@@ -39,3 +39,12 @@ export async function deleteReq(path: string): Promise<void> {
   const r = await fetch(`${base}${path}`, { method: 'DELETE' })
   if (!r.ok && r.status !== 204) throw new Error(await parseError(r))
 }
+
+export async function postFormData<T>(path: string, form: FormData): Promise<T> {
+  const r = await fetch(`${base}${path}`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!r.ok) throw new Error(await parseError(r))
+  return r.json() as Promise<T>
+}

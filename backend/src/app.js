@@ -28,9 +28,17 @@ app.use('/api/summary', summaryRouter);
 
 app.use((err, req, res, next) => {
   console.error(err);
-  const status = err.status || 500;
-  res.status(status).json({
-    error: err.message || 'Internal Server Error',
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    res.status(400).json({ error: 'File too large (max 15MB)' });
+    return;
+  }
+  const status = Number(err.status || err.statusCode) || 500;
+  const message =
+    err.message && !String(err.message).includes('ENOENT')
+      ? err.message
+      : 'Internal Server Error';
+  res.status(status >= 400 && status < 600 ? status : 500).json({
+    error: message,
   });
 });
 

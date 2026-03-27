@@ -90,6 +90,21 @@
   margin-bottom: 1rem;
 }
 
+.uploadCard h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.uploadCard .uploadMsg {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.filePick input[type='file'] {
+  max-width: 100%;
+}
+
 .formGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

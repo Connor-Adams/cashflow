@@ -34,42 +34,79 @@ async function resolveAccount(cardToken) {
 }
 
 /**
- * @param {{ profileId?: string }} [options]
+ * Import one CSV from memory. Either pass `accountId` (web upload) or rely on
+ * `CardName_YYYY_MM.csv` filename (folder scan).
+ *
+ * @param {object} opts
+ * @param {Buffer} opts.buffer
+ * @param {string} opts.fileName - basename-safe label for history
+ * @param {string} [opts.profileId]
+ * @param {number|null} [opts.accountId] - when set, filename is not used for account
+ * @param {string|null} [opts.batchLabel] - when accountId set, optional batch name
  */
-async function runImport(options = {}) {
-  const profileId = options.profileId || process.env.CSV_PROFILE_ID || 'generic_simple';
-  const uploadDir = env.csvUploadDir;
-  await fs.mkdir(uploadDir, { recursive: true });
+async function importCsvFile(opts) {
+  const profileId =
+    opts.profileId || process.env.CSV_PROFILE_ID || 'generic_simple';
+  const name = path.basename(opts.fileName || 'upload.csv').replace(/[\\/]/g, '');
+  const buf = opts.buffer;
+  const contentHash = hashContent(buf);
+
+  const prior = await ImportHistory.findOne({
+    where: { contentHash, status: 'success' },
+  });
+  if (prior) {
+    return {
+      file: name,
+      skipped: true,
+      reason: 'already_imported',
+      contentHash,
+    };
+  }
 
   const rules = await loadAllRules(sequelize);
-  const files = (await fs.readdir(uploadDir)).filter((f) =>
-    f.toLowerCase().endsWith('.csv')
-  );
+  const startedAt = new Date();
+  let account;
+  let importBatch;
 
-  const results = [];
-
-  for (const name of files) {
-    const fullPath = path.join(uploadDir, name);
-    assertUnderRoot(uploadDir, fullPath);
-
-    const buf = await fs.readFile(fullPath);
-    const contentHash = hashContent(buf);
-
-    const prior = await ImportHistory.findOne({
-      where: { contentHash, status: 'success' },
-    });
-    if (prior) {
-      results.push({
-        file: name,
-        skipped: true,
-        reason: 'already_imported',
+  if (opts.accountId != null && opts.accountId !== '') {
+    const id = Number(opts.accountId);
+    if (Number.isNaN(id)) {
+      await ImportHistory.create({
+        fileName: name,
+        filePathSafe: name,
         contentHash,
+        batchLabel: 'invalid-account',
+        status: 'failed',
+        rowCount: 0,
+        errorMessage: 'Invalid accountId',
+        startedAt,
+        finishedAt: new Date(),
       });
-      continue;
+      return { file: name, skipped: true, reason: 'invalid_account' };
     }
-
+    account = await Account.findByPk(id);
+    if (!account) {
+      await ImportHistory.create({
+        fileName: name,
+        filePathSafe: name,
+        contentHash,
+        batchLabel: 'unknown-account',
+        status: 'failed',
+        rowCount: 0,
+        errorMessage: `No account with id ${id}`,
+        startedAt,
+        finishedAt: new Date(),
+      });
+      return { file: name, skipped: true, reason: 'unknown_account' };
+    }
+    const d = new Date();
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const token = account.shortCode || account.name || 'account';
+    importBatch =
+      (opts.batchLabel && String(opts.batchLabel).trim()) ||
+      `${ym} ${token}`;
+  } else {
     const meta = parseStatementFilename(name);
-    const startedAt = new Date();
     if (!meta) {
       await ImportHistory.create({
         fileName: name,
@@ -79,15 +116,13 @@ async function runImport(options = {}) {
         status: 'failed',
         rowCount: 0,
         errorMessage:
-          'Filename must match CardName_YYYY_MM.csv (e.g. Amex_2025_01.csv)',
+          'Filename must match CardName_YYYY_MM.csv (e.g. Amex_2025_01.csv), or pass accountId when uploading from the web',
         startedAt,
         finishedAt: new Date(),
       });
-      results.push({ file: name, skipped: true, reason: 'bad_filename' });
-      continue;
+      return { file: name, skipped: true, reason: 'bad_filename' };
     }
-
-    const account = await resolveAccount(meta.cardToken);
+    account = await resolveAccount(meta.cardToken);
     if (!account) {
       await ImportHistory.create({
         fileName: name,
@@ -100,138 +135,167 @@ async function runImport(options = {}) {
         startedAt,
         finishedAt: new Date(),
       });
-      results.push({ file: name, skipped: true, reason: 'unknown_account' });
-      continue;
+      return { file: name, skipped: true, reason: 'unknown_account' };
     }
+    importBatch = meta.batchLabel;
+  }
 
-    const text = buf.toString('utf8');
-    const records = parse(text, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-    });
-    const headers = records.length > 0 ? Object.keys(records[0]) : [];
+  const text = buf.toString('utf8');
+  const records = parse(text, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+  });
+  const headers = records.length > 0 ? Object.keys(records[0]) : [];
 
-    const defaultCurrency =
-      account.defaultCurrency || env.defaultCurrency || 'USD';
+  const defaultCurrency =
+    account.defaultCurrency || env.defaultCurrency || 'USD';
 
-    let inserted = 0;
-    let skippedDup = 0;
-    let rowErrors = 0;
+  let inserted = 0;
+  let skippedDup = 0;
+  let rowErrors = 0;
 
-    await sequelize.transaction(async (t) => {
-      const importBatch = meta.batchLabel;
+  await sequelize.transaction(async (t) => {
+    for (const row of records) {
+      const mapped = mapCsvRow(row, headers, profileId, defaultCurrency);
+      if (mapped.error) {
+        rowErrors += 1;
+        continue;
+      }
+      const v = mapped.value;
+      const fp = rowFingerprint({
+        accountId: account.id,
+        date: v.date,
+        amount: v.amount,
+        currency: v.currency,
+        merchantClean: v.merchantClean,
+        sourceReference: v.sourceReference,
+      });
 
-      for (const row of records) {
-        const mapped = mapCsvRow(row, headers, profileId, defaultCurrency);
-        if (mapped.error) {
-          rowErrors += 1;
-          continue;
-        }
-        const v = mapped.value;
-        const fp = rowFingerprint({
-          accountId: account.id,
-          date: v.date,
-          amount: v.amount,
-          currency: v.currency,
-          merchantClean: v.merchantClean,
-          sourceReference: v.sourceReference,
-        });
-
-        const { rule, ambiguous } = findBestRule(rules, v.merchantClean);
-        let autoFields = {
-          autoCategory: null,
-          autoBusiness: null,
-          autoSplitType: null,
-          autoPctMe: null,
-          autoPctPartner: null,
-        };
-        if (rule && !ambiguous) {
-          autoFields = applyRuleToAuto(rule);
-        }
-
-        let reviewFlag =
-          ambiguous ||
-          !rule ||
-          autoFields.autoCategory == null ||
-          autoFields.autoSplitType == null;
-
-        const txn = Transaction.build(
-          {
-            accountId: account.id,
-            importBatch,
-            date: v.date,
-            merchantRaw: v.merchantRaw,
-            merchantClean: v.merchantClean,
-            amount: v.amount,
-            currency: v.currency,
-            notes: null,
-            sourceReference: v.sourceReference,
-            sourceRowFingerprint: fp,
-            appliedRuleId: rule && !ambiguous ? rule.id : null,
-            ...autoFields,
-            categoryOverride: null,
-            businessOverride: null,
-            splitOverride: null,
-            pctMeOverride: null,
-            pctPartnerOverride: null,
-            reviewFlag,
-            reviewedAt: null,
-          },
-          { transaction: t }
-        );
-
-        recomputeTransactionAmounts(txn);
-
-        try {
-          await txn.save({ transaction: t });
-          inserted += 1;
-        } catch (e) {
-          if (
-            e.name === 'SequelizeUniqueConstraintError' ||
-            e.name === 'SequelizeBulkRecordError'
-          ) {
-            skippedDup += 1;
-          } else {
-            throw e;
-          }
-        }
+      const { rule, ambiguous } = findBestRule(rules, v.merchantClean);
+      let autoFields = {
+        autoCategory: null,
+        autoBusiness: null,
+        autoSplitType: null,
+        autoPctMe: null,
+        autoPctPartner: null,
+      };
+      if (rule && !ambiguous) {
+        autoFields = applyRuleToAuto(rule);
       }
 
-      const status =
-        rowErrors > 0 && inserted === 0 ? 'failed' : rowErrors > 0 ? 'partial' : 'success';
-      const errMsg =
-        rowErrors > 0
-          ? `${rowErrors} row(s) could not be parsed`
-          : null;
+      const reviewFlag =
+        ambiguous ||
+        !rule ||
+        autoFields.autoCategory == null ||
+        autoFields.autoSplitType == null;
 
-      await ImportHistory.create(
+      const txn = Transaction.build(
         {
-          fileName: name,
-          filePathSafe: name,
-          contentHash,
-          batchLabel: meta.batchLabel,
-          status,
-          rowCount: inserted,
-          errorMessage: errMsg,
-          startedAt,
-          finishedAt: new Date(),
+          accountId: account.id,
+          importBatch,
+          date: v.date,
+          merchantRaw: v.merchantRaw,
+          merchantClean: v.merchantClean,
+          amount: v.amount,
+          currency: v.currency,
+          notes: null,
+          sourceReference: v.sourceReference,
+          sourceRowFingerprint: fp,
+          appliedRuleId: rule && !ambiguous ? rule.id : null,
+          ...autoFields,
+          categoryOverride: null,
+          businessOverride: null,
+          splitOverride: null,
+          pctMeOverride: null,
+          pctPartnerOverride: null,
+          reviewFlag,
+          reviewedAt: null,
         },
         { transaction: t }
       );
-    });
 
-    results.push({
-      file: name,
-      batchLabel: meta.batchLabel,
-      inserted,
-      skippedDuplicates: skippedDup,
-      rowErrors,
-      contentHash,
+      recomputeTransactionAmounts(txn);
+
+      try {
+        await txn.save({ transaction: t });
+        inserted += 1;
+      } catch (e) {
+        if (
+          e.name === 'SequelizeUniqueConstraintError' ||
+          e.name === 'SequelizeBulkRecordError'
+        ) {
+          skippedDup += 1;
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    const status =
+      rowErrors > 0 && inserted === 0
+        ? 'failed'
+        : rowErrors > 0
+          ? 'partial'
+          : 'success';
+    const errMsg =
+      rowErrors > 0 ? `${rowErrors} row(s) could not be parsed` : null;
+
+    await ImportHistory.create(
+      {
+        fileName: name,
+        filePathSafe: name,
+        contentHash,
+        batchLabel: importBatch,
+        status,
+        rowCount: inserted,
+        errorMessage: errMsg,
+        startedAt,
+        finishedAt: new Date(),
+      },
+      { transaction: t }
+    );
+  });
+
+  return {
+    file: name,
+    batchLabel: importBatch,
+    inserted,
+    skippedDuplicates: skippedDup,
+    rowErrors,
+    contentHash,
+  };
+}
+
+/**
+ * @param {{ profileId?: string }} [options]
+ */
+async function runImport(options = {}) {
+  const profileId =
+    options.profileId || process.env.CSV_PROFILE_ID || 'generic_simple';
+  const uploadDir = env.csvUploadDir;
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  const files = (await fs.readdir(uploadDir)).filter((f) =>
+    f.toLowerCase().endsWith('.csv')
+  );
+
+  const results = [];
+
+  for (const name of files) {
+    const fullPath = path.join(uploadDir, name);
+    assertUnderRoot(uploadDir, fullPath);
+
+    const buf = await fs.readFile(fullPath);
+    const r = await importCsvFile({
+      buffer: buf,
+      fileName: name,
+      profileId,
     });
+    results.push(r);
   }
 
   return { results, uploadDir };
 }
 
-module.exports = { runImport, resolveAccount };
+module.exports = { runImport, importCsvFile, resolveAccount };

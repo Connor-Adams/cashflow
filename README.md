@@ -43,11 +43,24 @@ With `yarn dev` / `npm run dev`:
 - API: `http://localhost:3001` (proxied as `/api` from Vite)
 - UI: `http://localhost:5173`
 
-## CSV files
+## CSV import
 
-1. Create an **account** whose `short_code` or `name` matches the card token in the filename.
-2. Drop CSV files into `CSV_UPLOAD_DIR` using: `CardName_YYYY_MM.csv` (example: `Amex_2025_01.csv`).
-3. Use **Run import** on the Transactions page or `POST /api/import/run`.
+### Web upload (recommended)
+
+1. Create at least one **account** (API `POST /api/accounts` or add via your own seed/UI later).
+2. Open **Transactions**, use **Upload CSV**: pick the account, optional batch label, CSV profile, and your `.csv` file → **Import CSV**.
+3. Same parsing, rules, and dedupe as folder import; filename does not need a special pattern when you choose the account in the form.
+
+### Folder scan (optional)
+
+1. Create an account whose `short_code` or `name` matches the card token in the filename.
+2. Put files in `CSV_UPLOAD_DIR` as `CardName_YYYY_MM.csv` (e.g. `Amex_2025_01.csv`).
+3. Use **Run import** on Transactions or `POST /api/import/run`.
+
+### API
+
+- `POST /api/import/upload` — multipart field `file` (required), `accountId` (required), optional `batchLabel`, `profileId`.
+- `POST /api/import/run` — scan folder only.
 
 ### Column mapping (profiles)
 
@@ -79,8 +92,10 @@ Covers split math, rule matching, and CSV row mapping. Sample CSV: `backend/test
 
 ## API overview
 
+- `GET|POST /api/accounts` — list and create accounts
 - `GET /api/transactions` — pagination and filters (`reviewFlag`, `currency`, `dateFrom`, `dateTo`, …)
 - `PATCH /api/transactions/:id` — overrides; recalculates share amounts
 - `GET|POST|PATCH|DELETE /api/rules` — merchant rules
-- `POST /api/import/run` — scan upload directory and import new files
+- `POST /api/import/upload` — multipart: `file`, `accountId`, optional `batchLabel`, `profileId`
+- `POST /api/import/run` — scan `CSV_UPLOAD_DIR` and import new files
 - `GET /api/summary/dashboard|partner|business` — aggregates (per currency; use `currency` query to filter)
