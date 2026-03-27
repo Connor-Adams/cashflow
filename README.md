@@ -47,7 +47,7 @@ With `yarn dev` / `npm run dev`:
 
 ### Web upload (recommended)
 
-1. Create at least one **account** (API `POST /api/accounts` or add via your own seed/UI later).
+1. Under **Accounts**, create at least one account (name, optional short code for filename matching, default currency).
 2. Open **Transactions**, use **Upload CSV**: pick the account, optional batch label, CSV profile, and your `.csv` file → **Import CSV**.
 3. Same parsing, rules, and dedupe as folder import; filename does not need a special pattern when you choose the account in the form.
 

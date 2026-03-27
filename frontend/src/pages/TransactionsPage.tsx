@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import {
   getJson,
   patchJson,
@@ -122,8 +123,8 @@ export function TransactionsPage() {
         </p>
         {accounts.length === 0 && (
           <p className="error">
-            No accounts yet. Create one with{' '}
-            <code>POST /api/accounts</code> (see README), then refresh this page.
+            No accounts yet —{' '}
+            <Link to="/accounts">create one under Accounts</Link>.
           </p>
         )}
         <div className="formGrid">

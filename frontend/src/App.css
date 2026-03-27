@@ -105,6 +105,19 @@
   max-width: 100%;
 }
 
+.req {
+  color: var(--danger);
+}
+
+.pad {
+  padding: 0.75rem 1rem;
+  margin: 0;
+}
+
+.page a {
+  color: var(--accent);
+}
+
 .formGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

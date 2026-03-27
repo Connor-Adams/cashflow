@@ -19,6 +19,9 @@ export function Layout() {
           <NavLink to="/" end style={linkStyle}>
             Dashboard
           </NavLink>
+          <NavLink to="/accounts" style={linkStyle}>
+            Accounts
+          </NavLink>
           <NavLink to="/transactions" style={linkStyle}>
             Transactions
           </NavLink>
