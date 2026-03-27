@@ -1,10 +1,39 @@
-import type { Sequelize } from 'sequelize';
-import { DataTypes } from 'sequelize';
+import {
+  Model,
+  DataTypes,
+  type Sequelize,
+  type ModelAttributes,
+  InferAttributes,
+  InferCreationAttributes,
+  CreationOptional,
+} from 'sequelize';
 
-export default function defineRule(sequelize: Sequelize) {
-  return sequelize.define(
-    'Rule',
+export class Rule extends Model<
+  InferAttributes<Rule>,
+  InferCreationAttributes<Rule>
+> {
+  declare id: CreationOptional<number>;
+  declare merchantPattern: string;
+  declare matchKind: string;
+  declare priority: number;
+  declare category: string | null;
+  declare isBusiness: boolean;
+  declare splitType: string;
+  /** Stored as DECIMAL; may be string when read from SQLite */
+  declare pctMe: string | null;
+  declare pctPartner: string | null;
+  declare readonly createdAt: CreationOptional<Date>;
+  declare readonly updatedAt: CreationOptional<Date>;
+}
+
+export function initRule(sequelize: Sequelize): typeof Rule {
+  Rule.init(
     {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+      },
       merchantPattern: {
         type: DataTypes.STRING(512),
         field: 'merchant_pattern',
@@ -36,11 +65,14 @@ export default function defineRule(sequelize: Sequelize) {
         field: 'pct_partner',
         allowNull: true,
       },
-    },
+    } as ModelAttributes<Rule>,
     {
+      sequelize,
+      modelName: 'Rule',
       tableName: 'rules',
       underscored: true,
       timestamps: true,
     }
   );
+  return Rule;
 }

@@ -64,14 +64,14 @@ export function applyRuleToAuto(rule: RuleRow): {
   autoCategory: string | null;
   autoBusiness: boolean;
   autoSplitType: string;
-  autoPctMe: number | null;
-  autoPctPartner: number | null;
+  autoPctMe: string | null;
+  autoPctPartner: string | null;
 } {
   return {
     autoCategory: rule.category || null,
     autoBusiness: rule.isBusiness,
     autoSplitType: rule.splitType,
-    autoPctMe: rule.pctMe != null ? Number(rule.pctMe) : null,
-    autoPctPartner: rule.pctPartner != null ? Number(rule.pctPartner) : null,
+    autoPctMe: rule.pctMe != null ? String(rule.pctMe) : null,
+    autoPctPartner: rule.pctPartner != null ? String(rule.pctPartner) : null,
   };
 }

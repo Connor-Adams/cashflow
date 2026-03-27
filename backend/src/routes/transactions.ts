@@ -76,7 +76,7 @@ router.patch('/:id', async (req, res, next) => {
     ] as const;
     for (const k of allowed) {
       if (Object.prototype.hasOwnProperty.call(b, k)) {
-        txn.set(k, b[k]);
+        txn.set(k, b[k] as never);
       }
     }
     if (Object.prototype.hasOwnProperty.call(b, 'reviewFlag')) {

@@ -1,10 +1,69 @@
-import type { Sequelize } from 'sequelize';
-import { DataTypes } from 'sequelize';
+import {
+  Model,
+  DataTypes,
+  type Sequelize,
+  type ModelAttributes,
+  InferAttributes,
+  InferCreationAttributes,
+  CreationOptional,
+} from 'sequelize';
 
-export default function defineTransaction(sequelize: Sequelize) {
-  return sequelize.define(
-    'Transaction',
+export class Transaction extends Model<
+  InferAttributes<Transaction>,
+  InferCreationAttributes<Transaction>
+> {
+  declare id: CreationOptional<number>;
+  declare accountId: number;
+  declare importBatch: string;
+  /** DATEONLY — ISO date string */
+  declare date: string;
+  declare merchantRaw: string;
+  declare merchantClean: string;
+  declare amount: string;
+  declare currency: string;
+  declare notes: string | null;
+  declare sourceReference: string | null;
+  declare sourceRowFingerprint: string;
+  declare appliedRuleId: number | null;
+
+  declare autoCategory: string | null;
+  declare categoryOverride: string | null;
+  declare finalCategory: string | null;
+
+  declare autoBusiness: boolean | null;
+  declare businessOverride: boolean | null;
+  declare finalBusiness: CreationOptional<boolean>;
+
+  declare autoSplitType: string | null;
+  declare splitOverride: string | null;
+  declare finalSplitType: CreationOptional<string>;
+
+  declare autoPctMe: string | null;
+  declare pctMeOverride: string | null;
+  declare finalPctMe: string | null;
+
+  declare autoPctPartner: string | null;
+  declare pctPartnerOverride: string | null;
+  declare finalPctPartner: string | null;
+
+  declare myShareAmount: CreationOptional<string>;
+  declare partnerShareAmount: CreationOptional<string>;
+  declare businessAmount: CreationOptional<string>;
+
+  declare reviewFlag: boolean;
+  declare reviewedAt: Date | null;
+  declare readonly createdAt: CreationOptional<Date>;
+  declare readonly updatedAt: CreationOptional<Date>;
+}
+
+export function initTransaction(sequelize: Sequelize): typeof Transaction {
+  Transaction.init(
     {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+      },
       accountId: {
         type: DataTypes.INTEGER,
         field: 'account_id',
@@ -157,11 +216,14 @@ export default function defineTransaction(sequelize: Sequelize) {
         field: 'reviewed_at',
         allowNull: true,
       },
-    },
+    } as ModelAttributes<Transaction>,
     {
+      sequelize,
+      modelName: 'Transaction',
       tableName: 'transactions',
       underscored: true,
       timestamps: true,
     }
   );
+  return Transaction;
 }

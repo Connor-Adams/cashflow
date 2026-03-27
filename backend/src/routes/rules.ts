@@ -14,7 +14,7 @@ router.get('/', async (_req, res, next) => {
     const out = [];
     for (const r of rules) {
       const usageCount = await Transaction.count({
-        where: { appliedRuleId: r.get('id') as number },
+        where: { appliedRuleId: r.id },
       });
       out.push({ ...r.toJSON(), usageCount });
     }
@@ -67,7 +67,7 @@ router.patch('/:id', async (req, res, next) => {
       'pctPartner',
     ] as const;
     for (const f of fields) {
-      if (Object.prototype.hasOwnProperty.call(b, f)) row.set(f, b[f]);
+      if (Object.prototype.hasOwnProperty.call(b, f)) row.set(f, b[f] as never);
     }
     await row.save();
     res.json(row);

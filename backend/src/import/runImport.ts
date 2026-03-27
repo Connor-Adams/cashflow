@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { parse } from 'csv-parse/sync';
 import { Op } from 'sequelize';
+import type { Account as AccountModel } from '../models/Account';
 import {
   sequelize,
   Account,
@@ -70,7 +71,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   const prior = await ImportHistory.findOne({
     where: { contentHash, status: 'success' },
   });
-  const priorRows = prior?.get('rowCount') as number | null | undefined;
+  const priorRows = prior?.rowCount;
   if (prior != null && priorRows != null && priorRows > 0) {
     return {
       file: name,
@@ -84,7 +85,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
 
   const rules = await loadAllRules();
   const startedAt = new Date();
-  let account: NonNullable<Awaited<ReturnType<typeof Account.findByPk>>>;
+  let account: AccountModel;
   let importBatch: string;
 
   if (opts.accountId != null && opts.accountId !== '') {
@@ -121,7 +122,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     account = byId;
     const d = new Date();
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const token = account.get('shortCode') || account.get('name') || 'account';
+    const token = account.shortCode || account.name || 'account';
     importBatch =
       (opts.batchLabel && String(opts.batchLabel).trim()) ||
       `${ym} ${token}`;
@@ -198,9 +199,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   const headers = records.length > 0 ? Object.keys(records[0]) : [];
 
   const defaultCurrency =
-    (account.get('defaultCurrency') as string | null) ||
-    env.defaultCurrency ||
-    'CAD';
+    account.defaultCurrency || env.defaultCurrency || 'CAD';
 
   let inserted = 0;
   let skippedDup = 0;
@@ -215,7 +214,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       }
       const v = mapped.value;
       const fp = rowFingerprint({
-        accountId: account.get('id') as number,
+        accountId: account.id,
         date: v.date,
         amount: v.amount,
         currency: v.currency,
@@ -231,8 +230,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               autoCategory: null as string | null,
               autoBusiness: null as boolean | null,
               autoSplitType: null as string | null,
-              autoPctMe: null as number | null,
-              autoPctPartner: null as number | null,
+              autoPctMe: null as string | null,
+              autoPctPartner: null as string | null,
             };
 
       const reviewFlag =
@@ -242,12 +241,12 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         autoFields.autoSplitType == null;
 
       const txn = Transaction.build({
-        accountId: account.get('id') as number,
+        accountId: account.id,
         importBatch,
         date: v.date,
         merchantRaw: v.merchantRaw,
         merchantClean: v.merchantClean,
-        amount: v.amount,
+        amount: String(v.amount),
         currency: v.currency,
         notes: null,
         sourceReference: v.sourceReference,

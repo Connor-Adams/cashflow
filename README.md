@@ -6,13 +6,11 @@ Local-first personal and partner expense tracker: import card CSVs, apply mercha
 
 - **Backend:** Node.js, Express, Sequelize, SQLite (TypeScript)
 - **Frontend:** React (Vite, TypeScript), Recharts
+- **Package manager:** [Yarn Classic](https://classic.yarnpkg.com/) (v1) at the repo root — workspaces cover **backend**, **frontend**, and **shared**.
 
 ## Quick start
 
-From the **repo root**, dependencies are installed once for **backend** and **frontend** ([npm workspaces](https://docs.npmjs.com/cli/using-npm/workspaces)). If you still have old `node_modules` only inside `backend/` or `frontend/`, delete those folders and reinstall from the root.
-
-
-**Yarn**
+From the **repo root**, install once for all packages ([Yarn workspaces](https://classic.yarnpkg.com/en/docs/workspaces/)). If you still have old `node_modules` only inside `backend/` or `frontend/`, delete those folders and reinstall from the root.
 
 ```bash
 yarn install
@@ -20,28 +18,22 @@ yarn db:migrate
 yarn dev
 ```
 
-**npm**
+**All-in-one** (install deps + run migrations):
 
 ```bash
-npm install
-npm run db:migrate
-npm run dev
+yarn setup
 ```
 
-**All-in-one** (install deps + run migrations; then start dev yourself):
-
-```bash
-yarn setup && yarn dev
-# or
-npm run setup && npm run dev
-```
+Then start dev with `yarn dev`.
 
 Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite`, `backend/uploads/csv`, and **`DEFAULT_CURRENCY=CAD`** (override in `.env` if needed).
 
-With `yarn dev` / `npm run dev`:
+With `yarn dev`:
 
 - API: `http://localhost:3001` (proxied as `/api` from Vite)
 - UI: `http://localhost:5173`
+
+**Using npm instead:** same scripts work with `npm run <script>` and `npm install` from the root (npm workspaces). Prefer one lockfile — this repo is maintained with **`yarn.lock`** only.
 
 ## CSV import
 
@@ -72,22 +64,20 @@ To match another issuer, add a profile or set `CSV_PROFILE_ID` / pass `profileId
 
 ## Scripts
 
-Run from the repo root (`yarn <script>` or `npm run <script>`):
+Run from the repo root:
 
 | Command | Description |
 |--------|-------------|
-| `setup` | `install` + `db:migrate` (first-time or after pulling migrations) |
-| `dev` | API + Vite dev servers |
-| `db:migrate` | Apply Sequelize migrations |
-| `build` | Production build of the frontend |
-| `test` | Backend unit tests |
+| `yarn setup` | `install` + `db:migrate` (first-time or after pulling migrations) |
+| `yarn dev` | API + Vite dev servers |
+| `yarn db:migrate` | Apply Sequelize migrations |
+| `yarn build` | Production build of backend + frontend |
+| `yarn test` | Backend unit tests |
 
 ## Tests
 
 ```bash
 yarn test
-# or
-npm run test
 ```
 
 Covers split math, rule matching, and CSV row mapping. Sample CSV: `backend/test/fixtures/sample.csv`.

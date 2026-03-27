@@ -1,13 +1,13 @@
 import { sequelize } from '../db';
-import defineAccount from './Account';
-import defineRule from './Rule';
-import defineTransaction from './Transaction';
-import defineImportHistory from './ImportHistory';
+import { Account, initAccount } from './Account';
+import { Rule, initRule } from './Rule';
+import { Transaction, initTransaction } from './Transaction';
+import { ImportHistory, initImportHistory } from './ImportHistory';
 
-const Account = defineAccount(sequelize);
-const Rule = defineRule(sequelize);
-const Transaction = defineTransaction(sequelize);
-const ImportHistory = defineImportHistory(sequelize);
+initAccount(sequelize);
+initRule(sequelize);
+initTransaction(sequelize);
+initImportHistory(sequelize);
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
