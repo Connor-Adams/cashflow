@@ -26,7 +26,8 @@ export function AccountsPage() {
 
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const fd = new FormData(e.currentTarget)
+    const form = e.currentTarget
+    const fd = new FormData(form)
     const name = String(fd.get('name') ?? '').trim()
     if (!name) {
       setErr('Name is required')
@@ -43,7 +44,7 @@ export function AccountsPage() {
           String(fd.get('defaultCurrency') ?? '').trim().toUpperCase() ||
           null,
       })
-      e.currentTarget.reset()
+      form.reset()
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create account')

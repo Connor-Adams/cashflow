@@ -22,7 +22,8 @@ export function RulesPage() {
 
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const fd = new FormData(e.currentTarget)
+    const form = e.currentTarget
+    const fd = new FormData(form)
     await postJson('/api/rules', {
       merchantPattern: String(fd.get('merchantPattern') ?? ''),
       matchKind: String(fd.get('matchKind') ?? 'substring'),
@@ -33,7 +34,7 @@ export function RulesPage() {
       pctMe: fd.get('pctMe') ? String(fd.get('pctMe')) : null,
       pctPartner: fd.get('pctPartner') ? String(fd.get('pctPartner')) : null,
     })
-    e.currentTarget.reset()
+    form.reset()
     await load()
   }
 
