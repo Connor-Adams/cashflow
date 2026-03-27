@@ -11,7 +11,7 @@ const databasePath =
 
 const port = Number(process.env.PORT || 3001);
 
-const defaultCurrency = process.env.DEFAULT_CURRENCY || 'USD';
+const defaultCurrency = process.env.DEFAULT_CURRENCY || 'CAD';
 
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 

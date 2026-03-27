@@ -149,7 +149,7 @@ async function importCsvFile(opts) {
   const headers = records.length > 0 ? Object.keys(records[0]) : [];
 
   const defaultCurrency =
-    account.defaultCurrency || env.defaultCurrency || 'USD';
+    account.defaultCurrency || env.defaultCurrency || 'CAD';
 
   let inserted = 0;
   let skippedDup = 0;

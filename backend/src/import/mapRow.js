@@ -63,7 +63,7 @@ function mapCsvRow(row, headers, profileId, defaultCurrency) {
   const currency = (
     currencyRaw ||
     defaultCurrency ||
-    'USD'
+    'CAD'
   )
     .toString()
     .trim()

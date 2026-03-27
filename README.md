@@ -36,7 +36,7 @@ yarn setup && yarn dev
 npm run setup && npm run dev
 ```
 
-Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite` and `backend/uploads/csv`.
+Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite`, `backend/uploads/csv`, and **`DEFAULT_CURRENCY=CAD`** (override in `.env` if needed).
 
 With `yarn dev` / `npm run dev`:
 
@@ -92,7 +92,7 @@ Covers split math, rule matching, and CSV row mapping. Sample CSV: `backend/test
 
 ## API overview
 
-- `GET|POST /api/accounts` — list and create accounts
+- `GET|POST|DELETE /api/accounts/:id` — list, create, delete account (delete removes all transactions for that account first)
 - `GET /api/transactions` — pagination and filters (`reviewFlag`, `currency`, `dateFrom`, `dateTo`, …)
 - `PATCH /api/transactions/:id` — overrides; recalculates share amounts
 - `GET|POST|PATCH|DELETE /api/rules` — merchant rules

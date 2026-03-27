@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { getJson, postJson } from '../lib/api'
+import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Account } from '../types/api'
 
 export function AccountsPage() {
@@ -42,7 +42,7 @@ export function AccountsPage() {
         shortCode: String(fd.get('shortCode') ?? '').trim() || null,
         defaultCurrency:
           String(fd.get('defaultCurrency') ?? '').trim().toUpperCase() ||
-          null,
+          undefined,
       })
       form.reset()
       await load()
@@ -50,6 +50,23 @@ export function AccountsPage() {
       setErr(e instanceof Error ? e.message : 'Could not create account')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function removeAccount(id: number, name: string) {
+    if (
+      !confirm(
+        `Delete account “${name}” and all its transactions? This cannot be undone.`
+      )
+    ) {
+      return
+    }
+    setErr(null)
+    try {
+      await deleteReq(`/api/accounts/${id}`)
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not delete account')
     }
   }
 
@@ -90,7 +107,8 @@ export function AccountsPage() {
             Default currency
             <input
               name="defaultCurrency"
-              placeholder="USD"
+              placeholder="CAD"
+              defaultValue="CAD"
               maxLength={3}
               style={{ width: 80 }}
             />
@@ -115,6 +133,7 @@ export function AccountsPage() {
                 <th>Owner</th>
                 <th>Short code</th>
                 <th>Default currency</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -123,7 +142,16 @@ export function AccountsPage() {
                   <td>{a.name}</td>
                   <td>{a.owner}</td>
                   <td>{a.shortCode ?? '—'}</td>
-                  <td>{a.defaultCurrency ?? '—'}</td>
+                  <td>{a.defaultCurrency ?? 'CAD'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btnDanger"
+                      onClick={() => void removeAccount(a.id, a.name)}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -193,7 +193,7 @@ export function TransactionsPage() {
               setPage(1)
               setCurrency(e.target.value.toUpperCase())
             }}
-            placeholder="e.g. USD"
+            placeholder="e.g. CAD"
             maxLength={3}
             style={{ width: 80 }}
           />
