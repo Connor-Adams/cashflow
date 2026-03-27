@@ -1,0 +1,9 @@
+{
+  "name": "@cashflow/shared",
+  "version": "0.0.0",
+  "private": true,
+  "types": "./api-types.ts",
+  "exports": {
+    ".": "./api-types.ts"
+  }
+}

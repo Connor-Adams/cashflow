@@ -3,13 +3,14 @@
   "private": true,
   "workspaces": [
     "backend",
-    "frontend"
+    "frontend",
+    "shared"
   ],
   "scripts": {
     "setup": "npm install && npm run db:migrate",
     "dev": "concurrently -n api,web -c blue,green \"npm run dev -w cashflow-backend\" \"npm run dev -w frontend\"",
     "db:migrate": "npm run db:migrate -w cashflow-backend",
-    "build": "npm run build -w frontend",
+    "build": "npm run build -w cashflow-backend && npm run build -w frontend",
     "test": "npm run test -w cashflow-backend"
   },
   "devDependencies": {

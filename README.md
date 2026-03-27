@@ -4,7 +4,7 @@ Local-first personal and partner expense tracker: import card CSVs, apply mercha
 
 ## Stack
 
-- **Backend:** Node.js, Express, Sequelize, SQLite
+- **Backend:** Node.js, Express, Sequelize, SQLite (TypeScript)
 - **Frontend:** React (Vite, TypeScript), Recharts
 
 ## Quick start
@@ -64,7 +64,7 @@ With `yarn dev` / `npm run dev`:
 
 ### Column mapping (profiles)
 
-Profiles live in `backend/src/import/csvProfiles.js`. The default `generic_simple` profile expects headers such as `Date`, `Description`, `Amount`, and optional `Currency`. Amounts follow **charges_negative** (spending is negative after normalization).
+Profiles live in `backend/src/import/csvProfiles.ts`. The default `generic_simple` profile expects headers such as `Date`, `Description`, `Amount`, and optional `Currency`. Amounts follow **charges_negative** (spending is negative after normalization).
 
 **American Express:** Use profile **`generic_amex`** or **`amex`** on upload. It recognizes many Amex column names (e.g. `Transaction Date`, `Posted Date`, `Charge Amount`, `Amount (CAD)`). Dates are parsed flexibly (US `MM/DD/YYYY`, Canadian `DD/MM/YYYY`, ISO `YYYY-MM-DD`, etc.).
 
