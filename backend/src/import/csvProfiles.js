@@ -13,9 +13,23 @@
 /** @type {Record<string, CsvProfile>} */
 const profiles = {
   generic_simple: {
-    dateHeaders: ['Date', 'date'],
-    merchantHeaders: ['Description', 'Merchant', 'Payee'],
-    amountHeaders: ['Amount', 'amount'],
+    dateHeaders: [
+      'Date',
+      'date',
+      'Transaction Date',
+      'Posted Date',
+      'Posting Date',
+      'Trans Date',
+    ],
+    merchantHeaders: [
+      'Description',
+      'Merchant',
+      'Payee',
+      'Name',
+      'Memo',
+      'Details',
+    ],
+    amountHeaders: ['Amount', 'amount', 'Transaction Amount', 'Amt'],
     currencyHeaders: ['Currency', 'currency'],
     referenceHeaders: ['Reference', 'reference', 'Id'],
     dateFormat: 'yyyy-MM-dd',
@@ -31,10 +45,16 @@ const profiles = {
   },
 };
 
+/** Strip UTF-8 BOM so "Date" matches Excel/Numbers exports */
+function stripBom(s) {
+  return String(s).replace(/^\uFEFF/, '').trim();
+}
+
 function normalizeHeaderMap(headers) {
   const map = {};
   for (const h of headers) {
-    map[String(h).trim().toLowerCase()] = h;
+    const cleaned = stripBom(h);
+    map[cleaned.toLowerCase()] = h;
   }
   return map;
 }
@@ -54,4 +74,5 @@ module.exports = {
   profiles,
   normalizeHeaderMap,
   pickColumn,
+  stripBom,
 };

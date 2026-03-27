@@ -54,12 +54,15 @@ async function importCsvFile(opts) {
   const prior = await ImportHistory.findOne({
     where: { contentHash, status: 'success' },
   });
-  if (prior) {
+  // Allow re-import of the same bytes if a previous run imported 0 rows (wrong profile, etc.)
+  if (prior && prior.rowCount > 0) {
     return {
       file: name,
       skipped: true,
       reason: 'already_imported',
       contentHash,
+      message:
+        'This file was already imported. Change the CSV or clear duplicate import history to try again.',
     };
   }
 
@@ -140,12 +143,36 @@ async function importCsvFile(opts) {
     importBatch = meta.batchLabel;
   }
 
-  const text = buf.toString('utf8');
-  const records = parse(text, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-  });
+  let text = buf.toString('utf8');
+  if (text.charCodeAt(0) === 0xfeff) {
+    text = text.slice(1);
+  }
+  let records;
+  try {
+    records = parse(text, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    });
+  } catch (parseErr) {
+    await ImportHistory.create({
+      fileName: name,
+      filePathSafe: name,
+      contentHash,
+      batchLabel: 'parse-error',
+      status: 'failed',
+      rowCount: 0,
+      errorMessage: parseErr.message || 'CSV parse failed',
+      startedAt,
+      finishedAt: new Date(),
+    });
+    return {
+      file: name,
+      skipped: true,
+      reason: 'parse_error',
+      message: parseErr.message || 'Could not parse CSV (wrong delimiter or invalid file?)',
+    };
+  }
   const headers = records.length > 0 ? Object.keys(records[0]) : [];
 
   const defaultCurrency =
@@ -257,7 +284,7 @@ async function importCsvFile(opts) {
     );
   });
 
-  return {
+  const out = {
     file: name,
     batchLabel: importBatch,
     inserted,
@@ -265,6 +292,17 @@ async function importCsvFile(opts) {
     rowErrors,
     contentHash,
   };
+  if (inserted === 0 && rowErrors > 0) {
+    out.warning =
+      'No rows imported — check CSV columns (Date, Description, Amount) and the selected profile, or date format.';
+  } else if (inserted === 0 && rowErrors === 0 && records.length === 0) {
+    out.warning =
+      'No data rows found — is the file empty or header-only?';
+  } else if (inserted === 0 && skippedDup > 0 && rowErrors === 0) {
+    out.warning =
+      'Every row matched an existing transaction (duplicate) — nothing new to add.';
+  }
+  return out;
 }
 
 /**

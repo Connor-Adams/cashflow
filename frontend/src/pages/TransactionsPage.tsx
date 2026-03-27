@@ -17,6 +17,13 @@ type UploadResult = {
   rowErrors?: number
   skipped?: boolean
   reason?: string
+  message?: string
+  warning?: string
+}
+
+type FolderImportResponse = {
+  results: UploadResult[]
+  uploadDir: string
 }
 
 export function TransactionsPage() {
@@ -94,12 +101,22 @@ export function TransactionsPage() {
       const result = await postFormData<UploadResult>('/api/import/upload', fd)
       if (result.skipped) {
         setUploadMsg(
-          `Skipped (${result.reason ?? 'unknown'}): ${result.file}`
+          [
+            `Skipped (${result.reason ?? 'unknown'}): ${result.file}`,
+            result.message,
+          ]
+            .filter(Boolean)
+            .join(' — ')
         )
       } else {
-        setUploadMsg(
-          `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`
-        )
+        const parts = [
+          `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`,
+          (result.rowErrors ?? 0) > 0
+            ? `${result.rowErrors} row(s) could not be parsed (wrong columns or date format?)`
+            : '',
+          result.warning,
+        ].filter(Boolean)
+        setUploadMsg(parts.join(' — '))
       }
       if (input) input.value = ''
       await load()
@@ -170,7 +187,19 @@ export function TransactionsPage() {
         <button type="submit" disabled={uploading}>
           {uploading ? 'Importing…' : 'Import CSV'}
         </button>
-        {uploadMsg && <p className="uploadMsg">{uploadMsg}</p>}
+        {uploadMsg && (
+          <p
+            className={
+              uploadMsg.includes('No rows') ||
+              uploadMsg.includes('duplicate') ||
+              uploadMsg.includes('Skipped')
+                ? 'uploadMsg warn'
+                : 'uploadMsg'
+            }
+          >
+            {uploadMsg}
+          </p>
+        )}
       </form>
 
       <div className="row">
@@ -206,7 +235,22 @@ export function TransactionsPage() {
           onClick={async () => {
             try {
               setErr(null)
-              await postJson<unknown>('/api/import/run', {})
+              setUploadMsg(null)
+              const out = await postJson<FolderImportResponse>(
+                '/api/import/run',
+                {}
+              )
+              const lines = out.results.map((r) => {
+                if (r.skipped) {
+                  return `${r.file}: skipped (${r.reason})${r.message ? ` — ${r.message}` : ''}`
+                }
+                return `${r.file}: ${r.inserted ?? 0} rows${r.warning ? ` — ${r.warning}` : ''}`
+              })
+              setUploadMsg(
+                lines.length
+                  ? lines.join(' | ')
+                  : `No .csv files in upload folder: ${out.uploadDir}`
+              )
               await load()
             } catch (e) {
               setErr(e instanceof Error ? e.message : 'Import failed')

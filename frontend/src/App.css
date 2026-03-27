@@ -99,6 +99,11 @@
   margin: 0.75rem 0 0;
   color: var(--muted);
   font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+
+.uploadCard .uploadMsg.warn {
+  color: #e8b86a;
 }
 
 .filePick input[type='file'] {
