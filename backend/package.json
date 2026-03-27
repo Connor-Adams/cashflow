@@ -6,7 +6,7 @@
     "start": "node src/server.js",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "test": "node --test test/calculateShares.test.js test/applyRules.test.js test/mapRow.test.js"
+    "test": "node --test test/calculateShares.test.js test/applyRules.test.js test/mapRow.test.js test/parseDateFlexible.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

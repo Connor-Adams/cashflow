@@ -66,7 +66,9 @@ With `yarn dev` / `npm run dev`:
 
 Profiles live in `backend/src/import/csvProfiles.js`. The default `generic_simple` profile expects headers such as `Date`, `Description`, `Amount`, and optional `Currency`. Amounts follow **charges_negative** (spending is negative after normalization).
 
-To match another issuer, add a profile and set `CSV_PROFILE_ID` or pass `{ "profileId": "generic_amex" }` to `POST /api/import/run`.
+**American Express:** Use profile **`generic_amex`** or **`amex`** on upload. It recognizes many Amex column names (e.g. `Transaction Date`, `Posted Date`, `Charge Amount`, `Amount (CAD)`). Dates are parsed flexibly (US `MM/DD/YYYY`, Canadian `DD/MM/YYYY`, ISO `YYYY-MM-DD`, etc.).
+
+To match another issuer, add a profile or set `CSV_PROFILE_ID` / pass `profileId` on import.
 
 ## Scripts
 

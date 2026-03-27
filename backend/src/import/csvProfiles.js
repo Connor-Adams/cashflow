@@ -35,15 +35,49 @@ const profiles = {
     dateFormat: 'yyyy-MM-dd',
     amountConvention: 'charges_negative',
   },
+  /** Amex US/CA/UK exports — dates vary; mapRow tries many formats */
   generic_amex: {
-    dateHeaders: ['Date'],
-    merchantHeaders: ['Description'],
-    amountHeaders: ['Amount'],
-    currencyHeaders: ['Currency'],
+    dateHeaders: [
+      'Date',
+      'Transaction Date',
+      'TransactionDate',
+      'Posted Date',
+      'Process Date',
+      'Date Processed',
+      'Trans Date',
+    ],
+    merchantHeaders: [
+      'Description',
+      'Merchant',
+      'Statement Line',
+      'Appears On Your Statement As',
+      'Extended Details',
+      'Payee',
+      'Details',
+      'Category',
+      'Simplified Details',
+    ],
+    amountHeaders: [
+      'Amount',
+      'Transaction Amount',
+      'Charge Amount',
+      'Amt',
+      'Charge',
+      'Charges',
+      'Debit',
+      'Spend',
+      'Net Amount',
+      'Amount (CAD)',
+      'Amount (USD)',
+      'Amount (GBP)',
+    ],
+    currencyHeaders: ['Currency', 'Currency Code', 'Txn Currency'],
     dateFormat: 'MM/dd/yyyy',
     amountConvention: 'charges_negative',
   },
 };
+
+profiles.amex = profiles.generic_amex;
 
 /** Strip UTF-8 BOM so "Date" matches Excel/Numbers exports */
 function stripBom(s) {

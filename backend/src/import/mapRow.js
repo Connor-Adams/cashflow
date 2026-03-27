@@ -1,5 +1,5 @@
-const { parse, isValid } = require('date-fns');
 const { normalizeMerchant } = require('./normalizeMerchant');
+const { parseDateFlexible } = require('./parseDateFlexible');
 const {
   profiles,
   normalizeHeaderMap,
@@ -12,7 +12,11 @@ const {
  */
 function normalizeAmount(rawAmount, convention) {
   if (rawAmount == null || rawAmount === '') return null;
-  const n = parseFloat(String(rawAmount).replace(/,/g, '').trim());
+  let s = String(rawAmount).replace(/,/g, '').trim();
+  if (s.startsWith('(') && s.endsWith(')')) {
+    s = `-${s.slice(1, -1)}`;
+  }
+  const n = parseFloat(s);
   if (Number.isNaN(n)) return null;
   if (convention === 'charges_negative') {
     if (n > 0) return -Math.abs(n);
@@ -41,12 +45,19 @@ function mapCsvRow(row, headers, profileId, defaultCurrency) {
   const currencyRaw = pickColumn(row, headerMap, profile.currencyHeaders || []);
   const refRaw = pickColumn(row, headerMap, profile.referenceHeaders || []);
 
-  if (dateRaw == null || merchantRaw == null || amountRaw == null) {
+  const missing =
+    dateRaw == null ||
+    String(dateRaw).trim() === '' ||
+    merchantRaw == null ||
+    String(merchantRaw).trim() === '' ||
+    amountRaw == null ||
+    String(amountRaw).trim() === '';
+  if (missing) {
     return { error: 'Missing required columns' };
   }
 
-  const parsedDate = parse(String(dateRaw).trim(), profile.dateFormat, new Date());
-  if (!isValid(parsedDate)) {
+  const parsedDate = parseDateFlexible(dateRaw, profile.dateFormat);
+  if (!parsedDate) {
     return { error: `Invalid date: ${dateRaw}` };
   }
   const y = parsedDate.getFullYear();

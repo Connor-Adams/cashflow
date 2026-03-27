@@ -16,6 +16,15 @@ const { parseStatementFilename } = require('./parseStatementFilename');
 const { assertUnderRoot } = require('./pathUtils');
 const env = require('../config/env');
 
+function detectDelimiter(text) {
+  const line =
+    text.split(/\r?\n/).find((l) => l.trim().length > 0) || '';
+  const tabs = (line.match(/\t/g) || []).length;
+  const commas = (line.match(/,/g) || []).length;
+  if (tabs > commas && tabs > 0) return '\t';
+  return ',';
+}
+
 /**
  * @param {string} cardToken
  */
@@ -153,6 +162,9 @@ async function importCsvFile(opts) {
       columns: true,
       skip_empty_lines: true,
       trim: true,
+      delimiter: detectDelimiter(text),
+      relax_column_count: true,
+      relax_quotes: true,
     });
   } catch (parseErr) {
     await ImportHistory.create({

@@ -175,8 +175,9 @@ export function TransactionsPage() {
               value={profileId}
               onChange={(e) => setProfileId(e.target.value)}
             >
-              <option value="generic_simple">generic_simple</option>
-              <option value="generic_amex">generic_amex</option>
+              <option value="generic_simple">generic_simple (ISO dates)</option>
+              <option value="generic_amex">Amex / generic_amex</option>
+              <option value="amex">amex (same as Amex)</option>
             </select>
           </label>
           <label className="filePick">
