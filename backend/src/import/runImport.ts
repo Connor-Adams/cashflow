@@ -25,6 +25,18 @@ function detectDelimiter(text: string): string {
   return ',';
 }
 
+/** Max row-level parse diagnostics returned on a single import response */
+export const PARSE_ERRORS_MAX = 50;
+
+export function appendParseError(
+  bucket: { rowIndex: number; message: string }[],
+  rowIndex: number,
+  message: string
+): void {
+  if (bucket.length >= PARSE_ERRORS_MAX) return;
+  bucket.push({ rowIndex, message });
+}
+
 function isSequelizeUniqueLike(e: unknown): boolean {
   return (
     e !== null &&
@@ -204,12 +216,15 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   let inserted = 0;
   let skippedDup = 0;
   let rowErrors = 0;
+  const parseErrors: { rowIndex: number; message: string }[] = [];
 
   await sequelize.transaction(async (t) => {
-    for (const row of records) {
+    for (let i = 0; i < records.length; i++) {
+      const row = records[i];
       const mapped = mapCsvRow(row, headers, profileId, defaultCurrency);
       if ('error' in mapped) {
         rowErrors += 1;
+        appendParseError(parseErrors, i + 1, mapped.error);
         continue;
       }
       const v = mapped.value;
@@ -307,6 +322,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     inserted,
     skippedDuplicates: skippedDup,
     rowErrors,
+    parseErrors,
     contentHash,
   };
   if (inserted === 0 && rowErrors > 0) {

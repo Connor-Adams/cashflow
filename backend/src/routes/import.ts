@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { runImport, importCsvFile } from '../import/runImport';
 import { ImportHistory } from '../models';
+import { importUploadLimiter } from './importRateLimit';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,8 +32,10 @@ router.post('/run', async (req, res, next) => {
 
 router.post(
   '/upload',
+  importUploadLimiter,
   (req, res, next) => {
-    upload.single('file')(req, res, (err: unknown) => {
+    // Multer's Request type can disagree with root @types/express (nested deps); runtime is correct.
+    upload.single('file')(req as never, res as never, (err: unknown) => {
       if (err) {
         next(err);
         return;

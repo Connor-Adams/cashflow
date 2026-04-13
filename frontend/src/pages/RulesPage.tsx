@@ -108,22 +108,33 @@ export function RulesPage() {
             </tr>
           </thead>
           <tbody>
-            {rules.map((r) => (
-              <tr key={r.id}>
-                <td>{r.merchantPattern}</td>
-                <td>{r.matchKind}</td>
-                <td>{r.priority}</td>
-                <td>{r.category}</td>
-                <td>{r.isBusiness ? 'yes' : ''}</td>
-                <td>{r.splitType}</td>
-                <td>{r.usageCount ?? 0}</td>
-                <td>
-                  <button type="button" onClick={() => void remove(r.id)}>
-                    Delete
-                  </button>
+            {rules.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="emptyStateCell">
+                  <p>No rules yet. Add a pattern above — higher priority wins when several rules match.</p>
+                  <p className="muted">
+                    Rules set default category, business flag, and split for matching merchants on import.
+                  </p>
                 </td>
               </tr>
-            ))}
+            ) : (
+              rules.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.merchantPattern}</td>
+                  <td>{r.matchKind}</td>
+                  <td>{r.priority}</td>
+                  <td>{r.category}</td>
+                  <td>{r.isBusiness ? 'yes' : ''}</td>
+                  <td>{r.splitType}</td>
+                  <td>{r.usageCount ?? 0}</td>
+                  <td>
+                    <button type="button" onClick={() => void remove(r.id)}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

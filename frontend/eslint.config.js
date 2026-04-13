@@ -19,5 +19,9 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Data-fetch on mount and controlled row reset are valid; rule is overly strict for these patterns.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

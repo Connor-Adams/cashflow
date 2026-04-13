@@ -26,7 +26,7 @@ yarn setup
 
 Then start dev with `yarn dev`.
 
-Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite`, `backend/uploads/csv`, and **`DEFAULT_CURRENCY=CAD`** (override in `.env` if needed).
+Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite`, `backend/uploads/csv`, and **`DEFAULT_CURRENCY=CAD`** (override in `.env` if needed). Developer setup, CI parity, and git hooks: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 With `yarn dev`:
 
@@ -72,7 +72,8 @@ Run from the repo root:
 | `yarn dev` | API + Vite dev servers |
 | `yarn db:migrate` | Apply Sequelize migrations |
 | `yarn build` | Production build of backend + frontend |
-| `yarn test` | Backend unit tests |
+| `yarn test` | Backend unit + integration tests, frontend Vitest |
+| `yarn ci` | Typecheck, all tests, production builds (same as CI) |
 
 ## Tests
 
@@ -80,7 +81,7 @@ Run from the repo root:
 yarn test
 ```
 
-Covers split math, rule matching, and CSV row mapping. Sample CSV: `backend/test/fixtures/sample.csv`.
+Covers split math, rule matching, CSV row mapping, env validation, import integration (HTTP + DB), and frontend unit tests. Sample CSV: `backend/test/fixtures/sample.csv`.
 
 ## API overview
 

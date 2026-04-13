@@ -7,6 +7,7 @@ import {
   postFormData,
   postJson,
 } from '../lib/api'
+import { formatParseErrorLines } from '../lib/formatParseErrors'
 import type { Account, Paginated, Transaction } from '../types/api'
 
 type UploadResult = {
@@ -15,6 +16,7 @@ type UploadResult = {
   inserted?: number
   skippedDuplicates?: number
   rowErrors?: number
+  parseErrors?: { rowIndex: number; message: string }[]
   skipped?: boolean
   reason?: string
   message?: string
@@ -38,6 +40,7 @@ export function TransactionsPage() {
   const [batchLabel, setBatchLabel] = useState('')
   const [profileId, setProfileId] = useState('generic_simple')
   const [uploadMsg, setUploadMsg] = useState<string | null>(null)
+  const [uploadParseLines, setUploadParseLines] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -91,6 +94,7 @@ export function TransactionsPage() {
     }
     setUploading(true)
     setUploadMsg(null)
+    setUploadParseLines([])
     setErr(null)
     try {
       const fd = new FormData()
@@ -100,6 +104,7 @@ export function TransactionsPage() {
       fd.append('profileId', profileId)
       const result = await postFormData<UploadResult>('/api/import/upload', fd)
       if (result.skipped) {
+        setUploadParseLines([])
         setUploadMsg(
           [
             `Skipped (${result.reason ?? 'unknown'}): ${result.file}`,
@@ -117,6 +122,11 @@ export function TransactionsPage() {
           result.warning,
         ].filter(Boolean)
         setUploadMsg(parts.join(' — '))
+        setUploadParseLines(
+          result.parseErrors?.length
+            ? formatParseErrorLines(result.parseErrors)
+            : []
+        )
       }
       if (input) input.value = ''
       await load()
@@ -201,6 +211,13 @@ export function TransactionsPage() {
             {uploadMsg}
           </p>
         )}
+        {uploadParseLines.length > 0 && (
+          <ul className="parseErrorList" aria-label="Rows that failed to parse">
+            {uploadParseLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
       </form>
 
       <div className="row">
@@ -280,9 +297,28 @@ export function TransactionsPage() {
             </tr>
           </thead>
           <tbody>
-            {res?.data.map((t) => (
-              <TransactionRow key={t.id} t={t} onSave={saveRow} />
-            ))}
+            {loading ? (
+              <tr>
+                <td colSpan={11} className="muted pad">
+                  Loading…
+                </td>
+              </tr>
+            ) : !res?.data.length ? (
+              <tr>
+                <td colSpan={11} className="emptyStateCell">
+                  <p>No transactions yet — or none match your filters.</p>
+                  <p className="muted">
+                    Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
+                    placed files in the configured upload folder. Create accounts under{' '}
+                    <Link to="/accounts">Accounts</Link> if needed.
+                  </p>
+                </td>
+              </tr>
+            ) : (
+              res.data.map((t) => (
+                <TransactionRow key={t.id} t={t} onSave={saveRow} />
+              ))
+            )}
           </tbody>
         </table>
       </div>

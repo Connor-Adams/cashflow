@@ -157,7 +157,9 @@ export function AccountsPage() {
             </tbody>
           </table>
           {accounts.length === 0 && !loading && (
-            <p className="muted pad">No accounts yet — create one above.</p>
+            <p className="emptyState pad">
+              No accounts yet — create one using the form above, then import CSVs under Transactions.
+            </p>
           )}
         </div>
       )}

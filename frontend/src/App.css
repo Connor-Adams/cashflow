@@ -106,6 +106,15 @@
   color: #e8b86a;
 }
 
+.uploadCard .parseErrorList {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+  color: var(--danger, #c77);
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
 .filePick input[type='file'] {
   max-width: 100%;
 }
@@ -117,6 +126,24 @@
 .pad {
   padding: 0.75rem 1rem;
   margin: 0;
+}
+
+.emptyState {
+  color: var(--muted);
+  margin: 0;
+}
+
+.emptyStateCell {
+  padding: 1.25rem 1rem !important;
+  vertical-align: top;
+}
+
+.emptyStateCell p {
+  margin: 0 0 0.5rem;
+}
+
+.emptyStateCell p:last-child {
+  margin-bottom: 0;
 }
 
 .page a {

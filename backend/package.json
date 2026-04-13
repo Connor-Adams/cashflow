@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "test:integration": "tsx --test test/integration/importUpload.test.ts"
   },
   "dependencies": {
     "@cashflow/shared": "*",
@@ -18,7 +19,8 @@
     "date-fns": "^4.1.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "multer": "^1.4.5-lts.2",
+    "express-rate-limit": "^8.3.2",
+    "multer": "^2.0.0",
     "sequelize": "^6.37.5",
     "sqlite3": "^5.1.7"
   },
@@ -27,7 +29,9 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.2",
+    "@types/supertest": "^7.2.0",
     "sequelize-cli": "^6.6.2",
+    "supertest": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "~5.9.3"
   }
