@@ -90,6 +90,40 @@
   margin-bottom: 1rem;
 }
 
+.bulkBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem 1rem;
+}
+
+.bulkBar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.bulkBar .checkRow {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.table .narrowCol {
+  width: 2.25rem;
+  text-align: center;
+}
+
+button.linkish {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font-size: inherit;
+}
+
 .uploadCard h2 {
   margin: 0 0 0.35rem;
   font-size: 1.05rem;

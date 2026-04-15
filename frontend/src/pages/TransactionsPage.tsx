@@ -28,10 +28,31 @@ type FolderImportResponse = {
   uploadDir: string
 }
 
+type ImportHistoryRow = {
+  id: number
+  fileName: string
+  batchLabel: string
+  status: string
+  rowCount: number | null
+  errorMessage: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
 export function TransactionsPage() {
   const [page, setPage] = useState(1)
   const [reviewOnly, setReviewOnly] = useState(false)
   const [currency, setCurrency] = useState('')
+  const [batchFilter, setBatchFilter] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [bulkCat, setBulkCat] = useState('')
+  const [bulkBiz, setBulkBiz] = useState('')
+  const [bulkSplit, setBulkSplit] = useState('')
+  const [bulkPctMe, setBulkPctMe] = useState('')
+  const [bulkPctPartner, setBulkPctPartner] = useState('')
+  const [bulkMarkReviewed, setBulkMarkReviewed] = useState(false)
+  const [bulkApplying, setBulkApplying] = useState(false)
+  const [importHistory, setImportHistory] = useState<ImportHistoryRow[]>([])
   const [res, setRes] = useState<Paginated<Transaction> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -50,6 +71,16 @@ export function TransactionsPage() {
       .catch(() => {})
   }, [])
 
+  const refreshImportHistory = useCallback(() => {
+    void getJson<ImportHistoryRow[]>('/api/import/history')
+      .then(setImportHistory)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshImportHistory()
+  }, [refreshImportHistory])
+
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
@@ -60,6 +91,7 @@ export function TransactionsPage() {
       })
       if (reviewOnly) qs.set('reviewFlag', 'true')
       if (currency) qs.set('currency', currency)
+      if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`
       )
@@ -69,15 +101,84 @@ export function TransactionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, reviewOnly, currency])
+  }, [page, reviewOnly, currency, batchFilter])
 
   useEffect(() => {
     void load()
   }, [load])
 
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [page])
+
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
     await load()
+  }
+
+  function toggleSelected(id: number) {
+    setSelectedIds((prev) => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  }
+
+  function selectAllOnPage() {
+    const rows = res?.data ?? []
+    const ids = rows.map((t) => t.id)
+    setSelectedIds((prev) => {
+      const allOnPage = ids.length > 0 && ids.every((id) => prev.has(id))
+      if (allOnPage) return new Set()
+      return new Set(ids)
+    })
+  }
+
+  function buildBulkPatch(): Record<string, unknown> | null {
+    const patch: Record<string, unknown> = {}
+    if (bulkCat.trim()) patch.categoryOverride = bulkCat.trim()
+    if (bulkBiz === 'true' || bulkBiz === 'false')
+      patch.businessOverride = bulkBiz === 'true'
+    if (bulkSplit === 'me' || bulkSplit === 'partner' || bulkSplit === 'shared')
+      patch.splitOverride = bulkSplit
+    if (bulkPctMe.trim()) {
+      const n = Number(bulkPctMe)
+      if (!Number.isFinite(n)) return null
+      patch.pctMeOverride = n
+    }
+    if (bulkPctPartner.trim()) {
+      const n = Number(bulkPctPartner)
+      if (!Number.isFinite(n)) return null
+      patch.pctPartnerOverride = n
+    }
+    if (bulkMarkReviewed) patch.reviewFlag = false
+    return Object.keys(patch).length ? patch : null
+  }
+
+  async function applyBulk() {
+    const patch = buildBulkPatch()
+    if (!patch || selectedIds.size === 0) return
+    setBulkApplying(true)
+    setErr(null)
+    try {
+      await postJson<{ updated: number }>('/api/transactions/bulk-patch', {
+        ids: [...selectedIds],
+        patch,
+      })
+      setBulkCat('')
+      setBulkBiz('')
+      setBulkSplit('')
+      setBulkPctMe('')
+      setBulkPctPartner('')
+      setBulkMarkReviewed(false)
+      setSelectedIds(new Set())
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Bulk update failed')
+    } finally {
+      setBulkApplying(false)
+    }
   }
 
   async function onUpload(e: FormEvent) {
@@ -130,6 +231,7 @@ export function TransactionsPage() {
       }
       if (input) input.value = ''
       await load()
+      refreshImportHistory()
     } catch (e) {
       setUploadMsg(e instanceof Error ? e.message : 'Upload failed')
     } finally {
@@ -220,6 +322,68 @@ export function TransactionsPage() {
         )}
       </form>
 
+      <section className="card" aria-labelledby="import-history-heading">
+        <h2 id="import-history-heading">Recent imports</h2>
+        <p className="muted">
+          Last 50 runs (upload or folder). Use <strong>Filter by batch</strong> to
+          narrow the table to one import batch.
+        </p>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Started</th>
+                <th>File</th>
+                <th>Batch</th>
+                <th>Status</th>
+                <th>Rows</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {importHistory.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="muted pad">
+                    No import history yet.
+                  </td>
+                </tr>
+              ) : (
+                importHistory.map((h) => (
+                  <tr key={h.id}>
+                    <td>{h.startedAt.slice(0, 19).replace('T', ' ')}</td>
+                    <td title={h.fileName}>{h.fileName}</td>
+                    <td>{h.batchLabel}</td>
+                    <td>
+                      {h.status}
+                      {h.errorMessage ? (
+                        <span className="muted" title={h.errorMessage}>
+                          {' '}
+                          ({h.errorMessage.slice(0, 40)}
+                          {h.errorMessage.length > 40 ? '…' : ''})
+                        </span>
+                      ) : null}
+                    </td>
+                    <td>{h.rowCount ?? '—'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={() => {
+                          setPage(1)
+                          setBatchFilter(h.batchLabel)
+                        }}
+                      >
+                        Filter by batch
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <div className="row">
         <label>
           <input
@@ -245,6 +409,29 @@ export function TransactionsPage() {
             style={{ width: 80 }}
           />
         </label>
+        <label>
+          Import batch{' '}
+          <input
+            value={batchFilter}
+            onChange={(e) => {
+              setPage(1)
+              setBatchFilter(e.target.value)
+            }}
+            placeholder="exact batch label"
+            style={{ minWidth: 180 }}
+          />
+        </label>
+        {batchFilter.trim() ? (
+          <button
+            type="button"
+            onClick={() => {
+              setPage(1)
+              setBatchFilter('')
+            }}
+          >
+            Clear batch filter
+          </button>
+        ) : null}
         <button type="button" onClick={() => void load()} disabled={loading}>
           Refresh
         </button>
@@ -270,6 +457,7 @@ export function TransactionsPage() {
                   : `No .csv files in upload folder: ${out.uploadDir}`
               )
               await load()
+              refreshImportHistory()
             } catch (e) {
               setErr(e instanceof Error ? e.message : 'Import failed')
             }
@@ -279,10 +467,107 @@ export function TransactionsPage() {
         </button>
       </div>
       {err && <span className="error">{err}</span>}
+      {selectedIds.size > 0 && (
+        <div className="card bulkBar">
+          <strong>{selectedIds.size} selected</strong>
+          <label>
+            Category
+            <input
+              value={bulkCat}
+              onChange={(e) => setBulkCat(e.target.value)}
+              placeholder="override"
+            />
+          </label>
+          <label>
+            Business
+            <select
+              value={bulkBiz}
+              onChange={(e) => setBulkBiz(e.target.value)}
+            >
+              <option value="">(no change)</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </label>
+          <label>
+            Split
+            <select
+              value={bulkSplit}
+              onChange={(e) => setBulkSplit(e.target.value)}
+            >
+              <option value="">(no change)</option>
+              <option value="me">me</option>
+              <option value="partner">partner</option>
+              <option value="shared">shared</option>
+            </select>
+          </label>
+          <label>
+            % me
+            <input
+              value={bulkPctMe}
+              onChange={(e) => setBulkPctMe(e.target.value)}
+              style={{ width: 64 }}
+              placeholder="0.5"
+            />
+          </label>
+          <label>
+            % ptn
+            <input
+              value={bulkPctPartner}
+              onChange={(e) => setBulkPctPartner(e.target.value)}
+              style={{ width: 64 }}
+              placeholder="0.5"
+            />
+          </label>
+          <label className="checkRow">
+            <input
+              type="checkbox"
+              checked={bulkMarkReviewed}
+              onChange={(e) => setBulkMarkReviewed(e.target.checked)}
+            />{' '}
+            Mark reviewed
+          </label>
+          <button
+            type="button"
+            disabled={
+              bulkApplying || !buildBulkPatch() || selectedIds.size === 0
+            }
+            onClick={() => void applyBulk()}
+          >
+            {bulkApplying ? 'Applying…' : 'Apply to selected'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
       <div className="tableWrap">
         <table className="table">
           <thead>
             <tr>
+              <th className="narrowCol">
+                <input
+                  type="checkbox"
+                  aria-label="Select all on this page"
+                  checked={
+                    (res?.data.length ?? 0) > 0 &&
+                    (res?.data.every((t) => selectedIds.has(t.id)) ?? false)
+                  }
+                  ref={(el) => {
+                    if (el) {
+                      const some =
+                        (res?.data.some((t) => selectedIds.has(t.id)) ??
+                          false) &&
+                        !(res?.data.every((t) => selectedIds.has(t.id)) ?? false)
+                      el.indeterminate = some
+                    }
+                  }}
+                  onChange={() => selectAllOnPage()}
+                />
+              </th>
               <th>Date</th>
               <th>Merchant</th>
               <th>Amount</th>
@@ -299,13 +584,13 @@ export function TransactionsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="muted pad">
+                <td colSpan={12} className="muted pad">
                   Loading…
                 </td>
               </tr>
             ) : !res?.data.length ? (
               <tr>
-                <td colSpan={11} className="emptyStateCell">
+                <td colSpan={12} className="emptyStateCell">
                   <p>No transactions yet — or none match your filters.</p>
                   <p className="muted">
                     Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
@@ -316,7 +601,13 @@ export function TransactionsPage() {
               </tr>
             ) : (
               res.data.map((t) => (
-                <TransactionRow key={t.id} t={t} onSave={saveRow} />
+                <TransactionRow
+                  key={t.id}
+                  t={t}
+                  selected={selectedIds.has(t.id)}
+                  onToggleSelected={() => toggleSelected(t.id)}
+                  onSave={saveRow}
+                />
               ))
             )}
           </tbody>
@@ -347,9 +638,13 @@ export function TransactionsPage() {
 
 function TransactionRow({
   t,
+  selected,
+  onToggleSelected,
   onSave,
 }: {
   t: Transaction
+  selected: boolean
+  onToggleSelected: () => void
   onSave: (id: number, patch: Record<string, unknown>) => Promise<void>
 }) {
   const [cat, setCat] = useState(t.categoryOverride ?? '')
@@ -386,6 +681,14 @@ function TransactionRow({
 
   return (
     <tr>
+      <td className="narrowCol">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelected}
+          aria-label={`Select transaction ${t.id}`}
+        />
+      </td>
       <td>{t.date}</td>
       <td title={t.merchantRaw}>{t.merchantClean}</td>
       <td>{t.amount}</td>

@@ -1,10 +1,87 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { Transaction, Account } from '../models';
+import { Transaction, Account, sequelize } from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
 
 const router = Router();
+
+const PATCHABLE_KEYS = [
+  'categoryOverride',
+  'businessOverride',
+  'splitOverride',
+  'pctMeOverride',
+  'pctPartnerOverride',
+  'notes',
+] as const;
+
+function applyPatchBody(
+  txn: InstanceType<typeof Transaction>,
+  b: Record<string, unknown>
+): void {
+  for (const k of PATCHABLE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(b, k)) {
+      txn.set(k, b[k] as never);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(b, 'reviewFlag')) {
+    txn.set('reviewFlag', Boolean(b.reviewFlag));
+    if (b.reviewFlag === false) {
+      txn.set('reviewedAt', new Date());
+    }
+  }
+}
+
+router.post('/bulk-patch', async (req, res, next) => {
+  try {
+    const body = (req.body || {}) as { ids?: unknown; patch?: unknown };
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array' });
+      return;
+    }
+    if (body.ids.length > 200) {
+      res.status(400).json({ error: 'At most 200 ids per request' });
+      return;
+    }
+    const ids: number[] = [];
+    for (const raw of body.ids) {
+      const id = parseInt(String(raw), 10);
+      if (Number.isNaN(id) || id < 1) {
+        res.status(400).json({ error: 'Each id must be a positive integer' });
+        return;
+      }
+      ids.push(id);
+    }
+    const patch =
+      body.patch && typeof body.patch === 'object' && body.patch !== null
+        ? (body.patch as Record<string, unknown>)
+        : {};
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: 'patch must include at least one field' });
+      return;
+    }
+
+    await sequelize.transaction(async (t) => {
+      for (const id of ids) {
+        const txn = await Transaction.findByPk(id, { transaction: t });
+        if (!txn) {
+          const err = new Error(`Transaction ${id} not found`) as Error & {
+            status?: number;
+          };
+          err.status = 404;
+          throw err;
+        }
+        applyPatchBody(txn, patch);
+        recomputeTransactionAmounts(txn);
+        await txn.save({ transaction: t });
+      }
+    });
+
+    res.json({ updated: ids.length });
+  } catch (e) {
+    next(e);
+  }
+});
 
 router.get('/', async (req, res, next) => {
   try {
@@ -26,6 +103,9 @@ router.get('/', async (req, res, next) => {
     }
     if (req.query.category) {
       where.finalCategory = String(req.query.category);
+    }
+    if (req.query.importBatch) {
+      where.importBatch = String(req.query.importBatch);
     }
     if (req.query.dateFrom || req.query.dateTo) {
       const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
@@ -66,25 +146,7 @@ router.patch('/:id', async (req, res, next) => {
     }
 
     const b = (req.body || {}) as Record<string, unknown>;
-    const allowed = [
-      'categoryOverride',
-      'businessOverride',
-      'splitOverride',
-      'pctMeOverride',
-      'pctPartnerOverride',
-      'notes',
-    ] as const;
-    for (const k of allowed) {
-      if (Object.prototype.hasOwnProperty.call(b, k)) {
-        txn.set(k, b[k] as never);
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(b, 'reviewFlag')) {
-      txn.set('reviewFlag', Boolean(b.reviewFlag));
-      if (b.reviewFlag === false) {
-        txn.set('reviewedAt', new Date());
-      }
-    }
+    applyPatchBody(txn, b);
 
     recomputeTransactionAmounts(txn);
     await txn.save();

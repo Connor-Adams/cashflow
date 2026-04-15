@@ -10,7 +10,7 @@
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "test": "tsx --test test/*.test.ts",
-    "test:integration": "tsx --test test/integration/importUpload.test.ts"
+    "test:integration": "tsx --test test/integration/*.test.ts"
   },
   "dependencies": {
     "@cashflow/shared": "*",
