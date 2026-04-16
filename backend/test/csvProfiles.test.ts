@@ -8,7 +8,10 @@ test('listImportProfiles returns distinct profile definitions', () => {
   const ids = list.map((x) => x.id);
   assert.ok(ids.includes('generic_simple'));
   assert.ok(ids.includes('generic_amex'));
-  assert.ok(!ids.includes('amex'), 'duplicate amex ref should be omitted');
+  assert.ok(
+    !ids.includes('amex'),
+    'duplicate amex ref should be omitted in favor of generic_amex'
+  );
 });
 
 test('listImportProfiles entries reference existing profile ids', () => {

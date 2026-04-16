@@ -104,7 +104,16 @@ export type CsvProfileListEntry = {
 export function listImportProfiles(): CsvProfileListEntry[] {
   const seen = new Set<CsvProfile>();
   const out: CsvProfileListEntry[] = [];
-  for (const id of Object.keys(profiles).sort()) {
+  const ids = Object.keys(profiles).sort((a, b) => {
+    const da = profiles[a];
+    const db = profiles[b];
+    if (da === db) {
+      if (a === 'generic_amex') return -1;
+      if (b === 'generic_amex') return 1;
+    }
+    return a.localeCompare(b);
+  });
+  for (const id of ids) {
     const def = profiles[id];
     if (seen.has(def)) continue;
     seen.add(def);
