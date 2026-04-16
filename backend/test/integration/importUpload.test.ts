@@ -154,6 +154,7 @@ test('GET /api/import/profiles returns CSV profile list', async () => {
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body));
   assert.ok(res.body.length >= 1);
+  assert.equal(res.body[0]?.id, 'auto');
   assert.ok(
     res.body.some(
       (p: { id: string }) => p.id === 'generic_simple'
@@ -220,6 +221,8 @@ test('POST /api/import/preview returns headers and mapped rows', async () => {
   const row = res.body.rows[0] as { ok: boolean; mapped?: { date: string } };
   assert.equal(row.ok, true);
   assert.equal(row.mapped?.date, '2025-06-01');
+  assert.equal(res.body.usedProfileId, 'generic_simple');
+  assert.equal(res.body.profileInferred, false);
 });
 
 test('POST /api/import/preview: row error for invalid date', async () => {
@@ -259,4 +262,29 @@ test('POST /api/import/preview: 400 when accountId missing', async () => {
       contentType: 'text/csv',
     });
   assert.equal(res.status, 400);
+});
+
+test('POST /api/import/upload with profile auto infers generic_simple', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Auto Profile Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv = 'Date,Description,Amount\n2025-06-01,Cafe,-5.50\n';
+  const res = await request(app)
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .field('profileId', 'auto')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'auto.csv',
+      contentType: 'text/csv',
+    });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.usedProfileId, 'generic_simple');
+  assert.equal(res.body.profileInferred, true);
+  assert.ok((res.body.inserted as number) >= 1);
 });

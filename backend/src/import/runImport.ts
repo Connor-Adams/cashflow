@@ -11,6 +11,7 @@ import {
 import { hashContent, rowFingerprint } from './fingerprint';
 import { findBestRule, loadAllRules, applyRuleToAuto } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
+import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
 import { mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
@@ -66,8 +67,6 @@ export type ImportCsvFileOpts = {
  * `CardName_YYYY_MM.csv` filename (folder scan).
  */
 export async function importCsvFile(opts: ImportCsvFileOpts) {
-  const profileId =
-    opts.profileId || process.env.CSV_PROFILE_ID || 'generic_simple';
   const name = path.basename(opts.fileName || 'upload.csv').replace(/[\\/]/g, '');
   const buf = opts.buffer;
   const contentHash = hashContent(buf);
@@ -193,6 +192,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   const defaultCurrency =
     account.defaultCurrency || env.defaultCurrency || 'CAD';
 
+  const { profileId, inferred: profileInferred } = resolveProfileIdForImport(
+    opts.profileId ?? undefined,
+    process.env.CSV_PROFILE_ID,
+    headers,
+    records,
+    defaultCurrency,
+  );
+
   let inserted = 0;
   let skippedDup = 0;
   let rowErrors = 0;
@@ -304,6 +311,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     rowErrors,
     parseErrors,
     contentHash,
+    usedProfileId: profileId,
+    profileInferred: profileInferred,
   };
   if (inserted === 0 && rowErrors > 0) {
     out.warning =
@@ -319,7 +328,12 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
 
 export async function runImport(options: { profileId?: string } = {}) {
   const profileId =
-    options.profileId || process.env.CSV_PROFILE_ID || 'generic_simple';
+    options.profileId ||
+    (process.env.CSV_PROFILE_ID &&
+    process.env.CSV_PROFILE_ID.trim() !== 'auto'
+      ? process.env.CSV_PROFILE_ID
+      : undefined) ||
+    'auto';
   const uploadDir = env.csvUploadDir;
   await fs.mkdir(uploadDir, { recursive: true });
 

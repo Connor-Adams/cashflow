@@ -23,7 +23,14 @@ const upload = multer({
 const router = Router();
 
 router.get('/profiles', (_req, res) => {
-  res.json(listImportProfiles());
+  res.json([
+    {
+      id: 'auto',
+      label: 'Automatic',
+      hint: 'Detect from your CSV columns and sample rows (best for raw card exports).',
+    },
+    ...listImportProfiles(),
+  ]);
 });
 
 router.post('/run', async (req, res, next) => {
@@ -68,7 +75,7 @@ router.post(
         return;
       }
       const profileId =
-        (req.body as { profileId?: string }).profileId || 'generic_simple';
+        (req.body as { profileId?: string }).profileId ?? 'auto';
 
       const result = await previewImportCsv({
         buffer: req.file.buffer,
@@ -83,6 +90,8 @@ router.post(
         headers: result.headers,
         rows: result.rows,
         previewRowLimit: PREVIEW_MAX_ROWS,
+        usedProfileId: result.usedProfileId,
+        profileInferred: result.profileInferred,
       });
     } catch (e) {
       next(e);
@@ -122,7 +131,8 @@ router.post(
         String((req.body as { batchLabel?: string }).batchLabel).trim()
           ? String((req.body as { batchLabel?: string }).batchLabel).trim()
           : null;
-      const profileId = (req.body as { profileId?: string }).profileId || null;
+      const profileId =
+        (req.body as { profileId?: string }).profileId ?? 'auto';
 
       const result = await importCsvFile({
         buffer: req.file.buffer,

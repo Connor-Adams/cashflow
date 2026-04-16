@@ -1,5 +1,6 @@
 import { Account } from '../models';
 import * as env from '../config/env';
+import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
 import { mapCsvRow } from './mapRow';
 
@@ -22,7 +23,13 @@ export async function previewImportCsv(opts: {
   accountId: number;
 }): Promise<
   | { ok: false; error: string }
-  | { ok: true; headers: string[]; rows: PreviewRow[] }
+  | {
+      ok: true;
+      headers: string[];
+      rows: PreviewRow[];
+      usedProfileId: string;
+      profileInferred: boolean;
+    }
 > {
   const account = await Account.findByPk(opts.accountId);
   if (!account) {
@@ -36,8 +43,13 @@ export async function previewImportCsv(opts: {
     return { ok: false, error: parsed.error };
   }
   const { records, headers } = parsed;
-  const profileId =
-    opts.profileId || process.env.CSV_PROFILE_ID || 'generic_simple';
+  const { profileId, inferred } = resolveProfileIdForImport(
+    opts.profileId,
+    process.env.CSV_PROFILE_ID,
+    headers,
+    records,
+    defaultCurrency,
+  );
   const rows: PreviewRow[] = [];
   const n = Math.min(records.length, PREVIEW_MAX_ROWS);
   for (let i = 0; i < n; i++) {
@@ -59,5 +71,11 @@ export async function previewImportCsv(opts: {
       });
     }
   }
-  return { ok: true, headers, rows };
+  return {
+    ok: true,
+    headers,
+    rows,
+    usedProfileId: profileId,
+    profileInferred: inferred,
+  };
 }

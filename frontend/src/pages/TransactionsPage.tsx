@@ -21,6 +21,8 @@ type UploadResult = {
   reason?: string
   message?: string
   warning?: string
+  usedProfileId?: string
+  profileInferred?: boolean
 }
 
 type FolderImportResponse = {
@@ -44,6 +46,8 @@ type CsvProfileOption = { id: string; label: string; hint: string }
 type PreviewResponse = {
   headers: string[]
   previewRowLimit: number
+  usedProfileId?: string
+  profileInferred?: boolean
   rows: Array<
     | {
         rowIndex: number
@@ -84,7 +88,7 @@ export function TransactionsPage() {
   const [csvProfileOptions, setCsvProfileOptions] = useState<CsvProfileOption[]>(
     []
   )
-  const [profileId, setProfileId] = useState('generic_simple')
+  const [profileId, setProfileId] = useState('auto')
   const [uploadMsg, setUploadMsg] = useState<string | null>(null)
   const [uploadParseLines, setUploadParseLines] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
@@ -104,7 +108,7 @@ export function TransactionsPage() {
       .then((list) => {
         setCsvProfileOptions(list)
         setProfileId((prev) =>
-          list.some((p) => p.id === prev) ? prev : list[0]?.id ?? 'generic_simple'
+          list.some((p) => p.id === prev) ? prev : list[0]?.id ?? 'auto'
         )
       })
       .catch(() => {})
@@ -286,8 +290,13 @@ export function TransactionsPage() {
             .join(' — ')
         )
       } else {
+        const profileNote =
+          result.usedProfileId != null
+            ? `Profile: ${result.usedProfileId}${result.profileInferred ? ' (auto-detected)' : ''}`
+            : ''
         const parts = [
           `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`,
+          profileNote,
           (result.rowErrors ?? 0) > 0
             ? `${result.rowErrors} row(s) could not be parsed (wrong columns or date format?)`
             : '',
@@ -317,9 +326,9 @@ export function TransactionsPage() {
       <form className="card uploadCard" onSubmit={onUpload}>
         <h2>Upload CSV</h2>
         <p className="muted">
-          Pick the account this statement belongs to, then choose your bank’s
-          CSV export. Rows are parsed with the selected profile (same as folder
-          import).
+          Pick the account, then drop in your card company’s CSV. With{' '}
+          <strong>Automatic</strong>, the app detects the column layout from
+          your file; override the profile only if something looks wrong.
         </p>
         {accounts.length === 0 && (
           <p className="error">
@@ -367,6 +376,7 @@ export function TransactionsPage() {
                 ))
               ) : (
                 <Fragment>
+                  <option value="auto">Automatic</option>
                   <option value="generic_simple">generic_simple (ISO dates)</option>
                   <option value="generic_amex">generic_amex (Amex)</option>
                 </Fragment>
@@ -437,6 +447,12 @@ export function TransactionsPage() {
               Showing up to {previewData.previewRowLimit} data rows (not
               imported).
             </p>
+            {previewData.usedProfileId != null && (
+              <p className="muted">
+                Profile used: <strong>{previewData.usedProfileId}</strong>
+                {previewData.profileInferred ? ' (auto-detected)' : ''}
+              </p>
+            )}
             <div className="tableWrap">
               <table className="table">
                 <thead>

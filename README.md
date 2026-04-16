@@ -40,8 +40,9 @@ With `yarn dev`:
 ### Web upload (recommended)
 
 1. Under **Accounts**, create at least one account (name, optional short code for filename matching, default currency).
-2. Open **Transactions**, use **Upload CSV**: pick the account, optional batch label, CSV profile, and your `.csv` file → **Import CSV**.
-3. Same parsing, rules, and dedupe as folder import; filename does not need a special pattern when you choose the account in the form.
+2. Open **Transactions**, use **Upload CSV**: pick the account, optional batch label, and your `.csv` file → **Import CSV**. Leave the profile on **Automatic** to detect column layout from the file (Amex vs generic bank exports), or choose a specific profile if you need to override.
+3. Use **Preview first rows** to sanity-check parsing before importing.
+4. Same parsing, rules, and dedupe as folder import; filename does not need a special pattern when you choose the account in the form.
 
 ### Folder scan (optional)
 
@@ -56,11 +57,13 @@ With `yarn dev`:
 
 ### Column mapping (profiles)
 
-Profiles live in `backend/src/import/csvProfiles.ts`. The default `generic_simple` profile expects headers such as `Date`, `Description`, `Amount`, and optional `Currency`. Amounts follow **charges_negative** (spending is negative after normalization).
+Automatic mode scores your CSV’s headers and the first rows against built-in profiles and picks **`generic_simple`** (ISO-style dates and common bank columns) or **`generic_amex`** (Amex-style columns and US date order). Override with **`generic_simple`**, **`generic_amex`**, or **`amex`** when needed.
 
-**American Express:** Use profile **`generic_amex`** or **`amex`** on upload. It recognizes many Amex column names (e.g. `Transaction Date`, `Posted Date`, `Charge Amount`, `Amount (CAD)`). Dates are parsed flexibly (US `MM/DD/YYYY`, Canadian `DD/MM/YYYY`, ISO `YYYY-MM-DD`, etc.).
+Profiles are defined in `backend/src/import/csvProfiles.ts`. The default `generic_simple` profile expects headers such as `Date`, `Description`, `Amount`, and optional `Currency`. Amounts follow **charges_negative** (spending is negative after normalization).
 
-To match another issuer, add a profile or set `CSV_PROFILE_ID` / pass `profileId` on import.
+**American Express:** **`generic_amex`** recognizes many Amex column names (e.g. `Transaction Date`, `Posted Date`, `Charge Amount`, `Amount (CAD)`). Dates are parsed flexibly (US `MM/DD/YYYY`, Canadian `DD/MM/YYYY`, ISO `YYYY-MM-DD`, etc.).
+
+To match another issuer, add a profile or set `CSV_PROFILE_ID` / pass `profileId` on import (use `auto` or omit for automatic detection when not setting env).
 
 ## Scripts
 
