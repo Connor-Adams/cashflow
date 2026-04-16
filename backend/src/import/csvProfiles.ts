@@ -79,6 +79,41 @@ export const profiles: Record<string, CsvProfile> = {
   amex: generic_amex,
 };
 
+const profileHints: Record<string, { label: string; hint: string }> = {
+  generic_simple: {
+    label: 'generic_simple',
+    hint: 'ISO dates (yyyy-MM-dd); common bank exports.',
+  },
+  generic_amex: {
+    label: 'generic_amex',
+    hint: 'Amex-style columns; US date order (MM/dd/yyyy).',
+  },
+  amex: {
+    label: 'amex',
+    hint: 'Same mapping as generic_amex.',
+  },
+};
+
+export type CsvProfileListEntry = {
+  id: string;
+  label: string;
+  hint: string;
+};
+
+/** One entry per distinct profile definition (skips duplicate object refs, e.g. amex). */
+export function listImportProfiles(): CsvProfileListEntry[] {
+  const seen = new Set<CsvProfile>();
+  const out: CsvProfileListEntry[] = [];
+  for (const id of Object.keys(profiles).sort()) {
+    const def = profiles[id];
+    if (seen.has(def)) continue;
+    seen.add(def);
+    const meta = profileHints[id] ?? { label: id, hint: '' };
+    out.push({ id, label: meta.label, hint: meta.hint });
+  }
+  return out;
+}
+
 /** Strip UTF-8 BOM so "Date" matches Excel/Numbers exports */
 export function stripBom(s: string): string {
   return String(s).replace(/^\uFEFF/, '').trim();

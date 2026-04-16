@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { formatMoney } from '../lib/formatMoney'
+import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 
 type PartnerRow = {
@@ -11,6 +13,8 @@ type BusRow = { currency: string; sumBusiness: number }
 
 export function ReportsPage() {
   const [currency, setCurrency] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [partner, setPartner] = useState<{ byCurrency: PartnerRow[] } | null>(
     null
   )
@@ -19,14 +23,22 @@ export function ReportsPage() {
   )
   const [err, setErr] = useState<string | null>(null)
 
+  const summaryQs = useMemo(
+    () => summaryQueryString({ currency, dateFrom, dateTo }),
+    [currency, dateFrom, dateTo]
+  )
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const q = currency ? `?currency=${encodeURIComponent(currency)}` : ''
         const [p, b] = await Promise.all([
-          getJson<{ byCurrency: PartnerRow[] }>(`/api/summary/partner${q}`),
-          getJson<{ byCurrency: BusRow[] }>(`/api/summary/business${q}`),
+          getJson<{ byCurrency: PartnerRow[] }>(
+            `/api/summary/partner${summaryQs}`
+          ),
+          getJson<{ byCurrency: BusRow[] }>(
+            `/api/summary/business${summaryQs}`
+          ),
         ])
         if (!cancelled) {
           setPartner(p)
@@ -40,7 +52,7 @@ export function ReportsPage() {
     return () => {
       cancelled = true
     }
-  }, [currency])
+  }, [summaryQs])
 
   return (
     <div className="page">
@@ -48,16 +60,34 @@ export function ReportsPage() {
       <p className="muted">
         Partner balances and business totals are reported per currency.
       </p>
-      <label>
-        Filter currency{' '}
-        <input
-          value={currency}
-          onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-          maxLength={3}
-          placeholder="optional"
-          style={{ width: 80 }}
-        />
-      </label>
+      <div className="row">
+        <label>
+          Filter currency{' '}
+          <input
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+            maxLength={3}
+            placeholder="optional"
+            style={{ width: 80 }}
+          />
+        </label>
+        <label>
+          From{' '}
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+          />
+        </label>
+        <label>
+          To{' '}
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+          />
+        </label>
+      </div>
       {err && <span className="error">{err}</span>}
 
       <h2>Partner split totals</h2>
@@ -74,8 +104,8 @@ export function ReportsPage() {
             {partner?.byCurrency.map((r) => (
               <tr key={r.currency}>
                 <td>{r.currency}</td>
-                <td>{r.sumMy}</td>
-                <td>{r.sumPartner}</td>
+                <td>{formatMoney(r.sumMy, r.currency)}</td>
+                <td>{formatMoney(r.sumPartner, r.currency)}</td>
               </tr>
             ))}
           </tbody>
@@ -95,7 +125,7 @@ export function ReportsPage() {
             {business?.byCurrency.map((r) => (
               <tr key={r.currency}>
                 <td>{r.currency}</td>
-                <td>{r.sumBusiness}</td>
+                <td>{formatMoney(r.sumBusiness, r.currency)}</td>
               </tr>
             ))}
           </tbody>

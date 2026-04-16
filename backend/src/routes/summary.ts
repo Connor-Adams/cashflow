@@ -118,4 +118,41 @@ router.get('/business', async (req, res, next) => {
   }
 });
 
+/** Total spend (sum of amount) by calendar month and currency */
+router.get('/monthly', async (req, res, next) => {
+  try {
+    const where = dateWhere(req);
+    const monthExpr = sequelize.fn(
+      'strftime',
+      '%Y-%m',
+      sequelize.col('date'),
+    );
+    const rows = await Transaction.findAll({
+      where,
+      attributes: [
+        [monthExpr, 'month'],
+        'currency',
+        [sequelize.fn('SUM', sequelize.col('amount')), 'sumAmount'],
+      ],
+      group: [monthExpr, 'currency'],
+      order: [[monthExpr, 'ASC']],
+      raw: true,
+    });
+    type MonthlyRow = {
+      month: string;
+      currency: string;
+      sumAmount: unknown;
+    };
+    res.json({
+      points: (rows as unknown as MonthlyRow[]).map((r) => ({
+        month: r.month,
+        currency: r.currency,
+        sumAmount: num(r.sumAmount),
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 export default router;

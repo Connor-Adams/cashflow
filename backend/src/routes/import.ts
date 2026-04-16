@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { listImportProfiles } from '../import/csvProfiles';
 import { runImport, importCsvFile } from '../import/runImport';
 import { ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
@@ -19,6 +20,10 @@ const upload = multer({
 });
 
 const router = Router();
+
+router.get('/profiles', (_req, res) => {
+  res.json(listImportProfiles());
+});
 
 router.post('/run', async (req, res, next) => {
   try {

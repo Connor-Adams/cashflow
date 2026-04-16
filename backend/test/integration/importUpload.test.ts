@@ -148,3 +148,47 @@ test('POST /api/import/upload: rejects non-csv extension', async () => {
 
   assert.equal(res.status, 400);
 });
+
+test('GET /api/import/profiles returns CSV profile list', async () => {
+  const res = await request(app).get('/api/import/profiles');
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.body));
+  assert.ok(res.body.length >= 1);
+  assert.ok(
+    res.body.some(
+      (p: { id: string }) => p.id === 'generic_simple'
+    )
+  );
+});
+
+test('GET /api/summary/monthly returns points after import', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Monthly Test',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv =
+    'Date,Description,Amount\n2025-06-01,Cafe,-5.50\n2025-07-01,Shop,-3.00\n';
+  const up = await request(app)
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'm.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(up.status, 200);
+
+  const res = await request(app).get('/api/summary/monthly');
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.body.points));
+  assert.ok(res.body.points.length >= 1);
+  const cad = res.body.points.filter(
+    (p: { currency: string }) => p.currency === 'CAD'
+  );
+  assert.ok(cad.some((p: { month: string }) => p.month === '2025-06'));
+  assert.ok(cad.some((p: { month: string }) => p.month === '2025-07'));
+});

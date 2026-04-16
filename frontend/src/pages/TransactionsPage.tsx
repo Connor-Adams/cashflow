@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -39,10 +39,14 @@ type ImportHistoryRow = {
   finishedAt: string | null
 }
 
+type CsvProfileOption = { id: string; label: string; hint: string }
+
 export function TransactionsPage() {
   const [page, setPage] = useState(1)
   const [reviewOnly, setReviewOnly] = useState(false)
   const [currency, setCurrency] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const [bulkCat, setBulkCat] = useState('')
@@ -59,6 +63,9 @@ export function TransactionsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [uploadAccountId, setUploadAccountId] = useState('')
   const [batchLabel, setBatchLabel] = useState('')
+  const [csvProfileOptions, setCsvProfileOptions] = useState<CsvProfileOption[]>(
+    []
+  )
   const [profileId, setProfileId] = useState('generic_simple')
   const [uploadMsg, setUploadMsg] = useState<string | null>(null)
   const [uploadParseLines, setUploadParseLines] = useState<string[]>([])
@@ -68,6 +75,17 @@ export function TransactionsPage() {
   useEffect(() => {
     void getJson<Account[]>('/api/accounts')
       .then(setAccounts)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    void getJson<CsvProfileOption[]>('/api/import/profiles')
+      .then((list) => {
+        setCsvProfileOptions(list)
+        setProfileId((prev) =>
+          list.some((p) => p.id === prev) ? prev : list[0]?.id ?? 'generic_simple'
+        )
+      })
       .catch(() => {})
   }, [])
 
@@ -91,6 +109,8 @@ export function TransactionsPage() {
       })
       if (reviewOnly) qs.set('reviewFlag', 'true')
       if (currency) qs.set('currency', currency)
+      if (dateFrom.trim()) qs.set('dateFrom', dateFrom.trim())
+      if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`
@@ -101,7 +121,7 @@ export function TransactionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, reviewOnly, currency, batchFilter])
+  }, [page, reviewOnly, currency, dateFrom, dateTo, batchFilter])
 
   useEffect(() => {
     void load()
@@ -287,9 +307,19 @@ export function TransactionsPage() {
               value={profileId}
               onChange={(e) => setProfileId(e.target.value)}
             >
-              <option value="generic_simple">generic_simple (ISO dates)</option>
-              <option value="generic_amex">Amex / generic_amex</option>
-              <option value="amex">amex (same as Amex)</option>
+              {csvProfileOptions.length > 0 ? (
+                csvProfileOptions.map((p) => (
+                  <option key={p.id} value={p.id} title={p.hint}>
+                    {p.label}
+                    {p.hint ? ` — ${p.hint}` : ''}
+                  </option>
+                ))
+              ) : (
+                <Fragment>
+                  <option value="generic_simple">generic_simple (ISO dates)</option>
+                  <option value="generic_amex">generic_amex (Amex)</option>
+                </Fragment>
+              )}
             </select>
           </label>
           <label className="filePick">
@@ -407,6 +437,28 @@ export function TransactionsPage() {
             placeholder="e.g. CAD"
             maxLength={3}
             style={{ width: 80 }}
+          />
+        </label>
+        <label>
+          From{' '}
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => {
+              setPage(1)
+              setDateFrom(e.target.value)
+            }}
+          />
+        </label>
+        <label>
+          To{' '}
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => {
+              setPage(1)
+              setDateTo(e.target.value)
+            }}
           />
         </label>
         <label>
