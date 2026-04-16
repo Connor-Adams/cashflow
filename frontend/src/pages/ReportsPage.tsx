@@ -21,6 +21,7 @@ export function ReportsPage() {
   const [business, setBusiness] = useState<{ byCurrency: BusRow[] } | null>(
     null
   )
+  const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
   const summaryQs = useMemo(
@@ -31,6 +32,8 @@ export function ReportsPage() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      setLoading(true)
+      setErr(null)
       try {
         const [p, b] = await Promise.all([
           getJson<{ byCurrency: PartnerRow[] }>(
@@ -47,6 +50,8 @@ export function ReportsPage() {
       } catch (e) {
         if (!cancelled)
           setErr(e instanceof Error ? e.message : 'Error')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     })()
     return () => {
@@ -89,9 +94,10 @@ export function ReportsPage() {
         </label>
       </div>
       {err && <span className="error">{err}</span>}
+      {loading && <p className="muted">Loading…</p>}
 
       <h2>Partner split totals</h2>
-      <div className="tableWrap">
+      <div className="tableWrap" aria-busy={loading}>
         <table className="table">
           <thead>
             <tr>
@@ -101,19 +107,31 @@ export function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {partner?.byCurrency.map((r) => (
-              <tr key={r.currency}>
-                <td>{r.currency}</td>
-                <td>{formatMoney(r.sumMy, r.currency)}</td>
-                <td>{formatMoney(r.sumPartner, r.currency)}</td>
-              </tr>
-            ))}
+            {!loading &&
+              (partner?.byCurrency.length ?? 0) === 0 && (
+                <tr>
+                  <td colSpan={3} className="emptyStateCell">
+                    <p className="emptyState">
+                      No partner-split data for these filters. Import transactions
+                      or widen the date range.
+                    </p>
+                  </td>
+                </tr>
+              )}
+            {!loading &&
+              partner?.byCurrency.map((r) => (
+                <tr key={r.currency}>
+                  <td>{r.currency}</td>
+                  <td>{formatMoney(r.sumMy, r.currency)}</td>
+                  <td>{formatMoney(r.sumPartner, r.currency)}</td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
 
       <h2>Business expenses</h2>
-      <div className="tableWrap">
+      <div className="tableWrap" aria-busy={loading}>
         <table className="table">
           <thead>
             <tr>
@@ -122,12 +140,23 @@ export function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {business?.byCurrency.map((r) => (
-              <tr key={r.currency}>
-                <td>{r.currency}</td>
-                <td>{formatMoney(r.sumBusiness, r.currency)}</td>
-              </tr>
-            ))}
+            {!loading &&
+              (business?.byCurrency.length ?? 0) === 0 && (
+                <tr>
+                  <td colSpan={2} className="emptyStateCell">
+                    <p className="emptyState">
+                      No business-tagged amounts for these filters.
+                    </p>
+                  </td>
+                </tr>
+              )}
+            {!loading &&
+              business?.byCurrency.map((r) => (
+                <tr key={r.currency}>
+                  <td>{r.currency}</td>
+                  <td>{formatMoney(r.sumBusiness, r.currency)}</td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>

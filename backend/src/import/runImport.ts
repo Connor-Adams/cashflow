@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { parse } from 'csv-parse/sync';
 import { Op } from 'sequelize';
 import type { Account as AccountModel } from '../models/Account';
 import {
@@ -12,18 +11,11 @@ import {
 import { hashContent, rowFingerprint } from './fingerprint';
 import { findBestRule, loadAllRules, applyRuleToAuto } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
+import { parseCsvRecords } from './csvParse';
 import { mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import { assertUnderRoot } from './pathUtils';
 import * as env from '../config/env';
-
-function detectDelimiter(text: string): string {
-  const line = text.split(/\r?\n/).find((l) => l.trim().length > 0) || '';
-  const tabs = (line.match(/\t/g) || []).length;
-  const commas = (line.match(/,/g) || []).length;
-  if (tabs > commas && tabs > 0) return '\t';
-  return ',';
-}
 
 /** Max row-level parse diagnostics returned on a single import response */
 export const PARSE_ERRORS_MAX = 50;
@@ -174,22 +166,10 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     importBatch = meta.batchLabel;
   }
 
-  let text = buf.toString('utf8');
-  if (text.charCodeAt(0) === 0xfeff) {
-    text = text.slice(1);
-  }
-  let records: Record<string, string>[];
-  try {
-    records = parse(text, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      delimiter: detectDelimiter(text),
-      relax_column_count: true,
-      relax_quotes: true,
-    }) as Record<string, string>[];
-  } catch (parseErr) {
-    const msg = parseErr instanceof Error ? parseErr.message : 'CSV parse failed';
+  const text = buf.toString('utf8');
+  const parsed = parseCsvRecords(text);
+  if (!parsed.ok) {
+    const msg = parsed.error;
     await ImportHistory.create({
       fileName: name,
       filePathSafe: name,
@@ -208,7 +188,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       message: msg || 'Could not parse CSV (wrong delimiter or invalid file?)',
     };
   }
-  const headers = records.length > 0 ? Object.keys(records[0]) : [];
+  const { records, headers } = parsed;
 
   const defaultCurrency =
     account.defaultCurrency || env.defaultCurrency || 'CAD';

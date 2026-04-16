@@ -44,6 +44,7 @@ export function DashboardPage() {
   const [dateTo, setDateTo] = useState('')
   const [data, setData] = useState<DashResp | null>(null)
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
+  const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
   const summaryQs = useMemo(
@@ -54,8 +55,9 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      setLoading(true)
+      setErr(null)
       try {
-        setErr(null)
         const [d, m] = await Promise.all([
           getJson<DashResp>(`/api/summary/dashboard${summaryQs}`),
           getJson<MonthlyResp>(`/api/summary/monthly${summaryQs}`),
@@ -66,6 +68,8 @@ export function DashboardPage() {
         }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     })()
     return () => {
@@ -119,6 +123,7 @@ export function DashboardPage() {
         Totals stay in each currency. Filter by currency and/or date range.
       </p>
       {err && <span className="error">{err}</span>}
+      {loading && <p className="muted">Loading…</p>}
       <div className="row">
         <label>
           Currency{' '}
@@ -151,28 +156,35 @@ export function DashboardPage() {
           />
         </label>
       </div>
-      <div className="chartWrap">
+      <div className="chartWrap" aria-busy={loading}>
         <h2>Spend by category</h2>
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip
-              formatter={(value) => {
-                const v = typeof value === 'number' ? value : Number(value)
-                if (!Number.isFinite(v)) return ''
-                return currency
-                  ? formatMoney(v, currency)
-                  : new Intl.NumberFormat(undefined, {
-                      maximumFractionDigits: 2,
-                    }).format(v)
-              }}
-            />
-            <Legend />
-            <Bar dataKey="total" name="Amount" fill="var(--accent)" />
-          </BarChart>
-        </ResponsiveContainer>
+        {!loading && chartData.length === 0 ? (
+          <p className="emptyState">
+            No category totals for these filters. Try widening the date range,
+            clearing the currency filter, or importing transactions.
+          </p>
+        ) : !loading ? (
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" />
+              <YAxis />
+              <Tooltip
+                formatter={(value) => {
+                  const v = typeof value === 'number' ? value : Number(value)
+                  if (!Number.isFinite(v)) return ''
+                  return currency
+                    ? formatMoney(v, currency)
+                    : new Intl.NumberFormat(undefined, {
+                        maximumFractionDigits: 2,
+                      }).format(v)
+                }}
+              />
+              <Legend />
+              <Bar dataKey="total" name="Amount" fill="var(--accent)" />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : null}
       </div>
 
       <div className="chartWrap">
@@ -180,9 +192,9 @@ export function DashboardPage() {
         <p className="muted">
           One line per currency (totals include credits and debits as stored).
         </p>
-        {monthlyChartData.length === 0 ? (
+        {!loading && monthlyChartData.length === 0 ? (
           <p className="muted">No transactions in this range.</p>
-        ) : (
+        ) : !loading ? (
           <ResponsiveContainer width="100%" height={320}>
             <LineChart data={monthlyChartData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -209,7 +221,7 @@ export function DashboardPage() {
               ))}
             </LineChart>
           </ResponsiveContainer>
-        )}
+        ) : null}
       </div>
     </div>
   )

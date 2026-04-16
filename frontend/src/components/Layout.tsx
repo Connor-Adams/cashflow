@@ -15,7 +15,7 @@ export function Layout() {
     <div className="layout">
       <header className="header">
         <div className="brand">Cashflow</div>
-        <nav className="nav">
+        <nav className="nav" aria-label="Main">
           <NavLink to="/" end style={linkStyle}>
             Dashboard
           </NavLink>

@@ -192,3 +192,71 @@ test('GET /api/summary/monthly returns points after import', async () => {
   assert.ok(cad.some((p: { month: string }) => p.month === '2025-06'));
   assert.ok(cad.some((p: { month: string }) => p.month === '2025-07'));
 });
+
+test('POST /api/import/preview returns headers and mapped rows', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Preview Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv = 'Date,Description,Amount\n2025-06-01,Test Cafe,-5.50\n';
+  const res = await request(app)
+    .post('/api/import/preview')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'preview.csv',
+      contentType: 'text/csv',
+    });
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.body.headers));
+  assert.ok(res.body.headers.includes('Date'));
+  assert.ok(Array.isArray(res.body.rows));
+  assert.equal(res.body.rows.length, 1);
+  const row = res.body.rows[0] as { ok: boolean; mapped?: { date: string } };
+  assert.equal(row.ok, true);
+  assert.equal(row.mapped?.date, '2025-06-01');
+});
+
+test('POST /api/import/preview: row error for invalid date', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Preview Bad Row',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv = 'Date,Description,Amount\nnot-a-date,X,-1\n';
+  const res = await request(app)
+    .post('/api/import/preview')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'bad.csv',
+      contentType: 'text/csv',
+    });
+
+  assert.equal(res.status, 200);
+  const row = res.body.rows[0] as { ok: boolean; error?: string };
+  assert.equal(row.ok, false);
+  assert.ok(
+    String(row.error ?? '').toLowerCase().includes('invalid date'),
+    `expected invalid date in ${row.error}`
+  );
+});
+
+test('POST /api/import/preview: 400 when accountId missing', async () => {
+  const csv = 'Date,Description,Amount\n2025-06-01,X,-1\n';
+  const res = await request(app)
+    .post('/api/import/preview')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'x.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(res.status, 400);
+});

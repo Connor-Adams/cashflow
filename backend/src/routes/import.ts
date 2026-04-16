@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
+import { previewImportCsv, PREVIEW_MAX_ROWS } from '../import/previewImport';
 import { runImport, importCsvFile } from '../import/runImport';
 import { ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
@@ -34,6 +35,60 @@ router.post('/run', async (req, res, next) => {
     next(e);
   }
 });
+
+router.post(
+  '/preview',
+  importUploadLimiter,
+  (req, res, next) => {
+    upload.single('file')(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'Missing file field "file"' });
+        return;
+      }
+      const accountIdRaw = (req.body as { accountId?: string }).accountId;
+      if (accountIdRaw === undefined || accountIdRaw === null || accountIdRaw === '') {
+        res.status(400).json({
+          error:
+            'accountId is required (create an account first, then pick it here)',
+        });
+        return;
+      }
+      const accountId = parseInt(String(accountIdRaw), 10);
+      if (Number.isNaN(accountId) || accountId < 1) {
+        res.status(400).json({ error: 'accountId must be a positive integer' });
+        return;
+      }
+      const profileId =
+        (req.body as { profileId?: string }).profileId || 'generic_simple';
+
+      const result = await previewImportCsv({
+        buffer: req.file.buffer,
+        profileId,
+        accountId,
+      });
+      if (!result.ok) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.json({
+        headers: result.headers,
+        rows: result.rows,
+        previewRowLimit: PREVIEW_MAX_ROWS,
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
 
 router.post(
   '/upload',

@@ -41,6 +41,24 @@ type ImportHistoryRow = {
 
 type CsvProfileOption = { id: string; label: string; hint: string }
 
+type PreviewResponse = {
+  headers: string[]
+  previewRowLimit: number
+  rows: Array<
+    | {
+        rowIndex: number
+        ok: true
+        mapped: {
+          date: string
+          merchantClean: string
+          amount: number
+          currency: string
+        }
+      }
+    | { rowIndex: number; ok: false; error: string }
+  >
+}
+
 export function TransactionsPage() {
   const [page, setPage] = useState(1)
   const [reviewOnly, setReviewOnly] = useState(false)
@@ -70,6 +88,9 @@ export function TransactionsPage() {
   const [uploadMsg, setUploadMsg] = useState<string | null>(null)
   const [uploadParseLines, setUploadParseLines] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
+  const [previewErr, setPreviewErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -201,6 +222,36 @@ export function TransactionsPage() {
     }
   }
 
+  async function onPreview() {
+    const input = fileRef.current
+    const file = input?.files?.[0]
+    if (!file) {
+      setPreviewErr('Choose a .csv file first.')
+      setPreviewData(null)
+      return
+    }
+    if (!uploadAccountId) {
+      setPreviewErr('Select an account.')
+      setPreviewData(null)
+      return
+    }
+    setPreviewing(true)
+    setPreviewErr(null)
+    setPreviewData(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('accountId', uploadAccountId)
+      fd.append('profileId', profileId)
+      const r = await postFormData<PreviewResponse>('/api/import/preview', fd)
+      setPreviewData(r)
+    } catch (e) {
+      setPreviewErr(e instanceof Error ? e.message : 'Preview failed')
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
   async function onUpload(e: FormEvent) {
     e.preventDefault()
     const input = fileRef.current
@@ -324,12 +375,34 @@ export function TransactionsPage() {
           </label>
           <label className="filePick">
             File
-            <input ref={fileRef} type="file" accept=".csv,text/csv" />
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={() => {
+                setPreviewData(null)
+                setPreviewErr(null)
+              }}
+            />
           </label>
         </div>
-        <button type="submit" disabled={uploading}>
-          {uploading ? 'Importing…' : 'Import CSV'}
-        </button>
+        <div className="row" style={{ marginBottom: 0 }}>
+          <button
+            type="button"
+            disabled={
+              uploading ||
+              previewing ||
+              !uploadAccountId ||
+              accounts.length === 0
+            }
+            onClick={() => void onPreview()}
+          >
+            {previewing ? 'Previewing…' : 'Preview first rows'}
+          </button>
+          <button type="submit" disabled={uploading}>
+            {uploading ? 'Importing…' : 'Import CSV'}
+          </button>
+        </div>
         {uploadMsg && (
           <p
             className={
@@ -349,6 +422,52 @@ export function TransactionsPage() {
               <li key={line}>{line}</li>
             ))}
           </ul>
+        )}
+        {previewErr && (
+          <p className="uploadMsg error" role="alert">
+            {previewErr}
+          </p>
+        )}
+        {previewData && (
+          <div className="previewBlock">
+            <p className="muted">
+              Parsed columns:{' '}
+              <code>{previewData.headers.join(', ') || '(none)'}</code>
+              {' · '}
+              Showing up to {previewData.previewRowLimit} data rows (not
+              imported).
+            </p>
+            <div className="tableWrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Row</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Merchant</th>
+                    <th>Amount</th>
+                    <th>Cur</th>
+                    <th>Parse note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewData.rows.map((row) => (
+                    <tr key={row.rowIndex}>
+                      <td>{row.rowIndex}</td>
+                      <td>{row.ok ? 'OK' : 'Error'}</td>
+                      <td>{row.ok ? row.mapped.date : '—'}</td>
+                      <td>{row.ok ? row.mapped.merchantClean : '—'}</td>
+                      <td>{row.ok ? String(row.mapped.amount) : '—'}</td>
+                      <td>{row.ok ? row.mapped.currency : '—'}</td>
+                      <td className={row.ok ? '' : 'error'}>
+                        {row.ok ? '—' : row.error}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </form>
 
