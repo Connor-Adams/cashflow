@@ -12,6 +12,13 @@ import { getOpenAiConfig } from '../config/openai';
 
 const router = Router();
 
+function logTransactionEvent(
+  event: string,
+  details: Record<string, string | number | boolean | null | undefined>
+): void {
+  console.info(`[transactions] ${event}`, details);
+}
+
 const PATCHABLE_KEYS = [
   'categoryOverride',
   'businessOverride',
@@ -110,6 +117,11 @@ router.post('/bulk-patch', async (req, res, next) => {
       res.status(400).json({ error: 'patch must include at least one field' });
       return;
     }
+    logTransactionEvent('bulk_patch_started', {
+      count: ids.length,
+      idsPreview: ids.slice(0, 10).join(','),
+      patchKeys: Object.keys(patch).join(','),
+    });
 
     await sequelize.transaction(async (t) => {
       for (const id of ids) {
@@ -127,6 +139,9 @@ router.post('/bulk-patch', async (req, res, next) => {
       }
     });
 
+    logTransactionEvent('bulk_patch_completed', {
+      count: ids.length,
+    });
     res.json({ updated: ids.length });
   } catch (e) {
     next(e);
@@ -229,13 +244,17 @@ router.post('/:id/ai-suggest', aiSuggestLimiter, async (req, res, next) => {
 router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const b = (req.body || {}) as Record<string, unknown>;
+    logTransactionEvent('patch_started', {
+      id,
+      patchKeys: Object.keys(b).join(','),
+    });
     const txn = await Transaction.findByPk(id);
     if (!txn) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
 
-    const b = (req.body || {}) as Record<string, unknown>;
     applyPatchBody(txn, b);
 
     recomputeTransactionAmounts(txn);
@@ -243,6 +262,7 @@ router.patch('/:id', async (req, res, next) => {
     await txn.reload({
       include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
     });
+    logTransactionEvent('patch_completed', { id });
     res.json(serializeTransaction(txn));
   } catch (e) {
     next(e);

@@ -22,6 +22,13 @@ const upload = multer({
 
 const router = Router();
 
+function logImportEvent(
+  event: string,
+  details: Record<string, unknown>
+): void {
+  console.info(`[import] ${event}`, details);
+}
+
 router.get('/profiles', (_req, res) => {
   res.json([
     {
@@ -36,7 +43,22 @@ router.get('/profiles', (_req, res) => {
 router.post('/run', async (req, res, next) => {
   try {
     const profileId = (req.body as { profileId?: string } | undefined)?.profileId;
+    logImportEvent('folder_run_started', {
+      profileId: profileId ?? 'auto',
+    });
     const result = await runImport({ profileId });
+    const importedCount = result.results.filter((row) => {
+      if (!row || typeof row !== 'object') return false;
+      if ('skipped' in row && row.skipped === true) return false;
+      return true;
+    }).length;
+    const skippedCount = result.results.length - importedCount;
+    logImportEvent('folder_run_completed', {
+      profileId: profileId ?? 'auto',
+      filesSeen: result.results.length,
+      filesImported: importedCount,
+      filesSkipped: skippedCount,
+    });
     res.json(result);
   } catch (e) {
     next(e);
@@ -76,6 +98,12 @@ router.post(
       }
       const profileId =
         (req.body as { profileId?: string }).profileId ?? 'auto';
+      logImportEvent('preview_started', {
+        fileName: req.file.originalname,
+        accountId,
+        profileId,
+        fileSizeBytes: req.file.size,
+      });
 
       const result = await previewImportCsv({
         buffer: req.file.buffer,
@@ -86,6 +114,14 @@ router.post(
         res.status(400).json({ error: result.error });
         return;
       }
+      logImportEvent('preview_completed', {
+        fileName: req.file.originalname,
+        accountId,
+        profileId,
+        usedProfileId: result.usedProfileId,
+        profileInferred: result.profileInferred,
+        rowCount: result.rows.length,
+      });
       res.json({
         headers: result.headers,
         rows: result.rows,
@@ -133,6 +169,13 @@ router.post(
           : null;
       const profileId =
         (req.body as { profileId?: string }).profileId ?? 'auto';
+      logImportEvent('upload_started', {
+        fileName: req.file.originalname,
+        accountId: parseInt(String(accountId), 10),
+        batchLabel,
+        profileId,
+        fileSizeBytes: req.file.size,
+      });
 
       const result = await importCsvFile({
         buffer: req.file.buffer,
@@ -140,6 +183,20 @@ router.post(
         accountId,
         batchLabel,
         profileId,
+      });
+      logImportEvent('upload_completed', {
+        fileName: req.file.originalname,
+        accountId: parseInt(String(accountId), 10),
+        batchLabel,
+        profileId,
+        usedProfileId:
+          result && typeof result === 'object' ? result.usedProfileId : undefined,
+        profileInferred:
+          result && typeof result === 'object' ? result.profileInferred : undefined,
+        inserted: result && typeof result === 'object' ? result.inserted : undefined,
+        skipped:
+          result && typeof result === 'object' ? result.skipped : undefined,
+        reason: result && typeof result === 'object' ? result.reason : undefined,
       });
       res.json(result);
     } catch (e) {

@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -98,12 +99,17 @@ export function TransactionsPage() {
   const [uploadMsg, setUploadMsg] = useState<string | null>(null)
   const [uploadParseLines, setUploadParseLines] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
+  const [runningFolderImport, setRunningFolderImport] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
   const [previewErr, setPreviewErr] = useState<string | null>(null)
   const [aiEnabled, setAiEnabled] = useState(false)
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
+  const [sortBy, setSortBy] = useState<
+    'date' | 'merchant' | 'amount' | 'category' | 'review'
+  >('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const fileRef = useRef<HTMLInputElement>(null)
   const receiptFileRef = useRef<HTMLInputElement>(null)
 
@@ -187,7 +193,7 @@ export function TransactionsPage() {
   }
 
   function selectAllOnPage() {
-    const rows = res?.data ?? []
+    const rows = sortedRows
     const ids = rows.map((t) => t.id)
     setSelectedIds((prev) => {
       const allOnPage = ids.length > 0 && ids.every((id) => prev.has(id))
@@ -195,6 +201,30 @@ export function TransactionsPage() {
       return new Set(ids)
     })
   }
+
+  const sortedRows = useMemo(() => {
+    const rows = [...(res?.data ?? [])]
+    const dir = sortDir === 'asc' ? 1 : -1
+    rows.sort((a, b) => {
+      if (sortBy === 'date') {
+        return a.date.localeCompare(b.date) * dir
+      }
+      if (sortBy === 'merchant') {
+        return a.merchantClean.localeCompare(b.merchantClean) * dir
+      }
+      if (sortBy === 'amount') {
+        return (Number(a.amount) - Number(b.amount)) * dir
+      }
+      if (sortBy === 'category') {
+        return (a.finalCategory ?? '').localeCompare(b.finalCategory ?? '') * dir
+      }
+      if (sortBy === 'review') {
+        return (Number(a.reviewFlag) - Number(b.reviewFlag)) * dir
+      }
+      return 0
+    })
+    return rows
+  }, [res?.data, sortBy, sortDir])
 
   function buildBulkPatch(): Record<string, unknown> | null {
     const patch: Record<string, unknown> = {}
@@ -631,6 +661,7 @@ export function TransactionsPage() {
       </section>
 
       <div className="row">
+        <strong>Filters</strong>
         <label>
           <input
             type="checkbox"
@@ -689,6 +720,38 @@ export function TransactionsPage() {
             style={{ minWidth: 180 }}
           />
         </label>
+        <label>
+          Sort by{' '}
+          <select
+            value={sortBy}
+            onChange={(e) =>
+              setSortBy(
+                e.target.value as
+                  | 'date'
+                  | 'merchant'
+                  | 'amount'
+                  | 'category'
+                  | 'review'
+              )
+            }
+          >
+            <option value="date">Date</option>
+            <option value="merchant">Merchant</option>
+            <option value="amount">Amount</option>
+            <option value="category">Category</option>
+            <option value="review">Review flag</option>
+          </select>
+        </label>
+        <label>
+          Direction{' '}
+          <select
+            value={sortDir}
+            onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}
+          >
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </label>
         {batchFilter.trim() ? (
           <button
             type="button"
@@ -700,20 +763,39 @@ export function TransactionsPage() {
             Clear batch filter
           </button>
         ) : null}
+        {(reviewOnly || currency || dateFrom || dateTo || batchFilter.trim()) && (
+          <button
+            type="button"
+            onClick={() => {
+              setPage(1)
+              setReviewOnly(false)
+              setCurrency('')
+              setDateFrom('')
+              setDateTo('')
+              setBatchFilter('')
+            }}
+          >
+            Clear filters
+          </button>
+        )}
         <button type="button" onClick={() => void load()} disabled={loading}>
           Refresh
         </button>
         <button
           type="button"
+          disabled={runningFolderImport}
           onClick={async () => {
             try {
+              setRunningFolderImport(true)
               setErr(null)
               setUploadMsg(null)
               const out = await postJson<FolderImportResponse>(
                 '/api/import/run',
                 {}
               )
-              const lines = out.results.map((r) => {
+              const imported = out.results.filter((r) => !r.skipped).length
+              const skipped = out.results.length - imported
+              const lines = out.results.slice(0, 6).map((r) => {
                 if (r.skipped) {
                   return `${r.file}: skipped (${r.reason})${r.message ? ` — ${r.message}` : ''}`
                 }
@@ -721,17 +803,19 @@ export function TransactionsPage() {
               })
               setUploadMsg(
                 lines.length
-                  ? lines.join(' | ')
+                  ? `Folder import complete — ${imported} imported, ${skipped} skipped. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
                   : `No .csv files in upload folder: ${out.uploadDir}`
               )
               await load()
               refreshImportHistory()
             } catch (e) {
               setErr(e instanceof Error ? e.message : 'Import failed')
+            } finally {
+              setRunningFolderImport(false)
             }
           }}
         >
-          Run import
+          {runningFolderImport ? 'Running import…' : 'Run folder import'}
         </button>
       </div>
       {err && <span className="error">{err}</span>}
@@ -841,15 +925,14 @@ export function TransactionsPage() {
                   type="checkbox"
                   aria-label="Select all on this page"
                   checked={
-                    (res?.data.length ?? 0) > 0 &&
-                    (res?.data.every((t) => selectedIds.has(t.id)) ?? false)
+                    sortedRows.length > 0 &&
+                    sortedRows.every((t) => selectedIds.has(t.id))
                   }
                   ref={(el) => {
                     if (el) {
                       const some =
-                        (res?.data.some((t) => selectedIds.has(t.id)) ??
-                          false) &&
-                        !(res?.data.every((t) => selectedIds.has(t.id)) ?? false)
+                        sortedRows.some((t) => selectedIds.has(t.id)) &&
+                        !sortedRows.every((t) => selectedIds.has(t.id))
                       el.indeterminate = some
                     }
                   }}
@@ -877,7 +960,7 @@ export function TransactionsPage() {
                   Loading…
                 </td>
               </tr>
-            ) : !res?.data.length ? (
+            ) : !sortedRows.length ? (
               <tr>
                 <td colSpan={14} className="emptyStateCell">
                   <p>No transactions yet — or none match your filters.</p>
@@ -889,7 +972,7 @@ export function TransactionsPage() {
                 </td>
               </tr>
             ) : (
-              res.data.map((t) => (
+              sortedRows.map((t) => (
                 <TransactionRow
                   key={t.id}
                   t={t}

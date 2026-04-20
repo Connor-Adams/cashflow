@@ -31,7 +31,11 @@ app.use('/api/ai', aiRouter);
 app.use('/api', receiptsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err);
+  const requestContext = {
+    method: _req.method,
+    path: _req.originalUrl || _req.url,
+  };
+  console.error('[api] request_failed', requestContext, err);
   const code =
     err && typeof err === 'object' && 'code' in err
       ? String((err as { code?: string }).code)
