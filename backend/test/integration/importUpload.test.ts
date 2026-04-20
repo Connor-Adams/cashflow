@@ -149,6 +149,12 @@ test('POST /api/import/upload: rejects non-csv extension', async () => {
   assert.equal(res.status, 400);
 });
 
+test('GET /api/ai/status returns openai flag', async () => {
+  const res = await request(app).get('/api/ai/status');
+  assert.equal(res.status, 200);
+  assert.equal(typeof res.body.openai, 'boolean');
+});
+
 test('GET /api/import/profiles returns CSV profile list', async () => {
   const res = await request(app).get('/api/import/profiles');
   assert.equal(res.status, 200);

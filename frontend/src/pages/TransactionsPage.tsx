@@ -1,5 +1,11 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
   getJson,
@@ -95,12 +101,22 @@ export function TransactionsPage() {
   const [previewing, setPreviewing] = useState(false)
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
   const [previewErr, setPreviewErr] = useState<string | null>(null)
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
+  const [bulkAiBusy, setBulkAiBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const receiptFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void getJson<Account[]>('/api/accounts')
       .then(setAccounts)
       .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    void getJson<{ openai: boolean }>('/api/ai/status')
+      .then((s) => setAiEnabled(s.openai))
+      .catch(() => setAiEnabled(false))
   }, [])
 
   useEffect(() => {
@@ -199,6 +215,63 @@ export function TransactionsPage() {
     }
     if (bulkMarkReviewed) patch.reviewFlag = false
     return Object.keys(patch).length ? patch : null
+  }
+
+  async function onReceiptPicked(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    const tid = attachForTxnId
+    setAttachForTxnId(null)
+    e.target.value = ''
+    if (!file || tid == null) return
+    setErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      await postFormData<{ id: number }>(`/api/transactions/${tid}/receipts`, fd)
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Receipt upload failed')
+    }
+  }
+
+  async function applyBulkAi() {
+    if (selectedIds.size === 0) return
+    setBulkAiBusy(true)
+    setErr(null)
+    try {
+      type Sug = {
+        category: string | null
+        business: boolean | null
+        splitType: 'me' | 'partner' | 'shared' | null
+        pctMe: number | null
+        pctPartner: number | null
+        notes: string | null
+      }
+      const out = await postJson<{
+        results: Array<{ id: number; suggestion: Sug }>
+      }>('/api/transactions/bulk-ai-suggest', { ids: [...selectedIds] })
+      for (const { id, suggestion } of out.results) {
+        const patch: Record<string, unknown> = {}
+        if (suggestion.category != null) patch.categoryOverride = suggestion.category
+        if (suggestion.business !== null && suggestion.business !== undefined)
+          patch.businessOverride = suggestion.business
+        if (suggestion.splitType != null)
+          patch.splitOverride = suggestion.splitType
+        if (suggestion.pctMe != null) patch.pctMeOverride = suggestion.pctMe
+        if (suggestion.pctPartner != null)
+          patch.pctPartnerOverride = suggestion.pctPartner
+        if (suggestion.notes != null) patch.notes = suggestion.notes
+        if (Object.keys(patch).length > 0) {
+          await patchJson<Transaction>(`/api/transactions/${id}`, patch)
+        }
+      }
+      setSelectedIds(new Set())
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'AI suggest failed')
+    } finally {
+      setBulkAiBusy(false)
+    }
   }
 
   async function applyBulk() {
@@ -322,6 +395,14 @@ export function TransactionsPage() {
   return (
     <div className="page">
       <h1>Transactions</h1>
+      <input
+        ref={receiptFileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        style={{ display: 'none' }}
+        aria-hidden
+        onChange={onReceiptPicked}
+      />
 
       <form className="card uploadCard" onSubmit={onUpload}>
         <h2>Upload CSV</h2>
@@ -654,9 +735,29 @@ export function TransactionsPage() {
         </button>
       </div>
       {err && <span className="error">{err}</span>}
+      {aiEnabled ? (
+        <p className="muted" style={{ marginTop: '0.25rem' }}>
+          OpenAI is configured — use <strong>AI</strong> on a row or{' '}
+          <strong>AI fill selected</strong> for bulk categorization.
+        </p>
+      ) : (
+        <p className="muted" style={{ marginTop: '0.25rem' }}>
+          Set <code>OPENAI_API_KEY</code> in <code>backend/.env</code> to enable
+          AI suggestions and receipt vision.
+        </p>
+      )}
       {selectedIds.size > 0 && (
         <div className="card bulkBar">
           <strong>{selectedIds.size} selected</strong>
+          {aiEnabled ? (
+            <button
+              type="button"
+              disabled={bulkAiBusy}
+              onClick={() => void applyBulkAi()}
+            >
+              {bulkAiBusy ? 'AI…' : 'AI fill selected'}
+            </button>
+          ) : null}
           <label>
             Category
             <input
@@ -765,19 +866,20 @@ export function TransactionsPage() {
               <th>% me</th>
               <th>% ptn</th>
               <th>Review</th>
+              <th>Rcpt</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={12} className="muted pad">
+                <td colSpan={14} className="muted pad">
                   Loading…
                 </td>
               </tr>
             ) : !res?.data.length ? (
               <tr>
-                <td colSpan={12} className="emptyStateCell">
+                <td colSpan={14} className="emptyStateCell">
                   <p>No transactions yet — or none match your filters.</p>
                   <p className="muted">
                     Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
@@ -794,6 +896,12 @@ export function TransactionsPage() {
                   selected={selectedIds.has(t.id)}
                   onToggleSelected={() => toggleSelected(t.id)}
                   onSave={saveRow}
+                  aiEnabled={aiEnabled}
+                  onAttachReceipt={(id) => {
+                    setAttachForTxnId(id)
+                    receiptFileRef.current?.click()
+                  }}
+                  onAiError={(msg) => setErr(msg)}
                 />
               ))
             )}
@@ -828,12 +936,19 @@ function TransactionRow({
   selected,
   onToggleSelected,
   onSave,
+  aiEnabled,
+  onAttachReceipt,
+  onAiError,
 }: {
   t: Transaction
   selected: boolean
   onToggleSelected: () => void
   onSave: (id: number, patch: Record<string, unknown>) => Promise<void>
+  aiEnabled: boolean
+  onAttachReceipt: (transactionId: number) => void
+  onAiError: (message: string) => void
 }) {
+  const [aiRowBusy, setAiRowBusy] = useState(false)
   const [cat, setCat] = useState(t.categoryOverride ?? '')
   const [biz, setBiz] = useState<string>(
     t.businessOverride === null || t.businessOverride === undefined
@@ -923,6 +1038,55 @@ function TransactionRow({
       </td>
       <td>{t.reviewFlag ? 'yes' : ''}</td>
       <td>
+        <span title="Receipts attached">{t.receiptCount ?? 0}</span>{' '}
+        <button
+          type="button"
+          className="linkish"
+          onClick={() => onAttachReceipt(t.id)}
+          title="Attach receipt image"
+        >
+          +
+        </button>
+      </td>
+      <td>
+        {aiEnabled ? (
+          <button
+            type="button"
+            disabled={aiRowBusy}
+            onClick={async () => {
+              setAiRowBusy(true)
+              try {
+                const out = await postJson<{
+                  suggestion: {
+                    category: string | null
+                    business: boolean | null
+                    splitType: 'me' | 'partner' | 'shared' | null
+                    pctMe: number | null
+                    pctPartner: number | null
+                    notes: string | null
+                    rationale: string | null
+                  }
+                }>(`/api/transactions/${t.id}/ai-suggest`)
+                const s = out.suggestion
+                if (s.category) setCat(s.category)
+                if (s.business !== null && s.business !== undefined) {
+                  setBiz(s.business ? 'true' : 'false')
+                }
+                if (s.splitType) setSplit(s.splitType)
+                if (s.pctMe != null) setPctMe(String(s.pctMe))
+                if (s.pctPartner != null) setPctPartner(String(s.pctPartner))
+              } catch (e) {
+                onAiError(
+                  e instanceof Error ? e.message : 'AI suggestion failed'
+                )
+              } finally {
+                setAiRowBusy(false)
+              }
+            }}
+          >
+            {aiRowBusy ? '…' : 'AI'}
+          </button>
+        ) : null}{' '}
         <button
           type="button"
           onClick={() =>

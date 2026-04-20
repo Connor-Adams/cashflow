@@ -1,8 +1,14 @@
 import { Router } from 'express';
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { Transaction, Account, sequelize } from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
+import {
+  loadCategoryHints,
+  suggestTransactionFields,
+} from '../ai/suggestTransaction';
+import { aiSuggestLimiter } from './aiRateLimit';
+import { getOpenAiConfig } from '../config/openai';
 
 const router = Router();
 
@@ -31,6 +37,50 @@ function applyPatchBody(
     }
   }
 }
+
+router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    if (!getOpenAiConfig()) {
+      res.status(503).json({ error: 'OpenAI is not configured (set OPENAI_API_KEY)' });
+      return;
+    }
+    const body = (req.body || {}) as { ids?: unknown };
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array' });
+      return;
+    }
+    if (body.ids.length > 15) {
+      res.status(400).json({ error: 'At most 15 ids per AI request' });
+      return;
+    }
+    const ids: number[] = [];
+    for (const raw of body.ids) {
+      const id = parseInt(String(raw), 10);
+      if (Number.isNaN(id) || id < 1) {
+        res.status(400).json({ error: 'Each id must be a positive integer' });
+        return;
+      }
+      ids.push(id);
+    }
+    const hints = await loadCategoryHints();
+    const results: {
+      id: number;
+      suggestion: Awaited<ReturnType<typeof suggestTransactionFields>>;
+    }[] = [];
+    for (const id of ids) {
+      const txn = await Transaction.findByPk(id);
+      if (!txn) {
+        res.status(404).json({ error: `Transaction ${id} not found` });
+        return;
+      }
+      const suggestion = await suggestTransactionFields(txn, hints);
+      results.push({ id, suggestion });
+    }
+    res.json({ results });
+  } catch (e) {
+    next(e);
+  }
+});
 
 router.post('/bulk-patch', async (req, res, next) => {
   try {
@@ -125,12 +175,52 @@ router.get('/', async (req, res, next) => {
       offset,
     });
 
+    const txnIds = rows.map((r) => r.id);
+    let receiptCountMap: Record<number, number> = {};
+    if (txnIds.length > 0) {
+      const placeholders = txnIds.map(() => '?').join(',');
+      const cntRows = await sequelize.query<{ transactionId: number; cnt: string }>(
+        `SELECT transaction_id AS transactionId, COUNT(*) AS cnt FROM receipts WHERE transaction_id IN (${placeholders}) GROUP BY transaction_id`,
+        { replacements: txnIds, type: QueryTypes.SELECT },
+      );
+      receiptCountMap = Object.fromEntries(
+        cntRows.map((r) => [r.transactionId, parseInt(String(r.cnt), 10) || 0]),
+      );
+    }
+
     res.json({
-      data: rows.map(serializeTransaction),
+      data: rows.map((row) => ({
+        ...serializeTransaction(row),
+        receiptCount: receiptCountMap[row.id] ?? 0,
+      })),
       page,
       pageSize,
       total: count,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/ai-suggest', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    if (!getOpenAiConfig()) {
+      res.status(503).json({ error: 'OpenAI is not configured (set OPENAI_API_KEY)' });
+      return;
+    }
+    const id = parseInt(String(req.params.id), 10);
+    if (Number.isNaN(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findByPk(id);
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const hints = await loadCategoryHints();
+    const suggestion = await suggestTransactionFields(txn, hints);
+    res.json({ suggestion });
   } catch (e) {
     next(e);
   }

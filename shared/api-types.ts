@@ -41,6 +41,8 @@ export type Transaction = {
   businessAmount: number
   reviewFlag: boolean
   reviewedAt: string | null
+  /** Count of attached receipt files */
+  receiptCount?: number
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
 }
 

@@ -86,6 +86,17 @@ yarn test
 
 Covers split math, rule matching, CSV row mapping, env validation, import integration (HTTP + DB), and frontend unit tests. Sample CSV: `backend/test/fixtures/sample.csv`.
 
+## AI and receipts (optional)
+
+Set **`OPENAI_API_KEY`** in `backend/.env` to enable:
+
+- **`GET /api/ai/status`** — `{ "openai": true }` when configured.
+- **`POST /api/transactions/:id/ai-suggest`** — JSON suggestions for category, business, split, and notes (uses your existing category labels as hints).
+- **`POST /api/transactions/bulk-ai-suggest`** — body `{ "ids": [1,2,3] }` (max 15) for batch suggestions.
+- **Receipt images** — `POST /api/transactions/:transactionId/receipts` (multipart `file`: JPEG/PNG/WebP, stored under `RECEIPTS_UPLOAD_DIR`), **`GET /api/transactions/:id/receipts`** list, **`GET /api/receipts/:id/file`** download, **`DELETE /api/receipts/:id`**, **`POST /api/receipts/:id/analyze`** (vision extract; costs API usage).
+
+Without an API key, CSV import and the rest of the app work unchanged; the UI shows how to enable AI.
+
 ## API overview
 
 - `GET|POST|DELETE /api/accounts/:id` — list, create, delete account (delete removes all transactions for that account first)

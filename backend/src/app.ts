@@ -8,6 +8,8 @@ import transactionsRouter from './routes/transactions';
 import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
+import aiRouter from './routes/ai';
+import receiptsRouter from './routes/receipts';
 
 const app = express();
 
@@ -25,6 +27,8 @@ app.use('/api/transactions', transactionsRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
+app.use('/api/ai', aiRouter);
+app.use('/api', receiptsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
