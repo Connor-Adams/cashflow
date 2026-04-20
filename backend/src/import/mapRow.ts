@@ -26,6 +26,9 @@ function normalizeAmount(
     if (n < 0) return Math.abs(n);
     return n;
   }
+  if (convention === 'invert_sign') {
+    return -n;
+  }
   return n;
 }
 

@@ -1,4 +1,7 @@
-export type AmountConvention = 'charges_negative' | 'charges_positive';
+export type AmountConvention =
+  | 'charges_negative'
+  | 'charges_positive'
+  | 'invert_sign';
 
 export interface CsvProfile {
   dateHeaders: string[];
@@ -47,7 +50,9 @@ const generic_amex: CsvProfile = {
   ],
   currencyHeaders: ['Currency', 'Currency Code', 'Txn Currency'],
   dateFormat: 'MM/dd/yyyy',
-  amountConvention: 'charges_negative',
+  // Amex exports commonly use positive charges and negative credits/payments.
+  // Invert sign so charges become negative and credits/payments become positive.
+  amountConvention: 'invert_sign',
 };
 
 /** Column names are matched case-insensitively against CSV headers. */

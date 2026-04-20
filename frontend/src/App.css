@@ -131,6 +131,11 @@
   font-size: 0.82rem;
 }
 
+.statDelta {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+}
+
 .dashboardChartCard {
   margin-bottom: 1rem;
 }

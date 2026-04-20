@@ -50,6 +50,32 @@ function toDateInputValue(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+function parseDateInput(value: string): Date | null {
+  const parts = value.split('-').map((p) => Number(p))
+  if (parts.length !== 3) return null
+  const [y, m, d] = parts
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
+    return null
+  }
+  const out = new Date(y, m - 1, d)
+  if (Number.isNaN(out.getTime())) return null
+  return out
+}
+
+function getPreviousRange(
+  dateFrom: string,
+  dateTo: string
+): { from: string; to: string } | null {
+  const from = parseDateInput(dateFrom)
+  const to = parseDateInput(dateTo)
+  if (!from || !to || from > to) return null
+  const dayMs = 24 * 60 * 60 * 1000
+  const spanDays = Math.floor((to.getTime() - from.getTime()) / dayMs) + 1
+  const prevTo = new Date(from.getTime() - dayMs)
+  const prevFrom = new Date(prevTo.getTime() - (spanDays - 1) * dayMs)
+  return { from: toDateInputValue(prevFrom), to: toDateInputValue(prevTo) }
+}
+
 function getDefaultDashboardRange(): { from: string; to: string } {
   const to = new Date()
   const from = new Date(to)
@@ -63,6 +89,9 @@ export function DashboardPage() {
   const [dateFrom, setDateFrom] = useState(defaultRange.from)
   const [dateTo, setDateTo] = useState(defaultRange.to)
   const [data, setData] = useState<DashResp | null>(null)
+  const [previousMetricsByCurrency, setPreviousMetricsByCurrency] = useState<
+    CurrencyMetrics[]
+  >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -71,6 +100,10 @@ export function DashboardPage() {
     () => summaryQueryString({ currency, dateFrom, dateTo }),
     [currency, dateFrom, dateTo]
   )
+  const previousRange = useMemo(
+    () => getPreviousRange(dateFrom, dateTo),
+    [dateFrom, dateTo]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -78,13 +111,23 @@ export function DashboardPage() {
       setLoading(true)
       setErr(null)
       try {
-        const [d, m] = await Promise.all([
+        const [d, m, prev] = await Promise.all([
           getJson<DashResp>(`/api/summary/dashboard${summaryQs}`),
           getJson<MonthlyResp>(`/api/summary/monthly${summaryQs}`),
+          previousRange
+            ? getJson<DashResp>(
+                `/api/summary/dashboard${summaryQueryString({
+                  currency,
+                  dateFrom: previousRange.from,
+                  dateTo: previousRange.to,
+                })}`
+              )
+            : Promise.resolve<DashResp | null>(null),
         ])
         if (!cancelled) {
           setData(d)
           setMonthly(m)
+          setPreviousMetricsByCurrency(prev?.metricsByCurrency ?? [])
         }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
@@ -95,7 +138,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [summaryQs])
+  }, [summaryQs, previousRange, currency])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -139,11 +182,34 @@ export function DashboardPage() {
   const summaryStats = useMemo(() => {
     const metricRows = data?.metricsByCurrency ?? []
     const selected = metricRows.filter((r) => !currency || r.currency === currency)
+    const prevSelected = previousMetricsByCurrency.filter(
+      (r) => !currency || r.currency === currency
+    )
     const spendTotal = selected.reduce((sum, row) => sum + row.totalSpend, 0)
     const creditTotal = selected.reduce((sum, row) => sum + row.totalCredits, 0)
     const netTotal = selected.reduce((sum, row) => sum + row.netAmount, 0)
     const txCount = selected.reduce((sum, row) => sum + row.transactionCount, 0)
+    const prevSpendTotal = prevSelected.reduce((sum, row) => sum + row.totalSpend, 0)
+    const prevCreditTotal = prevSelected.reduce((sum, row) => sum + row.totalCredits, 0)
+    const prevNetTotal = prevSelected.reduce((sum, row) => sum + row.netAmount, 0)
+    const prevTxCount = prevSelected.reduce((sum, row) => sum + row.transactionCount, 0)
     const singleCurrency = selected.length === 1 ? selected[0].currency : null
+    const comparisonHint =
+      previousRange == null
+        ? 'Set both dates for period comparison.'
+        : `${previousRange.from} to ${previousRange.to}`
+    const spendDelta = spendTotal - prevSpendTotal
+    const creditDelta = creditTotal - prevCreditTotal
+    const netDelta = netTotal - prevNetTotal
+    const txDelta = txCount - prevTxCount
+    const formatDeltaMoney = (v: number): string => {
+      const abs = Math.abs(v)
+      const sign = v > 0 ? '+' : v < 0 ? '-' : ''
+      if (singleCurrency == null) return `${sign}${abs.toFixed(2)}`
+      return `${sign}${formatMoney(abs, singleCurrency)}`
+    }
+    const formatDeltaCount = (v: number): string =>
+      `${v > 0 ? '+' : ''}${Math.trunc(v)}`
 
     return {
       spendLabel:
@@ -161,10 +227,22 @@ export function DashboardPage() {
       moneyHint:
         singleCurrency != null ? `In ${singleCurrency}` : 'Across selected currencies',
       txCount,
+      spendDeltaLabel: formatDeltaMoney(spendDelta),
+      creditsDeltaLabel: formatDeltaMoney(creditDelta),
+      netDeltaLabel: formatDeltaMoney(netDelta),
+      txDeltaLabel: formatDeltaCount(txDelta),
+      comparisonHint,
       categoryCount: chartData.length,
       monthCount: monthlyChartData.length,
     }
-  }, [data?.metricsByCurrency, currency, chartData.length, monthlyChartData.length])
+  }, [
+    data?.metricsByCurrency,
+    previousMetricsByCurrency,
+    previousRange,
+    currency,
+    chartData.length,
+    monthlyChartData.length,
+  ])
 
   const activeRangeLabel = useMemo(() => {
     if (!dateFrom && !dateTo) return 'All dates'
@@ -242,21 +320,33 @@ export function DashboardPage() {
           <p className="muted statHint">
             Charges only (absolute values). {summaryStats.moneyHint}
           </p>
+          <p className="muted statDelta">
+            vs previous period: {summaryStats.spendDeltaLabel}
+          </p>
         </article>
         <article className="card statCard">
           <p className="statLabel">Credits / refunds</p>
           <p className="statValue">{summaryStats.creditsLabel}</p>
           <p className="muted statHint">Positive transaction amounts.</p>
+          <p className="muted statDelta">
+            vs previous period: {summaryStats.creditsDeltaLabel}
+          </p>
         </article>
         <article className="card statCard">
           <p className="statLabel">Net cashflow</p>
           <p className="statValue">{summaryStats.netLabel}</p>
           <p className="muted statHint">Signed sum: credits + charges.</p>
+          <p className="muted statDelta">
+            vs previous period: {summaryStats.netDeltaLabel}
+          </p>
         </article>
         <article className="card statCard">
           <p className="statLabel">Transactions</p>
           <p className="statValue">{summaryStats.txCount}</p>
           <p className="muted statHint">Rows in current filters</p>
+          <p className="muted statDelta">
+            vs previous period: {summaryStats.txDeltaLabel}
+          </p>
         </article>
         <article className="card statCard">
           <p className="statLabel">Categories</p>
@@ -266,7 +356,8 @@ export function DashboardPage() {
         <article className="card statCard">
           <p className="statLabel">Months</p>
           <p className="statValue">{summaryStats.monthCount}</p>
-          <p className="muted statHint">Shown in monthly trend</p>
+          <p className="muted statHint">Shown in monthly trend</p>{' '}
+          <p className="muted statDelta">{summaryStats.comparisonHint}</p>
         </article>
       </section>
 
