@@ -85,6 +85,64 @@
   margin-top: 1rem;
 }
 
+.dashboardHeader {
+  margin-bottom: 0.75rem;
+}
+
+.dashboardHeader .muted {
+  margin-bottom: 0;
+}
+
+.dashboardFilters {
+  margin-top: 0.75rem;
+}
+
+.dashboardFilters .row {
+  margin-bottom: 0;
+}
+
+.dashboardStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.statCard {
+  margin-bottom: 0;
+}
+
+.statLabel {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.statValue {
+  margin: 0.35rem 0 0.25rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.statHint {
+  margin-bottom: 0;
+  font-size: 0.82rem;
+}
+
+.dashboardChartCard {
+  margin-bottom: 1rem;
+}
+
+.dashboardChartCard h2 {
+  margin-top: 0;
+}
+
+.dashboardChartCard .muted {
+  margin-bottom: 0.35rem;
+}
+
 .card {
   border: 1px solid var(--border);
   border-radius: 8px;

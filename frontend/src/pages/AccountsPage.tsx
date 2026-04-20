@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { deleteReq, getJson, postJson } from '../lib/api'
+import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account } from '../types/api'
+
+const CURRENCY_OPTIONS = ['CAD', 'USD', 'EUR', 'GBP'] as const
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editOwner, setEditOwner] = useState<'me' | 'partner' | 'joint'>('me')
+  const [editShortCode, setEditShortCode] = useState('')
+  const [editCurrency, setEditCurrency] = useState('')
 
   const load = useCallback(async () => {
     setErr(null)
@@ -70,6 +77,36 @@ export function AccountsPage() {
     }
   }
 
+  async function saveCard(id: number) {
+    const name = editName.trim()
+    const defaultCurrency = editCurrency.trim().toUpperCase()
+    if (!name) {
+      setErr('Name is required')
+      return
+    }
+    if (!defaultCurrency) {
+      setErr('Default currency is required')
+      return
+    }
+    setErr(null)
+    try {
+      await patchJson<Account>(`/api/accounts/${id}`, {
+        name,
+        owner: editOwner,
+        shortCode: editShortCode.trim() || null,
+        defaultCurrency,
+      })
+      setEditingId(null)
+      setEditName('')
+      setEditOwner('me')
+      setEditShortCode('')
+      setEditCurrency('')
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not update account')
+    }
+  }
+
   return (
     <div className="page">
       <h1>Accounts</h1>
@@ -105,13 +142,16 @@ export function AccountsPage() {
           </label>
           <label>
             Default currency
-            <input
+            <select
               name="defaultCurrency"
-              placeholder="CAD"
               defaultValue="CAD"
-              maxLength={3}
-              style={{ width: 80 }}
-            />
+            >
+              {CURRENCY_OPTIONS.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
         <button type="submit" disabled={saving}>
@@ -139,11 +179,100 @@ export function AccountsPage() {
             <tbody>
               {accounts.map((a) => (
                 <tr key={a.id}>
-                  <td>{a.name}</td>
-                  <td>{a.owner}</td>
-                  <td>{a.shortCode ?? '—'}</td>
-                  <td>{a.defaultCurrency ?? 'CAD'}</td>
                   <td>
+                    {editingId === a.id ? (
+                      <input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Account name"
+                      />
+                    ) : (
+                      a.name
+                    )}
+                  </td>
+                  <td>
+                    {editingId === a.id ? (
+                      <select
+                        value={editOwner}
+                        onChange={(e) =>
+                          setEditOwner(
+                            e.target.value as 'me' | 'partner' | 'joint'
+                          )
+                        }
+                      >
+                        <option value="me">me</option>
+                        <option value="partner">partner</option>
+                        <option value="joint">joint</option>
+                      </select>
+                    ) : (
+                      a.owner
+                    )}
+                  </td>
+                  <td>
+                    {editingId === a.id ? (
+                      <input
+                        value={editShortCode}
+                        onChange={(e) => setEditShortCode(e.target.value)}
+                        placeholder="Short code"
+                        maxLength={64}
+                      />
+                    ) : (
+                      a.shortCode ?? '—'
+                    )}
+                  </td>
+                  <td>
+                    {editingId === a.id ? (
+                      <div className="row" style={{ marginBottom: 0, gap: '0.4rem' }}>
+                        <select
+                          value={editCurrency}
+                          onChange={(e) => setEditCurrency(e.target.value)}
+                        >
+                          {CURRENCY_OPTIONS.map((code) => (
+                            <option key={code} value={code}>
+                              {code}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => void saveCard(a.id)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(null)
+                            setEditName('')
+                            setEditOwner('me')
+                            setEditShortCode('')
+                            setEditCurrency('')
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      a.defaultCurrency ?? 'CAD'
+                    )}
+                  </td>
+                  <td>
+                    {editingId !== a.id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(a.id)
+                          setEditName(a.name)
+                          setEditOwner(
+                            (a.owner as 'me' | 'partner' | 'joint') ?? 'me'
+                          )
+                          setEditShortCode(a.shortCode ?? '')
+                          setEditCurrency((a.defaultCurrency ?? 'CAD').toUpperCase())
+                        }}
+                      >
+                        Edit card
+                      </button>
+                    )}{' '}
                     <button
                       type="button"
                       className="btnDanger"

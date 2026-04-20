@@ -12,7 +12,7 @@ type PartnerRow = {
 type BusRow = { currency: string; sumBusiness: number }
 
 export function ReportsPage() {
-  const [currency, setCurrency] = useState('')
+  const [currency, setCurrency] = useState('CAD')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [partner, setPartner] = useState<{ byCurrency: PartnerRow[] } | null>(
@@ -72,7 +72,7 @@ export function ReportsPage() {
             value={currency}
             onChange={(e) => setCurrency(e.target.value.toUpperCase())}
             maxLength={3}
-            placeholder="optional"
+            placeholder="CAD"
             style={{ width: 80 }}
           />
         </label>

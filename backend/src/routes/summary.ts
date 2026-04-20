@@ -24,7 +24,7 @@ function dateWhere(req: Request) {
 router.get('/dashboard', async (req, res, next) => {
   try {
     const where = dateWhere(req);
-    const rows = await Transaction.findAll({
+    const rowsPromise = Transaction.findAll({
       where,
       attributes: [
         'currency',
@@ -41,6 +41,31 @@ router.get('/dashboard', async (req, res, next) => {
       ],
       raw: true,
     });
+    const metricRowsPromise = Transaction.findAll({
+      where,
+      attributes: [
+        'currency',
+        [
+          sequelize.fn(
+            'SUM',
+            sequelize.literal('CASE WHEN amount < 0 THEN -amount ELSE 0 END')
+          ),
+          'totalSpend',
+        ],
+        [
+          sequelize.fn(
+            'SUM',
+            sequelize.literal('CASE WHEN amount > 0 THEN amount ELSE 0 END')
+          ),
+          'totalCredits',
+        ],
+        [sequelize.fn('SUM', sequelize.col('amount')), 'netAmount'],
+        [sequelize.fn('COUNT', sequelize.col('id')), 'transactionCount'],
+      ],
+      group: ['currency'],
+      raw: true,
+    });
+    const [rows, metricRows] = await Promise.all([rowsPromise, metricRowsPromise]);
     type DashRow = {
       currency: string;
       finalCategory: string | null;
@@ -55,6 +80,19 @@ router.get('/dashboard', async (req, res, next) => {
         sumAmount: num(r.sumAmount),
         finalBusiness: r.finalBusiness,
         finalSplitType: r.finalSplitType,
+      })),
+      metricsByCurrency: (metricRows as unknown as {
+        currency: string;
+        totalSpend: unknown;
+        totalCredits: unknown;
+        netAmount: unknown;
+        transactionCount: unknown;
+      }[]).map((r) => ({
+        currency: r.currency,
+        totalSpend: num(r.totalSpend),
+        totalCredits: num(r.totalCredits),
+        netAmount: num(r.netAmount),
+        transactionCount: num(r.transactionCount),
       })),
     });
   } catch (e) {

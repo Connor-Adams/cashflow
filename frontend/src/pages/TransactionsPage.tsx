@@ -73,7 +73,7 @@ type PreviewResponse = {
 export function TransactionsPage() {
   const [page, setPage] = useState(1)
   const [reviewOnly, setReviewOnly] = useState(false)
-  const [currency, setCurrency] = useState('')
+  const [currency, setCurrency] = useState('CAD')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
@@ -769,7 +769,7 @@ export function TransactionsPage() {
             onClick={() => {
               setPage(1)
               setReviewOnly(false)
-              setCurrency('')
+              setCurrency('CAD')
               setDateFrom('')
               setDateTo('')
               setBatchFilter('')
