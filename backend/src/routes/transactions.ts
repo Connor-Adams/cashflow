@@ -148,6 +148,49 @@ router.post('/bulk-patch', async (req, res, next) => {
   }
 });
 
+router.get('/category-hints', async (_req, res, next) => {
+  try {
+    const [ruleRows, txnRows] = await Promise.all([
+      sequelize.query<{ label: string }>(
+        `SELECT DISTINCT TRIM(category) AS label
+         FROM rules
+         WHERE category IS NOT NULL AND TRIM(category) != ''`,
+        { type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ label: string; usageCount: string }>(
+        `SELECT TRIM(final_category) AS label, COUNT(*) AS usageCount
+         FROM transactions
+         WHERE final_category IS NOT NULL AND TRIM(final_category) != ''
+         GROUP BY TRIM(final_category)`,
+        { type: QueryTypes.SELECT },
+      ),
+    ]);
+
+    const byLabel = new Map<string, { label: string; usageCount: number }>();
+    for (const row of ruleRows) {
+      if (!row.label) continue;
+      byLabel.set(row.label, { label: row.label, usageCount: 0 });
+    }
+    for (const row of txnRows) {
+      if (!row.label) continue;
+      byLabel.set(row.label, {
+        label: row.label,
+        usageCount: parseInt(String(row.usageCount), 10) || 0,
+      });
+    }
+
+    res.json({
+      categories: Array.from(byLabel.values()).sort((a, b) =>
+        b.usageCount === a.usageCount
+          ? a.label.localeCompare(b.label)
+          : b.usageCount - a.usageCount
+      ),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));

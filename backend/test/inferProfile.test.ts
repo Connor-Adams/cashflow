@@ -31,3 +31,25 @@ test('inferProfileId falls back to headers when rows empty', () => {
   const headers = ['Posted Date', 'Charge Amount', 'Extended Details'];
   assert.equal(inferProfileId(headers, [], 'CAD'), 'generic_amex');
 });
+
+test('inferProfileId picks generic_simple for Visa snake_case CSV', () => {
+  const headers = [
+    'transaction_date',
+    'post_date',
+    'type',
+    'details',
+    'amount',
+    'currency',
+  ];
+  const rows = [
+    {
+      transaction_date: '2025-11-18',
+      post_date: '2025-11-18',
+      type: 'Purchase',
+      details: 'TU *TRANSUNION',
+      amount: '28.19',
+      currency: 'CAD',
+    },
+  ];
+  assert.equal(inferProfileId(headers, rows, 'CAD'), 'generic_simple');
+});

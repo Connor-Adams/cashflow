@@ -1,34 +1,46 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
-const linkStyle = ({ isActive }: { isActive: boolean }) =>
-  ({
-    padding: '0.5rem 0.75rem',
-    borderRadius: 6,
-    textDecoration: 'none',
-    color: isActive ? 'var(--fg)' : 'var(--muted)',
-    background: isActive ? 'var(--bg2)' : 'transparent',
-    fontWeight: isActive ? 600 : 400,
-  }) as const
-
 export function Layout() {
   return (
     <div className="layout">
       <header className="header">
-        <div className="brand">Cashflow</div>
+        <div className="brandLockup">
+          <div className="brandMark">CF</div>
+          <div>
+            <div className="brandEyebrow">Household ledger</div>
+            <div className="brand">Cashflow</div>
+          </div>
+        </div>
         <nav className="nav" aria-label="Main">
-          <NavLink to="/" end style={linkStyle}>
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
+          >
             Dashboard
           </NavLink>
-          <NavLink to="/accounts" style={linkStyle}>
+          <NavLink
+            to="/accounts"
+            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
+          >
             Accounts
           </NavLink>
-          <NavLink to="/transactions" style={linkStyle}>
+          <NavLink
+            to="/transactions"
+            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
+          >
             Transactions
           </NavLink>
-          <NavLink to="/rules" style={linkStyle}>
+          <NavLink
+            to="/rules"
+            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
+          >
             Rules
           </NavLink>
-          <NavLink to="/reports" style={linkStyle}>
+          <NavLink
+            to="/reports"
+            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
+          >
             Reports
           </NavLink>
         </nav>

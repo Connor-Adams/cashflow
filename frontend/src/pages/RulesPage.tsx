@@ -3,8 +3,14 @@ import type { FormEvent } from 'react'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
 
+type CategoryHint = {
+  label: string
+  usageCount: number
+}
+
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([])
+  const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [err, setErr] = useState<string | null>(null)
 
   async function load() {
@@ -18,6 +24,12 @@ export function RulesPage() {
 
   useEffect(() => {
     void load()
+  }, [])
+
+  useEffect(() => {
+    void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
+      .then((data) => setCategoryHints(data.categories))
+      .catch(() => setCategoryHints([]))
   }, [])
 
   async function onCreate(e: FormEvent<HTMLFormElement>) {
@@ -68,7 +80,11 @@ export function RulesPage() {
           </label>
           <label>
             Category
-            <input name="category" placeholder="Groceries" />
+            <input
+              name="category"
+              placeholder="Groceries"
+              list="rule-category-options"
+            />
           </label>
           <label className="check">
             <input name="isBusiness" type="checkbox" /> Business
@@ -90,6 +106,11 @@ export function RulesPage() {
             <input name="pctPartner" placeholder="0.5" />
           </label>
         </div>
+        <datalist id="rule-category-options">
+          {categoryHints.map((hint) => (
+            <option key={hint.label} value={hint.label} />
+          ))}
+        </datalist>
         <button type="submit">Add rule</button>
       </form>
 

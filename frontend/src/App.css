@@ -1,311 +1,680 @@
-.layout {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+@reference "./index.css";
+
+@layer base {
+  button {
+    @apply inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium transition-colors duration-150;
+    border-color: var(--border);
+    background: color-mix(in srgb, var(--bg2) 84%, transparent);
+    color: var(--fg);
+  }
+
+  button:hover:enabled {
+    background: color-mix(in srgb, var(--bg3) 88%, white 4%);
+    border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  }
+
+  button:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  button.btnDanger {
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+    color: var(--danger);
+  }
+
+  input,
+  select,
+  textarea {
+    @apply rounded-xl border px-3 py-2 text-sm transition-colors duration-150 outline-none;
+    border-color: var(--border);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    color: var(--fg);
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: color-mix(in srgb, var(--accent) 62%, white 10%);
+    box-shadow: 0 0 0 3px rgba(119, 167, 255, 0.18);
+  }
 }
 
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem 1rem;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg2);
+@layer components {
+  .layout {
+    @apply flex min-h-screen flex-col;
+  }
+
+  .header {
+    @apply sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b px-5 py-4 backdrop-blur-xl;
+    border-color: color-mix(in srgb, var(--border) 88%, white 6%);
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--bg2) 92%, transparent) 0%,
+        color-mix(in srgb, var(--bg) 82%, transparent) 100%
+      );
+  }
+
+  .brandLockup {
+    @apply flex items-center gap-3;
+  }
+
+  .brandMark {
+    @apply flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold tracking-[0.18em];
+    color: #06111e;
+    background:
+      linear-gradient(135deg, var(--accent-soft) 0%, var(--accent) 52%, #7dd3fc 100%);
+    box-shadow: 0 12px 26px rgba(119, 167, 255, 0.28);
+  }
+
+  .brandEyebrow {
+    @apply text-[0.65rem] font-semibold uppercase tracking-[0.22em];
+    color: var(--muted);
+  }
+
+  .brand {
+    @apply text-lg font-semibold tracking-[0.04em];
+    color: var(--fg);
+  }
+
+  .nav {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .navLink {
+    @apply rounded-full px-3 py-2 text-sm font-medium no-underline transition-all duration-150;
+    color: var(--muted);
+  }
+
+  .navLink:hover {
+    @apply -translate-y-px;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--bg3) 82%, transparent);
+  }
+
+  .navLink.isActive {
+    @apply shadow-sm;
+    color: var(--fg);
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+    background:
+      linear-gradient(
+        180deg,
+        rgba(119, 167, 255, 0.18) 0%,
+        color-mix(in srgb, var(--bg3) 88%, transparent) 100%
+      );
+  }
+
+  .main {
+    @apply mx-auto flex-1 w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8;
+  }
+
+  .page h1 {
+    @apply mb-2 text-[1.55rem] font-semibold tracking-tight;
+  }
+
+  .page h2 {
+    @apply mb-2 mt-5 text-[1.05rem] font-semibold tracking-tight;
+  }
+
+  .page a {
+    color: var(--accent-soft);
+  }
+
+  .muted {
+    @apply mb-4 text-sm leading-6;
+    color: var(--muted);
+  }
+
+  .error {
+    @apply text-sm font-medium;
+    color: var(--danger);
+  }
+
+  .row {
+    @apply mb-3 flex flex-wrap items-center gap-3;
+  }
+
+  .card {
+    @apply mb-4 rounded-3xl border p-4 sm:p-5;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--bg2) 88%, transparent) 0%,
+        color-mix(in srgb, var(--bg) 92%, transparent) 100%
+      );
+    box-shadow: var(--shadow);
+  }
+
+  .tableWrap {
+    @apply overflow-auto rounded-3xl border;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+  }
+
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .table th,
+  .table td {
+    @apply border-b px-3 py-2 text-left align-middle;
+    border-color: color-mix(in srgb, var(--border) 82%, white 6%);
+  }
+
+  .table th {
+    @apply text-[0.72rem] font-semibold uppercase tracking-[0.12em];
+    color: var(--muted);
+    background: color-mix(in srgb, var(--bg2) 76%, transparent);
+  }
+
+  .table tbody tr:hover {
+    background: color-mix(in srgb, var(--bg3) 58%, transparent);
+  }
+
+  .table input,
+  .table select {
+    @apply max-w-[140px];
+  }
+
+  .table .narrowCol {
+    @apply w-9 text-center;
+  }
+
+  .chartWrap {
+    @apply mt-4;
+  }
+
+  .dashboardHeader {
+    @apply mb-3;
+  }
+
+  .dashboardHeader .muted {
+    @apply mb-0;
+  }
+
+  .dashboardFilters {
+    @apply mt-3;
+  }
+
+  .dashboardFilters .row {
+    @apply mb-0;
+  }
+
+  .quickFilters {
+    @apply mb-3 mt-3 flex flex-wrap gap-2;
+  }
+
+  .quickFilterButton {
+    @apply rounded-full px-3 py-1.5 text-xs font-semibold tracking-[0.08em] uppercase;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background: color-mix(in srgb, var(--bg3) 62%, transparent);
+    color: var(--muted);
+  }
+
+  .quickFilterButton[aria-pressed='true'] {
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+    background:
+      linear-gradient(
+        180deg,
+        rgba(119, 167, 255, 0.18) 0%,
+        color-mix(in srgb, var(--bg3) 92%, transparent) 100%
+      );
+    color: var(--fg);
+  }
+
+  .dashboardStats {
+    @apply mb-4 grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .transactionsHeader {
+    @apply mb-4;
+  }
+
+  .transactionsStats {
+    @apply mb-4 grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .transactionsStatCard {
+    @apply mb-0;
+  }
+
+  .transactionsTopGrid {
+    @apply mb-4 grid gap-4;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+
+  .transactionsPanel {
+    @apply mb-0;
+  }
+
+  .transactionsPanelHeader {
+    @apply mb-4 flex flex-wrap items-start justify-between gap-3;
+  }
+
+  .transactionsPanelHeader h2 {
+    @apply mt-0 mb-1;
+  }
+
+  .transactionsPanelBadge {
+    @apply rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em];
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background: color-mix(in srgb, var(--bg3) 62%, transparent);
+    color: var(--muted);
+  }
+
+  .transactionsToolbar {
+    @apply mb-4;
+  }
+
+  .transactionsToolbarMeta {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .transactionsFilterGrid {
+    @apply mb-0;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .transactionsCategoryField {
+    grid-column: span 2;
+  }
+
+  .transactionsCheckTile {
+    @apply justify-between rounded-2xl border px-3 py-2;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background: color-mix(in srgb, var(--bg3) 52%, transparent);
+  }
+
+  .transactionsCheckTile span {
+    @apply text-[0.82rem] font-medium;
+    color: var(--fg);
+  }
+
+  .transactionsCheckTile input {
+    @apply h-4 w-4;
+  }
+
+  .transactionsActionRow {
+    @apply mt-3;
+  }
+
+  .transactionsCategoryCloud {
+    @apply mt-2 flex flex-wrap gap-2;
+    align-content: flex-start;
+  }
+
+  .transactionsCategoryCloudItem {
+    @apply rounded-full px-3 py-1.5 text-xs font-medium;
+    border: 0;
+    background: color-mix(in srgb, var(--bg3) 40%, transparent);
+    color: var(--muted);
+  }
+
+  .transactionsCategoryCloudItem:hover {
+    background: color-mix(in srgb, var(--bg3) 65%, transparent);
+    color: var(--fg);
+  }
+
+  .transactionsCategoryCloudItem[aria-pressed='true'] {
+    background: rgba(119, 167, 255, 0.16);
+    color: var(--fg);
+  }
+
+  .transactionsHelperCopy {
+    @apply mb-0 mt-2;
+  }
+
+  .transactionsBulkCard {
+    @apply items-center;
+  }
+
+  .transactionsBulkHeader {
+    @apply min-w-[180px];
+  }
+
+  .transactionsBulkHeader .muted {
+    @apply mb-0 mt-1 text-xs;
+  }
+
+  .transactionsTableCard {
+    @apply mb-0;
+  }
+
+  .transactionsTableWrap {
+    @apply overflow-auto;
+  }
+
+  .transactionsTable thead th {
+    @apply sticky top-0 z-10;
+  }
+
+  .transactionsActionsCol {
+    @apply sticky right-0;
+    background: color-mix(in srgb, var(--bg2) 92%, transparent);
+    box-shadow: -10px 0 18px rgba(0, 0, 0, 0.18);
+  }
+
+  .transactionsTable tbody .transactionsActionsCol {
+    background: color-mix(in srgb, var(--bg) 96%, transparent);
+  }
+
+  .transactionsPager {
+    @apply mb-0 mt-4 justify-center;
+  }
+
+  .txnMerchantCell {
+    @apply flex min-w-[180px] flex-col gap-1;
+  }
+
+  .txnMerchantName {
+    @apply font-medium;
+    color: var(--fg);
+  }
+
+  .txnMerchantMeta {
+    @apply text-xs;
+    color: var(--muted);
+  }
+
+  .txnAmount {
+    @apply font-semibold;
+  }
+
+  .txnAmount--expense {
+    color: #fca5a5;
+  }
+
+  .txnAmount--credit {
+    color: #86efac;
+  }
+
+  .txnBadge {
+    @apply inline-flex rounded-full border px-2 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em];
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    color: var(--muted);
+    background: color-mix(in srgb, var(--bg3) 52%, transparent);
+  }
+
+  .txnBadge--review {
+    border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border));
+    color: #fcd34d;
+    background: rgba(245, 158, 11, 0.12);
+  }
+
+  .txnReceiptCount {
+    @apply inline-flex min-w-6 items-center justify-center rounded-full border px-1.5 py-0.5 text-xs font-semibold;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    color: var(--fg);
+    background: color-mix(in srgb, var(--bg3) 52%, transparent);
+  }
+
+  .txnActionGroup {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .txnSaveButton {
+    border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+    background:
+      linear-gradient(
+        180deg,
+        rgba(119, 167, 255, 0.18) 0%,
+        color-mix(in srgb, var(--bg3) 90%, transparent) 100%
+      );
+    color: var(--fg);
+  }
+
+  .statCard {
+    @apply mb-0;
+  }
+
+  .statLabel {
+    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em];
+    color: var(--muted);
+  }
+
+  .statValue {
+    @apply my-1 text-[1.55rem] font-semibold tracking-tight;
+  }
+
+  .statHint {
+    @apply mb-0 text-xs;
+  }
+
+  .statDelta {
+    @apply mt-1 text-xs;
+  }
+
+  .dashboardBusinessSpotlight {
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--accent-warm) 18%, var(--bg2)) 0%,
+        color-mix(in srgb, var(--accent-green) 16%, var(--bg2)) 100%
+      );
+  }
+
+  .businessSpotlightHeader {
+    @apply flex flex-wrap items-end justify-between gap-4;
+  }
+
+  .businessSpotlightHeader h2 {
+    @apply mb-1 mt-0;
+  }
+
+  .businessSpotlightTotals {
+    @apply rounded-2xl border px-4 py-3;
+    min-width: 220px;
+    border-color: color-mix(in srgb, var(--border) 70%, white 10%);
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+  }
+
+  .businessSpotlightTotalLabel {
+    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em];
+    color: var(--muted);
+  }
+
+  .businessSpotlightTotalValue {
+    @apply mt-1 text-2xl font-semibold tracking-tight;
+  }
+
+  .businessSpotlightGrid {
+    @apply mt-4 grid gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .businessFocusCard {
+    @apply rounded-2xl border p-4;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+  }
+
+  .businessFocusCard--business {
+    border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border));
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.18);
+  }
+
+  .businessFocusCard--personal {
+    border-color: color-mix(in srgb, var(--accent-green) 42%, var(--border));
+    box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.18);
+  }
+
+  .businessFocusLabel {
+    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em];
+    color: var(--muted);
+  }
+
+  .businessFocusValue {
+    @apply mb-1 mt-1 text-[1.7rem] font-semibold tracking-tight;
+  }
+
+  .businessFocusShare {
+    @apply m-0 text-sm;
+    color: var(--muted);
+  }
+
+  .businessFocusMetrics {
+    @apply mt-4 grid gap-3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .businessFocusMetrics dt {
+    @apply mb-1 text-[0.68rem] font-semibold uppercase tracking-[0.12em];
+    color: var(--muted);
+  }
+
+  .businessFocusMetrics dd {
+    @apply m-0 text-base font-semibold;
+  }
+
+  .businessSharePanel {
+    @apply mt-4 border-t pt-4;
+    border-color: color-mix(in srgb, var(--border) 80%, white 8%);
+  }
+
+  .businessShareLabels {
+    @apply mb-2 flex justify-between gap-3 text-sm;
+    color: var(--muted);
+  }
+
+  .businessShareBar {
+    @apply flex h-3.5 w-full overflow-hidden rounded-full border;
+    background: color-mix(in srgb, var(--bg) 88%, white 4%);
+    border-color: color-mix(in srgb, var(--border) 85%, white 8%);
+  }
+
+  .businessShareFill {
+    @apply block h-full;
+  }
+
+  .businessShareFill--business {
+    background: var(--accent-warm);
+  }
+
+  .businessShareFill--personal {
+    background: var(--accent-green);
+  }
+
+  .businessShareCaption {
+    @apply mt-2 mb-0;
+  }
+
+  .dashboardChartCard {
+    @apply mb-4;
+  }
+
+  .dashboardChartCard h2 {
+    @apply mt-0;
+  }
+
+  .dashboardChartCard .muted {
+    @apply mb-1;
+  }
+
+  .bulkBar {
+    @apply flex flex-wrap items-end gap-x-4 gap-y-3;
+  }
+
+  .bulkBar label {
+    @apply flex flex-col gap-1 text-[0.82rem];
+  }
+
+  .bulkBar .checkRow {
+    @apply flex-row items-center gap-2;
+  }
+
+  button.linkish {
+    @apply inline p-0 text-sm font-medium underline underline-offset-2;
+    border: 0;
+    background: transparent;
+    color: var(--accent-soft);
+  }
+
+  .uploadCard h2 {
+    @apply mb-1 mt-0 text-[1.05rem];
+  }
+
+  .uploadCard .uploadMsg {
+    @apply mt-3 text-sm whitespace-pre-wrap;
+    color: var(--muted);
+  }
+
+  .uploadCard .uploadMsg.warn {
+    color: #e8b86a;
+  }
+
+  .uploadCard .parseErrorList {
+    @apply mt-2 max-h-48 overflow-y-auto pl-5 text-[0.82rem];
+    color: var(--danger);
+  }
+
+  .uploadCard .previewBlock {
+    @apply mt-4;
+  }
+
+  .uploadCard .previewBlock code {
+    @apply text-xs break-all;
+  }
+
+  .filePick input[type='file'] {
+    @apply max-w-full;
+  }
+
+  .req {
+    color: var(--danger);
+  }
+
+  .pad {
+    @apply m-0 px-4 py-3;
+  }
+
+  .emptyState {
+    @apply m-0;
+    color: var(--muted);
+  }
+
+  .emptyStateCell {
+    @apply align-top px-4 py-5;
+  }
+
+  .emptyStateCell p {
+    @apply mb-2;
+  }
+
+  .emptyStateCell p:last-child {
+    @apply mb-0;
+  }
+
+  .formGrid {
+    @apply mb-3 grid gap-3;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  .formGrid label {
+    @apply flex flex-col gap-1 text-[0.82rem];
+  }
+
+  .formGrid .check {
+    @apply flex-row items-center gap-2;
+  }
 }
 
-.brand {
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
+@media (width <= 720px) {
+  .transactionsTopGrid {
+    grid-template-columns: 1fr;
+  }
 
-.nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-}
+  .transactionsCategoryField {
+    grid-column: span 1;
+  }
 
-.main {
-  flex: 1;
-  padding: 1.25rem;
-  max-width: 1200px;
-  width: 100%;
-  margin: 0 auto;
-}
+  .businessSpotlightTotals {
+    min-width: 0;
+    width: 100%;
+  }
 
-.page h1 {
-  margin: 0 0 0.5rem;
-  font-size: 1.35rem;
-}
-
-.page h2 {
-  margin: 1.25rem 0 0.5rem;
-  font-size: 1.05rem;
-}
-
-.muted {
-  color: var(--muted);
-  margin: 0 0 1rem;
-}
-
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.tableWrap {
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-
-.table th,
-.table td {
-  padding: 0.45rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.table input,
-.table select {
-  max-width: 140px;
-}
-
-.chartWrap {
-  margin-top: 1rem;
-}
-
-.dashboardHeader {
-  margin-bottom: 0.75rem;
-}
-
-.dashboardHeader .muted {
-  margin-bottom: 0;
-}
-
-.dashboardFilters {
-  margin-top: 0.75rem;
-}
-
-.dashboardFilters .row {
-  margin-bottom: 0;
-}
-
-.dashboardStats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.statCard {
-  margin-bottom: 0;
-}
-
-.statLabel {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.statValue {
-  margin: 0.35rem 0 0.25rem;
-  font-size: 1.3rem;
-  font-weight: 700;
-}
-
-.statHint {
-  margin-bottom: 0;
-  font-size: 0.82rem;
-}
-
-.statDelta {
-  margin: 0.25rem 0 0;
-  font-size: 0.8rem;
-}
-
-.dashboardChartCard {
-  margin-bottom: 1rem;
-}
-
-.dashboardChartCard h2 {
-  margin-top: 0;
-}
-
-.dashboardChartCard .muted {
-  margin-bottom: 0.35rem;
-}
-
-.card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-}
-
-.bulkBar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.65rem 1rem;
-}
-
-.bulkBar label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.85rem;
-}
-
-.bulkBar .checkRow {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.table .narrowCol {
-  width: 2.25rem;
-  text-align: center;
-}
-
-button.linkish {
-  background: transparent;
-  border: none;
-  padding: 0;
-  color: var(--accent);
-  text-decoration: underline;
-  font-size: inherit;
-}
-
-.uploadCard h2 {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-}
-
-.uploadCard .uploadMsg {
-  margin: 0.75rem 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-  white-space: pre-wrap;
-}
-
-.uploadCard .uploadMsg.warn {
-  color: #e8b86a;
-}
-
-.uploadCard .parseErrorList {
-  margin: 0.5rem 0 0;
-  padding-left: 1.25rem;
-  font-size: 0.85rem;
-  color: var(--danger, #c77);
-  max-height: 12rem;
-  overflow-y: auto;
-}
-
-.uploadCard .previewBlock {
-  margin-top: 1rem;
-}
-
-.uploadCard .previewBlock code {
-  font-size: 0.8rem;
-  word-break: break-all;
-}
-
-.filePick input[type='file'] {
-  max-width: 100%;
-}
-
-.req {
-  color: var(--danger);
-}
-
-.pad {
-  padding: 0.75rem 1rem;
-  margin: 0;
-}
-
-.emptyState {
-  color: var(--muted);
-  margin: 0;
-}
-
-.emptyStateCell {
-  padding: 1.25rem 1rem !important;
-  vertical-align: top;
-}
-
-.emptyStateCell p {
-  margin: 0 0 0.5rem;
-}
-
-.emptyStateCell p:last-child {
-  margin-bottom: 0;
-}
-
-.page a {
-  color: var(--accent);
-}
-
-.formGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
-.formGrid label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-}
-
-.formGrid .check {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.error {
-  color: var(--danger);
-}
-
-button {
-  padding: 0.35rem 0.65rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg2);
-  color: var(--fg);
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-button.btnDanger {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-  color: var(--danger);
-}
-
-input,
-select {
-  padding: 0.35rem 0.5rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
+  .businessFocusMetrics {
+    grid-template-columns: 1fr;
+  }
 }

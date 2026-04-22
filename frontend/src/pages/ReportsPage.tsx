@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
+import { useSessionState } from '../lib/useSessionState'
 
 type PartnerRow = {
   currency: string
@@ -12,9 +13,9 @@ type PartnerRow = {
 type BusRow = { currency: string; sumBusiness: number }
 
 export function ReportsPage() {
-  const [currency, setCurrency] = useState('CAD')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [currency, setCurrency] = useSessionState('reports.currency', 'CAD')
+  const [dateFrom, setDateFrom] = useSessionState('reports.dateFrom', '')
+  const [dateTo, setDateTo] = useSessionState('reports.dateTo', '')
   const [partner, setPartner] = useState<{ byCurrency: PartnerRow[] } | null>(
     null
   )
@@ -107,8 +108,7 @@ export function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {!loading &&
-              (partner?.byCurrency.length ?? 0) === 0 && (
+            {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
                 <tr>
                   <td colSpan={3} className="emptyStateCell">
                     <p className="emptyState">
@@ -118,8 +118,7 @@ export function ReportsPage() {
                   </td>
                 </tr>
               )}
-            {!loading &&
-              partner?.byCurrency.map((r) => (
+            {partner?.byCurrency.map((r) => (
                 <tr key={r.currency}>
                   <td>{r.currency}</td>
                   <td>{formatMoney(r.sumMy, r.currency)}</td>
@@ -140,8 +139,7 @@ export function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {!loading &&
-              (business?.byCurrency.length ?? 0) === 0 && (
+            {(business?.byCurrency.length ?? 0) === 0 && !loading && (
                 <tr>
                   <td colSpan={2} className="emptyStateCell">
                     <p className="emptyState">
@@ -150,8 +148,7 @@ export function ReportsPage() {
                   </td>
                 </tr>
               )}
-            {!loading &&
-              business?.byCurrency.map((r) => (
+            {business?.byCurrency.map((r) => (
                 <tr key={r.currency}>
                   <td>{r.currency}</td>
                   <td>{formatMoney(r.sumBusiness, r.currency)}</td>

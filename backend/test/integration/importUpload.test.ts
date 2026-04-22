@@ -200,6 +200,165 @@ test('GET /api/summary/monthly returns points after import', async () => {
   assert.ok(cad.some((p: { month: string }) => p.month === '2025-07'));
 });
 
+test('GET /api/summary/dashboard separates payments from refunds', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Dashboard Metrics Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv =
+    'Date,Description,Type,Amount\n' +
+    '2025-09-01,Grocery Store,Debit,100.00\n' +
+    '2025-09-02,ONLINE PAYMENT THANK YOU,Credit,100.00\n' +
+    '2025-09-03,MERCHANDISE REFUND,Credit,25.00\n';
+  const up = await request(app)
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'dashboard-signs.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(up.status, 200);
+  assert.equal(up.body.inserted, 3);
+
+  const res = await request(app)
+    .get('/api/summary/dashboard')
+    .query({ currency: 'CAD', dateFrom: '2025-09-01', dateTo: '2025-09-30' });
+  assert.equal(res.status, 200);
+  const metrics = (res.body.metricsByCurrency as {
+    currency: string;
+    totalSpend: number;
+    totalCredits: number;
+    totalPayments: number;
+    netSpend: number;
+    transactionCount: number;
+  }[]).find((row) => row.currency === 'CAD');
+  assert.ok(metrics);
+  assert.equal(metrics?.totalSpend, 100);
+  assert.equal(metrics?.totalCredits, 25);
+  assert.equal(metrics?.totalPayments, 100);
+  assert.equal(metrics?.netSpend, 75);
+  assert.equal(metrics?.transactionCount, 3);
+
+  const accountSummary = (res.body.accountSummaries as {
+    currency: string;
+    accountId: number;
+    accountName: string;
+    totalSpend: number;
+    totalCredits: number;
+    totalPayments: number;
+    netSpend: number;
+    transactionCount: number;
+    reviewCount: number;
+  }[]).find((row) => row.currency === 'CAD' && row.accountName === 'Dashboard Metrics Account');
+  assert.ok(accountSummary);
+  assert.equal(accountSummary?.totalSpend, 100);
+  assert.equal(accountSummary?.totalCredits, 25);
+  assert.equal(accountSummary?.totalPayments, 100);
+  assert.equal(accountSummary?.netSpend, 75);
+  assert.equal(accountSummary?.transactionCount, 3);
+  assert.equal(accountSummary?.reviewCount, 3);
+
+  const merchantRows = res.body.merchantSummaries as {
+    currency: string;
+    merchant: string;
+    totalSpend: number;
+    totalCredits: number;
+    totalPayments: number;
+    netSpend: number;
+    transactionCount: number;
+    reviewCount: number;
+  }[];
+  assert.equal(merchantRows.filter((row) => row.currency === 'CAD').length, 3);
+  assert.ok(
+    merchantRows.some(
+      (row) =>
+        row.currency === 'CAD' &&
+        row.totalSpend === 100 &&
+        row.totalCredits === 0 &&
+        row.totalPayments === 0 &&
+        row.netSpend === 100
+    )
+  );
+  assert.ok(
+    merchantRows.some(
+      (row) =>
+        row.currency === 'CAD' &&
+        row.totalSpend === 0 &&
+        row.totalCredits === 0 &&
+        row.totalPayments === 100 &&
+        row.netSpend === 0
+    )
+  );
+
+  const reviewQueue = res.body.reviewQueue as {
+    date: string;
+    currency: string;
+    amount: number;
+  }[];
+  assert.equal(reviewQueue.length, 3);
+  assert.deepEqual(
+    reviewQueue.map((row) => row.date),
+    ['2025-09-03', '2025-09-02', '2025-09-01']
+  );
+  assert.deepEqual(
+    reviewQueue.map((row) => row.amount),
+    [25, 100, -100]
+  );
+
+  const categoryRows = (res.body.byCategory as {
+    currency: string;
+    category: string | null;
+    sumAmount: number;
+  }[]).filter((row) => row.currency === 'CAD');
+  assert.equal(
+    categoryRows.reduce((sum, row) => sum + row.sumAmount, 0),
+    -75,
+    'category activity includes charges and refunds, but excludes payments'
+  );
+});
+
+test('GET /api/summary/monthly excludes payment rows from monthly activity', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Monthly Payments Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv =
+    'Date,Description,Type,Amount\n' +
+    '2025-08-01,Grocery Store,Debit,100.00\n' +
+    '2025-08-02,ONLINE PAYMENT THANK YOU,Credit,60.00\n' +
+    '2025-08-03,MERCHANDISE REFUND,Credit,10.00\n';
+  const up = await request(app)
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'monthly-activity.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(up.status, 200);
+
+  const res = await request(app)
+    .get('/api/summary/monthly')
+    .query({ currency: 'CAD', dateFrom: '2025-08-01', dateTo: '2025-08-31' });
+  assert.equal(res.status, 200);
+  const august = (res.body.points as {
+    month: string;
+    currency: string;
+    sumAmount: number;
+  }[]).find((row) => row.month === '2025-08' && row.currency === 'CAD');
+  assert.ok(august);
+  assert.equal(august?.sumAmount, -90);
+});
+
 test('POST /api/import/preview returns headers and mapped rows', async () => {
   const acc = await request(app).post('/api/accounts').send({
     name: 'Preview Account',
@@ -259,6 +418,38 @@ test('POST /api/import/preview: row error for invalid date', async () => {
   );
 });
 
+test('POST /api/import/preview maps Visa monthly fee rows with blank details', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Preview Visa Fee',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv =
+    'transaction_date,post_date,type,details,amount,currency\n' +
+    '2025-12-12,2025-12-12,Monthly fee,,10.0,CAD\n';
+  const res = await request(app)
+    .post('/api/import/preview')
+    .field('accountId', String(accountId))
+    .field('profileId', 'auto')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'visa-fee.csv',
+      contentType: 'text/csv',
+    });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.usedProfileId, 'generic_simple');
+  const row = res.body.rows[0] as {
+    ok: boolean;
+    mapped?: { merchantClean: string; amount: number };
+  };
+  assert.equal(row.ok, true);
+  assert.equal(row.mapped?.merchantClean, 'Monthly fee');
+  assert.equal(row.mapped?.amount, -10);
+});
+
 test('POST /api/import/preview: 400 when accountId missing', async () => {
   const csv = 'Date,Description,Amount\n2025-06-01,X,-1\n';
   const res = await request(app)
@@ -293,4 +484,43 @@ test('POST /api/import/upload with profile auto infers generic_simple', async ()
   assert.equal(res.body.usedProfileId, 'generic_simple');
   assert.equal(res.body.profileInferred, true);
   assert.ok((res.body.inserted as number) >= 1);
+});
+
+test('POST /api/import/upload keeps payment rows positive when generic profile normalizes signs', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Payment Direction Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv =
+    'Date,Description,Type,Amount\n' +
+    '2025-06-01,Grocery Store,Debit,1200.00\n' +
+    '2025-06-02,ONLINE PAYMENT THANK YOU,Credit,-1200.00\n';
+
+  const up = await request(app)
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'payment-signs.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(up.status, 200);
+  assert.equal(up.body.inserted, 2);
+
+  const txns = await request(app)
+    .get('/api/transactions')
+    .query({ accountId });
+  assert.equal(txns.status, 200);
+  const byDescription = new Map(
+    (txns.body.data as { merchantRaw: string; amount: number }[]).map((t) => [
+      t.merchantRaw,
+      t.amount,
+    ])
+  );
+  assert.equal(byDescription.get('Grocery Store'), -1200);
+  assert.equal(byDescription.get('ONLINE PAYMENT THANK YOU'), 1200);
 });

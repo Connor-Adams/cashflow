@@ -107,3 +107,54 @@ test('POST /api/transactions/bulk-patch 400 when patch empty', async () => {
   });
   assert.equal(res.status, 400);
 });
+
+test('GET /api/transactions/category-hints returns known categories with usage counts', async () => {
+  const acc = await request(app).post('/api/accounts').send({
+    name: 'Category Hint Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const csv =
+    'Date,Description,Amount\n2025-07-01,Grocer,-10.00\n2025-07-02,Cafe,-12.00\n';
+  const imp = await request(app)
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'category-hints.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(imp.status, 200);
+
+  const list = await request(app).get('/api/transactions?pageSize=25');
+  assert.equal(list.status, 200);
+  const ids = (list.body.data as { id: number }[]).slice(0, 2).map((t) => t.id);
+  assert.equal(ids.length, 2);
+
+  const patch = await request(app).post('/api/transactions/bulk-patch').send({
+    ids,
+    patch: { categoryOverride: 'Groceries', reviewFlag: false },
+  });
+  assert.equal(patch.status, 200);
+
+  const rule = await request(app).post('/api/rules').send({
+    merchantPattern: 'coffee',
+    matchKind: 'substring',
+    priority: 1,
+    category: 'Dining',
+    isBusiness: false,
+    splitType: 'me',
+  });
+  assert.equal(rule.status, 201);
+
+  const res = await request(app).get('/api/transactions/category-hints');
+  assert.equal(res.status, 200);
+  const categories = res.body.categories as { label: string; usageCount: number }[];
+  assert.ok(
+    categories.some((row) => row.label === 'Groceries' && row.usageCount >= 2)
+  );
+  assert.ok(categories.some((row) => row.label === 'Dining'));
+});

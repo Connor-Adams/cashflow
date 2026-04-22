@@ -3,6 +3,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Legend,
   Line,
   LineChart,
@@ -14,6 +15,7 @@ import {
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
+import { useSessionState } from '../lib/useSessionState'
 
 type Row = {
   currency: string
@@ -27,11 +29,90 @@ type CurrencyMetrics = {
   currency: string
   totalSpend: number
   totalCredits: number
-  netAmount: number
+  totalPayments: number
+  netSpend: number
   transactionCount: number
 }
 
-type DashResp = { byCategory: Row[]; metricsByCurrency: CurrencyMetrics[] }
+type MonthlyCurrencyBreakdown = {
+  month: string
+  currency: string
+  totalSpend: number
+  totalCredits: number
+  totalPayments: number
+  netSpend: number
+}
+
+type SplitReportRow = {
+  currency: string
+  splitType: string
+  totalSpend: number
+  totalCredits: number
+  netSpend: number
+}
+
+type BusinessReportRow = {
+  currency: string
+  business: boolean
+  totalSpend: number
+  totalCredits: number
+  netSpend: number
+}
+
+type CategoryReportRow = {
+  currency: string
+  category: string | null
+  totalSpend: number
+  totalCredits: number
+  netSpend: number
+}
+
+type MerchantSummaryRow = {
+  currency: string
+  merchant: string
+  totalSpend: number
+  totalCredits: number
+  totalPayments: number
+  netSpend: number
+  transactionCount: number
+  lastDate: string
+  reviewCount: number
+}
+
+type AccountSummaryRow = {
+  currency: string
+  accountId: number
+  accountName: string
+  accountShortCode: string | null
+  totalSpend: number
+  totalCredits: number
+  totalPayments: number
+  netSpend: number
+  transactionCount: number
+  reviewCount: number
+}
+
+type ReviewQueueRow = {
+  id: number
+  date: string
+  currency: string
+  merchant: string
+  accountName: string
+  category: string | null
+  amount: number
+}
+
+type DashResp = {
+  byCategory: Row[]
+  metricsByCurrency: CurrencyMetrics[]
+  monthlyByCurrency: MonthlyCurrencyBreakdown[]
+  netSpendBySplit: SplitReportRow[]
+  netSpendByBusiness: BusinessReportRow[]
+  categoryReports: CategoryReportRow[]
+  merchantSummaries: MerchantSummaryRow[]
+  accountSummaries: AccountSummaryRow[]
+  reviewQueue: ReviewQueueRow[]
+}
 
 type MonthlyResp = {
   points: { month: string; currency: string; sumAmount: number }[]
@@ -45,6 +126,31 @@ const LINE_COLORS = [
   '#8b5cf6',
   '#ec4899',
 ]
+const BUSINESS_COLOR = '#f59e0b'
+const PERSONAL_COLOR = '#22c55e'
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: 'rgba(11, 16, 22, 0.96)',
+  border: '1px solid rgba(119, 167, 255, 0.28)',
+  borderRadius: '14px',
+  boxShadow: '0 18px 40px rgba(0, 0, 0, 0.4)',
+  color: '#eef3f8',
+}
+const CHART_TOOLTIP_LABEL_STYLE = {
+  color: '#eef3f8',
+  fontWeight: 600,
+  marginBottom: '0.35rem',
+}
+const CHART_TOOLTIP_ITEM_STYLE = {
+  color: '#eef3f8',
+  padding: 0,
+}
+
+function formatSplitType(splitType: string): string {
+  if (splitType === 'me') return 'Me'
+  if (splitType === 'partner') return 'Partner'
+  if (splitType === 'shared') return 'Shared'
+  return splitType || 'Unknown'
+}
 
 function toDateInputValue(d: Date): string {
   return d.toISOString().slice(0, 10)
@@ -83,11 +189,33 @@ function getDefaultDashboardRange(): { from: string; to: string } {
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
+function getRollingMonthRange(months: number): { from: string; to: string } {
+  const to = new Date()
+  const from = new Date(to)
+  from.setMonth(from.getMonth() - months)
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+}
+
+function getYearToDateRange(): { from: string; to: string } {
+  const to = new Date()
+  const from = new Date(to.getFullYear(), 0, 1)
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+}
+
 export function DashboardPage() {
   const defaultRange = useMemo(() => getDefaultDashboardRange(), [])
-  const [currency, setCurrency] = useState<string>('CAD')
-  const [dateFrom, setDateFrom] = useState(defaultRange.from)
-  const [dateTo, setDateTo] = useState(defaultRange.to)
+  const [currency, setCurrency] = useSessionState<string>(
+    'dashboard.currency',
+    'CAD'
+  )
+  const [dateFrom, setDateFrom] = useSessionState<string>(
+    'dashboard.dateFrom',
+    () => defaultRange.from
+  )
+  const [dateTo, setDateTo] = useSessionState<string>(
+    'dashboard.dateTo',
+    () => defaultRange.to
+  )
   const [data, setData] = useState<DashResp | null>(null)
   const [previousMetricsByCurrency, setPreviousMetricsByCurrency] = useState<
     CurrencyMetrics[]
@@ -143,8 +271,10 @@ export function DashboardPage() {
   const currencies = useMemo(() => {
     const s = new Set<string>()
     data?.byCategory.forEach((r) => s.add(r.currency))
+    data?.metricsByCurrency.forEach((r) => s.add(r.currency))
+    monthly?.points.forEach((p) => s.add(p.currency))
     return Array.from(s).sort()
-  }, [data])
+  }, [data, monthly])
 
   const chartData = useMemo(() => {
     const byCat = new Map<string, number>()
@@ -179,6 +309,171 @@ export function DashboardPage() {
     })
   }, [monthly, monthlyLineKeys])
 
+  const monthlyBreakdownData = useMemo(() => {
+    const rows = data?.monthlyByCurrency ?? []
+    const byMonth = new Map<
+      string,
+      {
+        month: string
+        totalSpend: number
+        totalCredits: number
+        totalPayments: number
+        netSpend: number
+      }
+    >()
+    for (const row of rows) {
+      if (currency && row.currency !== currency) continue
+      const existing = byMonth.get(row.month) ?? {
+        month: row.month,
+        totalSpend: 0,
+        totalCredits: 0,
+        totalPayments: 0,
+        netSpend: 0,
+      }
+      existing.totalSpend += row.totalSpend
+      existing.totalCredits += row.totalCredits
+      existing.totalPayments += row.totalPayments
+      existing.netSpend += row.netSpend
+      byMonth.set(row.month, existing)
+    }
+    return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
+  }, [data?.monthlyByCurrency, currency])
+
+  const splitReportData = useMemo(() => {
+    const rows = data?.netSpendBySplit ?? []
+    const bySplit = new Map<
+      string,
+      { splitType: string; totalSpend: number; totalCredits: number; netSpend: number }
+    >()
+    for (const row of rows) {
+      if (currency && row.currency !== currency) continue
+      const existing = bySplit.get(row.splitType) ?? {
+        splitType: row.splitType,
+        totalSpend: 0,
+        totalCredits: 0,
+        netSpend: 0,
+      }
+      existing.totalSpend += row.totalSpend
+      existing.totalCredits += row.totalCredits
+      existing.netSpend += row.netSpend
+      bySplit.set(row.splitType, existing)
+    }
+    return Array.from(bySplit.values())
+      .map((row) => ({ ...row, label: formatSplitType(row.splitType) }))
+      .sort((a, b) => b.netSpend - a.netSpend)
+  }, [data?.netSpendBySplit, currency])
+
+  const businessReportData = useMemo(() => {
+    const rows = data?.netSpendByBusiness ?? []
+    const byFlag = new Map<
+      string,
+      {
+        label: string
+        tone: 'business' | 'personal'
+        fill: string
+        totalSpend: number
+        totalCredits: number
+        netSpend: number
+      }
+    >()
+    for (const row of rows) {
+      if (currency && row.currency !== currency) continue
+      const key = row.business ? 'Business' : 'Personal'
+      const existing = byFlag.get(key) ?? {
+        label: key,
+        tone: row.business ? 'business' : 'personal',
+        fill: row.business ? BUSINESS_COLOR : PERSONAL_COLOR,
+        totalSpend: 0,
+        totalCredits: 0,
+        netSpend: 0,
+      }
+      existing.totalSpend += row.totalSpend
+      existing.totalCredits += row.totalCredits
+      existing.netSpend += row.netSpend
+      byFlag.set(key, existing)
+    }
+    return Array.from(byFlag.values()).sort((a, b) => b.netSpend - a.netSpend)
+  }, [data?.netSpendByBusiness, currency])
+
+  const businessSpotlight = useMemo(() => {
+    const business =
+      businessReportData.find((row) => row.tone === 'business') ?? {
+        label: 'Business',
+        tone: 'business' as const,
+        fill: BUSINESS_COLOR,
+        totalSpend: 0,
+        totalCredits: 0,
+        netSpend: 0,
+      }
+    const personal =
+      businessReportData.find((row) => row.tone === 'personal') ?? {
+        label: 'Personal',
+        tone: 'personal' as const,
+        fill: PERSONAL_COLOR,
+        totalSpend: 0,
+        totalCredits: 0,
+        netSpend: 0,
+      }
+    const totalNetSpend = business.netSpend + personal.netSpend
+    const totalGrossSpend = business.totalSpend + personal.totalSpend
+    const totalCredits = business.totalCredits + personal.totalCredits
+    const safeTotal = totalNetSpend > 0 ? totalNetSpend : 0
+    const businessShare = safeTotal === 0 ? 0 : (business.netSpend / safeTotal) * 100
+    const personalShare = safeTotal === 0 ? 0 : (personal.netSpend / safeTotal) * 100
+
+    return {
+      business,
+      personal,
+      totalNetSpend,
+      totalGrossSpend,
+      totalCredits,
+      businessShare,
+      personalShare,
+    }
+  }, [businessReportData])
+
+  const categoryReportData = useMemo(() => {
+    const rows = data?.categoryReports ?? []
+    return rows
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) => b.netSpend - a.netSpend)
+  }, [data?.categoryReports, currency])
+
+  const merchantReportData = useMemo(() => {
+    const rows = data?.merchantSummaries ?? []
+    return rows
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) =>
+        b.netSpend === a.netSpend
+          ? b.transactionCount - a.transactionCount
+          : b.netSpend - a.netSpend
+      )
+  }, [data?.merchantSummaries, currency])
+
+  const accountReportData = useMemo(() => {
+    const rows = data?.accountSummaries ?? []
+    return rows
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) =>
+        b.netSpend === a.netSpend
+          ? b.transactionCount - a.transactionCount
+          : b.netSpend - a.netSpend
+      )
+  }, [data?.accountSummaries, currency])
+
+  const reviewQueueData = useMemo(() => {
+    const rows = data?.reviewQueue ?? []
+    return rows
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) =>
+        a.date === b.date ? Math.abs(b.amount) - Math.abs(a.amount) : b.date.localeCompare(a.date)
+      )
+  }, [data?.reviewQueue, currency])
+
   const summaryStats = useMemo(() => {
     const metricRows = data?.metricsByCurrency ?? []
     const selected = metricRows.filter((r) => !currency || r.currency === currency)
@@ -187,11 +482,16 @@ export function DashboardPage() {
     )
     const spendTotal = selected.reduce((sum, row) => sum + row.totalSpend, 0)
     const creditTotal = selected.reduce((sum, row) => sum + row.totalCredits, 0)
-    const netTotal = selected.reduce((sum, row) => sum + row.netAmount, 0)
+    const paymentTotal = selected.reduce((sum, row) => sum + row.totalPayments, 0)
+    const netSpendTotal = selected.reduce((sum, row) => sum + row.netSpend, 0)
     const txCount = selected.reduce((sum, row) => sum + row.transactionCount, 0)
     const prevSpendTotal = prevSelected.reduce((sum, row) => sum + row.totalSpend, 0)
     const prevCreditTotal = prevSelected.reduce((sum, row) => sum + row.totalCredits, 0)
-    const prevNetTotal = prevSelected.reduce((sum, row) => sum + row.netAmount, 0)
+    const prevPaymentTotal = prevSelected.reduce(
+      (sum, row) => sum + row.totalPayments,
+      0
+    )
+    const prevNetSpendTotal = prevSelected.reduce((sum, row) => sum + row.netSpend, 0)
     const prevTxCount = prevSelected.reduce((sum, row) => sum + row.transactionCount, 0)
     const singleCurrency = selected.length === 1 ? selected[0].currency : null
     const comparisonHint =
@@ -200,7 +500,8 @@ export function DashboardPage() {
         : `${previousRange.from} to ${previousRange.to}`
     const spendDelta = spendTotal - prevSpendTotal
     const creditDelta = creditTotal - prevCreditTotal
-    const netDelta = netTotal - prevNetTotal
+    const paymentDelta = paymentTotal - prevPaymentTotal
+    const netSpendDelta = netSpendTotal - prevNetSpendTotal
     const txDelta = txCount - prevTxCount
     const formatDeltaMoney = (v: number): string => {
       const abs = Math.abs(v)
@@ -220,20 +521,28 @@ export function DashboardPage() {
         singleCurrency != null
           ? formatMoney(creditTotal, singleCurrency)
           : `${selected.length} currencies`,
-      netLabel:
+      paymentsLabel:
         singleCurrency != null
-          ? formatMoney(netTotal, singleCurrency)
+          ? formatMoney(paymentTotal, singleCurrency)
+          : `${selected.length} currencies`,
+      netSpendLabel:
+        singleCurrency != null
+          ? formatMoney(netSpendTotal, singleCurrency)
           : `${selected.length} currencies`,
       moneyHint:
         singleCurrency != null ? `In ${singleCurrency}` : 'Across selected currencies',
       txCount,
       spendDeltaLabel: formatDeltaMoney(spendDelta),
       creditsDeltaLabel: formatDeltaMoney(creditDelta),
-      netDeltaLabel: formatDeltaMoney(netDelta),
+      paymentsDeltaLabel: formatDeltaMoney(paymentDelta),
+      netSpendDeltaLabel: formatDeltaMoney(netSpendDelta),
       txDeltaLabel: formatDeltaCount(txDelta),
       comparisonHint,
       categoryCount: chartData.length,
       monthCount: monthlyChartData.length,
+      merchantCount: merchantReportData.length,
+      accountCount: accountReportData.length,
+      reviewCount: reviewQueueData.length,
     }
   }, [
     data?.metricsByCurrency,
@@ -242,6 +551,9 @@ export function DashboardPage() {
     currency,
     chartData.length,
     monthlyChartData.length,
+    merchantReportData.length,
+    accountReportData.length,
+    reviewQueueData.length,
   ])
 
   const activeRangeLabel = useMemo(() => {
@@ -250,6 +562,31 @@ export function DashboardPage() {
     if (dateFrom) return `From ${dateFrom}`
     return `Up to ${dateTo}`
   }, [dateFrom, dateTo])
+
+  const quickRanges = useMemo(
+    () => [
+      { key: '3m', label: '3 months', ...getRollingMonthRange(3) },
+      { key: '6m', label: '6 months', ...getRollingMonthRange(6) },
+      { key: 'ytd', label: 'YTD', ...getYearToDateRange() },
+      { key: 'all', label: 'All time', from: '', to: '' },
+    ],
+    []
+  )
+
+  const activeQuickRange = useMemo(
+    () =>
+      quickRanges.find((range) => range.from === dateFrom && range.to === dateTo)?.key ??
+      null,
+    [quickRanges, dateFrom, dateTo]
+  )
+
+  const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
+  const formatDashboardAmount = (value: number): string =>
+    displayCurrency
+      ? formatMoney(value, displayCurrency)
+      : new Intl.NumberFormat(undefined, {
+          maximumFractionDigits: 2,
+        }).format(value)
 
   return (
     <div className="page">
@@ -307,6 +644,22 @@ export function DashboardPage() {
             </button>
           )}
         </div>
+        <div className="quickFilters" aria-label="Quick date ranges">
+          {quickRanges.map((range) => (
+            <button
+              key={range.key}
+              type="button"
+              className="quickFilterButton"
+              aria-pressed={activeQuickRange === range.key}
+              onClick={() => {
+                setDateFrom(range.from)
+                setDateTo(range.to)
+              }}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
         <p className="muted" style={{ marginBottom: 0 }}>
           Showing <strong>{currency || 'all currencies'}</strong> for{' '}
           <strong>{activeRangeLabel}</strong>.
@@ -325,19 +678,33 @@ export function DashboardPage() {
           </p>
         </article>
         <article className="card statCard">
-          <p className="statLabel">Credits / refunds</p>
+          <p className="statLabel">Refunds / credits</p>
           <p className="statValue">{summaryStats.creditsLabel}</p>
-          <p className="muted statHint">Positive transaction amounts.</p>
+          <p className="muted statHint">
+            Positive amounts excluding payments and transfers.
+          </p>
           <p className="muted statDelta">
             vs previous period: {summaryStats.creditsDeltaLabel}
           </p>
         </article>
         <article className="card statCard">
-          <p className="statLabel">Net cashflow</p>
-          <p className="statValue">{summaryStats.netLabel}</p>
-          <p className="muted statHint">Signed sum: credits + charges.</p>
+          <p className="statLabel">Payments / transfers</p>
+          <p className="statValue">{summaryStats.paymentsLabel}</p>
+          <p className="muted statHint">
+            Card payments and transfer-like inflows, tracked separately.
+          </p>
           <p className="muted statDelta">
-            vs previous period: {summaryStats.netDeltaLabel}
+            vs previous period: {summaryStats.paymentsDeltaLabel}
+          </p>
+        </article>
+        <article className="card statCard">
+          <p className="statLabel">Net spend</p>
+          <p className="statValue">{summaryStats.netSpendLabel}</p>
+          <p className="muted statHint">
+            Spend minus refunds/credits. Payments excluded.
+          </p>
+          <p className="muted statDelta">
+            vs previous period: {summaryStats.netSpendDeltaLabel}
           </p>
         </article>
         <article className="card statCard">
@@ -359,46 +726,189 @@ export function DashboardPage() {
           <p className="muted statHint">Shown in monthly trend</p>{' '}
           <p className="muted statDelta">{summaryStats.comparisonHint}</p>
         </article>
+        <article className="card statCard">
+          <p className="statLabel">Merchants</p>
+          <p className="statValue">{summaryStats.merchantCount}</p>
+          <p className="muted statHint">Distinct merchants in the current filters</p>
+        </article>
+        <article className="card statCard">
+          <p className="statLabel">Accounts</p>
+          <p className="statValue">{summaryStats.accountCount}</p>
+          <p className="muted statHint">Accounts contributing activity in this view</p>
+        </article>
+        <article className="card statCard">
+          <p className="statLabel">Needs review</p>
+          <p className="statValue">{summaryStats.reviewCount}</p>
+          <p className="muted statHint">Flagged transactions still needing a pass</p>
+        </article>
+      </section>
+
+      <section className="card dashboardBusinessSpotlight" aria-busy={loading}>
+        <div className="businessSpotlightHeader">
+          <div>
+            <h2>Business vs personal</h2>
+            <p className="muted">
+              A direct split of current net spend so business charges do not get lost
+              in the overall totals.
+            </p>
+          </div>
+          <div className="businessSpotlightTotals">
+            <p className="businessSpotlightTotalLabel">Combined net spend</p>
+            <p className="businessSpotlightTotalValue">
+              {formatDashboardAmount(businessSpotlight.totalNetSpend)}
+            </p>
+          </div>
+        </div>
+
+        <div className="businessSpotlightGrid">
+          {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
+            const share =
+              businessSpotlight.totalNetSpend > 0
+                ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
+                : 0
+            return (
+              <article
+                key={row.label}
+                className={`businessFocusCard businessFocusCard--${row.tone}`}
+              >
+                <p className="businessFocusLabel">{row.label}</p>
+                <p className="businessFocusValue">
+                  {formatDashboardAmount(row.netSpend)}
+                </p>
+                <p className="businessFocusShare">
+                  {businessSpotlight.totalNetSpend > 0
+                    ? `${share.toFixed(0)}% of current net spend`
+                    : 'No net spend in current filters'}
+                </p>
+                <dl className="businessFocusMetrics">
+                  <div>
+                    <dt>Gross spend</dt>
+                    <dd>{formatDashboardAmount(row.totalSpend)}</dd>
+                  </div>
+                  <div>
+                    <dt>Credits</dt>
+                    <dd>{formatDashboardAmount(row.totalCredits)}</dd>
+                  </div>
+                </dl>
+              </article>
+            )
+          })}
+        </div>
+
+        <div className="businessSharePanel">
+          <div className="businessShareLabels" aria-hidden="true">
+            <span>Business {businessSpotlight.businessShare.toFixed(0)}%</span>
+            <span>Personal {businessSpotlight.personalShare.toFixed(0)}%</span>
+          </div>
+          <div
+            className="businessShareBar"
+            role="img"
+            aria-label={`Business ${businessSpotlight.businessShare.toFixed(
+              0
+            )} percent, personal ${businessSpotlight.personalShare.toFixed(
+              0
+            )} percent of net spend`}
+          >
+            <span
+              className="businessShareFill businessShareFill--business"
+              style={{ width: `${businessSpotlight.businessShare}%` }}
+            />
+            <span
+              className="businessShareFill businessShareFill--personal"
+              style={{ width: `${businessSpotlight.personalShare}%` }}
+            />
+          </div>
+          <p className="muted businessShareCaption">
+            Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
+            Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
+          </p>
+        </div>
       </section>
 
       <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Net by category</h2>
+        <h2>Monthly breakdown</h2>
         <p className="muted">
-          Signed totals by category (charges negative, credits positive).
+          Gross spend, refunds/credits, and payments/transfers by month.
         </p>
         <div className="chartWrap">
-          {!loading && chartData.length === 0 ? (
-            <div>
-              <p className="emptyState">
-                No category totals for these filters. Your transactions may be in a
-                different currency or outside this date window.
-              </p>
-              <div className="row" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-                {currency ? (
-                  <button type="button" onClick={() => setCurrency('')}>
-                    Show all currencies
-                  </button>
-                ) : null}
-                {(dateFrom || dateTo) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDateFrom('')
-                      setDateTo('')
-                    }}
-                  >
-                    Show all dates
-                  </button>
-                )}
+          {monthlyBreakdownData.length === 0 ? (
+            !loading ? (
+              <p className="emptyState">No monthly breakdown data for these filters.</p>
+            ) : null
+          ) : (
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={monthlyBreakdownData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  formatter={(value) => {
+                    const v = typeof value === 'number' ? value : Number(value)
+                    if (!Number.isFinite(v)) return ''
+                    return formatDashboardAmount(v)
+                  }}
+                />
+                <Legend />
+                <Bar dataKey="totalSpend" name="Spend" fill="var(--accent)" />
+                <Bar dataKey="totalCredits" name="Refunds / credits" fill="#22c55e" />
+                <Bar
+                  dataKey="totalPayments"
+                  name="Payments / transfers"
+                  fill="#94a3b8"
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </section>
+
+      <section className="card dashboardChartCard" aria-busy={loading}>
+        <h2>Activity by category</h2>
+        <p className="muted">
+          Signed totals by category. Payments and transfers are excluded; refunds and
+          credits remain positive.
+        </p>
+        <div className="chartWrap">
+          {chartData.length === 0 ? (
+            !loading ? (
+              <div>
+                <p className="emptyState">
+                  No category totals for these filters. Your transactions may be in a
+                  different currency or outside this date window.
+                </p>
+                <div className="row" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                  {currency ? (
+                    <button type="button" onClick={() => setCurrency('')}>
+                      Show all currencies
+                    </button>
+                  ) : null}
+                  {(dateFrom || dateTo) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateFrom('')
+                        setDateTo('')
+                      }}
+                    >
+                      Show all dates
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ) : !loading ? (
+            ) : null
+          ) : (
             <ResponsiveContainer width="100%" height={320}>
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis />
                 <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -413,25 +923,101 @@ export function DashboardPage() {
                 <Bar dataKey="total" name="Amount" fill="var(--accent)" />
               </BarChart>
             </ResponsiveContainer>
-          ) : null}
+          )}
+        </div>
+      </section>
+
+      <section className="card dashboardChartCard" aria-busy={loading}>
+        <h2>Net spend by split</h2>
+        <p className="muted">
+          Spend less refunds/credits by ownership split. Payments stay excluded.
+        </p>
+        <div className="chartWrap">
+          {splitReportData.length === 0 ? (
+            !loading ? (
+              <p className="emptyState">No split report data for these filters.</p>
+            ) : null
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={splitReportData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis />
+                <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  formatter={(value) => {
+                    const v = typeof value === 'number' ? value : Number(value)
+                    if (!Number.isFinite(v)) return ''
+                    return formatDashboardAmount(v)
+                  }}
+                />
+                <Legend />
+                <Bar dataKey="netSpend" name="Net spend" fill="#f59e0b" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </section>
+
+      <section className="card dashboardChartCard" aria-busy={loading}>
+        <h2>Net spend by business flag</h2>
+        <p className="muted">
+          Same split, charted directly with separate business and personal colors.
+        </p>
+        <div className="chartWrap">
+          {businessReportData.length === 0 ? (
+            !loading ? (
+              <p className="emptyState">No business breakdown data for these filters.</p>
+            ) : null
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={businessReportData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis />
+                <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  formatter={(value) => {
+                    const v = typeof value === 'number' ? value : Number(value)
+                    if (!Number.isFinite(v)) return ''
+                    return formatDashboardAmount(v)
+                  }}
+                />
+                <Legend />
+                <Bar dataKey="netSpend" name="Net spend">
+                  {businessReportData.map((entry) => (
+                    <Cell key={entry.label} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </section>
 
       <section className="card dashboardChartCard">
-        <h2>Net by month</h2>
+        <h2>Activity by month</h2>
         <p className="muted">
-          One line per currency using signed monthly totals.
+          One line per currency using signed monthly totals, excluding payments and
+          transfers.
         </p>
         <div className="chartWrap">
-          {!loading && monthlyChartData.length === 0 ? (
-            <p className="muted">No transactions in this range.</p>
-          ) : !loading ? (
+          {monthlyChartData.length === 0 ? (
+            !loading ? <p className="muted">No transactions in this range.</p> : null
+          ) : (
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={monthlyChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
                 <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                   formatter={(value, name) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -452,7 +1038,189 @@ export function DashboardPage() {
                 ))}
               </LineChart>
             </ResponsiveContainer>
-          ) : null}
+          )}
+        </div>
+      </section>
+
+      <section className="card dashboardChartCard" aria-busy={loading}>
+        <h2>Category report</h2>
+        <p className="muted">
+          Top categories ranked by net spend for the current filters.
+        </p>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                {!currency && <th>Currency</th>}
+                <th>Category</th>
+                <th>Spend</th>
+                <th>Refunds / credits</th>
+                <th>Net spend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && categoryReportData.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={currency ? 4 : 5}
+                    className="emptyStateCell"
+                  >
+                    <p className="emptyState">
+                      No category report data for these filters.
+                    </p>
+                  </td>
+                </tr>
+              ) : null}
+              {categoryReportData.slice(0, 12).map((row) => (
+                  <tr key={`${row.currency}:${row.category ?? 'uncategorized'}`}>
+                    {!currency && <td>{row.currency}</td>}
+                    <td>{row.category ?? '(uncategorized)'}</td>
+                    <td>{formatMoney(row.totalSpend, row.currency)}</td>
+                    <td>{formatMoney(row.totalCredits, row.currency)}</td>
+                    <td>{formatMoney(row.netSpend, row.currency)}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card dashboardChartCard" aria-busy={loading}>
+        <h2>Merchant report</h2>
+        <p className="muted">
+          Where the money is actually going, ranked by net spend with refunds,
+          payments, and review backlog shown beside it.
+        </p>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                {!currency && <th>Currency</th>}
+                <th>Merchant</th>
+                <th>Transactions</th>
+                <th>Spend</th>
+                <th>Refunds / credits</th>
+                <th>Payments</th>
+                <th>Net spend</th>
+                <th>Needs review</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && merchantReportData.length === 0 ? (
+                <tr>
+                  <td colSpan={currency ? 8 : 9} className="emptyStateCell">
+                    <p className="emptyState">
+                      No merchant-level activity for these filters.
+                    </p>
+                  </td>
+                </tr>
+              ) : null}
+              {merchantReportData.slice(0, 12).map((row) => (
+                  <tr key={`${row.currency}:${row.merchant}`}>
+                    {!currency && <td>{row.currency}</td>}
+                    <td>{row.merchant}</td>
+                    <td>{row.transactionCount}</td>
+                    <td>{formatMoney(row.totalSpend, row.currency)}</td>
+                    <td>{formatMoney(row.totalCredits, row.currency)}</td>
+                    <td>{formatMoney(row.totalPayments, row.currency)}</td>
+                    <td>{formatMoney(row.netSpend, row.currency)}</td>
+                    <td>{row.reviewCount}</td>
+                    <td>{row.lastDate}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card dashboardChartCard" aria-busy={loading}>
+        <h2>Account report</h2>
+        <p className="muted">
+          Which accounts are driving the totals, including payment volume and review
+          backlog.
+        </p>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                {!currency && <th>Currency</th>}
+                <th>Account</th>
+                <th>Transactions</th>
+                <th>Spend</th>
+                <th>Refunds / credits</th>
+                <th>Payments</th>
+                <th>Net spend</th>
+                <th>Needs review</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && accountReportData.length === 0 ? (
+                <tr>
+                  <td colSpan={currency ? 7 : 8} className="emptyStateCell">
+                    <p className="emptyState">
+                      No account-level totals for these filters.
+                    </p>
+                  </td>
+                </tr>
+              ) : null}
+              {accountReportData.map((row) => (
+                  <tr key={`${row.currency}:${row.accountId}`}>
+                    {!currency && <td>{row.currency}</td>}
+                    <td>{row.accountShortCode ?? row.accountName}</td>
+                    <td>{row.transactionCount}</td>
+                    <td>{formatMoney(row.totalSpend, row.currency)}</td>
+                    <td>{formatMoney(row.totalCredits, row.currency)}</td>
+                    <td>{formatMoney(row.totalPayments, row.currency)}</td>
+                    <td>{formatMoney(row.netSpend, row.currency)}</td>
+                    <td>{row.reviewCount}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card dashboardChartCard" aria-busy={loading}>
+        <h2>Review queue</h2>
+        <p className="muted">
+          Recent flagged transactions from the current view so you can see what still
+          needs cleanup.
+        </p>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                {!currency && <th>Currency</th>}
+                <th>Merchant</th>
+                <th>Account</th>
+                <th>Category</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && reviewQueueData.length === 0 ? (
+                <tr>
+                  <td colSpan={currency ? 5 : 6} className="emptyStateCell">
+                    <p className="emptyState">
+                      No flagged transactions in the current filters.
+                    </p>
+                  </td>
+                </tr>
+              ) : null}
+              {reviewQueueData.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.date}</td>
+                    {!currency && <td>{row.currency}</td>}
+                    <td>{row.merchant}</td>
+                    <td>{row.accountName}</td>
+                    <td>{row.category ?? '(uncategorized)'}</td>
+                    <td>{formatMoney(row.amount, row.currency)}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>
