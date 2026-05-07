@@ -86,9 +86,9 @@ Backend service:
 
 ```bash
 Root Directory: /
-Build Command: yarn railway:backend:build
-Pre-deploy Command: yarn railway:backend:migrate
-Start Command: yarn railway:backend:start
+Build Command: yarn railway:build
+Pre-deploy Command: yarn railway:migrate
+Start Command: yarn railway:start
 Healthcheck Path: /api/health
 ```
 
@@ -96,8 +96,8 @@ Frontend service:
 
 ```bash
 Root Directory: /
-Build Command: yarn railway:frontend:build
-Start Command: yarn railway:frontend:start
+Build Command: yarn railway:build
+Start Command: yarn railway:start
 Healthcheck Path: /
 ```
 
@@ -113,6 +113,15 @@ DATABASE_PATH=/data/cashflow.sqlite
 CSV_UPLOAD_DIR=/data/uploads/csv
 RECEIPTS_UPLOAD_DIR=/data/uploads/receipts
 DEFAULT_CURRENCY=CAD
+RAILWAY_DEPLOY_TARGET=backend
+YARN_PRODUCTION=false
+```
+
+For the frontend service, set:
+
+```bash
+RAILWAY_DEPLOY_TARGET=frontend
+VITE_API_BASE=https://your-backend-service-url
 YARN_PRODUCTION=false
 ```
 
