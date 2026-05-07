@@ -38,6 +38,16 @@ function run(command, args, env = {}) {
   process.exit(result.status ?? 1);
 }
 
+function assertFrontendApiBase() {
+  if (process.env.VITE_API_BASE) return;
+
+  console.error(
+    'VITE_API_BASE is required for the Railway frontend service. ' +
+      'Set it to the backend public URL, for example: https://backend-production-xxxx.up.railway.app'
+  );
+  process.exit(1);
+}
+
 if (mode === 'migrate') {
   run('yarn', ['workspace', 'cashflow-backend', 'run', 'db:migrate'], {
     NODE_ENV: 'production',
@@ -46,6 +56,7 @@ if (mode === 'migrate') {
 
 if (mode === 'build') {
   if (target === 'frontend') {
+    assertFrontendApiBase();
     run('yarn', ['workspace', 'frontend', 'run', 'build']);
   }
   if (target === 'backend') {
@@ -61,6 +72,7 @@ if (mode === 'build') {
     { stdio: 'inherit', env: process.env }
   );
   if (backend.status !== 0) process.exit(backend.status ?? 1);
+  assertFrontendApiBase();
   run('yarn', ['workspace', 'frontend', 'run', 'build']);
 }
 

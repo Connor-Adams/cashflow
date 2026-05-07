@@ -1,11 +1,14 @@
 const base = import.meta.env.VITE_API_BASE ?? ''
 
 async function parseError(res: Response): Promise<string> {
+  const raw = await res.text()
+  if (!raw) return res.statusText
+
   try {
-    const j = await res.json()
-    return (j as { error?: string }).error ?? res.statusText
+    const j = JSON.parse(raw) as { error?: string }
+    return j.error ?? res.statusText
   } catch {
-    return await res.text()
+    return raw
   }
 }
 
