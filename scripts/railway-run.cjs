@@ -90,6 +90,12 @@ if (mode === 'start') {
     ]);
   }
   if (target === 'backend') {
+    const migrate = spawnSync(
+      'yarn',
+      ['workspace', 'cashflow-backend', 'run', 'db:migrate'],
+      { stdio: 'inherit', env: { ...process.env, NODE_ENV: 'production' } }
+    );
+    if (migrate.status !== 0) process.exit(migrate.status ?? 1);
     run('yarn', ['workspace', 'cashflow-backend', 'run', 'start'], {
       NODE_ENV: 'production',
     });
