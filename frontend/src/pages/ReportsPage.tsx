@@ -7,6 +7,9 @@ import { useSessionState } from '../lib/useSessionState'
 
 type PartnerRow = {
   currency: string
+  ownershipType?: string
+  ownershipContactId?: number | null
+  contactName?: string | null
   sumMy: number
   sumPartner: number
 }
@@ -262,6 +265,7 @@ export function ReportsPage() {
               <thead>
                 <tr>
                   <th>Currency</th>
+                  <th>Ownership</th>
                   <th>My share</th>
                   <th>Partner share</th>
                 </tr>
@@ -269,7 +273,7 @@ export function ReportsPage() {
               <tbody>
                 {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
                   <tr>
-                    <td colSpan={3} className="emptyStateCell">
+                    <td colSpan={4} className="emptyStateCell">
                       <p className="emptyState">
                         No partner-split data for these filters. Import transactions or widen the date range.
                       </p>
@@ -277,8 +281,13 @@ export function ReportsPage() {
                   </tr>
                 )}
                 {partner?.byCurrency.map((r) => (
-                  <tr key={r.currency}>
+                  <tr key={`${r.currency}-${r.ownershipType ?? 'legacy'}-${r.ownershipContactId ?? 'none'}`}>
                     <td>{r.currency}</td>
+                    <td>
+                      {r.ownershipType === 'contact'
+                        ? r.contactName ?? 'Contact'
+                        : r.ownershipType ?? 'legacy split'}
+                    </td>
                     <td>{formatMoney(r.sumMy, r.currency)}</td>
                     <td>{formatMoney(r.sumPartner, r.currency)}</td>
                   </tr>

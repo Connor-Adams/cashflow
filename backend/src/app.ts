@@ -10,6 +10,9 @@ import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
 import aiRouter from './routes/ai';
 import receiptsRouter from './routes/receipts';
+import authRouter from './routes/auth';
+import contactsRouter from './routes/contacts';
+import { attachAuth, requireAuth } from './auth/middleware';
 
 const app = express();
 
@@ -27,11 +30,15 @@ app.use(
   })
 );
 app.use(express.json({ limit: '2mb' }));
+app.use(attachAuth);
 
 app.use('/api/health', healthRouter);
+app.use('/api/auth', authRouter);
+app.use('/api', requireAuth);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/rules', rulesRouter);
+app.use('/api/contacts', contactsRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/ai', aiRouter);

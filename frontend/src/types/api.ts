@@ -1,1 +1,8 @@
-export type { Account, Transaction, Rule, Paginated } from '@cashflow/shared'
+export type {
+  Account,
+  AuthUser,
+  Contact,
+  Transaction,
+  Rule,
+  Paginated,
+} from '@cashflow/shared'

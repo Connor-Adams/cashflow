@@ -55,8 +55,11 @@ export function findBestRule(
   return { rule: best, ambiguous: false };
 }
 
-export async function loadAllRules(): Promise<RuleRow[]> {
-  const rows = await Rule.findAll({ order: [['id', 'ASC']] });
+export async function loadAllRules(householdId?: number | null): Promise<RuleRow[]> {
+  const rows = await Rule.findAll({
+    where: householdId != null ? { householdId } : undefined,
+    order: [['id', 'ASC']],
+  });
   return rows.map((r) => r.toJSON() as RuleRow);
 }
 

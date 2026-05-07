@@ -14,6 +14,8 @@ export class Rule extends Model<
 > {
   declare id: CreationOptional<number>;
   declare merchantPattern: string;
+  declare householdId: number | null;
+  declare createdByUserId: number | null;
   declare matchKind: string;
   declare priority: number;
   declare category: string | null;
@@ -38,6 +40,16 @@ export function initRule(sequelize: Sequelize): typeof Rule {
         type: DataTypes.STRING(512),
         field: 'merchant_pattern',
         allowNull: false,
+      },
+      householdId: {
+        type: DataTypes.INTEGER,
+        field: 'household_id',
+        allowNull: true,
+      },
+      createdByUserId: {
+        type: DataTypes.INTEGER,
+        field: 'created_by_user_id',
+        allowNull: true,
       },
       matchKind: {
         type: DataTypes.STRING(16),

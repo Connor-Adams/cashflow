@@ -1,6 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import { useAuth } from '../lib/useAuth'
 
 export function Layout() {
+  const auth = useAuth()
   return (
     <div className="layout">
       <header className="header">
@@ -43,7 +45,22 @@ export function Layout() {
           >
             Reports
           </NavLink>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
+          >
+            Settings
+          </NavLink>
         </nav>
+        <div className="userMenu">
+          <span>{auth.user?.displayName}</span>
+          {auth.user?.globalRole === 'superadmin' && (
+            <span className="superadminBadge">God mode</span>
+          )}
+          <button type="button" onClick={() => void auth.logout()}>
+            Log out
+          </button>
+        </div>
       </header>
       <main className="main">
         <Outlet />

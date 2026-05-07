@@ -15,6 +15,9 @@ export class Account extends Model<
   declare id: CreationOptional<number>;
   declare name: string;
   declare owner: string;
+  declare householdId: number | null;
+  declare ownerUserId: number | null;
+  declare visibility: CreationOptional<string>;
   declare shortCode: string | null;
   declare defaultCurrency: string | null;
   declare readonly createdAt: CreationOptional<Date>;
@@ -34,6 +37,21 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         type: DataTypes.STRING(16),
         allowNull: false,
         defaultValue: 'me',
+      },
+      householdId: {
+        type: DataTypes.INTEGER,
+        field: 'household_id',
+        allowNull: true,
+      },
+      ownerUserId: {
+        type: DataTypes.INTEGER,
+        field: 'owner_user_id',
+        allowNull: true,
+      },
+      visibility: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        defaultValue: 'private',
       },
       shortCode: {
         type: DataTypes.STRING(64),

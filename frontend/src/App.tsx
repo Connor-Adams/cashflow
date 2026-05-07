@@ -5,9 +5,18 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
+import { AuthPage } from './pages/AuthPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { AuthProvider } from './lib/auth'
+import { useAuth } from './lib/useAuth'
 import './App.css'
 
-export default function App() {
+function AppRoutes() {
+  const auth = useAuth()
+  if (auth.loading) {
+    return <main className="authShell"><p className="muted">Loading...</p></main>
+  }
+  if (!auth.user) return <AuthPage />
   return (
     <BrowserRouter>
       <Routes>
@@ -17,9 +26,18 @@ export default function App() {
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   )
 }

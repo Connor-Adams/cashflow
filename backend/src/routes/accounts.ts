@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import { Account, Transaction, sequelize } from '../models';
 import * as env from '../config/env';
+import { currentAuth } from '../auth/middleware';
+import { visibleAccountWhere } from '../auth/scope';
 
 const router = Router();
 
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const rows = await Account.findAll({ order: [['name', 'ASC']] });
+    const rows = await Account.findAll({
+      where: visibleAccountWhere(req),
+      order: [['name', 'ASC']],
+    });
     res.json(rows);
   } catch (e) {
     next(e);
@@ -15,7 +20,8 @@ router.get('/', async (_req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { name, owner, shortCode, defaultCurrency } = (req.body || {}) as Record<
+    const { user, household } = currentAuth(req);
+    const { name, owner, shortCode, defaultCurrency, visibility } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -30,6 +36,9 @@ router.post('/', async (req, res, next) => {
     const row = await Account.create({
       name: String(name),
       owner: (owner as string) || 'me',
+      householdId: household.id,
+      ownerUserId: user.id,
+      visibility: visibility === 'shared' ? 'shared' : 'private',
       shortCode: (shortCode as string) || null,
       defaultCurrency: dc,
     });
@@ -46,12 +55,12 @@ router.patch('/:id', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    const account = await Account.findByPk(id);
+    const account = await Account.findOne({ where: { id, ...visibleAccountWhere(req) } });
     if (!account) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const { name, owner, shortCode, defaultCurrency } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -82,6 +91,9 @@ router.patch('/:id', async (req, res, next) => {
         value ? value.toUpperCase().slice(0, 3) : env.defaultCurrency
       );
     }
+    if (visibility !== undefined) {
+      account.set('visibility', visibility === 'shared' ? 'shared' : 'private');
+    }
     await account.save();
     res.json(account);
   } catch (e) {
@@ -96,7 +108,7 @@ router.delete('/:id', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    const account = await Account.findByPk(id);
+    const account = await Account.findOne({ where: { id, ...visibleAccountWhere(req) } });
     if (!account) {
       res.status(404).json({ error: 'Not found' });
       return;

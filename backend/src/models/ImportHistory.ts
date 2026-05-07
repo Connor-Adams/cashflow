@@ -14,6 +14,8 @@ export class ImportHistory extends Model<
 > {
   declare id: CreationOptional<number>;
   declare fileName: string;
+  declare householdId: number | null;
+  declare createdByUserId: number | null;
   declare filePathSafe: string;
   declare contentHash: string;
   declare batchLabel: string;
@@ -38,6 +40,16 @@ export function initImportHistory(sequelize: Sequelize): typeof ImportHistory {
         type: DataTypes.STRING(512),
         field: 'file_name',
         allowNull: false,
+      },
+      householdId: {
+        type: DataTypes.INTEGER,
+        field: 'household_id',
+        allowNull: true,
+      },
+      createdByUserId: {
+        type: DataTypes.INTEGER,
+        field: 'created_by_user_id',
+        allowNull: true,
       },
       filePathSafe: {
         type: DataTypes.STRING(1024),

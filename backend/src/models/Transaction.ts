@@ -14,6 +14,11 @@ export class Transaction extends Model<
 > {
   declare id: CreationOptional<number>;
   declare accountId: number;
+  declare householdId: number | null;
+  declare createdByUserId: number | null;
+  declare visibility: CreationOptional<string>;
+  declare ownershipType: CreationOptional<string>;
+  declare ownershipContactId: number | null;
   declare importBatch: string;
   /** DATEONLY — ISO date string */
   declare date: string;
@@ -68,6 +73,32 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         type: DataTypes.INTEGER,
         field: 'account_id',
         allowNull: false,
+      },
+      householdId: {
+        type: DataTypes.INTEGER,
+        field: 'household_id',
+        allowNull: true,
+      },
+      createdByUserId: {
+        type: DataTypes.INTEGER,
+        field: 'created_by_user_id',
+        allowNull: true,
+      },
+      visibility: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        defaultValue: 'private',
+      },
+      ownershipType: {
+        type: DataTypes.STRING(16),
+        field: 'ownership_type',
+        allowNull: false,
+        defaultValue: 'me',
+      },
+      ownershipContactId: {
+        type: DataTypes.INTEGER,
+        field: 'ownership_contact_id',
+        allowNull: true,
       },
       importBatch: {
         type: DataTypes.STRING(128),

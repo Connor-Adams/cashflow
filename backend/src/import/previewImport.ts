@@ -21,6 +21,7 @@ export async function previewImportCsv(opts: {
   buffer: Buffer;
   profileId: string;
   accountId: number;
+  householdId?: number | null;
 }): Promise<
   | { ok: false; error: string }
   | {
@@ -31,7 +32,12 @@ export async function previewImportCsv(opts: {
       profileInferred: boolean;
     }
 > {
-  const account = await Account.findByPk(opts.accountId);
+  const account = await Account.findOne({
+    where: {
+      id: opts.accountId,
+      ...(opts.householdId != null ? { householdId: opts.householdId } : {}),
+    },
+  });
   if (!account) {
     return { ok: false, error: 'No account with that id' };
   }

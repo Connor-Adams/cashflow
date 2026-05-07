@@ -40,12 +40,13 @@ function isSequelizeUniqueLike(e: unknown): boolean {
   );
 }
 
-export async function resolveAccount(cardToken: string) {
+export async function resolveAccount(cardToken: string, householdId?: number | null) {
   const token = cardToken.trim();
   if (!token) return null;
   const lower = token.toLowerCase();
   return Account.findOne({
     where: {
+      ...(householdId != null ? { householdId } : {}),
       [Op.or]: [
         sequelize.where(sequelize.fn('lower', sequelize.col('short_code')), lower),
         sequelize.where(sequelize.fn('lower', sequelize.col('name')), lower),
@@ -60,6 +61,8 @@ export type ImportCsvFileOpts = {
   profileId?: string | null;
   accountId?: number | string | null;
   batchLabel?: string | null;
+  householdId?: number | null;
+  userId?: number | null;
 };
 
 /**
@@ -72,7 +75,11 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   const contentHash = hashContent(buf);
 
   const prior = await ImportHistory.findOne({
-    where: { contentHash, status: 'success' },
+    where: {
+      contentHash,
+      status: 'success',
+      ...(opts.householdId != null ? { householdId: opts.householdId } : {}),
+    },
   });
   const priorRows = prior?.rowCount;
   if (prior != null && priorRows != null && priorRows > 0) {
@@ -86,7 +93,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     };
   }
 
-  const rules = await loadAllRules();
+  const rules = await loadAllRules(opts.householdId);
   const startedAt = new Date();
   let account: AccountModel;
   let importBatch: string;
@@ -104,10 +111,17 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         errorMessage: 'Invalid accountId',
         startedAt,
         finishedAt: new Date(),
+        householdId: opts.householdId ?? null,
+        createdByUserId: opts.userId ?? null,
       });
       return { file: name, skipped: true, reason: 'invalid_account' };
     }
-    const byId = await Account.findByPk(id);
+    const byId = await Account.findOne({
+      where: {
+        id,
+        ...(opts.householdId != null ? { householdId: opts.householdId } : {}),
+      },
+    });
     if (!byId) {
       await ImportHistory.create({
         fileName: name,
@@ -119,6 +133,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         errorMessage: `No account with id ${id}`,
         startedAt,
         finishedAt: new Date(),
+        householdId: opts.householdId ?? null,
+        createdByUserId: opts.userId ?? null,
       });
       return { file: name, skipped: true, reason: 'unknown_account' };
     }
@@ -143,10 +159,12 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           'Filename must match CardName_YYYY_MM.csv (e.g. Amex_2025_01.csv), or pass accountId when uploading from the web',
         startedAt,
         finishedAt: new Date(),
+        householdId: opts.householdId ?? null,
+        createdByUserId: opts.userId ?? null,
       });
       return { file: name, skipped: true, reason: 'bad_filename' };
     }
-    const resolved = await resolveAccount(meta.cardToken);
+    const resolved = await resolveAccount(meta.cardToken, opts.householdId);
     if (!resolved) {
       await ImportHistory.create({
         fileName: name,
@@ -158,6 +176,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         errorMessage: `No account matches token "${meta.cardToken}" (short_code or name)`,
         startedAt,
         finishedAt: new Date(),
+        householdId: opts.householdId ?? null,
+        createdByUserId: opts.userId ?? null,
       });
       return { file: name, skipped: true, reason: 'unknown_account' };
     }
@@ -179,6 +199,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       errorMessage: msg,
       startedAt,
       finishedAt: new Date(),
+      householdId: opts.householdId ?? null,
+      createdByUserId: opts.userId ?? null,
     });
     return {
       file: name,
@@ -244,6 +266,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
 
       const txn = Transaction.build({
         accountId: account.id,
+        householdId: opts.householdId ?? account.householdId ?? null,
+        createdByUserId: opts.userId ?? account.ownerUserId ?? null,
+        visibility: account.visibility === 'shared' ? 'shared' : 'private',
+        ownershipType:
+          autoFields.autoSplitType === 'partner' || autoFields.autoSplitType === 'shared'
+            ? autoFields.autoSplitType
+            : 'me',
+        ownershipContactId: null,
         importBatch,
         date: v.date,
         merchantRaw: v.merchantRaw,
@@ -298,6 +328,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         errorMessage: errMsg,
         startedAt,
         finishedAt: new Date(),
+        householdId: opts.householdId ?? account.householdId ?? null,
+        createdByUserId: opts.userId ?? account.ownerUserId ?? null,
       },
       { transaction: t }
     );
@@ -326,7 +358,11 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   return out;
 }
 
-export async function runImport(options: { profileId?: string } = {}) {
+export async function runImport(options: {
+  profileId?: string;
+  householdId?: number | null;
+  userId?: number | null;
+} = {}) {
   const profileId =
     options.profileId ||
     (process.env.CSV_PROFILE_ID &&
@@ -352,6 +388,8 @@ export async function runImport(options: { profileId?: string } = {}) {
       buffer: buf,
       fileName: name,
       profileId,
+      householdId: options.householdId,
+      userId: options.userId,
     });
     results.push(r);
   }

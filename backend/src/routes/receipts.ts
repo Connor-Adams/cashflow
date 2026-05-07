@@ -8,6 +8,7 @@ import { getReceiptsUploadDir } from '../config/receipts';
 import { analyzeReceiptFile } from '../ai/receiptVision';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
+import { visibleTransactionWhere } from '../auth/scope';
 
 const router = Router();
 
@@ -59,7 +60,7 @@ router.post(
         res.status(400).json({ error: 'Missing file field "file"' });
         return;
       }
-      const txn = await Transaction.findByPk(tid);
+      const txn = await Transaction.findOne({ where: { id: tid, ...visibleTransactionWhere(req) } });
       if (!txn) {
         res.status(404).json({ error: 'Transaction not found' });
         return;
@@ -100,6 +101,11 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid transaction id' });
       return;
     }
+    const txn = await Transaction.findOne({ where: { id: tid, ...visibleTransactionWhere(req) } });
+    if (!txn) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
     const rows = await Receipt.findAll({
       where: { transactionId: tid },
       order: [['createdAt', 'DESC']],
@@ -132,6 +138,13 @@ router.get('/receipts/:id/file', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    const txn = await Transaction.findOne({
+      where: { id: row.transactionId, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
     const dir = getReceiptsUploadDir();
     const abs = path.join(dir, row.storedFilename);
     res.setHeader(
@@ -156,6 +169,13 @@ router.delete('/receipts/:id', async (req, res, next) => {
     }
     const row = await Receipt.findByPk(id);
     if (!row) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id: row.transactionId, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
@@ -190,6 +210,13 @@ router.post(
       }
       const row = await Receipt.findByPk(id);
       if (!row) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      const txn = await Transaction.findOne({
+        where: { id: row.transactionId, ...visibleTransactionWhere(req) },
+      });
+      if (!txn) {
         res.status(404).json({ error: 'Not found' });
         return;
       }

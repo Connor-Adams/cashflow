@@ -16,6 +16,7 @@ const dbPath = path.join(backendRoot, 'data', 'test-integration.sqlite');
 const csvUploadDir = path.join(backendRoot, 'uploads', 'test-integration-csv');
 
 let app: import('express').Express;
+let authed: ReturnType<typeof request.agent>;
 
 before(async () => {
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
@@ -39,6 +40,13 @@ before(async () => {
 
   const mod = await import('../../src/app.js');
   app = mod.default;
+  authed = request.agent(app);
+  const register = await authed.post('/api/auth/register').send({
+    email: 'integration@example.com',
+    displayName: 'Integration User',
+    password: 'password123',
+  });
+  assert.equal(register.status, 201);
 });
 
 after(() => {
@@ -51,8 +59,13 @@ after(() => {
   }
 });
 
+test('protected routes require auth', async () => {
+  const res = await request(app).get('/api/accounts');
+  assert.equal(res.status, 401);
+});
+
 test('POST /api/import/upload: creates transactions for valid CSV', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Integration Account',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -62,7 +75,7 @@ test('POST /api/import/upload: creates transactions for valid CSV', async () => 
 
   const csv =
     'Date,Description,Amount\n2025-06-01,Test Cafe,-5.50\n2025-06-02,Shop,-3.00\n';
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -78,7 +91,7 @@ test('POST /api/import/upload: creates transactions for valid CSV', async () => 
 
 test('POST /api/import/upload: 400 when accountId missing', async () => {
   const csv = 'Date,Description,Amount\n2025-06-01,X,-1\n';
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/upload')
     .attach('file', Buffer.from(csv, 'utf8'), {
       filename: 'x.csv',
@@ -90,7 +103,7 @@ test('POST /api/import/upload: 400 when accountId missing', async () => {
 });
 
 test('POST /api/import/upload: returns parseErrors for bad rows', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'ParseErr Account',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -105,7 +118,7 @@ test('POST /api/import/upload: returns parseErrors for bad rows', async () => {
     '2025-06-03,OK Row Two,-3.00\n' +
     ',Missing,-4.00\n';
 
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -132,13 +145,13 @@ test('POST /api/import/upload: returns parseErrors for bad rows', async () => {
 });
 
 test('POST /api/import/upload: rejects non-csv extension', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'A2',
     owner: 'me',
   });
   const accountId = acc.body.id as number;
 
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .attach('file', Buffer.from('a,b\n1,2'), {
@@ -150,13 +163,13 @@ test('POST /api/import/upload: rejects non-csv extension', async () => {
 });
 
 test('GET /api/ai/status returns openai flag', async () => {
-  const res = await request(app).get('/api/ai/status');
+  const res = await authed.get('/api/ai/status');
   assert.equal(res.status, 200);
   assert.equal(typeof res.body.openai, 'boolean');
 });
 
 test('GET /api/import/profiles returns CSV profile list', async () => {
-  const res = await request(app).get('/api/import/profiles');
+  const res = await authed.get('/api/import/profiles');
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body));
   assert.ok(res.body.length >= 1);
@@ -169,7 +182,7 @@ test('GET /api/import/profiles returns CSV profile list', async () => {
 });
 
 test('GET /api/summary/monthly returns points after import', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Monthly Test',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -179,7 +192,7 @@ test('GET /api/summary/monthly returns points after import', async () => {
 
   const csv =
     'Date,Description,Amount\n2025-06-01,Cafe,-5.50\n2025-07-01,Shop,-3.00\n';
-  const up = await request(app)
+  const up = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -189,7 +202,7 @@ test('GET /api/summary/monthly returns points after import', async () => {
     });
   assert.equal(up.status, 200);
 
-  const res = await request(app).get('/api/summary/monthly');
+  const res = await authed.get('/api/summary/monthly');
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body.points));
   assert.ok(res.body.points.length >= 1);
@@ -201,7 +214,7 @@ test('GET /api/summary/monthly returns points after import', async () => {
 });
 
 test('GET /api/summary/dashboard separates payments from refunds', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Dashboard Metrics Account',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -214,7 +227,7 @@ test('GET /api/summary/dashboard separates payments from refunds', async () => {
     '2025-09-01,Grocery Store,Debit,100.00\n' +
     '2025-09-02,ONLINE PAYMENT THANK YOU,Credit,100.00\n' +
     '2025-09-03,MERCHANDISE REFUND,Credit,25.00\n';
-  const up = await request(app)
+  const up = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -225,7 +238,7 @@ test('GET /api/summary/dashboard separates payments from refunds', async () => {
   assert.equal(up.status, 200);
   assert.equal(up.body.inserted, 3);
 
-  const res = await request(app)
+  const res = await authed
     .get('/api/summary/dashboard')
     .query({ currency: 'CAD', dateFrom: '2025-09-01', dateTo: '2025-09-30' });
   assert.equal(res.status, 200);
@@ -323,7 +336,7 @@ test('GET /api/summary/dashboard separates payments from refunds', async () => {
 });
 
 test('GET /api/summary/monthly excludes payment rows from monthly activity', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Monthly Payments Account',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -336,7 +349,7 @@ test('GET /api/summary/monthly excludes payment rows from monthly activity', asy
     '2025-08-01,Grocery Store,Debit,100.00\n' +
     '2025-08-02,ONLINE PAYMENT THANK YOU,Credit,60.00\n' +
     '2025-08-03,MERCHANDISE REFUND,Credit,10.00\n';
-  const up = await request(app)
+  const up = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -346,7 +359,7 @@ test('GET /api/summary/monthly excludes payment rows from monthly activity', asy
     });
   assert.equal(up.status, 200);
 
-  const res = await request(app)
+  const res = await authed
     .get('/api/summary/monthly')
     .query({ currency: 'CAD', dateFrom: '2025-08-01', dateTo: '2025-08-31' });
   assert.equal(res.status, 200);
@@ -360,7 +373,7 @@ test('GET /api/summary/monthly excludes payment rows from monthly activity', asy
 });
 
 test('POST /api/import/preview returns headers and mapped rows', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Preview Account',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -369,7 +382,7 @@ test('POST /api/import/preview returns headers and mapped rows', async () => {
   const accountId = acc.body.id as number;
 
   const csv = 'Date,Description,Amount\n2025-06-01,Test Cafe,-5.50\n';
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/preview')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -391,7 +404,7 @@ test('POST /api/import/preview returns headers and mapped rows', async () => {
 });
 
 test('POST /api/import/preview: row error for invalid date', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Preview Bad Row',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -400,7 +413,7 @@ test('POST /api/import/preview: row error for invalid date', async () => {
   const accountId = acc.body.id as number;
 
   const csv = 'Date,Description,Amount\nnot-a-date,X,-1\n';
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/preview')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -419,7 +432,7 @@ test('POST /api/import/preview: row error for invalid date', async () => {
 });
 
 test('POST /api/import/preview maps Visa monthly fee rows with blank details', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Preview Visa Fee',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -430,7 +443,7 @@ test('POST /api/import/preview maps Visa monthly fee rows with blank details', a
   const csv =
     'transaction_date,post_date,type,details,amount,currency\n' +
     '2025-12-12,2025-12-12,Monthly fee,,10.0,CAD\n';
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/preview')
     .field('accountId', String(accountId))
     .field('profileId', 'auto')
@@ -452,7 +465,7 @@ test('POST /api/import/preview maps Visa monthly fee rows with blank details', a
 
 test('POST /api/import/preview: 400 when accountId missing', async () => {
   const csv = 'Date,Description,Amount\n2025-06-01,X,-1\n';
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/preview')
     .attach('file', Buffer.from(csv, 'utf8'), {
       filename: 'x.csv',
@@ -462,7 +475,7 @@ test('POST /api/import/preview: 400 when accountId missing', async () => {
 });
 
 test('POST /api/import/upload with profile auto infers generic_simple', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Auto Profile Account',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -471,7 +484,7 @@ test('POST /api/import/upload with profile auto infers generic_simple', async ()
   const accountId = acc.body.id as number;
 
   const csv = 'Date,Description,Amount\n2025-06-01,Cafe,-5.50\n';
-  const res = await request(app)
+  const res = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .field('profileId', 'auto')
@@ -487,7 +500,7 @@ test('POST /api/import/upload with profile auto infers generic_simple', async ()
 });
 
 test('POST /api/import/upload keeps payment rows positive when generic profile normalizes signs', async () => {
-  const acc = await request(app).post('/api/accounts').send({
+  const acc = await authed.post('/api/accounts').send({
     name: 'Payment Direction Account',
     owner: 'me',
     defaultCurrency: 'CAD',
@@ -500,7 +513,7 @@ test('POST /api/import/upload keeps payment rows positive when generic profile n
     '2025-06-01,Grocery Store,Debit,1200.00\n' +
     '2025-06-02,ONLINE PAYMENT THANK YOU,Credit,-1200.00\n';
 
-  const up = await request(app)
+  const up = await authed
     .post('/api/import/upload')
     .field('accountId', String(accountId))
     .field('profileId', 'generic_simple')
@@ -511,7 +524,7 @@ test('POST /api/import/upload keeps payment rows positive when generic profile n
   assert.equal(up.status, 200);
   assert.equal(up.body.inserted, 2);
 
-  const txns = await request(app)
+  const txns = await authed
     .get('/api/transactions')
     .query({ accountId });
   assert.equal(txns.status, 200);

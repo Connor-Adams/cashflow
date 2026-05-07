@@ -5,15 +5,24 @@ import { QueryTypes } from 'sequelize';
 import { num } from '../util/numbers';
 import { openaiJson } from './openaiJson';
 
-export async function loadCategoryHints(): Promise<string[]> {
+export async function loadCategoryHints(householdId?: number | null): Promise<string[]> {
+  const replacements = householdId != null ? [householdId] : [];
+  const ruleWhere =
+    householdId != null
+      ? `household_id = ? AND category IS NOT NULL AND TRIM(category) != ''`
+      : `category IS NOT NULL AND TRIM(category) != ''`;
+  const txnWhere =
+    householdId != null
+      ? `household_id = ? AND final_category IS NOT NULL AND TRIM(final_category) != ''`
+      : `final_category IS NOT NULL AND TRIM(final_category) != ''`;
   const [a, b] = await Promise.all([
     sequelize.query<{ c: string }>(
-      `SELECT DISTINCT TRIM(category) AS c FROM rules WHERE category IS NOT NULL AND TRIM(category) != ''`,
-      { type: QueryTypes.SELECT },
+      `SELECT DISTINCT TRIM(category) AS c FROM rules WHERE ${ruleWhere}`,
+      { replacements, type: QueryTypes.SELECT },
     ),
     sequelize.query<{ c: string }>(
-      `SELECT DISTINCT TRIM(final_category) AS c FROM transactions WHERE final_category IS NOT NULL AND TRIM(final_category) != ''`,
-      { type: QueryTypes.SELECT },
+      `SELECT DISTINCT TRIM(final_category) AS c FROM transactions WHERE ${txnWhere}`,
+      { replacements, type: QueryTypes.SELECT },
     ),
   ]);
   const set = new Set<string>();
@@ -113,4 +122,3 @@ export async function suggestTransactionFields(
 
   return parseSuggestion(j);
 }
-

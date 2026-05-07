@@ -15,6 +15,7 @@ export function AccountsPage() {
   const [editOwner, setEditOwner] = useState<'me' | 'partner' | 'joint'>('me')
   const [editShortCode, setEditShortCode] = useState('')
   const [editCurrency, setEditCurrency] = useState('')
+  const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const loadRequestRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -60,6 +61,7 @@ export function AccountsPage() {
         defaultCurrency:
           String(fd.get('defaultCurrency') ?? '').trim().toUpperCase() ||
           undefined,
+        visibility: String(fd.get('visibility') ?? 'private'),
       })
       form.reset()
       await load()
@@ -105,12 +107,14 @@ export function AccountsPage() {
         owner: editOwner,
         shortCode: editShortCode.trim() || null,
         defaultCurrency,
+        visibility: editVisibility,
       })
       setEditingId(null)
       setEditName('')
       setEditOwner('me')
       setEditShortCode('')
       setEditCurrency('')
+      setEditVisibility('private')
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -123,6 +127,7 @@ export function AccountsPage() {
     setEditOwner('me')
     setEditShortCode('')
     setEditCurrency('')
+    setEditVisibility('private')
   }
 
   function startEdit(account: Account) {
@@ -131,6 +136,7 @@ export function AccountsPage() {
     setEditOwner((account.owner as 'me' | 'partner' | 'joint') ?? 'me')
     setEditShortCode(account.shortCode ?? '')
     setEditCurrency((account.defaultCurrency ?? 'CAD').toUpperCase())
+    setEditVisibility(account.visibility ?? 'private')
   }
 
   const accountCount = accounts.length
@@ -218,6 +224,13 @@ export function AccountsPage() {
               ))}
             </select>
           </label>
+          <label>
+            Visibility
+            <select name="visibility" defaultValue="private">
+              <option value="private">private</option>
+              <option value="shared">shared</option>
+            </select>
+          </label>
         </div>
         <button type="submit" disabled={saving}>
           {saving ? 'Saving…' : 'Create account'}
@@ -247,6 +260,7 @@ export function AccountsPage() {
                   <th>Owner</th>
                   <th>Short code</th>
                   <th>Default currency</th>
+                  <th>Visibility</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -262,6 +276,21 @@ export function AccountsPage() {
                         />
                       ) : (
                         a.name
+                      )}
+                    </td>
+                    <td>
+                      {editingId === a.id ? (
+                        <select
+                          value={editVisibility}
+                          onChange={(e) =>
+                            setEditVisibility(e.target.value as 'private' | 'shared')
+                          }
+                        >
+                          <option value="private">private</option>
+                          <option value="shared">shared</option>
+                        </select>
+                      ) : (
+                        a.visibility
                       )}
                     </td>
                     <td>

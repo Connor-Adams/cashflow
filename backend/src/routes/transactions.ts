@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { Op, QueryTypes } from 'sequelize';
-import { Transaction, Account, sequelize } from '../models';
+import { Transaction, Account, Contact, sequelize } from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
 import {
@@ -9,6 +9,8 @@ import {
 } from '../ai/suggestTransaction';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
+import { currentAuth } from '../auth/middleware';
+import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 
 const router = Router();
 
@@ -26,16 +28,54 @@ const PATCHABLE_KEYS = [
   'pctMeOverride',
   'pctPartnerOverride',
   'notes',
+  'visibility',
+  'ownershipType',
+  'ownershipContactId',
 ] as const;
 
-function applyPatchBody(
+async function applyPatchBody(
+  req: import('express').Request,
   txn: InstanceType<typeof Transaction>,
   b: Record<string, unknown>
-): void {
+): Promise<void> {
+  const { household } = currentAuth(req);
   for (const k of PATCHABLE_KEYS) {
     if (Object.prototype.hasOwnProperty.call(b, k)) {
-      txn.set(k, b[k] as never);
+      if (k === 'visibility') {
+        txn.set('visibility', b[k] === 'shared' ? 'shared' : 'private');
+      } else if (k === 'ownershipType') {
+        const val = String(b[k]);
+        if (!['me', 'partner', 'shared', 'contact'].includes(val)) {
+          const err = new Error('Invalid ownershipType') as Error & { status?: number };
+          err.status = 400;
+          throw err;
+        }
+        txn.set('ownershipType', val);
+      } else if (k === 'ownershipContactId') {
+        if (b[k] == null || b[k] === '') {
+          txn.set('ownershipContactId', null);
+        } else {
+          const contactId = Number(b[k]);
+          const contact = await Contact.findOne({
+            where: { id: contactId, householdId: household.id },
+          });
+          if (!contact) {
+            const err = new Error('ownershipContactId must reference a household contact') as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          txn.set('ownershipContactId', contact.id);
+        }
+      } else {
+        txn.set(k, b[k] as never);
+      }
     }
+  }
+  if (txn.get('ownershipType') !== 'contact') txn.set('ownershipContactId', null);
+  if (txn.get('ownershipType') === 'contact' && !txn.get('ownershipContactId')) {
+    const err = new Error('ownershipContactId is required for contact ownership') as Error & { status?: number };
+    err.status = 400;
+    throw err;
   }
   if (Object.prototype.hasOwnProperty.call(b, 'reviewFlag')) {
     txn.set('reviewFlag', Boolean(b.reviewFlag));
@@ -69,13 +109,15 @@ router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
       }
       ids.push(id);
     }
-    const hints = await loadCategoryHints();
+    const hints = await loadCategoryHints(
+      isSuperadmin(req) ? null : currentAuth(req).household.id
+    );
     const results: {
       id: number;
       suggestion: Awaited<ReturnType<typeof suggestTransactionFields>>;
     }[] = [];
     for (const id of ids) {
-      const txn = await Transaction.findByPk(id);
+        const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
       if (!txn) {
         res.status(404).json({ error: `Transaction ${id} not found` });
         return;
@@ -125,7 +167,10 @@ router.post('/bulk-patch', async (req, res, next) => {
 
     await sequelize.transaction(async (t) => {
       for (const id of ids) {
-        const txn = await Transaction.findByPk(id, { transaction: t });
+        const txn = await Transaction.findOne({
+          where: { id, ...visibleTransactionWhere(req) },
+          transaction: t,
+        });
         if (!txn) {
           const err = new Error(`Transaction ${id} not found`) as Error & {
             status?: number;
@@ -133,7 +178,7 @@ router.post('/bulk-patch', async (req, res, next) => {
           err.status = 404;
           throw err;
         }
-        applyPatchBody(txn, patch);
+        await applyPatchBody(req, txn, patch);
         recomputeTransactionAmounts(txn);
         await txn.save({ transaction: t });
       }
@@ -150,19 +195,29 @@ router.post('/bulk-patch', async (req, res, next) => {
 
 router.get('/category-hints', async (_req, res, next) => {
   try {
+    const householdId = isSuperadmin(_req) ? null : currentAuth(_req).household.id;
+    const ruleWhere =
+      householdId == null
+        ? `category IS NOT NULL AND TRIM(category) != ''`
+        : `household_id = ? AND category IS NOT NULL AND TRIM(category) != ''`;
+    const txnWhere =
+      householdId == null
+        ? `final_category IS NOT NULL AND TRIM(final_category) != ''`
+        : `household_id = ? AND final_category IS NOT NULL AND TRIM(final_category) != ''`;
+    const replacements = householdId == null ? [] : [householdId];
     const [ruleRows, txnRows] = await Promise.all([
       sequelize.query<{ label: string }>(
         `SELECT DISTINCT TRIM(category) AS label
          FROM rules
-         WHERE category IS NOT NULL AND TRIM(category) != ''`,
-        { type: QueryTypes.SELECT },
+         WHERE ${ruleWhere}`,
+        { replacements, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ label: string; usageCount: string }>(
         `SELECT TRIM(final_category) AS label, COUNT(*) AS usageCount
          FROM transactions
-         WHERE final_category IS NOT NULL AND TRIM(final_category) != ''
+         WHERE ${txnWhere}
          GROUP BY TRIM(final_category)`,
-        { type: QueryTypes.SELECT },
+        { replacements, type: QueryTypes.SELECT },
       ),
     ]);
 
@@ -200,7 +255,7 @@ router.get('/', async (req, res, next) => {
     );
     const offset = (page - 1) * pageSize;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { ...visibleTransactionWhere(req) };
     if (req.query.accountId) {
       where.accountId = parseInt(String(req.query.accountId), 10);
     }
@@ -271,12 +326,14 @@ router.post('/:id/ai-suggest', aiSuggestLimiter, async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    const txn = await Transaction.findByPk(id);
+    const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
     if (!txn) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const hints = await loadCategoryHints();
+    const hints = await loadCategoryHints(
+      isSuperadmin(req) ? null : currentAuth(req).household.id
+    );
     const suggestion = await suggestTransactionFields(txn, hints);
     res.json({ suggestion });
   } catch (e) {
@@ -292,13 +349,13 @@ router.patch('/:id', async (req, res, next) => {
       id,
       patchKeys: Object.keys(b).join(','),
     });
-    const txn = await Transaction.findByPk(id);
+    const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
     if (!txn) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
 
-    applyPatchBody(txn, b);
+    await applyPatchBody(req, txn, b);
 
     recomputeTransactionAmounts(txn);
     await txn.save();

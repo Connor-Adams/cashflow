@@ -18,7 +18,7 @@ import {
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { formatParseErrorLines } from '../lib/formatParseErrors'
-import type { Account, Paginated, Transaction } from '../types/api'
+import type { Account, Contact, Paginated, Transaction } from '../types/api'
 import { useSessionState } from '../lib/useSessionState'
 
 type UploadResult = {
@@ -127,6 +127,7 @@ export function TransactionsPage() {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [contacts, setContacts] = useState<Contact[]>([])
   const [uploadAccountId, setUploadAccountId] = useState('')
   const [batchLabel, setBatchLabel] = useState('')
   const [csvProfileOptions, setCsvProfileOptions] = useState<CsvProfileOption[]>(
@@ -155,6 +156,9 @@ export function TransactionsPage() {
   useEffect(() => {
     void getJson<Account[]>('/api/accounts')
       .then(setAccounts)
+      .catch(() => {})
+    void getJson<Contact[]>('/api/contacts')
+      .then(setContacts)
       .catch(() => {})
   }, [])
 
@@ -1266,6 +1270,7 @@ export function TransactionsPage() {
                   key={t.id}
                   t={t}
                   categoryOptions={categoryLabels}
+                  contacts={contacts}
                   selected={selectedIds.has(t.id)}
                   onToggleSelected={() => toggleSelected(t.id)}
                   onSave={saveRow}
@@ -1308,6 +1313,7 @@ export function TransactionsPage() {
 function TransactionRow({
   t,
   categoryOptions,
+  contacts,
   selected,
   onToggleSelected,
   onSave,
@@ -1317,6 +1323,7 @@ function TransactionRow({
 }: {
   t: Transaction
   categoryOptions: string[]
+  contacts: Contact[]
   selected: boolean
   onToggleSelected: () => void
   onSave: (id: number, patch: Record<string, unknown>) => Promise<void>
@@ -1340,6 +1347,15 @@ function TransactionRow({
   const [pctPartner, setPctPartner] = useState(
     t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : ''
   )
+  const [visibility, setVisibility] = useState<'private' | 'shared'>(
+    t.visibility ?? 'private'
+  )
+  const [ownershipType, setOwnershipType] = useState<
+    'me' | 'partner' | 'shared' | 'contact'
+  >(t.ownershipType ?? 'me')
+  const [ownershipContactId, setOwnershipContactId] = useState(
+    t.ownershipContactId != null ? String(t.ownershipContactId) : ''
+  )
   const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe)
   const parsedPctPartner =
     pctPartner.trim() === '' ? null : Number(pctPartner)
@@ -1356,7 +1372,10 @@ function TransactionRow({
           : 'false') ||
     split !== (t.splitOverride ?? '') ||
     pctMe !== (t.pctMeOverride != null ? String(t.pctMeOverride) : '') ||
-    pctPartner !== (t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '')
+    pctPartner !== (t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '') ||
+    visibility !== (t.visibility ?? 'private') ||
+    ownershipType !== (t.ownershipType ?? 'me') ||
+    ownershipContactId !== (t.ownershipContactId != null ? String(t.ownershipContactId) : '')
 
   function resetDraft() {
     setCat(t.categoryOverride ?? '')
@@ -1370,6 +1389,9 @@ function TransactionRow({
     setSplit(t.splitOverride ?? '')
     setPctMe(t.pctMeOverride != null ? String(t.pctMeOverride) : '')
     setPctPartner(t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '')
+    setVisibility(t.visibility ?? 'private')
+    setOwnershipType(t.ownershipType ?? 'me')
+    setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
   }
 
   useEffect(() => {
@@ -1457,6 +1479,42 @@ function TransactionRow({
               aria-label={`Partner share override for transaction ${t.id}`}
             />
           </div>
+          <select
+            value={ownershipType}
+            onChange={(e) => {
+              const value = e.target.value as 'me' | 'partner' | 'shared' | 'contact'
+              setOwnershipType(value)
+              if (value !== 'contact') setOwnershipContactId('')
+            }}
+            aria-label={`Ownership for transaction ${t.id}`}
+          >
+            <option value="me">owned by me</option>
+            <option value="partner">owned by partner</option>
+            <option value="shared">shared</option>
+            <option value="contact">contact</option>
+          </select>
+          {ownershipType === 'contact' && (
+            <select
+              value={ownershipContactId}
+              onChange={(e) => setOwnershipContactId(e.target.value)}
+              aria-label={`Contact owner for transaction ${t.id}`}
+            >
+              <option value="">Pick contact</option>
+              {contacts.map((contact) => (
+                <option key={contact.id} value={contact.id}>
+                  {contact.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            value={visibility}
+            onChange={(e) => setVisibility(e.target.value as 'private' | 'shared')}
+            aria-label={`Visibility for transaction ${t.id}`}
+          >
+            <option value="private">private</option>
+            <option value="shared">shared</option>
+          </select>
         </div>
       </td>
       <td>
@@ -1527,12 +1585,20 @@ function TransactionRow({
                 onError('Percent overrides must be valid numbers.')
                 return
               }
+              if (ownershipType === 'contact' && !ownershipContactId) {
+                onError('Pick a contact for contact-owned transactions.')
+                return
+              }
               void onSave(t.id, {
                 categoryOverride: cat || null,
                 businessOverride: biz === '' ? null : biz === 'true',
                 splitOverride: split || null,
                 pctMeOverride: parsedPctMe,
                 pctPartnerOverride: parsedPctPartner,
+                visibility,
+                ownershipType,
+                ownershipContactId:
+                  ownershipType === 'contact' ? Number(ownershipContactId) : null,
                 reviewFlag: false,
               })
             }}

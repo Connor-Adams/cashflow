@@ -89,6 +89,43 @@
     display: none;
   }
 
+  .userMenu {
+    @apply flex items-center gap-2 text-sm;
+    color: var(--muted);
+  }
+
+  .superadminBadge {
+    @apply rounded-lg border px-2 py-1 text-xs font-semibold;
+    border-color: color-mix(in srgb, var(--danger) 46%, var(--border));
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
+
+  .authShell {
+    @apply flex min-h-screen items-center justify-center px-4 py-8;
+  }
+
+  .authCard {
+    @apply grid w-full max-w-md gap-5 p-6;
+  }
+
+  .authTabs {
+    @apply grid grid-cols-2 gap-2;
+  }
+
+  .authTabs button.isActive {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg2));
+  }
+
+  .authForm {
+    @apply grid gap-3;
+  }
+
+  .authForm label {
+    @apply grid gap-1 text-sm;
+  }
+
   .navLink {
     @apply whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold no-underline transition-colors duration-150;
     color: var(--muted);

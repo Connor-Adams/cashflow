@@ -5,6 +5,8 @@ import { previewImportCsv, PREVIEW_MAX_ROWS } from '../import/previewImport';
 import { runImport, importCsvFile } from '../import/runImport';
 import { ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
+import { currentAuth } from '../auth/middleware';
+import { householdWhere } from '../auth/scope';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -42,11 +44,12 @@ router.get('/profiles', (_req, res) => {
 
 router.post('/run', async (req, res, next) => {
   try {
+    const { user, household } = currentAuth(req);
     const profileId = (req.body as { profileId?: string } | undefined)?.profileId;
     logImportEvent('folder_run_started', {
       profileId: profileId ?? 'auto',
     });
-    const result = await runImport({ profileId });
+    const result = await runImport({ profileId, householdId: household.id, userId: user.id });
     const importedCount = result.results.filter((row) => {
       if (!row || typeof row !== 'object') return false;
       if ('skipped' in row && row.skipped === true) return false;
@@ -109,6 +112,7 @@ router.post(
         buffer: req.file.buffer,
         profileId,
         accountId,
+        householdId: currentAuth(req).household.id,
       });
       if (!result.ok) {
         res.status(400).json({ error: result.error });
@@ -177,12 +181,15 @@ router.post(
         fileSizeBytes: req.file.size,
       });
 
+      const { user, household } = currentAuth(req);
       const result = await importCsvFile({
         buffer: req.file.buffer,
         fileName: req.file.originalname,
         accountId,
         batchLabel,
         profileId,
+        householdId: household.id,
+        userId: user.id,
       });
       logImportEvent('upload_completed', {
         fileName: req.file.originalname,
@@ -205,9 +212,10 @@ router.post(
   }
 );
 
-router.get('/history', async (_req, res, next) => {
+router.get('/history', async (req, res, next) => {
   try {
     const rows = await ImportHistory.findAll({
+      where: householdWhere(req),
       order: [['startedAt', 'DESC']],
       limit: 50,
     });

@@ -1,11 +1,14 @@
 import { Router } from 'express';
 import { Rule, Transaction } from '../models';
+import { currentAuth } from '../auth/middleware';
+import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 
 const router = Router();
 
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const rules = await Rule.findAll({
+      where: householdWhere(req),
       order: [
         ['priority', 'DESC'],
         ['id', 'DESC'],
@@ -14,7 +17,7 @@ router.get('/', async (_req, res, next) => {
     const out = [];
     for (const r of rules) {
       const usageCount = await Transaction.count({
-        where: { appliedRuleId: r.id },
+        where: { appliedRuleId: r.id, ...visibleTransactionWhere(req) },
       });
       out.push({ ...r.toJSON(), usageCount });
     }
@@ -27,12 +30,15 @@ router.get('/', async (_req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const b = (req.body || {}) as Record<string, unknown>;
+    const { user, household } = currentAuth(req);
     if (!b.merchantPattern) {
       res.status(400).json({ error: 'merchantPattern is required' });
       return;
     }
     const row = await Rule.create({
       merchantPattern: String(b.merchantPattern),
+      householdId: household.id,
+      createdByUserId: user.id,
       matchKind: (b.matchKind as string) || 'substring',
       priority: b.priority != null ? Number(b.priority) : 0,
       category: (b.category as string | null) ?? null,
@@ -50,7 +56,7 @@ router.post('/', async (req, res, next) => {
 router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const row = await Rule.findByPk(id);
+    const row = await Rule.findOne({ where: { id, ...householdWhere(req) } });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
       return;
@@ -79,7 +85,7 @@ router.patch('/:id', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const row = await Rule.findByPk(id);
+    const row = await Rule.findOne({ where: { id, ...householdWhere(req) } });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
       return;

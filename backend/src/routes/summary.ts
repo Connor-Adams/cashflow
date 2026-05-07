@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import type { Request } from 'express';
 import { Op } from 'sequelize';
-import { Account, Transaction, sequelize } from '../models';
+import { Account, Contact, Transaction, sequelize } from '../models';
 import { num } from '../util/numbers';
 import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
+import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 
 const router = Router();
 
 function dateWhere(req: Request) {
-  const w: Record<string, unknown> = {};
+  const w: Record<string, unknown> = { ...visibleTransactionWhere(req) };
   if (req.query.dateFrom || req.query.dateTo) {
     const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
     if (req.query.dateFrom) dateCond[Op.gte] = String(req.query.dateFrom);
@@ -44,6 +45,7 @@ router.get('/dashboard', async (req, res, next) => {
         raw: true,
       }),
       Account.findAll({
+        where: visibleAccountWhere(req),
         attributes: ['id', 'name', 'shortCode'],
         raw: true,
       }),
@@ -374,23 +376,39 @@ router.get('/dashboard', async (req, res, next) => {
 router.get('/partner', async (req, res, next) => {
   try {
     const where = dateWhere(req);
-    const rows = await Transaction.findAll({
+    const [rows, contacts] = await Promise.all([Transaction.findAll({
       where,
       attributes: [
         'currency',
+        'ownershipType',
+        'ownershipContactId',
         [sequelize.fn('SUM', sequelize.col('my_share_amount')), 'sumMy'],
         [
           sequelize.fn('SUM', sequelize.col('partner_share_amount')),
           'sumPartner',
         ],
       ],
-      group: ['currency'],
+      group: ['currency', 'ownershipType', 'ownershipContactId'],
       raw: true,
-    });
-    type PartnerRow = { currency: string; sumMy: unknown; sumPartner: unknown };
+    }),
+    Contact.findAll({ where: householdWhere(req), raw: true }),
+    ]);
+    type PartnerRow = {
+      currency: string;
+      ownershipType: string;
+      ownershipContactId: number | null;
+      sumMy: unknown;
+      sumPartner: unknown;
+    };
+    type ContactRow = { id: number; name: string };
+    const contactsById = new Map((contacts as ContactRow[]).map((c) => [c.id, c.name]));
     res.json({
       byCurrency: (rows as unknown as PartnerRow[]).map((r) => ({
         currency: r.currency,
+        ownershipType: r.ownershipType,
+        ownershipContactId: r.ownershipContactId,
+        contactName:
+          r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
         sumMy: num(r.sumMy),
         sumPartner: num(r.sumPartner),
       })),

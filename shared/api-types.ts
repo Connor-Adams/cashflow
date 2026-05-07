@@ -4,6 +4,9 @@ export type Account = {
   id: number
   name: string
   owner: string
+  householdId: number | null
+  ownerUserId: number | null
+  visibility: 'private' | 'shared'
   shortCode: string | null
   defaultCurrency: string | null
 }
@@ -11,6 +14,11 @@ export type Account = {
 export type Transaction = {
   id: number
   accountId: number
+  householdId: number | null
+  createdByUserId: number | null
+  visibility: 'private' | 'shared'
+  ownershipType: 'me' | 'partner' | 'shared' | 'contact'
+  ownershipContactId: number | null
   importBatch: string
   date: string
   merchantRaw: string
@@ -44,6 +52,25 @@ export type Transaction = {
   /** Count of attached receipt files */
   receiptCount?: number
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
+}
+
+export type Contact = {
+  id: number
+  householdId: number
+  name: string
+  notes: string | null
+}
+
+export type AuthUser = {
+  id: number
+  email: string
+  displayName: string
+  globalRole: 'user' | 'superadmin'
+  household: {
+    id: number
+    name: string
+    role: string
+  } | null
 }
 
 export type Rule = {
