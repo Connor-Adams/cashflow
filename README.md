@@ -78,6 +78,23 @@ Run from the repo root:
 | `yarn test` | Backend unit + integration tests, frontend Vitest |
 | `yarn ci` | Typecheck, all tests, production builds (same as CI) |
 
+## Railway deployment
+
+This repo includes a root `railway.toml` for deploying the backend API service on Railway. It builds `cashflow-backend`, runs Sequelize migrations before deploy, starts `node dist/server.js`, and healthchecks `GET /api/health`.
+
+Recommended Railway variables:
+
+```bash
+NODE_ENV=production
+CORS_ORIGIN=https://your-frontend-domain.example
+DATABASE_PATH=/data/cashflow.sqlite
+CSV_UPLOAD_DIR=/data/uploads/csv
+RECEIPTS_UPLOAD_DIR=/data/uploads/receipts
+DEFAULT_CURRENCY=CAD
+```
+
+Attach a Railway volume mounted at `/data` if you want SQLite data and uploads to persist across deploys. Deploy the Vite frontend as a separate static service and set `VITE_API_BASE` to the backend public URL.
+
 ## Tests
 
 ```bash
