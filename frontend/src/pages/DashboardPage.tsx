@@ -15,6 +15,7 @@ import {
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
+import { toDateInputValue } from '../lib/dateInput'
 import { useSessionState } from '../lib/useSessionState'
 
 type Row = {
@@ -126,6 +127,7 @@ const LINE_COLORS = [
   '#8b5cf6',
   '#ec4899',
 ]
+const DEFAULT_DASHBOARD_CURRENCY = 'CAD'
 const BUSINESS_COLOR = '#f59e0b'
 const PERSONAL_COLOR = '#22c55e'
 const CHART_TOOLTIP_STYLE = {
@@ -150,10 +152,6 @@ function formatSplitType(splitType: string): string {
   if (splitType === 'partner') return 'Partner'
   if (splitType === 'shared') return 'Shared'
   return splitType || 'Unknown'
-}
-
-function toDateInputValue(d: Date): string {
-  return d.toISOString().slice(0, 10)
 }
 
 function parseDateInput(value: string): Date | null {
@@ -206,7 +204,7 @@ export function DashboardPage() {
   const defaultRange = useMemo(() => getDefaultDashboardRange(), [])
   const [currency, setCurrency] = useSessionState<string>(
     'dashboard.currency',
-    'CAD'
+    DEFAULT_DASHBOARD_CURRENCY
   )
   const [dateFrom, setDateFrom] = useSessionState<string>(
     'dashboard.dateFrom',
@@ -579,6 +577,10 @@ export function DashboardPage() {
       null,
     [quickRanges, dateFrom, dateTo]
   )
+  const hasActiveFilters =
+    currency !== DEFAULT_DASHBOARD_CURRENCY ||
+    dateFrom !== defaultRange.from ||
+    dateTo !== defaultRange.to
 
   const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
   const formatDashboardAmount = (value: number): string =>
@@ -631,11 +633,11 @@ export function DashboardPage() {
               onChange={(e) => setDateTo(e.target.value)}
             />
           </label>
-          {(currency || dateFrom || dateTo) && (
+          {hasActiveFilters && (
             <button
               type="button"
               onClick={() => {
-                setCurrency('CAD')
+                setCurrency(DEFAULT_DASHBOARD_CURRENCY)
                 setDateFrom(defaultRange.from)
                 setDateTo(defaultRange.to)
               }}

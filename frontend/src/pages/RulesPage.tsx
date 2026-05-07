@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
 
@@ -11,14 +12,26 @@ type CategoryHint = {
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([])
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
+  const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const loadRequestRef = useRef(0)
+  const categoryLabels = useMemo(
+    () => categoryHints.map((hint) => hint.label),
+    [categoryHints]
+  )
 
   async function load() {
+    const requestId = ++loadRequestRef.current
     setErr(null)
     try {
-      setRules(await getJson<Rule[]>('/api/rules'))
+      const nextRules = await getJson<Rule[]>('/api/rules')
+      if (loadRequestRef.current === requestId) {
+        setRules(nextRules)
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error')
+      if (loadRequestRef.current === requestId) {
+        setErr(e instanceof Error ? e.message : 'Error')
+      }
     }
   }
 
@@ -36,33 +49,60 @@ export function RulesPage() {
     e.preventDefault()
     const form = e.currentTarget
     const fd = new FormData(form)
-    await postJson('/api/rules', {
-      merchantPattern: String(fd.get('merchantPattern') ?? ''),
-      matchKind: String(fd.get('matchKind') ?? 'substring'),
-      priority: Number(fd.get('priority') ?? 0),
-      category: String(fd.get('category') ?? '') || null,
-      isBusiness: fd.get('isBusiness') === 'on',
-      splitType: String(fd.get('splitType') ?? 'me'),
-      pctMe: fd.get('pctMe') ? String(fd.get('pctMe')) : null,
-      pctPartner: fd.get('pctPartner') ? String(fd.get('pctPartner')) : null,
-    })
-    form.reset()
-    await load()
+    setErr(null)
+    try {
+      await postJson('/api/rules', {
+        merchantPattern: String(fd.get('merchantPattern') ?? ''),
+        matchKind: String(fd.get('matchKind') ?? 'substring'),
+        priority: Number(fd.get('priority') ?? 0),
+        category: String(fd.get('category') ?? '') || null,
+        isBusiness: fd.get('isBusiness') === 'on',
+        splitType: String(fd.get('splitType') ?? 'me'),
+        pctMe: fd.get('pctMe') ? String(fd.get('pctMe')) : null,
+        pctPartner: fd.get('pctPartner') ? String(fd.get('pctPartner')) : null,
+      })
+      form.reset()
+      setRuleCategory('')
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create rule')
+    }
   }
 
   async function remove(id: number) {
     if (!confirm('Delete this rule?')) return
-    await deleteReq(`/api/rules/${id}`)
-    await load()
+    setErr(null)
+    try {
+      await deleteReq(`/api/rules/${id}`)
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not delete rule')
+    }
   }
 
   return (
     <div className="page">
-      <h1>Rules</h1>
+      <div className="rulesHeader">
+        <h1>Rules</h1>
+        <p className="muted">
+          Match merchants on import so category, business, and split defaults land in
+          the right place.
+        </p>
+      </div>
       {err && <span className="error">{err}</span>}
-      <form className="card" onSubmit={onCreate}>
-        <h2>New rule</h2>
-        <div className="formGrid">
+      <form className="card rulesFormCard" onSubmit={onCreate}>
+        <div className="rulesCardHeader">
+          <div>
+            <h2>New rule</h2>
+            <p className="muted">
+              Reuse an existing category when possible to keep reports tidy.
+            </p>
+          </div>
+          <span className="transactionsPanelBadge">
+            {categoryLabels.length} categories
+          </span>
+        </div>
+        <div className="formGrid rulesFormGrid">
           <label>
             Pattern
             <input name="merchantPattern" required placeholder="merchant text" />
@@ -78,13 +118,18 @@ export function RulesPage() {
             Priority
             <input name="priority" type="number" defaultValue={0} />
           </label>
-          <label>
+          <label className="rulesCategoryField">
             Category
-            <input
-              name="category"
+            <CategoryCloudPicker
+              className="rulesCategoryPicker"
+              cloudClassName="rulesCategoryPickerCloud"
+              itemClassName="rulesCategoryPickerItem"
+              value={ruleCategory}
+              onChange={setRuleCategory}
+              options={categoryLabels}
               placeholder="Groceries"
-              list="rule-category-options"
             />
+            <input type="hidden" name="category" value={ruleCategory} />
           </label>
           <label className="check">
             <input name="isBusiness" type="checkbox" /> Business
@@ -106,59 +151,65 @@ export function RulesPage() {
             <input name="pctPartner" placeholder="0.5" />
           </label>
         </div>
-        <datalist id="rule-category-options">
-          {categoryHints.map((hint) => (
-            <option key={hint.label} value={hint.label} />
-          ))}
-        </datalist>
         <button type="submit">Add rule</button>
       </form>
 
-      <div className="tableWrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Pattern</th>
-              <th>Match</th>
-              <th>Pri</th>
-              <th>Category</th>
-              <th>Biz</th>
-              <th>Split</th>
-              <th>Usage</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.length === 0 ? (
+      <section className="card rulesTableCard">
+        <div className="rulesCardHeader">
+          <div>
+            <h2>Existing rules</h2>
+            <p className="muted">
+              Higher priority wins when several patterns match the same transaction.
+            </p>
+          </div>
+          <span className="transactionsPanelBadge">{rules.length} rules</span>
+        </div>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={8} className="emptyStateCell">
-                  <p>No rules yet. Add a pattern above — higher priority wins when several rules match.</p>
-                  <p className="muted">
-                    Rules set default category, business flag, and split for matching merchants on import.
-                  </p>
-                </td>
+                <th>Pattern</th>
+                <th>Match</th>
+                <th>Pri</th>
+                <th>Category</th>
+                <th>Biz</th>
+                <th>Split</th>
+                <th>Usage</th>
+                <th></th>
               </tr>
-            ) : (
-              rules.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.merchantPattern}</td>
-                  <td>{r.matchKind}</td>
-                  <td>{r.priority}</td>
-                  <td>{r.category}</td>
-                  <td>{r.isBusiness ? 'yes' : ''}</td>
-                  <td>{r.splitType}</td>
-                  <td>{r.usageCount ?? 0}</td>
-                  <td>
-                    <button type="button" onClick={() => void remove(r.id)}>
-                      Delete
-                    </button>
+            </thead>
+            <tbody>
+              {rules.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="emptyStateCell">
+                    <p>No rules yet. Add a pattern above to start automating imports.</p>
+                    <p className="muted">
+                      Rules set default category, business flag, and split for matching merchants on import.
+                    </p>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                rules.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.merchantPattern}</td>
+                    <td>{r.matchKind}</td>
+                    <td>{r.priority}</td>
+                    <td>{r.category ?? '—'}</td>
+                    <td>{r.isBusiness ? 'yes' : ''}</td>
+                    <td>{r.splitType}</td>
+                    <td>{r.usageCount ?? 0}</td>
+                    <td>
+                      <button type="button" onClick={() => void remove(r.id)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   )
 }

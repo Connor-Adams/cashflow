@@ -8,12 +8,14 @@ import {
 } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import {
   getJson,
   patchJson,
   postFormData,
   postJson,
 } from '../lib/api'
+import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { formatParseErrorLines } from '../lib/formatParseErrors'
 import type { Account, Paginated, Transaction } from '../types/api'
@@ -77,9 +79,7 @@ type CategoryHint = {
   usageCount: number
 }
 
-function toDateInputValue(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
+const DEFAULT_TRANSACTION_CURRENCY = 'CAD'
 
 function getRelativeDateRange(days: number): { from: string; to: string } {
   const to = new Date()
@@ -94,32 +94,16 @@ function getYearToDateRange(): { from: string; to: string } {
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
-function arrangeCategoryCloud(hints: CategoryHint[]): CategoryHint[] {
-  const byLength = [...hints].sort((a, b) => {
-    const lengthDiff = b.label.length - a.label.length
-    return lengthDiff !== 0 ? lengthDiff : a.label.localeCompare(b.label)
-  })
-  const out: CategoryHint[] = []
-  let left = 0
-  let right = byLength.length - 1
-  while (left <= right) {
-    out.push(byLength[left])
-    left += 1
-    if (left <= right) {
-      out.push(byLength[right])
-      right -= 1
-    }
-  }
-  return out
-}
-
 export function TransactionsPage() {
   const [page, setPage] = useState(1)
   const [reviewOnly, setReviewOnly] = useSessionState(
     'transactions.reviewOnly',
     false
   )
-  const [currency, setCurrency] = useSessionState('transactions.currency', 'CAD')
+  const [currency, setCurrency] = useSessionState(
+    'transactions.currency',
+    DEFAULT_TRANSACTION_CURRENCY
+  )
   const [dateFrom, setDateFrom] = useSessionState('transactions.dateFrom', '')
   const [dateTo, setDateTo] = useSessionState('transactions.dateTo', '')
   const [categoryFilter, setCategoryFilter] = useSessionState(
@@ -166,6 +150,7 @@ export function TransactionsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const fileRef = useRef<HTMLInputElement>(null)
   const receiptFileRef = useRef<HTMLInputElement>(null)
+  const loadRequestRef = useRef(0)
 
   useEffect(() => {
     void getJson<Account[]>('/api/accounts')
@@ -207,6 +192,7 @@ export function TransactionsPage() {
   }, [refreshImportHistory])
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     setErr(null)
     try {
@@ -223,11 +209,17 @@ export function TransactionsPage() {
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`
       )
-      setRes(data)
+      if (loadRequestRef.current === requestId) {
+        setRes(data)
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error')
+      if (loadRequestRef.current === requestId) {
+        setErr(e instanceof Error ? e.message : 'Error')
+      }
     } finally {
-      setLoading(false)
+      if (loadRequestRef.current === requestId) {
+        setLoading(false)
+      }
     }
   }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter])
 
@@ -241,7 +233,7 @@ export function TransactionsPage() {
 
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter])
 
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
@@ -345,9 +337,80 @@ export function TransactionsPage() {
         : dateTo
           ? `Up to ${dateTo}`
           : 'All dates'
-  const topCategoryHints = useMemo(
-    () => arrangeCategoryCloud(categoryHints).slice(0, 18),
+  const categoryLabels = useMemo(
+    () => categoryHints.map((hint) => hint.label),
     [categoryHints]
+  )
+  const hasCustomCurrency = currency !== DEFAULT_TRANSACTION_CURRENCY
+  const activeFilters = useMemo(
+    () =>
+      [
+        reviewOnly
+          ? {
+              key: 'review',
+              label: 'Review only',
+              clear: () => {
+                setPage(1)
+                setReviewOnly(false)
+              },
+            }
+          : null,
+        hasCustomCurrency
+          ? {
+              key: 'currency',
+              label: currency,
+              clear: () => {
+                setPage(1)
+                setCurrency(DEFAULT_TRANSACTION_CURRENCY)
+              },
+            }
+          : null,
+        categoryFilter.trim()
+          ? {
+              key: 'category',
+              label: `Category: ${categoryFilter.trim()}`,
+              clear: () => {
+                setPage(1)
+                setCategoryFilter('')
+              },
+            }
+          : null,
+        dateFrom || dateTo
+          ? {
+              key: 'date',
+              label: filteredSummaryLabel,
+              clear: () => {
+                setPage(1)
+                setDateFrom('')
+                setDateTo('')
+              },
+            }
+          : null,
+        batchFilter.trim()
+          ? {
+              key: 'batch',
+              label: `Batch: ${batchFilter.trim()}`,
+              clear: () => {
+                setPage(1)
+                setBatchFilter('')
+              },
+            }
+          : null,
+      ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>,
+    [
+      reviewOnly,
+      hasCustomCurrency,
+      currency,
+      categoryFilter,
+      filteredSummaryLabel,
+      batchFilter,
+      setReviewOnly,
+      setCurrency,
+      setCategoryFilter,
+      setDateFrom,
+      setDateTo,
+      setBatchFilter,
+    ]
   )
 
   async function onReceiptPicked(e: ChangeEvent<HTMLInputElement>) {
@@ -903,36 +966,18 @@ export function TransactionsPage() {
           </label>
           <label className="transactionsCategoryField">
             Category
-            <input
+            <CategoryCloudPicker
+              className="transactionsCategoryPicker"
+              cloudClassName="transactionsCategoryPickerCloud"
+              itemClassName="transactionsCategoryPickerItem"
               value={categoryFilter}
-              onChange={(e) => {
+              onChange={(value) => {
                 setPage(1)
-                setCategoryFilter(e.target.value)
+                setCategoryFilter(value)
               }}
-              list="transaction-category-options"
+              options={categoryLabels}
               placeholder="e.g. Groceries"
             />
-            {topCategoryHints.length > 0 ? (
-              <div
-                className="transactionsCategoryCloud"
-                aria-label="Suggested categories"
-              >
-                {topCategoryHints.map((hint) => (
-                  <button
-                    key={hint.label}
-                    type="button"
-                    className="transactionsCategoryCloudItem"
-                    aria-pressed={categoryFilter === hint.label}
-                    onClick={() => {
-                      setPage(1)
-                      setCategoryFilter(categoryFilter === hint.label ? '' : hint.label)
-                    }}
-                  >
-                    {hint.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
           </label>
           <label>
             From
@@ -1000,30 +1045,14 @@ export function TransactionsPage() {
             </select>
           </label>
         </div>
-        <div className="row transactionsActionRow">
-          {batchFilter.trim() ? (
-            <button
-              type="button"
-              onClick={() => {
-                setPage(1)
-                setBatchFilter('')
-              }}
-            >
-              Clear batch filter
-            </button>
-          ) : null}
-          {(reviewOnly ||
-            currency ||
-            categoryFilter.trim() ||
-            dateFrom ||
-            dateTo ||
-            batchFilter.trim()) && (
+          <div className="row transactionsActionRow">
+          {activeFilters.length > 0 && (
             <button
               type="button"
               onClick={() => {
                 setPage(1)
                 setReviewOnly(false)
-                setCurrency('CAD')
+                setCurrency(DEFAULT_TRANSACTION_CURRENCY)
                 setCategoryFilter('')
                 setDateFrom('')
                 setDateTo('')
@@ -1037,6 +1066,26 @@ export function TransactionsPage() {
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
+        {activeFilters.length > 0 ? (
+          <div className="transactionsFilterPills" aria-label="Active filters">
+            {activeFilters.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                className="transactionsFilterPill"
+                onClick={filter.clear}
+              >
+                <span>{filter.label}</span>
+                <span aria-hidden>×</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="muted transactionsHelperCopy">
+            Showing the default view: {DEFAULT_TRANSACTION_CURRENCY}, all categories,
+            all dates.
+          </p>
+        )}
         {aiEnabled ? (
           <p className="muted transactionsHelperCopy">
             OpenAI is configured. Use <strong>AI</strong> on a row or{' '}
@@ -1050,11 +1099,6 @@ export function TransactionsPage() {
           </p>
         )}
       </section>
-      <datalist id="transaction-category-options">
-        {categoryHints.map((hint) => (
-          <option key={hint.label} value={hint.label} />
-        ))}
-      </datalist>
       {err && <span className="error">{err}</span>}
       {selectedIds.size > 0 && (
         <div className="card bulkBar transactionsBulkCard">
@@ -1073,10 +1117,13 @@ export function TransactionsPage() {
           ) : null}
           <label>
             Category
-            <input
+            <CategoryCloudPicker
+              className="transactionsBulkCategoryPicker"
+              cloudClassName="transactionsBulkCategoryCloud"
+              itemClassName="transactionsBulkCategoryItem"
               value={bulkCat}
-              onChange={(e) => setBulkCat(e.target.value)}
-              list="transaction-category-options"
+              onChange={setBulkCat}
+              options={categoryLabels}
               placeholder="override"
             />
           </label>
@@ -1188,27 +1235,23 @@ export function TransactionsPage() {
                 <th>Date</th>
                 <th>Merchant</th>
                 <th>Amount</th>
-                <th>Cur</th>
                 <th>Category</th>
                 <th>Business</th>
-                <th>Split</th>
-                <th>% me</th>
-                <th>% ptn</th>
-                <th>Review</th>
-                <th>Rcpt</th>
+                <th>Split / share</th>
+                <th>Status</th>
                 <th className="transactionsActionsCol">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading && sortedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="muted pad">
+                  <td colSpan={9} className="muted pad">
                     Loading…
                   </td>
                 </tr>
               ) : !sortedRows.length ? (
                 <tr>
-                  <td colSpan={14} className="emptyStateCell">
+                  <td colSpan={9} className="emptyStateCell">
                     <p>No transactions yet — or none match your filters.</p>
                     <p className="muted">
                       Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
@@ -1222,7 +1265,7 @@ export function TransactionsPage() {
                 <TransactionRow
                   key={t.id}
                   t={t}
-                  categoryHints={categoryHints}
+                  categoryOptions={categoryLabels}
                   selected={selectedIds.has(t.id)}
                   onToggleSelected={() => toggleSelected(t.id)}
                   onSave={saveRow}
@@ -1231,7 +1274,7 @@ export function TransactionsPage() {
                       setAttachForTxnId(id)
                       receiptFileRef.current?.click()
                     }}
-                    onAiError={(msg) => setErr(msg)}
+                    onError={(msg) => setErr(msg)}
                   />
                 ))
               )}
@@ -1264,22 +1307,22 @@ export function TransactionsPage() {
 
 function TransactionRow({
   t,
-  categoryHints,
+  categoryOptions,
   selected,
   onToggleSelected,
   onSave,
   aiEnabled,
   onAttachReceipt,
-  onAiError,
+  onError,
 }: {
   t: Transaction
-  categoryHints: CategoryHint[]
+  categoryOptions: string[]
   selected: boolean
   onToggleSelected: () => void
   onSave: (id: number, patch: Record<string, unknown>) => Promise<void>
   aiEnabled: boolean
   onAttachReceipt: (transactionId: number) => void
-  onAiError: (message: string) => void
+  onError: (message: string) => void
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [cat, setCat] = useState(t.categoryOverride ?? '')
@@ -1297,8 +1340,25 @@ function TransactionRow({
   const [pctPartner, setPctPartner] = useState(
     t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : ''
   )
+  const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe)
+  const parsedPctPartner =
+    pctPartner.trim() === '' ? null : Number(pctPartner)
+  const hasInvalidShareOverride =
+    (pctMe.trim() !== '' && !Number.isFinite(parsedPctMe)) ||
+    (pctPartner.trim() !== '' && !Number.isFinite(parsedPctPartner))
+  const isDirty =
+    cat !== (t.categoryOverride ?? '') ||
+    biz !==
+      (t.businessOverride === null || t.businessOverride === undefined
+        ? ''
+        : t.businessOverride
+          ? 'true'
+          : 'false') ||
+    split !== (t.splitOverride ?? '') ||
+    pctMe !== (t.pctMeOverride != null ? String(t.pctMeOverride) : '') ||
+    pctPartner !== (t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '')
 
-  useEffect(() => {
+  function resetDraft() {
     setCat(t.categoryOverride ?? '')
     setBiz(
       t.businessOverride === null || t.businessOverride === undefined
@@ -1309,9 +1369,11 @@ function TransactionRow({
     )
     setSplit(t.splitOverride ?? '')
     setPctMe(t.pctMeOverride != null ? String(t.pctMeOverride) : '')
-    setPctPartner(
-      t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : ''
-    )
+    setPctPartner(t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '')
+  }
+
+  useEffect(() => {
+    resetDraft()
   }, [t])
 
   return (
@@ -1333,22 +1395,31 @@ function TransactionRow({
           </span>
         </div>
       </td>
-      <td className={Number(t.amount) < 0 ? 'txnAmount txnAmount--expense' : 'txnAmount txnAmount--credit'}>
-        {formatMoney(Number(t.amount), t.currency)}
-      </td>
-      <td>{t.currency}</td>
       <td>
-        <input
+        <div className="txnAmountCell">
+          <span
+            className={
+              Number(t.amount) < 0
+                ? 'txnAmount txnAmount--expense'
+                : 'txnAmount txnAmount--credit'
+            }
+          >
+            {formatMoney(Number(t.amount), t.currency)}
+          </span>
+          <span className="txnAmountMeta">{t.currency}</span>
+        </div>
+      </td>
+      <td>
+        <CategoryCloudPicker
+          className="txnCategoryCell"
+          inputClassName="txnCategoryInput"
+          cloudClassName="txnCategoryPickerCloud"
+          itemClassName="txnCategoryPickerItem"
           value={cat}
-          onChange={(e) => setCat(e.target.value)}
-          list={`transaction-row-category-options-${t.id}`}
+          onChange={setCat}
+          options={categoryOptions}
           placeholder={t.finalCategory ?? ''}
         />
-        <datalist id={`transaction-row-category-options-${t.id}`}>
-          {categoryHints.map((hint) => (
-            <option key={hint.label} value={hint.label} />
-          ))}
-        </datalist>
       </td>
       <td>
         <select
@@ -1361,46 +1432,48 @@ function TransactionRow({
         </select>
       </td>
       <td>
-        <select value={split} onChange={(e) => setSplit(e.target.value)}>
-          <option value="">(auto)</option>
-          <option value="me">me</option>
-          <option value="partner">partner</option>
-          <option value="shared">shared</option>
-        </select>
+        <div className="txnSplitCell">
+          <select value={split} onChange={(e) => setSplit(e.target.value)}>
+            <option value="">(auto)</option>
+            <option value="me">me</option>
+            <option value="partner">partner</option>
+            <option value="shared">shared</option>
+          </select>
+          <div className="txnSplitPercents">
+            <input
+              value={pctMe}
+              onChange={(e) => setPctMe(e.target.value)}
+              aria-invalid={hasInvalidShareOverride && pctMe.trim() !== ''}
+              className="txnPercentInput"
+              placeholder="me"
+              aria-label={`My share override for transaction ${t.id}`}
+            />
+            <input
+              value={pctPartner}
+              onChange={(e) => setPctPartner(e.target.value)}
+              aria-invalid={hasInvalidShareOverride && pctPartner.trim() !== ''}
+              className="txnPercentInput"
+              placeholder="ptn"
+              aria-label={`Partner share override for transaction ${t.id}`}
+            />
+          </div>
+        </div>
       </td>
       <td>
-        <input
-          value={pctMe}
-          onChange={(e) => setPctMe(e.target.value)}
-          style={{ width: 56 }}
-          placeholder="0.5"
-        />
-      </td>
-      <td>
-        <input
-          value={pctPartner}
-          onChange={(e) => setPctPartner(e.target.value)}
-          style={{ width: 56 }}
-          placeholder="0.5"
-        />
-      </td>
-      <td>
-        <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
-          {t.reviewFlag ? 'Needs review' : 'Done'}
-        </span>
-      </td>
-      <td>
-        <span className="txnReceiptCount" title="Receipts attached">
-          {t.receiptCount ?? 0}
-        </span>{' '}
-        <button
-          type="button"
-          className="linkish"
-          onClick={() => onAttachReceipt(t.id)}
-          title="Attach receipt image"
-        >
-          +
-        </button>
+        <div className="txnStatusCell">
+          <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
+            {t.reviewFlag ? 'Needs review' : 'Reviewed'}
+          </span>
+          <button
+            type="button"
+            className="txnReceiptAction"
+            onClick={() => onAttachReceipt(t.id)}
+            title="Attach receipt image"
+          >
+            <span className="txnReceiptCount">{t.receiptCount ?? 0}</span>
+            <span>{(t.receiptCount ?? 0) > 0 ? 'Add receipt' : 'Attach receipt'}</span>
+          </button>
+        </div>
       </td>
       <td className="transactionsActionsCol">
         <div className="txnActionGroup">
@@ -1431,7 +1504,7 @@ function TransactionRow({
                   if (s.pctMe != null) setPctMe(String(s.pctMe))
                   if (s.pctPartner != null) setPctPartner(String(s.pctPartner))
                 } catch (e) {
-                  onAiError(e instanceof Error ? e.message : 'AI suggestion failed')
+                  onError(e instanceof Error ? e.message : 'AI suggestion failed')
                 } finally {
                   setAiRowBusy(false)
                 }
@@ -1440,21 +1513,31 @@ function TransactionRow({
               {aiRowBusy ? '…' : 'AI'}
             </button>
           ) : null}
+          {isDirty ? (
+            <button type="button" className="txnResetButton" onClick={resetDraft}>
+              Revert
+            </button>
+          ) : null}
           <button
             type="button"
             className="txnSaveButton"
-            onClick={() =>
+            disabled={!isDirty && !t.reviewFlag}
+            onClick={() => {
+              if (hasInvalidShareOverride) {
+                onError('Percent overrides must be valid numbers.')
+                return
+              }
               void onSave(t.id, {
                 categoryOverride: cat || null,
                 businessOverride: biz === '' ? null : biz === 'true',
                 splitOverride: split || null,
-                pctMeOverride: pctMe === '' ? null : Number(pctMe),
-                pctPartnerOverride: pctPartner === '' ? null : Number(pctPartner),
+                pctMeOverride: parsedPctMe,
+                pctPartnerOverride: parsedPctPartner,
                 reviewFlag: false,
               })
-            }
+            }}
           >
-            Save
+            {!isDirty && t.reviewFlag ? 'Mark reviewed' : isDirty ? 'Save' : 'Saved'}
           </button>
         </div>
       </td>
