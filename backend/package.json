@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "start": "sequelize-cli db:migrate && node dist/server.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "db:migrate": "sequelize-cli db:migrate",
