@@ -80,7 +80,14 @@ Run from the repo root:
 
 ## Railway deployment
 
-This repo includes a root `railway.toml` for deploying the backend API service on Railway. It builds `cashflow-backend`, runs Sequelize migrations before deploy, starts `node dist/server.js`, and healthchecks `GET /api/health`.
+This repo includes separate Railway config files for the backend API and Vite frontend:
+
+- Backend service config path: `/backend/railway.toml`
+- Frontend service config path: `/frontend/railway.toml`
+
+Set each Railway service's config file path explicitly in the service settings. Both services should keep the repo root as the Railway root directory so Yarn workspaces resolve correctly.
+
+The backend config builds `cashflow-backend`, runs Sequelize migrations before deploy, starts `node dist/server.js`, and healthchecks `GET /api/health`. The frontend config builds Vite and serves it with `vite preview` on Railway's `$PORT`.
 
 Recommended Railway variables:
 

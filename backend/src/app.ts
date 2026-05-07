@@ -13,6 +13,13 @@ import receiptsRouter from './routes/receipts';
 
 const app = express();
 
+app.get('/', (_req, res) => {
+  res.json({
+    service: 'cashflow-backend',
+    health: '/api/health',
+  });
+});
+
 app.use(
   cors({
     origin: env.corsOrigin,

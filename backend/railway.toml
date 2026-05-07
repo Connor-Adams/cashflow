@@ -5,8 +5,7 @@ watchPatterns = [
   "backend/**",
   "shared/**",
   "package.json",
-  "yarn.lock",
-  "railway.toml"
+  "yarn.lock"
 ]
 
 [deploy]
