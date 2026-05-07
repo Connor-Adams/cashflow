@@ -103,6 +103,8 @@ Healthcheck Path: /
 
 Do not set a Railway config file path for either service. This is a Yarn workspace repo with shared root configuration, so both services need the repo root available at build time.
 
+The repo root also has a generic `start` script only so Railpack can detect a runnable Node app during analysis. Keep the explicit service start commands above in Railway, especially for the frontend service.
+
 Recommended Railway variables:
 
 ```bash

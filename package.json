@@ -12,6 +12,7 @@
     "lint-staged": "lint-staged",
     "setup": "yarn install && yarn db:migrate",
     "dev": "concurrently -n api,web -c blue,green \"yarn workspace cashflow-backend run dev\" \"yarn workspace frontend run dev\"",
+    "start": "yarn railway:backend:start",
     "db:migrate": "yarn workspace cashflow-backend run db:migrate",
     "build": "yarn workspace cashflow-backend run build && yarn workspace frontend run build",
     "railway:backend:build": "yarn workspace cashflow-backend run build",
