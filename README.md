@@ -106,13 +106,15 @@ Do not set a Railway config file path for either service. This is a Yarn workspa
 Recommended Railway variables:
 
 ```bash
-NODE_ENV=production
 CORS_ORIGIN=https://your-frontend-domain.example
 DATABASE_PATH=/data/cashflow.sqlite
 CSV_UPLOAD_DIR=/data/uploads/csv
 RECEIPTS_UPLOAD_DIR=/data/uploads/receipts
 DEFAULT_CURRENCY=CAD
+YARN_PRODUCTION=false
 ```
+
+Do not set `NODE_ENV=production` as a Railway variable for these services. Yarn Classic uses it during install and may skip build tools like TypeScript, Vite, and Sequelize CLI. The backend start script sets `NODE_ENV=production` only at runtime.
 
 Attach a Railway volume mounted at `/data` if you want SQLite data and uploads to persist across deploys. Deploy the Vite frontend as a separate static service and set `VITE_API_BASE` to the backend public URL.
 
