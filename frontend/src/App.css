@@ -2,9 +2,9 @@
 
 @layer base {
   button {
-    @apply inline-flex items-center justify-center rounded-xl border px-3 py-2 text-sm font-medium transition-colors duration-150;
+    @apply inline-flex min-h-10 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition-colors duration-150;
     border-color: var(--border);
-    background: color-mix(in srgb, var(--bg2) 84%, transparent);
+    background: color-mix(in srgb, var(--bg2) 88%, black 4%);
     color: var(--fg);
   }
 
@@ -25,9 +25,9 @@
   input,
   select,
   textarea {
-    @apply rounded-xl border px-3 py-2 text-sm transition-colors duration-150 outline-none;
+    @apply min-h-10 rounded-lg border px-3 py-2 text-sm transition-colors duration-150 outline-none;
     border-color: var(--border);
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    background: color-mix(in srgb, var(--bg) 90%, black 4%);
     color: var(--fg);
   }
 
@@ -52,71 +52,64 @@
   }
 
   .header {
-    @apply sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b px-5 py-4 backdrop-blur-xl;
-    border-color: color-mix(in srgb, var(--border) 88%, white 6%);
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--bg2) 92%, transparent) 0%,
-        color-mix(in srgb, var(--bg) 82%, transparent) 100%
-      );
+    @apply sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 backdrop-blur-xl sm:px-6;
+    border-color: color-mix(in srgb, var(--border) 86%, white 4%);
+    background: color-mix(in srgb, var(--bg2) 92%, transparent);
   }
 
   .brandLockup {
-    @apply flex items-center gap-3;
+    @apply flex min-w-0 items-center gap-3;
   }
 
   .brandMark {
-    @apply flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold tracking-[0.18em];
-    color: #06111e;
-    background:
-      linear-gradient(135deg, var(--accent-soft) 0%, var(--accent) 52%, #7dd3fc 100%);
-    box-shadow: 0 12px 26px rgba(119, 167, 255, 0.28);
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold;
+    color: #11140f;
+    background: var(--accent-soft);
+    box-shadow: 0 10px 20px rgba(140, 195, 163, 0.2);
   }
 
   .brandEyebrow {
-    @apply text-[0.65rem] font-semibold uppercase tracking-[0.22em];
+    @apply truncate text-[0.65rem] font-semibold uppercase tracking-normal;
     color: var(--muted);
   }
 
   .brand {
-    @apply text-lg font-semibold tracking-[0.04em];
+    @apply truncate text-lg font-semibold;
     color: var(--fg);
   }
 
   .nav {
-    @apply flex flex-wrap gap-2;
+    @apply flex max-w-full gap-1 overflow-x-auto rounded-lg border p-1;
+    border-color: color-mix(in srgb, var(--border) 78%, transparent);
+    background: color-mix(in srgb, var(--bg) 56%, transparent);
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
   }
 
   .navLink {
-    @apply rounded-full px-3 py-2 text-sm font-medium no-underline transition-all duration-150;
+    @apply whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold no-underline transition-colors duration-150;
     color: var(--muted);
   }
 
   .navLink:hover {
-    @apply -translate-y-px;
     color: var(--fg);
-    background: color-mix(in srgb, var(--bg3) 82%, transparent);
+    background: color-mix(in srgb, var(--bg3) 78%, transparent);
   }
 
   .navLink.isActive {
-    @apply shadow-sm;
-    color: var(--fg);
-    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-    background:
-      linear-gradient(
-        180deg,
-        rgba(119, 167, 255, 0.18) 0%,
-        color-mix(in srgb, var(--bg3) 88%, transparent) 100%
-      );
+    color: #10110f;
+    background: var(--accent-soft);
   }
 
   .main {
-    @apply mx-auto flex-1 w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8;
+    @apply mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 lg:px-8;
   }
 
   .page h1 {
-    @apply mb-2 text-[1.55rem] font-semibold tracking-tight;
+    @apply mb-2 text-[1.55rem] font-semibold tracking-tight sm:text-[1.8rem];
   }
 
   .page h2 {
@@ -133,7 +126,9 @@
   }
 
   .error {
-    @apply text-sm font-medium;
+    @apply inline-flex rounded-lg border px-3 py-2 text-sm font-semibold;
+    border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
     color: var(--danger);
   }
 
@@ -142,19 +137,14 @@
   }
 
   .card {
-    @apply mb-4 rounded-3xl border p-4 sm:p-5;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--bg2) 88%, transparent) 0%,
-        color-mix(in srgb, var(--bg) 92%, transparent) 100%
-      );
+    @apply mb-4 rounded-lg border p-4 sm:p-5;
+    border-color: color-mix(in srgb, var(--border) 88%, white 4%);
+    background: color-mix(in srgb, var(--bg2) 76%, transparent);
     box-shadow: var(--shadow);
   }
 
   .tableWrap {
-    @apply overflow-auto rounded-3xl border;
+    @apply overflow-auto rounded-lg border;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg) 90%, transparent);
   }
@@ -165,14 +155,14 @@
 
   .table th,
   .table td {
-    @apply border-b px-3 py-2 text-left align-middle;
+    @apply whitespace-nowrap border-b px-3 py-2.5 text-left align-middle;
     border-color: color-mix(in srgb, var(--border) 82%, white 6%);
   }
 
   .table th {
-    @apply text-[0.72rem] font-semibold uppercase tracking-[0.12em];
+    @apply text-[0.7rem] font-bold uppercase tracking-normal;
     color: var(--muted);
-    background: color-mix(in srgb, var(--bg2) 76%, transparent);
+    background: color-mix(in srgb, var(--bg3) 72%, transparent);
   }
 
   .table tbody tr:hover {
@@ -193,7 +183,7 @@
   }
 
   .dashboardHeader {
-    @apply mb-3;
+    @apply mb-4 flex flex-wrap items-end justify-between gap-3;
   }
 
   .dashboardHeader .muted {
@@ -201,7 +191,9 @@
   }
 
   .dashboardFilters {
-    @apply mt-3;
+    @apply mt-3 rounded-lg border p-3 sm:p-4;
+    border-color: color-mix(in srgb, var(--border) 86%, white 4%);
+    background: color-mix(in srgb, var(--bg2) 64%, transparent);
   }
 
   .dashboardFilters .row {
@@ -213,7 +205,7 @@
   }
 
   .quickFilterButton {
-    @apply rounded-full px-3 py-1.5 text-xs font-semibold tracking-[0.08em] uppercase;
+    @apply min-h-8 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 62%, transparent);
     color: var(--muted);
@@ -221,13 +213,8 @@
 
   .quickFilterButton[aria-pressed='true'] {
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-    background:
-      linear-gradient(
-        180deg,
-        rgba(119, 167, 255, 0.18) 0%,
-        color-mix(in srgb, var(--bg3) 92%, transparent) 100%
-      );
-    color: var(--fg);
+    background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
+    color: #10110f;
   }
 
   .dashboardStats {
@@ -250,7 +237,7 @@
 
   .transactionsTopGrid {
     @apply mb-4 grid gap-4;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   }
 
   .transactionsPanel {
@@ -266,7 +253,7 @@
   }
 
   .transactionsPanelBadge {
-    @apply rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em];
+    @apply rounded-md border px-2.5 py-1 text-[0.68rem] font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 62%, transparent);
     color: var(--muted);
@@ -348,7 +335,7 @@
 
   .reportsGrid {
     @apply grid gap-4;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   }
 
   .reportsTableCard {
@@ -373,7 +360,7 @@
   }
 
   .categoryCloudPicker__cloud {
-    @apply absolute left-0 top-full z-30 mt-2 flex max-h-[min(20rem,calc(100vh-8rem))] flex-wrap gap-2 overflow-y-auto rounded-2xl border p-3;
+    @apply absolute left-0 top-full z-30 mt-2 flex max-h-[min(20rem,calc(100vh-8rem))] flex-wrap gap-2 overflow-y-auto rounded-lg border p-3;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg2) 96%, transparent);
     box-shadow: var(--shadow);
@@ -381,7 +368,7 @@
   }
 
   .categoryCloudPicker__item {
-    @apply rounded-full px-3 py-1.5 text-xs font-medium;
+    @apply min-h-8 rounded-md px-3 py-1.5 text-xs font-semibold;
     border: 0;
     background: color-mix(in srgb, var(--bg3) 40%, transparent);
     color: var(--muted);
@@ -411,7 +398,7 @@
   }
 
   .transactionsCheckTile {
-    @apply justify-between rounded-2xl border px-3 py-2;
+    @apply justify-between rounded-lg border px-3 py-2;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 52%, transparent);
   }
@@ -434,7 +421,7 @@
   }
 
   .transactionsFilterPill {
-    @apply inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium;
+    @apply inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold;
     border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
     background: color-mix(in srgb, var(--bg3) 68%, transparent);
     color: var(--fg);
@@ -474,6 +461,7 @@
 
   .transactionsTableWrap {
     @apply overflow-auto;
+    max-height: 72vh;
   }
 
   .transactionsTable thead th {
@@ -483,7 +471,7 @@
   .transactionsActionsCol {
     @apply sticky right-0;
     background: color-mix(in srgb, var(--bg2) 92%, transparent);
-    box-shadow: -10px 0 18px rgba(0, 0, 0, 0.18);
+    box-shadow: -8px 0 16px rgba(0, 0, 0, 0.2);
   }
 
   .transactionsTable tbody .transactionsActionsCol {
@@ -524,7 +512,7 @@
   }
 
   .txnCategoryPickerItem {
-    @apply rounded-full px-2 py-1 text-[0.68rem] leading-none;
+    @apply rounded-md px-2 py-1 text-[0.68rem] leading-none;
   }
 
   .txnAmount {
@@ -536,7 +524,7 @@
   }
 
   .txnAmountMeta {
-    @apply text-xs font-medium uppercase tracking-[0.08em];
+    @apply text-xs font-medium uppercase tracking-normal;
     color: var(--muted);
   }
 
@@ -549,7 +537,7 @@
   }
 
   .txnBadge {
-    @apply inline-flex rounded-full border px-2 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em];
+    @apply inline-flex rounded-md border px-2 py-1 text-[0.68rem] font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     color: var(--muted);
     background: color-mix(in srgb, var(--bg3) 52%, transparent);
@@ -562,7 +550,7 @@
   }
 
   .txnReceiptCount {
-    @apply inline-flex min-w-6 items-center justify-center rounded-full border px-1.5 py-0.5 text-xs font-semibold;
+    @apply inline-flex min-w-6 items-center justify-center rounded-md border px-1.5 py-0.5 text-xs font-bold;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     color: var(--fg);
     background: color-mix(in srgb, var(--bg3) 52%, transparent);
@@ -590,7 +578,7 @@
   }
 
   .txnReceiptAction {
-    @apply inline-flex items-center justify-start gap-2 rounded-xl border px-2.5 py-1.5 text-xs font-medium;
+    @apply inline-flex items-center justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 40%, transparent);
     color: var(--fg);
@@ -602,13 +590,8 @@
 
   .txnSaveButton {
     border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
-    background:
-      linear-gradient(
-        180deg,
-        rgba(119, 167, 255, 0.18) 0%,
-        color-mix(in srgb, var(--bg3) 90%, transparent) 100%
-      );
-    color: var(--fg);
+    background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
+    color: #10110f;
   }
 
   .txnSaveButton:disabled {
@@ -616,16 +599,16 @@
   }
 
   .statCard {
-    @apply mb-0 flex flex-col gap-2 px-4 py-4;
+    @apply mb-0 flex min-h-[148px] flex-col gap-2 px-4 py-4;
   }
 
   .statLabel {
-    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em];
+    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
     color: var(--muted);
   }
 
   .statValue {
-    @apply m-0 text-[1.55rem] font-semibold tracking-tight;
+    @apply m-0 text-[1.65rem] font-semibold tracking-tight;
   }
 
   .statHint {
@@ -637,12 +620,7 @@
   }
 
   .dashboardBusinessSpotlight {
-    background:
-      linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--accent-warm) 18%, var(--bg2)) 0%,
-        color-mix(in srgb, var(--accent-green) 16%, var(--bg2)) 100%
-      );
+    background: color-mix(in srgb, var(--bg2) 72%, var(--accent-green) 8%);
   }
 
   .businessSpotlightHeader {
@@ -654,14 +632,14 @@
   }
 
   .businessSpotlightTotals {
-    @apply rounded-2xl border px-4 py-3;
+    @apply rounded-lg border px-4 py-3;
     min-width: 220px;
     border-color: color-mix(in srgb, var(--border) 70%, white 10%);
     background: color-mix(in srgb, var(--bg) 72%, transparent);
   }
 
   .businessSpotlightTotalLabel {
-    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em];
+    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
     color: var(--muted);
   }
 
@@ -675,7 +653,7 @@
   }
 
   .businessFocusCard {
-    @apply rounded-2xl border p-4;
+    @apply rounded-lg border p-4;
     background: color-mix(in srgb, var(--bg) 82%, transparent);
   }
 
@@ -690,7 +668,7 @@
   }
 
   .businessFocusLabel {
-    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em];
+    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
     color: var(--muted);
   }
 
@@ -709,7 +687,7 @@
   }
 
   .businessFocusMetrics dt {
-    @apply mb-1 text-[0.68rem] font-semibold uppercase tracking-[0.12em];
+    @apply mb-1 text-[0.68rem] font-semibold uppercase tracking-normal;
     color: var(--muted);
   }
 
@@ -728,7 +706,7 @@
   }
 
   .businessShareBar {
-    @apply flex h-3.5 w-full overflow-hidden rounded-full border;
+    @apply flex h-3.5 w-full overflow-hidden rounded-md border;
     background: color-mix(in srgb, var(--bg) 88%, white 4%);
     border-color: color-mix(in srgb, var(--border) 85%, white 8%);
   }
@@ -824,7 +802,7 @@
   }
 
   .emptyStateCell {
-    @apply align-top px-4 py-5;
+    @apply whitespace-normal align-top px-4 py-5;
   }
 
   .emptyStateCell p {
@@ -837,7 +815,7 @@
 
   .formGrid {
     @apply mb-3 grid gap-3;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
   }
 
   .formGrid label {
@@ -850,6 +828,18 @@
 }
 
 @media (width <= 720px) {
+  .header {
+    @apply items-start;
+  }
+
+  .nav {
+    @apply w-full;
+  }
+
+  .navLink {
+    @apply flex-1 text-center;
+  }
+
   .transactionsTopGrid {
     grid-template-columns: 1fr;
   }
