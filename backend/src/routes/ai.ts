@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { getOpenAiConfig } from '../config/openai';
+import { isDemoUserRequest } from '../demo/aiAccess';
 
 const router = Router();
 
-router.get('/status', (_req, res) => {
+router.get('/status', (req, res) => {
   res.json({
-    openai: getOpenAiConfig() != null,
+    openai: !isDemoUserRequest(req) && getOpenAiConfig() != null,
   });
 });
 

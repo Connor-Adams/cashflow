@@ -148,6 +148,20 @@ Set **`OPENAI_API_KEY`** in `backend/.env` to enable:
 
 Without an API key, CSV import and the rest of the app work unchanged; the UI shows how to enable AI.
 
+## Demo account
+
+The backend seeds a demo account on startup, including in production, unless
+`DEMO_ACCOUNT_ENABLED=false` is set. Defaults:
+
+- Email: `dev@cashflow.local`
+- Password: `cashflow-demo`
+
+Override with `DEMO_ACCOUNT_EMAIL`, `DEMO_ACCOUNT_PASSWORD`, and
+`DEMO_ACCOUNT_NAME`. The seed is idempotent: it ensures the user, household,
+demo account, rules, and sample transactions exist without duplicating the
+sample ledger on later deploys. The auth screen also exposes a **Continue with
+demo account** button backed by `POST /api/auth/demo-login`.
+
 ## API overview
 
 - `GET|POST|DELETE /api/accounts/:id` — list, create, delete account (delete removes all transactions for that account first)

@@ -92,3 +92,14 @@ export type Paginated<T> = {
   pageSize: number
   total: number
 }
+
+export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+export type ClientLogPayload = {
+  level: ClientLogLevel
+  event: string
+  message?: string
+  path?: string
+  requestId?: string
+  fields?: Record<string, unknown>
+}

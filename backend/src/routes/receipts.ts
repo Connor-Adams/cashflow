@@ -9,6 +9,7 @@ import { analyzeReceiptFile } from '../ai/receiptVision';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { visibleTransactionWhere } from '../auth/scope';
+import { rejectDemoAiRequest } from '../demo/aiAccess';
 
 const router = Router();
 
@@ -199,6 +200,7 @@ router.post(
   aiSuggestLimiter,
   async (req, res, next) => {
     try {
+      if (rejectDemoAiRequest(req, res)) return;
       if (!getOpenAiConfig()) {
         res.status(503).json({ error: 'OpenAI is not configured' });
         return;

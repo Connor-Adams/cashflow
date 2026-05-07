@@ -14,6 +14,7 @@ import {
 } from '../models';
 import { hashPassword, hashToken, randomToken, verifyPassword } from '../auth/password';
 import { clearSessionCookie, currentAuth, setSessionCookie } from '../auth/middleware';
+import { DEMO_EMAIL, demoSeedEnabled, seedDemoData } from '../demo/seedDemoData';
 
 const router = Router();
 const SESSION_DAYS = 30;
@@ -55,6 +56,16 @@ async function resolveInvite(token: unknown) {
       expiresAt: { [Op.gt]: new Date() },
     },
   });
+}
+
+async function loadPrimaryMembership(userId: number) {
+  const membership = await HouseholdMember.findOne({
+    where: { userId },
+    include: [{ model: Household, as: 'household' }],
+    order: [['id', 'ASC']],
+  });
+  const household = membership?.get('household') as Household | undefined;
+  return { membership, household };
 }
 
 router.get('/me', async (req, res, next) => {
@@ -168,14 +179,33 @@ router.post('/login', async (req, res, next) => {
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }
-    const membership = await HouseholdMember.findOne({
-      where: { userId: user.id },
-      include: [{ model: Household, as: 'household' }],
-      order: [['id', 'ASC']],
-    });
-    const household = membership?.get('household') as Household | undefined;
+    const { membership, household } = await loadPrimaryMembership(user.id);
     if (!membership || !household) {
       res.status(403).json({ error: 'User is not linked to a household' });
+      return;
+    }
+    await createSession(res, user.id);
+    res.json({ user: publicUser(user, household, membership.role) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/demo-login', async (_req, res, next) => {
+  try {
+    if (!demoSeedEnabled()) {
+      res.status(404).json({ error: 'Demo account is disabled' });
+      return;
+    }
+    await seedDemoData();
+    const user = await User.findOne({ where: { email: DEMO_EMAIL } });
+    if (!user) {
+      res.status(404).json({ error: 'Demo account is not available' });
+      return;
+    }
+    const { membership, household } = await loadPrimaryMembership(user.id);
+    if (!membership || !household) {
+      res.status(403).json({ error: 'Demo user is not linked to a household' });
       return;
     }
     await createSession(res, user.id);

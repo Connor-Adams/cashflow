@@ -6,6 +6,7 @@ export type AuthState = {
   bootstrapRequired: boolean
   loading: boolean
   login(email: string, password: string): Promise<void>
+  demoLogin(): Promise<void>
   register(input: {
     email: string
     displayName: string

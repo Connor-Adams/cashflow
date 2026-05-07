@@ -11,6 +11,8 @@ import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { currentAuth } from '../auth/middleware';
 import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
+import { rejectDemoAiRequest } from '../demo/aiAccess';
+import { logger } from '../observability/logger';
 
 const router = Router();
 
@@ -18,7 +20,7 @@ function logTransactionEvent(
   event: string,
   details: Record<string, string | number | boolean | null | undefined>
 ): void {
-  console.info(`[transactions] ${event}`, details);
+  logger.info(`transactions_${event}`, details);
 }
 
 const PATCHABLE_KEYS = [
@@ -87,6 +89,7 @@ async function applyPatchBody(
 
 router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
   try {
+    if (rejectDemoAiRequest(req, res)) return;
     if (!getOpenAiConfig()) {
       res.status(503).json({ error: 'OpenAI is not configured (set OPENAI_API_KEY)' });
       return;
@@ -317,6 +320,7 @@ router.get('/', async (req, res, next) => {
 
 router.post('/:id/ai-suggest', aiSuggestLimiter, async (req, res, next) => {
   try {
+    if (rejectDemoAiRequest(req, res)) return;
     if (!getOpenAiConfig()) {
       res.status(503).json({ error: 'OpenAI is not configured (set OPENAI_API_KEY)' });
       return;

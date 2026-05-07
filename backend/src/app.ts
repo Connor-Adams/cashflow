@@ -12,7 +12,10 @@ import aiRouter from './routes/ai';
 import receiptsRouter from './routes/receipts';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
+import clientLogsRouter from './routes/clientLogs';
 import { attachAuth, requireAuth } from './auth/middleware';
+import { logger } from './observability/logger';
+import { requestLogger } from './observability/requestLogger';
 
 const app = express();
 
@@ -29,11 +32,13 @@ app.use(
     credentials: true,
   })
 );
+app.use(requestLogger);
 app.use(express.json({ limit: '2mb' }));
 app.use(attachAuth);
 
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/client-logs', clientLogsRouter);
 app.use('/api', requireAuth);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/transactions', transactionsRouter);
@@ -45,31 +50,44 @@ app.use('/api/ai', aiRouter);
 app.use('/api', receiptsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  const requestContext = {
-    method: _req.method,
-    path: _req.originalUrl || _req.url,
-  };
-  console.error('[api] request_failed', requestContext, err);
   const code =
     err && typeof err === 'object' && 'code' in err
       ? String((err as { code?: string }).code)
       : '';
-  if (code === 'LIMIT_FILE_SIZE') {
-    res.status(400).json({ error: 'File too large (max 15MB)' });
-    return;
-  }
   const statusRaw =
     err && typeof err === 'object' && 'status' in err
       ? (err as { status?: number }).status
       : err && typeof err === 'object' && 'statusCode' in err
         ? (err as { statusCode?: number }).statusCode
         : undefined;
-  const status = Number(statusRaw) || 500;
+  const status = code === 'LIMIT_FILE_SIZE' ? 400 : Number(statusRaw) || 500;
+  const responseStatus = status >= 400 && status < 600 ? status : 500;
+  const requestContext = {
+    requestId: _req.requestId,
+    method: _req.method,
+    path: _req.originalUrl || _req.url,
+    statusCode: responseStatus,
+    userId: _req.auth?.user.id,
+    householdId: _req.auth?.household.id,
+  };
+  if (responseStatus >= 500) {
+    logger.error('request_failed', requestContext, err);
+  } else {
+    logger.warn('request_failed', {
+      ...requestContext,
+      errorName: err instanceof Error ? err.name : undefined,
+      errorMessage: err instanceof Error ? err.message : undefined,
+    });
+  }
+  if (code === 'LIMIT_FILE_SIZE') {
+    res.status(400).json({ error: 'File too large (max 15MB)' });
+    return;
+  }
   const message =
     err instanceof Error && err.message && !String(err.message).includes('ENOENT')
       ? err.message
       : 'Internal Server Error';
-  res.status(status >= 400 && status < 600 ? status : 500).json({
+  res.status(responseStatus).json({
     error: message,
   });
 });

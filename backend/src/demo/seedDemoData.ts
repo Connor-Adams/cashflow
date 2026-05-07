@@ -1,0 +1,226 @@
+import { Account, Household, HouseholdMember, Rule, Transaction, User, sequelize } from '../models';
+import { hashPassword } from '../auth/password';
+import { recomputeTransactionAmounts } from '../import/calculateShares';
+import { rowFingerprint } from '../import/fingerprint';
+import { logger } from '../observability/logger';
+
+export const DEMO_EMAIL = process.env.DEMO_ACCOUNT_EMAIL?.trim().toLowerCase() || 'dev@cashflow.local';
+const DEMO_PASSWORD = process.env.DEMO_ACCOUNT_PASSWORD || 'cashflow-demo';
+const DEMO_NAME = process.env.DEMO_ACCOUNT_NAME?.trim() || 'Dev Demo';
+
+type DemoTxn = {
+  daysAgo: number;
+  merchant: string;
+  amount: number;
+  category: string;
+  splitType?: 'me' | 'partner' | 'shared';
+  business?: boolean;
+  notes?: string;
+  review?: boolean;
+};
+
+export function demoSeedEnabled(): boolean {
+  return process.env.DEMO_ACCOUNT_ENABLED !== 'false';
+}
+
+export function isDemoUserEmail(email: string | null | undefined): boolean {
+  return String(email ?? '').trim().toLowerCase() === DEMO_EMAIL;
+}
+
+function isoDateDaysAgo(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
+function splitPercent(splitType: DemoTxn['splitType']): {
+  pctMe: number | null;
+  pctPartner: number | null;
+} {
+  if (splitType === 'shared') return { pctMe: 0.5, pctPartner: 0.5 };
+  return { pctMe: null, pctPartner: null };
+}
+
+const demoTransactions: DemoTxn[] = [
+  { daysAgo: 2, merchant: 'Metro Grocery', amount: -86.42, category: 'Groceries', splitType: 'shared' },
+  { daysAgo: 3, merchant: 'TTC Presto', amount: -32.5, category: 'Transit' },
+  { daysAgo: 4, merchant: 'Stripe Payout', amount: 620, category: 'Freelance', business: true },
+  { daysAgo: 6, merchant: 'Bell Canada', amount: -78.12, category: 'Utilities', splitType: 'shared' },
+  { daysAgo: 8, merchant: 'Coffee Lab', amount: -14.75, category: 'Dining' },
+  { daysAgo: 10, merchant: 'Adobe Creative Cloud', amount: -31.63, category: 'Software', business: true },
+  { daysAgo: 13, merchant: 'Shoppers Drug Mart', amount: -44.2, category: 'Health', splitType: 'shared' },
+  { daysAgo: 16, merchant: 'Payroll Deposit', amount: 2850, category: 'Income' },
+  { daysAgo: 20, merchant: 'Alectra Utilities', amount: -122.89, category: 'Utilities', splitType: 'shared' },
+  { daysAgo: 24, merchant: 'Airbnb', amount: -412.18, category: 'Travel', review: true },
+  { daysAgo: 31, merchant: 'FreshCo', amount: -63.91, category: 'Groceries', splitType: 'shared' },
+  { daysAgo: 39, merchant: 'Client Lunch', amount: -58.3, category: 'Meals', business: true, notes: 'Client meeting' },
+  { daysAgo: 45, merchant: 'Rent Payment', amount: -2150, category: 'Rent', splitType: 'shared' },
+  { daysAgo: 58, merchant: 'GO Transit', amount: -19.2, category: 'Transit' },
+  { daysAgo: 76, merchant: 'Refund - Home Depot', amount: 38.44, category: 'Home', splitType: 'shared' },
+];
+
+const demoRules = [
+  { merchantPattern: 'metro', category: 'Groceries', splitType: 'shared', pctMe: 0.5, pctPartner: 0.5 },
+  { merchantPattern: 'freshco', category: 'Groceries', splitType: 'shared', pctMe: 0.5, pctPartner: 0.5 },
+  { merchantPattern: 'presto', category: 'Transit', splitType: 'me', pctMe: null, pctPartner: null },
+  { merchantPattern: 'adobe', category: 'Software', splitType: 'me', pctMe: null, pctPartner: null, isBusiness: true },
+  { merchantPattern: 'utilities', category: 'Utilities', splitType: 'shared', pctMe: 0.5, pctPartner: 0.5 },
+];
+
+export async function seedDemoData(): Promise<void> {
+  if (!demoSeedEnabled()) return;
+
+  const passwordData = await hashPassword(DEMO_PASSWORD);
+  await sequelize.transaction(async (t) => {
+    const existingUser = await User.findOne({
+      where: { email: DEMO_EMAIL },
+      transaction: t,
+    });
+
+    const user =
+      existingUser ??
+      (await User.create(
+        {
+          email: DEMO_EMAIL,
+          displayName: DEMO_NAME,
+          globalRole: 'user',
+          passwordHash: passwordData.hash,
+          passwordSalt: passwordData.salt,
+          passwordParams: passwordData.params,
+        },
+        { transaction: t }
+      ));
+
+    if (existingUser) {
+      await existingUser.update(
+        {
+          displayName: existingUser.displayName || DEMO_NAME,
+          passwordHash: passwordData.hash,
+          passwordSalt: passwordData.salt,
+          passwordParams: passwordData.params,
+        },
+        { transaction: t }
+      );
+    }
+
+    let membership = await HouseholdMember.findOne({
+      where: { userId: user.id },
+      transaction: t,
+    });
+    let household =
+      membership != null
+        ? await Household.findByPk(membership.householdId, { transaction: t })
+        : null;
+    if (!household) {
+      household = await Household.create({ name: 'Demo Household' }, { transaction: t });
+      membership = await HouseholdMember.create(
+        { householdId: household.id, userId: user.id, role: 'owner' },
+        { transaction: t }
+      );
+    }
+
+    const [account] = await Account.findOrCreate({
+      where: {
+        householdId: household.id,
+        shortCode: 'DEMO',
+      },
+      defaults: {
+        name: 'Demo Chequing',
+        owner: 'me',
+        householdId: household.id,
+        ownerUserId: user.id,
+        visibility: 'shared',
+        shortCode: 'DEMO',
+        defaultCurrency: 'CAD',
+      },
+      transaction: t,
+    });
+
+    for (const [i, rule] of demoRules.entries()) {
+      await Rule.findOrCreate({
+        where: {
+          householdId: household.id,
+          merchantPattern: rule.merchantPattern,
+        },
+        defaults: {
+          merchantPattern: rule.merchantPattern,
+          householdId: household.id,
+          createdByUserId: user.id,
+          matchKind: 'substring',
+          priority: 100 - i,
+          category: rule.category,
+          isBusiness: Boolean(rule.isBusiness),
+          splitType: rule.splitType,
+          pctMe: rule.pctMe == null ? null : String(rule.pctMe),
+          pctPartner: rule.pctPartner == null ? null : String(rule.pctPartner),
+        },
+        transaction: t,
+      });
+    }
+
+    const existingDemoTxnCount = await Transaction.count({
+      where: { householdId: household.id },
+      transaction: t,
+    });
+    if (existingDemoTxnCount > 0) return;
+
+    for (const [i, row] of demoTransactions.entries()) {
+      const splitType = row.splitType || 'me';
+      const { pctMe, pctPartner } = splitPercent(splitType);
+      const date = isoDateDaysAgo(row.daysAgo);
+      const sourceReference = `demo-${i + 1}`;
+      const txn = Transaction.build({
+        accountId: account.id,
+        householdId: household.id,
+        createdByUserId: user.id,
+        visibility: 'shared',
+        ownershipType: splitType,
+        ownershipContactId: null,
+        importBatch: 'Demo seed',
+        date,
+        merchantRaw: row.merchant,
+        merchantClean: row.merchant,
+        amount: String(row.amount),
+        currency: 'CAD',
+        notes: row.notes ?? null,
+        sourceReference,
+        sourceRowFingerprint: rowFingerprint({
+          accountId: account.id,
+          date,
+          amount: row.amount,
+          currency: 'CAD',
+          merchantClean: row.merchant,
+          sourceReference,
+        }),
+        appliedRuleId: null,
+        autoCategory: row.category,
+        categoryOverride: null,
+        finalCategory: row.category,
+        autoBusiness: Boolean(row.business),
+        businessOverride: null,
+        finalBusiness: Boolean(row.business),
+        autoSplitType: splitType,
+        splitOverride: null,
+        finalSplitType: splitType,
+        autoPctMe: pctMe == null ? null : String(pctMe),
+        pctMeOverride: null,
+        finalPctMe: pctMe == null ? null : String(pctMe),
+        autoPctPartner: pctPartner == null ? null : String(pctPartner),
+        pctPartnerOverride: null,
+        finalPctPartner: pctPartner == null ? null : String(pctPartner),
+        myShareAmount: '0',
+        partnerShareAmount: '0',
+        businessAmount: '0',
+        reviewFlag: Boolean(row.review),
+        reviewedAt: row.review ? null : new Date(),
+      });
+      recomputeTransactionAmounts(txn);
+      await txn.save({ transaction: t });
+    }
+  });
+
+  logger.info('demo_seed_complete', {
+    email: DEMO_EMAIL,
+    enabled: true,
+  });
+}

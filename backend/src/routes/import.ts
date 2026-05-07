@@ -7,6 +7,8 @@ import { ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import type { LogFields } from '../observability/logger';
+import { logger } from '../observability/logger';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -26,9 +28,9 @@ const router = Router();
 
 function logImportEvent(
   event: string,
-  details: Record<string, unknown>
+  details: LogFields
 ): void {
-  console.info(`[import] ${event}`, details);
+  logger.info(`import_${event}`, details);
 }
 
 router.get('/profiles', (_req, res) => {

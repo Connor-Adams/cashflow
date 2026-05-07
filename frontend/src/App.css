@@ -118,6 +118,12 @@
     background: color-mix(in srgb, var(--accent) 16%, var(--bg2));
   }
 
+  .demoLoginButton {
+    @apply w-full;
+    border-color: color-mix(in srgb, var(--accent-green) 42%, var(--border));
+    background: color-mix(in srgb, var(--accent-green) 18%, var(--bg2));
+  }
+
   .authForm {
     @apply grid gap-3;
   }
@@ -492,6 +498,38 @@
     @apply text-xs;
   }
 
+  .aiVisibilityPanel {
+    @apply gap-3;
+  }
+
+  .aiVisibilityHeader {
+    @apply flex flex-wrap items-baseline justify-between gap-2;
+  }
+
+  .aiVisibilityHeader .muted,
+  .aiVisibilityMore {
+    @apply mb-0 text-xs;
+  }
+
+  .aiVisibilityList {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .aiVisibilityItem {
+    @apply rounded-md border px-3 py-2 text-sm;
+    border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+    background: color-mix(in srgb, var(--bg3) 48%, transparent);
+  }
+
+  .aiVisibilityItemHeader {
+    @apply flex items-center justify-between gap-3;
+  }
+
+  .aiVisibilityItem p {
+    @apply mb-0 mt-1 leading-5;
+  }
+
   .transactionsTableCard {
     @apply mb-0;
   }
@@ -594,7 +632,19 @@
   }
 
   .txnActionGroup {
-    @apply flex flex-wrap gap-2;
+    @apply flex max-w-[260px] flex-wrap gap-2;
+  }
+
+  .txnAiInsight {
+    @apply flex basis-full flex-col gap-1 rounded-md border px-3 py-2 text-xs leading-5;
+    border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+    background: color-mix(in srgb, var(--bg3) 52%, transparent);
+    color: var(--fg);
+  }
+
+  .txnAiInsight strong {
+    @apply text-[0.68rem] uppercase tracking-normal;
+    color: var(--muted);
   }
 
   .txnSplitCell {

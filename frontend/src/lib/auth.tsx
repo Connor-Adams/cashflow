@@ -48,6 +48,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(data.user)
         setBootstrapRequired(false)
       },
+      async demoLogin() {
+        const data = await postJson<{ user: AuthUser }>('/api/auth/demo-login')
+        setUser(data.user)
+        setBootstrapRequired(false)
+      },
       async register(input) {
         const data = await postJson<{ user: AuthUser }>('/api/auth/register', input)
         setUser(data.user)

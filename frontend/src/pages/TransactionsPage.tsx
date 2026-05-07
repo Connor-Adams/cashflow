@@ -79,6 +79,35 @@ type CategoryHint = {
   usageCount: number
 }
 
+type AiSuggestion = {
+  category: string | null
+  business: boolean | null
+  splitType: 'me' | 'partner' | 'shared' | null
+  pctMe: number | null
+  pctPartner: number | null
+  notes: string | null
+  rationale: string | null
+}
+
+type BulkAiResult = {
+  id: number
+  merchant: string
+  suggestion: AiSuggestion
+  appliedFields: string[]
+}
+
+function formatAiSuggestion(suggestion: AiSuggestion): string {
+  const parts = [
+    suggestion.category ? `Category: ${suggestion.category}` : null,
+    suggestion.business !== null ? `Business: ${suggestion.business ? 'yes' : 'no'}` : null,
+    suggestion.splitType ? `Split: ${suggestion.splitType}` : null,
+    suggestion.pctMe !== null ? `Me: ${suggestion.pctMe}` : null,
+    suggestion.pctPartner !== null ? `Partner: ${suggestion.pctPartner}` : null,
+    suggestion.notes ? `Notes: ${suggestion.notes}` : null,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : 'No fields suggested'
+}
+
 const DEFAULT_TRANSACTION_CURRENCY = 'CAD'
 
 function getRelativeDateRange(days: number): { from: string; to: string } {
@@ -145,6 +174,7 @@ export function TransactionsPage() {
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
+  const [bulkAiResults, setBulkAiResults] = useState<BulkAiResult[]>([])
   const [sortBy, setSortBy] = useState<
     'date' | 'merchant' | 'amount' | 'category' | 'review'
   >('date')
@@ -237,6 +267,7 @@ export function TransactionsPage() {
 
   useEffect(() => {
     setSelectedIds(new Set())
+    setBulkAiResults([])
   }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter])
 
   async function saveRow(id: number, patch: Record<string, unknown>) {
@@ -438,33 +469,51 @@ export function TransactionsPage() {
     if (selectedIds.size === 0) return
     setBulkAiBusy(true)
     setErr(null)
+    setBulkAiResults([])
     try {
-      type Sug = {
-        category: string | null
-        business: boolean | null
-        splitType: 'me' | 'partner' | 'shared' | null
-        pctMe: number | null
-        pctPartner: number | null
-        notes: string | null
-      }
       const out = await postJson<{
-        results: Array<{ id: number; suggestion: Sug }>
+        results: Array<{ id: number; suggestion: AiSuggestion }>
       }>('/api/transactions/bulk-ai-suggest', { ids: [...selectedIds] })
+      const nextBulkAiResults: BulkAiResult[] = []
       for (const { id, suggestion } of out.results) {
         const patch: Record<string, unknown> = {}
-        if (suggestion.category != null) patch.categoryOverride = suggestion.category
-        if (suggestion.business !== null && suggestion.business !== undefined)
+        const appliedFields: string[] = []
+        if (suggestion.category != null) {
+          patch.categoryOverride = suggestion.category
+          appliedFields.push('category')
+        }
+        if (suggestion.business !== null && suggestion.business !== undefined) {
           patch.businessOverride = suggestion.business
-        if (suggestion.splitType != null)
+          appliedFields.push('business')
+        }
+        if (suggestion.splitType != null) {
           patch.splitOverride = suggestion.splitType
-        if (suggestion.pctMe != null) patch.pctMeOverride = suggestion.pctMe
-        if (suggestion.pctPartner != null)
+          appliedFields.push('split')
+        }
+        if (suggestion.pctMe != null) {
+          patch.pctMeOverride = suggestion.pctMe
+          appliedFields.push('my share')
+        }
+        if (suggestion.pctPartner != null) {
           patch.pctPartnerOverride = suggestion.pctPartner
-        if (suggestion.notes != null) patch.notes = suggestion.notes
+          appliedFields.push('partner share')
+        }
+        if (suggestion.notes != null) {
+          patch.notes = suggestion.notes
+          appliedFields.push('notes')
+        }
         if (Object.keys(patch).length > 0) {
           await patchJson<Transaction>(`/api/transactions/${id}`, patch)
         }
+        const txn = res?.data.find((row) => row.id === id)
+        nextBulkAiResults.push({
+          id,
+          merchant: txn?.merchantClean ?? `Transaction ${id}`,
+          suggestion,
+          appliedFields,
+        })
       }
+      setBulkAiResults(nextBulkAiResults)
       setSelectedIds(new Set())
       await load()
     } catch (e) {
@@ -1104,6 +1153,43 @@ export function TransactionsPage() {
         )}
       </section>
       {err && <span className="error">{err}</span>}
+      {bulkAiResults.length > 0 && (
+        <section className="card aiVisibilityPanel" aria-label="Latest bulk AI results">
+          <div className="aiVisibilityHeader">
+            <strong>Latest AI fill</strong>
+            <span className="muted">
+              Applied {bulkAiResults.length} suggestion
+              {bulkAiResults.length === 1 ? '' : 's'}.
+            </span>
+          </div>
+          <div className="aiVisibilityList">
+            {bulkAiResults.slice(0, 6).map((result) => (
+              <article key={result.id} className="aiVisibilityItem">
+                <div className="aiVisibilityItemHeader">
+                  <strong>{result.merchant}</strong>
+                  <span className="muted">#{result.id}</span>
+                </div>
+                <p>{formatAiSuggestion(result.suggestion)}</p>
+                <p className="muted">
+                  Applied:{' '}
+                  {result.appliedFields.length
+                    ? result.appliedFields.join(', ')
+                    : 'nothing'}
+                </p>
+                {result.suggestion.rationale ? (
+                  <p className="muted">{result.suggestion.rationale}</p>
+                ) : null}
+              </article>
+            ))}
+          </div>
+          {bulkAiResults.length > 6 ? (
+            <p className="muted aiVisibilityMore">
+              {bulkAiResults.length - 6} more result
+              {bulkAiResults.length - 6 === 1 ? '' : 's'} applied.
+            </p>
+          ) : null}
+        </section>
+      )}
       {selectedIds.size > 0 && (
         <div className="card bulkBar transactionsBulkCard">
           <div className="transactionsBulkHeader">
@@ -1332,6 +1418,7 @@ function TransactionRow({
   onError: (message: string) => void
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
+  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
   const [cat, setCat] = useState(t.categoryOverride ?? '')
   const [biz, setBiz] = useState<string>(
     t.businessOverride === null || t.businessOverride === undefined
@@ -1392,6 +1479,7 @@ function TransactionRow({
     setVisibility(t.visibility ?? 'private')
     setOwnershipType(t.ownershipType ?? 'me')
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
+    setAiSuggestion(null)
   }
 
   useEffect(() => {
@@ -1543,17 +1631,10 @@ function TransactionRow({
                 setAiRowBusy(true)
                 try {
                   const out = await postJson<{
-                    suggestion: {
-                      category: string | null
-                      business: boolean | null
-                      splitType: 'me' | 'partner' | 'shared' | null
-                      pctMe: number | null
-                      pctPartner: number | null
-                      notes: string | null
-                      rationale: string | null
-                    }
+                    suggestion: AiSuggestion
                   }>(`/api/transactions/${t.id}/ai-suggest`)
                   const s = out.suggestion
+                  setAiSuggestion(s)
                   if (s.category) setCat(s.category)
                   if (s.business !== null && s.business !== undefined) {
                     setBiz(s.business ? 'true' : 'false')
@@ -1570,6 +1651,15 @@ function TransactionRow({
             >
               {aiRowBusy ? '…' : 'AI'}
             </button>
+          ) : null}
+          {aiSuggestion ? (
+            <div className="txnAiInsight" role="status">
+              <strong>AI suggestion</strong>
+              <span>{formatAiSuggestion(aiSuggestion)}</span>
+              {aiSuggestion.rationale ? (
+                <span className="muted">{aiSuggestion.rationale}</span>
+              ) : null}
+            </div>
           ) : null}
           {isDirty ? (
             <button type="button" className="txnResetButton" onClick={resetDraft}>

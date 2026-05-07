@@ -32,6 +32,15 @@ export function AuthPage() {
     }
   }
 
+  async function demoLogin() {
+    setErr(null)
+    try {
+      await auth.demoLogin()
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Demo login failed')
+    }
+  }
+
   return (
     <main className="authShell">
       <section className="card authCard">
@@ -58,6 +67,9 @@ export function AuthPage() {
             Register
           </button>
         </div>
+        <button type="button" className="demoLoginButton" onClick={() => void demoLogin()}>
+          Continue with demo account
+        </button>
         <form onSubmit={submit} className="authForm">
           {mode === 'register' && (
             <label>
