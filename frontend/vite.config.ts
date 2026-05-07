@@ -8,6 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  preview: {
+    allowedHosts: ['.up.railway.app'],
+  },
   resolve: {
     alias: {
       '@cashflow/shared': path.resolve(__dirname, '../shared/api-types.ts'),
