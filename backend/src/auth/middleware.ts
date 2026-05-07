@@ -6,6 +6,18 @@ import './types';
 
 export const SESSION_COOKIE = 'cashflow_session';
 
+function sessionCookieAttributes(expiresAt: Date): string {
+  const sameSite =
+    process.env.NODE_ENV === 'production' ? 'SameSite=None; Secure' : 'SameSite=Lax';
+  return `Path=/; HttpOnly; ${sameSite}; Expires=${expiresAt.toUTCString()}`;
+}
+
+function expiredSessionCookieAttributes(): string {
+  const sameSite =
+    process.env.NODE_ENV === 'production' ? 'SameSite=None; Secure' : 'SameSite=Lax';
+  return `Path=/; HttpOnly; ${sameSite}; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+}
+
 function parseCookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!header) return out;
@@ -20,17 +32,16 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 export function setSessionCookie(res: Response, token: string, expiresAt: Date): void {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
   res.setHeader(
     'Set-Cookie',
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}${secure}`
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}; ${sessionCookieAttributes(expiresAt)}`
   );
 }
 
 export function clearSessionCookie(res: Response): void {
   res.setHeader(
     'Set-Cookie',
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT`
+    `${SESSION_COOKIE}=; ${expiredSessionCookieAttributes()}`
   );
 }
 
