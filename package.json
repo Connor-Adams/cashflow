@@ -14,6 +14,11 @@
     "dev": "concurrently -n api,web -c blue,green \"yarn workspace cashflow-backend run dev\" \"yarn workspace frontend run dev\"",
     "db:migrate": "yarn workspace cashflow-backend run db:migrate",
     "build": "yarn workspace cashflow-backend run build && yarn workspace frontend run build",
+    "railway:backend:build": "yarn workspace cashflow-backend run build",
+    "railway:backend:start": "yarn workspace cashflow-backend run start",
+    "railway:backend:migrate": "yarn workspace cashflow-backend run db:migrate",
+    "railway:frontend:build": "yarn workspace frontend run build",
+    "railway:frontend:start": "yarn workspace frontend run preview -- --host 0.0.0.0 --port ${PORT:-4173}",
     "test": "yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace frontend run test",
     "ci": "yarn workspace cashflow-backend run typecheck && yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace cashflow-backend run build && yarn workspace frontend run test && yarn workspace frontend run build"
   },

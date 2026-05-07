@@ -80,14 +80,28 @@ Run from the repo root:
 
 ## Railway deployment
 
-This repo includes separate Railway config files for the backend API and Vite frontend:
+Deploy this as a shared JavaScript monorepo with two Railway services. Keep both services pointed at the repo root and set service-specific commands in Railway.
 
-- Backend service config path: `/backend/railway.toml`
-- Frontend service config path: `/frontend/railway.toml`
+Backend service:
 
-Set each Railway service's config file path explicitly in the service settings. Both services should keep the repo root as the Railway root directory so Yarn workspaces resolve correctly.
+```bash
+Root Directory: /
+Build Command: yarn railway:backend:build
+Pre-deploy Command: yarn railway:backend:migrate
+Start Command: yarn railway:backend:start
+Healthcheck Path: /api/health
+```
 
-The backend config builds `cashflow-backend`, runs Sequelize migrations before deploy, starts `node dist/server.js`, and healthchecks `GET /api/health`. The frontend config builds Vite and serves it with `vite preview` on Railway's `$PORT`.
+Frontend service:
+
+```bash
+Root Directory: /
+Build Command: yarn railway:frontend:build
+Start Command: yarn railway:frontend:start
+Healthcheck Path: /
+```
+
+Do not set a Railway config file path for either service. This is a Yarn workspace repo with shared root configuration, so both services need the repo root available at build time.
 
 Recommended Railway variables:
 
