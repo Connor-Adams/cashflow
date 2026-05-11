@@ -10,6 +10,7 @@ import { Household, initHousehold } from './Household';
 import { HouseholdMember, initHouseholdMember } from './HouseholdMember';
 import { HouseholdInvite, initHouseholdInvite } from './HouseholdInvite';
 import { Contact, initContact } from './Contact';
+import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -22,6 +23,7 @@ initRule(sequelize);
 initTransaction(sequelize);
 initImportHistory(sequelize);
 initReceipt(sequelize);
+initAiSuggestion(sequelize);
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -40,6 +42,16 @@ Rule.hasMany(Transaction, {
 Transaction.belongsTo(Rule, { foreignKey: 'applied_rule_id', as: 'appliedRule' });
 Transaction.hasMany(Receipt, { foreignKey: 'transaction_id', as: 'receipts' });
 Receipt.belongsTo(Transaction, { foreignKey: 'transaction_id', as: 'transaction' });
+Transaction.hasMany(AiSuggestion, {
+  foreignKey: 'transaction_id',
+  as: 'aiSuggestions',
+});
+AiSuggestion.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+Receipt.hasMany(AiSuggestion, { foreignKey: 'receipt_id', as: 'aiSuggestions' });
+AiSuggestion.belongsTo(Receipt, { foreignKey: 'receipt_id', as: 'receipt' });
 
 export {
   sequelize,
@@ -54,4 +66,5 @@ export {
   Transaction,
   ImportHistory,
   Receipt,
+  AiSuggestion,
 };

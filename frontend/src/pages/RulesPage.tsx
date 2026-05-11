@@ -9,8 +9,20 @@ type CategoryHint = {
   usageCount: number
 }
 
+type RuleProposal = {
+  merchantPattern: string
+  category: string | null
+  isBusiness: boolean
+  splitType: string
+  pctMe: string | null
+  pctPartner: string | null
+  supportCount: number
+  exampleTransactionIds: number[]
+}
+
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([])
+  const [proposals, setProposals] = useState<RuleProposal[]>([])
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -25,8 +37,12 @@ export function RulesPage() {
     setErr(null)
     try {
       const nextRules = await getJson<Rule[]>('/api/rules')
+      const nextProposals = await getJson<{ proposals: RuleProposal[] }>(
+        '/api/ai/rule-proposals'
+      )
       if (loadRequestRef.current === requestId) {
         setRules(nextRules)
+        setProposals(nextProposals.proposals)
       }
     } catch (e) {
       if (loadRequestRef.current === requestId) {
@@ -77,6 +93,19 @@ export function RulesPage() {
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not delete rule')
+    }
+  }
+
+  async function approveProposal(proposal: RuleProposal) {
+    setErr(null)
+    try {
+      await postJson(
+        `/api/ai/rule-proposals/${encodeURIComponent(proposal.merchantPattern)}/approve`,
+        proposal
+      )
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not approve proposal')
     }
   }
 
@@ -153,6 +182,52 @@ export function RulesPage() {
         </div>
         <button type="submit">Add rule</button>
       </form>
+
+      {proposals.length > 0 && (
+        <section className="card rulesTableCard">
+          <div className="rulesCardHeader">
+            <div>
+              <h2>AI rule proposals</h2>
+              <p className="muted">
+                Repeated reviewed merchants that look stable enough to automate.
+              </p>
+            </div>
+            <span className="transactionsPanelBadge">{proposals.length} proposals</span>
+          </div>
+          <div className="tableWrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Pattern</th>
+                  <th>Category</th>
+                  <th>Biz</th>
+                  <th>Split</th>
+                  <th>Support</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {proposals.map((p) => (
+                  <tr key={`${p.merchantPattern}-${p.category}-${p.splitType}`}>
+                    <td>{p.merchantPattern}</td>
+                    <td>{p.category ?? '—'}</td>
+                    <td>{p.isBusiness ? 'yes' : ''}</td>
+                    <td>{p.splitType}</td>
+                    <td>
+                      {p.supportCount} rows #{p.exampleTransactionIds.join(', #')}
+                    </td>
+                    <td>
+                      <button type="button" onClick={() => void approveProposal(p)}>
+                        Approve
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="card rulesTableCard">
         <div className="rulesCardHeader">

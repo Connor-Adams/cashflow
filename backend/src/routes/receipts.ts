@@ -3,7 +3,8 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Transaction, Receipt } from '../models';
-import { analyzeReceiptFile } from '../ai/receiptVision';
+import { analyzeReceiptFileTracked } from '../ai/receiptVision';
+import { createTrackedSuggestion } from '../ai/suggestionStore';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { visibleTransactionWhere } from '../auth/scope';
@@ -217,9 +218,23 @@ router.post(
         res.status(404).json({ error: 'Not found' });
         return;
       }
-      const extracted = await analyzeReceiptFile(row);
+      const tracked = await analyzeReceiptFileTracked(row);
+      const extracted = tracked.extract;
       const note = JSON.stringify(extracted);
       await row.update({ extractedNote: note });
+      await createTrackedSuggestion({
+        req,
+        transactionId: txn.id,
+        receiptId: row.id,
+        kind: 'receipt_extract',
+        inputSnapshot: tracked.inputSnapshot,
+        output: extracted,
+        model: tracked.meta.model,
+        promptVersion: 'receipt-extract-v1',
+        temperature: tracked.meta.temperature,
+        latencyMs: tracked.meta.latencyMs,
+        providerRequestId: tracked.meta.providerRequestId,
+      });
       res.json({ extracted, receiptId: row.id });
     } catch (e) {
       next(e);
