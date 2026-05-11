@@ -41,6 +41,10 @@ type FolderImportResponse = {
   uploadDir: string
 }
 
+type MultiUploadResponse = {
+  results: UploadResult[]
+}
+
 type ImportHistoryRow = {
   id: number
   fileName: string
@@ -77,6 +81,31 @@ type PreviewResponse = {
 type CategoryHint = {
   label: string
   usageCount: number
+}
+
+function summarizeUploadResult(result: UploadResult): string {
+  if (result.skipped) {
+    return [
+      `Skipped (${result.reason ?? 'unknown'}): ${result.file}`,
+      result.message,
+    ]
+      .filter(Boolean)
+      .join(' — ')
+  }
+  const profileNote =
+    result.usedProfileId != null
+      ? `Profile: ${result.usedProfileId}${result.profileInferred ? ' (auto-detected)' : ''}`
+      : ''
+  return [
+    `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`,
+    profileNote,
+    (result.rowErrors ?? 0) > 0
+      ? `${result.rowErrors} row(s) could not be parsed`
+      : '',
+    result.warning,
+  ]
+    .filter(Boolean)
+    .join(' — ')
 }
 
 type AiSuggestion = {
@@ -550,9 +579,15 @@ export function TransactionsPage() {
 
   async function onPreview() {
     const input = fileRef.current
-    const file = input?.files?.[0]
+    const files = Array.from(input?.files ?? [])
+    const file = files[0]
     if (!file) {
       setPreviewErr('Choose a .csv file first.')
+      setPreviewData(null)
+      return
+    }
+    if (files.length > 1) {
+      setPreviewErr('Preview supports one file at a time. Select one CSV to preview, or import all selected files.')
       setPreviewData(null)
       return
     }
@@ -581,9 +616,9 @@ export function TransactionsPage() {
   async function onUpload(e: FormEvent) {
     e.preventDefault()
     const input = fileRef.current
-    const file = input?.files?.[0]
-    if (!file) {
-      setUploadMsg('Choose a .csv file first.')
+    const files = Array.from(input?.files ?? [])
+    if (files.length === 0) {
+      setUploadMsg('Choose at least one .csv file first.')
       return
     }
     if (!uploadAccountId) {
@@ -596,39 +631,37 @@ export function TransactionsPage() {
     setErr(null)
     try {
       const fd = new FormData()
-      fd.append('file', file)
       fd.append('accountId', uploadAccountId)
       if (batchLabel.trim()) fd.append('batchLabel', batchLabel.trim())
       fd.append('profileId', profileId)
-      const result = await postFormData<UploadResult>('/api/import/upload', fd)
-      if (result.skipped) {
-        setUploadParseLines([])
-        setUploadMsg(
-          [
-            `Skipped (${result.reason ?? 'unknown'}): ${result.file}`,
-            result.message,
-          ]
-            .filter(Boolean)
-            .join(' — ')
-        )
-      } else {
-        const profileNote =
-          result.usedProfileId != null
-            ? `Profile: ${result.usedProfileId}${result.profileInferred ? ' (auto-detected)' : ''}`
-            : ''
-        const parts = [
-          `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`,
-          profileNote,
-          (result.rowErrors ?? 0) > 0
-            ? `${result.rowErrors} row(s) could not be parsed (wrong columns or date format?)`
-            : '',
-          result.warning,
-        ].filter(Boolean)
-        setUploadMsg(parts.join(' — '))
+      if (files.length === 1) {
+        fd.append('file', files[0])
+        const result = await postFormData<UploadResult>('/api/import/upload', fd)
+        setUploadMsg(summarizeUploadResult(result))
         setUploadParseLines(
           result.parseErrors?.length
             ? formatParseErrorLines(result.parseErrors)
             : []
+        )
+      } else {
+        files.forEach((file) => fd.append('files', file))
+        const out = await postFormData<MultiUploadResponse>('/api/import/upload-many', fd)
+        const imported = out.results.filter((r) => !r.skipped).length
+        const inserted = out.results.reduce((sum, r) => sum + (r.inserted ?? 0), 0)
+        const skipped = out.results.length - imported
+        const failedRows = out.results.reduce((sum, r) => sum + (r.rowErrors ?? 0), 0)
+        const lines = out.results.slice(0, 6).map((r) => `${r.file}: ${summarizeUploadResult(r)}`)
+        setUploadMsg(
+          `Multi-file import complete — ${inserted} row(s), ${imported} file(s) imported, ${skipped} skipped${failedRows ? `, ${failedRows} row error(s)` : ''}. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
+        )
+        setUploadParseLines(
+          out.results.flatMap((result) =>
+            result.parseErrors?.length
+              ? formatParseErrorLines(result.parseErrors).map(
+                  (line) => `${result.file}: ${line}`,
+                )
+              : [],
+          )
         )
       }
       if (input) input.value = ''
@@ -756,11 +789,12 @@ export function TransactionsPage() {
               </select>
             </label>
             <label className="filePick">
-              File
+              CSV files
               <input
                 ref={fileRef}
                 type="file"
                 accept=".csv,text/csv"
+                multiple
                 onChange={() => {
                   setPreviewData(null)
                   setPreviewErr(null)
@@ -782,7 +816,7 @@ export function TransactionsPage() {
               {previewing ? 'Previewing…' : 'Preview first rows'}
             </button>
             <button type="submit" disabled={uploading}>
-              {uploading ? 'Importing…' : 'Import CSV'}
+              {uploading ? 'Importing…' : 'Import CSV file(s)'}
             </button>
           </div>
           {uploadMsg && (

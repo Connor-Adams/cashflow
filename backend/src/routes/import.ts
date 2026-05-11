@@ -12,7 +12,7 @@ import { logger } from '../observability/logger';
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 15 * 1024 * 1024, files: 20 },
   fileFilter: (_req, file, cb) => {
     if (!file.originalname.toLowerCase().endsWith('.csv')) {
       const e = new Error('Only .csv files are allowed') as Error & { status?: number };
@@ -208,6 +208,83 @@ router.post(
         reason: result && typeof result === 'object' ? result.reason : undefined,
       });
       res.json(result);
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+router.post(
+  '/upload-many',
+  importUploadLimiter,
+  (req, res, next) => {
+    upload.array('files', 20)(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        res.status(400).json({ error: 'Missing files field "files"' });
+        return;
+      }
+      const accountId = (req.body as { accountId?: string }).accountId;
+      if (accountId === undefined || accountId === null || accountId === '') {
+        res.status(400).json({
+          error:
+            'accountId is required (create an account first, then pick it here)',
+        });
+        return;
+      }
+      const batchLabel =
+        (req.body as { batchLabel?: string }).batchLabel &&
+        String((req.body as { batchLabel?: string }).batchLabel).trim()
+          ? String((req.body as { batchLabel?: string }).batchLabel).trim()
+          : null;
+      const profileId =
+        (req.body as { profileId?: string }).profileId ?? 'auto';
+      const { user, household } = currentAuth(req);
+
+      logImportEvent('multi_upload_started', {
+        fileCount: files.length,
+        accountId: parseInt(String(accountId), 10),
+        batchLabel,
+        profileId,
+        totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
+      });
+
+      const results = [];
+      for (const file of files) {
+        const result = await importCsvFile({
+          buffer: file.buffer,
+          fileName: file.originalname,
+          accountId,
+          batchLabel,
+          profileId,
+          householdId: household.id,
+          userId: user.id,
+        });
+        results.push(result);
+      }
+
+      logImportEvent('multi_upload_completed', {
+        fileCount: files.length,
+        accountId: parseInt(String(accountId), 10),
+        batchLabel,
+        profileId,
+        importedFiles: results.filter((row) => {
+          if (!row || typeof row !== 'object') return false;
+          if ('skipped' in row && row.skipped === true) return false;
+          return true;
+        }).length,
+      });
+
+      res.json({ results });
     } catch (e) {
       next(e);
     }

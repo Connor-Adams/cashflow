@@ -94,6 +94,48 @@ test('POST /api/import/upload: creates transactions for valid CSV', async () => 
   assert.ok(res.body.inserted >= 2, `expected inserted >= 2, got ${JSON.stringify(res.body)}`);
 });
 
+test('POST /api/import/upload-many: imports multiple CSV files', async () => {
+  const acc = await authed.post('/api/accounts').send({
+    name: 'Multi Upload Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const one = 'Date,Description,Amount\n2025-06-04,Multi One,-4.00\n';
+  const two = 'Date,Description,Amount\n2025-06-05,Multi Two,-5.00\n';
+  const res = await authed
+    .post('/api/import/upload-many')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('files', Buffer.from(one, 'utf8'), {
+      filename: 'multi-one.csv',
+      contentType: 'text/csv',
+    })
+    .attach('files', Buffer.from(two, 'utf8'), {
+      filename: 'multi-two.csv',
+      contentType: 'text/csv',
+    });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results.length, 2);
+  assert.deepEqual(
+    res.body.results.map((row: { inserted?: number }) => row.inserted),
+    [1, 1],
+  );
+});
+
+test('POST /api/import/upload-many: rejects empty uploads', async () => {
+  const res = await authed
+    .post('/api/import/upload-many')
+    .field('accountId', '1')
+    .field('profileId', 'generic_simple');
+
+  assert.equal(res.status, 400);
+  assert.ok(String(res.body?.error || '').includes('files'));
+});
+
 test('receipt upload stores, downloads, lists, and deletes the image', async () => {
   const acc = await authed.post('/api/accounts').send({
     name: 'Receipt Account',
