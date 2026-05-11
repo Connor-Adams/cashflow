@@ -10,7 +10,7 @@
 
   button:hover:enabled {
     background: color-mix(in srgb, var(--bg3) 88%, white 4%);
-    border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+    border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
   }
 
   button:disabled {
@@ -34,7 +34,7 @@
   input:focus,
   select:focus,
   textarea:focus {
-    border-color: color-mix(in srgb, var(--accent) 62%, white 10%);
+    border-color: color-mix(in srgb, var(--primary) 62%, white 10%);
     box-shadow: 0 0 0 3px rgba(119, 167, 255, 0.18);
   }
 
@@ -54,7 +54,7 @@
   .header {
     @apply sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 backdrop-blur-xl sm:px-6;
     border-color: color-mix(in srgb, var(--border) 86%, white 4%);
-    background: color-mix(in srgb, var(--bg2) 92%, transparent);
+    background: color-mix(in oklch, var(--card) 88%, transparent);
   }
 
   .brandLockup {
@@ -63,14 +63,14 @@
 
   .brandMark {
     @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold;
-    color: #11140f;
-    background: var(--accent-soft);
-    box-shadow: 0 10px 20px rgba(140, 195, 163, 0.2);
+    color: var(--primary-foreground);
+    background: var(--primary);
+    box-shadow: 0 10px 20px color-mix(in oklch, var(--primary) 22%, transparent);
   }
 
   .brandEyebrow {
     @apply truncate text-[0.65rem] font-semibold uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .brand {
@@ -81,7 +81,7 @@
   .nav {
     @apply flex max-w-full gap-1 overflow-x-auto rounded-lg border p-1;
     border-color: color-mix(in srgb, var(--border) 78%, transparent);
-    background: color-mix(in srgb, var(--bg) 56%, transparent);
+    background: color-mix(in oklch, var(--background) 72%, transparent);
     scrollbar-width: none;
   }
 
@@ -91,14 +91,20 @@
 
   .userMenu {
     @apply flex items-center gap-2 text-sm;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .superadminBadge {
-    @apply rounded-lg border px-2 py-1 text-xs font-semibold;
+    @apply gap-1 rounded-lg border px-2 py-1 text-xs font-semibold;
     border-color: color-mix(in srgb, var(--danger) 46%, var(--border));
     color: var(--danger);
     background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
+
+  .superadminBadge svg,
+  .navLink svg,
+  .userMenu button svg {
+    @apply h-4 w-4 shrink-0;
   }
 
   .authShell {
@@ -114,8 +120,8 @@
   }
 
   .authTabs button.isActive {
-    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-    background: color-mix(in srgb, var(--accent) 16%, var(--bg2));
+    border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+    background: color-mix(in srgb, var(--primary) 16%, var(--bg2));
   }
 
   .demoLoginButton {
@@ -133,8 +139,8 @@
   }
 
   .navLink {
-    @apply whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold no-underline transition-colors duration-150;
-    color: var(--muted);
+    @apply inline-flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold no-underline transition-colors duration-150;
+    color: var(--muted-foreground);
   }
 
   .navLink:hover {
@@ -143,8 +149,8 @@
   }
 
   .navLink.isActive {
-    color: #10110f;
-    background: var(--accent-soft);
+    color: var(--primary-foreground);
+    background: var(--primary);
   }
 
   .main {
@@ -174,7 +180,7 @@
 
   .muted {
     @apply mb-4 text-sm leading-6;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .error {
@@ -191,7 +197,7 @@
   .card {
     @apply mb-4 rounded-lg border p-4 sm:p-5;
     border-color: color-mix(in srgb, var(--border) 88%, white 4%);
-    background: color-mix(in srgb, var(--bg2) 76%, transparent);
+    background: color-mix(in oklch, var(--card) 88%, transparent);
     box-shadow: var(--shadow);
   }
 
@@ -213,7 +219,7 @@
 
   .table th {
     @apply text-[0.7rem] font-bold uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
     background: color-mix(in srgb, var(--bg3) 72%, transparent);
   }
 
@@ -260,11 +266,11 @@
     @apply min-h-8 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 62%, transparent);
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .quickFilterButton[aria-pressed='true'] {
-    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+    border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
     color: #10110f;
   }
@@ -308,7 +314,7 @@
     @apply rounded-md border px-2.5 py-1 text-[0.68rem] font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 62%, transparent);
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .transactionsToolbar {
@@ -457,7 +463,7 @@
     @apply min-h-8 rounded-md px-3 py-1.5 text-xs font-semibold;
     border: 0;
     background: color-mix(in srgb, var(--bg3) 40%, transparent);
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .categoryCloudPicker__item:hover {
@@ -508,7 +514,7 @@
 
   .transactionsFilterPill {
     @apply inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold;
-    border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+    border-color: color-mix(in srgb, var(--primary) 20%, var(--border));
     background: color-mix(in srgb, var(--bg3) 68%, transparent);
     color: var(--fg);
   }
@@ -561,7 +567,7 @@
 
   .aiVisibilityItem {
     @apply rounded-md border px-3 py-2 text-sm;
-    border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+    border-color: color-mix(in srgb, var(--primary) 22%, var(--border));
     background: color-mix(in srgb, var(--bg3) 48%, transparent);
   }
 
@@ -611,7 +617,7 @@
 
   .txnMerchantMeta {
     @apply text-xs;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .txnCategoryCell {
@@ -643,7 +649,7 @@
 
   .txnAmountMeta {
     @apply text-xs font-medium uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .txnAmount--expense {
@@ -657,7 +663,7 @@
   .txnBadge {
     @apply inline-flex rounded-md border px-2 py-1 text-[0.68rem] font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    color: var(--muted);
+    color: var(--muted-foreground);
     background: color-mix(in srgb, var(--bg3) 52%, transparent);
   }
 
@@ -680,14 +686,14 @@
 
   .txnAiInsight {
     @apply flex basis-full flex-col gap-1 rounded-md border px-3 py-2 text-xs leading-5;
-    border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+    border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
     background: color-mix(in srgb, var(--bg3) 52%, transparent);
     color: var(--fg);
   }
 
   .txnAiInsight strong {
     @apply text-[0.68rem] uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .txnSplitCell {
@@ -719,7 +725,7 @@
   }
 
   .txnSaveButton {
-    border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+    border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
     color: #10110f;
   }
@@ -734,11 +740,11 @@
 
   .statLabel {
     @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .statValue {
-    @apply m-0 text-[1.65rem] font-semibold tracking-tight;
+    @apply m-0 whitespace-nowrap text-[1.55rem] font-semibold tracking-tight;
   }
 
   .statHint {
@@ -770,7 +776,7 @@
 
   .businessSpotlightTotalLabel {
     @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .businessSpotlightTotalValue {
@@ -799,7 +805,7 @@
 
   .businessFocusLabel {
     @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .businessFocusValue {
@@ -808,7 +814,7 @@
 
   .businessFocusShare {
     @apply m-0 text-sm;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .businessFocusMetrics {
@@ -818,7 +824,7 @@
 
   .businessFocusMetrics dt {
     @apply mb-1 text-[0.68rem] font-semibold uppercase tracking-normal;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .businessFocusMetrics dd {
@@ -832,7 +838,7 @@
 
   .businessShareLabels {
     @apply mb-2 flex justify-between gap-3 text-sm;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .businessShareBar {
@@ -894,7 +900,7 @@
 
   .uploadCard .uploadMsg {
     @apply mt-3 text-sm whitespace-pre-wrap;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .uploadCard .uploadMsg.warn {
@@ -928,7 +934,7 @@
 
   .emptyState {
     @apply m-0;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .emptyStateCell {

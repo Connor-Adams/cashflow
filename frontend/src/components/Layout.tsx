@@ -1,6 +1,27 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import {
+  BarChart3,
+  BookOpenCheck,
+  CreditCard,
+  LayoutDashboard,
+  LogOut,
+  ReceiptText,
+  Settings,
+  Shield,
+} from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { useAuth } from '../lib/useAuth'
+
+const navItems = [
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/accounts', label: 'Accounts', icon: CreditCard },
+  { to: '/transactions', label: 'Transactions', icon: ReceiptText },
+  { to: '/rules', label: 'Rules', icon: BookOpenCheck },
+  { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/settings', label: 'Settings', icon: Settings },
+]
 
 export function Layout() {
   const auth = useAuth()
@@ -16,52 +37,33 @@ export function Layout() {
           </div>
         </div>
         <nav className="nav" aria-label="Main">
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
-          >
-            Dashboard
-          </NavLink>
-          <NavLink
-            to="/accounts"
-            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
-          >
-            Accounts
-          </NavLink>
-          <NavLink
-            to="/transactions"
-            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
-          >
-            Transactions
-          </NavLink>
-          <NavLink
-            to="/rules"
-            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
-          >
-            Rules
-          </NavLink>
-          <NavLink
-            to="/reports"
-            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
-          >
-            Reports
-          </NavLink>
-          <NavLink
-            to="/settings"
-            className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
-          >
-            Settings
-          </NavLink>
+          {navItems.map((item) => {
+            const Icon = item.icon
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
+              >
+                <Icon aria-hidden="true" />
+                <span>{item.label}</span>
+              </NavLink>
+            )
+          })}
         </nav>
         <div className="userMenu">
           <span>{auth.user?.displayName}</span>
           {auth.user?.globalRole === 'superadmin' && (
-            <span className="superadminBadge">God mode</span>
+            <Badge variant="outline" className="superadminBadge">
+              <Shield aria-hidden="true" />
+              God mode
+            </Badge>
           )}
-          <button type="button" onClick={() => void auth.logout()}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => void auth.logout()}>
+            <LogOut aria-hidden="true" />
             Log out
-          </button>
+          </Button>
         </div>
       </header>
       <main className="main" data-layout-width={layoutWidth}>

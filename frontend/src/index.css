@@ -1,5 +1,64 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.14 0.015 125);
+  --foreground: oklch(0.95 0.015 92);
+  --card: oklch(0.18 0.018 125);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.17 0.018 125);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.77 0.09 151);
+  --primary-foreground: oklch(0.16 0.02 145);
+  --secondary: oklch(0.25 0.02 125);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.24 0.018 125);
+  --muted-foreground: oklch(0.72 0.025 95);
+  --accent: oklch(0.28 0.025 143);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.66 0.19 27);
+  --border: oklch(0.31 0.018 118);
+  --input: oklch(0.33 0.018 118);
+  --ring: oklch(0.72 0.09 151);
+  --chart-1: oklch(0.74 0.11 151);
+  --chart-2: oklch(0.72 0.13 82);
+  --chart-3: oklch(0.68 0.12 248);
+  --chart-4: oklch(0.71 0.14 35);
+  --chart-5: oklch(0.65 0.13 300);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
 :root {
   font-family:
     'Avenir Next',
@@ -10,17 +69,16 @@
   line-height: 1.45;
   font-weight: 400;
   color-scheme: dark;
-  --bg: #10110f;
-  --bg2: #171914;
-  --bg3: #20231c;
-  --fg: #f5f3ea;
-  --muted: #aaa696;
-  --border: #3b3d34;
-  --accent: #8cc3a3;
+  --bg: color-mix(in oklch, var(--background) 96%, black 4%);
+  --bg2: var(--card);
+  --bg3: var(--secondary);
+  --fg: var(--foreground);
+  --muted-legacy: var(--muted-foreground);
+  --accent-legacy: var(--primary);
   --accent-soft: #b6dfc6;
   --accent-warm: #d9a441;
   --accent-green: #55c47c;
-  --danger: #ff817a;
+  --danger: var(--destructive);
   --shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
 }
 
@@ -32,7 +90,8 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    linear-gradient(180deg, #14150f 0%, var(--bg) 28%, #0e0f0d 100%);
+    radial-gradient(circle at 20% -10%, color-mix(in oklch, var(--primary) 18%, transparent), transparent 30rem),
+    linear-gradient(180deg, #12170f 0%, var(--bg) 30%, #0b0d0b 100%);
   color: var(--fg);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

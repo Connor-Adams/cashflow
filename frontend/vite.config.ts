@@ -13,6 +13,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, './src'),
       '@cashflow/shared': path.resolve(__dirname, '../shared/api-types.ts'),
     },
   },
