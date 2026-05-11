@@ -154,7 +154,16 @@
   }
 
   .main {
-    @apply mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 lg:px-8;
+    @apply mx-auto w-full flex-1 px-4 py-5 sm:px-6 lg:px-8;
+    max-width: 80rem;
+  }
+
+  .main[data-layout-width='wide'] {
+    max-width: 110rem;
+  }
+
+  .main[data-layout-width='ultrawide'] {
+    max-width: 160rem;
   }
 
   .page h1 {
@@ -343,8 +352,42 @@
   .rulesFormCard,
   .rulesTableCard,
   .accountsFormCard,
-  .accountsTableCard {
+  .accountsTableCard,
+  .settingsDisplayCard {
     @apply mb-4;
+  }
+
+  .settingsWidthOptions {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  }
+
+  .settingsWidthOption {
+    @apply flex cursor-pointer items-start gap-3 rounded-lg border p-3;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background: color-mix(in srgb, var(--bg3) 42%, transparent);
+  }
+
+  .settingsWidthOption:has(input:checked) {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg2));
+  }
+
+  .settingsWidthOption input {
+    @apply mt-1 h-4 w-4;
+  }
+
+  .settingsWidthOption span {
+    @apply grid gap-1;
+  }
+
+  .settingsWidthOption strong {
+    @apply text-sm;
+  }
+
+  .settingsWidthOption small {
+    @apply text-xs leading-5;
+    color: var(--muted);
   }
 
   .rulesFormGrid {

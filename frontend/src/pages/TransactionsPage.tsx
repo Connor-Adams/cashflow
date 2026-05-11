@@ -116,13 +116,36 @@ type AiSuggestion = {
   pctPartner: number | null
   notes: string | null
   rationale: string | null
+  confidence?: 'high' | 'medium' | 'low'
+  evidence?: string[]
+  needsReview?: boolean
 }
 
 type BulkAiResult = {
   id: number
+  suggestionId: number
   merchant: string
   suggestion: AiSuggestion
   appliedFields: string[]
+  status: 'suggested' | 'applied' | 'rejected'
+}
+
+type ImportCleanup = {
+  batch: string | null
+  total: number
+  readyToConfirmCount: number
+  needsCategoryCount: number
+  alreadyReviewedCount: number
+  topReady: Array<{
+    id: number
+    date: string
+    merchant: string
+    amount: number
+    currency: string
+    category: string | null
+    source: 'rule' | 'merchant_memory'
+  }>
+  batches: Array<{ importBatch: string; count: number }>
 }
 
 function formatAiSuggestion(suggestion: AiSuggestion): string {
@@ -204,6 +227,7 @@ export function TransactionsPage() {
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
   const [bulkAiResults, setBulkAiResults] = useState<BulkAiResult[]>([])
+  const [importCleanup, setImportCleanup] = useState<ImportCleanup | null>(null)
   const [sortBy, setSortBy] = useState<
     'date' | 'merchant' | 'amount' | 'category' | 'review'
   >('date')
@@ -269,11 +293,16 @@ export function TransactionsPage() {
       if (dateFrom.trim()) qs.set('dateFrom', dateFrom.trim())
       if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
-      const data = await getJson<Paginated<Transaction>>(
-        `/api/transactions?${qs.toString()}`
-      )
+      const cleanupQs = new URLSearchParams()
+      if (batchFilter.trim()) cleanupQs.set('batch', batchFilter.trim())
+      if (currency) cleanupQs.set('currency', currency)
+      const [data, cleanup] = await Promise.all([
+        getJson<Paginated<Transaction>>(`/api/transactions?${qs.toString()}`),
+        getJson<ImportCleanup>(`/api/ai/import-cleanup?${cleanupQs.toString()}`),
+      ])
       if (loadRequestRef.current === requestId) {
         setRes(data)
+        setImportCleanup(cleanup)
       }
     } catch (e) {
       if (loadRequestRef.current === requestId) {
@@ -501,54 +530,74 @@ export function TransactionsPage() {
     setBulkAiResults([])
     try {
       const out = await postJson<{
-        results: Array<{ id: number; suggestion: AiSuggestion }>
-      }>('/api/transactions/bulk-ai-suggest', { ids: [...selectedIds] })
+        results: Array<{ id: number; suggestionId: number; suggestion: AiSuggestion }>
+      }>('/api/ai/transactions/suggest', { ids: [...selectedIds] })
       const nextBulkAiResults: BulkAiResult[] = []
-      for (const { id, suggestion } of out.results) {
-        const patch: Record<string, unknown> = {}
+      for (const { id, suggestionId, suggestion } of out.results) {
         const appliedFields: string[] = []
         if (suggestion.category != null) {
-          patch.categoryOverride = suggestion.category
           appliedFields.push('category')
         }
         if (suggestion.business !== null && suggestion.business !== undefined) {
-          patch.businessOverride = suggestion.business
           appliedFields.push('business')
         }
         if (suggestion.splitType != null) {
-          patch.splitOverride = suggestion.splitType
           appliedFields.push('split')
         }
         if (suggestion.pctMe != null) {
-          patch.pctMeOverride = suggestion.pctMe
           appliedFields.push('my share')
         }
         if (suggestion.pctPartner != null) {
-          patch.pctPartnerOverride = suggestion.pctPartner
           appliedFields.push('partner share')
         }
         if (suggestion.notes != null) {
-          patch.notes = suggestion.notes
           appliedFields.push('notes')
-        }
-        if (Object.keys(patch).length > 0) {
-          await patchJson<Transaction>(`/api/transactions/${id}`, patch)
         }
         const txn = res?.data.find((row) => row.id === id)
         nextBulkAiResults.push({
           id,
+          suggestionId,
           merchant: txn?.merchantClean ?? `Transaction ${id}`,
           suggestion,
           appliedFields,
+          status: 'suggested',
         })
       }
       setBulkAiResults(nextBulkAiResults)
       setSelectedIds(new Set())
-      await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'AI suggest failed')
     } finally {
       setBulkAiBusy(false)
+    }
+  }
+
+  async function applyAiSuggestion(result: BulkAiResult) {
+    setErr(null)
+    try {
+      await postJson(`/api/ai/suggestions/${result.suggestionId}/apply`)
+      setBulkAiResults((prev) =>
+        prev.map((row) =>
+          row.suggestionId === result.suggestionId ? { ...row, status: 'applied' } : row
+        )
+      )
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not apply AI suggestion')
+    }
+  }
+
+  async function rejectAiSuggestion(result: BulkAiResult) {
+    setErr(null)
+    try {
+      await postJson(`/api/ai/suggestions/${result.suggestionId}/reject`)
+      setBulkAiResults((prev) =>
+        prev.map((row) =>
+          row.suggestionId === result.suggestionId ? { ...row, status: 'rejected' } : row
+        )
+      )
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not reject AI suggestion')
     }
   }
 
@@ -723,6 +772,61 @@ export function TransactionsPage() {
           <p className="muted statHint">Attachments on the current page</p>
         </article>
       </section>
+
+      {importCleanup && importCleanup.total > 0 && (
+        <section className="card aiVisibilityPanel" aria-label="Import cleanup assistant">
+          <div className="aiVisibilityHeader">
+            <strong>Import cleanup</strong>
+            <span className="muted">
+              {importCleanup.readyToConfirmCount} auto-categorized ·{' '}
+              {importCleanup.needsCategoryCount} need categories ·{' '}
+              {importCleanup.alreadyReviewedCount} reviewed
+            </span>
+          </div>
+          {importCleanup.readyToConfirmCount > 0 ? (
+            <div className="aiVisibilityList">
+              {importCleanup.topReady.slice(0, 6).map((row) => (
+                <article key={row.id} className="aiVisibilityItem">
+                  <div className="aiVisibilityItemHeader">
+                    <strong>{row.merchant}</strong>
+                    <span className="muted">#{row.id}</span>
+                  </div>
+                  <p>
+                    {row.category ?? 'Uncategorized'} ·{' '}
+                    {formatMoney(Math.abs(row.amount), row.currency)}
+                  </p>
+                  <p className="muted">
+                    Source: {row.source === 'rule' ? 'rule' : 'merchant memory'}
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">
+              Nothing is ready to confirm for the current filters.
+            </p>
+          )}
+          <div className="row">
+            <button
+              type="button"
+              onClick={() => {
+                setReviewOnly(true)
+                if (importCleanup.batch) setBatchFilter(importCleanup.batch)
+              }}
+            >
+              Review cleanup queue
+            </button>
+            {importCleanup.batches.length > 0 && !batchFilter && (
+              <button
+                type="button"
+                onClick={() => setBatchFilter(importCleanup.batches[0].importBatch)}
+              >
+                Focus latest batch
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="transactionsTopGrid">
         <form className="card uploadCard transactionsPanel" onSubmit={onUpload}>
@@ -1192,8 +1296,8 @@ export function TransactionsPage() {
           <div className="aiVisibilityHeader">
             <strong>Latest AI fill</strong>
             <span className="muted">
-              Applied {bulkAiResults.length} suggestion
-              {bulkAiResults.length === 1 ? '' : 's'}.
+              Review {bulkAiResults.length} suggestion
+              {bulkAiResults.length === 1 ? '' : 's'} before applying.
             </span>
           </div>
           <div className="aiVisibilityList">
@@ -1205,14 +1309,37 @@ export function TransactionsPage() {
                 </div>
                 <p>{formatAiSuggestion(result.suggestion)}</p>
                 <p className="muted">
-                  Applied:{' '}
+                  Fields:{' '}
                   {result.appliedFields.length
                     ? result.appliedFields.join(', ')
                     : 'nothing'}
                 </p>
+                <p className="muted">
+                  Confidence: {result.suggestion.confidence ?? 'medium'}
+                  {result.suggestion.needsReview ? ' · needs review' : ''}
+                </p>
+                {result.suggestion.evidence?.length ? (
+                  <p className="muted">Evidence: {result.suggestion.evidence.join(', ')}</p>
+                ) : null}
                 {result.suggestion.rationale ? (
                   <p className="muted">{result.suggestion.rationale}</p>
                 ) : null}
+                <div className="row">
+                  <button
+                    type="button"
+                    disabled={result.status !== 'suggested'}
+                    onClick={() => void applyAiSuggestion(result)}
+                  >
+                    {result.status === 'applied' ? 'Applied' : 'Apply'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={result.status !== 'suggested'}
+                    onClick={() => void rejectAiSuggestion(result)}
+                  >
+                    {result.status === 'rejected' ? 'Rejected' : 'Reject'}
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -1453,6 +1580,7 @@ function TransactionRow({
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
+  const [aiSuggestionId, setAiSuggestionId] = useState<number | null>(null)
   const [cat, setCat] = useState(t.categoryOverride ?? '')
   const [biz, setBiz] = useState<string>(
     t.businessOverride === null || t.businessOverride === undefined
@@ -1514,6 +1642,7 @@ function TransactionRow({
     setOwnershipType(t.ownershipType ?? 'me')
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
     setAiSuggestion(null)
+    setAiSuggestionId(null)
   }
 
   useEffect(() => {
@@ -1642,7 +1771,11 @@ function TransactionRow({
       <td>
         <div className="txnStatusCell">
           <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
-            {t.reviewFlag ? 'Needs review' : 'Reviewed'}
+            {t.reviewFlag
+              ? t.autoCategory
+                ? 'Auto categorized'
+                : 'Needs review'
+              : 'Reviewed'}
           </span>
           <button
             type="button"
@@ -1653,6 +1786,11 @@ function TransactionRow({
             <span className="txnReceiptCount">{t.receiptCount ?? 0}</span>
             <span>{(t.receiptCount ?? 0) > 0 ? 'Add receipt' : 'Attach receipt'}</span>
           </button>
+          {t.receiptWarnings?.length ? (
+            <span className="txnBadge txnBadge--review" title={t.receiptWarnings.join(', ')}>
+              Receipt check
+            </span>
+          ) : null}
         </div>
       </td>
       <td className="transactionsActionsCol">
@@ -1666,9 +1804,11 @@ function TransactionRow({
                 try {
                   const out = await postJson<{
                     suggestion: AiSuggestion
+                    suggestionId: number
                   }>(`/api/transactions/${t.id}/ai-suggest`)
                   const s = out.suggestion
                   setAiSuggestion(s)
+                  setAiSuggestionId(out.suggestionId)
                   if (s.category) setCat(s.category)
                   if (s.business !== null && s.business !== undefined) {
                     setBiz(s.business ? 'true' : 'false')
@@ -1690,6 +1830,13 @@ function TransactionRow({
             <div className="txnAiInsight" role="status">
               <strong>AI suggestion</strong>
               <span>{formatAiSuggestion(aiSuggestion)}</span>
+              <span className="muted">
+                Confidence: {aiSuggestion.confidence ?? 'medium'}
+                {aiSuggestion.needsReview ? ' · needs review' : ''}
+              </span>
+              {aiSuggestion.evidence?.length ? (
+                <span className="muted">Evidence: {aiSuggestion.evidence.join(', ')}</span>
+              ) : null}
               {aiSuggestion.rationale ? (
                 <span className="muted">{aiSuggestion.rationale}</span>
               ) : null}
@@ -1724,6 +1871,7 @@ function TransactionRow({
                 ownershipContactId:
                   ownershipType === 'contact' ? Number(ownershipContactId) : null,
                 reviewFlag: false,
+                aiSuggestionId,
               })
             }}
           >

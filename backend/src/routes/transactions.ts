@@ -6,7 +6,9 @@ import { serializeTransaction } from '../util/serializeTransaction';
 import {
   loadCategoryHints,
   suggestTransactionFields,
+  suggestTransactionFieldsTracked,
 } from '../ai/suggestTransaction';
+import { createTrackedSuggestion, markTransactionSuggestionOutcome } from '../ai/suggestionStore';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { currentAuth } from '../auth/middleware';
@@ -41,7 +43,7 @@ async function applyPatchBody(
   b: Record<string, unknown>
 ): Promise<void> {
   const { household } = currentAuth(req);
-  for (const k of PATCHABLE_KEYS) {
+    for (const k of PATCHABLE_KEYS) {
     if (Object.prototype.hasOwnProperty.call(b, k)) {
       if (k === 'visibility') {
         txn.set('visibility', b[k] === 'shared' ? 'shared' : 'private');
@@ -117,6 +119,7 @@ router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
     );
     const results: {
       id: number;
+      suggestionId: number;
       suggestion: Awaited<ReturnType<typeof suggestTransactionFields>>;
     }[] = [];
     for (const id of ids) {
@@ -125,8 +128,20 @@ router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
         res.status(404).json({ error: `Transaction ${id} not found` });
         return;
       }
-      const suggestion = await suggestTransactionFields(txn, hints);
-      results.push({ id, suggestion });
+      const tracked = await suggestTransactionFieldsTracked(txn, hints);
+      const row = await createTrackedSuggestion({
+        req,
+        transactionId: txn.id,
+        kind: 'transaction_fields',
+        inputSnapshot: tracked.inputSnapshot,
+        output: tracked.suggestion,
+        model: tracked.meta.model,
+        promptVersion: tracked.promptVersion,
+        temperature: tracked.meta.temperature,
+        latencyMs: tracked.meta.latencyMs,
+        providerRequestId: tracked.meta.providerRequestId,
+      });
+      results.push({ id, suggestionId: row.id, suggestion: tracked.suggestion });
     }
     res.json({ results });
   } catch (e) {
@@ -303,11 +318,63 @@ router.get('/', async (req, res, next) => {
         cntRows.map((r) => [r.transactionId, parseInt(String(r.cnt), 10) || 0]),
       );
     }
+    let receiptWarningMap: Record<number, string[]> = {};
+    if (txnIds.length > 0) {
+      const placeholders = txnIds.map(() => '?').join(',');
+      const receiptRows = await sequelize.query<{
+        transactionId: number;
+        extractedNote: string | null;
+      }>(
+        `SELECT transaction_id AS transactionId, extracted_note AS extractedNote
+         FROM receipts
+         WHERE transaction_id IN (${placeholders})
+           AND extracted_note IS NOT NULL
+         ORDER BY created_at DESC`,
+        { replacements: txnIds, type: QueryTypes.SELECT },
+      );
+      const txnById = new Map(rows.map((row) => [row.id, row]));
+      receiptWarningMap = {};
+      for (const row of receiptRows) {
+        if (receiptWarningMap[row.transactionId]) continue;
+        const txn = txnById.get(row.transactionId);
+        if (!txn || !row.extractedNote) continue;
+        try {
+          const extracted = JSON.parse(row.extractedNote) as {
+            total?: unknown;
+            currency?: unknown;
+            date?: unknown;
+          };
+          const warnings: string[] = [];
+          const receiptTotal = Number(extracted.total);
+          const txnAmountAbs = Math.abs(Number(txn.amount));
+          if (
+            Number.isFinite(receiptTotal) &&
+            Number.isFinite(txnAmountAbs) &&
+            Math.abs(receiptTotal - txnAmountAbs) > 0.02
+          ) {
+            warnings.push('receipt total differs');
+          }
+          if (
+            typeof extracted.currency === 'string' &&
+            extracted.currency.toUpperCase() !== txn.currency
+          ) {
+            warnings.push('receipt currency differs');
+          }
+          if (typeof extracted.date === 'string' && extracted.date !== txn.date) {
+            warnings.push('receipt date differs');
+          }
+          if (warnings.length) receiptWarningMap[row.transactionId] = warnings;
+        } catch {
+          receiptWarningMap[row.transactionId] = ['receipt extract could not be read'];
+        }
+      }
+    }
 
     res.json({
       data: rows.map((row) => ({
         ...serializeTransaction(row),
         receiptCount: receiptCountMap[row.id] ?? 0,
+        receiptWarnings: receiptWarningMap[row.id] ?? [],
       })),
       page,
       pageSize,
@@ -338,8 +405,20 @@ router.post('/:id/ai-suggest', aiSuggestLimiter, async (req, res, next) => {
     const hints = await loadCategoryHints(
       isSuperadmin(req) ? null : currentAuth(req).household.id
     );
-    const suggestion = await suggestTransactionFields(txn, hints);
-    res.json({ suggestion });
+    const tracked = await suggestTransactionFieldsTracked(txn, hints);
+    const row = await createTrackedSuggestion({
+      req,
+      transactionId: txn.id,
+      kind: 'transaction_fields',
+      inputSnapshot: tracked.inputSnapshot,
+      output: tracked.suggestion,
+      model: tracked.meta.model,
+      promptVersion: tracked.promptVersion,
+      temperature: tracked.meta.temperature,
+      latencyMs: tracked.meta.latencyMs,
+      providerRequestId: tracked.meta.providerRequestId,
+    });
+    res.json({ suggestion: tracked.suggestion, suggestionId: row.id });
   } catch (e) {
     next(e);
   }
@@ -363,6 +442,10 @@ router.patch('/:id', async (req, res, next) => {
 
     recomputeTransactionAmounts(txn);
     await txn.save();
+    const aiSuggestionId = Number(b.aiSuggestionId);
+    if (Number.isInteger(aiSuggestionId) && aiSuggestionId > 0) {
+      await markTransactionSuggestionOutcome(req, aiSuggestionId, txn);
+    }
     await txn.reload({
       include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
     });

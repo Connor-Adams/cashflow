@@ -149,6 +149,24 @@ function StatCard({ label, value, hint, delta }: StatCardProps) {
   )
 }
 
+type AiInsight = {
+  title: string
+  summary: string
+  severity: 'info' | 'watch' | 'action'
+  metric: string
+  amount: number
+  comparison: string
+  supportingTransactionIds: number[]
+  rationale: string
+  suggestedAction: string
+}
+
+type AiInsightsResp = {
+  period: string
+  currency: string
+  insights: AiInsight[]
+}
+
 const LINE_COLORS = [
   'var(--primary)',
   '#94a3b8',
@@ -249,6 +267,7 @@ export function DashboardPage() {
     CurrencyMetrics[]
   >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
+  const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -267,7 +286,8 @@ export function DashboardPage() {
       setLoading(true)
       setErr(null)
       try {
-        const [d, m, prev] = await Promise.all([
+        const insightPeriod = (dateTo || new Date().toISOString()).slice(0, 7)
+        const [d, m, prev, insights] = await Promise.all([
           getJson<DashResp>(`/api/summary/dashboard${summaryQs}`),
           getJson<MonthlyResp>(`/api/summary/monthly${summaryQs}`),
           previousRange
@@ -279,11 +299,19 @@ export function DashboardPage() {
                 })}`
               )
             : Promise.resolve<DashResp | null>(null),
+          currency
+            ? getJson<AiInsightsResp>(
+                `/api/ai/insights?period=${encodeURIComponent(
+                  insightPeriod
+                )}&currency=${encodeURIComponent(currency)}`
+              )
+            : Promise.resolve<AiInsightsResp | null>(null),
         ])
         if (!cancelled) {
           setData(d)
           setMonthly(m)
           setPreviousMetricsByCurrency(prev?.metricsByCurrency ?? [])
+          setAiInsights(insights)
         }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
@@ -294,7 +322,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [summaryQs, previousRange, currency])
+  }, [summaryQs, previousRange, currency, dateTo])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -761,6 +789,40 @@ export function DashboardPage() {
           hint="Flagged transactions still needing a pass"
         />
       </section>
+
+      {aiInsights && (
+        <section className="card dashboardChartCard" aria-busy={loading}>
+          <h2>AI insights</h2>
+          <p className="muted">
+            Calculated from finalized {aiInsights.currency} transactions for{' '}
+            {aiInsights.period}; supporting transaction ids are shown for audit.
+          </p>
+          <div className="aiVisibilityList">
+            {aiInsights.insights.length === 0 ? (
+              <p className="emptyState">No AI insights for this period yet.</p>
+            ) : (
+              aiInsights.insights.map((insight) => (
+                <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
+                  <div className="aiVisibilityItemHeader">
+                    <strong>{insight.title}</strong>
+                    <span className="muted">{insight.severity}</span>
+                  </div>
+                  <p>{insight.summary}</p>
+                  <p className="muted">
+                    {insight.comparison} · {formatDashboardAmount(insight.amount)}
+                  </p>
+                  {insight.supportingTransactionIds.length > 0 ? (
+                    <p className="muted">
+                      Transactions: #{insight.supportingTransactionIds.join(', #')}
+                    </p>
+                  ) : null}
+                  <p className="muted">{insight.suggestedAction}</p>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="card dashboardBusinessSpotlight" aria-busy={loading}>
         <div className="businessSpotlightHeader">

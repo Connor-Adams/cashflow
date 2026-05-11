@@ -5,11 +5,13 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
+import { layoutWidthOptions, useLayoutWidth } from '../lib/layoutWidth'
 import { useAuth } from '../lib/useAuth'
 import type { Contact } from '../types/api'
 
 export function SettingsPage() {
   const auth = useAuth()
+  const [layoutWidth, setLayoutWidth] = useLayoutWidth()
   const [contacts, setContacts] = useState<Contact[]>([])
   const [invite, setInvite] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -88,6 +90,32 @@ export function SettingsPage() {
         </p>
       </div>
 
+      <Card className="settingsDisplayCard">
+        <div className="accountsCardHeader">
+          <div>
+            <h2>Display width</h2>
+            <p className="muted">Choose how much horizontal space the app can use on this browser.</p>
+          </div>
+        </div>
+        <div className="settingsWidthOptions" role="radiogroup" aria-label="Display width">
+          {layoutWidthOptions.map((option) => (
+            <label className="settingsWidthOption" key={option.value}>
+              <input
+                type="radio"
+                name="layoutWidth"
+                value={option.value}
+                checked={layoutWidth === option.value}
+                onChange={() => setLayoutWidth(option.value)}
+              />
+              <span>
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </span>
+            </label>
+          ))}
+        </div>
+      </Card>
+
       <Card className="accountsFormCard">
         <div className="accountsCardHeader">
           <div>
@@ -105,28 +133,28 @@ export function SettingsPage() {
       </Card>
 
       <Card className="accountsFormCard">
-      <form onSubmit={createContact}>
-        <div className="accountsCardHeader">
-          <div>
-            <h2>Contacts ledger</h2>
-            <p className="muted">Contacts track loans and reimbursements without giving login access.</p>
+        <form onSubmit={createContact}>
+          <div className="accountsCardHeader">
+            <div>
+              <h2>Contacts ledger</h2>
+              <p className="muted">Contacts track loans and reimbursements without giving login access.</p>
+            </div>
           </div>
-        </div>
-        <div className="formGrid">
-          <label>
-            Name
-            <Input name="name" required />
-          </label>
-          <label>
-            Notes
-            <Input name="notes" />
-          </label>
-        </div>
-        <Button type="submit">
-          <Plus aria-hidden="true" />
-          Add contact
-        </Button>
-      </form>
+          <div className="formGrid">
+            <label>
+              Name
+              <Input name="name" required />
+            </label>
+            <label>
+              Notes
+              <Input name="notes" />
+            </label>
+          </div>
+          <Button type="submit">
+            <Plus aria-hidden="true" />
+            Add contact
+          </Button>
+        </form>
       </Card>
 
       {err && <span className="error">{err}</span>}

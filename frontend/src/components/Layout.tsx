@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useLayoutWidth } from '../lib/layoutWidth'
 import { useAuth } from '../lib/useAuth'
 
 const navItems = [
@@ -24,6 +25,7 @@ const navItems = [
 
 export function Layout() {
   const auth = useAuth()
+  const [layoutWidth] = useLayoutWidth()
   return (
     <div className="layout">
       <header className="header">
@@ -64,7 +66,7 @@ export function Layout() {
           </Button>
         </div>
       </header>
-      <main className="main">
+      <main className="main" data-layout-width={layoutWidth}>
         <Outlet />
       </main>
     </div>

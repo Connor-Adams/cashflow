@@ -36,6 +36,19 @@ function parseExtract(j: Record<string, unknown>): ReceiptExtract {
 }
 
 export async function analyzeReceiptFile(receipt: Receipt): Promise<ReceiptExtract> {
+  return (await analyzeReceiptFileTracked(receipt)).extract;
+}
+
+export async function analyzeReceiptFileTracked(receipt: Receipt): Promise<{
+  extract: ReceiptExtract;
+  meta: {
+    model: string;
+    temperature: number;
+    latencyMs: number;
+    providerRequestId: string | null;
+  };
+  inputSnapshot: { receiptId: number; mimeType: string; sizeBytes: number };
+}> {
   const cfg = getOpenAiConfig();
   if (!cfg) {
     const err = new Error('OpenAI is not configured (set OPENAI_API_KEY)') as Error & {
@@ -58,6 +71,9 @@ export async function analyzeReceiptFile(receipt: Receipt): Promise<ReceiptExtra
   const b64 = buf.toString('base64');
   const dataUrl = `data:${mime};base64,${b64}`;
 
+  const model = getVisionModel();
+  const temperature = 0.1;
+  const started = Date.now();
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -65,7 +81,7 @@ export async function analyzeReceiptFile(receipt: Receipt): Promise<ReceiptExtra
       Authorization: `Bearer ${cfg.apiKey}`,
     },
     body: JSON.stringify({
-      model: getVisionModel(),
+      model,
       messages: [
         {
           role: 'system',
@@ -87,10 +103,11 @@ export async function analyzeReceiptFile(receipt: Receipt): Promise<ReceiptExtra
         },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.1,
+      temperature,
       max_tokens: 500,
     }),
   });
+  const latencyMs = Date.now() - started;
 
   if (!res.ok) {
     const t = await res.text();
@@ -107,5 +124,18 @@ export async function analyzeReceiptFile(receipt: Receipt): Promise<ReceiptExtra
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error('OpenAI returned no content');
   const j = JSON.parse(text) as Record<string, unknown>;
-  return parseExtract(j);
+  return {
+    extract: parseExtract(j),
+    meta: {
+      model,
+      temperature,
+      latencyMs,
+      providerRequestId: res.headers.get('x-request-id'),
+    },
+    inputSnapshot: {
+      receiptId: receipt.id,
+      mimeType: receipt.mimeType,
+      sizeBytes: receipt.sizeBytes,
+    },
+  };
 }
