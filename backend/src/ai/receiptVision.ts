@@ -1,8 +1,6 @@
-import fs from 'fs/promises';
-import path from 'path';
 import { getOpenAiConfig, getVisionModel } from '../config/openai';
-import { getReceiptsUploadDir } from '../config/receipts';
 import type { Receipt } from '../models/Receipt';
+import { readReceiptObject } from '../storage/receiptStorage';
 
 export type ReceiptExtract = {
   merchant: string | null;
@@ -47,9 +45,7 @@ export async function analyzeReceiptFile(receipt: Receipt): Promise<ReceiptExtra
     throw err;
   }
 
-  const dir = getReceiptsUploadDir();
-  const abs = path.join(dir, receipt.storedFilename);
-  const buf = await fs.readFile(abs);
+  const buf = await readReceiptObject(receipt.storedFilename);
   const mime = receipt.mimeType.toLowerCase();
   if (!mime.startsWith('image/')) {
     const err = new Error(

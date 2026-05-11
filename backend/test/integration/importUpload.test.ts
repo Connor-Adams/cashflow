@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
 const dbPath = path.join(backendRoot, 'data', 'test-integration.sqlite');
 const csvUploadDir = path.join(backendRoot, 'uploads', 'test-integration-csv');
+const receiptsUploadDir = path.join(backendRoot, 'uploads', 'test-integration-receipts');
 
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
@@ -22,9 +23,12 @@ before(async () => {
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   fs.mkdirSync(csvUploadDir, { recursive: true });
+  fs.rmSync(receiptsUploadDir, { recursive: true, force: true });
+  fs.mkdirSync(receiptsUploadDir, { recursive: true });
 
   process.env.DATABASE_PATH = dbPath;
   process.env.CSV_UPLOAD_DIR = csvUploadDir;
+  process.env.RECEIPTS_UPLOAD_DIR = receiptsUploadDir;
   process.env.NODE_ENV = 'test';
 
   // sequelize.config.cjs uses :memory: when NODE_ENV=test; use development so migrations hit DATABASE_PATH.
@@ -57,6 +61,7 @@ after(() => {
       /* ignore */
     }
   }
+  fs.rmSync(receiptsUploadDir, { recursive: true, force: true });
 });
 
 test('protected routes require auth', async () => {
@@ -87,6 +92,63 @@ test('POST /api/import/upload: creates transactions for valid CSV', async () => 
   assert.equal(res.status, 200);
   assert.ok(typeof res.body.inserted === 'number');
   assert.ok(res.body.inserted >= 2, `expected inserted >= 2, got ${JSON.stringify(res.body)}`);
+});
+
+test('receipt upload stores, downloads, lists, and deletes the image', async () => {
+  const acc = await authed.post('/api/accounts').send({
+    name: 'Receipt Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+
+  const csv = 'Date,Description,Amount\n2025-06-03,Receipt Cafe,-7.25\n';
+  const upload = await authed
+    .post('/api/import/upload')
+    .field('accountId', String(acc.body.id))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'receipt-source.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(upload.status, 200);
+
+  const txns = await authed.get('/api/transactions').query({ pageSize: 5 });
+  assert.equal(txns.status, 200);
+  const txn = txns.body.data.find(
+    (row: { merchantClean?: string }) => row.merchantClean === 'Receipt Cafe',
+  );
+  assert.ok(txn, `expected imported transaction in ${JSON.stringify(txns.body.data)}`);
+
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lz9ncwAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const receipt = await authed
+    .post(`/api/transactions/${txn.id}/receipts`)
+    .attach('file', png, {
+      filename: 'receipt.png',
+      contentType: 'image/png',
+    });
+  assert.equal(receipt.status, 201);
+  assert.equal(receipt.body.originalName, 'receipt.png');
+
+  const list = await authed.get(`/api/transactions/${txn.id}/receipts`);
+  assert.equal(list.status, 200);
+  assert.equal(list.body.length, 1);
+  assert.equal(list.body[0].id, receipt.body.id);
+
+  const file = await authed.get(`/api/receipts/${receipt.body.id}/file`);
+  assert.equal(file.status, 200);
+  assert.equal(file.type, 'image/png');
+  assert.deepEqual(file.body, png);
+
+  const deleted = await authed.delete(`/api/receipts/${receipt.body.id}`);
+  assert.equal(deleted.status, 204);
+
+  const empty = await authed.get(`/api/transactions/${txn.id}/receipts`);
+  assert.equal(empty.status, 200);
+  assert.equal(empty.body.length, 0);
 });
 
 test('POST /api/import/upload: 400 when accountId missing', async () => {

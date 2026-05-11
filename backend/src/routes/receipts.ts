@@ -1,15 +1,18 @@
 import { Router } from 'express';
-import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Transaction, Receipt } from '../models';
-import { getReceiptsUploadDir } from '../config/receipts';
 import { analyzeReceiptFile } from '../ai/receiptVision';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
+import {
+  deleteReceiptObject,
+  readReceiptObject,
+  saveReceiptObject,
+} from '../storage/receiptStorage';
 
 const router = Router();
 
@@ -31,12 +34,6 @@ const upload = multer({
     cb(null, true);
   },
 });
-
-async function ensureDir(): Promise<string> {
-  const dir = getReceiptsUploadDir();
-  await fs.mkdir(dir, { recursive: true });
-  return dir;
-}
 
 /** POST /api/transactions/:transactionId/receipts */
 router.post(
@@ -66,14 +63,17 @@ router.post(
         res.status(404).json({ error: 'Transaction not found' });
         return;
       }
-      const dir = await ensureDir();
       const ext = path.extname(req.file.originalname) || '.jpg';
       const stored = `${crypto.randomUUID()}${ext}`;
-      await fs.writeFile(path.join(dir, stored), req.file.buffer);
+      const storedKey = await saveReceiptObject(stored, {
+        buffer: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+      });
 
       const row = await Receipt.create({
         transactionId: tid,
-        storedFilename: stored,
+        storedFilename: storedKey,
         originalName: req.file.originalname.slice(0, 500),
         mimeType: req.file.mimetype,
         sizeBytes: req.file.size,
@@ -146,16 +146,13 @@ router.get('/receipts/:id/file', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const dir = getReceiptsUploadDir();
-    const abs = path.join(dir, row.storedFilename);
+    const buffer = await readReceiptObject(row.storedFilename);
     res.setHeader(
       'Content-Disposition',
       `inline; filename="${encodeURIComponent(row.originalName)}"`,
     );
     res.type(row.mimeType);
-    res.sendFile(path.resolve(abs), (err) => {
-      if (err) next(err);
-    });
+    res.send(buffer);
   } catch (e) {
     next(e);
   }
@@ -180,11 +177,9 @@ router.delete('/receipts/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const dir = getReceiptsUploadDir();
-    const abs = path.join(dir, row.storedFilename);
     await row.destroy();
     try {
-      await fs.unlink(abs);
+      await deleteReceiptObject(row.storedFilename);
     } catch {
       /* ignore */
     }

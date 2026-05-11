@@ -111,11 +111,28 @@ Recommended Railway variables:
 CORS_ORIGIN=https://your-frontend-domain.example
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 CSV_UPLOAD_DIR=/data/uploads/csv
-RECEIPTS_UPLOAD_DIR=/data/uploads/receipts
 DEFAULT_CURRENCY=CAD
 DEMO_ACCOUNT_ENABLED=false
 RAILWAY_DEPLOY_TARGET=backend
 YARN_PRODUCTION=false
+```
+
+For receipt uploads on Railway Buckets, create a bucket and set its S3-compatible
+credentials on the backend service:
+
+```bash
+AWS_ENDPOINT_URL=<bucket endpoint>
+AWS_ACCESS_KEY_ID=<bucket access key>
+AWS_SECRET_ACCESS_KEY=<bucket secret key>
+AWS_S3_BUCKET_NAME=<bucket name>
+AWS_DEFAULT_REGION=<bucket region>
+```
+
+Optional:
+
+```bash
+RECEIPTS_S3_KEY_PREFIX=receipts
+AWS_S3_FORCE_PATH_STYLE=true
 ```
 
 For the frontend service, set:
@@ -128,7 +145,7 @@ YARN_PRODUCTION=false
 
 Do not set `NODE_ENV=production` as a Railway variable for these services. Yarn Classic uses it during install and may skip build tools like TypeScript, Vite, and Sequelize CLI. The backend start script sets `NODE_ENV=production` only at runtime.
 
-Attach a Railway volume mounted at `/data` if you want uploaded CSV and receipt files to persist across deploys. Application records should use the Railway Postgres service via `DATABASE_URL`. Deploy the Vite frontend as a separate static service and set `VITE_API_BASE` to the backend public URL.
+Attach a Railway volume mounted at `/data` if you use folder-based CSV imports with `CSV_UPLOAD_DIR`; web CSV uploads are parsed from memory and do not store the source file. Receipt files should use Railway Buckets via the S3 variables above. Application records should use the Railway Postgres service via `DATABASE_URL`. Deploy the Vite frontend as a separate static service and set `VITE_API_BASE` to the backend public URL.
 
 ## Tests
 

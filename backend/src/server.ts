@@ -3,6 +3,7 @@ import app from './app';
 import * as env from './config/env';
 import { seedDemoData } from './demo/seedDemoData';
 import { logger } from './observability/logger';
+import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -17,6 +18,7 @@ async function start() {
       port: env.port,
       nodeEnv: env.nodeEnv,
       uploadDir,
+      receiptStorage: isS3ReceiptStorageEnabled() ? 's3' : 'local',
     });
   });
 }
