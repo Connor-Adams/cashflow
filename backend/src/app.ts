@@ -19,6 +19,8 @@ import { requestLogger } from './observability/requestLogger';
 
 const app = express();
 
+app.set('trust proxy', env.trustProxy);
+
 app.get('/', (_req, res) => {
   res.json({
     service: 'cashflow-backend',

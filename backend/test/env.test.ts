@@ -5,6 +5,7 @@ import {
   assertDatabaseUrl,
   assertDatabasePath,
   assertCorsOrigin,
+  parseTrustProxy,
   loadEnvConfig,
 } from '../src/config/env';
 
@@ -54,6 +55,23 @@ test('assertCorsOrigin: rejects invalid URL', () => {
 
 test('assertCorsOrigin: accepts http URL', () => {
   assert.equal(assertCorsOrigin('http://127.0.0.1:3000'), 'http://127.0.0.1:3000');
+});
+
+test('parseTrustProxy: defaults to false outside production', () => {
+  assert.equal(parseTrustProxy(undefined, 'development'), false);
+});
+
+test('parseTrustProxy: defaults to one hop in production', () => {
+  assert.equal(parseTrustProxy(undefined, 'production'), 1);
+});
+
+test('parseTrustProxy: accepts numeric hop count', () => {
+  assert.equal(parseTrustProxy('1'), 1);
+});
+
+test('parseTrustProxy: accepts boolean strings', () => {
+  assert.equal(parseTrustProxy('true'), true);
+  assert.equal(parseTrustProxy('false'), false);
 });
 
 test('loadEnvConfig: happy path with minimal env', () => {
