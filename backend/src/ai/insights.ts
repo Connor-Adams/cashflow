@@ -25,19 +25,20 @@ function monthRange(period: string): { from: string; to: string } {
   return { from, to };
 }
 
+function previousMonth(period: string): string {
+  const d = /^\d{4}-\d{2}$/.test(period) ? new Date(`${period}-01T00:00:00`) : new Date();
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export async function buildFinancialInsights(
   req: Request,
   period: string,
   currency: string,
 ): Promise<{ period: string; currency: string; insights: AiFinancialInsight[] }> {
   const range = monthRange(period);
-  const rows = await Transaction.findAll({
-    where: {
-      ...visibleTransactionWhere(req),
-      currency,
-      date: { [Op.gte]: range.from, [Op.lte]: range.to },
-    },
-    attributes: [
+  const previousRange = monthRange(previousMonth(range.from.slice(0, 7)));
+  const attributes = [
       'id',
       'date',
       'merchantClean',
@@ -47,9 +48,27 @@ export async function buildFinancialInsights(
       'finalBusiness',
       'finalSplitType',
       'reviewFlag',
-    ],
-    raw: true,
-  });
+    ];
+  const [rows, previousRows] = await Promise.all([
+    Transaction.findAll({
+      where: {
+        ...visibleTransactionWhere(req),
+        currency,
+        date: { [Op.gte]: range.from, [Op.lte]: range.to },
+      },
+      attributes,
+      raw: true,
+    }),
+    Transaction.findAll({
+      where: {
+        ...visibleTransactionWhere(req),
+        currency,
+        date: { [Op.gte]: previousRange.from, [Op.lte]: previousRange.to },
+      },
+      attributes,
+      raw: true,
+    }),
+  ]);
   type Row = {
     id: number;
     merchantClean: string;
@@ -61,11 +80,18 @@ export async function buildFinancialInsights(
     reviewFlag: boolean;
   };
   const byCategory = new Map<string, { amount: number; ids: number[] }>();
+  const previousByCategory = new Map<string, number>();
   const byMerchant = new Map<string, { amount: number; ids: number[] }>();
   let reviewCount = 0;
   let businessSpend = 0;
   let sharedSpend = 0;
   let totalSpend = 0;
+  for (const row of previousRows as unknown as Row[]) {
+    const amount = num(row.amount);
+    if (amount == null || amount >= 0) continue;
+    const category = row.finalCategory || 'Uncategorized';
+    previousByCategory.set(category, (previousByCategory.get(category) ?? 0) + -amount);
+  }
   for (const row of rows as unknown as Row[]) {
     const amount = num(row.amount);
     if (amount == null) continue;
@@ -101,6 +127,46 @@ export async function buildFinancialInsights(
       supportingTransactionIds: topCategory[1].ids.slice(0, 8),
       rationale: 'Calculated from finalized transaction categories.',
       suggestedAction: 'Review the supporting transactions if this category looks high.',
+    });
+  }
+  const biggestCategoryIncrease = Array.from(byCategory.entries())
+    .map(([category, current]) => ({
+      category,
+      current,
+      previous: previousByCategory.get(category) ?? 0,
+      delta: current.amount - (previousByCategory.get(category) ?? 0),
+    }))
+    .filter((row) => row.delta > 0 && row.current.amount >= 25)
+    .sort((a, b) => b.delta - a.delta)[0];
+  if (biggestCategoryIncrease && biggestCategoryIncrease.delta >= 25) {
+    insights.push({
+      title: `${biggestCategoryIncrease.category} is up`,
+      summary: `${biggestCategoryIncrease.category} increased versus the previous month.`,
+      severity:
+        biggestCategoryIncrease.previous > 0 &&
+        biggestCategoryIncrease.delta / biggestCategoryIncrease.previous > 0.35
+          ? 'watch'
+          : 'info',
+      metric: 'category_month_over_month_delta',
+      amount: Number(biggestCategoryIncrease.delta.toFixed(2)),
+      comparison: `${previousRange.from.slice(0, 7)}: ${biggestCategoryIncrease.previous.toFixed(2)}; ${range.from.slice(0, 7)}: ${biggestCategoryIncrease.current.amount.toFixed(2)}`,
+      supportingTransactionIds: biggestCategoryIncrease.current.ids.slice(0, 8),
+      rationale: 'Computed from finalized category totals for the current and previous month.',
+      suggestedAction: 'Review the supporting transactions to see which merchants caused the increase.',
+    });
+  }
+  const uncategorized = byCategory.get('Uncategorized');
+  if (uncategorized && uncategorized.ids.length > 0) {
+    insights.push({
+      title: 'Uncategorized spend is blocking clean reports',
+      summary: `${uncategorized.ids.length} transaction${uncategorized.ids.length === 1 ? '' : 's'} have no final category.`,
+      severity: 'action',
+      metric: 'uncategorized_spend',
+      amount: Number(uncategorized.amount.toFixed(2)),
+      comparison: `${uncategorized.ids.length} rows`,
+      supportingTransactionIds: uncategorized.ids.slice(0, 8),
+      rationale: 'Rows without final categories reduce report quality and rule learning.',
+      suggestedAction: 'Use the import cleanup queue or AI suggestions to categorize these rows.',
     });
   }
   if (topMerchant) {

@@ -6,6 +6,7 @@ import { num } from '../util/numbers';
 import { openaiJson, openaiJsonWithMeta, type OpenAiJsonResult } from './openaiJson';
 import { findBestRule, loadAllRules } from '../import/applyRules';
 import type { Receipt } from '../models/Receipt';
+import { findMerchantMemory, type MerchantMemoryMatch } from './merchantMemory';
 
 export const TRANSACTION_SUGGESTION_PROMPT_VERSION = 'transaction-fields-v2';
 
@@ -144,6 +145,7 @@ export type TransactionSuggestionContext = {
     pctMe: string | null;
     pctPartner: string | null;
   };
+  merchantMemory: MerchantMemoryMatch | null;
   similarTransactions: Array<{
     id: number;
     date: string;
@@ -172,7 +174,7 @@ export async function buildTransactionSuggestionContext(
 ): Promise<TransactionSuggestionContext> {
   const householdId = txn.householdId;
   const targetMerchant = normalizeForSimilarity(txn.merchantClean || txn.merchantRaw);
-  const [rules, priorRows, receipts] = await Promise.all([
+  const [rules, priorRows, receipts, merchantMemory] = await Promise.all([
     loadAllRules(householdId),
     sequelize.query<{
       id: number;
@@ -207,6 +209,7 @@ export async function buildTransactionSuggestionContext(
        LIMIT 5`,
       { replacements: [txn.id], type: QueryTypes.SELECT },
     ),
+    findMerchantMemory(householdId, txn.merchantClean),
   ]);
   const matching = findBestRule(rules, txn.merchantClean);
   const similarTransactions = priorRows
@@ -276,6 +279,7 @@ export async function buildTransactionSuggestionContext(
           pctPartner: matching.rule.pctPartner,
         }
       : null,
+    merchantMemory,
     similarTransactions,
     receiptExtracts,
   };
@@ -333,6 +337,7 @@ export async function suggestTransactionFieldsTracked(
     `Transaction JSON: ${JSON.stringify(context.transaction)}`,
     `Known category labels already used in this database: ${categories}`,
     `Matching deterministic rule, if any: ${JSON.stringify(context.matchingRule)}`,
+    `Merchant memory, if any: ${JSON.stringify(context.merchantMemory)}`,
     `Similar reviewed transactions: ${JSON.stringify(context.similarTransactions)}`,
     `Receipt extracts: ${JSON.stringify(context.receiptExtracts)}`,
     ``,
