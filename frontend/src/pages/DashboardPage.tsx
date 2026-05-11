@@ -12,6 +12,18 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { FilterX } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
@@ -119,8 +131,26 @@ type MonthlyResp = {
   points: { month: string; currency: string; sumAmount: number }[]
 }
 
+type StatCardProps = {
+  label: string
+  value: string | number
+  hint: string
+  delta?: string
+}
+
+function StatCard({ label, value, hint, delta }: StatCardProps) {
+  return (
+    <Card className="statCard">
+      <p className="statLabel">{label}</p>
+      <p className="statValue">{value}</p>
+      <p className="muted statHint">{hint}</p>
+      {delta ? <p className="muted statDelta">vs previous period: {delta}</p> : null}
+    </Card>
+  )
+}
+
 const LINE_COLORS = [
-  'var(--accent)',
+  'var(--primary)',
   '#94a3b8',
   '#f59e0b',
   '#22c55e',
@@ -601,7 +631,8 @@ export function DashboardPage() {
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
 
-      <section className="card dashboardFilters">
+      <Card className="dashboardFilters">
+        <CardContent className="p-0">
         <div className="row">
           <label>
             Currency{' '}
@@ -619,7 +650,7 @@ export function DashboardPage() {
           </label>
           <label>
             From{' '}
-            <input
+            <Input
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
@@ -627,30 +658,34 @@ export function DashboardPage() {
           </label>
           <label>
             To{' '}
-            <input
+            <Input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
             />
           </label>
           {hasActiveFilters && (
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={() => {
                 setCurrency(DEFAULT_DASHBOARD_CURRENCY)
                 setDateFrom(defaultRange.from)
                 setDateTo(defaultRange.to)
               }}
             >
+              <FilterX aria-hidden="true" />
               Clear filters
-            </button>
+            </Button>
           )}
         </div>
         <div className="quickFilters" aria-label="Quick date ranges">
           {quickRanges.map((range) => (
-            <button
+            <Button
               key={range.key}
               type="button"
+              variant={activeQuickRange === range.key ? 'default' : 'secondary'}
+              size="sm"
               className="quickFilterButton"
               aria-pressed={activeQuickRange === range.key}
               onClick={() => {
@@ -659,90 +694,72 @@ export function DashboardPage() {
               }}
             >
               {range.label}
-            </button>
+            </Button>
           ))}
         </div>
         <p className="muted" style={{ marginBottom: 0 }}>
           Showing <strong>{currency || 'all currencies'}</strong> for{' '}
           <strong>{activeRangeLabel}</strong>.
         </p>
-      </section>
+        </CardContent>
+      </Card>
 
       <section className="dashboardStats" aria-busy={loading}>
-        <article className="card statCard">
-          <p className="statLabel">Total spend</p>
-          <p className="statValue">{summaryStats.spendLabel}</p>
-          <p className="muted statHint">
-            Charges only (absolute values). {summaryStats.moneyHint}
-          </p>
-          <p className="muted statDelta">
-            vs previous period: {summaryStats.spendDeltaLabel}
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Refunds / credits</p>
-          <p className="statValue">{summaryStats.creditsLabel}</p>
-          <p className="muted statHint">
-            Positive amounts excluding payments and transfers.
-          </p>
-          <p className="muted statDelta">
-            vs previous period: {summaryStats.creditsDeltaLabel}
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Payments / transfers</p>
-          <p className="statValue">{summaryStats.paymentsLabel}</p>
-          <p className="muted statHint">
-            Card payments and transfer-like inflows, tracked separately.
-          </p>
-          <p className="muted statDelta">
-            vs previous period: {summaryStats.paymentsDeltaLabel}
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Net spend</p>
-          <p className="statValue">{summaryStats.netSpendLabel}</p>
-          <p className="muted statHint">
-            Spend minus refunds/credits. Payments excluded.
-          </p>
-          <p className="muted statDelta">
-            vs previous period: {summaryStats.netSpendDeltaLabel}
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Transactions</p>
-          <p className="statValue">{summaryStats.txCount}</p>
-          <p className="muted statHint">Rows in current filters</p>
-          <p className="muted statDelta">
-            vs previous period: {summaryStats.txDeltaLabel}
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Categories</p>
-          <p className="statValue">{summaryStats.categoryCount}</p>
-          <p className="muted statHint">Shown in category chart</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Months</p>
-          <p className="statValue">{summaryStats.monthCount}</p>
-          <p className="muted statHint">Shown in monthly trend</p>{' '}
-          <p className="muted statDelta">{summaryStats.comparisonHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Merchants</p>
-          <p className="statValue">{summaryStats.merchantCount}</p>
-          <p className="muted statHint">Distinct merchants in the current filters</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Accounts</p>
-          <p className="statValue">{summaryStats.accountCount}</p>
-          <p className="muted statHint">Accounts contributing activity in this view</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Needs review</p>
-          <p className="statValue">{summaryStats.reviewCount}</p>
-          <p className="muted statHint">Flagged transactions still needing a pass</p>
-        </article>
+        <StatCard
+          label="Total spend"
+          value={summaryStats.spendLabel}
+          hint={`Charges only (absolute values). ${summaryStats.moneyHint}`}
+          delta={summaryStats.spendDeltaLabel}
+        />
+        <StatCard
+          label="Refunds / credits"
+          value={summaryStats.creditsLabel}
+          hint="Positive amounts excluding payments and transfers."
+          delta={summaryStats.creditsDeltaLabel}
+        />
+        <StatCard
+          label="Payments / transfers"
+          value={summaryStats.paymentsLabel}
+          hint="Card payments and transfer-like inflows, tracked separately."
+          delta={summaryStats.paymentsDeltaLabel}
+        />
+        <StatCard
+          label="Net spend"
+          value={summaryStats.netSpendLabel}
+          hint="Spend minus refunds/credits. Payments excluded."
+          delta={summaryStats.netSpendDeltaLabel}
+        />
+        <StatCard
+          label="Transactions"
+          value={summaryStats.txCount}
+          hint="Rows in current filters"
+          delta={summaryStats.txDeltaLabel}
+        />
+        <StatCard
+          label="Categories"
+          value={summaryStats.categoryCount}
+          hint="Shown in category chart"
+        />
+        <StatCard
+          label="Months"
+          value={summaryStats.monthCount}
+          hint={summaryStats.comparisonHint}
+        />
+        <StatCard
+          label="Merchants"
+          value={summaryStats.merchantCount}
+          hint="Distinct merchants in the current filters"
+        />
+        <StatCard
+          label="Accounts"
+          value={summaryStats.accountCount}
+          hint="Accounts contributing activity in this view"
+        />
+        <StatCard
+          label="Needs review"
+          value={summaryStats.reviewCount}
+          hint="Flagged transactions still needing a pass"
+        />
       </section>
 
       <section className="card dashboardBusinessSpotlight" aria-busy={loading}>
@@ -854,7 +871,7 @@ export function DashboardPage() {
                   }}
                 />
                 <Legend />
-                <Bar dataKey="totalSpend" name="Spend" fill="var(--accent)" />
+                <Bar dataKey="totalSpend" name="Spend" fill="var(--primary)" />
                 <Bar dataKey="totalCredits" name="Refunds / credits" fill="#22c55e" />
                 <Bar
                   dataKey="totalPayments"
@@ -883,20 +900,21 @@ export function DashboardPage() {
                 </p>
                 <div className="row" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
                   {currency ? (
-                    <button type="button" onClick={() => setCurrency('')}>
+                    <Button type="button" variant="secondary" onClick={() => setCurrency('')}>
                       Show all currencies
-                    </button>
+                    </Button>
                   ) : null}
                   {(dateFrom || dateTo) && (
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
                       onClick={() => {
                         setDateFrom('')
                         setDateTo('')
                       }}
                     >
                       Show all dates
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -922,7 +940,7 @@ export function DashboardPage() {
                   }}
                 />
                 <Legend />
-                <Bar dataKey="total" name="Amount" fill="var(--accent)" />
+                <Bar dataKey="total" name="Amount" fill="var(--primary)" />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -1050,40 +1068,40 @@ export function DashboardPage() {
           Top categories ranked by net spend for the current filters.
         </p>
         <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                {!currency && <th>Currency</th>}
-                <th>Category</th>
-                <th>Spend</th>
-                <th>Refunds / credits</th>
-                <th>Net spend</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Category</TableHead>
+                <TableHead>Spend</TableHead>
+                <TableHead>Refunds / credits</TableHead>
+                <TableHead>Net spend</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {!loading && categoryReportData.length === 0 ? (
-                <tr>
-                  <td
+                <TableRow>
+                  <TableCell
                     colSpan={currency ? 4 : 5}
                     className="emptyStateCell"
                   >
                     <p className="emptyState">
                       No category report data for these filters.
                     </p>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : null}
               {categoryReportData.slice(0, 12).map((row) => (
-                  <tr key={`${row.currency}:${row.category ?? 'uncategorized'}`}>
-                    {!currency && <td>{row.currency}</td>}
-                    <td>{row.category ?? '(uncategorized)'}</td>
-                    <td>{formatMoney(row.totalSpend, row.currency)}</td>
-                    <td>{formatMoney(row.totalCredits, row.currency)}</td>
-                    <td>{formatMoney(row.netSpend, row.currency)}</td>
-                  </tr>
+                  <TableRow key={`${row.currency}:${row.category ?? 'uncategorized'}`}>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.category ?? '(uncategorized)'}</TableCell>
+                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
+                  </TableRow>
                 ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
 
@@ -1094,45 +1112,45 @@ export function DashboardPage() {
           payments, and review backlog shown beside it.
         </p>
         <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                {!currency && <th>Currency</th>}
-                <th>Merchant</th>
-                <th>Transactions</th>
-                <th>Spend</th>
-                <th>Refunds / credits</th>
-                <th>Payments</th>
-                <th>Net spend</th>
-                <th>Needs review</th>
-                <th>Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Merchant</TableHead>
+                <TableHead>Transactions</TableHead>
+                <TableHead>Spend</TableHead>
+                <TableHead>Refunds / credits</TableHead>
+                <TableHead>Payments</TableHead>
+                <TableHead>Net spend</TableHead>
+                <TableHead>Needs review</TableHead>
+                <TableHead>Last seen</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {!loading && merchantReportData.length === 0 ? (
-                <tr>
-                  <td colSpan={currency ? 8 : 9} className="emptyStateCell">
+                <TableRow>
+                  <TableCell colSpan={currency ? 8 : 9} className="emptyStateCell">
                     <p className="emptyState">
                       No merchant-level activity for these filters.
                     </p>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : null}
               {merchantReportData.slice(0, 12).map((row) => (
-                  <tr key={`${row.currency}:${row.merchant}`}>
-                    {!currency && <td>{row.currency}</td>}
-                    <td>{row.merchant}</td>
-                    <td>{row.transactionCount}</td>
-                    <td>{formatMoney(row.totalSpend, row.currency)}</td>
-                    <td>{formatMoney(row.totalCredits, row.currency)}</td>
-                    <td>{formatMoney(row.totalPayments, row.currency)}</td>
-                    <td>{formatMoney(row.netSpend, row.currency)}</td>
-                    <td>{row.reviewCount}</td>
-                    <td>{row.lastDate}</td>
-                  </tr>
+                  <TableRow key={`${row.currency}:${row.merchant}`}>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.merchant}</TableCell>
+                    <TableCell>{row.transactionCount}</TableCell>
+                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalPayments, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
+                    <TableCell>{row.reviewCount}</TableCell>
+                    <TableCell>{row.lastDate}</TableCell>
+                  </TableRow>
                 ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
 
@@ -1143,43 +1161,43 @@ export function DashboardPage() {
           backlog.
         </p>
         <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                {!currency && <th>Currency</th>}
-                <th>Account</th>
-                <th>Transactions</th>
-                <th>Spend</th>
-                <th>Refunds / credits</th>
-                <th>Payments</th>
-                <th>Net spend</th>
-                <th>Needs review</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Account</TableHead>
+                <TableHead>Transactions</TableHead>
+                <TableHead>Spend</TableHead>
+                <TableHead>Refunds / credits</TableHead>
+                <TableHead>Payments</TableHead>
+                <TableHead>Net spend</TableHead>
+                <TableHead>Needs review</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {!loading && accountReportData.length === 0 ? (
-                <tr>
-                  <td colSpan={currency ? 7 : 8} className="emptyStateCell">
+                <TableRow>
+                  <TableCell colSpan={currency ? 7 : 8} className="emptyStateCell">
                     <p className="emptyState">
                       No account-level totals for these filters.
                     </p>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : null}
               {accountReportData.map((row) => (
-                  <tr key={`${row.currency}:${row.accountId}`}>
-                    {!currency && <td>{row.currency}</td>}
-                    <td>{row.accountShortCode ?? row.accountName}</td>
-                    <td>{row.transactionCount}</td>
-                    <td>{formatMoney(row.totalSpend, row.currency)}</td>
-                    <td>{formatMoney(row.totalCredits, row.currency)}</td>
-                    <td>{formatMoney(row.totalPayments, row.currency)}</td>
-                    <td>{formatMoney(row.netSpend, row.currency)}</td>
-                    <td>{row.reviewCount}</td>
-                  </tr>
+                  <TableRow key={`${row.currency}:${row.accountId}`}>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.accountShortCode ?? row.accountName}</TableCell>
+                    <TableCell>{row.transactionCount}</TableCell>
+                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalPayments, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
+                    <TableCell>{row.reviewCount}</TableCell>
+                  </TableRow>
                 ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
 
@@ -1190,39 +1208,39 @@ export function DashboardPage() {
           needs cleanup.
         </p>
         <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                {!currency && <th>Currency</th>}
-                <th>Merchant</th>
-                <th>Account</th>
-                <th>Category</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Merchant</TableHead>
+                <TableHead>Account</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Amount</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {!loading && reviewQueueData.length === 0 ? (
-                <tr>
-                  <td colSpan={currency ? 5 : 6} className="emptyStateCell">
+                <TableRow>
+                  <TableCell colSpan={currency ? 5 : 6} className="emptyStateCell">
                     <p className="emptyState">
                       No flagged transactions in the current filters.
                     </p>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : null}
               {reviewQueueData.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.date}</td>
-                    {!currency && <td>{row.currency}</td>}
-                    <td>{row.merchant}</td>
-                    <td>{row.accountName}</td>
-                    <td>{row.category ?? '(uncategorized)'}</td>
-                    <td>{formatMoney(row.amount, row.currency)}</td>
-                  </tr>
+                  <TableRow key={row.id}>
+                    <TableCell>{row.date}</TableCell>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.merchant}</TableCell>
+                    <TableCell>{row.accountName}</TableCell>
+                    <TableCell>{row.category ?? '(uncategorized)'}</TableCell>
+                    <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
+                  </TableRow>
                 ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
     </div>
