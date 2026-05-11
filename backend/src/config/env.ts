@@ -7,6 +7,7 @@ const backendRoot = path.join(__dirname, '..', '..');
 
 export type EnvConfig = {
   csvUploadDir: string;
+  databaseUrl: string | null;
   databasePath: string;
   port: number;
   defaultCurrency: string;
@@ -39,6 +40,21 @@ export function assertDatabasePath(
   return raw.trim();
 }
 
+export function assertDatabaseUrl(raw: string | undefined): string | null {
+  if (raw === undefined || raw === '') {
+    return null;
+  }
+  try {
+    const url = new URL(raw);
+    if (!['postgres:', 'postgresql:'].includes(url.protocol)) {
+      throw new Error('unsupported protocol');
+    }
+  } catch {
+    throw new Error('DATABASE_URL must be a valid postgres URL');
+  }
+  return raw;
+}
+
 export function assertCorsOrigin(raw: string | undefined): string {
   if (raw === undefined || raw === '') {
     return 'http://localhost:5173';
@@ -58,6 +74,7 @@ export function loadEnvConfig(
   const csvUploadDir =
     e.CSV_UPLOAD_DIR || path.join(backendRoot, 'uploads', 'csv');
 
+  const databaseUrl = assertDatabaseUrl(e.DATABASE_URL);
   const databasePath = assertDatabasePath(e.DATABASE_PATH, backendRoot);
   const port = parsePort(e.PORT);
   const defaultCurrency = e.DEFAULT_CURRENCY || 'CAD';
@@ -66,6 +83,7 @@ export function loadEnvConfig(
 
   return {
     csvUploadDir,
+    databaseUrl,
     databasePath,
     port,
     defaultCurrency,
@@ -77,6 +95,7 @@ export function loadEnvConfig(
 const resolved = loadEnvConfig(process.env as Record<string, string | undefined>);
 
 export const csvUploadDir = resolved.csvUploadDir;
+export const databaseUrl = resolved.databaseUrl;
 export const databasePath = resolved.databasePath;
 export const port = resolved.port;
 export const defaultCurrency = resolved.defaultCurrency;

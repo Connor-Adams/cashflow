@@ -26,7 +26,7 @@ yarn setup
 
 Then start dev with `yarn dev`.
 
-Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite`, `backend/uploads/csv`, and **`DEFAULT_CURRENCY=CAD`** (override in `.env` if needed). Developer setup, CI parity, and git hooks: [CONTRIBUTING.md](CONTRIBUTING.md).
+Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite`, `backend/uploads/csv`, and **`DEFAULT_CURRENCY=CAD`** (override in `.env` if needed). Set `DATABASE_URL` to use Postgres instead of the SQLite fallback. Developer setup, CI parity, and git hooks: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 With `yarn dev`:
 
@@ -109,10 +109,11 @@ Recommended Railway variables:
 
 ```bash
 CORS_ORIGIN=https://your-frontend-domain.example
-DATABASE_PATH=/data/cashflow.sqlite
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 CSV_UPLOAD_DIR=/data/uploads/csv
 RECEIPTS_UPLOAD_DIR=/data/uploads/receipts
 DEFAULT_CURRENCY=CAD
+DEMO_ACCOUNT_ENABLED=false
 RAILWAY_DEPLOY_TARGET=backend
 YARN_PRODUCTION=false
 ```
@@ -127,7 +128,7 @@ YARN_PRODUCTION=false
 
 Do not set `NODE_ENV=production` as a Railway variable for these services. Yarn Classic uses it during install and may skip build tools like TypeScript, Vite, and Sequelize CLI. The backend start script sets `NODE_ENV=production` only at runtime.
 
-Attach a Railway volume mounted at `/data` if you want SQLite data and uploads to persist across deploys. Deploy the Vite frontend as a separate static service and set `VITE_API_BASE` to the backend public URL.
+Attach a Railway volume mounted at `/data` if you want uploaded CSV and receipt files to persist across deploys. Application records should use the Railway Postgres service via `DATABASE_URL`. Deploy the Vite frontend as a separate static service and set `VITE_API_BASE` to the backend public URL.
 
 ## Tests
 

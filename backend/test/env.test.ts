@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parsePort,
+  assertDatabaseUrl,
   assertDatabasePath,
   assertCorsOrigin,
   loadEnvConfig,
@@ -32,6 +33,17 @@ test('assertDatabasePath: accepts default path', () => {
   assert.ok(p.includes('cashflow.sqlite'));
 });
 
+test('assertDatabaseUrl: accepts postgres URL', () => {
+  assert.equal(
+    assertDatabaseUrl('postgresql://user:pass@example.com:5432/db'),
+    'postgresql://user:pass@example.com:5432/db'
+  );
+});
+
+test('assertDatabaseUrl: rejects non-postgres URL', () => {
+  assert.throws(() => assertDatabaseUrl('mysql://example.com/db'), /DATABASE_URL/);
+});
+
 test('assertCorsOrigin: default', () => {
   assert.equal(assertCorsOrigin(undefined), 'http://localhost:5173');
 });
@@ -47,6 +59,7 @@ test('assertCorsOrigin: accepts http URL', () => {
 test('loadEnvConfig: happy path with minimal env', () => {
   const c = loadEnvConfig({});
   assert.equal(typeof c.port, 'number');
+  assert.equal(c.databaseUrl, null);
   assert.ok(c.databasePath.length > 0);
   assert.ok(c.csvUploadDir.length > 0);
 });
@@ -57,4 +70,9 @@ test('loadEnvConfig: throws on bad PORT', () => {
 
 test('loadEnvConfig: throws on empty DATABASE_PATH', () => {
   assert.throws(() => loadEnvConfig({ DATABASE_PATH: '' }), /DATABASE_PATH/);
+});
+
+test('loadEnvConfig: accepts DATABASE_URL for postgres', () => {
+  const c = loadEnvConfig({ DATABASE_URL: 'postgres://user:pass@example.com/db' });
+  assert.equal(c.databaseUrl, 'postgres://user:pass@example.com/db');
 });

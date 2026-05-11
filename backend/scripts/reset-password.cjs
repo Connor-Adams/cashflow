@@ -7,6 +7,7 @@ const { promisify } = require('util');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
+const pg = require('pg');
 const sqlite3 = require('sqlite3');
 
 const scryptAsync = promisify(crypto.scrypt);
@@ -20,6 +21,7 @@ function usage() {
       '  node backend/scripts/reset-password.cjs --email user@example.com --password new-password',
       '',
       'Options:',
+      '  --database-url postgres://...       Override DATABASE_URL',
       '  --database /path/to/cashflow.sqlite  Override DATABASE_PATH',
     ].join('\n')
   );
@@ -45,6 +47,7 @@ function readArgs(argv) {
 
 function databasePath(raw) {
   if (raw) return path.resolve(raw);
+  if (process.env.DATABASE_URL) return null;
   if (process.env.DATABASE_PATH) return path.resolve(process.env.DATABASE_PATH);
   return path.join(__dirname, '..', 'data', 'cashflow.sqlite');
 }
@@ -81,22 +84,34 @@ async function hashPassword(password) {
   };
 }
 
-async function main() {
-  const args = readArgs(process.argv.slice(2));
-  const email = String(args.email || '').trim().toLowerCase();
-  const password = String(args.password || '');
-  const dbPath = databasePath(args.database);
+async function resetPostgres(databaseUrl, email, passwordData) {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const user = await client.query(
+      'select id, email from users where lower(email) = lower($1)',
+      [email]
+    );
+    if (user.rowCount === 0) {
+      throw new Error(`No user found for email: ${email}`);
+    }
 
-  if (!email || !password) {
-    usage();
-    process.exitCode = 1;
-    return;
+    await client.query(
+      [
+        'update users',
+        'set password_hash = $1, password_salt = $2, password_params = $3, updated_at = CURRENT_TIMESTAMP',
+        'where id = $4',
+      ].join(' '),
+      [passwordData.hash, passwordData.salt, passwordData.params, user.rows[0].id]
+    );
+
+    console.log(`Password reset for ${user.rows[0].email} in Postgres`);
+  } finally {
+    await client.end();
   }
+}
 
-  if (password.length < 8) {
-    throw new Error('Password must be at least 8 characters');
-  }
-
+async function resetSqlite(dbPath, email, passwordData) {
   if (!fs.existsSync(dbPath)) {
     throw new Error(`Database not found: ${dbPath}`);
   }
@@ -108,7 +123,6 @@ async function main() {
       throw new Error(`No user found for email: ${email}`);
     }
 
-    const passwordData = await hashPassword(password);
     await run(
       db,
       [
@@ -122,6 +136,32 @@ async function main() {
     console.log(`Password reset for ${user.email} in ${dbPath}`);
   } finally {
     db.close();
+  }
+}
+
+async function main() {
+  const args = readArgs(process.argv.slice(2));
+  const email = String(args.email || '').trim().toLowerCase();
+  const password = String(args.password || '');
+  const dbUrl = args['database-url'] || process.env.DATABASE_URL || null;
+  const dbPath = databasePath(args.database);
+
+  if (!email || !password) {
+    usage();
+    process.exitCode = 1;
+    return;
+  }
+
+  if (password.length < 8) {
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  const passwordData = await hashPassword(password);
+
+  if (dbUrl) {
+    await resetPostgres(dbUrl, email, passwordData);
+  } else {
+    await resetSqlite(dbPath, email, passwordData);
   }
 }
 
