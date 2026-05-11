@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Edit3, Link2, Plus, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { useAuth } from '../lib/useAuth'
 import type { Contact } from '../types/api'
@@ -84,22 +88,24 @@ export function SettingsPage() {
         </p>
       </div>
 
-      <section className="card accountsFormCard">
+      <Card className="accountsFormCard">
         <div className="accountsCardHeader">
           <div>
             <h2>Partner invite</h2>
             <p className="muted">Invite links let another user join shared household reporting.</p>
           </div>
-          <button type="button" onClick={createInvite}>
+          <Button type="button" onClick={createInvite}>
+            <Link2 aria-hidden="true" />
             Create invite
-          </button>
+          </Button>
         </div>
         {inviteUrl && (
-          <input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
+          <Input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
         )}
-      </section>
+      </Card>
 
-      <form className="card accountsFormCard" onSubmit={createContact}>
+      <Card className="accountsFormCard">
+      <form onSubmit={createContact}>
         <div className="accountsCardHeader">
           <div>
             <h2>Contacts ledger</h2>
@@ -109,33 +115,39 @@ export function SettingsPage() {
         <div className="formGrid">
           <label>
             Name
-            <input name="name" required />
+            <Input name="name" required />
           </label>
           <label>
             Notes
-            <input name="notes" />
+            <Input name="notes" />
           </label>
         </div>
-        <button type="submit">Add contact</button>
+        <Button type="submit">
+          <Plus aria-hidden="true" />
+          Add contact
+        </Button>
       </form>
+      </Card>
 
       {err && <span className="error">{err}</span>}
       <section className="accountsGrid">
         {contacts.map((contact) => (
-          <article className="card accountCard" key={contact.id}>
+          <Card className="accountCard" key={contact.id}>
             <div>
               <h3>{contact.name}</h3>
               {contact.notes && <p className="muted">{contact.notes}</p>}
             </div>
             <div className="row">
-              <button type="button" onClick={() => void renameContact(contact)}>
+              <Button type="button" size="sm" variant="secondary" onClick={() => void renameContact(contact)}>
+                <Edit3 aria-hidden="true" />
                 Edit
-              </button>
-              <button type="button" onClick={() => void removeContact(contact)}>
+              </Button>
+              <Button type="button" size="sm" variant="destructive" onClick={() => void removeContact(contact)}>
+                <Trash2 aria-hidden="true" />
                 Delete
-              </button>
+              </Button>
             </div>
-          </article>
+          </Card>
         ))}
       </section>
     </div>

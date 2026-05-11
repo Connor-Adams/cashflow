@@ -1,5 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { LogIn, UserPlus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { useAuth } from '../lib/useAuth'
 
 export function AuthPage() {
@@ -43,7 +47,7 @@ export function AuthPage() {
 
   return (
     <main className="authShell">
-      <section className="card authCard">
+      <Card className="authCard">
         <div className="brandLockup">
           <div className="brandMark">CF</div>
           <div>
@@ -52,38 +56,42 @@ export function AuthPage() {
           </div>
         </div>
         <div className="authTabs" role="tablist">
-          <button
+          <Button
             type="button"
+            variant={mode === 'login' ? 'default' : 'secondary'}
             className={mode === 'login' ? 'isActive' : ''}
             onClick={() => setMode('login')}
           >
+            <LogIn aria-hidden="true" />
             Log in
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant={mode === 'register' ? 'default' : 'secondary'}
             className={mode === 'register' ? 'isActive' : ''}
             onClick={() => setMode('register')}
           >
+            <UserPlus aria-hidden="true" />
             Register
-          </button>
+          </Button>
         </div>
-        <button type="button" className="demoLoginButton" onClick={() => void demoLogin()}>
+        <Button type="button" className="demoLoginButton" onClick={() => void demoLogin()}>
           Continue with demo account
-        </button>
+        </Button>
         <form onSubmit={submit} className="authForm">
           {mode === 'register' && (
             <label>
               Name
-              <input name="displayName" autoComplete="name" required />
+              <Input name="displayName" autoComplete="name" required />
             </label>
           )}
           <label>
             Email
-            <input name="email" type="email" autoComplete="email" required />
+            <Input name="email" type="email" autoComplete="email" required />
           </label>
           <label>
             Password
-            <input
+            <Input
               name="password"
               type="password"
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -94,15 +102,15 @@ export function AuthPage() {
           {mode === 'register' && !auth.bootstrapRequired && (
             <label>
               Invite code
-              <input name="inviteToken" defaultValue={inviteFromUrl} required />
+              <Input name="inviteToken" defaultValue={inviteFromUrl} required />
             </label>
           )}
           {err && <span className="error">{err}</span>}
-          <button type="submit">
+          <Button type="submit">
             {mode === 'login' ? 'Log in' : auth.bootstrapRequired ? 'Create first account' : 'Join household'}
-          </button>
+          </Button>
         </form>
-      </section>
+      </Card>
     </main>
   )
 }

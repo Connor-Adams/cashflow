@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account } from '../types/api'
 
@@ -158,29 +171,30 @@ export function AccountsPage() {
       </div>
 
       <section className="accountsStats" aria-busy={loading}>
-        <article className="card statCard">
+        <Card className="statCard">
           <p className="statLabel">Accounts</p>
           <p className="statValue">{accountCount}</p>
           <p className="muted statHint">Cards and bank accounts configured</p>
-        </article>
-        <article className="card statCard">
+        </Card>
+        <Card className="statCard">
           <p className="statLabel">Short codes</p>
           <p className="statValue">{shortCodeCount}</p>
           <p className="muted statHint">Ready for folder import matching</p>
-        </article>
-        <article className="card statCard">
+        </Card>
+        <Card className="statCard">
           <p className="statLabel">Joint</p>
           <p className="statValue">{jointCount}</p>
           <p className="muted statHint">Accounts owned together</p>
-        </article>
-        <article className="card statCard">
+        </Card>
+        <Card className="statCard">
           <p className="statLabel">Currencies</p>
           <p className="statValue">{currencyCount}</p>
           <p className="muted statHint">Default currencies in use</p>
-        </article>
+        </Card>
       </section>
 
-      <form className="card accountsFormCard" onSubmit={onCreate}>
+      <Card className="accountsFormCard">
+      <form onSubmit={onCreate}>
         <div className="accountsCardHeader">
           <div>
             <h2>New account</h2>
@@ -192,7 +206,7 @@ export function AccountsPage() {
         <div className="formGrid">
           <label>
             Name <span className="req">*</span>
-            <input name="name" required placeholder="Amex Personal" />
+            <Input name="name" required placeholder="Amex Personal" />
           </label>
           <label>
             Owner
@@ -204,7 +218,7 @@ export function AccountsPage() {
           </label>
           <label>
             Short code
-            <input
+            <Input
               name="shortCode"
               placeholder="Amex"
               maxLength={64}
@@ -232,14 +246,16 @@ export function AccountsPage() {
             </select>
           </label>
         </div>
-        <button type="submit" disabled={saving}>
+        <Button type="submit" disabled={saving}>
+          <Plus aria-hidden="true" />
           {saving ? 'Saving…' : 'Create account'}
-        </button>
+        </Button>
       </form>
+      </Card>
 
       {err && <p className="error">{err}</p>}
 
-      <section className="card accountsTableCard">
+      <Card className="accountsTableCard">
         <div className="accountsCardHeader">
           <div>
             <h2>Your accounts</h2>
@@ -247,29 +263,29 @@ export function AccountsPage() {
               Edit the basics here without cramming action buttons into the currency field.
             </p>
           </div>
-          <span className="transactionsPanelBadge">{accountCount} total</span>
+          <Badge variant="secondary">{accountCount} total</Badge>
         </div>
         {loading ? (
           <p className="muted">Loading…</p>
         ) : (
           <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Owner</th>
-                  <th>Short code</th>
-                  <th>Default currency</th>
-                  <th>Visibility</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Short code</TableHead>
+                  <TableHead>Default currency</TableHead>
+                  <TableHead>Visibility</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {accounts.map((a) => (
-                  <tr key={a.id}>
-                    <td>
+                  <TableRow key={a.id}>
+                    <TableCell>
                       {editingId === a.id ? (
-                        <input
+                        <Input
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
                           placeholder="Account name"
@@ -277,23 +293,8 @@ export function AccountsPage() {
                       ) : (
                         a.name
                       )}
-                    </td>
-                    <td>
-                      {editingId === a.id ? (
-                        <select
-                          value={editVisibility}
-                          onChange={(e) =>
-                            setEditVisibility(e.target.value as 'private' | 'shared')
-                          }
-                        >
-                          <option value="private">private</option>
-                          <option value="shared">shared</option>
-                        </select>
-                      ) : (
-                        a.visibility
-                      )}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       {editingId === a.id ? (
                         <select
                           value={editOwner}
@@ -310,10 +311,10 @@ export function AccountsPage() {
                       ) : (
                         a.owner
                       )}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       {editingId === a.id ? (
-                        <input
+                        <Input
                           value={editShortCode}
                           onChange={(e) => setEditShortCode(e.target.value)}
                           placeholder="Short code"
@@ -322,8 +323,8 @@ export function AccountsPage() {
                       ) : (
                         a.shortCode ?? '—'
                       )}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       {editingId === a.id ? (
                         <select
                           value={editCurrency}
@@ -338,36 +339,56 @@ export function AccountsPage() {
                       ) : (
                         a.defaultCurrency ?? 'CAD'
                       )}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
+                      {editingId === a.id ? (
+                        <select
+                          value={editVisibility}
+                          onChange={(e) =>
+                            setEditVisibility(e.target.value as 'private' | 'shared')
+                          }
+                        >
+                          <option value="private">private</option>
+                          <option value="shared">shared</option>
+                        </select>
+                      ) : (
+                        a.visibility
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <div className="accountsActionGroup">
                         {editingId === a.id ? (
                           <>
-                            <button type="button" onClick={() => void saveCard(a.id)}>
+                            <Button type="button" size="sm" onClick={() => void saveCard(a.id)}>
+                              <Save aria-hidden="true" />
                               Save
-                            </button>
-                            <button type="button" onClick={() => resetEditForm()}>
+                            </Button>
+                            <Button type="button" size="sm" variant="secondary" onClick={() => resetEditForm()}>
+                              <X aria-hidden="true" />
                               Cancel
-                            </button>
+                            </Button>
                           </>
                         ) : (
-                          <button type="button" onClick={() => startEdit(a)}>
+                          <Button type="button" size="sm" variant="secondary" onClick={() => startEdit(a)}>
+                            <Edit3 aria-hidden="true" />
                             Edit
-                          </button>
+                          </Button>
                         )}
-                        <button
+                        <Button
                           type="button"
-                          className="btnDanger"
+                          size="sm"
+                          variant="destructive"
                           onClick={() => void removeAccount(a.id, a.name)}
                         >
+                          <Trash2 aria-hidden="true" />
                           Delete
-                        </button>
+                        </Button>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
             {accounts.length === 0 && !loading && (
               <p className="emptyState pad">
                 No accounts yet — create one using the form above, then import CSVs under Transactions.
@@ -375,7 +396,7 @@ export function AccountsPage() {
             )}
           </div>
         )}
-      </section>
+      </Card>
     </div>
   )
 }
