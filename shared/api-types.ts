@@ -51,6 +51,8 @@ export type Transaction = {
   reviewedAt: string | null
   /** Count of attached receipt files */
   receiptCount?: number
+  /** Receipt extraction mismatches that need review */
+  receiptWarnings?: string[]
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
 }
 
