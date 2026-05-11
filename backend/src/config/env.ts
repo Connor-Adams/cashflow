@@ -10,6 +10,7 @@ export type EnvConfig = {
   databaseUrl: string | null;
   databasePath: string;
   port: number;
+  trustProxy: boolean | number | string;
   defaultCurrency: string;
   corsOrigin: string;
   nodeEnv: string;
@@ -68,6 +69,21 @@ export function assertCorsOrigin(raw: string | undefined): string {
   return raw;
 }
 
+export function parseTrustProxy(
+  raw: string | undefined,
+  nodeEnv: string = process.env.NODE_ENV || 'development'
+): boolean | number | string {
+  if (raw === undefined || raw === '') {
+    return nodeEnv === 'production' ? 1 : false;
+  }
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  const numeric = Number(trimmed);
+  if (Number.isInteger(numeric) && numeric >= 0) return numeric;
+  return raw.trim();
+}
+
 export function loadEnvConfig(
   e: Record<string, string | undefined>
 ): EnvConfig {
@@ -80,12 +96,14 @@ export function loadEnvConfig(
   const defaultCurrency = e.DEFAULT_CURRENCY || 'CAD';
   const corsOrigin = assertCorsOrigin(e.CORS_ORIGIN);
   const nodeEnv = e.NODE_ENV || 'development';
+  const trustProxy = parseTrustProxy(e.TRUST_PROXY, nodeEnv);
 
   return {
     csvUploadDir,
     databaseUrl,
     databasePath,
     port,
+    trustProxy,
     defaultCurrency,
     corsOrigin,
     nodeEnv,
@@ -98,6 +116,7 @@ export const csvUploadDir = resolved.csvUploadDir;
 export const databaseUrl = resolved.databaseUrl;
 export const databasePath = resolved.databasePath;
 export const port = resolved.port;
+export const trustProxy = resolved.trustProxy;
 export const defaultCurrency = resolved.defaultCurrency;
 export const corsOrigin = resolved.corsOrigin;
 export const nodeEnv = resolved.nodeEnv;
