@@ -13,29 +13,63 @@ export type RuleProposal = {
   exampleTransactionIds: number[];
 };
 
+type RuleProposalRow = {
+  merchantClean?: string;
+  merchantclean?: string;
+  category: string | null;
+  isBusiness?: number | boolean;
+  isbusiness?: number | boolean;
+  splitType?: string;
+  splittype?: string;
+  pctMe?: string | null;
+  pctme?: string | null;
+  pctPartner?: string | null;
+  pctpartner?: string | null;
+  supportCount?: string | number;
+  supportcount?: string | number;
+  exampleIds?: string;
+  exampleids?: string;
+};
+
 function merchantPatternFor(value: string): string {
   return value.trim().replace(/\s+/g, ' ').slice(0, 120);
 }
 
+export function ruleProposalFromRow(row: RuleProposalRow): RuleProposal {
+  const merchantClean = row.merchantClean ?? row.merchantclean ?? '';
+  const isBusiness = row.isBusiness ?? row.isbusiness ?? false;
+  const splitType = row.splitType ?? row.splittype ?? 'me';
+  const pctMe = row.pctMe ?? row.pctme ?? null;
+  const pctPartner = row.pctPartner ?? row.pctpartner ?? null;
+  const supportCount = row.supportCount ?? row.supportcount ?? 0;
+  const exampleIds = row.exampleIds ?? row.exampleids ?? '';
+
+  return {
+    merchantPattern: merchantPatternFor(merchantClean),
+    category: row.category,
+    isBusiness: Boolean(isBusiness),
+    splitType,
+    pctMe: pctMe == null ? null : String(pctMe),
+    pctPartner: pctPartner == null ? null : String(pctPartner),
+    supportCount: Number(supportCount) || 0,
+    exampleTransactionIds: String(exampleIds || '')
+      .split(',')
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id))
+      .slice(0, 8),
+  };
+}
+
 export async function findRuleProposals(householdId: number | null): Promise<RuleProposal[]> {
-  const rows = await sequelize.query<{
-    merchantClean: string;
-    category: string | null;
-    isBusiness: number | boolean;
-    splitType: string;
-    pctMe: string | null;
-    pctPartner: string | null;
-    supportCount: string;
-    exampleIds: string;
-  }>(
-    `SELECT merchant_clean AS merchantClean,
+  const rows = await sequelize.query<RuleProposalRow>(
+    `SELECT merchant_clean AS "merchantClean",
             final_category AS category,
-            final_business AS isBusiness,
-            final_split_type AS splitType,
-            final_pct_me AS pctMe,
-            final_pct_partner AS pctPartner,
-            COUNT(*) AS supportCount,
-            GROUP_CONCAT(id) AS exampleIds
+            final_business AS "isBusiness",
+            final_split_type AS "splitType",
+            final_pct_me AS "pctMe",
+            final_pct_partner AS "pctPartner",
+            COUNT(*) AS "supportCount",
+            GROUP_CONCAT(id) AS "exampleIds"
      FROM transactions
      WHERE (? IS NULL OR household_id = ?)
        AND reviewed_at IS NOT NULL
@@ -56,19 +90,6 @@ export async function findRuleProposals(householdId: number | null): Promise<Rul
     existingRules.map((r) => String(r.merchantPattern).trim().toLowerCase()),
   );
   return rows
-    .map((row) => ({
-      merchantPattern: merchantPatternFor(row.merchantClean),
-      category: row.category,
-      isBusiness: Boolean(row.isBusiness),
-      splitType: row.splitType,
-      pctMe: row.pctMe == null ? null : String(row.pctMe),
-      pctPartner: row.pctPartner == null ? null : String(row.pctPartner),
-      supportCount: Number(row.supportCount) || 0,
-      exampleTransactionIds: String(row.exampleIds || '')
-        .split(',')
-        .map((id) => Number(id))
-        .filter((id) => Number.isInteger(id))
-        .slice(0, 8),
-    }))
+    .map(ruleProposalFromRow)
     .filter((p) => !existing.has(p.merchantPattern.toLowerCase()));
 }

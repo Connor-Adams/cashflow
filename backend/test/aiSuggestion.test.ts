@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSuggestion } from '../src/ai/suggestTransaction';
 import { scoreTransactionSuggestion } from '../src/ai/evaluateSuggestion';
+import { ruleProposalFromRow } from '../src/ai/ruleProposals';
 
 test('parseSuggestion validates malformed values safely', () => {
   const parsed = parseSuggestion({
@@ -55,5 +56,30 @@ test('scoreTransactionSuggestion distinguishes accepted from edited', () => {
       notes: null,
     }).status,
     'edited',
+  );
+});
+
+test('ruleProposalFromRow handles Postgres lowercased aliases', () => {
+  assert.deepEqual(
+    ruleProposalFromRow({
+      merchantclean: '  Metro   Grocery  ',
+      category: 'Groceries',
+      isbusiness: false,
+      splittype: 'shared',
+      pctme: '0.5',
+      pctpartner: '0.5',
+      supportcount: '4',
+      exampleids: '7,8,9,10',
+    }),
+    {
+      merchantPattern: 'Metro Grocery',
+      category: 'Groceries',
+      isBusiness: false,
+      splitType: 'shared',
+      pctMe: '0.5',
+      pctPartner: '0.5',
+      supportCount: 4,
+      exampleTransactionIds: [7, 8, 9, 10],
+    },
   );
 });

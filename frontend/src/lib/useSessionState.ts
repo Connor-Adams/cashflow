@@ -15,7 +15,16 @@ export function useSessionState<T>(
     if (typeof window === 'undefined') return fallback
     try {
       const raw = window.sessionStorage.getItem(key)
-      return raw == null ? fallback : (JSON.parse(raw) as T)
+      if (raw == null) return fallback
+      const parsed = JSON.parse(raw) as unknown
+      if (
+        fallback == null ||
+        typeof fallback === 'object' ||
+        typeof parsed === typeof fallback
+      ) {
+        return parsed as T
+      }
+      return fallback
     } catch {
       return fallback
     }
