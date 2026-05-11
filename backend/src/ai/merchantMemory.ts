@@ -36,15 +36,15 @@ export async function findMerchantMemory(
     exampleIds: string;
     lastReviewedAt: string;
   }>(
-    `SELECT merchant_clean AS merchantClean,
+    `SELECT merchant_clean AS "merchantClean",
             final_category AS category,
             final_business AS business,
-            final_split_type AS splitType,
-            final_pct_me AS pctMe,
-            final_pct_partner AS pctPartner,
-            COUNT(*) AS supportCount,
-            GROUP_CONCAT(id) AS exampleIds,
-            MAX(reviewed_at) AS lastReviewedAt
+            final_split_type AS "splitType",
+            final_pct_me AS "pctMe",
+            final_pct_partner AS "pctPartner",
+            COUNT(*) AS "supportCount",
+            GROUP_CONCAT(id) AS "exampleIds",
+            MAX(reviewed_at) AS "lastReviewedAt"
      FROM transactions
      WHERE (? IS NULL OR household_id = ?)
        AND LOWER(merchant_clean) = ?

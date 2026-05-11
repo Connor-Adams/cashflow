@@ -188,10 +188,10 @@ export async function buildTransactionSuggestionContext(
       finalPctMe: unknown;
       finalPctPartner: unknown;
     }>(
-      `SELECT id, date, merchant_clean AS merchantClean, amount, currency,
-              final_category AS finalCategory, final_business AS finalBusiness,
-              final_split_type AS finalSplitType, final_pct_me AS finalPctMe,
-              final_pct_partner AS finalPctPartner
+      `SELECT id, date, merchant_clean AS "merchantClean", amount, currency,
+              final_category AS "finalCategory", final_business AS "finalBusiness",
+              final_split_type AS "finalSplitType", final_pct_me AS "finalPctMe",
+              final_pct_partner AS "finalPctPartner"
        FROM transactions
        WHERE id != ?
          AND (? IS NULL OR household_id = ?)
@@ -202,7 +202,7 @@ export async function buildTransactionSuggestionContext(
       { replacements: [txn.id, householdId, householdId], type: QueryTypes.SELECT },
     ),
     sequelize.query<Pick<Receipt, 'id' | 'extractedNote'>>(
-      `SELECT id, extracted_note AS extractedNote
+      `SELECT id, extracted_note AS "extractedNote"
        FROM receipts
        WHERE transaction_id = ?
        ORDER BY created_at DESC
