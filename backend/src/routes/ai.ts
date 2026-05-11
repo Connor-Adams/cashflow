@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import { QueryTypes } from 'sequelize';
 import { AiSuggestion, Rule, Transaction } from '../models';
+import { sequelize } from '../models';
 import { getOpenAiConfig } from '../config/openai';
 import { isDemoUserRequest } from '../demo/aiAccess';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -201,6 +203,90 @@ router.get('/insights', async (req, res, next) => {
       temperature: null,
     });
     res.json(out);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/import-cleanup', async (req, res, next) => {
+  try {
+    const batch = String(req.query.batch || '').trim();
+    const currency = req.query.currency
+      ? String(req.query.currency).toUpperCase().slice(0, 3)
+      : null;
+    const where = {
+      ...visibleTransactionWhere(req),
+      ...(batch ? { importBatch: batch } : {}),
+      ...(currency ? { currency } : {}),
+    };
+    const rows = await Transaction.findAll({
+      where,
+      attributes: [
+        'id',
+        'date',
+        'merchantClean',
+        'amount',
+        'currency',
+        'autoCategory',
+        'finalCategory',
+        'reviewFlag',
+        'appliedRuleId',
+      ],
+      order: [
+        ['date', 'DESC'],
+        ['id', 'DESC'],
+      ],
+      limit: 200,
+      raw: true,
+    });
+    type CleanupRow = {
+      id: number;
+      date: string;
+      merchantClean: string;
+      amount: unknown;
+      currency: string;
+      autoCategory: string | null;
+      finalCategory: string | null;
+      reviewFlag: boolean;
+      appliedRuleId: number | null;
+    };
+    const typed = rows as unknown as CleanupRow[];
+    const readyToConfirm = typed.filter((row) => row.reviewFlag && row.autoCategory);
+    const needsCategory = typed.filter((row) => row.reviewFlag && !row.autoCategory);
+    const alreadyReviewed = typed.filter((row) => !row.reviewFlag);
+    const topReady = readyToConfirm.slice(0, 25).map((row) => ({
+      id: row.id,
+      date: row.date,
+      merchant: row.merchantClean,
+      amount: Number(row.amount),
+      currency: row.currency,
+      category: row.autoCategory ?? row.finalCategory,
+      source: row.appliedRuleId ? 'rule' : 'merchant_memory',
+    }));
+    const batches = await sequelize.query<{ importBatch: string; count: string }>(
+      `SELECT import_batch AS importBatch, COUNT(*) AS count
+       FROM transactions
+       WHERE ${isSuperadmin(req) ? '1=1' : 'household_id = ?'}
+       GROUP BY import_batch
+       ORDER BY MAX(date) DESC
+       LIMIT 20`,
+      {
+        replacements: isSuperadmin(req) ? [] : [currentAuth(req).household.id],
+        type: QueryTypes.SELECT,
+      },
+    );
+    res.json({
+      batch: batch || null,
+      total: typed.length,
+      readyToConfirmCount: readyToConfirm.length,
+      needsCategoryCount: needsCategory.length,
+      alreadyReviewedCount: alreadyReviewed.length,
+      topReady,
+      batches: batches.map((row) => ({
+        importBatch: row.importBatch,
+        count: Number(row.count) || 0,
+      })),
+    });
   } catch (e) {
     next(e);
   }

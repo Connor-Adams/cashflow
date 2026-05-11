@@ -16,6 +16,7 @@ import { parseCsvRecords } from './csvParse';
 import { mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import { assertUnderRoot } from './pathUtils';
+import { findMerchantMemory, merchantMemoryToAutoFields } from '../ai/merchantMemory';
 import * as env from '../config/env';
 
 /** Max row-level parse diagnostics returned on a single import response */
@@ -247,22 +248,23 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       });
 
       const { rule, ambiguous } = findBestRule(rules, v.merchantClean);
+      const memory = !rule || ambiguous
+        ? await findMerchantMemory(opts.householdId ?? account.householdId ?? null, v.merchantClean)
+        : null;
       const autoFields =
         rule && !ambiguous
           ? applyRuleToAuto(rule)
-          : {
-              autoCategory: null as string | null,
-              autoBusiness: null as boolean | null,
-              autoSplitType: null as string | null,
-              autoPctMe: null as string | null,
-              autoPctPartner: null as string | null,
-            };
+          : memory
+            ? merchantMemoryToAutoFields(memory)
+            : {
+                autoCategory: null as string | null,
+                autoBusiness: null as boolean | null,
+                autoSplitType: null as string | null,
+                autoPctMe: null as string | null,
+                autoPctPartner: null as string | null,
+              };
 
-      const reviewFlag =
-        ambiguous ||
-        !rule ||
-        autoFields.autoCategory == null ||
-        autoFields.autoSplitType == null;
+      const reviewFlag = true;
 
       const txn = Transaction.build({
         accountId: account.id,
@@ -280,7 +282,9 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         merchantClean: v.merchantClean,
         amount: String(v.amount),
         currency: v.currency,
-        notes: null,
+        notes: memory
+          ? `Auto-categorized from ${memory.supportCount} previous ${memory.merchantClean} transaction${memory.supportCount === 1 ? '' : 's'}.`
+          : null,
         sourceReference: v.sourceReference,
         sourceRowFingerprint: fp,
         appliedRuleId: rule && !ambiguous ? rule.id : null,

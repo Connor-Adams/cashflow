@@ -130,6 +130,24 @@ type BulkAiResult = {
   status: 'suggested' | 'applied' | 'rejected'
 }
 
+type ImportCleanup = {
+  batch: string | null
+  total: number
+  readyToConfirmCount: number
+  needsCategoryCount: number
+  alreadyReviewedCount: number
+  topReady: Array<{
+    id: number
+    date: string
+    merchant: string
+    amount: number
+    currency: string
+    category: string | null
+    source: 'rule' | 'merchant_memory'
+  }>
+  batches: Array<{ importBatch: string; count: number }>
+}
+
 function formatAiSuggestion(suggestion: AiSuggestion): string {
   const parts = [
     suggestion.category ? `Category: ${suggestion.category}` : null,
@@ -209,6 +227,7 @@ export function TransactionsPage() {
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
   const [bulkAiResults, setBulkAiResults] = useState<BulkAiResult[]>([])
+  const [importCleanup, setImportCleanup] = useState<ImportCleanup | null>(null)
   const [sortBy, setSortBy] = useState<
     'date' | 'merchant' | 'amount' | 'category' | 'review'
   >('date')
@@ -274,11 +293,16 @@ export function TransactionsPage() {
       if (dateFrom.trim()) qs.set('dateFrom', dateFrom.trim())
       if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
-      const data = await getJson<Paginated<Transaction>>(
-        `/api/transactions?${qs.toString()}`
-      )
+      const cleanupQs = new URLSearchParams()
+      if (batchFilter.trim()) cleanupQs.set('batch', batchFilter.trim())
+      if (currency) cleanupQs.set('currency', currency)
+      const [data, cleanup] = await Promise.all([
+        getJson<Paginated<Transaction>>(`/api/transactions?${qs.toString()}`),
+        getJson<ImportCleanup>(`/api/ai/import-cleanup?${cleanupQs.toString()}`),
+      ])
       if (loadRequestRef.current === requestId) {
         setRes(data)
+        setImportCleanup(cleanup)
       }
     } catch (e) {
       if (loadRequestRef.current === requestId) {
@@ -748,6 +772,61 @@ export function TransactionsPage() {
           <p className="muted statHint">Attachments on the current page</p>
         </article>
       </section>
+
+      {importCleanup && importCleanup.total > 0 && (
+        <section className="card aiVisibilityPanel" aria-label="Import cleanup assistant">
+          <div className="aiVisibilityHeader">
+            <strong>Import cleanup</strong>
+            <span className="muted">
+              {importCleanup.readyToConfirmCount} auto-categorized ·{' '}
+              {importCleanup.needsCategoryCount} need categories ·{' '}
+              {importCleanup.alreadyReviewedCount} reviewed
+            </span>
+          </div>
+          {importCleanup.readyToConfirmCount > 0 ? (
+            <div className="aiVisibilityList">
+              {importCleanup.topReady.slice(0, 6).map((row) => (
+                <article key={row.id} className="aiVisibilityItem">
+                  <div className="aiVisibilityItemHeader">
+                    <strong>{row.merchant}</strong>
+                    <span className="muted">#{row.id}</span>
+                  </div>
+                  <p>
+                    {row.category ?? 'Uncategorized'} ·{' '}
+                    {formatMoney(Math.abs(row.amount), row.currency)}
+                  </p>
+                  <p className="muted">
+                    Source: {row.source === 'rule' ? 'rule' : 'merchant memory'}
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">
+              Nothing is ready to confirm for the current filters.
+            </p>
+          )}
+          <div className="row">
+            <button
+              type="button"
+              onClick={() => {
+                setReviewOnly(true)
+                if (importCleanup.batch) setBatchFilter(importCleanup.batch)
+              }}
+            >
+              Review cleanup queue
+            </button>
+            {importCleanup.batches.length > 0 && !batchFilter && (
+              <button
+                type="button"
+                onClick={() => setBatchFilter(importCleanup.batches[0].importBatch)}
+              >
+                Focus latest batch
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="transactionsTopGrid">
         <form className="card uploadCard transactionsPanel" onSubmit={onUpload}>
@@ -1692,7 +1771,11 @@ function TransactionRow({
       <td>
         <div className="txnStatusCell">
           <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
-            {t.reviewFlag ? 'Needs review' : 'Reviewed'}
+            {t.reviewFlag
+              ? t.autoCategory
+                ? 'Auto categorized'
+                : 'Needs review'
+              : 'Reviewed'}
           </span>
           <button
             type="button"
