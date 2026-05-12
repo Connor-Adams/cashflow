@@ -286,7 +286,12 @@ export function DashboardPage() {
       setLoading(true)
       setErr(null)
       try {
-        const insightPeriod = (dateTo || new Date().toISOString()).slice(0, 7)
+        const insightQs = new URLSearchParams({
+          currency,
+          period: (dateTo || new Date().toISOString()).slice(0, 7),
+        })
+        insightQs.set('dateFrom', dateFrom)
+        insightQs.set('dateTo', dateTo)
         const [d, m, prev, insights] = await Promise.all([
           getJson<DashResp>(`/api/summary/dashboard${summaryQs}`),
           getJson<MonthlyResp>(`/api/summary/monthly${summaryQs}`),
@@ -301,9 +306,7 @@ export function DashboardPage() {
             : Promise.resolve<DashResp | null>(null),
           currency
             ? getJson<AiInsightsResp>(
-                `/api/ai/insights?period=${encodeURIComponent(
-                  insightPeriod
-                )}&currency=${encodeURIComponent(currency)}`
+                `/api/ai/insights?${insightQs.toString()}`
               )
             : Promise.resolve<AiInsightsResp | null>(null),
         ])

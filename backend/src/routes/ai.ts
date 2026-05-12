@@ -250,7 +250,23 @@ router.get('/insights', async (req, res, next) => {
   try {
     const period = String(req.query.period || new Date().toISOString().slice(0, 7));
     const currency = String(req.query.currency || 'CAD').toUpperCase().slice(0, 3);
-    const out = await buildFinancialInsights(req, period, currency);
+    const dateFrom =
+      typeof req.query.dateFrom === 'string' && req.query.dateFrom.trim()
+        ? req.query.dateFrom.trim()
+        : null;
+    const dateTo =
+      typeof req.query.dateTo === 'string' && req.query.dateTo.trim()
+        ? req.query.dateTo.trim()
+        : null;
+    const hasExplicitRange =
+      Object.prototype.hasOwnProperty.call(req.query, 'dateFrom') ||
+      Object.prototype.hasOwnProperty.call(req.query, 'dateTo');
+    const out = await buildFinancialInsights(
+      req,
+      period,
+      currency,
+      hasExplicitRange ? { from: dateFrom, to: dateTo } : undefined,
+    );
     await createTrackedSuggestion({
       req,
       kind: 'financial_insight',

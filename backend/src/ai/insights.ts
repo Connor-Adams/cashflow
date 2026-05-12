@@ -31,13 +31,65 @@ function previousMonth(period: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+export type FinancialInsightRange = {
+  from?: string | null;
+  to?: string | null;
+  label?: string | null;
+};
+
+function dateWhere(range: FinancialInsightRange): { [Op.gte]?: string; [Op.lte]?: string } | undefined {
+  const date: { [Op.gte]?: string; [Op.lte]?: string } = {};
+  if (range.from) date[Op.gte] = range.from;
+  if (range.to) date[Op.lte] = range.to;
+  return Object.keys(date).length ? date : undefined;
+}
+
+function parseDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function previousComparableRange(
+  range: FinancialInsightRange,
+): FinancialInsightRange | null {
+  const from = parseDate(range.from);
+  const to = parseDate(range.to);
+  if (!from || !to || from > to) return null;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const spanDays = Math.floor((to.getTime() - from.getTime()) / dayMs) + 1;
+  const prevTo = new Date(from.getTime() - dayMs);
+  const prevFrom = new Date(prevTo.getTime() - (spanDays - 1) * dayMs);
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { from: fmt(prevFrom), to: fmt(prevTo) };
+}
+
+function rangeFromPeriod(period: string): FinancialInsightRange {
+  const range = monthRange(period);
+  return { from: range.from, to: range.to, label: range.from.slice(0, 7) };
+}
+
+function rangeLabel(range: FinancialInsightRange): string {
+  if (range.label) return range.label;
+  if (range.from && range.to) return `${range.from} to ${range.to}`;
+  if (range.from) return `from ${range.from}`;
+  if (range.to) return `through ${range.to}`;
+  return 'all time';
+}
+
 export async function buildFinancialInsights(
   req: Request,
   period: string,
   currency: string,
+  explicitRange?: FinancialInsightRange,
 ): Promise<{ period: string; currency: string; insights: AiFinancialInsight[] }> {
-  const range = monthRange(period);
-  const previousRange = monthRange(previousMonth(range.from.slice(0, 7)));
+  const range = explicitRange ?? rangeFromPeriod(period);
+  const previousRange = explicitRange
+    ? previousComparableRange(range)
+    : monthRange(previousMonth(range.from?.slice(0, 7) ?? period));
+  const currentDateWhere = dateWhere(range);
+  const previousDateWhere = previousRange ? dateWhere(previousRange) : undefined;
   const attributes = [
       'id',
       'date',
@@ -54,7 +106,7 @@ export async function buildFinancialInsights(
       where: {
         ...visibleTransactionWhere(req),
         currency,
-        date: { [Op.gte]: range.from, [Op.lte]: range.to },
+        ...(currentDateWhere ? { date: currentDateWhere } : {}),
       },
       attributes,
       raw: true,
@@ -63,7 +115,7 @@ export async function buildFinancialInsights(
       where: {
         ...visibleTransactionWhere(req),
         currency,
-        date: { [Op.gte]: previousRange.from, [Op.lte]: previousRange.to },
+        ...(previousDateWhere ? { date: previousDateWhere } : {}),
       },
       attributes,
       raw: true,
@@ -149,7 +201,7 @@ export async function buildFinancialInsights(
           : 'info',
       metric: 'category_month_over_month_delta',
       amount: Number(biggestCategoryIncrease.delta.toFixed(2)),
-      comparison: `${previousRange.from.slice(0, 7)}: ${biggestCategoryIncrease.previous.toFixed(2)}; ${range.from.slice(0, 7)}: ${biggestCategoryIncrease.current.amount.toFixed(2)}`,
+      comparison: `${previousRange ? rangeLabel(previousRange) : 'previous comparable period'}: ${biggestCategoryIncrease.previous.toFixed(2)}; ${rangeLabel(range)}: ${biggestCategoryIncrease.current.amount.toFixed(2)}`,
       supportingTransactionIds: biggestCategoryIncrease.current.ids.slice(0, 8),
       rationale: 'Computed from finalized category totals for the current and previous month.',
       suggestedAction: 'Review the supporting transactions to see which merchants caused the increase.',
@@ -211,5 +263,5 @@ export async function buildFinancialInsights(
       suggestedAction: 'Audit split fields if household sharing feels off.',
     });
   }
-  return { period: range.from.slice(0, 7), currency, insights };
+  return { period: rangeLabel(range), currency, insights };
 }
