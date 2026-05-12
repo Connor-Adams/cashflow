@@ -13,6 +13,7 @@ import receiptsRouter from './routes/receipts';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import clientLogsRouter from './routes/clientLogs';
+import amazonRouter from './routes/amazon';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -49,6 +50,7 @@ app.use('/api/contacts', contactsRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/ai', aiRouter);
+app.use('/api/amazon', amazonRouter);
 app.use('/api', receiptsRouter);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

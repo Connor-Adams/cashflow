@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { parseSuggestion } from '../src/ai/suggestTransaction';
 import { scoreTransactionSuggestion } from '../src/ai/evaluateSuggestion';
 import { ruleProposalFromRow } from '../src/ai/ruleProposals';
+import { parseTransactionAuditIssues } from '../src/ai/auditTransactions';
 
 test('parseSuggestion validates malformed values safely', () => {
   const parsed = parseSuggestion({
@@ -81,5 +82,39 @@ test('ruleProposalFromRow handles Postgres lowercased aliases', () => {
       supportCount: 4,
       exampleTransactionIds: [7, 8, 9, 10],
     },
+  );
+});
+
+test('parseTransactionAuditIssues validates audit output safely', () => {
+  assert.deepEqual(
+    parseTransactionAuditIssues({
+      issues: [
+        {
+          id: 12,
+          issueType: 'both',
+          currentCategory: 'Dining',
+          suggestedCategory: 'Office',
+          currentBusiness: 'false',
+          suggestedBusiness: true,
+          confidence: 'high',
+          evidence: ['matching rule', '', 1],
+          rationale: 'Merchant history points to office supplies.',
+        },
+        { id: 'bad', issueType: 'category_mismatch' },
+      ],
+    }),
+    [
+      {
+        id: 12,
+        issueType: 'both',
+        currentCategory: 'Dining',
+        suggestedCategory: 'Office',
+        currentBusiness: false,
+        suggestedBusiness: true,
+        confidence: 'high',
+        evidence: ['matching rule'],
+        rationale: 'Merchant history points to office supplies.',
+      },
+    ],
   );
 });

@@ -133,6 +133,7 @@ export type TransactionSuggestionContext = {
     currency: string;
     autoCategory: string | null;
     finalCategory: string | null;
+    finalBusiness: boolean;
     notes: string | null;
   };
   categoryHints: string[];
@@ -265,6 +266,7 @@ export async function buildTransactionSuggestionContext(
       currency: txn.currency,
       autoCategory: txn.autoCategory,
       finalCategory: txn.finalCategory,
+      finalBusiness: txn.finalBusiness,
       notes: txn.notes,
     },
     categoryHints: hints,

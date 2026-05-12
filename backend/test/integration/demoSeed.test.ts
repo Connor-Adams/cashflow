@@ -75,7 +75,7 @@ test('seedDemoData creates an idempotent production demo account with sample led
   const transactions = await models.Transaction.findAll({
     where: { householdId: memberships[0].householdId },
   });
-  assert.equal(transactions.length, 15);
+  assert.equal(transactions.length, 21);
   assert.ok(transactions.some((row) => row.finalCategory === 'Groceries'));
   assert.ok(transactions.some((row) => row.finalBusiness));
   assert.ok(transactions.some((row) => row.reviewFlag));
@@ -96,7 +96,7 @@ test('POST /api/auth/demo-login creates a session for the seeded demo user', asy
 
   const txns = await agent.get('/api/transactions?pageSize=25').set('Cookie', cookie);
   assert.equal(txns.status, 200);
-  assert.equal(txns.body.total, 15);
+  assert.equal(txns.body.total, 21);
 });
 
 test('demo user cannot use AI even when OpenAI is configured', async () => {
