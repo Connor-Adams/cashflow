@@ -84,8 +84,20 @@ function itemPreview(order?: AmazonOrder): string {
   if (!items.length) return 'No items'
   return items
     .slice(0, 3)
-    .map((item) => item.title)
+    .map((item) => `${item.title}${item.inferredCategory ? ` (${item.inferredCategory})` : ''}`)
     .join(' · ')
+}
+
+function categoryPreview(order?: AmazonOrder): string {
+  const counts = new Map<string, number>()
+  for (const item of order?.items ?? []) {
+    const category = item.inferredCategory || 'Uncategorized'
+    counts.set(category, (counts.get(category) ?? 0) + 1)
+  }
+  const rows = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  return rows.length
+    ? rows.map(([category, count]) => `${category}${count > 1 ? ` x${count}` : ''}`).join(' · ')
+    : '—'
 }
 
 export function AmazonPage() {
@@ -323,6 +335,7 @@ export function AmazonPage() {
                       <strong>{confidenceLabel(link.confidence)} · {Number(link.confidence).toFixed(0)}</strong>
                       <span className="muted">{link.status} · {link.matchReason}</span>
                       <span>{itemPreview(link.order)}</span>
+                      <span className="muted">{categoryPreview(link.order)}</span>
                     </div>
                     <div className="amazonActionRow">
                       <button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
@@ -373,7 +386,7 @@ export function AmazonPage() {
         <div className="tableWrap">
           <table className="table">
             <thead>
-              <tr><th>Order</th><th>Date</th><th>Total</th><th>Items</th><th></th></tr>
+              <tr><th>Order</th><th>Date</th><th>Total</th><th>Categories</th><th>Items</th><th></th></tr>
             </thead>
             <tbody>
               {orders.map((order) => (
@@ -381,6 +394,7 @@ export function AmazonPage() {
                   <td>{order.vendorOrderId ?? `#${order.id}`}</td>
                   <td>{order.orderDate ?? order.shipmentDate ?? '—'}</td>
                   <td>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</td>
+                  <td>{categoryPreview(order)}</td>
                   <td>{itemPreview(order)}</td>
                   <td><button type="button" onClick={() => setSelectedOrderId(order.id)}>View/Edit</button></td>
                 </tr>
