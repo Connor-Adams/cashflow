@@ -23,7 +23,12 @@ export async function createTrackedSuggestion(params: {
   req: Request;
   transactionId?: number | null;
   receiptId?: number | null;
-  kind: 'transaction_fields' | 'receipt_extract' | 'financial_insight' | 'rule_proposal';
+  kind:
+    | 'transaction_fields'
+    | 'transaction_audit'
+    | 'receipt_extract'
+    | 'financial_insight'
+    | 'rule_proposal';
   inputSnapshot: unknown;
   output: unknown;
   model?: string | null;

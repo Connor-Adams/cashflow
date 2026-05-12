@@ -10,6 +10,7 @@ import {
 
 export type AiSuggestionKind =
   | 'transaction_fields'
+  | 'transaction_audit'
   | 'receipt_extract'
   | 'financial_insight'
   | 'rule_proposal';

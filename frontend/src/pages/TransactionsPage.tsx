@@ -130,6 +130,29 @@ type BulkAiResult = {
   status: 'suggested' | 'applied' | 'rejected'
 }
 
+type AiAuditIssue = {
+  id: number
+  issueType:
+    | 'category_mismatch'
+    | 'business_flag_mismatch'
+    | 'both'
+    | 'uncertain'
+  currentCategory: string | null
+  suggestedCategory: string | null
+  currentBusiness: boolean | null
+  suggestedBusiness: boolean | null
+  confidence: 'high' | 'medium' | 'low'
+  evidence: string[]
+  rationale: string | null
+}
+
+type AiAuditResult = AiAuditIssue & {
+  merchant: string
+  amount: number
+  currency: string
+  status: 'open' | 'applied' | 'dismissed'
+}
+
 type ImportCleanup = {
   batch: string | null
   total: number
@@ -227,6 +250,9 @@ export function TransactionsPage() {
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
   const [bulkAiResults, setBulkAiResults] = useState<BulkAiResult[]>([])
+  const [aiAuditBusy, setAiAuditBusy] = useState(false)
+  const [aiAuditResults, setAiAuditResults] = useState<AiAuditResult[]>([])
+  const [aiAuditMessage, setAiAuditMessage] = useState<string | null>(null)
   const [importCleanup, setImportCleanup] = useState<ImportCleanup | null>(null)
   const [sortBy, setSortBy] = useState<
     'date' | 'merchant' | 'amount' | 'category' | 'review'
@@ -326,6 +352,8 @@ export function TransactionsPage() {
   useEffect(() => {
     setSelectedIds(new Set())
     setBulkAiResults([])
+    setAiAuditResults([])
+    setAiAuditMessage(null)
   }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter])
 
   async function saveRow(id: number, patch: Record<string, unknown>) {
@@ -585,6 +613,85 @@ export function TransactionsPage() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not apply AI suggestion')
     }
+  }
+
+  async function runAiAudit() {
+    if (selectedIds.size === 0) return
+    setAiAuditBusy(true)
+    setErr(null)
+    setAiAuditResults([])
+    setAiAuditMessage(null)
+    try {
+      const out = await postJson<{ auditId: number; issues: AiAuditIssue[] }>(
+        '/api/ai/transactions/audit',
+        { ids: [...selectedIds] }
+      )
+      const byId = new Map((res?.data ?? []).map((row) => [row.id, row]))
+      setAiAuditResults(
+        out.issues.map((issue) => {
+          const txn = byId.get(issue.id)
+          return {
+            ...issue,
+            merchant: txn?.merchantClean ?? `Transaction ${issue.id}`,
+            amount: Number(txn?.amount ?? 0),
+            currency: txn?.currency ?? currency,
+            status: 'open',
+          }
+        })
+      )
+      if (out.issues.length === 0) {
+        setAiAuditMessage('AI audit found no likely category or business flag issues.')
+      }
+      setSelectedIds(new Set())
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'AI audit failed')
+    } finally {
+      setAiAuditBusy(false)
+    }
+  }
+
+  async function applyAiAuditIssue(result: AiAuditResult) {
+    const patch: Record<string, unknown> = { reviewFlag: false }
+    if (
+      result.suggestedCategory != null &&
+      result.suggestedCategory !== result.currentCategory
+    ) {
+      patch.categoryOverride = result.suggestedCategory
+    }
+    if (
+      result.suggestedBusiness != null &&
+      result.suggestedBusiness !== result.currentBusiness
+    ) {
+      patch.businessOverride = result.suggestedBusiness
+    }
+    if (Object.keys(patch).length === 1) {
+      setAiAuditResults((prev) =>
+        prev.map((row) =>
+          row.id === result.id ? { ...row, status: 'dismissed' } : row
+        )
+      )
+      return
+    }
+    setErr(null)
+    try {
+      await patchJson<Transaction>(`/api/transactions/${result.id}`, patch)
+      setAiAuditResults((prev) =>
+        prev.map((row) =>
+          row.id === result.id ? { ...row, status: 'applied' } : row
+        )
+      )
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not apply audit correction')
+    }
+  }
+
+  function dismissAiAuditIssue(result: AiAuditResult) {
+    setAiAuditResults((prev) =>
+      prev.map((row) =>
+        row.id === result.id ? { ...row, status: 'dismissed' } : row
+      )
+    )
   }
 
   async function rejectAiSuggestion(result: BulkAiResult) {
@@ -1281,7 +1388,8 @@ export function TransactionsPage() {
           <p className="muted transactionsHelperCopy">
             OpenAI is configured. Use <strong>AI</strong> on a row or{' '}
             <strong>AI fill selected</strong> when you want the page to help with
-            categorization.
+            categorization; use <strong>AI audit selected</strong> to look for
+            mislabeled categories or business flags.
           </p>
         ) : (
           <p className="muted transactionsHelperCopy">
@@ -1291,6 +1399,7 @@ export function TransactionsPage() {
         )}
       </section>
       {err && <span className="error">{err}</span>}
+      {aiAuditMessage && <p className="uploadMsg">{aiAuditMessage}</p>}
       {bulkAiResults.length > 0 && (
         <section className="card aiVisibilityPanel" aria-label="Latest bulk AI results">
           <div className="aiVisibilityHeader">
@@ -1351,6 +1460,78 @@ export function TransactionsPage() {
           ) : null}
         </section>
       )}
+      {aiAuditResults.length > 0 && (
+        <section className="card aiVisibilityPanel" aria-label="Latest AI audit results">
+          <div className="aiVisibilityHeader">
+            <strong>AI audit findings</strong>
+            <span className="muted">
+              {aiAuditResults.filter((row) => row.status === 'open').length} open ·{' '}
+              {aiAuditResults.length} total
+            </span>
+          </div>
+          <div className="aiVisibilityList">
+            {aiAuditResults.slice(0, 8).map((result) => (
+              <article key={result.id} className="aiVisibilityItem">
+                <div className="aiVisibilityItemHeader">
+                  <strong>{result.merchant}</strong>
+                  <span className="muted">#{result.id}</span>
+                </div>
+                <p>
+                  {result.issueType.replaceAll('_', ' ')} ·{' '}
+                  {formatMoney(Math.abs(result.amount), result.currency)}
+                </p>
+                <p className="muted">
+                  Category:{' '}
+                  {result.currentCategory ?? 'Uncategorized'}
+                  {result.suggestedCategory &&
+                  result.suggestedCategory !== result.currentCategory
+                    ? ` → ${result.suggestedCategory}`
+                    : ''}
+                </p>
+                <p className="muted">
+                  Business:{' '}
+                  {result.currentBusiness == null
+                    ? 'unknown'
+                    : result.currentBusiness
+                      ? 'yes'
+                      : 'no'}
+                  {result.suggestedBusiness != null &&
+                  result.suggestedBusiness !== result.currentBusiness
+                    ? ` → ${result.suggestedBusiness ? 'yes' : 'no'}`
+                    : ''}
+                </p>
+                <p className="muted">Confidence: {result.confidence}</p>
+                {result.evidence.length ? (
+                  <p className="muted">Evidence: {result.evidence.join(', ')}</p>
+                ) : null}
+                {result.rationale ? <p className="muted">{result.rationale}</p> : null}
+                <div className="row">
+                  <button
+                    type="button"
+                    disabled={result.status !== 'open'}
+                    onClick={() => void applyAiAuditIssue(result)}
+                  >
+                    {result.status === 'applied' ? 'Applied' : 'Apply correction'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={result.status !== 'open'}
+                    onClick={() => dismissAiAuditIssue(result)}
+                  >
+                    {result.status === 'dismissed' ? 'Dismissed' : 'Dismiss'}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+          {aiAuditResults.length > 8 ? (
+            <p className="muted aiVisibilityMore">
+              {aiAuditResults.length - 8} more finding
+              {aiAuditResults.length - 8 === 1 ? '' : 's'} hidden.
+            </p>
+          ) : null}
+        </section>
+      )}
       {selectedIds.size > 0 && (
         <div className="card bulkBar transactionsBulkCard">
           <div className="transactionsBulkHeader">
@@ -1358,13 +1539,32 @@ export function TransactionsPage() {
             <span className="muted">Apply a batch override without opening each row.</span>
           </div>
           {aiEnabled ? (
-            <button
-              type="button"
-              disabled={bulkAiBusy}
-              onClick={() => void applyBulkAi()}
-            >
-              {bulkAiBusy ? 'AI…' : 'AI fill selected'}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={bulkAiBusy || aiAuditBusy || selectedIds.size > 15}
+                onClick={() => void applyBulkAi()}
+                title={
+                  selectedIds.size > 15
+                    ? 'AI fill supports up to 15 selected rows'
+                    : undefined
+                }
+              >
+                {bulkAiBusy ? 'AI…' : 'AI fill selected'}
+              </button>
+              <button
+                type="button"
+                disabled={bulkAiBusy || aiAuditBusy || selectedIds.size > 25}
+                onClick={() => void runAiAudit()}
+                title={
+                  selectedIds.size > 25
+                    ? 'AI audit supports up to 25 selected rows'
+                    : undefined
+                }
+              >
+                {aiAuditBusy ? 'Auditing…' : 'AI audit selected'}
+              </button>
+            </>
           ) : null}
           <label>
             Category

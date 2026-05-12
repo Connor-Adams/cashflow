@@ -15,6 +15,7 @@ import {
 } from '../ai/suggestionStore';
 import { findRuleProposals } from '../ai/ruleProposals';
 import { buildFinancialInsights } from '../ai/insights';
+import { auditTransactionsForMislabels } from '../ai/auditTransactions';
 import { aiSuggestLimiter } from './aiRateLimit';
 
 const router = Router();
@@ -74,6 +75,63 @@ router.post('/transactions/suggest', aiSuggestLimiter, async (req, res, next) =>
       results.push({ id, suggestionId: row.id, suggestion: tracked.suggestion });
     }
     res.json({ results });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/transactions/audit', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    if (rejectDemoAiRequest(req, res)) return;
+    if (!getOpenAiConfig()) {
+      res.status(503).json({ error: 'OpenAI is not configured (set OPENAI_API_KEY)' });
+      return;
+    }
+    const idsRaw = (req.body as { ids?: unknown } | undefined)?.ids;
+    if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
+      res.status(400).json({ error: 'ids must be a non-empty array' });
+      return;
+    }
+    if (idsRaw.length > 25) {
+      res.status(400).json({ error: 'At most 25 ids per AI audit' });
+      return;
+    }
+    const ids = idsRaw.map((v) => Number(v));
+    if (ids.some((id) => !Number.isInteger(id) || id < 1)) {
+      res.status(400).json({ error: 'Each id must be a positive integer' });
+      return;
+    }
+    const [hints, txns] = await Promise.all([
+      loadCategoryHints(isSuperadmin(req) ? null : currentAuth(req).household.id),
+      Promise.all(
+        ids.map((id) =>
+          Transaction.findOne({
+            where: { id, ...visibleTransactionWhere(req) },
+          }),
+        ),
+      ),
+    ]);
+    const missingId = ids.find((_id, index) => !txns[index]);
+    if (missingId) {
+      res.status(404).json({ error: `Transaction ${missingId} not found` });
+      return;
+    }
+    const audit = await auditTransactionsForMislabels(
+      txns.filter((txn): txn is Transaction => txn != null),
+      hints,
+    );
+    const row = await createTrackedSuggestion({
+      req,
+      kind: 'transaction_audit',
+      inputSnapshot: audit.inputSnapshot,
+      output: { issues: audit.issues },
+      model: audit.meta.model,
+      promptVersion: audit.promptVersion,
+      temperature: audit.meta.temperature,
+      latencyMs: audit.meta.latencyMs,
+      providerRequestId: audit.meta.providerRequestId,
+    });
+    res.json({ auditId: row.id, issues: audit.issues });
   } catch (e) {
     next(e);
   }
