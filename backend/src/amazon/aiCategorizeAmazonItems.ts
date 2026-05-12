@@ -13,6 +13,7 @@ export type AmazonItemCategorySuggestion = {
   businessUsePercent: number | null;
   confidence: number;
   rationale: string;
+  usedExistingCategory: boolean;
 };
 
 export type AmazonItemCategorizationResult = {
@@ -61,6 +62,51 @@ function parseCategory(value: unknown, title: string, preferredCategories: strin
   return categorizeAmazonItem(title);
 }
 
+function normalizeCategoryKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function pickExistingCategoryForItem(args: {
+  aiCategory: string;
+  title: string;
+  preferredCategories: string[];
+}): string | null {
+  const preferred = args.preferredCategories;
+  if (!preferred.length) return null;
+  const title = normalizeCategoryKey(args.title);
+  const ai = normalizeCategoryKey(args.aiCategory);
+  const exact = preferred.find((category) => normalizeCategoryKey(category) === ai);
+  if (exact) return exact;
+
+  const titleTerms = new Set(title.split(/\s+/).filter(Boolean));
+  const has = (...terms: string[]) => terms.some((term) => titleTerms.has(term) || title.includes(term));
+  const categoryHas = (...terms: string[]) =>
+    preferred.find((category) => {
+      const key = normalizeCategoryKey(category);
+      return terms.some((term) => key.includes(term));
+    }) ?? null;
+
+  if (ai === 'meals groceries' || ai === 'household') {
+    if (has('coffee', 'syrup', 'barista')) return categoryHas('coffee', 'grocer');
+    if (has('candy', 'starburst', 'food', 'snack', 'grocery')) return categoryHas('grocer', 'coffee');
+  }
+  if (ai === 'office equipment' || ai === 'software') {
+    if (has('laptop', 'macbook')) return categoryHas('laptop', 'desk');
+    if (has('desk', 'monitor', 'keyboard', 'mouse', 'usb', 'cable', 'dock', 'notebook', 'charger', 'battery')) {
+      return categoryHas('desk', 'laptop');
+    }
+  }
+  if (ai === 'household' || ai === 'personal') {
+    if (has('bathroom', 'towel', 'rug', 'cabinet', 'home', 'kitchen', 'panini', 'shaker')) return categoryHas('house');
+  }
+  if (ai === 'travel') return categoryHas('travel', 'uber', 'esim');
+  if (ai === 'medical') return categoryHas('diabetes', 'dentist', 'medical');
+  if (has('wii', 'controller', 'game', 'gaming')) return categoryHas('games');
+  if (has('golf')) return categoryHas('golf');
+  if (has('snowboard', 'ski')) return categoryHas('snowboarding');
+  return null;
+}
+
 export function parseAmazonItemCategorySuggestions(
   json: Record<string, unknown>,
   items: Array<{ id: number; title: string }>,
@@ -79,12 +125,22 @@ export function parseAmazonItemCategorySuggestions(
         typeof obj.rationale === 'string' && obj.rationale.trim()
           ? obj.rationale.trim().slice(0, 240)
           : 'AI category suggestion based on Amazon item title.';
+      const parsedCategory = parseCategory(obj.category, item.title, preferredCategories);
+      const existingCategory = pickExistingCategoryForItem({
+        aiCategory: parsedCategory,
+        title: item.title,
+        preferredCategories,
+      });
+      const category = existingCategory ?? parsedCategory;
       return {
         itemId,
-        category: parseCategory(obj.category, item.title, preferredCategories),
+        category,
         businessUsePercent: clampPercent(obj.businessUsePercent),
         confidence: clampConfidence(obj.confidence),
-        rationale,
+        rationale: existingCategory
+          ? `${rationale} Remapped to existing category "${existingCategory}".`.slice(0, 240)
+          : rationale,
+        usedExistingCategory: existingCategory != null,
       };
     })
     .filter((row): row is AmazonItemCategorySuggestion => row != null);
@@ -111,7 +167,7 @@ export async function categorizeAmazonItemsWithAi(args: {
       ['orderDate', 'DESC'],
       ['id', 'DESC'],
     ],
-    limit: Math.min(100, Math.max(1, args.limit ?? 50)),
+    limit: Math.min(25, Math.max(1, args.limit ?? 20)),
   });
 
   const itemContexts = orders.flatMap((order) => {
@@ -161,14 +217,16 @@ export async function categorizeAmazonItemsWithAi(args: {
       {
         role: 'user',
         content: [
-          'Use the item title and order context to assign each item to a category.',
+          'Use the item title and order context to assign every item to a category.',
           categoryHints.length
-            ? `First try to use one of these existing household categories exactly as written: ${categoryHints.join(', ')}.`
+            ? `You MUST use one of these existing household categories exactly as written whenever any category is even reasonably close: ${categoryHints.join(', ')}.`
             : 'There are no existing household categories yet.',
-          `If none of the household categories fit, use one of these fallback categories: ${fallbackCategories.join(', ')}.`,
-          'Only create a new concise category label when neither the household categories nor fallback categories fit the item.',
+          `Only if none of the household categories are reasonably close, use one of these fallback categories: ${fallbackCategories.join(', ')}.`,
+          'Only create a new concise category label when neither household nor fallback categories fit.',
+          'Do not use generic fallback labels when a household label is close. For example use Coffee over Meals & Groceries, Games over Uncategorized for game controllers, House over Household for home goods, Desk/Laptop over Office Equipment for computer gear.',
           'Use businessUsePercent as 0-100 when the item is plausibly business-related; otherwise null.',
-          'Return ONLY JSON: {"items":[{"itemId":number,"category":string,"businessUsePercent":number|null,"confidence":0-100,"rationale":string}]}',
+          'Return one result for every input item.',
+          'Return ONLY JSON: {"items":[{"itemId":number,"category":string,"usedExistingCategory":boolean,"businessUsePercent":number|null,"confidence":0-100,"rationale":string}]}',
           `Data: ${JSON.stringify(inputSnapshot)}`,
         ].join('\n'),
       },
@@ -179,7 +237,7 @@ export async function categorizeAmazonItemsWithAi(args: {
   const suggestions = parseAmazonItemCategorySuggestions(
     meta.json,
     itemContexts.map((item) => ({ id: item.itemId, title: item.title })),
-    [...categoryHints, ...fallbackCategories],
+    categoryHints,
   );
 
   return {

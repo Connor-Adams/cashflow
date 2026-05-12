@@ -95,9 +95,11 @@ test('AI item categorization parser validates category and numeric fields', () =
   assert.equal(suggestions[0].category, 'Office Equipment');
   assert.equal(suggestions[0].businessUsePercent, 80);
   assert.equal(suggestions[0].confidence, 92);
+  assert.equal(suggestions[0].usedExistingCategory, false);
   assert.equal(suggestions[1].category, 'Not Real');
   assert.equal(suggestions[1].businessUsePercent, 100);
   assert.equal(suggestions[1].confidence, 0);
+  assert.equal(suggestions[1].usedExistingCategory, false);
 });
 
 test('AI item categorization parser preserves existing and new category labels', () => {
@@ -115,7 +117,37 @@ test('AI item categorization parser preserves existing and new category labels',
     ['Groceries', 'Office Supplies'],
   );
   assert.equal(suggestions[0].category, 'Groceries');
+  assert.equal(suggestions[0].usedExistingCategory, true);
   assert.equal(suggestions[1].category, 'Camera Gear');
+  assert.equal(suggestions[1].usedExistingCategory, false);
+});
+
+test('AI item categorization parser remaps fallback labels to existing categories', () => {
+  const suggestions = parseAmazonItemCategorySuggestions(
+    {
+      items: [
+        { itemId: 10, category: 'Meals & Groceries', confidence: 90, rationale: 'Food item.' },
+        { itemId: 11, category: 'Uncategorized', confidence: 50, rationale: 'Game accessory.' },
+        { itemId: 12, category: 'Household', confidence: 80, rationale: 'Home item.' },
+        { itemId: 13, category: 'Office Equipment', confidence: 85, rationale: 'Computer accessory.' },
+      ],
+    },
+    [
+      { id: 10, title: 'Torani Vanilla Syrup' },
+      { id: 11, title: 'Wii Remote Controller' },
+      { id: 12, title: 'Bathroom Storage Cabinet' },
+      { id: 13, title: 'USB-C Monitor Cable' },
+    ],
+    ['Coffee', 'Games', 'House', 'Desk', 'Laptop'],
+  );
+  assert.deepEqual(
+    suggestions.map((suggestion) => suggestion.category),
+    ['Coffee', 'Games', 'House', 'Desk'],
+  );
+  assert.deepEqual(
+    suggestions.map((suggestion) => suggestion.usedExistingCategory),
+    [true, true, true, true],
+  );
 });
 
 test('matcher matches amount + nearby date and rejects wrong amount/date', () => {

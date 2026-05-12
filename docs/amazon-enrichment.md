@@ -48,7 +48,7 @@ The Amazon Review section lists Amazon-like transactions with suggested orders, 
 
 Item categories use a deterministic keyword fallback at import time. If OpenAI is configured, the Amazon page also offers **AI categorize** actions that use the imported item titles, prices, order metadata, existing household category hints, and current fallback category to update item categories and business-use percentages.
 
-AI categorization prefers your existing household categories exactly as written. It only uses Amazon fallback categories or creates a new concise category label when your existing categories do not fit the item.
+AI categorization prefers your existing household categories exactly as written. It only uses Amazon fallback categories or creates a new concise category label when your existing categories do not fit the item. The backend also enforces common remaps after the AI response, so generic labels like Meals & Groceries, Household, Office Equipment, or Uncategorized are converted to close existing categories such as Coffee, House, Desk, Laptop, or Games when the item title supports it.
 
 Supported categories:
 
