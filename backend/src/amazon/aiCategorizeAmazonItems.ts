@@ -79,38 +79,58 @@ function pickExistingCategoryForItem(args: {
   if (exact) return exact;
 
   const titleTerms = new Set(title.split(/\s+/).filter(Boolean));
-  const has = (...terms: string[]) => terms.some((term) => titleTerms.has(term) || title.includes(term));
+  const hasWord = (...terms: string[]) => terms.some((term) => titleTerms.has(term));
+  const hasPhrase = (...phrases: string[]) => phrases.some((phrase) => title.includes(phrase));
   const categoryHas = (...terms: string[]) =>
     preferred.find((category) => {
       const key = normalizeCategoryKey(category);
       return terms.some((term) => key.includes(term));
     }) ?? null;
 
-  if (has('coffee', 'syrup', 'barista')) return categoryHas('coffee', 'grocer');
-  if (has('wii', 'controller', 'game', 'gaming')) return categoryHas('games');
-  if (has('laptop', 'macbook')) return categoryHas('laptop', 'desk');
-  if (has('desk', 'monitor', 'keyboard', 'mouse', 'usb', 'cable', 'dock', 'notebook', 'charger', 'battery')) {
+  if (
+    (hasWord('coffee', 'espresso', 'keurig', 'nespresso', 'barista') && !hasPhrase('coffee shop')) ||
+    hasPhrase('coffee maker', 'coffee syrup', 'torani', 'k cup', 'k cups')
+  ) {
+    return categoryHas('coffee', 'grocer');
+  }
+  if (
+    hasWord('wii', 'oculus') ||
+    hasPhrase('quest 2', 'quest 3', 'game controller', 'nunchuck')
+  ) {
+    return categoryHas('games');
+  }
+  if (hasWord('laptop', 'macbook')) return categoryHas('laptop', 'desk');
+  if (
+    hasWord('desk', 'monitor', 'keyboard', 'webcam', 'mouse') ||
+    hasPhrase('wrist rest', 'mouse pad', 'usb hub', 'displayport', 'ethernet cable')
+  ) {
     return categoryHas('desk', 'laptop');
   }
-  if (has('bathroom', 'towel', 'rug', 'cabinet', 'home', 'kitchen', 'panini', 'shaker')) return categoryHas('house');
-  if (has('candy', 'starburst', 'food', 'snack', 'grocery')) return categoryHas('grocer', 'coffee');
-  if (has('golf')) return categoryHas('golf');
-  if (has('snowboard', 'ski')) return categoryHas('snowboarding');
+  if (
+    hasWord('bathroom', 'towel', 'rug', 'cabinet', 'faucet', 'deadbolt') ||
+    hasPhrase('shop light', 'door lock', 'bath mat', 'medicine cabinet')
+  ) {
+    return categoryHas('house');
+  }
+  if (hasWord('candy', 'starburst', 'skittles', 'snack', 'crackers')) return categoryHas('grocer', 'coffee');
+  if (hasWord('golf')) return categoryHas('golf');
+  if (hasWord('snowboard') || hasPhrase('ski boot', 'ski bag')) return categoryHas('snowboarding');
 
   if (ai === 'meals groceries' || ai === 'household') {
-    if (has('coffee', 'syrup', 'barista')) return categoryHas('coffee', 'grocer');
-    if (has('candy', 'starburst', 'food', 'snack', 'grocery')) return categoryHas('grocer', 'coffee');
+    if ((hasWord('coffee', 'espresso', 'keurig', 'nespresso') && !hasPhrase('coffee shop')) || hasPhrase('torani')) {
+      return categoryHas('coffee', 'grocer');
+    }
+    if (hasWord('candy', 'starburst', 'skittles', 'snack', 'crackers')) return categoryHas('grocer', 'coffee');
   }
   if (ai === 'office equipment' || ai === 'software') {
-    if (has('laptop', 'macbook')) return categoryHas('laptop', 'desk');
-    if (has('desk', 'monitor', 'keyboard', 'mouse', 'usb', 'cable', 'dock', 'notebook', 'charger', 'battery')) {
+    if (hasWord('laptop', 'macbook')) return categoryHas('laptop', 'desk');
+    if (hasWord('desk', 'monitor', 'keyboard', 'webcam', 'mouse') || hasPhrase('wrist rest', 'mouse pad', 'usb hub')) {
       return categoryHas('desk', 'laptop');
     }
   }
   if (ai === 'household' || ai === 'personal') {
-    if (has('bathroom', 'towel', 'rug', 'cabinet', 'home', 'kitchen', 'panini', 'shaker')) return categoryHas('house');
+    if (hasWord('bathroom', 'towel', 'rug', 'cabinet', 'faucet', 'deadbolt')) return categoryHas('house');
   }
-  if (ai === 'travel') return categoryHas('travel', 'uber', 'esim');
   if (ai === 'medical') return categoryHas('diabetes', 'dentist', 'medical');
   return null;
 }

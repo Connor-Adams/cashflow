@@ -150,6 +150,34 @@ test('AI item categorization parser remaps fallback labels to existing categorie
   );
 });
 
+test('AI item categorization parser avoids broad substring remaps', () => {
+  const suggestions = parseAmazonItemCategorySuggestions(
+    {
+      items: [
+        { itemId: 10, category: 'Uncategorized', confidence: 60, rationale: 'Skin care.' },
+        { itemId: 11, category: 'Travel', confidence: 60, rationale: 'Travel accessory.' },
+        { itemId: 12, category: 'Uncategorized', confidence: 60, rationale: 'Cable mentions gaming.' },
+        { itemId: 13, category: 'Uncategorized', confidence: 60, rationale: 'Coffee shop wording.' },
+      ],
+    },
+    [
+      { id: 10, title: 'Cetaphil Gentle Skin Cleansing Cloths' },
+      { id: 11, title: 'Travel Toothbrush Kit' },
+      { id: 12, title: 'HDMI Cable for PS5 Gaming' },
+      { id: 13, title: 'Gold Napkin Holder for Coffee Shop Counter' },
+    ],
+    ['Snowboarding Gear', 'ESim', 'Games', 'Desk', 'Coffee'],
+  );
+  assert.deepEqual(
+    suggestions.map((suggestion) => suggestion.category),
+    ['Uncategorized', 'Travel', 'Uncategorized', 'Uncategorized'],
+  );
+  assert.deepEqual(
+    suggestions.map((suggestion) => suggestion.usedExistingCategory),
+    [false, false, false, false],
+  );
+});
+
 test('matcher matches amount + nearby date and rejects wrong amount/date', () => {
   const txn = Transaction.build({
     id: 1,
