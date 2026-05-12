@@ -97,6 +97,7 @@ export function AmazonPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiStatusLoaded, setAiStatusLoaded] = useState(false)
   const [aiCategorizing, setAiCategorizing] = useState(false)
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<AmazonOrder | null>(null)
@@ -119,8 +120,14 @@ export function AmazonPage() {
 
   useEffect(() => {
     void getJson<{ openai: boolean }>('/api/ai/status')
-      .then((status) => setAiEnabled(status.openai))
-      .catch(() => setAiEnabled(false))
+      .then((status) => {
+        setAiEnabled(status.openai)
+        setAiStatusLoaded(true)
+      })
+      .catch(() => {
+        setAiEnabled(false)
+        setAiStatusLoaded(true)
+      })
   }, [])
 
   useEffect(() => {
@@ -172,8 +179,16 @@ export function AmazonPage() {
   }
 
   async function runAiCategorization(orderId?: number) {
+    if (!aiStatusLoaded) {
+      setMessage('AI status is still loading. Try again in a moment.')
+      return
+    }
+    if (!aiEnabled) {
+      setMessage('AI categorization is unavailable for this session. Check OpenAI configuration or whether you are using the demo account.')
+      return
+    }
     setAiCategorizing(true)
-    setMessage(null)
+    setMessage(orderId ? 'AI categorizing this Amazon order...' : 'AI categorizing recent Amazon items...')
     try {
       const result = await postJson<AiCategorizeResult>('/api/amazon/categorize/run', {
         orderId,
@@ -260,11 +275,11 @@ export function AmazonPage() {
           <button
             type="button"
             onClick={() => void runAiCategorization()}
-            disabled={!aiEnabled || aiCategorizing}
-            title={aiEnabled ? 'Categorize imported Amazon items with AI' : 'OpenAI is not configured'}
+            disabled={aiCategorizing}
+            title={aiEnabled ? 'Categorize imported Amazon items with AI' : 'Click to see why AI is unavailable'}
           >
             <Sparkles aria-hidden="true" />
-            AI categorize
+            {aiCategorizing ? 'Categorizing...' : 'AI categorize'}
           </button>
         </div>
       </div>
@@ -387,11 +402,11 @@ export function AmazonPage() {
             <button
               type="button"
               onClick={() => void runAiCategorization(selectedOrder.id)}
-              disabled={!aiEnabled || aiCategorizing}
-              title={aiEnabled ? 'Categorize this order with AI' : 'OpenAI is not configured'}
+              disabled={aiCategorizing}
+              title={aiEnabled ? 'Categorize this order with AI' : 'Click to see why AI is unavailable'}
             >
               <Sparkles aria-hidden="true" />
-              AI categorize order
+              {aiCategorizing ? 'Categorizing...' : 'AI categorize order'}
             </button>
           </div>
           <div className="tableWrap">
