@@ -82,10 +82,9 @@ function pickExistingCategoryForItem(args: {
   const hasWord = (...terms: string[]) => terms.some((term) => titleTerms.has(term));
   const hasPhrase = (...phrases: string[]) => phrases.some((phrase) => title.includes(phrase));
   const categoryHas = (...terms: string[]) =>
-    preferred.find((category) => {
-      const key = normalizeCategoryKey(category);
-      return terms.some((term) => key.includes(term));
-    }) ?? null;
+    terms
+      .map((term) => preferred.find((category) => normalizeCategoryKey(category).includes(term)))
+      .find((category): category is string => category != null) ?? null;
 
   if (
     (hasWord('coffee', 'espresso', 'keurig', 'nespresso', 'barista') && !hasPhrase('coffee shop')) ||
@@ -94,8 +93,8 @@ function pickExistingCategoryForItem(args: {
     return categoryHas('coffee', 'grocer');
   }
   if (
-    hasWord('wii', 'oculus') ||
-    hasPhrase('quest 2', 'quest 3', 'game controller', 'nunchuck')
+    hasWord('wii') ||
+    hasPhrase('oculus quest 2', 'oculus quest 3', 'quest 2 link cable', 'quest 3 link cable', 'game controller', 'nunchuck')
   ) {
     return categoryHas('games');
   }
@@ -107,8 +106,8 @@ function pickExistingCategoryForItem(args: {
     return categoryHas('desk', 'laptop');
   }
   if (
-    hasWord('bathroom', 'towel', 'rug', 'cabinet', 'faucet', 'deadbolt') ||
-    hasPhrase('shop light', 'door lock', 'bath mat', 'medicine cabinet')
+    hasWord('bathroom', 'towel', 'rug', 'faucet', 'deadbolt') ||
+    hasPhrase('shop light', 'door lock', 'bath mat', 'medicine cabinet', 'bathroom cabinet')
   ) {
     return categoryHas('house');
   }
@@ -129,7 +128,9 @@ function pickExistingCategoryForItem(args: {
     }
   }
   if (ai === 'household' || ai === 'personal') {
-    if (hasWord('bathroom', 'towel', 'rug', 'cabinet', 'faucet', 'deadbolt')) return categoryHas('house');
+    if (hasWord('bathroom', 'towel', 'rug', 'faucet', 'deadbolt') || hasPhrase('medicine cabinet', 'bathroom cabinet')) {
+      return categoryHas('house');
+    }
   }
   if (ai === 'medical') return categoryHas('diabetes', 'dentist', 'medical');
   return null;

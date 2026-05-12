@@ -178,6 +178,26 @@ test('AI item categorization parser avoids broad substring remaps', () => {
   );
 });
 
+test('AI item categorization parser prioritizes specific existing category matches', () => {
+  const suggestions = parseAmazonItemCategorySuggestions(
+    {
+      items: [
+        { itemId: 10, category: 'Meals & Groceries', confidence: 80 },
+        { itemId: 11, category: 'Office Equipment', confidence: 80 },
+      ],
+    },
+    [
+      { id: 10, title: 'Cheez-It Baked Snack Crackers' },
+      { id: 11, title: 'USB C Cable compatible with phones and Oculus Quest' },
+    ],
+    ['Coffee', 'Games', 'Groceries'],
+  );
+  assert.equal(suggestions[0].category, 'Groceries');
+  assert.equal(suggestions[0].usedExistingCategory, true);
+  assert.equal(suggestions[1].category, 'Office Equipment');
+  assert.equal(suggestions[1].usedExistingCategory, false);
+});
+
 test('matcher matches amount + nearby date and rejects wrong amount/date', () => {
   const txn = Transaction.build({
     id: 1,
