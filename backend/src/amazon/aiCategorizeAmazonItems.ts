@@ -98,7 +98,6 @@ function pickExistingCategoryForItem(args: {
   ) {
     return categoryHas('games');
   }
-  if (hasWord('laptop', 'macbook')) return categoryHas('laptop', 'desk');
   if (
     hasWord('desk', 'monitor', 'keyboard', 'webcam', 'mouse') ||
     hasPhrase('wrist rest', 'mouse pad', 'usb hub', 'displayport', 'ethernet cable')
@@ -122,7 +121,6 @@ function pickExistingCategoryForItem(args: {
     if (hasWord('candy', 'starburst', 'skittles', 'snack', 'crackers')) return categoryHas('grocer', 'coffee');
   }
   if (ai === 'office equipment' || ai === 'software') {
-    if (hasWord('laptop', 'macbook')) return categoryHas('laptop', 'desk');
     if (hasWord('desk', 'monitor', 'keyboard', 'webcam', 'mouse') || hasPhrase('wrist rest', 'mouse pad', 'usb hub')) {
       return categoryHas('desk', 'laptop');
     }

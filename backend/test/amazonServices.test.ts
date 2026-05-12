@@ -198,6 +198,22 @@ test('AI item categorization parser prioritizes specific existing category match
   assert.equal(suggestions[1].usedExistingCategory, false);
 });
 
+test('AI item categorization parser does not infer Laptop from compatibility text', () => {
+  const suggestions = parseAmazonItemCategorySuggestions(
+    {
+      items: [
+        { itemId: 10, category: 'Office Equipment', confidence: 80 },
+      ],
+    },
+    [
+      { id: 10, title: 'USB C Cable Compatible with MacBook Pro and iPad' },
+    ],
+    ['Laptop', 'Desk'],
+  );
+  assert.equal(suggestions[0].category, 'Office Equipment');
+  assert.equal(suggestions[0].usedExistingCategory, false);
+});
+
 test('matcher matches amount + nearby date and rejects wrong amount/date', () => {
   const txn = Transaction.build({
     id: 1,
