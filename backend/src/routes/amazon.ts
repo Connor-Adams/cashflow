@@ -14,7 +14,6 @@ import { importAmazonReportCsv } from '../amazon/importAmazonOrders';
 import { isAmazonLikeMerchant, runAmazonMatching } from '../amazon/matcher';
 import { AMAZON_CATEGORIES, categorizeAmazonItem } from '../amazon/categories';
 import {
-  applyAmazonExistingCategoryRemaps,
   applyAmazonItemCategorySuggestions,
   categorizeAmazonItemsWithAi,
 } from '../amazon/aiCategorizeAmazonItems';
@@ -240,17 +239,13 @@ router.post('/categorize/run', aiSuggestLimiter, async (req, res, next) => {
         ? undefined
         : Math.min(100, Math.max(1, Number(body.limit)));
     const { household } = currentAuth(req);
-    const remapped = await applyAmazonExistingCategoryRemaps({
-      householdId: household.id,
-      orderId,
-    });
     const result = await categorizeAmazonItemsWithAi({
       householdId: household.id,
       orderId,
       itemIds,
       limit,
     });
-    const updated = remapped + (await applyAmazonItemCategorySuggestions(result.suggestions));
+    const updated = await applyAmazonItemCategorySuggestions(result.suggestions);
     const audit = await createTrackedSuggestion({
       req,
       kind: 'amazon_item_categories',

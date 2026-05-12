@@ -200,11 +200,11 @@ export function AmazonPage() {
       return
     }
     setAiCategorizing(true)
-    setMessage(orderId ? 'AI categorizing this Amazon order...' : 'AI categorizing recent Amazon items...')
+    setMessage(orderId ? 'AI categorizing this Amazon order...' : 'AI categorizing the next 100 Amazon items...')
     try {
       const result = await postJson<AiCategorizeResult>('/api/amazon/categorize/run', {
         orderId,
-        limit: orderId ? undefined : 50,
+        limit: orderId ? undefined : 100,
       })
       setMessage(`AI categorized ${result.updated} Amazon item(s).`)
       if (selectedOrderId != null) {

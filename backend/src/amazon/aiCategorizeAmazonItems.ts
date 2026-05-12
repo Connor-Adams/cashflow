@@ -23,6 +23,22 @@ export type AmazonItemCategorizationResult = {
   promptVersion: string;
 };
 
+type AmazonItemContext = {
+  itemId: number;
+  orderId: number;
+  vendorOrderId: string | null;
+  orderDate: string | null;
+  shipmentDate: string | null;
+  orderTotal: number | null;
+  currency: string;
+  title: string;
+  quantity: number;
+  unitPrice: number | null;
+  totalPrice: number | null;
+  currentCategory: string;
+  currentBusinessUsePercent: number | null;
+};
+
 function asNumber(value: unknown): number | null {
   if (value == null || value === '') return null;
   const n = Number(value);
@@ -187,33 +203,36 @@ export async function categorizeAmazonItemsWithAi(args: {
   const itemWhere: Record<string, unknown> = {};
   if (args.itemIds?.length) itemWhere.id = { [Op.in]: args.itemIds };
 
-  const orders = await ExternalOrder.findAll({
-    where: orderWhere,
-    include: [{ model: ExternalOrderItem, as: 'items', where: itemWhere, required: true }],
+  const itemLimit = args.itemIds?.length
+    ? Math.min(500, args.itemIds.length)
+    : Math.min(200, Math.max(1, args.limit ?? 50));
+  const items = await ExternalOrderItem.findAll({
+    where: itemWhere,
+    include: [{ model: ExternalOrder, as: 'order', where: orderWhere, required: true }],
     order: [
-      ['orderDate', 'DESC'],
+      [{ model: ExternalOrder, as: 'order' }, 'orderDate', 'DESC'],
       ['id', 'DESC'],
     ],
-    limit: Math.min(25, Math.max(1, args.limit ?? 20)),
+    limit: itemLimit,
   });
 
-  const itemContexts = orders.flatMap((order) => {
-    const items = (order.get('items') as ExternalOrderItem[] | undefined) ?? [];
-    return items.map((item) => ({
+  const itemContexts = items.map((item) => {
+    const order = item.get('order') as ExternalOrder | undefined;
+    return {
       itemId: item.id,
-      orderId: order.id,
-      vendorOrderId: order.vendorOrderId,
-      orderDate: order.orderDate,
-      shipmentDate: order.shipmentDate,
-      orderTotal: asNumber(order.total),
-      currency: order.currency,
+      orderId: order?.id ?? item.externalOrderId,
+      vendorOrderId: order?.vendorOrderId ?? null,
+      orderDate: order?.orderDate ?? null,
+      shipmentDate: order?.shipmentDate ?? null,
+      orderTotal: asNumber(order?.total),
+      currency: order?.currency ?? 'CAD',
       title: item.title,
       quantity: item.quantity,
       unitPrice: asNumber(item.unitPrice),
       totalPrice: asNumber(item.totalPrice),
       currentCategory: item.inferredCategory || categorizeAmazonItem(item.title),
       currentBusinessUsePercent: asNumber(item.businessUsePercent),
-    }));
+    };
   });
 
   if (itemContexts.length === 0) {
@@ -234,7 +253,15 @@ export async function categorizeAmazonItemsWithAi(args: {
     fallbackCategories,
     items: itemContexts,
   };
-  const meta = await openaiJsonWithMeta(
+  const batches: AmazonItemContext[][] = [];
+  for (let i = 0; i < itemContexts.length; i += 20) {
+    batches.push(itemContexts.slice(i, i + 20));
+  }
+
+  const metas: OpenAiJsonResult[] = [];
+  const suggestions: AmazonItemCategorySuggestion[] = [];
+  for (const batch of batches) {
+    const meta = await openaiJsonWithMeta(
     [
       {
         role: 'system',
@@ -254,62 +281,40 @@ export async function categorizeAmazonItemsWithAi(args: {
           'Use businessUsePercent as 0-100 when the item is plausibly business-related; otherwise null.',
           'Return one result for every input item.',
           'Return ONLY JSON: {"items":[{"itemId":number,"category":string,"usedExistingCategory":boolean,"businessUsePercent":number|null,"confidence":0-100,"rationale":string}]}',
-          `Data: ${JSON.stringify(inputSnapshot)}`,
+            `Data: ${JSON.stringify({
+              householdCategoryHints: categoryHints.slice(0, 80),
+              fallbackCategories,
+              items: batch,
+            })}`,
         ].join('\n'),
       },
     ],
     { temperature: 0.1, maxTokens: 4000 },
   );
-
-  const suggestions = parseAmazonItemCategorySuggestions(
-    meta.json,
-    itemContexts.map((item) => ({ id: item.itemId, title: item.title })),
-    categoryHints,
-  );
+    metas.push(meta);
+    suggestions.push(
+      ...parseAmazonItemCategorySuggestions(
+        meta.json,
+        batch.map((item) => ({ id: item.itemId, title: item.title })),
+        categoryHints,
+      ),
+    );
+  }
+  const firstMeta = metas[0];
 
   return {
     suggestions,
     inputSnapshot,
-    meta,
+    meta: {
+      json: { items: suggestions },
+      model: firstMeta.model,
+      temperature: firstMeta.temperature,
+      latencyMs: metas.reduce((sum, row) => sum + row.latencyMs, 0),
+      providerRequestId: metas.map((row) => row.providerRequestId).filter(Boolean).join(',') || null,
+      rawTextPreview: firstMeta.rawTextPreview,
+    },
     promptVersion: AMAZON_ITEM_CATEGORIZATION_PROMPT_VERSION,
   };
-}
-
-export async function applyAmazonExistingCategoryRemaps(args: {
-  householdId: number;
-  orderId?: number | null;
-}): Promise<number> {
-  const preferredCategories = await loadCategoryHints(args.householdId);
-  if (!preferredCategories.length) return 0;
-  const orderWhere: Record<string, unknown> = {
-    householdId: args.householdId,
-    vendor: 'amazon',
-  };
-  if (args.orderId != null) orderWhere.id = args.orderId;
-  const orders = await ExternalOrder.findAll({
-    where: orderWhere,
-    include: [{ model: ExternalOrderItem, as: 'items', required: true }],
-  });
-  let updated = 0;
-  for (const order of orders) {
-    const items = (order.get('items') as ExternalOrderItem[] | undefined) ?? [];
-    for (const item of items) {
-      const currentCategory = item.inferredCategory || categorizeAmazonItem(item.title);
-      const existingCategory = pickExistingCategoryForItem({
-        aiCategory: currentCategory,
-        title: item.title,
-        preferredCategories,
-      });
-      if (!existingCategory || existingCategory === item.inferredCategory) continue;
-      item.inferredCategory = existingCategory;
-      if (item.confidence == null || Number(item.confidence) < 80) {
-        item.confidence = '80';
-      }
-      await item.save();
-      updated += 1;
-    }
-  }
-  return updated;
 }
 
 export async function applyAmazonItemCategorySuggestions(
