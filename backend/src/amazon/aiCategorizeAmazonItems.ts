@@ -2,18 +2,14 @@ import { Op } from 'sequelize';
 import { ExternalOrder, ExternalOrderItem } from '../models';
 import { loadCategoryHints } from '../ai/suggestTransaction';
 import { openaiJsonWithMeta, type OpenAiJsonResult } from '../ai/openaiJson';
-import {
-  AMAZON_CATEGORIES,
-  categorizeAmazonItem,
-  type AmazonCategory,
-} from './categories';
+import { AMAZON_CATEGORIES, categorizeAmazonItem } from './categories';
 
 export const AMAZON_ITEM_CATEGORIZATION_PROMPT_VERSION =
   'amazon-item-categorization-v1';
 
 export type AmazonItemCategorySuggestion = {
   itemId: number;
-  category: AmazonCategory;
+  category: string;
   businessUsePercent: number | null;
   confidence: number;
   rationale: string;
@@ -45,12 +41,22 @@ function clampConfidence(value: unknown): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-function parseCategory(value: unknown, title: string): AmazonCategory {
+function normalizeCategoryLabel(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').slice(0, 128);
+}
+
+function parseCategory(value: unknown, title: string, preferredCategories: string[]): string {
   if (typeof value === 'string') {
-    const match = AMAZON_CATEGORIES.find(
-      (category) => category.toLowerCase() === value.trim().toLowerCase(),
+    const normalized = normalizeCategoryLabel(value);
+    const preferredMatch = preferredCategories.find(
+      (category) => category.toLowerCase() === normalized.toLowerCase(),
     );
-    if (match) return match;
+    if (preferredMatch) return preferredMatch;
+    const fallbackMatch = AMAZON_CATEGORIES.find(
+      (category) => category.toLowerCase() === normalized.toLowerCase(),
+    );
+    if (fallbackMatch) return fallbackMatch;
+    if (normalized) return normalized;
   }
   return categorizeAmazonItem(title);
 }
@@ -58,6 +64,7 @@ function parseCategory(value: unknown, title: string): AmazonCategory {
 export function parseAmazonItemCategorySuggestions(
   json: Record<string, unknown>,
   items: Array<{ id: number; title: string }>,
+  preferredCategories: string[] = [],
 ): AmazonItemCategorySuggestion[] {
   const byId = new Map(items.map((item) => [item.id, item]));
   const rows = Array.isArray(json.items) ? json.items : [];
@@ -74,7 +81,7 @@ export function parseAmazonItemCategorySuggestions(
           : 'AI category suggestion based on Amazon item title.';
       return {
         itemId,
-        category: parseCategory(obj.category, item.title),
+        category: parseCategory(obj.category, item.title, preferredCategories),
         businessUsePercent: clampPercent(obj.businessUsePercent),
         confidence: clampConfidence(obj.confidence),
         rationale,
@@ -135,9 +142,13 @@ export async function categorizeAmazonItemsWithAi(args: {
   }
 
   const categoryHints = await loadCategoryHints(args.householdId);
+  const fallbackCategories = AMAZON_CATEGORIES.filter(
+    (category) =>
+      !categoryHints.some((hint) => hint.toLowerCase() === category.toLowerCase()),
+  );
   const inputSnapshot = {
-    categories: AMAZON_CATEGORIES,
     householdCategoryHints: categoryHints.slice(0, 80),
+    fallbackCategories,
     items: itemContexts,
   };
   const meta = await openaiJsonWithMeta(
@@ -150,10 +161,13 @@ export async function categorizeAmazonItemsWithAi(args: {
       {
         role: 'user',
         content: [
-          'Use the item title and order context to assign each item to exactly one allowed category.',
-          `Allowed categories: ${AMAZON_CATEGORIES.join(', ')}.`,
+          'Use the item title and order context to assign each item to a category.',
+          categoryHints.length
+            ? `First try to use one of these existing household categories exactly as written: ${categoryHints.join(', ')}.`
+            : 'There are no existing household categories yet.',
+          `If none of the household categories fit, use one of these fallback categories: ${fallbackCategories.join(', ')}.`,
+          'Only create a new concise category label when neither the household categories nor fallback categories fit the item.',
           'Use businessUsePercent as 0-100 when the item is plausibly business-related; otherwise null.',
-          'Prefer Office Equipment for work hardware/peripherals, Software for digital services/apps, Meals & Groceries for food/drink, Household for cleaning/home supplies, Personal for personal care, Medical for health products, Travel for travel gear, and Uncategorized when uncertain.',
           'Return ONLY JSON: {"items":[{"itemId":number,"category":string,"businessUsePercent":number|null,"confidence":0-100,"rationale":string}]}',
           `Data: ${JSON.stringify(inputSnapshot)}`,
         ].join('\n'),
@@ -165,6 +179,7 @@ export async function categorizeAmazonItemsWithAi(args: {
   const suggestions = parseAmazonItemCategorySuggestions(
     meta.json,
     itemContexts.map((item) => ({ id: item.itemId, title: item.title })),
+    [...categoryHints, ...fallbackCategories],
   );
 
   return {

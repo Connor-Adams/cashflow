@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import {
   ExternalOrder,
   ExternalOrderItem,
   Transaction,
   TransactionOrderLink,
+  sequelize,
 } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
@@ -20,6 +21,7 @@ import { createTrackedSuggestion } from '../ai/suggestionStore';
 import { getOpenAiConfig } from '../config/openai';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { aiSuggestLimiter } from './aiRateLimit';
+import { loadCategoryHints } from '../ai/suggestTransaction';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -48,8 +50,33 @@ async function findScopedOrder(id: number, householdId: number) {
   });
 }
 
-router.get('/categories', (_req, res) => {
-  res.json({ categories: AMAZON_CATEGORIES });
+async function loadAmazonCategoryOptions(householdId: number): Promise<string[]> {
+  const [householdHints, itemRows] = await Promise.all([
+    loadCategoryHints(householdId),
+    sequelize.query<{ label: string }>(
+      `SELECT DISTINCT TRIM(inferred_category) AS label
+       FROM external_order_items i
+       INNER JOIN external_orders o ON o.id = i.external_order_id
+       WHERE o.household_id = ?
+         AND i.inferred_category IS NOT NULL
+         AND TRIM(i.inferred_category) != ''`,
+      { replacements: [householdId], type: QueryTypes.SELECT },
+    ),
+  ]);
+  const byLower = new Map<string, string>();
+  for (const label of [...householdHints, ...itemRows.map((row) => row.label), ...AMAZON_CATEGORIES]) {
+    const normalized = String(label || '').trim().replace(/\s+/g, ' ');
+    if (normalized) byLower.set(normalized.toLowerCase(), normalized);
+  }
+  return Array.from(byLower.values()).sort((a, b) => a.localeCompare(b));
+}
+
+router.get('/categories', async (req, res, next) => {
+  try {
+    res.json({ categories: await loadAmazonCategoryOptions(currentAuth(req).household.id) });
+  } catch (e) {
+    next(e);
+  }
 });
 
 router.post(
@@ -140,11 +167,14 @@ router.patch('/orders/:id/items/:itemId', async (req, res, next) => {
     }
     if (Object.prototype.hasOwnProperty.call(body, 'inferredCategory')) {
       const category = String(body.inferredCategory || '').trim();
-      if (!AMAZON_CATEGORIES.includes(category as never)) {
+      const allowedCategories = await loadAmazonCategoryOptions(household.id);
+      if (!allowedCategories.some((label) => label.toLowerCase() === category.toLowerCase())) {
         res.status(400).json({ error: 'Invalid category' });
         return;
       }
-      item.inferredCategory = category;
+      item.inferredCategory =
+        allowedCategories.find((label) => label.toLowerCase() === category.toLowerCase()) ??
+        category;
     }
     if (Object.prototype.hasOwnProperty.call(body, 'businessUsePercent')) {
       const pct =

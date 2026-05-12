@@ -46,7 +46,9 @@ The Amazon Review section lists Amazon-like transactions with suggested orders, 
 
 ## Categorization
 
-Item categories use a deterministic keyword fallback at import time. If OpenAI is configured, the Amazon page also offers **AI categorize** actions that use the imported item titles, prices, order metadata, existing category hints, and current fallback category to update item categories and business-use percentages.
+Item categories use a deterministic keyword fallback at import time. If OpenAI is configured, the Amazon page also offers **AI categorize** actions that use the imported item titles, prices, order metadata, existing household category hints, and current fallback category to update item categories and business-use percentages.
+
+AI categorization prefers your existing household categories exactly as written. It only uses Amazon fallback categories or creates a new concise category label when your existing categories do not fit the item.
 
 Supported categories:
 

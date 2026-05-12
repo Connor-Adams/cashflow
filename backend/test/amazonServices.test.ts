@@ -89,14 +89,33 @@ test('AI item categorization parser validates category and numeric fields', () =
       { id: 10, title: 'USB-C Cable' },
       { id: 11, title: 'Coffee Beans' },
     ],
+    ['Computer Gear', 'Groceries'],
   );
   assert.equal(suggestions.length, 2);
   assert.equal(suggestions[0].category, 'Office Equipment');
   assert.equal(suggestions[0].businessUsePercent, 80);
   assert.equal(suggestions[0].confidence, 92);
-  assert.equal(suggestions[1].category, 'Meals & Groceries');
+  assert.equal(suggestions[1].category, 'Not Real');
   assert.equal(suggestions[1].businessUsePercent, 100);
   assert.equal(suggestions[1].confidence, 0);
+});
+
+test('AI item categorization parser preserves existing and new category labels', () => {
+  const suggestions = parseAmazonItemCategorySuggestions(
+    {
+      items: [
+        { itemId: 10, category: 'groceries', confidence: 90 },
+        { itemId: 11, category: 'Camera Gear', confidence: 80 },
+      ],
+    },
+    [
+      { id: 10, title: 'Coffee Beans' },
+      { id: 11, title: 'Pentax Film Camera' },
+    ],
+    ['Groceries', 'Office Supplies'],
+  );
+  assert.equal(suggestions[0].category, 'Groceries');
+  assert.equal(suggestions[1].category, 'Camera Gear');
 });
 
 test('matcher matches amount + nearby date and rejects wrong amount/date', () => {
