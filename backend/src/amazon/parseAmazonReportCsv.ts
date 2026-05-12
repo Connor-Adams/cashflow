@@ -12,15 +12,30 @@ const aliases: Record<string, string[]> = {
   orderDate: ['order date', 'date', 'purchase date', 'ordered on'],
   shipmentDate: ['shipment date', 'ship date', 'shipped date', 'delivery date'],
   title: ['title', 'item title', 'product name', 'item', 'description'],
-  quantity: ['quantity', 'qty'],
+  quantity: ['quantity', 'qty', 'original quantity', 'quantity ordered', 'affected item quantity'],
   unitPrice: ['unit price', 'item price', 'price'],
-  totalPrice: ['item total', 'item subtotal', 'line total', 'total price'],
-  subtotal: ['subtotal', 'order subtotal'],
-  tax: ['tax', 'sales tax', 'gst/hst', 'estimated tax'],
+  totalPrice: [
+    'item total',
+    'item subtotal',
+    'line total',
+    'total price',
+    'shipment item subtotal',
+    'transaction amount',
+  ],
+  subtotal: ['subtotal', 'order subtotal', 'shipment item subtotal'],
+  tax: ['tax', 'sales tax', 'gst/hst', 'estimated tax', 'shipment item subtotal tax', 'unit price tax', 'price tax'],
   shipping: ['shipping', 'shipping charge', 'delivery'],
-  total: ['total', 'order total', 'grand total', 'charged amount', 'amount'],
+  total: ['total', 'order total', 'grand total', 'charged amount', 'amount', 'total amount', 'transaction amount'],
   currency: ['currency'],
-  paymentLast4: ['payment last4', 'payment last 4', 'card last4', 'card last 4', 'last 4'],
+  paymentLast4: [
+    'payment last4',
+    'payment last 4',
+    'card last4',
+    'card last 4',
+    'last 4',
+    'payment method type',
+    'payment information',
+  ],
 };
 
 function canonical(header: string): string {
@@ -49,6 +64,12 @@ function parseQty(value: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function parseLast4(value: string | null): string | null {
+  if (!value) return null;
+  const match = value.match(/\b(\d{4})\b/);
+  return match?.[1] ?? null;
+}
+
 export function parseAmazonReportCsv(text: string): ParseResult {
   const parsed = parseCsvRecords(text);
   if (!parsed.ok) return { orders: [], failedRows: [{ rowIndex: 0, message: parsed.error }], headers: [] };
@@ -70,7 +91,7 @@ export function parseAmazonReportCsv(text: string): ParseResult {
     const orderDate = read(row, 'orderDate');
     const shipmentDate = read(row, 'shipmentDate');
     const currency = read(row, 'currency') || 'CAD';
-    const paymentLast4 = read(row, 'paymentLast4');
+    const paymentLast4 = parseLast4(read(row, 'paymentLast4'));
     const rawOrder: RawAmazonOrder = {
       vendorOrderId,
       orderDate,

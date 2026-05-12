@@ -41,6 +41,20 @@ test('CSV parser aggregates no-order-id rows before fallback dedupe hash', () =>
   assert.match(result.orders[0].dedupeKey, /^amazon:fallback:/);
 });
 
+test('CSV parser handles Amazon data export order history columns', () => {
+  const csv = [
+    'ASIN,Currency,Order Date,Order ID,Original Quantity,Payment Method Type,Product Name,Ship Date,Shipment Item Subtotal,Shipment Item Subtotal Tax,Shipping Charge,Total Amount,Unit Price,Unit Price Tax',
+    'B000000001,CAD,2026-01-25T16:01:44Z,701-0000000-0000001,1,AmericanExpress - 1001,Ergonomic Wrist Rest,2026-01-25T20:40:47Z,43.92,5.71,0,49.63,43.92,5.71',
+  ].join('\n');
+  const result = parseAmazonReportCsv(csv);
+  assert.equal(result.failedRows.length, 0);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].vendorOrderId, '701-0000000-0000001');
+  assert.equal(result.orders[0].paymentLast4, '1001');
+  assert.equal(result.orders[0].total, 49.63);
+  assert.equal(result.orders[0].items[0].title, 'Ergonomic Wrist Rest');
+});
+
 test('fallback categorizer works', () => {
   assert.equal(categorizeAmazonItem('USB-C monitor cable'), 'Office Equipment');
   assert.equal(categorizeAmazonItem('protein coffee snacks'), 'Meals & Groceries');
