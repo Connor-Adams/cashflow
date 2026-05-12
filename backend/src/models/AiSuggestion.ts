@@ -11,6 +11,7 @@ import {
 export type AiSuggestionKind =
   | 'transaction_fields'
   | 'transaction_audit'
+  | 'amazon_item_categories'
   | 'receipt_extract'
   | 'financial_insight'
   | 'rule_proposal';

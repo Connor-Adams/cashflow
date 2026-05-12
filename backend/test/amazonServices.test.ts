@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { parseAmazonReportCsv } from '../src/amazon/parseAmazonReportCsv';
 import { categorizeAmazonItem } from '../src/amazon/categories';
 import { scoreAmazonOrderMatch } from '../src/amazon/matcher';
+import { parseAmazonItemCategorySuggestions } from '../src/amazon/aiCategorizeAmazonItems';
 import { ExternalOrder } from '../src/models/ExternalOrder';
 import { Transaction } from '../src/models/Transaction';
 
@@ -61,6 +62,41 @@ test('fallback categorizer works', () => {
   assert.equal(categorizeAmazonItem('laundry detergent'), 'Household');
   assert.equal(categorizeAmazonItem('toothpaste'), 'Personal');
   assert.equal(categorizeAmazonItem('unknown thing'), 'Uncategorized');
+});
+
+test('AI item categorization parser validates category and numeric fields', () => {
+  const suggestions = parseAmazonItemCategorySuggestions(
+    {
+      items: [
+        {
+          itemId: 10,
+          category: 'Office Equipment',
+          businessUsePercent: 80,
+          confidence: 92,
+          rationale: 'Work peripheral.',
+        },
+        {
+          itemId: 11,
+          category: 'Not Real',
+          businessUsePercent: 150,
+          confidence: -10,
+          rationale: '',
+        },
+        { itemId: 999, category: 'Software' },
+      ],
+    },
+    [
+      { id: 10, title: 'USB-C Cable' },
+      { id: 11, title: 'Coffee Beans' },
+    ],
+  );
+  assert.equal(suggestions.length, 2);
+  assert.equal(suggestions[0].category, 'Office Equipment');
+  assert.equal(suggestions[0].businessUsePercent, 80);
+  assert.equal(suggestions[0].confidence, 92);
+  assert.equal(suggestions[1].category, 'Meals & Groceries');
+  assert.equal(suggestions[1].businessUsePercent, 100);
+  assert.equal(suggestions[1].confidence, 0);
 });
 
 test('matcher matches amount + nearby date and rejects wrong amount/date', () => {

@@ -46,7 +46,7 @@ The Amazon Review section lists Amazon-like transactions with suggested orders, 
 
 ## Categorization
 
-Item categories use a deterministic keyword fallback. No paid AI or Amazon login is required.
+Item categories use a deterministic keyword fallback at import time. If OpenAI is configured, the Amazon page also offers **AI categorize** actions that use the imported item titles, prices, order metadata, existing category hints, and current fallback category to update item categories and business-use percentages.
 
 Supported categories:
 
@@ -60,6 +60,8 @@ Supported categories:
 - Uncategorized
 
 Examples include USB-C cables, monitors, and keyboards as Office Equipment; protein, coffee, and snacks as Meals & Groceries; detergent and cleaning supplies as Household; and toothpaste as Personal.
+
+AI categorization is optional. The deterministic fallback still works without paid AI, Amazon login, or Gmail access.
 
 ## Known Limitations
 

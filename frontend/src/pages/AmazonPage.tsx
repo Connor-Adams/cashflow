@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, LinkIcon, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
+import {
+  Check,
+  LinkIcon,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react'
 import { deleteReq, getJson, patchJson, postFormData, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 
@@ -11,6 +20,7 @@ type AmazonItem = {
   totalPrice: string | null
   inferredCategory: string | null
   businessUsePercent: string | null
+  confidence: string | null
 }
 
 type AmazonOrder = {
@@ -50,6 +60,18 @@ type ImportSummary = {
   failedRows: Array<{ rowIndex: number; message: string }>
 }
 
+type AiCategorizeResult = {
+  categorizationId: number
+  updated: number
+  suggestions: Array<{
+    itemId: number
+    category: string
+    businessUsePercent: number | null
+    confidence: number
+    rationale: string
+  }>
+}
+
 const confidenceLabel = (confidence: string) => {
   const n = Number(confidence)
   if (n >= 90) return 'High'
@@ -74,6 +96,8 @@ export function AmazonPage() {
   const [summary, setSummary] = useState<ImportSummary | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiCategorizing, setAiCategorizing] = useState(false)
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<AmazonOrder | null>(null)
   const [manualOrderByTxn, setManualOrderByTxn] = useState<Record<number, string>>({})
@@ -92,6 +116,12 @@ export function AmazonPage() {
   useEffect(() => {
     void refresh().catch((e: Error) => setMessage(e.message))
   }, [refresh])
+
+  useEffect(() => {
+    void getJson<{ openai: boolean }>('/api/ai/status')
+      .then((status) => setAiEnabled(status.openai))
+      .catch(() => setAiEnabled(false))
+  }, [])
 
   useEffect(() => {
     if (selectedOrderId == null) {
@@ -138,6 +168,27 @@ export function AmazonPage() {
       setMessage(e instanceof Error ? e.message : 'Matching failed')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function runAiCategorization(orderId?: number) {
+    setAiCategorizing(true)
+    setMessage(null)
+    try {
+      const result = await postJson<AiCategorizeResult>('/api/amazon/categorize/run', {
+        orderId,
+        limit: orderId ? undefined : 50,
+      })
+      setMessage(`AI categorized ${result.updated} Amazon item(s).`)
+      if (selectedOrderId != null) {
+        const order = await getJson<AmazonOrder>(`/api/amazon/orders/${selectedOrderId}`)
+        setSelectedOrder(order)
+      }
+      await refresh()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'AI categorization failed')
+    } finally {
+      setAiCategorizing(false)
     }
   }
 
@@ -201,10 +252,21 @@ export function AmazonPage() {
           <h1>Amazon Enrichment</h1>
           <p className="muted">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
         </div>
-        <button type="button" onClick={runMatching} disabled={loading}>
-          <RefreshCw aria-hidden="true" />
-          Run matching
-        </button>
+        <div className="amazonActionRow">
+          <button type="button" onClick={runMatching} disabled={loading}>
+            <RefreshCw aria-hidden="true" />
+            Run matching
+          </button>
+          <button
+            type="button"
+            onClick={() => void runAiCategorization()}
+            disabled={!aiEnabled || aiCategorizing}
+            title={aiEnabled ? 'Categorize imported Amazon items with AI' : 'OpenAI is not configured'}
+          >
+            <Sparkles aria-hidden="true" />
+            AI categorize
+          </button>
+        </div>
       </div>
 
       {message && <p className="error">{message}</p>}
@@ -315,14 +377,27 @@ export function AmazonPage() {
 
       {selectedOrder && (
         <section className="card amazonOrderEditor">
-          <h2>Order Detail/Edit</h2>
-          <p className="muted">
-            {selectedOrder.vendorOrderId ?? `Order #${selectedOrder.id}`} · {selectedOrder.orderDate ?? selectedOrder.shipmentDate ?? 'No date'}
-          </p>
+          <div className="amazonHeader">
+            <div>
+              <h2>Order Detail/Edit</h2>
+              <p className="muted">
+                {selectedOrder.vendorOrderId ?? `Order #${selectedOrder.id}`} · {selectedOrder.orderDate ?? selectedOrder.shipmentDate ?? 'No date'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void runAiCategorization(selectedOrder.id)}
+              disabled={!aiEnabled || aiCategorizing}
+              title={aiEnabled ? 'Categorize this order with AI' : 'OpenAI is not configured'}
+            >
+              <Sparkles aria-hidden="true" />
+              AI categorize order
+            </button>
+          </div>
           <div className="tableWrap">
             <table className="table">
               <thead>
-                <tr><th>Title</th><th>Category</th><th>Business %</th><th>Amount</th></tr>
+                <tr><th>Title</th><th>Category</th><th>Business %</th><th>Amount</th><th>Confidence</th></tr>
               </thead>
               <tbody>
                 {(selectedOrder.items ?? []).map((item) => (
@@ -352,6 +427,7 @@ export function AmazonPage() {
                         onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
                       />
                     </td>
+                    <td>{item.confidence ? `${Number(item.confidence).toFixed(0)}%` : '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -12,6 +12,14 @@ import { visibleTransactionWhere } from '../auth/scope';
 import { importAmazonReportCsv } from '../amazon/importAmazonOrders';
 import { isAmazonLikeMerchant, runAmazonMatching } from '../amazon/matcher';
 import { AMAZON_CATEGORIES, categorizeAmazonItem } from '../amazon/categories';
+import {
+  applyAmazonItemCategorySuggestions,
+  categorizeAmazonItemsWithAi,
+} from '../amazon/aiCategorizeAmazonItems';
+import { createTrackedSuggestion } from '../ai/suggestionStore';
+import { getOpenAiConfig } from '../config/openai';
+import { rejectDemoAiRequest } from '../demo/aiAccess';
+import { aiSuggestLimiter } from './aiRateLimit';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -168,6 +176,62 @@ router.post('/match/run', async (req, res, next) => {
   try {
     const result = await runAmazonMatching({ householdId: currentAuth(req).household.id });
     res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/categorize/run', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    if (rejectDemoAiRequest(req, res)) return;
+    if (!getOpenAiConfig()) {
+      res.status(503).json({ error: 'OpenAI is not configured (set OPENAI_API_KEY)' });
+      return;
+    }
+    const body = (req.body || {}) as {
+      orderId?: unknown;
+      itemIds?: unknown;
+      limit?: unknown;
+    };
+    const orderId =
+      body.orderId == null || body.orderId === '' ? null : Number(body.orderId);
+    if (orderId != null && (!Number.isFinite(orderId) || orderId < 1)) {
+      res.status(400).json({ error: 'orderId must be a positive integer' });
+      return;
+    }
+    const itemIds = Array.isArray(body.itemIds)
+      ? body.itemIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      : undefined;
+    const limit =
+      body.limit == null || body.limit === ''
+        ? undefined
+        : Math.min(100, Math.max(1, Number(body.limit)));
+    const { household } = currentAuth(req);
+    const result = await categorizeAmazonItemsWithAi({
+      householdId: household.id,
+      orderId,
+      itemIds,
+      limit,
+    });
+    const updated = await applyAmazonItemCategorySuggestions(result.suggestions);
+    const audit = await createTrackedSuggestion({
+      req,
+      kind: 'amazon_item_categories',
+      inputSnapshot: result.inputSnapshot,
+      output: { items: result.suggestions },
+      model: result.meta.model,
+      promptVersion: result.promptVersion,
+      temperature: result.meta.temperature,
+      latencyMs: result.meta.latencyMs,
+      providerRequestId: result.meta.providerRequestId,
+    });
+    res.json({
+      categorizationId: audit.id,
+      updated,
+      suggestions: result.suggestions,
+    });
   } catch (e) {
     next(e);
   }
