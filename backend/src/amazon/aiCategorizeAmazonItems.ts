@@ -86,6 +86,17 @@ function pickExistingCategoryForItem(args: {
       return terms.some((term) => key.includes(term));
     }) ?? null;
 
+  if (has('coffee', 'syrup', 'barista')) return categoryHas('coffee', 'grocer');
+  if (has('wii', 'controller', 'game', 'gaming')) return categoryHas('games');
+  if (has('laptop', 'macbook')) return categoryHas('laptop', 'desk');
+  if (has('desk', 'monitor', 'keyboard', 'mouse', 'usb', 'cable', 'dock', 'notebook', 'charger', 'battery')) {
+    return categoryHas('desk', 'laptop');
+  }
+  if (has('bathroom', 'towel', 'rug', 'cabinet', 'home', 'kitchen', 'panini', 'shaker')) return categoryHas('house');
+  if (has('candy', 'starburst', 'food', 'snack', 'grocery')) return categoryHas('grocer', 'coffee');
+  if (has('golf')) return categoryHas('golf');
+  if (has('snowboard', 'ski')) return categoryHas('snowboarding');
+
   if (ai === 'meals groceries' || ai === 'household') {
     if (has('coffee', 'syrup', 'barista')) return categoryHas('coffee', 'grocer');
     if (has('candy', 'starburst', 'food', 'snack', 'grocery')) return categoryHas('grocer', 'coffee');
@@ -101,9 +112,6 @@ function pickExistingCategoryForItem(args: {
   }
   if (ai === 'travel') return categoryHas('travel', 'uber', 'esim');
   if (ai === 'medical') return categoryHas('diabetes', 'dentist', 'medical');
-  if (has('wii', 'controller', 'game', 'gaming')) return categoryHas('games');
-  if (has('golf')) return categoryHas('golf');
-  if (has('snowboard', 'ski')) return categoryHas('snowboarding');
   return null;
 }
 
@@ -246,6 +254,43 @@ export async function categorizeAmazonItemsWithAi(args: {
     meta,
     promptVersion: AMAZON_ITEM_CATEGORIZATION_PROMPT_VERSION,
   };
+}
+
+export async function applyAmazonExistingCategoryRemaps(args: {
+  householdId: number;
+  orderId?: number | null;
+}): Promise<number> {
+  const preferredCategories = await loadCategoryHints(args.householdId);
+  if (!preferredCategories.length) return 0;
+  const orderWhere: Record<string, unknown> = {
+    householdId: args.householdId,
+    vendor: 'amazon',
+  };
+  if (args.orderId != null) orderWhere.id = args.orderId;
+  const orders = await ExternalOrder.findAll({
+    where: orderWhere,
+    include: [{ model: ExternalOrderItem, as: 'items', required: true }],
+  });
+  let updated = 0;
+  for (const order of orders) {
+    const items = (order.get('items') as ExternalOrderItem[] | undefined) ?? [];
+    for (const item of items) {
+      const currentCategory = item.inferredCategory || categorizeAmazonItem(item.title);
+      const existingCategory = pickExistingCategoryForItem({
+        aiCategory: currentCategory,
+        title: item.title,
+        preferredCategories,
+      });
+      if (!existingCategory || existingCategory === item.inferredCategory) continue;
+      item.inferredCategory = existingCategory;
+      if (item.confidence == null || Number(item.confidence) < 80) {
+        item.confidence = '80';
+      }
+      await item.save();
+      updated += 1;
+    }
+  }
+  return updated;
 }
 
 export async function applyAmazonItemCategorySuggestions(

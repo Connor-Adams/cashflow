@@ -39,7 +39,7 @@ async function parseJson<T>(res: Response): Promise<T> {
 }
 
 export async function getJson<T>(path: string): Promise<T> {
-  const r = await fetch(`${base}${path}`, { credentials: 'include' })
+  const r = await fetch(`${base}${path}`, { credentials: 'include', cache: 'no-store' })
   if (!r.ok) throw await apiError(r, path)
   return parseJson<T>(r)
 }

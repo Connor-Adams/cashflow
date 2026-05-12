@@ -96,10 +96,10 @@ test('AI item categorization parser validates category and numeric fields', () =
   assert.equal(suggestions[0].businessUsePercent, 80);
   assert.equal(suggestions[0].confidence, 92);
   assert.equal(suggestions[0].usedExistingCategory, false);
-  assert.equal(suggestions[1].category, 'Not Real');
+  assert.equal(suggestions[1].category, 'Groceries');
   assert.equal(suggestions[1].businessUsePercent, 100);
   assert.equal(suggestions[1].confidence, 0);
-  assert.equal(suggestions[1].usedExistingCategory, false);
+  assert.equal(suggestions[1].usedExistingCategory, true);
 });
 
 test('AI item categorization parser preserves existing and new category labels', () => {
@@ -126,7 +126,7 @@ test('AI item categorization parser remaps fallback labels to existing categorie
   const suggestions = parseAmazonItemCategorySuggestions(
     {
       items: [
-        { itemId: 10, category: 'Meals & Groceries', confidence: 90, rationale: 'Food item.' },
+        { itemId: 10, category: 'Uncategorized', confidence: 90, rationale: 'Food item.' },
         { itemId: 11, category: 'Uncategorized', confidence: 50, rationale: 'Game accessory.' },
         { itemId: 12, category: 'Household', confidence: 80, rationale: 'Home item.' },
         { itemId: 13, category: 'Office Equipment', confidence: 85, rationale: 'Computer accessory.' },
