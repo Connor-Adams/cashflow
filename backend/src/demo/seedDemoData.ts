@@ -1,4 +1,14 @@
-import { Account, Household, HouseholdMember, Rule, Transaction, User, sequelize } from '../models';
+import {
+  Account,
+  ExternalOrder,
+  ExternalOrderItem,
+  Household,
+  HouseholdMember,
+  Rule,
+  Transaction,
+  User,
+  sequelize,
+} from '../models';
 import { hashPassword } from '../auth/password';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { rowFingerprint } from '../import/fingerprint';
@@ -42,6 +52,12 @@ function splitPercent(splitType: DemoTxn['splitType']): {
 }
 
 const demoTransactions: DemoTxn[] = [
+  { daysAgo: 1, merchant: 'AMZN Mktp CA', amount: -48.56, category: 'Shopping', review: true },
+  { daysAgo: 2, merchant: 'AMAZON.CA', amount: -32.18, category: 'Shopping', review: true },
+  { daysAgo: 3, merchant: 'Amazon Marketplace', amount: -21.49, category: 'Shopping', review: true },
+  { daysAgo: 4, merchant: 'Prime Video', amount: -11.29, category: 'Software', review: true },
+  { daysAgo: 5, merchant: 'AMZN MKTP CA', amount: -76.84, category: 'Shopping', review: true },
+  { daysAgo: 5, merchant: 'Neighbourhood Bakery', amount: -9.75, category: 'Dining' },
   { daysAgo: 2, merchant: 'Metro Grocery', amount: -86.42, category: 'Groceries', splitType: 'shared' },
   { daysAgo: 3, merchant: 'TTC Presto', amount: -32.5, category: 'Transit' },
   { daysAgo: 4, merchant: 'Stripe Payout', amount: 620, category: 'Freelance', business: true },
@@ -57,6 +73,45 @@ const demoTransactions: DemoTxn[] = [
   { daysAgo: 45, merchant: 'Rent Payment', amount: -2150, category: 'Rent', splitType: 'shared' },
   { daysAgo: 58, merchant: 'GO Transit', amount: -19.2, category: 'Transit' },
   { daysAgo: 76, merchant: 'Refund - Home Depot', amount: 38.44, category: 'Home', splitType: 'shared' },
+];
+
+const demoAmazonOrders = [
+  {
+    vendorOrderId: '701-1000000-0000001',
+    daysAgo: 2,
+    total: 48.56,
+    items: [
+      { title: 'USB-C Cable 2-Pack', totalPrice: 18.99, inferredCategory: 'Office Equipment' },
+      { title: 'Bluetooth Keyboard', totalPrice: 29.57, inferredCategory: 'Office Equipment' },
+    ],
+  },
+  {
+    vendorOrderId: '701-1000000-0000002',
+    daysAgo: 3,
+    total: 32.18,
+    items: [{ title: 'Coffee Beans', totalPrice: 32.18, inferredCategory: 'Meals & Groceries' }],
+  },
+  {
+    vendorOrderId: '701-1000000-0000003',
+    daysAgo: 4,
+    total: 21.49,
+    items: [{ title: 'Laundry Detergent', totalPrice: 21.49, inferredCategory: 'Household' }],
+  },
+  {
+    vendorOrderId: '701-1000000-0000004',
+    daysAgo: 5,
+    total: 11.29,
+    items: [{ title: 'Productivity App Subscription', totalPrice: 11.29, inferredCategory: 'Software' }],
+  },
+  {
+    vendorOrderId: '701-1000000-0000005',
+    daysAgo: 6,
+    total: 76.84,
+    items: [
+      { title: 'Monitor Arm', totalPrice: 55.35, inferredCategory: 'Office Equipment' },
+      { title: 'Toothpaste Multipack', totalPrice: 21.49, inferredCategory: 'Personal' },
+    ],
+  },
 ];
 
 const demoRules = [
@@ -162,60 +217,102 @@ export async function seedDemoData(): Promise<void> {
       where: { householdId: household.id },
       transaction: t,
     });
-    if (existingDemoTxnCount > 0) return;
-
-    for (const [i, row] of demoTransactions.entries()) {
-      const splitType = row.splitType || 'me';
-      const { pctMe, pctPartner } = splitPercent(splitType);
-      const date = isoDateDaysAgo(row.daysAgo);
-      const sourceReference = `demo-${i + 1}`;
-      const txn = Transaction.build({
-        accountId: account.id,
-        householdId: household.id,
-        createdByUserId: user.id,
-        visibility: 'shared',
-        ownershipType: splitType,
-        ownershipContactId: null,
-        importBatch: 'Demo seed',
-        date,
-        merchantRaw: row.merchant,
-        merchantClean: row.merchant,
-        amount: String(row.amount),
-        currency: 'CAD',
-        notes: row.notes ?? null,
-        sourceReference,
-        sourceRowFingerprint: rowFingerprint({
+    if (existingDemoTxnCount === 0) {
+      for (const [i, row] of demoTransactions.entries()) {
+        const splitType = row.splitType || 'me';
+        const { pctMe, pctPartner } = splitPercent(splitType);
+        const date = isoDateDaysAgo(row.daysAgo);
+        const sourceReference = `demo-${i + 1}`;
+        const txn = Transaction.build({
           accountId: account.id,
+          householdId: household.id,
+          createdByUserId: user.id,
+          visibility: 'shared',
+          ownershipType: splitType,
+          ownershipContactId: null,
+          importBatch: 'Demo seed',
           date,
-          amount: row.amount,
-          currency: 'CAD',
+          merchantRaw: row.merchant,
           merchantClean: row.merchant,
+          amount: String(row.amount),
+          currency: 'CAD',
+          notes: row.notes ?? null,
           sourceReference,
-        }),
-        appliedRuleId: null,
-        autoCategory: row.category,
-        categoryOverride: null,
-        finalCategory: row.category,
-        autoBusiness: Boolean(row.business),
-        businessOverride: null,
-        finalBusiness: Boolean(row.business),
-        autoSplitType: splitType,
-        splitOverride: null,
-        finalSplitType: splitType,
-        autoPctMe: pctMe == null ? null : String(pctMe),
-        pctMeOverride: null,
-        finalPctMe: pctMe == null ? null : String(pctMe),
-        autoPctPartner: pctPartner == null ? null : String(pctPartner),
-        pctPartnerOverride: null,
-        finalPctPartner: pctPartner == null ? null : String(pctPartner),
-        myShareAmount: '0',
-        partnerShareAmount: '0',
-        businessAmount: '0',
-        reviewFlag: Boolean(row.review),
-        reviewedAt: row.review ? null : new Date(),
+          sourceRowFingerprint: rowFingerprint({
+            accountId: account.id,
+            date,
+            amount: row.amount,
+            currency: 'CAD',
+            merchantClean: row.merchant,
+            sourceReference,
+          }),
+          appliedRuleId: null,
+          autoCategory: row.category,
+          categoryOverride: null,
+          finalCategory: row.category,
+          autoBusiness: Boolean(row.business),
+          businessOverride: null,
+          finalBusiness: Boolean(row.business),
+          autoSplitType: splitType,
+          splitOverride: null,
+          finalSplitType: splitType,
+          autoPctMe: pctMe == null ? null : String(pctMe),
+          pctMeOverride: null,
+          finalPctMe: pctMe == null ? null : String(pctMe),
+          autoPctPartner: pctPartner == null ? null : String(pctPartner),
+          pctPartnerOverride: null,
+          finalPctPartner: pctPartner == null ? null : String(pctPartner),
+          myShareAmount: '0',
+          partnerShareAmount: '0',
+          businessAmount: '0',
+          reviewFlag: Boolean(row.review),
+          reviewedAt: row.review ? null : new Date(),
+        });
+        recomputeTransactionAmounts(txn);
+        await txn.save({ transaction: t });
+      }
+    }
+
+    for (const order of demoAmazonOrders) {
+      const [externalOrder, created] = await ExternalOrder.findOrCreate({
+        where: { householdId: household.id, dedupeKey: `amazon:order:${order.vendorOrderId}` },
+        defaults: {
+          householdId: household.id,
+          createdByUserId: user.id,
+          vendor: 'amazon',
+          vendorOrderId: order.vendorOrderId,
+          dedupeKey: `amazon:order:${order.vendorOrderId}`,
+          orderDate: isoDateDaysAgo(order.daysAgo),
+          shipmentDate: isoDateDaysAgo(order.daysAgo - 1),
+          subtotal: String(order.total),
+          tax: '0',
+          shipping: '0',
+          total: String(order.total),
+          currency: 'CAD',
+          paymentLast4: '4242',
+          source: 'amazon_report',
+          rawPayload: { demo: true },
+        },
+        transaction: t,
       });
-      recomputeTransactionAmounts(txn);
-      await txn.save({ transaction: t });
+      if (created) {
+        for (const item of order.items) {
+          await ExternalOrderItem.create(
+            {
+              externalOrderId: externalOrder.id,
+              title: item.title,
+              quantity: 1,
+              unitPrice: String(item.totalPrice),
+              totalPrice: String(item.totalPrice),
+              inferredCategory: item.inferredCategory,
+              businessUsePercent: null,
+              confidence: '100',
+              rawPayload: { demo: true },
+            },
+            { transaction: t },
+          );
+        }
+      }
     }
   });
 

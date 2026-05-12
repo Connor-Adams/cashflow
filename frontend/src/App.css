@@ -240,6 +240,79 @@
     @apply mt-4;
   }
 
+  .amazonHeader,
+  .amazonImportPanel,
+  .amazonReviewRow,
+  .amazonSuggestedLink,
+  .amazonManualLink,
+  .amazonActionRow {
+    @apply flex flex-wrap items-center gap-3;
+  }
+
+  .amazonHeader,
+  .amazonReviewRow {
+    @apply justify-between;
+  }
+
+  .amazonHeader .muted,
+  .amazonImportPanel .muted,
+  .amazonSuggestedLink .muted {
+    @apply mb-0;
+  }
+
+  .amazonImportPanel {
+    @apply justify-between;
+  }
+
+  .amazonSummaryGrid {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .amazonSummaryGrid .card {
+    @apply grid gap-1;
+  }
+
+  .amazonSummaryGrid strong {
+    @apply text-2xl;
+  }
+
+  .amazonSummaryGrid span {
+    @apply text-sm;
+    color: var(--muted-foreground);
+  }
+
+  .amazonReviewList,
+  .amazonLinks,
+  .amazonSuggestedLink,
+  .amazonOrderEditor {
+    @apply grid gap-3;
+  }
+
+  .amazonReviewRow {
+    @apply rounded-lg border p-3;
+    border-color: color-mix(in srgb, var(--border) 86%, white 4%);
+    background: color-mix(in srgb, var(--bg) 74%, transparent);
+  }
+
+  .amazonLinks {
+    @apply min-w-[min(100%,34rem)] flex-1;
+  }
+
+  .amazonSuggestedLink {
+    @apply rounded-lg border p-3;
+    border-color: color-mix(in srgb, var(--border) 84%, white 4%);
+    background: color-mix(in srgb, var(--bg2) 70%, transparent);
+  }
+
+  .amazonSuggestedLink > div:first-child {
+    @apply grid gap-1;
+  }
+
+  .amazonManualLink {
+    @apply justify-end;
+  }
+
   .dashboardHeader {
     @apply mb-4 flex flex-wrap items-end justify-between gap-3;
   }

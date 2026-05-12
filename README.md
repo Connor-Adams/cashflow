@@ -1,5 +1,7 @@
 # Cashflow
 
+See [Amazon Transaction Enrichment](docs/amazon-enrichment.md) for importing Amazon order reports, matching them to card transactions, and reviewing item-level categories.
+
 Local-first personal and partner expense tracker: import card CSVs, apply merchant rules, override categorization and splits, and view per-currency summaries.
 
 ## Stack

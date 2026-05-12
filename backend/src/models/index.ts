@@ -11,6 +11,9 @@ import { HouseholdMember, initHouseholdMember } from './HouseholdMember';
 import { HouseholdInvite, initHouseholdInvite } from './HouseholdInvite';
 import { Contact, initContact } from './Contact';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
+import { ExternalOrder, initExternalOrder } from './ExternalOrder';
+import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
+import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -24,6 +27,9 @@ initTransaction(sequelize);
 initImportHistory(sequelize);
 initReceipt(sequelize);
 initAiSuggestion(sequelize);
+initExternalOrder(sequelize);
+initExternalOrderItem(sequelize);
+initTransactionOrderLink(sequelize);
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -52,6 +58,30 @@ AiSuggestion.belongsTo(Transaction, {
 });
 Receipt.hasMany(AiSuggestion, { foreignKey: 'receipt_id', as: 'aiSuggestions' });
 AiSuggestion.belongsTo(Receipt, { foreignKey: 'receipt_id', as: 'receipt' });
+ExternalOrder.hasMany(ExternalOrderItem, {
+  foreignKey: 'external_order_id',
+  as: 'items',
+});
+ExternalOrderItem.belongsTo(ExternalOrder, {
+  foreignKey: 'external_order_id',
+  as: 'order',
+});
+Transaction.hasMany(TransactionOrderLink, {
+  foreignKey: 'transaction_id',
+  as: 'orderLinks',
+});
+TransactionOrderLink.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+ExternalOrder.hasMany(TransactionOrderLink, {
+  foreignKey: 'external_order_id',
+  as: 'transactionLinks',
+});
+TransactionOrderLink.belongsTo(ExternalOrder, {
+  foreignKey: 'external_order_id',
+  as: 'order',
+});
 
 export {
   sequelize,
@@ -67,4 +97,7 @@ export {
   ImportHistory,
   Receipt,
   AiSuggestion,
+  ExternalOrder,
+  ExternalOrderItem,
+  TransactionOrderLink,
 };

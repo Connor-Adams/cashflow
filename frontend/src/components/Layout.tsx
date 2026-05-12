@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import {
   BarChart3,
   BookOpenCheck,
+  PackageSearch,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/accounts', label: 'Accounts', icon: CreditCard },
   { to: '/transactions', label: 'Transactions', icon: ReceiptText },
+  { to: '/amazon', label: 'Amazon', icon: PackageSearch },
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings },
