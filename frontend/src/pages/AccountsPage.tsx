@@ -14,9 +14,17 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
-import type { Account } from '../types/api'
+import type { Account, AccountType } from '../types/api'
 
 const CURRENCY_OPTIONS = ['CAD', 'USD', 'EUR', 'GBP'] as const
+const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
+  { value: 'checking', label: 'Checking' },
+  { value: 'savings', label: 'Savings' },
+  { value: 'credit_card', label: 'Credit card' },
+  { value: 'investment', label: 'Investment' },
+  { value: 'cash', label: 'Cash' },
+  { value: 'other', label: 'Other' },
+]
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -28,6 +36,7 @@ export function AccountsPage() {
   const [editOwner, setEditOwner] = useState<'me' | 'partner' | 'joint'>('me')
   const [editShortCode, setEditShortCode] = useState('')
   const [editCurrency, setEditCurrency] = useState('')
+  const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const loadRequestRef = useRef(0)
 
@@ -74,6 +83,7 @@ export function AccountsPage() {
         defaultCurrency:
           String(fd.get('defaultCurrency') ?? '').trim().toUpperCase() ||
           undefined,
+        accountType: String(fd.get('accountType') ?? 'checking'),
         visibility: String(fd.get('visibility') ?? 'private'),
       })
       form.reset()
@@ -120,6 +130,7 @@ export function AccountsPage() {
         owner: editOwner,
         shortCode: editShortCode.trim() || null,
         defaultCurrency,
+        accountType: editAccountType,
         visibility: editVisibility,
       })
       setEditingId(null)
@@ -127,6 +138,7 @@ export function AccountsPage() {
       setEditOwner('me')
       setEditShortCode('')
       setEditCurrency('')
+      setEditAccountType('checking')
       setEditVisibility('private')
       await load()
     } catch (e) {
@@ -140,6 +152,7 @@ export function AccountsPage() {
     setEditOwner('me')
     setEditShortCode('')
     setEditCurrency('')
+    setEditAccountType('checking')
     setEditVisibility('private')
   }
 
@@ -149,6 +162,7 @@ export function AccountsPage() {
     setEditOwner((account.owner as 'me' | 'partner' | 'joint') ?? 'me')
     setEditShortCode(account.shortCode ?? '')
     setEditCurrency((account.defaultCurrency ?? 'CAD').toUpperCase())
+    setEditAccountType(account.accountType ?? 'checking')
     setEditVisibility(account.visibility ?? 'private')
   }
 
@@ -164,7 +178,7 @@ export function AccountsPage() {
       <div className="accountsHeader">
         <h1>Accounts</h1>
         <p className="muted">
-          Each account is a card or bank account. Use a short code (e.g.{' '}
+          Each account is a checking, card, cash, or investment account. Use a short code (e.g.{' '}
           <code>Amex</code>) so folder imports can match{' '}
           <code>Amex_2025_01.csv</code>.
         </p>
@@ -226,6 +240,16 @@ export function AccountsPage() {
             />
           </label>
           <label>
+            Type
+            <select name="accountType" defaultValue="checking">
+              {ACCOUNT_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Default currency
             <select
               name="defaultCurrency"
@@ -274,6 +298,7 @@ export function AccountsPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Owner</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Short code</TableHead>
                   <TableHead>Default currency</TableHead>
                   <TableHead>Visibility</TableHead>
@@ -283,6 +308,22 @@ export function AccountsPage() {
               <TableBody>
                 {accounts.map((a) => (
                   <TableRow key={a.id}>
+                    <TableCell>
+                      {editingId === a.id ? (
+                        <select
+                          value={editAccountType}
+                          onChange={(e) => setEditAccountType(e.target.value as AccountType)}
+                        >
+                          {ACCOUNT_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        ACCOUNT_TYPE_OPTIONS.find((option) => option.value === a.accountType)?.label ?? a.accountType
+                      )}
+                    </TableCell>
                     <TableCell>
                       {editingId === a.id ? (
                         <Input

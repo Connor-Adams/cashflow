@@ -14,6 +14,10 @@ import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
+import { Security, initSecurity } from './Security';
+import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
+import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
+import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -30,9 +34,29 @@ initAiSuggestion(sequelize);
 initExternalOrder(sequelize);
 initExternalOrderItem(sequelize);
 initTransactionOrderLink(sequelize);
+initSecurity(sequelize);
+initInvestmentActivity(sequelize);
+initHoldingSnapshot(sequelize);
+initSecurityPrice(sequelize);
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
+Account.hasMany(InvestmentActivity, {
+  foreignKey: 'account_id',
+  as: 'investmentActivities',
+});
+InvestmentActivity.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
+Account.hasMany(HoldingSnapshot, { foreignKey: 'account_id', as: 'holdings' });
+HoldingSnapshot.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
+Security.hasMany(InvestmentActivity, {
+  foreignKey: 'security_id',
+  as: 'activities',
+});
+InvestmentActivity.belongsTo(Security, { foreignKey: 'security_id', as: 'security' });
+Security.hasMany(HoldingSnapshot, { foreignKey: 'security_id', as: 'holdings' });
+HoldingSnapshot.belongsTo(Security, { foreignKey: 'security_id', as: 'security' });
+Security.hasMany(SecurityPrice, { foreignKey: 'security_id', as: 'prices' });
+SecurityPrice.belongsTo(Security, { foreignKey: 'security_id', as: 'security' });
 User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
 Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(HouseholdMember, { foreignKey: 'household_id', as: 'members' });
@@ -100,4 +124,8 @@ export {
   ExternalOrder,
   ExternalOrderItem,
   TransactionOrderLink,
+  Security,
+  InvestmentActivity,
+  HoldingSnapshot,
+  SecurityPrice,
 };

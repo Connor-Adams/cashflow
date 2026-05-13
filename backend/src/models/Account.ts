@@ -18,6 +18,7 @@ export class Account extends Model<
   declare householdId: number | null;
   declare ownerUserId: number | null;
   declare visibility: CreationOptional<string>;
+  declare accountType: CreationOptional<string>;
   declare shortCode: string | null;
   declare defaultCurrency: string | null;
   declare readonly createdAt: CreationOptional<Date>;
@@ -52,6 +53,12 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         type: DataTypes.STRING(16),
         allowNull: false,
         defaultValue: 'private',
+      },
+      accountType: {
+        type: DataTypes.STRING(32),
+        field: 'account_type',
+        allowNull: false,
+        defaultValue: 'checking',
       },
       shortCode: {
         type: DataTypes.STRING(64),

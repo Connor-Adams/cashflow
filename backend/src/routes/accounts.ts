@@ -5,6 +5,19 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 
 const router = Router();
+const ACCOUNT_TYPES = new Set([
+  'checking',
+  'savings',
+  'credit_card',
+  'investment',
+  'cash',
+  'other',
+]);
+
+function normalizeAccountType(raw: unknown): string {
+  const value = String(raw ?? '').trim();
+  return ACCOUNT_TYPES.has(value) ? value : 'checking';
+}
 
 router.get('/', async (req, res, next) => {
   try {
@@ -21,7 +34,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
-    const { name, owner, shortCode, defaultCurrency, visibility } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -39,6 +52,7 @@ router.post('/', async (req, res, next) => {
       householdId: household.id,
       ownerUserId: user.id,
       visibility: visibility === 'shared' ? 'shared' : 'private',
+      accountType: normalizeAccountType(accountType),
       shortCode: (shortCode as string) || null,
       defaultCurrency: dc,
     });
@@ -60,7 +74,7 @@ router.patch('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const { name, owner, shortCode, defaultCurrency, visibility } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -93,6 +107,9 @@ router.patch('/:id', async (req, res, next) => {
     }
     if (visibility !== undefined) {
       account.set('visibility', visibility === 'shared' ? 'shared' : 'private');
+    }
+    if (accountType !== undefined) {
+      account.set('accountType', normalizeAccountType(accountType));
     }
     await account.save();
     res.json(account);

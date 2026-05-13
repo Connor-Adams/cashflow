@@ -1,8 +1,15 @@
 export type {
   Account,
+  AccountType,
   AuthUser,
   Contact,
+  HoldingSnapshot,
+  InvestmentActivity,
   Transaction,
+  PortfolioSummary,
   Rule,
   Paginated,
+  Security,
+  SecurityPrice,
+  StatementPreview,
 } from '@cashflow/shared'

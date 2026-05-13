@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
-import { previewImportCsv, PREVIEW_MAX_ROWS } from '../import/previewImport';
+import { PREVIEW_MAX_ROWS } from '../import/previewImport';
 import { runImport, importCsvFile } from '../import/runImport';
+import { parseStatementFile } from '../import/parseStatementFile';
+import { consumeStatementPreview } from '../import/statementPreviewStore';
+import { commitStatementImport } from '../import/commitStatementImport';
 import { ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
 import { currentAuth } from '../auth/middleware';
@@ -10,12 +13,26 @@ import { householdWhere } from '../auth/scope';
 import type { LogFields } from '../observability/logger';
 import { logger } from '../observability/logger';
 
-const upload = multer({
+const csvUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 20 },
   fileFilter: (_req, file, cb) => {
     if (!file.originalname.toLowerCase().endsWith('.csv')) {
       const e = new Error('Only .csv files are allowed') as Error & { status?: number };
+      e.status = 400;
+      cb(e);
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+const statementUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 20 },
+  fileFilter: (_req, file, cb) => {
+    if (!/\.(csv|ofx|qfx)$/i.test(file.originalname)) {
+      const e = new Error('Only .csv, .ofx, and .qfx files are allowed') as Error & { status?: number };
       e.status = 400;
       cb(e);
       return;
@@ -74,7 +91,7 @@ router.post(
   '/preview',
   importUploadLimiter,
   (req, res, next) => {
-    upload.single('file')(req as never, res as never, (err: unknown) => {
+    statementUpload.single('file')(req as never, res as never, (err: unknown) => {
       if (err) {
         next(err);
         return;
@@ -110,43 +127,67 @@ router.post(
         fileSizeBytes: req.file.size,
       });
 
-      const result = await previewImportCsv({
+      const result = await parseStatementFile({
         buffer: req.file.buffer,
+        fileName: req.file.originalname,
         profileId,
         accountId,
         householdId: currentAuth(req).household.id,
       });
-      if (!result.ok) {
+      if ('error' in result) {
         res.status(400).json({ error: result.error });
         return;
       }
+      const preview = result;
       logImportEvent('preview_completed', {
         fileName: req.file.originalname,
         accountId,
         profileId,
-        usedProfileId: result.usedProfileId,
-        profileInferred: result.profileInferred,
-        rowCount: result.rows.length,
+        usedProfileId: preview.usedProfileId,
+        profileInferred: preview.profileInferred,
+        rowCount: preview.rows?.length ?? 0,
       });
-      res.json({
-        headers: result.headers,
-        rows: result.rows,
-        previewRowLimit: PREVIEW_MAX_ROWS,
-        usedProfileId: result.usedProfileId,
-        profileInferred: result.profileInferred,
-      });
+      res.json({ ...preview, previewRowLimit: PREVIEW_MAX_ROWS });
     } catch (e) {
       next(e);
     }
   }
 );
 
+router.post('/commit', async (req, res, next) => {
+  try {
+    const previewToken = String((req.body as { previewToken?: string })?.previewToken ?? '').trim();
+    if (!previewToken) {
+      res.status(400).json({ error: 'previewToken is required' });
+      return;
+    }
+    const preview = consumeStatementPreview(previewToken);
+    if (!preview) {
+      res.status(404).json({ error: 'Preview expired or not found. Preview the file again.' });
+      return;
+    }
+    const { user, household } = currentAuth(req);
+    if (preview.accountId == null) {
+      res.status(400).json({ error: 'Preview is missing accountId' });
+      return;
+    }
+    if (household.id == null) {
+      res.status(401).json({ error: 'Missing household' });
+      return;
+    }
+    const result = await commitStatementImport(preview, user.id, household.id);
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post(
   '/upload',
   importUploadLimiter,
   (req, res, next) => {
     // Multer's Request type can disagree with root @types/express (nested deps); runtime is correct.
-    upload.single('file')(req as never, res as never, (err: unknown) => {
+    csvUpload.single('file')(req as never, res as never, (err: unknown) => {
       if (err) {
         next(err);
         return;
@@ -218,7 +259,7 @@ router.post(
   '/upload-many',
   importUploadLimiter,
   (req, res, next) => {
-    upload.array('files', 20)(req as never, res as never, (err: unknown) => {
+    csvUpload.array('files', 20)(req as never, res as never, (err: unknown) => {
       if (err) {
         next(err);
         return;

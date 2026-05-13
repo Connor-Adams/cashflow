@@ -507,6 +507,52 @@ test('POST /api/import/preview returns headers and mapped rows', async () => {
   assert.equal(res.body.profileInferred, false);
 });
 
+test('POST /api/import/preview does not mutate until commit', async () => {
+  const acc = await authed.post('/api/accounts').send({
+    name: 'Preview Commit Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+
+  const csv = 'Date,Description,Amount\n2025-10-01,Commit Cafe,-9.25\n';
+  const preview = await authed
+    .post('/api/import/preview')
+    .field('accountId', String(acc.body.id))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'commit-preview.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.transactions.length, 1);
+  assert.ok(preview.body.previewToken);
+
+  const before = await authed
+    .get('/api/transactions')
+    .query({ accountId: acc.body.id, pageSize: 100 });
+  assert.equal(before.status, 200);
+  assert.equal(
+    before.body.data.some((row: { merchantClean: string }) => row.merchantClean === 'Commit Cafe'),
+    false
+  );
+
+  const commit = await authed
+    .post('/api/import/commit')
+    .send({ previewToken: preview.body.previewToken });
+  assert.equal(commit.status, 200);
+  assert.equal(commit.body.insertedTransactions, 1);
+
+  const afterRows = await authed
+    .get('/api/transactions')
+    .query({ accountId: acc.body.id, pageSize: 100 });
+  assert.equal(afterRows.status, 200);
+  assert.equal(
+    afterRows.body.data.some((row: { merchantClean: string }) => row.merchantClean === 'Commit Cafe'),
+    true
+  );
+});
+
 test('POST /api/import/preview: row error for invalid date', async () => {
   const acc = await authed.post('/api/accounts').send({
     name: 'Preview Bad Row',
@@ -565,6 +611,95 @@ test('POST /api/import/preview maps Visa monthly fee rows with blank details', a
   assert.equal(row.ok, true);
   assert.equal(row.mapped?.merchantClean, 'Monthly fee');
   assert.equal(row.mapped?.amount, -10);
+});
+
+test('investment OFX preview and commit populates portfolio', async () => {
+  const acc = await authed.post('/api/accounts').send({
+    name: 'Brokerage Account',
+    owner: 'me',
+    defaultCurrency: 'USD',
+    accountType: 'investment',
+  });
+  assert.equal(acc.status, 201);
+  assert.equal(acc.body.accountType, 'investment');
+
+  const ofx = `
+OFXHEADER:100
+DATA:OFXSGML
+
+<OFX>
+  <INVSTMTMSGSRSV1>
+    <INVSTMTTRNRS>
+      <INVSTMTRS>
+        <CURDEF>USD
+        <DTASOF>20251231210000
+        <INVTRANLIST>
+          <BUYSTOCK>
+            <INVBUY>
+              <INVTRAN><FITID>BUY1<DTTRADE>20251215<MEMO>Buy Apple</INVTRAN>
+              <SECID><UNIQUEID>AAPL</SECID>
+              <UNITS>2
+              <UNITPRICE>200
+              <TOTAL>-400
+            </INVBUY>
+          </BUYSTOCK>
+          <INCOME>
+            <INVTRAN><FITID>DIV1<DTTRADE>20251220<MEMO>Apple Dividend</INVTRAN>
+            <SECID><UNIQUEID>AAPL</SECID>
+            <INCOMETYPE>DIV
+            <TOTAL>3.5
+          </INCOME>
+        </INVTRANLIST>
+        <INVPOSLIST>
+          <POSSTOCK>
+            <INVPOS>
+              <SECID><UNIQUEID>AAPL</SECID>
+              <HELDINACCT>CASH
+              <POSTYPE>LONG
+              <UNITS>2
+              <UNITPRICE>210
+              <MKTVAL>420
+            </INVPOS>
+          </POSSTOCK>
+        </INVPOSLIST>
+      </INVSTMTRS>
+    </INVSTMTTRNRS>
+  </INVSTMTMSGSRSV1>
+</OFX>`;
+
+  const preview = await authed
+    .post('/api/import/preview')
+    .field('accountId', String(acc.body.id))
+    .attach('file', Buffer.from(ofx, 'utf8'), {
+      filename: 'brokerage.qfx',
+      contentType: 'application/x-ofx',
+    });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.usedParser, 'ofx');
+  assert.equal(preview.body.investmentActivities.length, 2);
+  assert.equal(preview.body.holdings.length, 1);
+  assert.equal(preview.body.holdings[0].security.symbol, 'AAPL');
+
+  const commit = await authed
+    .post('/api/import/commit')
+    .send({ previewToken: preview.body.previewToken });
+  assert.equal(commit.status, 200);
+  assert.equal(commit.body.insertedInvestmentActivities, 2);
+  assert.equal(commit.body.insertedHoldings, 1);
+
+  const portfolio = await authed.get('/api/portfolio');
+  assert.equal(portfolio.status, 200);
+  assert.equal(portfolio.body.holdings.length >= 1, true);
+  const holding = portfolio.body.holdings.find(
+    (row: { security?: { symbol?: string } }) => row.security?.symbol === 'AAPL'
+  );
+  assert.ok(holding, JSON.stringify(portfolio.body.holdings));
+  assert.equal(holding.quantity, 2);
+  assert.equal(holding.marketValue, 420);
+
+  const refresh = await authed.post('/api/portfolio/prices/refresh').send({});
+  assert.equal(refresh.status, 400);
+  assert.ok(String(refresh.body.error).includes('ALPHA_VANTAGE_API_KEY'));
 });
 
 test('POST /api/import/preview: 400 when accountId missing', async () => {

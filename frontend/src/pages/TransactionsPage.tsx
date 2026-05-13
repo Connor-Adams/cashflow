@@ -18,7 +18,7 @@ import {
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { formatParseErrorLines } from '../lib/formatParseErrors'
-import type { Account, Contact, Paginated, Transaction } from '../types/api'
+import type { Account, Contact, Paginated, StatementPreview, Transaction } from '../types/api'
 import { useSessionState } from '../lib/useSessionState'
 
 type UploadResult = {
@@ -34,6 +34,10 @@ type UploadResult = {
   warning?: string
   usedProfileId?: string
   profileInferred?: boolean
+  insertedTransactions?: number
+  insertedInvestmentActivities?: number
+  insertedHoldings?: number
+  warnings?: string[]
 }
 
 type FolderImportResponse = {
@@ -58,25 +62,7 @@ type ImportHistoryRow = {
 
 type CsvProfileOption = { id: string; label: string; hint: string }
 
-type PreviewResponse = {
-  headers: string[]
-  previewRowLimit: number
-  usedProfileId?: string
-  profileInferred?: boolean
-  rows: Array<
-    | {
-        rowIndex: number
-        ok: true
-        mapped: {
-          date: string
-          merchantClean: string
-          amount: number
-          currency: string
-        }
-      }
-    | { rowIndex: number; ok: false; error: string }
-  >
-}
+type PreviewResponse = StatementPreview
 
 type CategoryHint = {
   label: string
@@ -97,12 +83,15 @@ function summarizeUploadResult(result: UploadResult): string {
       ? `Profile: ${result.usedProfileId}${result.profileInferred ? ' (auto-detected)' : ''}`
       : ''
   return [
-    `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`,
+    result.insertedInvestmentActivities != null || result.insertedHoldings != null
+      ? `Imported ${result.inserted ?? 0} record(s): ${result.insertedTransactions ?? 0} transactions, ${result.insertedInvestmentActivities ?? 0} activities, ${result.insertedHoldings ?? 0} holdings · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`
+      : `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`,
     profileNote,
     (result.rowErrors ?? 0) > 0
       ? `${result.rowErrors} row(s) could not be parsed`
       : '',
     result.warning,
+    result.warnings?.length ? `${result.warnings.length} warning(s)` : '',
   ]
     .filter(Boolean)
     .join(' — ')
@@ -761,7 +750,7 @@ export function TransactionsPage() {
       fd.append('accountId', uploadAccountId)
       fd.append('profileId', profileId)
       const r = await postFormData<PreviewResponse>('/api/import/preview', fd)
-      setPreviewData(r)
+    setPreviewData(r)
     } catch (e) {
       setPreviewErr(e instanceof Error ? e.message : 'Preview failed')
     } finally {
@@ -771,10 +760,37 @@ export function TransactionsPage() {
 
   async function onUpload(e: FormEvent) {
     e.preventDefault()
+    if (previewData?.previewToken) {
+      setUploading(true)
+      setUploadMsg(null)
+      setUploadParseLines([])
+      setErr(null)
+      try {
+        const result = await postJson<UploadResult>('/api/import/commit', {
+          previewToken: previewData.previewToken,
+        })
+        setUploadMsg(summarizeUploadResult(result))
+        setUploadParseLines(
+          result.parseErrors?.length
+            ? formatParseErrorLines(result.parseErrors)
+            : []
+        )
+        setPreviewData(null)
+        const input = fileRef.current
+        if (input) input.value = ''
+        await load()
+        refreshImportHistory()
+      } catch (e) {
+        setUploadMsg(e instanceof Error ? e.message : 'Import failed')
+      } finally {
+        setUploading(false)
+      }
+      return
+    }
     const input = fileRef.current
     const files = Array.from(input?.files ?? [])
     if (files.length === 0) {
-      setUploadMsg('Choose at least one .csv file first.')
+      setUploadMsg('Choose at least one statement file first.')
       return
     }
     if (!uploadAccountId) {
@@ -941,9 +957,9 @@ export function TransactionsPage() {
             <div>
               <h2>Upload CSV</h2>
               <p className="muted">
-                Pick the account, then drop in your card company’s CSV. With{' '}
+                Pick the account, then drop in CSV, OFX, or QFX files. With{' '}
                 <strong>Automatic</strong>, the app detects the column layout from
-                your file; override the profile only if something looks wrong.
+                CSV files; OFX/QFX files use their embedded statement data.
               </p>
             </div>
             <span className="transactionsPanelBadge">
@@ -1000,11 +1016,11 @@ export function TransactionsPage() {
               </select>
             </label>
             <label className="filePick">
-              CSV files
+              Statement files
               <input
                 ref={fileRef}
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,text/csv,.ofx,.qfx"
                 multiple
                 onChange={() => {
                   setPreviewData(null)
@@ -1024,10 +1040,10 @@ export function TransactionsPage() {
               }
               onClick={() => void onPreview()}
             >
-              {previewing ? 'Previewing…' : 'Preview first rows'}
+              {previewing ? 'Previewing…' : 'Preview statement'}
             </button>
             <button type="submit" disabled={uploading}>
-              {uploading ? 'Importing…' : 'Import CSV file(s)'}
+              {uploading ? 'Importing…' : previewData?.previewToken ? 'Commit preview' : 'Import CSV file(s)'}
             </button>
           </div>
           {uploadMsg && (
@@ -1058,7 +1074,12 @@ export function TransactionsPage() {
           {previewData && (
             <div className="previewBlock">
               <p className="muted">
-                Parsed columns: <code>{previewData.headers.join(', ') || '(none)'}</code>
+                Parser: <strong>{previewData.usedParser}</strong>
+                {previewData.headers?.length ? (
+                  <>
+                    {' · '}Parsed columns: <code>{previewData.headers.join(', ')}</code>
+                  </>
+                ) : null}
                 {' · '}
                 Showing up to {previewData.previewRowLimit} data rows (not imported).
               </p>
@@ -1067,6 +1088,19 @@ export function TransactionsPage() {
                   Profile used: <strong>{previewData.usedProfileId}</strong>
                   {previewData.profileInferred ? ' (auto-detected)' : ''}
                 </p>
+              )}
+              <p className="muted">
+                Preview contains {previewData.transactions.length} transaction(s),{' '}
+                {previewData.investmentActivities.length} investment activit{previewData.investmentActivities.length === 1 ? 'y' : 'ies'}, and{' '}
+                {previewData.holdings.length} holding(s). Duplicates detected:{' '}
+                {previewData.duplicateCounts.transactions + previewData.duplicateCounts.investmentActivities + previewData.duplicateCounts.holdings}.
+              </p>
+              {previewData.warnings.length > 0 && (
+                <ul className="parseErrorList" aria-label="Statement import warnings">
+                  {previewData.warnings.slice(0, 8).map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
               )}
               <div className="tableWrap">
                 <table className="table">
@@ -1082,7 +1116,7 @@ export function TransactionsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {previewData.rows.map((row) => (
+                    {(previewData.rows ?? []).map((row) => (
                       <tr key={row.rowIndex}>
                         <td>{row.rowIndex}</td>
                         <td>{row.ok ? 'OK' : 'Error'}</td>

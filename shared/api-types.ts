@@ -7,9 +7,18 @@ export type Account = {
   householdId: number | null
   ownerUserId: number | null
   visibility: 'private' | 'shared'
+  accountType: AccountType
   shortCode: string | null
   defaultCurrency: string | null
 }
+
+export type AccountType =
+  | 'checking'
+  | 'savings'
+  | 'credit_card'
+  | 'investment'
+  | 'cash'
+  | 'other'
 
 export type Transaction = {
   id: number
@@ -93,6 +102,133 @@ export type Paginated<T> = {
   page: number
   pageSize: number
   total: number
+}
+
+export type Security = {
+  id: number
+  symbol: string
+  name: string | null
+  assetType: string | null
+  currency: string
+}
+
+export type SecurityPrice = {
+  id: number
+  provider: string
+  symbol: string
+  pricedAt: string
+  price: number | null
+  currency: string
+  fetchedAt: string
+}
+
+export type InvestmentActivity = {
+  id: number
+  accountId: number
+  securityId: number | null
+  activityType: string
+  tradeDate: string
+  settlementDate: string | null
+  description: string
+  quantity: number | null
+  price: number | null
+  amount: number | null
+  fees: number | null
+  currency: string
+  sourceReference: string | null
+  importBatch: string
+  security: Security | null
+}
+
+export type HoldingSnapshot = {
+  id: number
+  accountId: number
+  securityId: number
+  statementDate: string
+  quantity: number
+  price: number | null
+  marketValue: number
+  importedMarketValue: number | null
+  costBasis: number | null
+  unrealizedGainLoss: number | null
+  currency: string
+  sourceReference: string | null
+  importBatch: string
+  security: Security | null
+  latestPrice: SecurityPrice | null
+}
+
+export type StatementPreview = {
+  previewToken: string
+  fileName: string
+  accountId: number
+  householdId: number | null
+  importBatch: string
+  usedParser: 'csv' | 'ofx'
+  usedProfileId?: string
+  profileInferred?: boolean
+  headers?: string[]
+  previewRowLimit: number
+  transactions: Array<{
+    date: string
+    merchantRaw: string
+    merchantClean: string
+    amount: number
+    currency: string
+    duplicate?: boolean
+  }>
+  investmentActivities: Array<{
+    activityType: string
+    tradeDate: string
+    description: string
+    security: { symbol: string; name: string | null } | null
+    quantity: number | null
+    price: number | null
+    amount: number | null
+    currency: string
+    duplicate?: boolean
+  }>
+  holdings: Array<{
+    statementDate: string
+    security: { symbol: string; name: string | null }
+    quantity: number
+    price: number | null
+    marketValue: number | null
+    costBasis: number | null
+    unrealizedGainLoss: number | null
+    currency: string
+    duplicate?: boolean
+  }>
+  warnings: string[]
+  rowErrors: number
+  parseErrors: { rowIndex: number; message: string }[]
+  duplicateCounts: {
+    transactions: number
+    investmentActivities: number
+    holdings: number
+  }
+  rows?: Array<
+    | {
+        rowIndex: number
+        ok: true
+        mapped: {
+          date: string
+          merchantClean: string
+          amount: number
+          currency: string
+        }
+      }
+    | { rowIndex: number; ok: false; error: string }
+  >
+}
+
+export type PortfolioSummary = {
+  accounts: Account[]
+  holdings: HoldingSnapshot[]
+  totalsByCurrency: Array<{ currency: string; marketValue: number }>
+  recentActivities: InvestmentActivity[]
+  quoteProvider: string
+  quoteConfigured: boolean
 }
 
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'

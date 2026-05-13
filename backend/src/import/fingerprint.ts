@@ -22,3 +22,10 @@ export function rowFingerprint(payload: {
   };
   return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
 }
+
+export function stableFingerprint(payload: Record<string, unknown>): string {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(payload))
+    .digest('hex');
+}
