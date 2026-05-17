@@ -8,6 +8,23 @@ import {
 } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select'
+import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@/components/ui/stat-card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import {
   getJson,
@@ -848,15 +865,10 @@ export function TransactionsPage() {
 
   return (
     <div className="page">
-      <div className="transactionsHeader">
-        <div>
-          <h1>Transactions</h1>
-          <p className="muted">
-            Import statements, review classifications, and clean up overrides in one
-            place.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Transactions"
+        description="Import statements, review classifications, and clean up overrides in one place."
+      />
       <input
         ref={receiptFileRef}
         type="file"
@@ -867,33 +879,11 @@ export function TransactionsPage() {
       />
 
       <section className="transactionsStats">
-        <article className="card transactionsStatCard">
-          <p className="statLabel">Filtered rows</p>
-          <p className="statValue">{totalCount}</p>
-          <p className="muted statHint">{filteredSummaryLabel}</p>
-        </article>
-        <article className="card transactionsStatCard">
-          <p className="statLabel">This page</p>
-          <p className="statValue">{pageCount}</p>
-          <p className="muted statHint">
-            Page {page} of {totalPages}
-          </p>
-        </article>
-        <article className="card transactionsStatCard">
-          <p className="statLabel">Needs review</p>
-          <p className="statValue">{reviewCountOnPage}</p>
-          <p className="muted statHint">Rows flagged on the current page</p>
-        </article>
-        <article className="card transactionsStatCard">
-          <p className="statLabel">Selected</p>
-          <p className="statValue">{selectedIds.size}</p>
-          <p className="muted statHint">Rows in the current bulk selection</p>
-        </article>
-        <article className="card transactionsStatCard">
-          <p className="statLabel">Receipts</p>
-          <p className="statValue">{receiptCountOnPage}</p>
-          <p className="muted statHint">Attachments on the current page</p>
-        </article>
+        <StatCard label="Filtered rows" value={totalCount} hint={filteredSummaryLabel} />
+        <StatCard label="This page" value={pageCount} hint={`Page ${page} of ${totalPages}`} />
+        <StatCard label="Needs review" value={reviewCountOnPage} hint="Rows flagged on the current page" />
+        <StatCard label="Selected" value={selectedIds.size} hint="Rows in the current bulk selection" />
+        <StatCard label="Receipts" value={receiptCountOnPage} hint="Attachments on the current page" />
       </section>
 
       {importCleanup && importCleanup.total > 0 && (
@@ -930,22 +920,24 @@ export function TransactionsPage() {
             </p>
           )}
           <div className="row">
-            <button
+            <Button
               type="button"
+              variant="secondary"
               onClick={() => {
                 setReviewOnly(true)
                 if (importCleanup.batch) setBatchFilter(importCleanup.batch)
               }}
             >
               Review cleanup queue
-            </button>
+            </Button>
             {importCleanup.batches.length > 0 && !batchFilter && (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => setBatchFilter(importCleanup.batches[0].importBatch)}
               >
                 Focus latest batch
-              </button>
+              </Button>
             )}
           </div>
         </section>
@@ -972,52 +964,52 @@ export function TransactionsPage() {
             </p>
           )}
           <div className="formGrid transactionsFilterGrid">
-            <label>
+            <Label>
               Account
-              <select
+              <NativeSelect
                 value={uploadAccountId}
                 onChange={(e) => setUploadAccountId(e.target.value)}
                 required
               >
-                <option value="">— select —</option>
+                <NativeSelectOption value="">— select —</NativeSelectOption>
                 {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
+                  <NativeSelectOption key={a.id} value={a.id}>
                     {a.name}
                     {a.shortCode ? ` (${a.shortCode})` : ''}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </Label>
+            <Label>
               Batch label (optional)
-              <input
+              <Input
                 value={batchLabel}
                 onChange={(e) => setBatchLabel(e.target.value)}
                 placeholder="defaults to YYYY-MM + account code"
               />
-            </label>
-            <label>
+            </Label>
+            <Label>
               CSV profile
-              <select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+              <NativeSelect value={profileId} onChange={(e) => setProfileId(e.target.value)}>
                 {csvProfileOptions.length > 0 ? (
                   csvProfileOptions.map((p) => (
-                    <option key={p.id} value={p.id} title={p.hint}>
+                    <NativeSelectOption key={p.id} value={p.id} title={p.hint}>
                       {p.label}
                       {p.hint ? ` — ${p.hint}` : ''}
-                    </option>
+                    </NativeSelectOption>
                   ))
                 ) : (
                   <Fragment>
-                    <option value="auto">Automatic</option>
-                    <option value="generic_simple">generic_simple (ISO dates)</option>
-                    <option value="generic_amex">generic_amex (Amex)</option>
+                    <NativeSelectOption value="auto">Automatic</NativeSelectOption>
+                    <NativeSelectOption value="generic_simple">generic_simple (ISO dates)</NativeSelectOption>
+                    <NativeSelectOption value="generic_amex">generic_amex (Amex)</NativeSelectOption>
                   </Fragment>
                 )}
-              </select>
-            </label>
-            <label className="filePick">
+              </NativeSelect>
+            </Label>
+            <Label className="filePick">
               Statement files
-              <input
+              <Input
                 ref={fileRef}
                 type="file"
                 accept=".csv,text/csv,.ofx,.qfx"
@@ -1027,11 +1019,12 @@ export function TransactionsPage() {
                   setPreviewErr(null)
                 }}
               />
-            </label>
+            </Label>
           </div>
           <div className="row transactionsActionRow">
-            <button
+            <Button
               type="button"
+              variant="secondary"
               disabled={
                 uploading ||
                 previewing ||
@@ -1041,10 +1034,10 @@ export function TransactionsPage() {
               onClick={() => void onPreview()}
             >
               {previewing ? 'Previewing…' : 'Preview statement'}
-            </button>
-            <button type="submit" disabled={uploading}>
+            </Button>
+            <Button type="submit" disabled={uploading}>
               {uploading ? 'Importing…' : previewData?.previewToken ? 'Commit preview' : 'Import CSV file(s)'}
-            </button>
+            </Button>
           </div>
           {uploadMsg && (
             <p
@@ -1103,34 +1096,34 @@ export function TransactionsPage() {
                 </ul>
               )}
               <div className="tableWrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Row</th>
-                      <th>Status</th>
-                      <th>Date</th>
-                      <th>Merchant</th>
-                      <th>Amount</th>
-                      <th>Cur</th>
-                      <th>Parse note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Row</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Merchant</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Cur</TableHead>
+                      <TableHead>Parse note</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {(previewData.rows ?? []).map((row) => (
-                      <tr key={row.rowIndex}>
-                        <td>{row.rowIndex}</td>
-                        <td>{row.ok ? 'OK' : 'Error'}</td>
-                        <td>{row.ok ? row.mapped.date : '—'}</td>
-                        <td>{row.ok ? row.mapped.merchantClean : '—'}</td>
-                        <td>{row.ok ? String(row.mapped.amount) : '—'}</td>
-                        <td>{row.ok ? row.mapped.currency : '—'}</td>
-                        <td className={row.ok ? '' : 'error'}>
+                      <TableRow key={row.rowIndex}>
+                        <TableCell>{row.rowIndex}</TableCell>
+                        <TableCell>{row.ok ? 'OK' : 'Error'}</TableCell>
+                        <TableCell>{row.ok ? row.mapped.date : '—'}</TableCell>
+                        <TableCell>{row.ok ? row.mapped.merchantClean : '—'}</TableCell>
+                        <TableCell>{row.ok ? String(row.mapped.amount) : '—'}</TableCell>
+                        <TableCell>{row.ok ? row.mapped.currency : '—'}</TableCell>
+                        <TableCell className={row.ok ? '' : 'error'}>
                           {row.ok ? '—' : row.error}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             </div>
           )}
@@ -1147,8 +1140,9 @@ export function TransactionsPage() {
                 Last 50 runs. Filter transactions by batch directly from here.
               </p>
             </div>
-            <button
+            <Button
               type="button"
+              variant="secondary"
               onClick={async () => {
                 try {
                   setRunningFolderImport(true)
@@ -1179,34 +1173,34 @@ export function TransactionsPage() {
               disabled={runningFolderImport}
             >
               {runningFolderImport ? 'Running import…' : 'Run folder import'}
-            </button>
+            </Button>
           </div>
           <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Started</th>
-                  <th>File</th>
-                  <th>Batch</th>
-                  <th>Status</th>
-                  <th>Rows</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Started</TableHead>
+                  <TableHead>File</TableHead>
+                  <TableHead>Batch</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Rows</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {importHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="muted pad">
+                  <TableRow>
+                    <TableCell colSpan={6} className="muted pad">
                       No import history yet.
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   importHistory.map((h) => (
-                    <tr key={h.id}>
-                      <td>{h.startedAt.slice(0, 19).replace('T', ' ')}</td>
-                      <td title={h.fileName}>{h.fileName}</td>
-                      <td>{h.batchLabel}</td>
-                      <td>
+                    <TableRow key={h.id}>
+                      <TableCell>{h.startedAt.slice(0, 19).replace('T', ' ')}</TableCell>
+                      <TableCell title={h.fileName}>{h.fileName}</TableCell>
+                      <TableCell>{h.batchLabel}</TableCell>
+                      <TableCell>
                         {h.status}
                         {h.errorMessage ? (
                           <span className="muted" title={h.errorMessage}>
@@ -1215,25 +1209,26 @@ export function TransactionsPage() {
                             {h.errorMessage.length > 40 ? '…' : ''})
                           </span>
                         ) : null}
-                      </td>
-                      <td>{h.rowCount ?? '—'}</td>
-                      <td>
-                        <button
+                      </TableCell>
+                      <TableCell>{h.rowCount ?? '—'}</TableCell>
+                      <TableCell>
+                        <Button
                           type="button"
-                          className="linkish"
+                          variant="link"
+                          size="sm"
                           onClick={() => {
                             setPage(1)
                             setBatchFilter(h.batchLabel)
                           }}
                         >
                           Filter by batch
-                        </button>
-                      </td>
-                    </tr>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
                   ))
                 )}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </section>
       </div>
@@ -1258,9 +1253,11 @@ export function TransactionsPage() {
         </div>
         <div className="quickFilters" aria-label="Quick transaction date ranges">
           {quickRanges.map((range) => (
-            <button
+            <Button
               key={range.key}
               type="button"
+              variant="secondary"
+              size="sm"
               className="quickFilterButton"
               aria-pressed={activeQuickRange === range.key}
               onClick={() => {
@@ -1269,13 +1266,14 @@ export function TransactionsPage() {
               }}
             >
               {range.label}
-            </button>
+            </Button>
           ))}
         </div>
         <div className="formGrid transactionsFilterGrid">
-          <label className="transactionsCheckTile">
+          <Label className="transactionsCheckTile">
             <span>Review only</span>
-            <input
+            <Input
+              className="size-4 w-auto shadow-none"
               type="checkbox"
               checked={reviewOnly}
               onChange={(e) => {
@@ -1283,10 +1281,10 @@ export function TransactionsPage() {
                 setReviewOnly(e.target.checked)
               }}
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             Currency
-            <input
+            <Input
               value={currency}
               onChange={(e) => {
                 setPage(1)
@@ -1295,8 +1293,8 @@ export function TransactionsPage() {
               placeholder="e.g. CAD"
               maxLength={3}
             />
-          </label>
-          <label className="transactionsCategoryField">
+          </Label>
+          <Label className="transactionsCategoryField">
             Category
             <CategoryCloudPicker
               className="transactionsCategoryPicker"
@@ -1310,10 +1308,10 @@ export function TransactionsPage() {
               options={categoryLabels}
               placeholder="e.g. Groceries"
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             From
-            <input
+            <Input
               type="date"
               value={dateFrom}
               onChange={(e) => {
@@ -1321,10 +1319,10 @@ export function TransactionsPage() {
                 setDateFrom(e.target.value)
               }}
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             To
-            <input
+            <Input
               type="date"
               value={dateTo}
               onChange={(e) => {
@@ -1332,10 +1330,10 @@ export function TransactionsPage() {
                 setDateTo(e.target.value)
               }}
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             Import batch
-            <input
+            <Input
               value={batchFilter}
               onChange={(e) => {
                 setPage(1)
@@ -1343,10 +1341,10 @@ export function TransactionsPage() {
               }}
               placeholder="exact batch label"
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             Sort by
-            <select
+            <NativeSelect
               value={sortBy}
               onChange={(e) =>
                 setSortBy(
@@ -1356,31 +1354,32 @@ export function TransactionsPage() {
                     | 'amount'
                     | 'category'
                     | 'review'
-                )
+                  )
               }
             >
-              <option value="date">Date</option>
-              <option value="merchant">Merchant</option>
-              <option value="amount">Amount</option>
-              <option value="category">Category</option>
-              <option value="review">Review flag</option>
-            </select>
-          </label>
-          <label>
+              <NativeSelectOption value="date">Date</NativeSelectOption>
+              <NativeSelectOption value="merchant">Merchant</NativeSelectOption>
+              <NativeSelectOption value="amount">Amount</NativeSelectOption>
+              <NativeSelectOption value="category">Category</NativeSelectOption>
+              <NativeSelectOption value="review">Review flag</NativeSelectOption>
+            </NativeSelect>
+          </Label>
+          <Label>
             Direction
-            <select
+            <NativeSelect
               value={sortDir}
               onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}
             >
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
-            </select>
-          </label>
+              <NativeSelectOption value="desc">Descending</NativeSelectOption>
+              <NativeSelectOption value="asc">Ascending</NativeSelectOption>
+            </NativeSelect>
+          </Label>
         </div>
           <div className="row transactionsActionRow">
           {activeFilters.length > 0 && (
-            <button
+            <Button
               type="button"
+              variant="secondary"
               onClick={() => {
                 setPage(1)
                 setReviewOnly(false)
@@ -1392,24 +1391,26 @@ export function TransactionsPage() {
               }}
             >
               Clear filters
-            </button>
+            </Button>
           )}
-          <button type="button" onClick={() => void load()} disabled={loading}>
+          <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
+          </Button>
         </div>
         {activeFilters.length > 0 ? (
           <div className="transactionsFilterPills" aria-label="Active filters">
             {activeFilters.map((filter) => (
-              <button
+              <Button
                 key={filter.key}
                 type="button"
+                variant="secondary"
+                size="sm"
                 className="transactionsFilterPill"
                 onClick={filter.clear}
               >
                 <span>{filter.label}</span>
                 <span aria-hidden>×</span>
-              </button>
+              </Button>
             ))}
           </div>
         ) : (
@@ -1468,20 +1469,24 @@ export function TransactionsPage() {
                   <p className="muted">{result.suggestion.rationale}</p>
                 ) : null}
                 <div className="row">
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     disabled={result.status !== 'suggested'}
                     onClick={() => void applyAiSuggestion(result)}
                   >
                     {result.status === 'applied' ? 'Applied' : 'Apply'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     disabled={result.status !== 'suggested'}
                     onClick={() => void rejectAiSuggestion(result)}
                   >
                     {result.status === 'rejected' ? 'Rejected' : 'Reject'}
-                  </button>
+                  </Button>
                 </div>
               </article>
             ))}
@@ -1540,20 +1545,24 @@ export function TransactionsPage() {
                 ) : null}
                 {result.rationale ? <p className="muted">{result.rationale}</p> : null}
                 <div className="row">
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     disabled={result.status !== 'open'}
                     onClick={() => void applyAiAuditIssue(result)}
                   >
                     {result.status === 'applied' ? 'Applied' : 'Apply correction'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="sm"
                     disabled={result.status !== 'open'}
                     onClick={() => dismissAiAuditIssue(result)}
                   >
                     {result.status === 'dismissed' ? 'Dismissed' : 'Dismiss'}
-                  </button>
+                  </Button>
                 </div>
               </article>
             ))}
@@ -1574,8 +1583,9 @@ export function TransactionsPage() {
           </div>
           {aiEnabled ? (
             <>
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 disabled={bulkAiBusy || aiAuditBusy || selectedIds.size > 15}
                 onClick={() => void applyBulkAi()}
                 title={
@@ -1585,9 +1595,10 @@ export function TransactionsPage() {
                 }
               >
                 {bulkAiBusy ? 'AI…' : 'AI fill selected'}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="secondary"
                 disabled={bulkAiBusy || aiAuditBusy || selectedIds.size > 25}
                 onClick={() => void runAiAudit()}
                 title={
@@ -1597,10 +1608,10 @@ export function TransactionsPage() {
                 }
               >
                 {aiAuditBusy ? 'Auditing…' : 'AI audit selected'}
-              </button>
+              </Button>
             </>
           ) : null}
-          <label>
+          <Label>
             Category
             <CategoryCloudPicker
               className="transactionsBulkCategoryPicker"
@@ -1611,57 +1622,58 @@ export function TransactionsPage() {
               options={categoryLabels}
               placeholder="override"
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             Business
-            <select
+            <NativeSelect
               value={bulkBiz}
               onChange={(e) => setBulkBiz(e.target.value)}
             >
-              <option value="">(no change)</option>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
-          </label>
-          <label>
+              <NativeSelectOption value="">(no change)</NativeSelectOption>
+              <NativeSelectOption value="true">Yes</NativeSelectOption>
+              <NativeSelectOption value="false">No</NativeSelectOption>
+            </NativeSelect>
+          </Label>
+          <Label>
             Split
-            <select
+            <NativeSelect
               value={bulkSplit}
               onChange={(e) => setBulkSplit(e.target.value)}
             >
-              <option value="">(no change)</option>
-              <option value="me">me</option>
-              <option value="partner">partner</option>
-              <option value="shared">shared</option>
-            </select>
-          </label>
-          <label>
+              <NativeSelectOption value="">(no change)</NativeSelectOption>
+              <NativeSelectOption value="me">me</NativeSelectOption>
+              <NativeSelectOption value="partner">partner</NativeSelectOption>
+              <NativeSelectOption value="shared">shared</NativeSelectOption>
+            </NativeSelect>
+          </Label>
+          <Label>
             % me
-            <input
+            <Input
               value={bulkPctMe}
               onChange={(e) => setBulkPctMe(e.target.value)}
               style={{ width: 64 }}
               placeholder="0.5"
             />
-          </label>
-          <label>
+          </Label>
+          <Label>
             % ptn
-            <input
+            <Input
               value={bulkPctPartner}
               onChange={(e) => setBulkPctPartner(e.target.value)}
               style={{ width: 64 }}
               placeholder="0.5"
             />
-          </label>
-          <label className="checkRow">
-            <input
+          </Label>
+          <Label className="checkRow">
+            <Input
+              className="size-4 w-auto shadow-none"
               type="checkbox"
               checked={bulkMarkReviewed}
               onChange={(e) => setBulkMarkReviewed(e.target.checked)}
             />{' '}
             Mark reviewed
-          </label>
-          <button
+          </Label>
+          <Button
             type="button"
             disabled={
               bulkApplying || !buildBulkPatch() || selectedIds.size === 0
@@ -1669,13 +1681,14 @@ export function TransactionsPage() {
             onClick={() => void applyBulk()}
           >
             {bulkApplying ? 'Applying…' : 'Apply to selected'}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
             onClick={() => setSelectedIds(new Set())}
           >
             Clear selection
-          </button>
+          </Button>
         </div>
       )}
       <section className="card transactionsTableCard">
@@ -1695,10 +1708,10 @@ export function TransactionsPage() {
           </div>
         </div>
         <div className="tableWrap transactionsTableWrap">
-          <table className="table transactionsTable">
-            <thead>
-              <tr>
-                <th className="narrowCol">
+          <Table className="table transactionsTable">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="narrowCol">
                   <input
                     type="checkbox"
                     aria-label="Select all on this page"
@@ -1716,35 +1729,35 @@ export function TransactionsPage() {
                     }}
                     onChange={() => selectAllOnPage()}
                   />
-                </th>
-                <th>Date</th>
-                <th>Merchant</th>
-                <th>Amount</th>
-                <th>Category</th>
-                <th>Business</th>
-                <th>Split / share</th>
-                <th>Status</th>
-                <th className="transactionsActionsCol">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Merchant</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Business</TableHead>
+                <TableHead>Split / share</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="transactionsActionsCol">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {loading && sortedRows.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="muted pad">
+                <TableRow>
+                  <TableCell colSpan={9} className="muted pad">
                     Loading…
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : !sortedRows.length ? (
-                <tr>
-                  <td colSpan={9} className="emptyStateCell">
+                <TableRow>
+                  <TableCell colSpan={9} className="emptyStateCell">
                     <p>No transactions yet — or none match your filters.</p>
                     <p className="muted">
                       Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
                       placed files in the configured upload folder. Create accounts under{' '}
                       <Link to="/accounts">Accounts</Link> if needed.
                     </p>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : (
                 sortedRows.map((t) => (
                 <TransactionRow
@@ -1764,27 +1777,29 @@ export function TransactionsPage() {
                   />
                 ))
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
         <div className="row transactionsPager">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
             Prev
-          </button>
+          </Button>
           <span>
             Page {page} / {totalPages}
           </span>
-          <button
+          <Button
             type="button"
+            variant="secondary"
             disabled={!res || page * res.pageSize >= res.total}
             onClick={() => setPage((p) => p + 1)}
           >
             Next
-          </button>
+          </Button>
         </div>
       </section>
     </div>
@@ -1884,25 +1899,25 @@ function TransactionRow({
   }, [t])
 
   return (
-    <tr>
-      <td className="narrowCol">
+    <TableRow>
+      <TableCell className="narrowCol">
         <input
           type="checkbox"
           checked={selected}
           onChange={onToggleSelected}
           aria-label={`Select transaction ${t.id}`}
         />
-      </td>
-      <td>{t.date}</td>
-      <td title={t.merchantRaw}>
+      </TableCell>
+      <TableCell>{t.date}</TableCell>
+      <TableCell title={t.merchantRaw}>
         <div className="txnMerchantCell">
           <span className="txnMerchantName">{t.merchantClean}</span>
           <span className="txnMerchantMeta">
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
           </span>
         </div>
-      </td>
-      <td>
+      </TableCell>
+      <TableCell>
         <div className="txnAmountCell">
           <span
             className={
@@ -1915,8 +1930,8 @@ function TransactionRow({
           </span>
           <span className="txnAmountMeta">{t.currency}</span>
         </div>
-      </td>
-      <td>
+      </TableCell>
+      <TableCell>
         <CategoryCloudPicker
           className="txnCategoryCell"
           inputClassName="txnCategoryInput"
@@ -1927,27 +1942,27 @@ function TransactionRow({
           options={categoryOptions}
           placeholder={t.finalCategory ?? ''}
         />
-      </td>
-      <td>
-        <select
+      </TableCell>
+      <TableCell>
+        <NativeSelect
           value={biz}
           onChange={(e) => setBiz(e.target.value)}
         >
-          <option value="">(auto)</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
-      </td>
-      <td>
+          <NativeSelectOption value="">(auto)</NativeSelectOption>
+          <NativeSelectOption value="true">Yes</NativeSelectOption>
+          <NativeSelectOption value="false">No</NativeSelectOption>
+        </NativeSelect>
+      </TableCell>
+      <TableCell>
         <div className="txnSplitCell">
-          <select value={split} onChange={(e) => setSplit(e.target.value)}>
-            <option value="">(auto)</option>
-            <option value="me">me</option>
-            <option value="partner">partner</option>
-            <option value="shared">shared</option>
-          </select>
+          <NativeSelect value={split} onChange={(e) => setSplit(e.target.value)}>
+            <NativeSelectOption value="">(auto)</NativeSelectOption>
+            <NativeSelectOption value="me">me</NativeSelectOption>
+            <NativeSelectOption value="partner">partner</NativeSelectOption>
+            <NativeSelectOption value="shared">shared</NativeSelectOption>
+          </NativeSelect>
           <div className="txnSplitPercents">
-            <input
+            <Input
               value={pctMe}
               onChange={(e) => setPctMe(e.target.value)}
               aria-invalid={hasInvalidShareOverride && pctMe.trim() !== ''}
@@ -1955,7 +1970,7 @@ function TransactionRow({
               placeholder="me"
               aria-label={`My share override for transaction ${t.id}`}
             />
-            <input
+            <Input
               value={pctPartner}
               onChange={(e) => setPctPartner(e.target.value)}
               aria-invalid={hasInvalidShareOverride && pctPartner.trim() !== ''}
@@ -1964,7 +1979,7 @@ function TransactionRow({
               aria-label={`Partner share override for transaction ${t.id}`}
             />
           </div>
-          <select
+          <NativeSelect
             value={ownershipType}
             onChange={(e) => {
               const value = e.target.value as 'me' | 'partner' | 'shared' | 'contact'
@@ -1973,36 +1988,36 @@ function TransactionRow({
             }}
             aria-label={`Ownership for transaction ${t.id}`}
           >
-            <option value="me">owned by me</option>
-            <option value="partner">owned by partner</option>
-            <option value="shared">shared</option>
-            <option value="contact">contact</option>
-          </select>
+            <NativeSelectOption value="me">owned by me</NativeSelectOption>
+            <NativeSelectOption value="partner">owned by partner</NativeSelectOption>
+            <NativeSelectOption value="shared">shared</NativeSelectOption>
+            <NativeSelectOption value="contact">contact</NativeSelectOption>
+          </NativeSelect>
           {ownershipType === 'contact' && (
-            <select
+            <NativeSelect
               value={ownershipContactId}
               onChange={(e) => setOwnershipContactId(e.target.value)}
               aria-label={`Contact owner for transaction ${t.id}`}
             >
-              <option value="">Pick contact</option>
+              <NativeSelectOption value="">Pick contact</NativeSelectOption>
               {contacts.map((contact) => (
-                <option key={contact.id} value={contact.id}>
+                <NativeSelectOption key={contact.id} value={contact.id}>
                   {contact.name}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
           )}
-          <select
+          <NativeSelect
             value={visibility}
             onChange={(e) => setVisibility(e.target.value as 'private' | 'shared')}
             aria-label={`Visibility for transaction ${t.id}`}
           >
-            <option value="private">private</option>
-            <option value="shared">shared</option>
-          </select>
+            <NativeSelectOption value="private">private</NativeSelectOption>
+            <NativeSelectOption value="shared">shared</NativeSelectOption>
+          </NativeSelect>
         </div>
-      </td>
-      <td>
+      </TableCell>
+      <TableCell>
         <div className="txnStatusCell">
           <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
             {t.reviewFlag
@@ -2011,27 +2026,31 @@ function TransactionRow({
                 : 'Needs review'
               : 'Reviewed'}
           </span>
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             className="txnReceiptAction"
             onClick={() => onAttachReceipt(t.id)}
             title="Attach receipt image"
           >
             <span className="txnReceiptCount">{t.receiptCount ?? 0}</span>
             <span>{(t.receiptCount ?? 0) > 0 ? 'Add receipt' : 'Attach receipt'}</span>
-          </button>
+          </Button>
           {t.receiptWarnings?.length ? (
             <span className="txnBadge txnBadge--review" title={t.receiptWarnings.join(', ')}>
               Receipt check
             </span>
           ) : null}
         </div>
-      </td>
-      <td className="transactionsActionsCol">
+      </TableCell>
+      <TableCell className="transactionsActionsCol">
         <div className="txnActionGroup">
           {aiEnabled ? (
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               disabled={aiRowBusy}
               onClick={async () => {
                 setAiRowBusy(true)
@@ -2058,7 +2077,7 @@ function TransactionRow({
               }}
             >
               {aiRowBusy ? '…' : 'AI'}
-            </button>
+            </Button>
           ) : null}
           {aiSuggestion ? (
             <div className="txnAiInsight" role="status">
@@ -2077,12 +2096,13 @@ function TransactionRow({
             </div>
           ) : null}
           {isDirty ? (
-            <button type="button" className="txnResetButton" onClick={resetDraft}>
+            <Button type="button" variant="secondary" size="sm" className="txnResetButton" onClick={resetDraft}>
               Revert
-            </button>
+            </Button>
           ) : null}
-          <button
+          <Button
             type="button"
+            size="sm"
             className="txnSaveButton"
             disabled={!isDirty && !t.reviewFlag}
             onClick={() => {
@@ -2110,9 +2130,9 @@ function TransactionRow({
             }}
           >
             {!isDirty && t.reviewFlag ? 'Mark reviewed' : isDirty ? 'Save' : 'Saved'}
-          </button>
+          </Button>
         </div>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   )
 }

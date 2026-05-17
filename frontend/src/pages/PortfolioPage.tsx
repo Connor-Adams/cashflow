@@ -2,6 +2,17 @@ import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { EmptyTableRow } from '@/components/ui/empty-state'
+import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@/components/ui/stat-card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type { PortfolioSummary } from '../types/api'
@@ -62,36 +73,35 @@ export function PortfolioPage() {
 
   return (
     <div className="page">
-      <div className="transactionsHeader">
-        <div>
-          <h1>Portfolio</h1>
-          <p className="muted">
-            Investment positions, broker cost basis, market values, and recent activity.
-          </p>
-        </div>
-        <Button type="button" onClick={() => void refreshPrices()} disabled={refreshing}>
-          <RefreshCw aria-hidden="true" />
-          {refreshing ? 'Refreshing…' : 'Refresh quotes'}
-        </Button>
-      </div>
+      <PageHeader
+        title="Portfolio"
+        description="Investment positions, broker cost basis, market values, and recent activity."
+        actions={
+          <Button type="button" onClick={() => void refreshPrices()} disabled={refreshing}>
+            <RefreshCw aria-hidden="true" />
+            {refreshing ? 'Refreshing…' : 'Refresh quotes'}
+          </Button>
+        }
+      />
 
       {err && <p className="error">{err}</p>}
       {message && <p className={message.includes('not configured') ? 'uploadMsg warn' : 'uploadMsg'}>{message}</p>}
 
       <section className="transactionsStats" aria-busy={loading}>
         {(data?.totalsByCurrency ?? []).map((total) => (
-          <article className="card transactionsStatCard" key={total.currency}>
-            <p className="statLabel">{total.currency}</p>
-            <p className="statValue">{formatMoney(total.marketValue, total.currency)}</p>
-            <p className="muted statHint">Current portfolio value</p>
-          </article>
+          <StatCard
+            key={total.currency}
+            label={total.currency}
+            value={formatMoney(total.marketValue, total.currency)}
+            hint="Current portfolio value"
+          />
         ))}
         {data && data.totalsByCurrency.length === 0 && (
-          <article className="card transactionsStatCard">
-            <p className="statLabel">Holdings</p>
-            <p className="statValue">0</p>
-            <p className="muted statHint">Import investment statements to populate this page</p>
-          </article>
+          <StatCard
+            label="Holdings"
+            value="0"
+            hint="Import investment statements to populate this page"
+          />
         )}
       </section>
 
@@ -105,49 +115,49 @@ export function PortfolioPage() {
           </div>
         </div>
         <div className="transactionsTableWrap">
-          <table className="table transactionsTable">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Symbol</th>
-                <th>Name</th>
-                <th>Qty</th>
-                <th>Price</th>
-                <th>Market value</th>
-                <th>Cost basis</th>
-                <th>Unrealized</th>
-                <th>As of</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table transactionsTable">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Account</TableHead>
+                <TableHead>Symbol</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Qty</TableHead>
+                <TableHead>Price</TableHead>
+                <TableHead>Market value</TableHead>
+                <TableHead>Cost basis</TableHead>
+                <TableHead>Unrealized</TableHead>
+                <TableHead>As of</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {(data?.holdings ?? []).map((holding) => (
-                <tr key={holding.id}>
-                  <td>{accountsById.get(holding.accountId)?.name ?? holding.accountId}</td>
-                  <td>{holding.security?.symbol ?? '—'}</td>
-                  <td>{holding.security?.name ?? '—'}</td>
-                  <td>{holding.quantity}</td>
-                  <td>
+                <TableRow key={holding.id}>
+                  <TableCell>{accountsById.get(holding.accountId)?.name ?? holding.accountId}</TableCell>
+                  <TableCell>{holding.security?.symbol ?? '—'}</TableCell>
+                  <TableCell>{holding.security?.name ?? '—'}</TableCell>
+                  <TableCell>{holding.quantity}</TableCell>
+                  <TableCell>
                     {holding.latestPrice
                       ? formatMoney(holding.latestPrice.price ?? 0, holding.latestPrice.currency)
                       : holding.price != null
                         ? formatMoney(holding.price, holding.currency)
                         : '—'}
-                  </td>
-                  <td>{formatMoney(holding.marketValue, holding.currency)}</td>
-                  <td>{holding.costBasis != null ? formatMoney(holding.costBasis, holding.currency) : '—'}</td>
-                  <td>{holding.unrealizedGainLoss != null ? formatMoney(holding.unrealizedGainLoss, holding.currency) : '—'}</td>
-                  <td>{holding.statementDate}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>{formatMoney(holding.marketValue, holding.currency)}</TableCell>
+                  <TableCell>{holding.costBasis != null ? formatMoney(holding.costBasis, holding.currency) : '—'}</TableCell>
+                  <TableCell>{holding.unrealizedGainLoss != null ? formatMoney(holding.unrealizedGainLoss, holding.currency) : '—'}</TableCell>
+                  <TableCell>{holding.statementDate}</TableCell>
+                </TableRow>
               ))}
               {data && data.holdings.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="emptyState">
-                    No holdings imported yet.
-                  </td>
-                </tr>
+                <EmptyTableRow
+                  colSpan={9}
+                  title="No holdings imported yet."
+                  description="Import an investment statement to populate this table."
+                />
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </Card>
 
@@ -159,39 +169,39 @@ export function PortfolioPage() {
           </div>
         </div>
         <div className="transactionsTableWrap">
-          <table className="table transactionsTable">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Account</th>
-                <th>Type</th>
-                <th>Security</th>
-                <th>Description</th>
-                <th>Qty</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table transactionsTable">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Account</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Security</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Qty</TableHead>
+                <TableHead>Amount</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {(data?.recentActivities ?? []).map((activity) => (
-                <tr key={activity.id}>
-                  <td>{activity.tradeDate}</td>
-                  <td>{accountsById.get(activity.accountId)?.name ?? activity.accountId}</td>
-                  <td>{activity.activityType}</td>
-                  <td>{activity.security?.symbol ?? '—'}</td>
-                  <td>{activity.description}</td>
-                  <td>{activity.quantity ?? '—'}</td>
-                  <td>{activity.amount != null ? formatMoney(activity.amount, activity.currency) : '—'}</td>
-                </tr>
+                <TableRow key={activity.id}>
+                  <TableCell>{activity.tradeDate}</TableCell>
+                  <TableCell>{accountsById.get(activity.accountId)?.name ?? activity.accountId}</TableCell>
+                  <TableCell>{activity.activityType}</TableCell>
+                  <TableCell>{activity.security?.symbol ?? '—'}</TableCell>
+                  <TableCell>{activity.description}</TableCell>
+                  <TableCell>{activity.quantity ?? '—'}</TableCell>
+                  <TableCell>{activity.amount != null ? formatMoney(activity.amount, activity.currency) : '—'}</TableCell>
+                </TableRow>
               ))}
               {data && data.recentActivities.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="emptyState">
-                    No investment activity imported yet.
-                  </td>
-                </tr>
+                <EmptyTableRow
+                  colSpan={7}
+                  title="No investment activity imported yet."
+                  description="Trades, dividends, fees, and transfers appear here after import."
+                />
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </Card>
     </div>

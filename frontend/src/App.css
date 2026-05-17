@@ -1,46 +1,47 @@
 @reference "./index.css";
 
 @layer base {
-  button {
+  /* Legacy fallback while older pages migrate to local ui primitives. */
+  button:not([data-slot]) {
     @apply inline-flex min-h-10 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition-colors duration-150;
     border-color: var(--border);
     background: color-mix(in srgb, var(--bg2) 88%, black 4%);
     color: var(--fg);
   }
 
-  button:hover:enabled {
+  button:not([data-slot]):hover:enabled {
     background: color-mix(in srgb, var(--bg3) 88%, white 4%);
     border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
   }
 
-  button:disabled {
+  button:not([data-slot]):disabled {
     @apply cursor-not-allowed opacity-50;
   }
 
-  button.btnDanger {
+  button:not([data-slot]).btnDanger {
     border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
     color: var(--danger);
   }
 
-  input,
-  select,
-  textarea {
+  input:not([data-slot]),
+  select:not([data-slot]),
+  textarea:not([data-slot]) {
     @apply min-h-10 rounded-lg border px-3 py-2 text-sm transition-colors duration-150 outline-none;
     border-color: var(--border);
     background: color-mix(in srgb, var(--bg) 90%, black 4%);
     color: var(--fg);
   }
 
-  input:focus,
-  select:focus,
-  textarea:focus {
+  input:not([data-slot]):focus,
+  select:not([data-slot]):focus,
+  textarea:not([data-slot]):focus {
     border-color: color-mix(in srgb, var(--primary) 62%, white 10%);
     box-shadow: 0 0 0 3px rgba(119, 167, 255, 0.18);
   }
 
-  input[aria-invalid='true'],
-  select[aria-invalid='true'],
-  textarea[aria-invalid='true'] {
+  input:not([data-slot])[aria-invalid='true'],
+  select:not([data-slot])[aria-invalid='true'],
+  textarea:not([data-slot])[aria-invalid='true'] {
     border-color: color-mix(in srgb, var(--danger) 62%, var(--border));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 16%, transparent);
   }
@@ -360,6 +361,122 @@
   .transactionsStats {
     @apply mb-4 grid gap-3;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .reviewInboxHeader {
+    @apply mb-4 flex flex-wrap items-start justify-between gap-3;
+  }
+
+  .reviewInboxHeader .muted {
+    @apply mb-0;
+  }
+
+  .reviewInboxStats {
+    @apply mb-4 grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .reviewInboxLayout {
+    @apply grid gap-4;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  }
+
+  .reviewInboxTableCard,
+  .reviewInboxDecisionCard {
+    @apply mb-0;
+  }
+
+  .reviewInboxToolbar {
+    @apply mb-4 flex flex-wrap items-end gap-3;
+  }
+
+  .reviewInboxToolbar label,
+  .reviewInboxDecisionFields label {
+    @apply flex flex-col gap-1 text-[0.82rem] font-semibold;
+    color: var(--muted-foreground);
+  }
+
+  .reviewInboxToolbar label:first-child {
+    @apply min-w-[220px];
+  }
+
+  .reviewInboxToolbar label svg {
+    @apply mr-1 inline size-4;
+  }
+
+  .reviewInboxBatchPills {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .reviewInboxMessage {
+    @apply mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold;
+    border-color: color-mix(in srgb, var(--accent-green) 45%, var(--border));
+    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
+    color: var(--accent-green);
+  }
+
+  .reviewInboxTableWrap {
+    @apply overflow-auto rounded-lg border;
+    max-height: 70vh;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+  }
+
+  .reviewInboxTable thead th {
+    @apply sticky top-0 z-10;
+    background: color-mix(in srgb, var(--bg3) 88%, transparent);
+  }
+
+  .reviewInboxHint {
+    @apply text-xs;
+    color: var(--muted);
+  }
+
+  .reviewInboxDecisionFields {
+    @apply grid gap-3;
+  }
+
+  .reviewInboxDecisionFields select,
+  .reviewInboxToolbar select {
+    @apply min-h-9 rounded-md border px-3 text-sm;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background: color-mix(in srgb, var(--bg2) 94%, transparent);
+    color: var(--fg);
+  }
+
+  .reviewInboxPreview {
+    @apply my-4 grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  }
+
+  .reviewInboxPreview div {
+    @apply rounded-lg border p-3;
+    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    background: color-mix(in srgb, var(--bg3) 46%, transparent);
+  }
+
+  .reviewInboxPreview strong,
+  .reviewInboxPreview span {
+    @apply block;
+  }
+
+  .reviewInboxPreview span {
+    @apply mt-1 text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .reviewInboxActions {
+    @apply flex flex-col gap-2;
+  }
+
+  .reviewInboxGuardrail {
+    @apply mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5;
+    border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
+    background: color-mix(in srgb, var(--bg3) 42%, transparent);
+    color: var(--muted-foreground);
+  }
+
+  .reviewInboxGuardrail svg {
+    @apply mt-0.5 size-4 shrink-0;
   }
 
   .transactionsStatCard {
@@ -1051,6 +1168,14 @@
 
   .transactionsTopGrid {
     grid-template-columns: 1fr;
+  }
+
+  .reviewInboxLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .reviewInboxDecisionCard {
+    order: -1;
   }
 
   .rulesCategoryField {

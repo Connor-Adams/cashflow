@@ -4,6 +4,7 @@ import { AccountsPage } from './pages/AccountsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { PortfolioPage } from './pages/PortfolioPage'
+import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { AmazonPage } from './pages/AmazonPage'
@@ -25,6 +26,7 @@ function AppRoutes() {
         <Route path="/" element={<Layout />}>
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />
+          <Route path="review" element={<ReviewInboxPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="amazon" element={<AmazonPage />} />

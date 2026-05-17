@@ -4,6 +4,7 @@ import {
   BookOpenCheck,
   PackageSearch,
   CreditCard,
+  ClipboardCheck,
   LineChart,
   LayoutDashboard,
   LogOut,
@@ -19,6 +20,7 @@ import { useAuth } from '../lib/useAuth'
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/accounts', label: 'Accounts', icon: CreditCard },
+  { to: '/review', label: 'Review', icon: ClipboardCheck },
   { to: '/transactions', label: 'Transactions', icon: ReceiptText },
   { to: '/portfolio', label: 'Portfolio', icon: LineChart },
   { to: '/amazon', label: 'Amazon', icon: PackageSearch },

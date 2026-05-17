@@ -4,6 +4,7 @@ dist/
 *.sqlite
 *.sqlite-journal
 .DS_Store
+.serena/
 coverage/
 uploads/
 *.log
