@@ -36,6 +36,7 @@ export function Layout() {
   const auth = useAuth()
   const [layoutWidth] = useLayoutWidth()
   const { theme, toggleTheme } = useTheme()
+  const isDark = theme === 'dark'
   return (
     <div className="layout">
       <header className="header">
@@ -74,10 +75,11 @@ export function Layout() {
             variant="ghost"
             size="sm"
             onClick={toggleTheme}
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-            aria-label="Toggle theme"
+            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+            aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-pressed={isDark}
           >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            {isDark ? <Sun size={18} /> : <Moon size={18} />}
           </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => void auth.logout()}>
             <LogOut aria-hidden="true" />

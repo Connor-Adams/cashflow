@@ -181,7 +181,7 @@
   }
 
   .navLink {
-    @apply inline-flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold no-underline transition-colors duration-150;
+    @apply relative inline-flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold no-underline transition-colors duration-150;
     color: var(--muted-foreground);
   }
 
@@ -190,9 +190,16 @@
     background: color-mix(in srgb, var(--bg3) 78%, transparent);
   }
 
+  .navLink:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
   .navLink.isActive {
     color: var(--primary-foreground);
     background: var(--primary);
+    /* Non-color signal for current page: inset underline that survives high-contrast / forced-colors. */
+    box-shadow: inset 0 -2px 0 0 var(--primary-foreground);
   }
 
   .main {
