@@ -1,12 +1,19 @@
 export type AmountConvention =
   | 'charges_negative'
   | 'charges_positive'
-  | 'invert_sign';
+  | 'invert_sign'
+  /** Amount is already signed correctly (negative = charge, positive = credit). No transformation. */
+  | 'passthrough';
 
 export interface CsvProfile {
   dateHeaders: string[];
   merchantHeaders: string[];
+  /** Single-column amount. Leave empty when using debitAmountHeaders + creditAmountHeaders. */
   amountHeaders: string[];
+  /** Two-column format: this column holds the withdrawal/charge amount (always positive in source). */
+  debitAmountHeaders?: string[];
+  /** Two-column format: this column holds the deposit/credit amount (always positive in source). */
+  creditAmountHeaders?: string[];
   currencyHeaders?: string[];
   referenceHeaders?: string[];
   dateFormat: string;
@@ -55,8 +62,191 @@ const generic_amex: CsvProfile = {
   amountConvention: 'invert_sign',
 };
 
+// ── Canadian bank profiles ────────────────────────────────────────────────────
+
+/**
+ * RBC (Royal Bank of Canada) — credit card and personal banking.
+ * Export: Account Type, Account Number, Transaction Date, Cheque Number,
+ *         Description 1, Description 2, CAD$, USD$
+ * Positive CAD$ = charge; negative = payment/credit → invert_sign.
+ */
+const rbc: CsvProfile = {
+  dateHeaders: ['Transaction Date'],
+  merchantHeaders: ['Description 1', 'Description 2'],
+  amountHeaders: ['CAD$', 'USD$'],
+  referenceHeaders: ['Cheque Number'],
+  dateFormat: 'M/d/yyyy',
+  amountConvention: 'invert_sign',
+};
+
+/**
+ * TD Bank credit card (newer format).
+ * Export: Transaction Date, Posting Date, Effective Date, Transaction Type,
+ *         Amount, Payee
+ * Transaction Type = "DEBIT" or "CREDIT"; Amount always positive.
+ * Direction inference from Transaction Type handles sign; convention is fallback.
+ */
+const td_credit_card: CsvProfile = {
+  dateHeaders: ['Transaction Date', 'Date'],
+  merchantHeaders: ['Payee', 'Description'],
+  amountHeaders: ['Amount'],
+  dateFormat: 'MM/dd/yyyy',
+  amountConvention: 'charges_negative',
+};
+
+/**
+ * TD Bank personal banking (chequing/savings).
+ * Export: Date, Activity Description, Debit Amount, Credit Amount, Balance
+ * Two-column split: Debit Amount = withdrawals, Credit Amount = deposits.
+ */
+const td_banking: CsvProfile = {
+  dateHeaders: ['Date', 'Settlement Date'],
+  merchantHeaders: ['Activity Description', 'Description'],
+  amountHeaders: [],
+  debitAmountHeaders: ['Debit Amount', 'Debit'],
+  creditAmountHeaders: ['Credit Amount', 'Credit'],
+  dateFormat: 'MM/dd/yyyy',
+  amountConvention: 'charges_negative',
+};
+
+/**
+ * Scotiabank credit card.
+ * Export: Date, Transaction Details, Amount, Balance
+ * Positive Amount = charge; negative = payment → invert_sign.
+ */
+const scotiabank_credit_card: CsvProfile = {
+  dateHeaders: ['Date'],
+  merchantHeaders: ['Transaction Details', 'Description', 'Name'],
+  amountHeaders: ['Amount'],
+  dateFormat: 'MM/dd/yyyy',
+  amountConvention: 'invert_sign',
+};
+
+/**
+ * Scotiabank personal banking.
+ * Export: Date, Description, Withdrawals, Deposits, Balance
+ * Two-column split.
+ */
+const scotiabank_banking: CsvProfile = {
+  dateHeaders: ['Date'],
+  merchantHeaders: ['Description', 'Name'],
+  amountHeaders: [],
+  debitAmountHeaders: ['Withdrawals', 'Withdrawal'],
+  creditAmountHeaders: ['Deposits', 'Deposit'],
+  dateFormat: 'MM/dd/yyyy',
+  amountConvention: 'charges_negative',
+};
+
+/**
+ * BMO (Bank of Montreal) credit card.
+ * Export: Item #, Card #, Transaction Date, Posting Date, Transaction Amount,
+ *         Description
+ * Positive Transaction Amount = charge; negative = credit → invert_sign.
+ */
+const bmo_credit_card: CsvProfile = {
+  dateHeaders: ['Transaction Date'],
+  merchantHeaders: ['Description'],
+  amountHeaders: ['Transaction Amount'],
+  referenceHeaders: ['Item #'],
+  dateFormat: 'MM/dd/yyyy',
+  amountConvention: 'invert_sign',
+};
+
+/**
+ * BMO personal banking.
+ * Export: Date, Description, Withdrawl, Deposit, Balance
+ * Note: BMO has a persistent typo — "Withdrawl" not "Withdrawal".
+ * Two-column split.
+ */
+const bmo_banking: CsvProfile = {
+  dateHeaders: ['Date'],
+  merchantHeaders: ['Description'],
+  amountHeaders: [],
+  debitAmountHeaders: ['Withdrawl', 'Withdrawal', 'Withdrawals'],
+  creditAmountHeaders: ['Deposit', 'Deposits'],
+  referenceHeaders: ['Cheque Number'],
+  dateFormat: 'yyyy-MM-dd',
+  amountConvention: 'charges_negative',
+};
+
+/**
+ * CIBC (Canadian Imperial Bank of Commerce) — credit card and banking.
+ * Export: Date, Description, Debit, Credit
+ * Debit column = charges/withdrawals; Credit column = payments/deposits.
+ * Both columns use positive values.
+ */
+const cibc: CsvProfile = {
+  dateHeaders: ['Date'],
+  merchantHeaders: ['Description'],
+  amountHeaders: [],
+  debitAmountHeaders: ['Debit'],
+  creditAmountHeaders: ['Credit'],
+  dateFormat: 'MM/dd/yyyy',
+  amountConvention: 'charges_negative',
+};
+
+/**
+ * Tangerine (personal banking and credit card).
+ * Export: Date, Transaction, Name, Memo, Amount
+ * Amount is pre-signed: negative = charge/withdrawal, positive = deposit/credit.
+ * Direction inference handles common cases; passthrough preserves the sign otherwise.
+ */
+const tangerine: CsvProfile = {
+  dateHeaders: ['Date'],
+  merchantHeaders: ['Name', 'Memo', 'Transaction'],
+  amountHeaders: ['Amount'],
+  dateFormat: 'MM/dd/yyyy',
+  amountConvention: 'passthrough',
+};
+
+/**
+ * EQ Bank (savings and GIC accounts).
+ * Export: Date, Description, Amount  (or Debit/Credit)
+ * Amount pre-signed like Tangerine.
+ */
+const eq_bank: CsvProfile = {
+  dateHeaders: ['Date', 'Effective Date', 'Transaction Date'],
+  merchantHeaders: ['Description', 'Memo'],
+  amountHeaders: ['Amount'],
+  dateFormat: 'yyyy-MM-dd',
+  amountConvention: 'passthrough',
+};
+
+/**
+ * National Bank of Canada.
+ * Export: Date de transaction, Description, Débit, Crédit  (French headers)
+ *         or: Transaction Date, Description, Debit, Credit  (English)
+ * Two-column split.
+ */
+const national_bank: CsvProfile = {
+  dateHeaders: ['Date de transaction', 'Transaction Date', 'Date'],
+  merchantHeaders: ['Description'],
+  amountHeaders: [],
+  debitAmountHeaders: ['Débit', 'Debit'],
+  creditAmountHeaders: ['Crédit', 'Credit'],
+  dateFormat: 'yyyy-MM-dd',
+  amountConvention: 'charges_negative',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /** Column names are matched case-insensitively against CSV headers. */
 export const profiles: Record<string, CsvProfile> = {
+  // Generic fallbacks
+  generic_passthrough: {
+    dateHeaders: [
+      'Date', 'Transaction Date', 'Posted Date', 'Trans Date', 'Activity Date',
+    ],
+    merchantHeaders: [
+      'Description', 'Merchant', 'Payee', 'Name', 'Memo', 'Details', 'Type',
+    ],
+    amountHeaders: ['Amount', 'amount', 'Net Amount', 'Transaction Amount'],
+    currencyHeaders: ['Currency', 'currency'],
+    referenceHeaders: ['Reference', 'Id', 'id'],
+    dateFormat: 'yyyy-MM-dd',
+    // Amount already signed: negative = charge/withdrawal, positive = deposit/credit.
+    amountConvention: 'passthrough',
+  },
   generic_simple: {
     dateHeaders: [
       'Date',
@@ -99,20 +289,80 @@ export const profiles: Record<string, CsvProfile> = {
   },
   generic_amex,
   amex: generic_amex,
+  // Canadian banks
+  rbc,
+  td_credit_card,
+  td_banking,
+  scotiabank_credit_card,
+  scotiabank_banking,
+  bmo_credit_card,
+  bmo_banking,
+  cibc,
+  tangerine,
+  eq_bank,
+  national_bank,
 };
 
 const profileHints: Record<string, { label: string; hint: string }> = {
+  generic_passthrough: {
+    label: 'Generic (pre-signed)',
+    hint: 'yyyy-MM-dd dates; Amount already signed — negative = charge, positive = deposit. Use for Wealthsimple Cash and similar.',
+  },
   generic_simple: {
-    label: 'generic_simple',
-    hint: 'ISO dates (yyyy-MM-dd); common bank exports.',
+    label: 'Generic (ISO dates)',
+    hint: 'yyyy-MM-dd dates; single Amount column, negative = charge.',
   },
   generic_amex: {
-    label: 'generic_amex',
-    hint: 'Amex-style columns; US date order (MM/dd/yyyy).',
+    label: 'Generic (Amex-style)',
+    hint: 'MM/dd/yyyy dates; positive = charge.',
   },
   amex: {
-    label: 'amex',
-    hint: 'Same mapping as generic_amex.',
+    label: 'Amex',
+    hint: 'Same as generic_amex.',
+  },
+  rbc: {
+    label: 'RBC',
+    hint: 'Credit card & banking. Columns: Description 1/2, CAD$.',
+  },
+  td_credit_card: {
+    label: 'TD — Credit Card',
+    hint: 'Columns: Transaction Type, Amount, Payee.',
+  },
+  td_banking: {
+    label: 'TD — Banking',
+    hint: 'Chequing/savings. Split Debit Amount / Credit Amount columns.',
+  },
+  scotiabank_credit_card: {
+    label: 'Scotiabank — Credit Card',
+    hint: 'Column: Transaction Details, Amount.',
+  },
+  scotiabank_banking: {
+    label: 'Scotiabank — Banking',
+    hint: 'Chequing/savings. Split Withdrawals / Deposits columns.',
+  },
+  bmo_credit_card: {
+    label: 'BMO — Credit Card',
+    hint: 'Columns: Item #, Card #, Transaction Amount.',
+  },
+  bmo_banking: {
+    label: 'BMO — Banking',
+    hint: 'Chequing/savings. Split Withdrawl / Deposit columns (BMO typo preserved).',
+  },
+  cibc: {
+    label: 'CIBC',
+    hint: 'Credit card & banking. Split Debit / Credit columns.',
+  },
+  tangerine: {
+    label: 'Tangerine',
+    hint: 'Columns: Transaction, Name, Memo, Amount. Amount pre-signed.',
+  },
+  eq_bank: {
+    label: 'EQ Bank',
+    hint: 'Savings accounts. Single Amount column, pre-signed.',
+  },
+  national_bank: {
+    label: 'National Bank',
+    hint: 'Split Débit / Crédit columns (French or English headers).',
   },
 };
 
