@@ -18,6 +18,7 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRow } from '@/components/ui/skeleton'
 import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
@@ -411,9 +412,11 @@ export function ReviewInboxPage() {
                     description="Adjust filters or import a new statement to populate the inbox."
                   />
                 )}
-                {loading && (
-                  <EmptyTableRow colSpan={8} title="Loading review inbox..." />
-                )}
+                {loading &&
+                  visibleRows.length === 0 &&
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonRow key={`review-skeleton-${i}`} cols={8} />
+                  ))}
               </TableBody>
             </Table>
           </div>
