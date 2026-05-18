@@ -1,5 +1,46 @@
 @reference "./index.css";
 
+/* Theme variables - will be set by ThemeContext */
+:root[data-theme="dark"] {
+  --background: #0f0f0f;
+  --bg: #1a1a1a;
+  --bg2: #242424;
+  --bg3: #2d2d2d;
+  --card: #1e1e1e;
+  --fg: #f0f0f0;
+  --muted-foreground: #a0a0a0;
+  --muted: #707070;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --accent: #8b5cf6;
+  --accent-soft: #fbbf24;
+  --accent-warm: #f97316;
+  --accent-green: #10b981;
+  --border: #333333;
+  --danger: #ef4444;
+  --shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="light"] {
+  --background: #ffffff;
+  --bg: #f9f9f9;
+  --bg2: #f3f3f3;
+  --bg3: #e8e8e8;
+  --card: #fafafa;
+  --fg: #1f1f1f;
+  --muted-foreground: #555555;
+  --muted: #808080;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --accent: #7c3aed;
+  --accent-soft: #d97706;
+  --accent-warm: #ea580c;
+  --accent-green: #059669;
+  --border: #d0d0d0;
+  --danger: #dc2626;
+  --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
 @layer base {
   /* Legacy fallback while older pages migrate to local ui primitives. */
   button:not([data-slot]) {

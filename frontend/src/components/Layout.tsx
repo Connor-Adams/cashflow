@@ -11,11 +11,14 @@ import {
   ReceiptText,
   Settings,
   Shield,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { useAuth } from '../lib/useAuth'
+import { useTheme } from '../hooks/useTheme'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -32,6 +35,7 @@ const navItems = [
 export function Layout() {
   const auth = useAuth()
   const [layoutWidth] = useLayoutWidth()
+  const { theme, toggleTheme } = useTheme()
   return (
     <div className="layout">
       <header className="header">
@@ -66,6 +70,15 @@ export function Layout() {
               God mode
             </Badge>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleTheme}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            aria-label="Toggle theme"
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => void auth.logout()}>
             <LogOut aria-hidden="true" />
             Log out
