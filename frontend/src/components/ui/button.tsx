@@ -5,7 +5,7 @@ const cn = (...args: (string | Record<string, boolean> | undefined)[]) => clsx(.
 
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "default" | "outline" | "ghost" | "danger" | "primary" | "secondary"
+  variant?: "default" | "outline" | "ghost" | "danger" | "primary" | "secondary" | "destructive" | "link"
   size?: "default" | "sm" | "lg"
 }
 
@@ -13,8 +13,10 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "default", size = "default", ...props }, ref) => {
     let variantClass = ""
 
-    if (variant === "danger") {
+    if (variant === "danger" || variant === "destructive") {
       variantClass = "bg-red-600 hover:bg-red-700 text-white"
+    } else if (variant === "link") {
+      variantClass = "text-primary underline-offset-4 hover:underline"
     } else if (variant === "outline") {
       variantClass = "border border-input bg-background hover:bg-accent hover:text-accent-foreground"
     } else if (variant === "ghost") {
