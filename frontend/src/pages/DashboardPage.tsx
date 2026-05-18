@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { FilterX } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -295,6 +295,7 @@ function getYearToDateRange(): { from: string; to: string } {
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate()
   const isNarrowViewport = useIsNarrowViewport(NARROW_VIEWPORT_BREAKPOINT_PX)
   const defaultRange = useMemo(() => getDefaultDashboardRange(), [])
   const [currency, setCurrency] = useSessionState<string>(
@@ -391,6 +392,24 @@ export function DashboardPage() {
     }
     return Array.from(byCat.entries()).map(([name, total]) => ({ name, total }))
   }, [data, currency])
+
+  // Drill from a category bar into a pre-filtered Transactions view. Preserves
+  // the active currency and date filters so the destination opens with the
+  // same slice the chart was showing. Uses the literal '(uncategorized)'
+  // sentinel for null categories; Transactions filters on exact category
+  // string, so this acts as a visible chip the user can clear.
+  const navigateToCategory = useCallback(
+    (categoryName: string) => {
+      if (!categoryName) return
+      const qs = new URLSearchParams()
+      qs.set('category', categoryName)
+      if (currency) qs.set('currency', currency)
+      if (dateFrom) qs.set('dateFrom', dateFrom)
+      if (dateTo) qs.set('dateTo', dateTo)
+      navigate(`/transactions?${qs.toString()}`)
+    },
+    [navigate, currency, dateFrom, dateTo]
+  )
 
   const monthlyLineKeys = useMemo(() => {
     const s = new Set<string>()
@@ -976,10 +995,15 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
+      <section
+        className="card dashboardChartCard"
+        aria-busy={loading}
+        aria-label="Activity by category. Click a bar to view its transactions."
+      >
         <h2>Activity by category</h2>
         <p className="muted">
-          Signed totals by category. Payments and transfers are excluded; refunds and
+          Signed totals by category. Click a bar to open those transactions with the
+          current filters applied. Payments and transfers are excluded; refunds and
           credits remain positive.
         </p>
         <div className="chartWrap">
@@ -1032,11 +1056,48 @@ export function DashboardPage() {
                   }}
                 />
                 <Legend />
-                <Bar dataKey="total" name="Amount" fill="var(--primary)" />
+                <Bar
+                  dataKey="total"
+                  name="Amount"
+                  fill="var(--primary)"
+                  cursor="pointer"
+                  onClick={(entry) => {
+                    // Recharts hands us the data row as the click payload. Guard
+                    // against missing/unexpected payloads — only navigate when we
+                    // can read a category name.
+                    const name =
+                      entry && typeof entry === 'object' && 'name' in entry
+                        ? String((entry as { name: unknown }).name ?? '')
+                        : ''
+                    if (name) navigateToCategory(name)
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
+        {chartData.length > 0 ? (
+          <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+            Jump to transactions:{' '}
+            {chartData.map((entry, index) => (
+              <span key={entry.name}>
+                {index > 0 ? ', ' : ''}
+                <Link
+                  to={`/transactions?${new URLSearchParams({
+                    category: entry.name,
+                    ...(currency ? { currency } : {}),
+                    ...(dateFrom ? { dateFrom } : {}),
+                    ...(dateTo ? { dateTo } : {}),
+                  }).toString()}`}
+                  className="text-sm font-semibold underline"
+                >
+                  {entry.name}
+                </Link>
+              </span>
+            ))}
+            .
+          </p>
+        ) : null}
       </section>
 
       <section className="card dashboardChartCard" aria-busy={loading}>
