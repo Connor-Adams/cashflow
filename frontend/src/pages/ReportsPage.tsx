@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { PageHeader } from '@/components/ui/page-header'
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
@@ -146,13 +147,10 @@ export function ReportsPage() {
 
   return (
     <div className="page">
-      <div className="reportsHeader">
-        <h1>Reports</h1>
-        <p className="muted">
-          Partner balances and business totals stay separated by currency and time
-          window.
-        </p>
-      </div>
+      <PageHeader
+        title="Reports"
+        description="Partner balances and business totals stay separated by currency and time window."
+      />
       <section className="card reportsFilters">
         <div className="row">
           <label>

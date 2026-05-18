@@ -355,14 +355,6 @@
     @apply justify-end;
   }
 
-  .dashboardHeader {
-    @apply mb-4 flex flex-wrap items-end justify-between gap-3;
-  }
-
-  .dashboardHeader .muted {
-    @apply mb-0;
-  }
-
   .dashboardFilters {
     @apply mt-3 rounded-lg border p-3 sm:p-4;
     border-color: color-mix(in srgb, var(--border) 86%, white 4%);
@@ -554,18 +546,6 @@
 
   .transactionsToolbarMeta {
     @apply flex flex-wrap gap-2;
-  }
-
-  .rulesHeader,
-  .reportsHeader,
-  .accountsHeader {
-    @apply mb-4;
-  }
-
-  .rulesHeader .muted,
-  .reportsHeader .muted,
-  .accountsHeader .muted {
-    @apply mb-0;
   }
 
   .rulesCardHeader,

@@ -16,6 +16,7 @@ import { FilterX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
   TableBody,
@@ -653,12 +654,10 @@ export function DashboardPage() {
 
   return (
     <div className="page">
-      <div className="dashboardHeader">
-        <h1>Dashboard</h1>
-        <p className="muted">
-          Totals stay in each currency. Filter by currency and date range.
-        </p>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        description="Totals stay in each currency. Filter by currency and date range."
+      />
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
 
