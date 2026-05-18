@@ -34,6 +34,82 @@ import { getJson } from '../lib/api'
 import { toDateInputValue } from '../lib/dateInput'
 import { useSessionState } from '../lib/useSessionState'
 
+// Narrow-viewport breakpoint for chart layout tweaks. 480px catches phones in
+// portrait (iPhone SE 375, iPhone 14 Pro Max 430, Pixel 7 412) while leaving
+// medium tablets on the desktop layout. Below this, Recharts axis labels and
+// legends overlap with default settings.
+const NARROW_VIEWPORT_BREAKPOINT_PX = 480
+const SHORT_MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+]
+
+function useIsNarrowViewport(maxWidthPx: number): boolean {
+  const query = `(max-width: ${maxWidthPx}px)`
+  const [matches, setMatches] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia(query).matches
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mql = window.matchMedia(query)
+    const handler = (event: MediaQueryListEvent) => setMatches(event.matches)
+    setMatches(mql.matches)
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [query])
+  return matches
+}
+
+// "2025-03" -> "Mar". Falls back to the input on malformed values so a bad
+// label is still legible rather than blank.
+function formatShortMonth(value: string): string {
+  if (typeof value !== 'string') return String(value)
+  const parts = value.split('-')
+  if (parts.length < 2) return value
+  const monthIndex = Number(parts[1]) - 1
+  if (!Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+    return value
+  }
+  return SHORT_MONTH_NAMES[monthIndex]
+}
+
+// Compact currency formatter for narrow-viewport axis ticks: 1234 -> "$1.2k",
+// 1500000 -> "$1.5M". Returns the same currency symbol as the full formatter
+// by relying on Intl.NumberFormat compact notation.
+function formatCompactMoney(value: number, currency: string | null): string {
+  if (!Number.isFinite(value)) return ''
+  try {
+    if (currency) {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency,
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }).format(value)
+    }
+    return new Intl.NumberFormat(undefined, {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(value)
+  } catch {
+    return new Intl.NumberFormat(undefined, {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(value)
+  }
+}
+
 type Row = {
   currency: string
   category: string | null
@@ -219,6 +295,7 @@ function getYearToDateRange(): { from: string; to: string } {
 }
 
 export function DashboardPage() {
+  const isNarrowViewport = useIsNarrowViewport(NARROW_VIEWPORT_BREAKPOINT_PX)
   const defaultRange = useMemo(() => getDefaultDashboardRange(), [])
   const [currency, setCurrency] = useSessionState<string>(
     'dashboard.currency',
@@ -591,6 +668,33 @@ export function DashboardPage() {
       : new Intl.NumberFormat(undefined, {
           maximumFractionDigits: 2,
         }).format(value)
+  // Narrow-viewport chart configuration. Pulled out so each chart references
+  // the same defaults; charts override individually where they need to.
+  // - tick font shrinks 12 -> 11
+  // - chart margins collapse so bars actually fill the card width
+  // - legends move below or hide when a single dataKey makes them redundant
+  // - currency axis ticks use compact notation ("$1.2k") to avoid overlap
+  // - month axis ticks render "Jan" instead of "2025-01" and drop interior
+  //   labels when there are many months
+  const narrowAxisTick = isNarrowViewport
+    ? { fontSize: 11 }
+    : undefined
+  const narrowChartMargin = isNarrowViewport
+    ? { top: 8, right: 4, bottom: 0, left: 0 }
+    : undefined
+  const compactCurrencyTickFormatter = (value: number | string): string => {
+    const v = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(v)) return ''
+    return isNarrowViewport
+      ? formatCompactMoney(v, displayCurrency || null)
+      : new Intl.NumberFormat(undefined, {
+          maximumFractionDigits: 0,
+        }).format(v)
+  }
+  const monthTickFormatter = (value: string | number): string => {
+    if (typeof value !== 'string') return String(value)
+    return isNarrowViewport ? formatShortMonth(value) : value
+  }
 
   return (
     <div className="page">
@@ -829,11 +933,21 @@ export function DashboardPage() {
               <p className="emptyState">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={monthlyBreakdownData}>
+            <ResponsiveContainer width="100%" height={isNarrowViewport ? 280 : 320}>
+              <BarChart data={monthlyBreakdownData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
+                <XAxis
+                  dataKey="month"
+                  tick={narrowAxisTick}
+                  tickFormatter={monthTickFormatter}
+                  interval={isNarrowViewport ? 'preserveStartEnd' : 0}
+                  minTickGap={isNarrowViewport ? 12 : 5}
+                />
+                <YAxis
+                  tick={narrowAxisTick}
+                  width={isNarrowViewport ? 44 : 60}
+                  tickFormatter={compactCurrencyTickFormatter}
+                />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
@@ -844,7 +958,11 @@ export function DashboardPage() {
                     return formatDashboardAmount(v)
                   }}
                 />
-                <Legend />
+                <Legend
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={isNarrowViewport ? { fontSize: 11 } : undefined}
+                />
                 <Bar dataKey="totalSpend" name="Spend" fill="var(--primary)" />
                 <Bar dataKey="totalCredits" name="Refunds / credits" fill="#22c55e" />
                 <Bar
