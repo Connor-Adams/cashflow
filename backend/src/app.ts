@@ -55,19 +55,45 @@ app.use('/api/amazon', amazonRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api', receiptsRouter);
 
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  const code =
-    err && typeof err === 'object' && 'code' in err
-      ? String((err as { code?: string }).code)
-      : '';
-  const statusRaw =
-    err && typeof err === 'object' && 'status' in err
-      ? (err as { status?: number }).status
-      : err && typeof err === 'object' && 'statusCode' in err
-        ? (err as { statusCode?: number }).statusCode
+type ErrorWithMetadata = {
+  code?: unknown;
+  status?: unknown;
+  statusCode?: unknown;
+};
+
+const isObjectError = (err: unknown): err is ErrorWithMetadata =>
+  Boolean(err) && typeof err === 'object';
+
+const getErrorCode = (err: unknown): string =>
+  isObjectError(err) && 'code' in err ? String(err.code) : '';
+
+const getErrorStatus = (err: unknown, code: string): number => {
+  if (code === 'LIMIT_FILE_SIZE') {
+    return 400;
+  }
+
+  const rawStatus =
+    isObjectError(err) && 'status' in err
+      ? err.status
+      : isObjectError(err) && 'statusCode' in err
+        ? err.statusCode
         : undefined;
-  const status = code === 'LIMIT_FILE_SIZE' ? 400 : Number(statusRaw) || 500;
-  const responseStatus = status >= 400 && status < 600 ? status : 500;
+  const status = Number(rawStatus) || 500;
+
+  return status >= 400 && status < 600 ? status : 500;
+};
+
+const getErrorMessage = (err: unknown): string => {
+  if (err instanceof Error && err.message && !err.message.includes('ENOENT')) {
+    return err.message;
+  }
+
+  return 'Internal Server Error';
+};
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const code = getErrorCode(err);
+  const responseStatus = getErrorStatus(err, code);
   const requestContext = {
     requestId: _req.requestId,
     method: _req.method,
@@ -89,12 +115,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     res.status(400).json({ error: 'File too large (max 15MB)' });
     return;
   }
-  const message =
-    err instanceof Error && err.message && !String(err.message).includes('ENOENT')
-      ? err.message
-      : 'Internal Server Error';
+
   res.status(responseStatus).json({
-    error: message,
+    error: getErrorMessage(err),
   });
 });
 
