@@ -3,7 +3,16 @@ import type { FormEvent } from 'react'
 import { Edit3, Link2, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogBody,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  useConfirm,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/ui/page-header'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { layoutWidthOptions, useLayoutWidth } from '../lib/layoutWidth'
@@ -16,6 +25,12 @@ export function SettingsPage() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [invite, setInvite] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<Contact | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
+  const confirm = useConfirm()
+  const errorId = 'settings-error'
+  const hasError = Boolean(err)
 
   const loadContacts = useCallback(async () => {
     try {
@@ -56,19 +71,41 @@ export function SettingsPage() {
     }
   }
 
-  async function renameContact(contact: Contact) {
-    const name = prompt('Contact name', contact.name)
-    if (name == null || !name.trim()) return
+  function openRename(contact: Contact) {
+    setRenameTarget(contact)
+    setRenameValue(contact.name)
+  }
+
+  function closeRename() {
+    setRenameTarget(null)
+    setRenameValue('')
+    setRenameSaving(false)
+  }
+
+  async function submitRename(e?: FormEvent<HTMLFormElement>) {
+    if (e) e.preventDefault()
+    if (!renameTarget) return
+    const next = renameValue.trim()
+    if (!next) return
+    setRenameSaving(true)
     try {
-      await patchJson<Contact>(`/api/contacts/${contact.id}`, { name: name.trim() })
+      await patchJson<Contact>(`/api/contacts/${renameTarget.id}`, { name: next })
+      closeRename()
       await loadContacts()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update contact')
+      setRenameSaving(false)
     }
   }
 
   async function removeContact(contact: Contact) {
-    if (!confirm(`Delete contact "${contact.name}"?`)) return
+    const ok = await confirm({
+      title: 'Delete contact?',
+      description: `“${contact.name}” will be removed from your contacts ledger.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
     try {
       await deleteReq(`/api/contacts/${contact.id}`)
       await loadContacts()
@@ -82,6 +119,7 @@ export function SettingsPage() {
     : null
 
   return (
+    <>
     <div className="page">
       <PageHeader
         title="Settings"
@@ -144,14 +182,20 @@ export function SettingsPage() {
             </div>
           </div>
           <div className="formGrid">
-            <label>
+            <Label htmlFor="settings-contact-name">
               Name
-              <Input name="name" required />
-            </label>
-            <label>
+              <Input
+                id="settings-contact-name"
+                name="name"
+                required
+                aria-invalid={hasError || undefined}
+                aria-describedby={hasError ? errorId : undefined}
+              />
+            </Label>
+            <Label htmlFor="settings-contact-notes">
               Notes
-              <Input name="notes" />
-            </label>
+              <Input id="settings-contact-notes" name="notes" />
+            </Label>
           </div>
           <Button type="submit">
             <Plus aria-hidden="true" />
@@ -160,7 +204,11 @@ export function SettingsPage() {
         </form>
       </Card>
 
-      {err && <span className="error">{err}</span>}
+      {err && (
+        <span className="error" id={errorId} role="alert">
+          {err}
+        </span>
+      )}
       <section className="accountsGrid">
         {contacts.map((contact) => (
           <Card className="accountCard" key={contact.id}>
@@ -169,7 +217,7 @@ export function SettingsPage() {
               {contact.notes && <p className="muted">{contact.notes}</p>}
             </div>
             <div className="row">
-              <Button type="button" size="sm" variant="secondary" onClick={() => void renameContact(contact)}>
+              <Button type="button" size="sm" variant="secondary" onClick={() => openRename(contact)}>
                 <Edit3 aria-hidden="true" />
                 Edit
               </Button>
@@ -182,5 +230,44 @@ export function SettingsPage() {
         ))}
       </section>
     </div>
+    {renameTarget && (
+      <Dialog
+        open
+        onOpenChange={(open) => {
+          if (!open) closeRename()
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Rename contact</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={submitRename}>
+          <DialogBody>
+            <Label htmlFor="settings-rename-name">
+              Contact name
+              <Input
+                id="settings-rename-name"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                required
+                autoComplete="off"
+              />
+            </Label>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeRename}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={renameSaving || !renameValue.trim() || renameValue.trim() === renameTarget.name}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
+    )}
+    {confirm.dialog}
+    </>
   )
 }

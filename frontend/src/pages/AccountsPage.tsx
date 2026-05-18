@@ -4,7 +4,9 @@ import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -40,6 +42,9 @@ export function AccountsPage() {
   const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const loadRequestRef = useRef(0)
+  const confirm = useConfirm()
+  const errorId = 'accounts-error'
+  const hasError = Boolean(err)
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current
@@ -97,13 +102,13 @@ export function AccountsPage() {
   }
 
   async function removeAccount(id: number, name: string) {
-    if (
-      !confirm(
-        `Delete account “${name}” and all its transactions? This cannot be undone.`
-      )
-    ) {
-      return
-    }
+    const ok = await confirm({
+      title: 'Delete account?',
+      description: `“${name}” and all its transactions will be removed. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
     setErr(null)
     try {
       await deleteReq(`/api/accounts/${id}`)
@@ -175,6 +180,7 @@ export function AccountsPage() {
   ).size
 
   return (
+    <>
     <div className="page">
       <PageHeader
         title="Accounts"
@@ -221,40 +227,53 @@ export function AccountsPage() {
           </div>
         </div>
         <div className="formGrid">
-          <label>
+          <Label htmlFor="accounts-create-name">
             Name <span className="req">*</span>
-            <Input name="name" required placeholder="Amex Personal" />
-          </label>
-          <label>
+            <Input
+              id="accounts-create-name"
+              name="name"
+              required
+              placeholder="Amex Personal"
+              aria-invalid={hasError || undefined}
+              aria-describedby={hasError ? errorId : undefined}
+            />
+          </Label>
+          <Label htmlFor="accounts-create-owner">
             Owner
-            <select name="owner" defaultValue="me">
+            <select id="accounts-create-owner" name="owner" defaultValue="me">
               <option value="me">me</option>
               <option value="partner">partner</option>
               <option value="joint">joint</option>
             </select>
-          </label>
-          <label>
+          </Label>
+          <Label htmlFor="accounts-create-short-code">
             Short code
             <Input
+              id="accounts-create-short-code"
               name="shortCode"
               placeholder="Amex"
               maxLength={64}
               autoCapitalize="off"
             />
-          </label>
-          <label>
+          </Label>
+          <Label htmlFor="accounts-create-account-type">
             Type
-            <select name="accountType" defaultValue="checking">
+            <select
+              id="accounts-create-account-type"
+              name="accountType"
+              defaultValue="checking"
+            >
               {ACCOUNT_TYPE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
-          </label>
-          <label>
+          </Label>
+          <Label htmlFor="accounts-create-default-currency">
             Default currency
             <select
+              id="accounts-create-default-currency"
               name="defaultCurrency"
               defaultValue="CAD"
             >
@@ -264,14 +283,18 @@ export function AccountsPage() {
                 </option>
               ))}
             </select>
-          </label>
-          <label>
+          </Label>
+          <Label htmlFor="accounts-create-visibility">
             Visibility
-            <select name="visibility" defaultValue="private">
+            <select
+              id="accounts-create-visibility"
+              name="visibility"
+              defaultValue="private"
+            >
               <option value="private">private</option>
               <option value="shared">shared</option>
             </select>
-          </label>
+          </Label>
         </div>
         <Button type="submit" disabled={saving}>
           <Plus aria-hidden="true" />
@@ -280,7 +303,11 @@ export function AccountsPage() {
       </form>
       </Card>
 
-      {err && <p className="error">{err}</p>}
+      {err && (
+        <p className="error" id={errorId} role="alert">
+          {err}
+        </p>
+      )}
 
       <Card className="accountsTableCard">
         <div className="accountsCardHeader">
@@ -442,5 +469,7 @@ export function AccountsPage() {
         )}
       </Card>
     </div>
+    {confirm.dialog}
+    </>
   )
 }

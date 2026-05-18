@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { deleteReq, getJson, postJson } from '../lib/api'
@@ -28,6 +29,7 @@ export function RulesPage() {
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const loadRequestRef = useRef(0)
+  const confirm = useConfirm()
   const categoryLabels = useMemo(
     () => categoryHints.map((hint) => hint.label),
     [categoryHints]
@@ -86,11 +88,17 @@ export function RulesPage() {
     }
   }
 
-  async function remove(id: number) {
-    if (!confirm('Delete this rule?')) return
+  async function remove(rule: Rule) {
+    const ok = await confirm({
+      title: 'Delete rule?',
+      description: `The rule for “${rule.merchantPattern}” will be removed.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
     setErr(null)
     try {
-      await deleteReq(`/api/rules/${id}`)
+      await deleteReq(`/api/rules/${rule.id}`)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not delete rule')
@@ -111,6 +119,7 @@ export function RulesPage() {
   }
 
   return (
+    <>
     <div className="page">
       <PageHeader
         title="Rules"
@@ -272,7 +281,7 @@ export function RulesPage() {
                     <td>{r.splitType}</td>
                     <td>{r.usageCount ?? 0}</td>
                     <td>
-                      <button type="button" onClick={() => void remove(r.id)}>
+                      <button type="button" onClick={() => void remove(r)}>
                         Delete
                       </button>
                     </td>
@@ -284,5 +293,7 @@ export function RulesPage() {
         </div>
       </section>
     </div>
+    {confirm.dialog}
+    </>
   )
 }
