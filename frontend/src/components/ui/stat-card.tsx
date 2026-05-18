@@ -13,13 +13,16 @@ function parseDeltaSign(delta: React.ReactNode): 'positive' | 'negative' | 'neut
   if (delta == null) return 'neutral'
   const text = typeof delta === 'string' || typeof delta === 'number' ? String(delta) : ''
   if (!text) return 'neutral'
-  // Strip currency symbols and whitespace to find the leading sign/digit
   const trimmed = text.trim()
-  if (trimmed.startsWith('+')) return 'positive'
-  if (trimmed.startsWith('-') || trimmed.startsWith('−')) return 'negative'
-  // Try to find first numeric character — if it's preceded by nothing positive/negative,
-  // attempt to coerce. Non-numeric strings get neutral treatment.
-  const match = trimmed.match(/-?\d+(\.\d+)?/)
+  // Find the first explicit sign that introduces a numeric chunk, tolerating
+  // a leading descriptor (e.g. "vs previous period: ") and currency symbols
+  // between the sign and the digits.
+  const signMatch = trimmed.match(/([+\-−])\s*[^\d+\-−]*\d/)
+  if (signMatch) {
+    return signMatch[1] === '+' ? 'positive' : 'negative'
+  }
+  // No explicit sign — fall back to coercing the first numeric token.
+  const match = trimmed.match(/\d+(\.\d+)?/)
   if (!match) return 'neutral'
   const num = Number(match[0])
   if (!Number.isFinite(num) || num === 0) return 'neutral'

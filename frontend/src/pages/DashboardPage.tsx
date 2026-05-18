@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -123,24 +124,6 @@ type DashResp = {
 
 type MonthlyResp = {
   points: { month: string; currency: string; sumAmount: number }[]
-}
-
-type StatCardProps = {
-  label: string
-  value: string | number
-  hint: string
-  delta?: string
-}
-
-function StatCard({ label, value, hint, delta }: StatCardProps) {
-  return (
-    <Card className="statCard">
-      <p className="statLabel">{label}</p>
-      <p className="statValue">{value}</p>
-      <p className="muted statHint">{hint}</p>
-      {delta ? <p className="muted statDelta">vs previous period: {delta}</p> : null}
-    </Card>
-  )
 }
 
 type AiInsight = {
@@ -533,6 +516,11 @@ export function DashboardPage() {
     }
     const formatDeltaCount = (v: number): string =>
       `${v > 0 ? '+' : ''}${Math.trunc(v)}`
+    // The previous-period prefix lives on Dashboard's delta strings so the
+    // shared StatCard renders it inside the colored badge. Sign detection in
+    // stat-card tolerates the leading descriptor.
+    const withPrevPeriod = (label: string): string =>
+      `vs previous period: ${label}`
 
     return {
       spendLabel:
@@ -554,11 +542,11 @@ export function DashboardPage() {
       moneyHint:
         singleCurrency != null ? `In ${singleCurrency}` : 'Across selected currencies',
       txCount,
-      spendDeltaLabel: formatDeltaMoney(spendDelta),
-      creditsDeltaLabel: formatDeltaMoney(creditDelta),
-      paymentsDeltaLabel: formatDeltaMoney(paymentDelta),
-      netSpendDeltaLabel: formatDeltaMoney(netSpendDelta),
-      txDeltaLabel: formatDeltaCount(txDelta),
+      spendDeltaLabel: withPrevPeriod(formatDeltaMoney(spendDelta)),
+      creditsDeltaLabel: withPrevPeriod(formatDeltaMoney(creditDelta)),
+      paymentsDeltaLabel: withPrevPeriod(formatDeltaMoney(paymentDelta)),
+      netSpendDeltaLabel: withPrevPeriod(formatDeltaMoney(netSpendDelta)),
+      txDeltaLabel: withPrevPeriod(formatDeltaCount(txDelta)),
       comparisonHint,
       merchantCount: merchantReportData.length,
       accountCount: accountReportData.length,
