@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { PageHeader } from '@/components/ui/page-header'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
@@ -111,13 +112,10 @@ export function RulesPage() {
 
   return (
     <div className="page">
-      <div className="rulesHeader">
-        <h1>Rules</h1>
-        <p className="muted">
-          Match merchants on import so category, business, and split defaults land in
-          the right place.
-        </p>
-      </div>
+      <PageHeader
+        title="Rules"
+        description="Match merchants on import so category, business, and split defaults land in the right place."
+      />
       {err && <span className="error">{err}</span>}
       <form className="card rulesFormCard" onSubmit={onCreate}>
         <div className="rulesCardHeader">

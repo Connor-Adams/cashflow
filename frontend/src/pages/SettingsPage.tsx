@@ -4,6 +4,7 @@ import { Edit3, Link2, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { layoutWidthOptions, useLayoutWidth } from '../lib/layoutWidth'
 import { useAuth } from '../lib/useAuth'
@@ -82,13 +83,15 @@ export function SettingsPage() {
 
   return (
     <div className="page">
-      <div className="accountsHeader">
-        <h1>Settings</h1>
-        <p className="muted">
-          {auth.user?.household?.name} · {auth.user?.email}
-          {auth.user?.globalRole === 'superadmin' ? ' · God mode' : ''}
-        </p>
-      </div>
+      <PageHeader
+        title="Settings"
+        description={
+          <>
+            {auth.user?.household?.name} · {auth.user?.email}
+            {auth.user?.globalRole === 'superadmin' ? ' · God mode' : ''}
+          </>
+        }
+      />
 
       <Card className="settingsDisplayCard">
         <div className="accountsCardHeader">

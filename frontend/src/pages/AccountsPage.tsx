@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
   TableBody,
@@ -175,14 +176,16 @@ export function AccountsPage() {
 
   return (
     <div className="page">
-      <div className="accountsHeader">
-        <h1>Accounts</h1>
-        <p className="muted">
-          Each account is a checking, card, cash, or investment account. Use a short code (e.g.{' '}
-          <code>Amex</code>) so folder imports can match{' '}
-          <code>Amex_2025_01.csv</code>.
-        </p>
-      </div>
+      <PageHeader
+        title="Accounts"
+        description={
+          <>
+            Each account is a checking, card, cash, or investment account. Use a short code (e.g.{' '}
+            <code>Amex</code>) so folder imports can match{' '}
+            <code>Amex_2025_01.csv</code>.
+          </>
+        }
+      />
 
       <section className="accountsStats" aria-busy={loading}>
         <Card className="statCard">
