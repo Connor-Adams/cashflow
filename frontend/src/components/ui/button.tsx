@@ -1,5 +1,7 @@
 import * as React from "react"
-import { cn } from "@wandercom/design-system-shared"
+import clsx from "clsx"
+
+const cn = (...args: (string | Record<string, boolean> | undefined)[]) => clsx(...args)
 
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement> {
