@@ -70,14 +70,15 @@ export function Layout() {
               God mode
             </Badge>
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={toggleTheme}
-            className="p-2 rounded-lg transition-colors hover:bg-opacity-10 hover:bg-primary"
             title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
             aria-label="Toggle theme"
           >
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
+          </Button>
           <Button type="button" variant="secondary" size="sm" onClick={() => void auth.logout()}>
             <LogOut aria-hidden="true" />
             Log out
