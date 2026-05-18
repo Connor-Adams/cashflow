@@ -13,6 +13,8 @@ import {
   YAxis,
 } from 'recharts'
 import { FilterX } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
@@ -54,14 +56,6 @@ type MonthlyCurrencyBreakdown = {
   totalSpend: number
   totalCredits: number
   totalPayments: number
-  netSpend: number
-}
-
-type SplitReportRow = {
-  currency: string
-  splitType: string
-  totalSpend: number
-  totalCredits: number
   netSpend: number
 }
 
@@ -120,7 +114,6 @@ type DashResp = {
   byCategory: Row[]
   metricsByCurrency: CurrencyMetrics[]
   monthlyByCurrency: MonthlyCurrencyBreakdown[]
-  netSpendBySplit: SplitReportRow[]
   netSpendByBusiness: BusinessReportRow[]
   categoryReports: CategoryReportRow[]
   merchantSummaries: MerchantSummaryRow[]
@@ -194,13 +187,6 @@ const CHART_TOOLTIP_LABEL_STYLE = {
 const CHART_TOOLTIP_ITEM_STYLE = {
   color: '#eef3f8',
   padding: 0,
-}
-
-function formatSplitType(splitType: string): string {
-  if (splitType === 'me') return 'Me'
-  if (splitType === 'partner') return 'Partner'
-  if (splitType === 'shared') return 'Shared'
-  return splitType || 'Unknown'
 }
 
 function parseDateInput(value: string): Date | null {
@@ -326,7 +312,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [summaryQs, previousRange, currency, dateTo])
+  }, [summaryQs, previousRange, currency, dateFrom, dateTo])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -398,30 +384,6 @@ export function DashboardPage() {
     }
     return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
   }, [data?.monthlyByCurrency, currency])
-
-  const splitReportData = useMemo(() => {
-    const rows = data?.netSpendBySplit ?? []
-    const bySplit = new Map<
-      string,
-      { splitType: string; totalSpend: number; totalCredits: number; netSpend: number }
-    >()
-    for (const row of rows) {
-      if (currency && row.currency !== currency) continue
-      const existing = bySplit.get(row.splitType) ?? {
-        splitType: row.splitType,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-      existing.totalSpend += row.totalSpend
-      existing.totalCredits += row.totalCredits
-      existing.netSpend += row.netSpend
-      bySplit.set(row.splitType, existing)
-    }
-    return Array.from(bySplit.values())
-      .map((row) => ({ ...row, label: formatSplitType(row.splitType) }))
-      .sort((a, b) => b.netSpend - a.netSpend)
-  }, [data?.netSpendBySplit, currency])
 
   const businessReportData = useMemo(() => {
     const rows = data?.netSpendByBusiness ?? []
@@ -598,8 +560,6 @@ export function DashboardPage() {
       netSpendDeltaLabel: formatDeltaMoney(netSpendDelta),
       txDeltaLabel: formatDeltaCount(txDelta),
       comparisonHint,
-      categoryCount: chartData.length,
-      monthCount: monthlyChartData.length,
       merchantCount: merchantReportData.length,
       accountCount: accountReportData.length,
       reviewCount: reviewQueueData.length,
@@ -609,8 +569,6 @@ export function DashboardPage() {
     previousMetricsByCurrency,
     previousRange,
     currency,
-    chartData.length,
-    monthlyChartData.length,
     merchantReportData.length,
     accountReportData.length,
     reviewQueueData.length,
@@ -654,6 +612,23 @@ export function DashboardPage() {
       />
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
+
+      {summaryStats.reviewCount > 0 ? (
+        <Alert
+          variant="warning"
+          title={`${summaryStats.reviewCount} transaction${
+            summaryStats.reviewCount === 1 ? '' : 's'
+          } need review`}
+          action={
+            <Link to="/review" className="text-sm font-semibold underline">
+              Open Review Inbox
+            </Link>
+          }
+        >
+          Flagged transactions are waiting on category, split, or business
+          decisions before they roll into your totals.
+        </Alert>
+      ) : null}
 
       <Card className="dashboardFilters">
         <CardContent className="p-0">
@@ -728,16 +703,6 @@ export function DashboardPage() {
           delta={summaryStats.txDeltaLabel}
         />
         <StatCard
-          label="Categories"
-          value={summaryStats.categoryCount}
-          hint="Shown in category chart"
-        />
-        <StatCard
-          label="Months"
-          value={summaryStats.monthCount}
-          hint={summaryStats.comparisonHint}
-        />
-        <StatCard
           label="Merchants"
           value={summaryStats.merchantCount}
           hint="Distinct merchants in the current filters"
@@ -746,11 +711,6 @@ export function DashboardPage() {
           label="Accounts"
           value={summaryStats.accountCount}
           hint="Accounts contributing activity in this view"
-        />
-        <StatCard
-          label="Needs review"
-          value={summaryStats.reviewCount}
-          hint="Flagged transactions still needing a pass"
         />
       </section>
 
@@ -967,40 +927,6 @@ export function DashboardPage() {
                 />
                 <Legend />
                 <Bar dataKey="total" name="Amount" fill="var(--primary)" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </section>
-
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Net spend by split</h2>
-        <p className="muted">
-          Spend less refunds/credits by ownership split. Payments stay excluded.
-        </p>
-        <div className="chartWrap">
-          {splitReportData.length === 0 ? (
-            !loading ? (
-              <p className="emptyState">No split report data for these filters.</p>
-            ) : null
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={splitReportData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" />
-                <YAxis />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  formatter={(value) => {
-                    const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
-                    return formatDashboardAmount(v)
-                  }}
-                />
-                <Legend />
-                <Bar dataKey="netSpend" name="Net spend" fill="#f59e0b" />
               </BarChart>
             </ResponsiveContainer>
           )}

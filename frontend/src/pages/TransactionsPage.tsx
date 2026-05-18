@@ -8,6 +8,7 @@ import {
 } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { Alert, type AlertVariant } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -84,6 +85,17 @@ type PreviewResponse = StatementPreview
 type CategoryHint = {
   label: string
   usageCount: number
+}
+
+function classifyUploadMessage(message: string): 'warning' | 'success' {
+  if (
+    message.includes('No rows') ||
+    message.includes('duplicate') ||
+    message.includes('Skipped')
+  ) {
+    return 'warning'
+  }
+  return 'success'
 }
 
 function summarizeUploadResult(result: UploadResult): string {
@@ -244,13 +256,17 @@ export function TransactionsPage() {
     []
   )
   const [profileId, setProfileId] = useState('auto')
-  const [uploadMsg, setUploadMsg] = useState<string | null>(null)
-  const [uploadParseLines, setUploadParseLines] = useState<string[]>([])
+  // Unified upload feedback — replaces the prior trio (uploadMsg, uploadParseLines,
+  // previewErr) so error/warning/info/success states render through one Alert.
+  const [uploadFeedback, setUploadFeedback] = useState<{
+    variant: AlertVariant
+    title: string
+    lines?: string[]
+  } | null>(null)
   const [uploading, setUploading] = useState(false)
   const [runningFolderImport, setRunningFolderImport] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
-  const [previewErr, setPreviewErr] = useState<string | null>(null)
   const [aiEnabled, setAiEnabled] = useState(false)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
@@ -530,6 +546,8 @@ export function TransactionsPage() {
       currency,
       categoryFilter,
       filteredSummaryLabel,
+      dateFrom,
+      dateTo,
       batchFilter,
       setReviewOnly,
       setCurrency,
@@ -744,22 +762,26 @@ export function TransactionsPage() {
     const files = Array.from(input?.files ?? [])
     const file = files[0]
     if (!file) {
-      setPreviewErr('Choose a .csv file first.')
+      setUploadFeedback({ variant: 'error', title: 'Choose a .csv file first.' })
       setPreviewData(null)
       return
     }
     if (files.length > 1) {
-      setPreviewErr('Preview supports one file at a time. Select one CSV to preview, or import all selected files.')
+      setUploadFeedback({
+        variant: 'error',
+        title:
+          'Preview supports one file at a time. Select one CSV to preview, or import all selected files.',
+      })
       setPreviewData(null)
       return
     }
     if (!uploadAccountId) {
-      setPreviewErr('Select an account.')
+      setUploadFeedback({ variant: 'error', title: 'Select an account.' })
       setPreviewData(null)
       return
     }
     setPreviewing(true)
-    setPreviewErr(null)
+    setUploadFeedback(null)
     setPreviewData(null)
     try {
       const fd = new FormData()
@@ -767,9 +789,12 @@ export function TransactionsPage() {
       fd.append('accountId', uploadAccountId)
       fd.append('profileId', profileId)
       const r = await postFormData<PreviewResponse>('/api/import/preview', fd)
-    setPreviewData(r)
+      setPreviewData(r)
     } catch (e) {
-      setPreviewErr(e instanceof Error ? e.message : 'Preview failed')
+      setUploadFeedback({
+        variant: 'error',
+        title: e instanceof Error ? e.message : 'Preview failed',
+      })
     } finally {
       setPreviewing(false)
     }
@@ -779,26 +804,30 @@ export function TransactionsPage() {
     e.preventDefault()
     if (previewData?.previewToken) {
       setUploading(true)
-      setUploadMsg(null)
-      setUploadParseLines([])
+      setUploadFeedback(null)
       setErr(null)
       try {
         const result = await postJson<UploadResult>('/api/import/commit', {
           previewToken: previewData.previewToken,
         })
-        setUploadMsg(summarizeUploadResult(result))
-        setUploadParseLines(
-          result.parseErrors?.length
+        const title = summarizeUploadResult(result)
+        setUploadFeedback({
+          variant: classifyUploadMessage(title),
+          title,
+          lines: result.parseErrors?.length
             ? formatParseErrorLines(result.parseErrors)
-            : []
-        )
+            : undefined,
+        })
         setPreviewData(null)
         const input = fileRef.current
         if (input) input.value = ''
         await load()
         refreshImportHistory()
       } catch (e) {
-        setUploadMsg(e instanceof Error ? e.message : 'Import failed')
+        setUploadFeedback({
+          variant: 'error',
+          title: e instanceof Error ? e.message : 'Import failed',
+        })
       } finally {
         setUploading(false)
       }
@@ -807,16 +836,18 @@ export function TransactionsPage() {
     const input = fileRef.current
     const files = Array.from(input?.files ?? [])
     if (files.length === 0) {
-      setUploadMsg('Choose at least one statement file first.')
+      setUploadFeedback({
+        variant: 'error',
+        title: 'Choose at least one statement file first.',
+      })
       return
     }
     if (!uploadAccountId) {
-      setUploadMsg('Select an account.')
+      setUploadFeedback({ variant: 'error', title: 'Select an account.' })
       return
     }
     setUploading(true)
-    setUploadMsg(null)
-    setUploadParseLines([])
+    setUploadFeedback(null)
     setErr(null)
     try {
       const fd = new FormData()
@@ -826,12 +857,14 @@ export function TransactionsPage() {
       if (files.length === 1) {
         fd.append('file', files[0])
         const result = await postFormData<UploadResult>('/api/import/upload', fd)
-        setUploadMsg(summarizeUploadResult(result))
-        setUploadParseLines(
-          result.parseErrors?.length
+        const title = summarizeUploadResult(result)
+        setUploadFeedback({
+          variant: classifyUploadMessage(title),
+          title,
+          lines: result.parseErrors?.length
             ? formatParseErrorLines(result.parseErrors)
-            : []
-        )
+            : undefined,
+        })
       } else {
         files.forEach((file) => fd.append('files', file))
         const out = await postFormData<MultiUploadResponse>('/api/import/upload-many', fd)
@@ -840,24 +873,29 @@ export function TransactionsPage() {
         const skipped = out.results.length - imported
         const failedRows = out.results.reduce((sum, r) => sum + (r.rowErrors ?? 0), 0)
         const lines = out.results.slice(0, 6).map((r) => `${r.file}: ${summarizeUploadResult(r)}`)
-        setUploadMsg(
-          `Multi-file import complete — ${inserted} row(s), ${imported} file(s) imported, ${skipped} skipped${failedRows ? `, ${failedRows} row error(s)` : ''}. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
+        const title = `Multi-file import complete — ${inserted} row(s), ${imported} file(s) imported, ${skipped} skipped${failedRows ? `, ${failedRows} row error(s)` : ''}. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
+        const parseLines = out.results.flatMap((result) =>
+          result.parseErrors?.length
+            ? formatParseErrorLines(result.parseErrors).map(
+                (line) => `${result.file}: ${line}`,
+              )
+            : [],
         )
-        setUploadParseLines(
-          out.results.flatMap((result) =>
-            result.parseErrors?.length
-              ? formatParseErrorLines(result.parseErrors).map(
-                  (line) => `${result.file}: ${line}`,
-                )
-              : [],
-          )
-        )
+        setUploadFeedback({
+          variant:
+            failedRows > 0 ? 'warning' : classifyUploadMessage(title),
+          title,
+          lines: parseLines.length > 0 ? parseLines : undefined,
+        })
       }
       if (input) input.value = ''
       await load()
       refreshImportHistory()
     } catch (e) {
-      setUploadMsg(e instanceof Error ? e.message : 'Upload failed')
+      setUploadFeedback({
+        variant: 'error',
+        title: e instanceof Error ? e.message : 'Upload failed',
+      })
     } finally {
       setUploading(false)
     }
@@ -1016,7 +1054,7 @@ export function TransactionsPage() {
                 multiple
                 onChange={() => {
                   setPreviewData(null)
-                  setPreviewErr(null)
+                  setUploadFeedback(null)
                 }}
               />
             </Label>
@@ -1039,30 +1077,23 @@ export function TransactionsPage() {
               {uploading ? 'Importing…' : previewData?.previewToken ? 'Commit preview' : 'Import CSV file(s)'}
             </Button>
           </div>
-          {uploadMsg && (
-            <p
-              className={
-                uploadMsg.includes('No rows') ||
-                uploadMsg.includes('duplicate') ||
-                uploadMsg.includes('Skipped')
-                  ? 'uploadMsg warn'
-                  : 'uploadMsg'
-              }
+          {uploadFeedback && (
+            <Alert
+              className="mt-3"
+              variant={uploadFeedback.variant}
+              title={uploadFeedback.title}
             >
-              {uploadMsg}
-            </p>
-          )}
-          {uploadParseLines.length > 0 && (
-            <ul className="parseErrorList" aria-label="Rows that failed to parse">
-              {uploadParseLines.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-          )}
-          {previewErr && (
-            <p className="uploadMsg error" role="alert">
-              {previewErr}
-            </p>
+              {uploadFeedback.lines && uploadFeedback.lines.length > 0 ? (
+                <ul
+                  className="parseErrorList m-0 pl-5"
+                  aria-label="Rows that failed to parse"
+                >
+                  {uploadFeedback.lines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </Alert>
           )}
           {previewData && (
             <div className="previewBlock">
@@ -1147,7 +1178,7 @@ export function TransactionsPage() {
                 try {
                   setRunningFolderImport(true)
                   setErr(null)
-                  setUploadMsg(null)
+                  setUploadFeedback(null)
                   const out = await postJson<FolderImportResponse>('/api/import/run', {})
                   const imported = out.results.filter((r) => !r.skipped).length
                   const skipped = out.results.length - imported
@@ -1157,11 +1188,13 @@ export function TransactionsPage() {
                     }
                     return `${r.file}: ${r.inserted ?? 0} rows${r.warning ? ` — ${r.warning}` : ''}`
                   })
-                  setUploadMsg(
-                    lines.length
-                      ? `Folder import complete — ${imported} imported, ${skipped} skipped. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
-                      : `No .csv files in upload folder: ${out.uploadDir}`
-                  )
+                  const title = lines.length
+                    ? `Folder import complete — ${imported} imported, ${skipped} skipped. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
+                    : `No .csv files in upload folder: ${out.uploadDir}`
+                  setUploadFeedback({
+                    variant: classifyUploadMessage(title),
+                    title,
+                  })
                   await load()
                   refreshImportHistory()
                 } catch (e) {
@@ -1875,7 +1908,7 @@ function TransactionRow({
     ownershipType !== (t.ownershipType ?? 'me') ||
     ownershipContactId !== (t.ownershipContactId != null ? String(t.ownershipContactId) : '')
 
-  function resetDraft() {
+  const resetDraft = useCallback(() => {
     setCat(t.categoryOverride ?? '')
     setBiz(
       t.businessOverride === null || t.businessOverride === undefined
@@ -1892,11 +1925,11 @@ function TransactionRow({
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
     setAiSuggestion(null)
     setAiSuggestionId(null)
-  }
+  }, [t])
 
   useEffect(() => {
     resetDraft()
-  }, [t])
+  }, [resetDraft])
 
   return (
     <TableRow>

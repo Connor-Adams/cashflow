@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Enable React 19 act() environment for interactive tests in this file.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+import { Alert } from './alert'
 import {
   Dialog,
   DialogBody,
@@ -67,6 +68,71 @@ describe('local design-system primitives', () => {
     expect(html).toContain('Open transactions')
     expect(html).toContain('No rows')
     expect(html).toContain('Everything is reviewed.')
+  })
+
+  it('marks StatCard delta with data-sign=positive for "+" prefixed values', () => {
+    const html = renderToStaticMarkup(
+      <StatCard label="Spend" value="$100" hint="this period" delta="+12.34" />
+    )
+    expect(html).toContain('data-slot="stat-card-delta"')
+    expect(html).toContain('data-sign="positive"')
+    expect(html).toContain('+12.34')
+  })
+
+  it('marks StatCard delta with data-sign=negative for "-" prefixed values', () => {
+    const html = renderToStaticMarkup(
+      <StatCard label="Spend" value="$100" hint="this period" delta="-5.00" />
+    )
+    expect(html).toContain('data-slot="stat-card-delta"')
+    expect(html).toContain('data-sign="negative"')
+    expect(html).toContain('-5.00')
+  })
+
+  it('marks StatCard delta with data-sign=neutral for zero or non-numeric values', () => {
+    const zero = renderToStaticMarkup(
+      <StatCard label="Spend" value="$100" hint="this period" delta="0" />
+    )
+    expect(zero).toContain('data-sign="neutral"')
+
+    const text = renderToStaticMarkup(
+      <StatCard label="Months" value="3" hint="—" delta="last quarter" />
+    )
+    expect(text).toContain('data-sign="neutral"')
+  })
+
+  it('renders Alert with error variant and role=alert', () => {
+    const html = renderToStaticMarkup(
+      <Alert variant="error" title="Upload failed">
+        Three rows could not be parsed.
+      </Alert>
+    )
+    expect(html).toContain('data-slot="alert"')
+    expect(html).toContain('data-variant="error"')
+    expect(html).toContain('role="alert"')
+    expect(html).toContain('Upload failed')
+    expect(html).toContain('Three rows could not be parsed.')
+  })
+
+  it('renders Alert with warning/info/success using role=status', () => {
+    for (const variant of ['warning', 'info', 'success'] as const) {
+      const html = renderToStaticMarkup(
+        <Alert variant={variant} title={`${variant} title`}>
+          body
+        </Alert>
+      )
+      expect(html).toContain(`data-variant="${variant}"`)
+      expect(html).toContain('role="status"')
+    }
+  })
+
+  it('renders Alert action when provided', () => {
+    const html = renderToStaticMarkup(
+      <Alert variant="info" title="Heads up" action={<button type="button">Dismiss</button>}>
+        Something happened.
+      </Alert>
+    )
+    expect(html).toContain('Dismiss')
+    expect(html).toContain('Something happened.')
   })
 })
 

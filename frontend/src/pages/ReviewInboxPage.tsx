@@ -27,7 +27,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getJson, postJson } from '../lib/api'
+import { useToast } from '@/components/ui/toast'
+import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import {
   buildReviewBulkPatch,
@@ -47,6 +49,32 @@ type RuleResponse = {
 
 const PAGE_SIZE = 100
 
+function buildRevertPatch(
+  row: Transaction,
+  patchKeys: string[]
+): Record<string, unknown> {
+  const revert: Record<string, unknown> = {}
+  for (const key of patchKeys) {
+    switch (key) {
+      case 'categoryOverride':
+        revert.categoryOverride = row.categoryOverride
+        break
+      case 'businessOverride':
+        revert.businessOverride = row.businessOverride
+        break
+      case 'splitOverride':
+        revert.splitOverride = row.splitOverride
+        break
+      case 'reviewFlag':
+        revert.reviewFlag = row.reviewFlag
+        break
+      default:
+        break
+    }
+  }
+  return revert
+}
+
 export function ReviewInboxPage() {
   const [rows, setRows] = useState<Transaction[]>([])
   const [total, setTotal] = useState(0)
@@ -61,6 +89,7 @@ export function ReviewInboxPage() {
   const [applying, setApplying] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const { showToast } = useToast()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -163,16 +192,51 @@ export function ReviewInboxPage() {
     setApplying(true)
     setErr(null)
     setMessage(null)
+    // Snapshot prior values for every selected row BEFORE the patch lands so we
+    // can revert if the user clicks Undo on the success toast.
+    const patchKeys = Object.keys(patch)
+    const affectedRows = selectedRows.map((row) => ({
+      id: row.id,
+      revert: buildRevertPatch(row, patchKeys),
+    }))
+    const appliedCount = selectedIds.size
     try {
       await postJson('/api/transactions/bulk-patch', {
         ids: selectedIdsList,
         patch,
       })
-      setMessage(`Reviewed ${selectedIds.size} transaction(s).`)
+      setMessage(`Reviewed ${appliedCount} transaction(s).`)
       setCategory('')
       setBusiness('')
       setSplitType('')
       await load()
+
+      // Per-row PATCH reverts are required: bulk-patch applies one patch to
+      // every id, but each row needs its own prior values restored.
+      const revert = async () => {
+        try {
+          await Promise.all(
+            affectedRows.map((row) =>
+              patchJson(`/api/transactions/${row.id}`, row.revert)
+            )
+          )
+          await load()
+          showToast({ title: 'Reverted', durationMs: 4000 })
+        } catch (revertError) {
+          setErr(
+            revertError instanceof Error
+              ? revertError.message
+              : 'Could not revert review decision'
+          )
+        }
+      }
+
+      showToast({
+        title: `Marked ${appliedCount} reviewed`,
+        variant: 'success',
+        durationMs: 10000,
+        action: { label: 'Undo', onClick: () => void revert() },
+      })
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not apply review decision')
     } finally {
@@ -374,17 +438,12 @@ export function ReviewInboxPage() {
           <div className="reviewInboxDecisionFields">
             <Label>
               Category
-              <Input
-                list="review-category-hints"
+              <CategoryCloudPicker
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                onChange={(value) => setCategory(value)}
+                options={categoryHints.map((hint) => hint.label)}
                 placeholder="Dining, Transport..."
               />
-              <datalist id="review-category-hints">
-                {categoryHints.map((hint) => (
-                  <option key={hint.label} value={hint.label} />
-                ))}
-              </datalist>
             </Label>
             <Label>
               Split
