@@ -233,6 +233,20 @@ const national_bank: CsvProfile = {
 /** Column names are matched case-insensitively against CSV headers. */
 export const profiles: Record<string, CsvProfile> = {
   // Generic fallbacks
+  generic_passthrough: {
+    dateHeaders: [
+      'Date', 'Transaction Date', 'Posted Date', 'Trans Date', 'Activity Date',
+    ],
+    merchantHeaders: [
+      'Description', 'Merchant', 'Payee', 'Name', 'Memo', 'Details', 'Type',
+    ],
+    amountHeaders: ['Amount', 'amount', 'Net Amount', 'Transaction Amount'],
+    currencyHeaders: ['Currency', 'currency'],
+    referenceHeaders: ['Reference', 'Id', 'id'],
+    dateFormat: 'yyyy-MM-dd',
+    // Amount already signed: negative = charge/withdrawal, positive = deposit/credit.
+    amountConvention: 'passthrough',
+  },
   generic_simple: {
     dateHeaders: [
       'Date',
@@ -290,6 +304,10 @@ export const profiles: Record<string, CsvProfile> = {
 };
 
 const profileHints: Record<string, { label: string; hint: string }> = {
+  generic_passthrough: {
+    label: 'Generic (pre-signed)',
+    hint: 'yyyy-MM-dd dates; Amount already signed — negative = charge, positive = deposit. Use for Wealthsimple Cash and similar.',
+  },
   generic_simple: {
     label: 'Generic (ISO dates)',
     hint: 'yyyy-MM-dd dates; single Amount column, negative = charge.',
