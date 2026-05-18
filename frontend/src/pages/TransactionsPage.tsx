@@ -17,6 +17,7 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRow } from '@/components/ui/skeleton'
 import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
@@ -1775,11 +1776,9 @@ export function TransactionsPage() {
             </TableHeader>
             <TableBody>
               {loading && sortedRows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="muted pad">
-                    Loading…
-                  </TableCell>
-                </TableRow>
+                Array.from({ length: 6 }).map((_, i) => (
+                  <SkeletonRow key={`txn-skeleton-${i}`} cols={9} />
+                ))
               ) : !sortedRows.length ? (
                 <TableRow>
                   <TableCell colSpan={9} className="emptyStateCell">

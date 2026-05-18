@@ -8,6 +8,7 @@ import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRow } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -319,24 +320,26 @@ export function AccountsPage() {
           </div>
           <Badge variant="secondary">{accountCount} total</Badge>
         </div>
-        {loading ? (
-          <p className="muted">Loading…</p>
-        ) : (
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Owner</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Short code</TableHead>
-                  <TableHead>Default currency</TableHead>
-                  <TableHead>Visibility</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {accounts.map((a) => (
+        <div className="tableWrap">
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Owner</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Short code</TableHead>
+                <TableHead>Default currency</TableHead>
+                <TableHead>Visibility</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={7} />
+                ))
+              ) : (
+                accounts.map((a) => (
                   <TableRow key={a.id}>
                     <TableCell>
                       {editingId === a.id ? (
@@ -457,16 +460,16 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {accounts.length === 0 && !loading && (
-              <p className="emptyState pad">
-                No accounts yet — create one using the form above, then import CSVs under Transactions.
-              </p>
-            )}
-          </div>
-        )}
+                ))
+              )}
+            </TableBody>
+          </Table>
+          {accounts.length === 0 && !loading && (
+            <p className="emptyState pad">
+              No accounts yet — create one using the form above, then import CSVs under Transactions.
+            </p>
+          )}
+        </div>
       </Card>
     </div>
     {confirm.dialog}
