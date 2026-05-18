@@ -33,82 +33,11 @@ import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import { toDateInputValue } from '../lib/dateInput'
 import { useSessionState } from '../lib/useSessionState'
-
-// Narrow-viewport breakpoint for chart layout tweaks. 480px catches phones in
-// portrait (iPhone SE 375, iPhone 14 Pro Max 430, Pixel 7 412) while leaving
-// medium tablets on the desktop layout. Below this, Recharts axis labels and
-// legends overlap with default settings.
-const NARROW_VIEWPORT_BREAKPOINT_PX = 480
-const SHORT_MONTH_NAMES = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
-
-function useIsNarrowViewport(maxWidthPx: number): boolean {
-  const query = `(max-width: ${maxWidthPx}px)`
-  const [matches, setMatches] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false
-    return window.matchMedia(query).matches
-  })
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const mql = window.matchMedia(query)
-    const handler = (event: MediaQueryListEvent) => setMatches(event.matches)
-    setMatches(mql.matches)
-    mql.addEventListener('change', handler)
-    return () => mql.removeEventListener('change', handler)
-  }, [query])
-  return matches
-}
-
-// "2025-03" -> "Mar". Falls back to the input on malformed values so a bad
-// label is still legible rather than blank.
-function formatShortMonth(value: string): string {
-  if (typeof value !== 'string') return String(value)
-  const parts = value.split('-')
-  if (parts.length < 2) return value
-  const monthIndex = Number(parts[1]) - 1
-  if (!Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) {
-    return value
-  }
-  return SHORT_MONTH_NAMES[monthIndex]
-}
-
-// Compact currency formatter for narrow-viewport axis ticks: 1234 -> "$1.2k",
-// 1500000 -> "$1.5M". Returns the same currency symbol as the full formatter
-// by relying on Intl.NumberFormat compact notation.
-function formatCompactMoney(value: number, currency: string | null): string {
-  if (!Number.isFinite(value)) return ''
-  try {
-    if (currency) {
-      return new Intl.NumberFormat(undefined, {
-        style: 'currency',
-        currency,
-        notation: 'compact',
-        maximumFractionDigits: 1,
-      }).format(value)
-    }
-    return new Intl.NumberFormat(undefined, {
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    }).format(value)
-  } catch {
-    return new Intl.NumberFormat(undefined, {
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    }).format(value)
-  }
-}
+import {
+  formatCompactMoney,
+  formatShortMonth,
+  useIsNarrowViewport,
+} from '../lib/chartViewport'
 
 type Row = {
   currency: string
@@ -296,7 +225,7 @@ function getYearToDateRange(): { from: string; to: string } {
 
 export function DashboardPage() {
   const navigate = useNavigate()
-  const isNarrowViewport = useIsNarrowViewport(NARROW_VIEWPORT_BREAKPOINT_PX)
+  const isNarrowViewport = useIsNarrowViewport()
   const defaultRange = useMemo(() => getDefaultDashboardRange(), [])
   const [currency, setCurrency] = useSessionState<string>(
     'dashboard.currency',
@@ -1036,11 +965,20 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={chartData}>
+            <ResponsiveContainer width="100%" height={isNarrowViewport ? 260 : 320}>
+              <BarChart data={chartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
+                <XAxis
+                  dataKey="name"
+                  tick={narrowAxisTick}
+                  interval={isNarrowViewport ? 'preserveStartEnd' : 0}
+                  minTickGap={isNarrowViewport ? 12 : 5}
+                />
+                <YAxis
+                  tick={narrowAxisTick}
+                  width={isNarrowViewport ? 44 : 60}
+                  tickFormatter={compactCurrencyTickFormatter}
+                />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
@@ -1055,7 +993,9 @@ export function DashboardPage() {
                         }).format(v)
                   }}
                 />
-                <Legend />
+                {!isNarrowViewport && (
+                  <Legend verticalAlign="bottom" align="center" />
+                )}
                 <Bar
                   dataKey="total"
                   name="Amount"
@@ -1111,11 +1051,15 @@ export function DashboardPage() {
               <p className="emptyState">No business breakdown data for these filters.</p>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={businessReportData}>
+            <ResponsiveContainer width="100%" height={isNarrowViewport ? 240 : 280}>
+              <BarChart data={businessReportData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" />
-                <YAxis />
+                <XAxis dataKey="label" tick={narrowAxisTick} />
+                <YAxis
+                  tick={narrowAxisTick}
+                  width={isNarrowViewport ? 44 : 60}
+                  tickFormatter={compactCurrencyTickFormatter}
+                />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
@@ -1126,7 +1070,9 @@ export function DashboardPage() {
                     return formatDashboardAmount(v)
                   }}
                 />
-                <Legend />
+                {!isNarrowViewport && (
+                  <Legend verticalAlign="bottom" align="center" />
+                )}
                 <Bar dataKey="netSpend" name="Net spend">
                   {businessReportData.map((entry) => (
                     <Cell key={entry.label} fill={entry.fill} />
@@ -1148,11 +1094,21 @@ export function DashboardPage() {
           {monthlyChartData.length === 0 ? (
             !loading ? <p className="muted">No transactions in this range.</p> : null
           ) : (
-            <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={monthlyChartData}>
+            <ResponsiveContainer width="100%" height={isNarrowViewport ? 280 : 320}>
+              <LineChart data={monthlyChartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
+                <XAxis
+                  dataKey="month"
+                  tick={narrowAxisTick}
+                  tickFormatter={monthTickFormatter}
+                  interval={isNarrowViewport ? 'preserveStartEnd' : 0}
+                  minTickGap={isNarrowViewport ? 12 : 5}
+                />
+                <YAxis
+                  tick={narrowAxisTick}
+                  width={isNarrowViewport ? 44 : 60}
+                  tickFormatter={compactCurrencyTickFormatter}
+                />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
@@ -1163,7 +1119,11 @@ export function DashboardPage() {
                     return formatMoney(v, String(name))
                   }}
                 />
-                <Legend />
+                <Legend
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={isNarrowViewport ? { fontSize: 11 } : undefined}
+                />
                 {monthlyLineKeys.map((c, i) => (
                   <Line
                     key={c}
