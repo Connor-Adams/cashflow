@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Alert, type AlertVariant } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -284,6 +284,37 @@ export function TransactionsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
   const receiptFileRef = useRef<HTMLInputElement>(null)
   const loadRequestRef = useRef(0)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Consume URL query params on navigation (e.g. when arriving from the
+  // Dashboard category chart drill-down). Filters from the URL take precedence
+  // over session state. After applying, we clear the params so manual filter
+  // edits do not fight the URL on subsequent renders.
+  useEffect(() => {
+    const urlCategory = searchParams.get('category')
+    const urlCurrency = searchParams.get('currency')
+    const urlDateFrom = searchParams.get('dateFrom')
+    const urlDateTo = searchParams.get('dateTo')
+    const hasAny =
+      urlCategory != null ||
+      urlCurrency != null ||
+      urlDateFrom != null ||
+      urlDateTo != null
+    if (!hasAny) return
+    if (urlCategory != null) setCategoryFilter(urlCategory)
+    if (urlCurrency != null) setCurrency(urlCurrency.toUpperCase().slice(0, 3))
+    if (urlDateFrom != null) setDateFrom(urlDateFrom)
+    if (urlDateTo != null) setDateTo(urlDateTo)
+    setPage(1)
+    setSearchParams({}, { replace: true })
+  }, [
+    searchParams,
+    setSearchParams,
+    setCategoryFilter,
+    setCurrency,
+    setDateFrom,
+    setDateTo,
+  ])
 
   useEffect(() => {
     void getJson<Account[]>('/api/accounts')
