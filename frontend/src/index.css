@@ -40,23 +40,131 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
+
+  /* Semantic text colors (Wander naming) */
+  --color-primary: var(--foreground);
+  --color-secondary: var(--muted-foreground);
+  --color-destructive: var(--destructive);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
+
+  /* Brand alias — cashflow green; use for accent UI, badges, etc. */
+  --color-brand: var(--primary);
+  --color-brand-foreground: var(--primary-foreground);
+
+  /* Kept for backward compat with remaining shadcn components */
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary-foreground: var(--foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  /* Border semantic tokens — must cover all border-* classes in use */
+  --color-border-primary: var(--border);
+  --color-border-secondary: var(--input);
+  --color-border-ring: var(--ring);
+  --color-border-destructive: var(--destructive);
+  --color-border-transparent: transparent;
+  --color-border-border: var(--border);
+  --color-border-input: var(--input);
+
+  /* Button semantic tokens (Wander naming, cashflow palette) */
+  --color-button-primary: var(--primary);
+  --color-text-button-primary: var(--primary-foreground);
+  --color-button-hover-primary: oklch(0.70 0.09 151);
+  --color-button-focus-primary: oklch(0.70 0.09 151);
+
+  --color-button-secondary: var(--secondary);
+  --color-button-hover-secondary: oklch(0.28 0.02 125);
+  --color-button-focus-secondary: oklch(0.28 0.02 125);
+
+  --color-button-outline: oklch(0 0 0 / 0);
+  --color-button-hover-outline: var(--secondary);
+  --color-button-focus-outline: var(--secondary);
+
+  --color-button-ghost: oklch(0 0 0 / 0);
+  --color-button-hover-ghost: var(--secondary);
+  --color-button-focus-ghost: var(--secondary);
+
+  --color-button-destructive: oklch(0.66 0.19 27 / 0.12);
+  --color-button-hover-destructive: oklch(0.66 0.19 27 / 0.20);
+  --color-button-focus-destructive: oklch(0.66 0.19 27 / 0.20);
+
+  --color-button-checkout: var(--primary);
+  --color-button-hover-checkout: oklch(0.70 0.09 151);
+  --color-button-focus-checkout: oklch(0.70 0.09 151);
+
+  /* Typography scale (Wander DS) */
+  --text-display-lg: 3.25rem;
+  --text-display-lg--line-height: 3.5rem;
+  --text-display-lg--letter-spacing: -0.02em;
+  --text-display: 2.25rem;
+  --text-display--line-height: 2.5rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-display-sm: 2rem;
+  --text-display-sm--line-height: 2rem;
+  --text-display-sm--letter-spacing: -0.02em;
+  --text-headline-lg: 1.875rem;
+  --text-headline-lg--line-height: 2.25rem;
+  --text-headline-lg--letter-spacing: -0.01em;
+  --text-headline: 1.5rem;
+  --text-headline--line-height: 1.75rem;
+  --text-headline--letter-spacing: -0.01em;
+  --text-headline-sm: 1rem;
+  --text-headline-sm--line-height: 1.25rem;
+  --text-headline-sm--letter-spacing: 0em;
+  --text-body-lg: 1rem;
+  --text-body-lg--line-height: 1.25rem;
+  --text-body-lg--letter-spacing: 0em;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.0625rem;
+  --text-body--letter-spacing: 0em;
+  --text-body-sm: 0.75rem;
+  --text-body-sm--line-height: 0.9375rem;
+  --text-body-sm--letter-spacing: 0em;
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+}
+
+/* Button color utility — auto-wires bg + text + hover/focus states */
+@utility bg-button-* {
+  background-color: --value(--color-button-*);
+  color: --value(--color-text-button-*);
+  &:hover {
+    background-color: --value(--color-button-hover-*);
+  }
+  &:focus {
+    background-color: --value(--color-button-focus-*);
+  }
+}
+
+/* Border color utility — maps border-{name} to --color-border-{name} */
+@utility border-* {
+  border-color: --value(--color-border-*);
+}
+
+/* Touch target expander for unstyled/icon buttons */
+@utility touch-hitbox {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    display: block;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    min-height: 44px;
+    min-width: 44px;
+    z-index: 9999;
+  }
 }
 
 :root {

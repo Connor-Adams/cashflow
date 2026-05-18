@@ -715,7 +715,7 @@ export function DashboardPage() {
             <Button
               key={range.key}
               type="button"
-              variant={activeQuickRange === range.key ? 'default' : 'secondary'}
+              variant={activeQuickRange === range.key ? 'primary' : 'secondary'}
               size="sm"
               className="quickFilterButton"
               aria-pressed={activeQuickRange === range.key}

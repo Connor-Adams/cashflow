@@ -1,36 +1,48 @@
-import * as React from 'react'
 import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'
+import type { ComponentProps } from 'react'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  "inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium outline-offset-2 transition-colors focus-visible:outline-1 focus-visible:outline-button-primary disabled:pointer-events-none disabled:opacity-30 aria-invalid:outline-destructive [&_svg:not([class*='size-'])]:size-5 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default:
-          'border border-primary/50 bg-primary text-primary-foreground shadow-sm hover:bg-primary/90',
-        destructive:
-          'border border-destructive/40 bg-destructive text-white shadow-sm hover:bg-destructive/90',
-        outline:
-          'border border-input bg-background/70 shadow-sm hover:border-primary/40 hover:bg-accent hover:text-accent-foreground',
-        secondary:
-          'border border-border bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
-        ghost: 'border border-transparent hover:bg-accent hover:text-accent-foreground',
-        link: 'border border-transparent text-primary underline-offset-4 hover:underline',
+        primary: 'bg-button-primary',
+        secondary: 'bg-button-secondary text-primary',
+        outline: 'border border-secondary bg-button-outline text-primary',
+        ghost: 'bg-button-ghost text-primary',
+        destructive: 'bg-button-destructive text-destructive focus-visible:outline-destructive',
+        checkout: 'bg-button-checkout text-white',
+        link: 'h-auto rounded-none bg-transparent p-0! font-normal! text-blue-500 text-body! underline-offset-4 hover:underline hover:text-blue-600',
+        unstyled: 'touch-hitbox h-auto bg-transparent p-0!',
       },
       size: {
-        default: 'h-9 px-4 py-2',
-        sm: 'h-8 rounded-md px-3 text-xs',
-        lg: 'h-10 rounded-md px-6',
-        icon: 'size-9',
+        sm: 'h-8 px-3 text-body has-[>svg]:pl-2',
+        md: 'h-10 px-4 text-body has-[>svg]:pl-3',
+        lg: 'h-12 px-5 text-body-lg has-[>svg]:pl-4 [&_svg:not([class*="size-"])]:size-5!',
+        'icon-sm': 'size-8',
+        'icon-md': 'size-10',
+        'icon-lg': 'size-12 [&_svg:not([class*="size-"])]:size-5!',
       },
     },
+    compoundVariants: [
+      {
+        variant: 'link',
+        size: ['sm', 'md', 'lg', 'icon-sm', 'icon-md', 'icon-lg'],
+        className: 'h-auto',
+      },
+      {
+        variant: 'unstyled',
+        size: ['sm', 'md', 'lg', 'icon-sm', 'icon-md', 'icon-lg'],
+        className: 'h-auto',
+      },
+    ],
     defaultVariants: {
-      variant: 'default',
-      size: 'default',
+      variant: 'primary',
+      size: 'md',
     },
-  }
+  },
 )
 
 function Button({
@@ -39,7 +51,7 @@ function Button({
   size,
   asChild = false,
   ...props
-}: React.ComponentProps<'button'> &
+}: ComponentProps<'button'> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
   }) {
@@ -47,8 +59,8 @@ function Button({
 
   return (
     <Comp
-      data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      data-slot="button"
       {...props}
     />
   )

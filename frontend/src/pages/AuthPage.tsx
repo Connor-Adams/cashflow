@@ -58,7 +58,7 @@ export function AuthPage() {
         <div className="authTabs" role="tablist">
           <Button
             type="button"
-            variant={mode === 'login' ? 'default' : 'secondary'}
+            variant={mode === 'login' ? 'primary' : 'secondary'}
             className={mode === 'login' ? 'isActive' : ''}
             onClick={() => setMode('login')}
           >
@@ -67,7 +67,7 @@ export function AuthPage() {
           </Button>
           <Button
             type="button"
-            variant={mode === 'register' ? 'default' : 'secondary'}
+            variant={mode === 'register' ? 'primary' : 'secondary'}
             className={mode === 'register' ? 'isActive' : ''}
             onClick={() => setMode('register')}
           >
