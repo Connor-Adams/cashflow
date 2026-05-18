@@ -142,36 +142,47 @@ function inferAmountDirection(
   return null;
 }
 
+function parseRawNumber(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  let s = String(raw).replace(/,/g, '').trim();
+  if (s.startsWith('(') && s.endsWith(')')) s = `-${s.slice(1, -1)}`;
+  const n = parseFloat(s);
+  return Number.isNaN(n) ? null : n;
+}
+
 function normalizeAmount(
   rawAmount: unknown,
   convention: CsvProfile['amountConvention'],
   direction: AmountDirection | null
 ): number | null {
-  if (rawAmount == null || rawAmount === '') return null;
-  let s = String(rawAmount).replace(/,/g, '').trim();
-  if (s.startsWith('(') && s.endsWith(')')) {
-    s = `-${s.slice(1, -1)}`;
-  }
-  const n = parseFloat(s);
-  if (Number.isNaN(n)) return null;
-  if (direction === 'credit') {
-    return Math.abs(n);
-  }
-  if (direction === 'debit') {
-    return -Math.abs(n);
-  }
-  if (convention === 'charges_negative') {
-    if (n > 0) return -Math.abs(n);
-    return n;
-  }
-  if (convention === 'charges_positive') {
-    if (n < 0) return Math.abs(n);
-    return n;
-  }
-  if (convention === 'invert_sign') {
-    return -n;
-  }
+  const n = parseRawNumber(rawAmount);
+  if (n === null) return null;
+  if (direction === 'credit') return Math.abs(n);
+  if (direction === 'debit') return -Math.abs(n);
+  if (convention === 'charges_negative') return n > 0 ? -Math.abs(n) : n;
+  if (convention === 'charges_positive') return n < 0 ? Math.abs(n) : n;
+  if (convention === 'invert_sign') return -n;
+  // passthrough — amount is already signed correctly in source
   return n;
+}
+
+/**
+ * Resolve amount from split debit/credit columns.
+ * Returns null if neither column has a non-zero value (treated as missing).
+ */
+function resolveSplitAmount(
+  row: Record<string, string>,
+  headerMap: Record<string, string>,
+  debitHeaders: string[],
+  creditHeaders: string[]
+): number | null {
+  const debitRaw = pickColumn(row, headerMap, debitHeaders);
+  const creditRaw = pickColumn(row, headerMap, creditHeaders);
+  const debit = parseRawNumber(debitRaw);
+  const credit = parseRawNumber(creditRaw);
+  if (debit != null && debit !== 0) return -Math.abs(debit);
+  if (credit != null && credit !== 0) return Math.abs(credit);
+  return null;
 }
 
 export type MappedRow =
@@ -204,13 +215,17 @@ export function mapCsvRow(
   const currencyRaw = pickColumn(row, headerMap, profile.currencyHeaders ?? []);
   const refRaw = pickColumn(row, headerMap, profile.referenceHeaders ?? []);
 
+  const hasSplitColumns =
+    (profile.debitAmountHeaders?.length ?? 0) > 0 ||
+    (profile.creditAmountHeaders?.length ?? 0) > 0;
+  const hasAmountRaw = amountRaw != null && String(amountRaw).trim() !== '';
+
   const missing =
     dateRaw == null ||
     String(dateRaw).trim() === '' ||
     merchantRaw == null ||
     String(merchantRaw).trim() === '' ||
-    amountRaw == null ||
-    String(amountRaw).trim() === '';
+    (!hasAmountRaw && !hasSplitColumns);
   if (missing) {
     return { error: 'Missing required columns' };
   }
@@ -224,14 +239,26 @@ export function mapCsvRow(
   const d = String(parsedDate.getDate()).padStart(2, '0');
   const dateOnly = `${y}-${m}-${d}`;
 
-  const amountDirection = inferAmountDirection(row, headerMap);
-  const amount = normalizeAmount(
-    amountRaw,
-    profile.amountConvention,
-    amountDirection
-  );
+  // Split debit/credit columns take priority over single-column amount.
+  let amount: number | null = null;
+  if (hasSplitColumns) {
+    amount = resolveSplitAmount(
+      row,
+      headerMap,
+      profile.debitAmountHeaders ?? [],
+      profile.creditAmountHeaders ?? []
+    );
+    // Fall back to single-column if split columns are both empty (e.g. balance-only row).
+    if (amount === null && hasAmountRaw) {
+      const dir = inferAmountDirection(row, headerMap);
+      amount = normalizeAmount(amountRaw, profile.amountConvention, dir);
+    }
+  } else {
+    const dir = inferAmountDirection(row, headerMap);
+    amount = normalizeAmount(amountRaw, profile.amountConvention, dir);
+  }
   if (amount == null) {
-    return { error: `Invalid amount: ${amountRaw}` };
+    return { error: `Invalid amount: ${amountRaw ?? '(split columns)'}` };
   }
 
   const merchantClean = normalizeMerchant(merchantRaw);
