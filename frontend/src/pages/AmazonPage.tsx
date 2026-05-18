@@ -9,6 +9,11 @@ import {
   Upload,
   X,
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { deleteReq, getJson, patchJson, postFormData, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 
@@ -280,11 +285,11 @@ export function AmazonPage() {
           <p className="muted">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
         </div>
         <div className="amazonActionRow">
-          <button type="button" onClick={runMatching} disabled={loading}>
+          <Button type="button" variant="secondary" onClick={runMatching} disabled={loading}>
             <RefreshCw aria-hidden="true" />
             Run matching
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={() => void runAiCategorization()}
             disabled={aiCategorizing}
@@ -292,7 +297,7 @@ export function AmazonPage() {
           >
             <Sparkles aria-hidden="true" />
             {aiCategorizing ? 'Categorizing...' : 'AI categorize'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -303,11 +308,19 @@ export function AmazonPage() {
           <h2>Amazon Import</h2>
           <p className="muted">Upload an Amazon report CSV. Re-uploading the same rows is safe.</p>
         </div>
-        <input ref={fileRef} type="file" accept=".csv,text/csv" />
-        <button type="submit" disabled={loading}>
+        <Label htmlFor="amazonImportFile">
+          CSV file
+          <Input
+            ref={fileRef}
+            id="amazonImportFile"
+            type="file"
+            accept=".csv,text/csv"
+          />
+        </Label>
+        <Button type="submit" disabled={loading}>
           <Upload aria-hidden="true" />
           Upload CSV
-        </button>
+        </Button>
       </form>
 
       {summary && (
@@ -338,46 +351,49 @@ export function AmazonPage() {
                       <span className="muted">{categoryPreview(link.order)}</span>
                     </div>
                     <div className="amazonActionRow">
-                      <button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
+                      <Button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
                         <Check aria-hidden="true" />
                         Accept
-                      </button>
-                      <button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/reject`)} disabled={loading}>
+                      </Button>
+                      <Button type="button" variant="secondary" onClick={() => void linkAction(`/api/amazon/links/${link.id}/reject`)} disabled={loading}>
                         <X aria-hidden="true" />
                         Reject
-                      </button>
-                      <button type="button" onClick={() => link.order && setSelectedOrderId(link.order.id)}>
+                      </Button>
+                      <Button type="button" variant="ghost" onClick={() => link.order && setSelectedOrderId(link.order.id)}>
                         <Search aria-hidden="true" />
                         View/Edit
-                      </button>
-                      <button type="button" className="btnDanger" onClick={() => void unlink(link.id)} disabled={loading}>
+                      </Button>
+                      <Button type="button" variant="destructive" onClick={() => void unlink(link.id)} disabled={loading}>
                         <Trash2 aria-hidden="true" />
                         Unlink
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
                 <div className="amazonManualLink">
-                  <select
+                  <NativeSelect
+                    aria-label={`Manually link order to ${txn.merchantClean}`}
                     value={manualOrderByTxn[txn.id] ?? ''}
                     onChange={(event) => setManualOrderByTxn((prev) => ({ ...prev, [txn.id]: event.target.value }))}
                   >
-                    <option value="">Manually link order...</option>
+                    <NativeSelectOption value="">Manually link order...</NativeSelectOption>
                     {orders.map((order) => (
-                      <option key={order.id} value={order.id}>
+                      <NativeSelectOption key={order.id} value={order.id}>
                         #{order.id} {order.orderDate ?? order.shipmentDate ?? 'No date'} {order.total ? formatMoney(Number(order.total), order.currency) : ''}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </select>
-                  <button type="button" onClick={() => void manualLink(txn.id)} disabled={loading || !manualOrderByTxn[txn.id]}>
+                  </NativeSelect>
+                  <Button type="button" onClick={() => void manualLink(txn.id)} disabled={loading || !manualOrderByTxn[txn.id]}>
                     <LinkIcon aria-hidden="true" />
                     Link
-                  </button>
+                  </Button>
                 </div>
               </div>
             </article>
           ))}
-          {txns.length === 0 && <p className="muted">No Amazon-like transactions found.</p>}
+          {txns.length === 0 && (
+            <EmptyState title="No Amazon-like transactions found." />
+          )}
         </div>
       </section>
 
@@ -396,7 +412,11 @@ export function AmazonPage() {
                   <td>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</td>
                   <td>{categoryPreview(order)}</td>
                   <td>{itemPreview(order)}</td>
-                  <td><button type="button" onClick={() => setSelectedOrderId(order.id)}>View/Edit</button></td>
+                  <td>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedOrderId(order.id)}>
+                      View/Edit
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -413,7 +433,7 @@ export function AmazonPage() {
                 {selectedOrder.vendorOrderId ?? `Order #${selectedOrder.id}`} · {selectedOrder.orderDate ?? selectedOrder.shipmentDate ?? 'No date'}
               </p>
             </div>
-            <button
+            <Button
               type="button"
               onClick={() => void runAiCategorization(selectedOrder.id)}
               disabled={aiCategorizing}
@@ -421,7 +441,7 @@ export function AmazonPage() {
             >
               <Sparkles aria-hidden="true" />
               {aiCategorizing ? 'Categorizing...' : 'AI categorize order'}
-            </button>
+            </Button>
           </div>
           <div className="tableWrap">
             <table className="table">
@@ -432,15 +452,26 @@ export function AmazonPage() {
                 {(selectedOrder.items ?? []).map((item) => (
                   <tr key={item.id}>
                     <td>
-                      <input value={item.title} onChange={(event) => void updateItem(item, { title: event.target.value })} />
+                      <Input
+                        aria-label="Item title"
+                        value={item.title}
+                        onChange={(event) => void updateItem(item, { title: event.target.value })}
+                      />
                     </td>
                     <td>
-                      <select value={item.inferredCategory ?? 'Uncategorized'} onChange={(event) => void updateItem(item, { inferredCategory: event.target.value })}>
-                        {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-                      </select>
+                      <NativeSelect
+                        aria-label="Item category"
+                        value={item.inferredCategory ?? 'Uncategorized'}
+                        onChange={(event) => void updateItem(item, { inferredCategory: event.target.value })}
+                      >
+                        {categories.map((cat) => (
+                          <NativeSelectOption key={cat} value={cat}>{cat}</NativeSelectOption>
+                        ))}
+                      </NativeSelect>
                     </td>
                     <td>
-                      <input
+                      <Input
+                        aria-label="Business use percent"
                         type="number"
                         min="0"
                         max="100"
@@ -449,7 +480,8 @@ export function AmazonPage() {
                       />
                     </td>
                     <td>
-                      <input
+                      <Input
+                        aria-label="Item total price"
                         type="number"
                         step="0.01"
                         value={item.totalPrice ?? ''}
