@@ -77,12 +77,23 @@ type AiCategorizeResult = {
   }>
 }
 
-const confidenceLabel = (confidence: string) => {
-  const n = Number(confidence)
+// Confidence values are stored as DECIMAL(5,2) strings on a 0–100 scale
+// (see backend/src/amazon/matcher.ts and aiCategorizeAmazonItems.ts:clampConfidence).
+// Number(confidence) is already the whole-percent value — no multiplier needed.
+const confidenceLabel = (n: number) => {
   if (n >= 90) return 'High'
   if (n >= 70) return 'Medium'
   return 'Low'
 }
+
+const confidenceColor = (n: number): string => {
+  if (n >= 90) return 'var(--primary)'
+  if (n >= 70) return 'var(--chart-2)'
+  return 'var(--muted-foreground)'
+}
+
+const AI_DISABLED_TITLE =
+  'AI categorization unavailable — OpenAI not configured for this session (check OPENAI_API_KEY or whether you are using the demo account)'
 
 function itemPreview(order?: AmazonOrder): string {
   const items = order?.items ?? []
@@ -292,8 +303,13 @@ export function AmazonPage() {
           <Button
             type="button"
             onClick={() => void runAiCategorization()}
-            disabled={aiCategorizing}
-            title={aiEnabled ? 'Categorize imported Amazon items with AI' : 'Click to see why AI is unavailable'}
+            disabled={aiCategorizing || (aiStatusLoaded && !aiEnabled)}
+            title={
+              aiStatusLoaded && !aiEnabled
+                ? AI_DISABLED_TITLE
+                : 'Categorize imported Amazon items with AI'
+            }
+            aria-disabled={aiStatusLoaded && !aiEnabled ? true : undefined}
           >
             <Sparkles aria-hidden="true" />
             {aiCategorizing ? 'Categorizing...' : 'AI categorize'}
@@ -345,7 +361,15 @@ export function AmazonPage() {
                 {(txn.orderLinks ?? []).map((link) => (
                   <div key={link.id} className="amazonSuggestedLink">
                     <div>
-                      <strong>{confidenceLabel(link.confidence)} · {Number(link.confidence).toFixed(0)}</strong>
+                      {(() => {
+                        const pct = Math.round(Number(link.confidence))
+                        const valid = Number.isFinite(pct)
+                        return (
+                          <strong style={{ color: valid ? confidenceColor(pct) : undefined }}>
+                            {valid ? `${pct}% (${confidenceLabel(pct)})` : '—'}
+                          </strong>
+                        )
+                      })()}
                       <span className="muted">{link.status} · {link.matchReason}</span>
                       <span>{itemPreview(link.order)}</span>
                       <span className="muted">{categoryPreview(link.order)}</span>
@@ -436,8 +460,13 @@ export function AmazonPage() {
             <Button
               type="button"
               onClick={() => void runAiCategorization(selectedOrder.id)}
-              disabled={aiCategorizing}
-              title={aiEnabled ? 'Categorize this order with AI' : 'Click to see why AI is unavailable'}
+              disabled={aiCategorizing || (aiStatusLoaded && !aiEnabled)}
+              title={
+                aiStatusLoaded && !aiEnabled
+                  ? AI_DISABLED_TITLE
+                  : 'Categorize this order with AI'
+              }
+              aria-disabled={aiStatusLoaded && !aiEnabled ? true : undefined}
             >
               <Sparkles aria-hidden="true" />
               {aiCategorizing ? 'Categorizing...' : 'AI categorize order'}
@@ -488,7 +517,18 @@ export function AmazonPage() {
                         onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
                       />
                     </td>
-                    <td>{item.confidence ? `${Number(item.confidence).toFixed(0)}%` : '—'}</td>
+                    <td>
+                      {(() => {
+                        if (item.confidence == null || item.confidence === '') return '—'
+                        const pct = Math.round(Number(item.confidence))
+                        if (!Number.isFinite(pct)) return '—'
+                        return (
+                          <span style={{ color: confidenceColor(pct) }}>
+                            {pct}% ({confidenceLabel(pct)})
+                          </span>
+                        )
+                      })()}
+                    </td>
                   </tr>
                 ))}
               </tbody>
