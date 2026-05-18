@@ -15,6 +15,7 @@ import {
   useConfirm,
 } from './dialog'
 import { EmptyState } from './empty-state'
+import { FilterBar, type QuickRange } from './filter-bar'
 import { Label } from './label'
 import { NativeSelect, NativeSelectOption } from './native-select'
 import { PageHeader } from './page-header'
@@ -120,6 +121,26 @@ function dispatchMouseDown(target: EventTarget) {
 function dispatchClick(target: EventTarget) {
   const event = new MouseEvent('click', { bubbles: true, cancelable: true })
   target.dispatchEvent(event)
+}
+
+// React tracks input/select values via a private tracker; to make React fire
+// its synthetic onChange we must set the value through the native prototype
+// setter (so React's tracker sees the change) and then dispatch an `input`
+// event. See React's ReactDOMInput#updateValueIfChanged.
+function setNativeValue(
+  element: HTMLInputElement | HTMLSelectElement,
+  value: string
+) {
+  const proto =
+    element instanceof HTMLSelectElement
+      ? HTMLSelectElement.prototype
+      : HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+  if (setter) {
+    setter.call(element, value)
+  } else {
+    element.value = value
+  }
 }
 
 // Captures the useToast() API by rendering a ToastProvider with a Capture child
@@ -457,5 +478,159 @@ describe('Skeleton primitive', () => {
     const cellMatches = html.match(/<td/g) ?? []
     expect(cellMatches.length).toBe(3)
     expect(html).toContain('animate-pulse')
+  })
+})
+
+describe('FilterBar primitive', () => {
+  let harness: Harness
+
+  beforeEach(() => {
+    harness = createHarness()
+  })
+
+  afterEach(async () => {
+    await harness.unmount()
+  })
+
+  const sampleRanges: QuickRange[] = [
+    { key: '30d', label: '30 days', from: '2025-04-17', to: '2025-05-17' },
+    { key: '90d', label: '90 days', from: '2025-02-16', to: '2025-05-17' },
+    { key: 'all', label: 'All time', from: '', to: '' },
+  ]
+
+  it('renders currency select, date inputs, and quick-range buttons', () => {
+    const html = renderToStaticMarkup(
+      <FilterBar
+        currency="CAD"
+        onCurrencyChange={() => {}}
+        availableCurrencies={['CAD', 'USD']}
+        dateFrom="2025-01-01"
+        dateTo="2025-05-17"
+        onDateChange={() => {}}
+        quickRanges={sampleRanges}
+      />
+    )
+
+    expect(html).toContain('data-slot="filter-bar"')
+    expect(html).toContain('data-slot="native-select"')
+    expect(html).toContain('All currencies')
+    expect(html).toContain('CAD')
+    expect(html).toContain('USD')
+    // Two date inputs (from + to)
+    const dateMatches = html.match(/type="date"/g) ?? []
+    expect(dateMatches.length).toBe(2)
+    expect(html).toContain('30 days')
+    expect(html).toContain('90 days')
+    expect(html).toContain('All time')
+  })
+
+  it('renders a free-text currency input when availableCurrencies is omitted', () => {
+    const html = renderToStaticMarkup(
+      <FilterBar
+        currency="CAD"
+        onCurrencyChange={() => {}}
+        dateFrom=""
+        dateTo=""
+        onDateChange={() => {}}
+      />
+    )
+    expect(html).toContain('data-slot="filter-bar"')
+    expect(html).not.toContain('data-slot="native-select"')
+    expect(html).toContain('placeholder="CAD"')
+  })
+
+  it('fires onCurrencyChange when the select changes', async () => {
+    const onCurrencyChange = vi.fn()
+    await harness.render(
+      <FilterBar
+        currency="CAD"
+        onCurrencyChange={onCurrencyChange}
+        availableCurrencies={['CAD', 'USD']}
+        dateFrom=""
+        dateTo=""
+        onDateChange={() => {}}
+      />
+    )
+    const select = harness.container.querySelector(
+      '[data-slot="native-select"]'
+    ) as HTMLSelectElement | null
+    expect(select).not.toBeNull()
+    await act(async () => {
+      setNativeValue(select!, 'USD')
+      select!.dispatchEvent(new Event('input', { bubbles: true }))
+      select!.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(onCurrencyChange).toHaveBeenCalledWith('USD')
+  })
+
+  it('fires onDateChange with both values when a date input changes', async () => {
+    const onDateChange = vi.fn()
+    await harness.render(
+      <FilterBar
+        currency="CAD"
+        onCurrencyChange={() => {}}
+        availableCurrencies={['CAD']}
+        dateFrom=""
+        dateTo="2025-05-17"
+        onDateChange={onDateChange}
+      />
+    )
+    const dateInputs = harness.container.querySelectorAll(
+      'input[type="date"]'
+    ) as NodeListOf<HTMLInputElement>
+    expect(dateInputs.length).toBe(2)
+    // Change the "from" input
+    await act(async () => {
+      setNativeValue(dateInputs[0], '2025-01-01')
+      dateInputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+      dateInputs[0].dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(onDateChange).toHaveBeenCalledWith('2025-01-01', '2025-05-17')
+  })
+
+  it('fires onDateChange with the range when a quick-range button is clicked', async () => {
+    const onDateChange = vi.fn()
+    await harness.render(
+      <FilterBar
+        currency="CAD"
+        onCurrencyChange={() => {}}
+        availableCurrencies={['CAD']}
+        dateFrom=""
+        dateTo=""
+        onDateChange={onDateChange}
+        quickRanges={sampleRanges}
+      />
+    )
+    const buttons = Array.from(
+      harness.container.querySelectorAll('button')
+    ) as HTMLButtonElement[]
+    const ninetyDays = buttons.find((b) => b.textContent === '90 days')
+    expect(ninetyDays).not.toBeUndefined()
+    await act(async () => {
+      dispatchClick(ninetyDays!)
+    })
+    expect(onDateChange).toHaveBeenCalledWith('2025-02-16', '2025-05-17')
+  })
+
+  it('marks the matching quick-range button as aria-pressed', async () => {
+    await harness.render(
+      <FilterBar
+        currency="CAD"
+        onCurrencyChange={() => {}}
+        availableCurrencies={['CAD']}
+        dateFrom="2025-02-16"
+        dateTo="2025-05-17"
+        onDateChange={() => {}}
+        quickRanges={sampleRanges}
+      />
+    )
+    const buttons = Array.from(
+      harness.container.querySelectorAll('button')
+    ) as HTMLButtonElement[]
+    const byLabel = (label: string) =>
+      buttons.find((b) => b.textContent === label)
+    expect(byLabel('90 days')?.getAttribute('aria-pressed')).toBe('true')
+    expect(byLabel('30 days')?.getAttribute('aria-pressed')).toBe('false')
+    expect(byLabel('All time')?.getAttribute('aria-pressed')).toBe('false')
   })
 })

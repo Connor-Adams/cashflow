@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
@@ -51,7 +53,7 @@ export function ReportsPage() {
     () => summaryQueryString({ currency, dateFrom, dateTo }),
     [currency, dateFrom, dateTo]
   )
-  const quickRanges = useMemo(
+  const quickRanges = useMemo<QuickRange[]>(
     () => [
       { key: '30d', label: '30 days', ...getRelativeDateRange(30) },
       { key: '90d', label: '90 days', ...getRelativeDateRange(90) },
@@ -59,12 +61,6 @@ export function ReportsPage() {
       { key: 'all', label: 'All time', from: '', to: '' },
     ],
     []
-  )
-  const activeQuickRange = useMemo(
-    () =>
-      quickRanges.find((range) => range.from === dateFrom && range.to === dateTo)?.key ??
-      null,
-    [quickRanges, dateFrom, dateTo]
   )
   const hasActiveFilters =
     currency !== DEFAULT_REPORTS_CURRENCY || Boolean(dateFrom) || Boolean(dateTo)
@@ -110,6 +106,19 @@ export function ReportsPage() {
     return Array.from(found).sort()
   }, [partner, business, currency])
 
+  // Unfiltered set of currencies present in the loaded data — used to
+  // populate the currency picker so changing selection does not collapse
+  // the options. The currently selected currency and the default are
+  // always included so the picker stays usable even before data loads.
+  const availableCurrencies = useMemo(() => {
+    const found = new Set<string>()
+    partner?.byCurrency.forEach((row) => found.add(row.currency))
+    business?.byCurrency.forEach((row) => found.add(row.currency))
+    found.add(DEFAULT_REPORTS_CURRENCY)
+    if (currency) found.add(currency)
+    return Array.from(found).sort()
+  }, [partner, business, currency])
+
   const singleCurrency = currency || (reportCurrencies.length === 1 ? reportCurrencies[0] : '')
   const partnerMineTotal = useMemo(
     () =>
@@ -152,66 +161,40 @@ export function ReportsPage() {
         description="Partner balances and business totals stay separated by currency and time window."
       />
       <section className="card reportsFilters">
-        <div className="row">
-          <label>
-            Currency{' '}
-            <input
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-              maxLength={3}
-              placeholder="CAD"
-              style={{ width: 90 }}
-            />
-          </label>
-          <label>
-            From{' '}
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
-          </label>
-          <label>
-            To{' '}
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
-          </label>
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={() => {
-                setCurrency(DEFAULT_REPORTS_CURRENCY)
-                setDateFrom('')
-                setDateTo('')
-              }}
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-        <div className="quickFilters" aria-label="Quick report date ranges">
-          {quickRanges.map((range) => (
-            <button
-              key={range.key}
-              type="button"
-              className="quickFilterButton"
-              aria-pressed={activeQuickRange === range.key}
-              onClick={() => {
-                setDateFrom(range.from)
-                setDateTo(range.to)
-              }}
-            >
-              {range.label}
-            </button>
-          ))}
-        </div>
-        <p className="muted" style={{ marginBottom: 0 }}>
-          Showing <strong>{currency || 'all currencies'}</strong> for{' '}
-          <strong>{activeRangeLabel}</strong>.
-        </p>
+        <FilterBar
+          currency={currency}
+          onCurrencyChange={setCurrency}
+          availableCurrencies={availableCurrencies}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateChange={(from, to) => {
+            setDateFrom(from)
+            setDateTo(to)
+          }}
+          quickRanges={quickRanges}
+          quickRangesLabel="Quick report date ranges"
+          actions={
+            hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCurrency(DEFAULT_REPORTS_CURRENCY)
+                  setDateFrom('')
+                  setDateTo('')
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : null
+          }
+          caption={
+            <p className="muted" style={{ marginBottom: 0 }}>
+              Showing <strong>{currency || 'all currencies'}</strong> for{' '}
+              <strong>{activeRangeLabel}</strong>.
+            </p>
+          }
+        />
       </section>
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading…</p>}

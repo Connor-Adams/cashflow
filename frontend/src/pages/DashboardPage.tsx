@@ -15,7 +15,7 @@ import {
 import { FilterX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -623,7 +623,7 @@ export function DashboardPage() {
     return `Up to ${dateTo}`
   }, [dateFrom, dateTo])
 
-  const quickRanges = useMemo(
+  const quickRanges = useMemo<QuickRange[]>(
     () => [
       { key: '3m', label: '3 months', ...getRollingMonthRange(3) },
       { key: '6m', label: '6 months', ...getRollingMonthRange(6) },
@@ -633,12 +633,6 @@ export function DashboardPage() {
     []
   )
 
-  const activeQuickRange = useMemo(
-    () =>
-      quickRanges.find((range) => range.from === dateFrom && range.to === dateTo)?.key ??
-      null,
-    [quickRanges, dateFrom, dateTo]
-  )
   const hasActiveFilters =
     currency !== DEFAULT_DASHBOARD_CURRENCY ||
     dateFrom !== defaultRange.from ||
@@ -663,74 +657,42 @@ export function DashboardPage() {
 
       <Card className="dashboardFilters">
         <CardContent className="p-0">
-        <div className="row">
-          <label>
-            Currency{' '}
-            <select
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-            >
-              <option value="">All (category chart may mix currencies)</option>
-              {currencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            From{' '}
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
-          </label>
-          <label>
-            To{' '}
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
-          </label>
-          {hasActiveFilters && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setCurrency(DEFAULT_DASHBOARD_CURRENCY)
-                setDateFrom(defaultRange.from)
-                setDateTo(defaultRange.to)
-              }}
-            >
-              <FilterX aria-hidden="true" />
-              Clear filters
-            </Button>
-          )}
-        </div>
-        <div className="quickFilters" aria-label="Quick date ranges">
-          {quickRanges.map((range) => (
-            <Button
-              key={range.key}
-              type="button"
-              variant={activeQuickRange === range.key ? 'primary' : 'secondary'}
-              size="sm"
-              className="quickFilterButton"
-              aria-pressed={activeQuickRange === range.key}
-              onClick={() => {
-                setDateFrom(range.from)
-                setDateTo(range.to)
-              }}
-            >
-              {range.label}
-            </Button>
-          ))}
-        </div>
-        <p className="muted" style={{ marginBottom: 0 }}>
-          Showing <strong>{currency || 'all currencies'}</strong> for{' '}
-          <strong>{activeRangeLabel}</strong>.
-        </p>
+          <FilterBar
+            currency={currency}
+            onCurrencyChange={setCurrency}
+            availableCurrencies={currencies}
+            allCurrenciesLabel="All (category chart may mix currencies)"
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateChange={(from, to) => {
+              setDateFrom(from)
+              setDateTo(to)
+            }}
+            quickRanges={quickRanges}
+            quickRangesLabel="Quick date ranges"
+            actions={
+              hasActiveFilters ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setCurrency(DEFAULT_DASHBOARD_CURRENCY)
+                    setDateFrom(defaultRange.from)
+                    setDateTo(defaultRange.to)
+                  }}
+                >
+                  <FilterX aria-hidden="true" />
+                  Clear filters
+                </Button>
+              ) : null
+            }
+            caption={
+              <p className="muted" style={{ marginBottom: 0 }}>
+                Showing <strong>{currency || 'all currencies'}</strong> for{' '}
+                <strong>{activeRangeLabel}</strong>.
+              </p>
+            }
+          />
         </CardContent>
       </Card>
 
