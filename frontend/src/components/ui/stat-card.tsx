@@ -52,10 +52,13 @@ const DELTA_SIGN_STYLE: Record<
 
 function StatCard({ label, value, hint, delta, className, ...props }: StatCardProps) {
   const sign = parseDeltaSign(delta)
+  const valueTitle = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
   return (
     <Card data-slot="stat-card" className={cn('mb-0', className)} {...props}>
       <p className="statLabel">{label}</p>
-      <p className={cn('statValue', 'text-3xl font-semibold')}>{value}</p>
+      <p className={cn('statValue', 'text-2xl font-semibold truncate')} title={valueTitle}>
+        {value}
+      </p>
       {hint ? (
         <p className={cn('muted statHint', 'text-xs')}>{hint}</p>
       ) : null}
