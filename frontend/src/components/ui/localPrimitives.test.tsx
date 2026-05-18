@@ -1,11 +1,26 @@
-import React from 'react'
+import React, { act, useRef } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Enable React 19 act() environment for interactive tests in this file.
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+import {
+  Dialog,
+  DialogBody,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  useConfirm,
+} from './dialog'
 import { EmptyState } from './empty-state'
 import { Label } from './label'
 import { NativeSelect, NativeSelectOption } from './native-select'
 import { PageHeader } from './page-header'
+import { Skeleton, SkeletonRow, SkeletonText } from './skeleton'
 import { StatCard } from './stat-card'
+import { ToastProvider, useToast } from './toast'
 
 describe('local design-system primitives', () => {
   it('renders labeled native selects with compact sizing', () => {
@@ -51,5 +66,396 @@ describe('local design-system primitives', () => {
     expect(html).toContain('Open transactions')
     expect(html).toContain('No rows')
     expect(html).toContain('Everything is reviewed.')
+  })
+})
+
+// --- DOM test harness for interactive primitives -----------------------------
+
+type Harness = {
+  container: HTMLElement
+  root: Root
+  render: (node: React.ReactNode) => Promise<void>
+  unmount: () => Promise<void>
+}
+
+function createHarness(): Harness {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  return {
+    container,
+    root,
+    async render(node: React.ReactNode) {
+      await act(async () => {
+        root.render(node)
+      })
+    },
+    async unmount() {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    },
+  }
+}
+
+function dispatchKey(target: EventTarget, key: string, shiftKey = false) {
+  const event = new KeyboardEvent('keydown', {
+    key,
+    shiftKey,
+    bubbles: true,
+    cancelable: true,
+  })
+  target.dispatchEvent(event)
+}
+
+function dispatchMouseDown(target: EventTarget) {
+  const event = new MouseEvent('mousedown', {
+    bubbles: true,
+    cancelable: true,
+  })
+  target.dispatchEvent(event)
+}
+
+function dispatchClick(target: EventTarget) {
+  const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+  target.dispatchEvent(event)
+}
+
+// Captures the useToast() API by rendering a ToastProvider with a Capture child
+// that resolves a Promise with the API via a callback prop. This avoids
+// reassigning module-level variables from inside components (which the React
+// Compiler lint blocks).
+function captureToastApi(harness: Harness): Promise<ReturnType<typeof useToast>> {
+  return new Promise((resolve) => {
+    function Capture({ onApi }: { onApi: (api: ReturnType<typeof useToast>) => void }) {
+      const api = useToast()
+      const calledRef = useRef(false)
+      React.useEffect(() => {
+        if (calledRef.current) return
+        calledRef.current = true
+        onApi(api)
+      }, [api, onApi])
+      return null
+    }
+    void harness.render(
+      <ToastProvider>
+        <Capture onApi={resolve} />
+      </ToastProvider>
+    )
+  })
+}
+
+describe('Dialog primitive', () => {
+  let harness: Harness
+
+  beforeEach(() => {
+    harness = createHarness()
+  })
+
+  afterEach(async () => {
+    await harness.unmount()
+    // Clean up any lingering portal nodes
+    document.body
+      .querySelectorAll('[data-slot="dialog-overlay"]')
+      .forEach((node) => node.remove())
+  })
+
+  it('renders nothing when closed and renders portal content when open', async () => {
+    await harness.render(
+      <Dialog open={false} onOpenChange={() => {}}>
+        <DialogHeader>
+          <DialogTitle>Closed</DialogTitle>
+        </DialogHeader>
+      </Dialog>
+    )
+    expect(document.querySelector('[data-slot="dialog"]')).toBeNull()
+
+    await harness.render(
+      <Dialog open onOpenChange={() => {}}>
+        <DialogHeader>
+          <DialogTitle>Hello</DialogTitle>
+        </DialogHeader>
+        <DialogBody>Body text</DialogBody>
+      </Dialog>
+    )
+    const dialog = document.querySelector('[data-slot="dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.getAttribute('role')).toBe('dialog')
+    expect(dialog?.getAttribute('aria-modal')).toBe('true')
+    expect(document.body.textContent).toContain('Hello')
+    expect(document.body.textContent).toContain('Body text')
+  })
+
+  it('calls onOpenChange(false) when Escape is pressed', async () => {
+    const onOpenChange = vi.fn()
+    await harness.render(
+      <Dialog open onOpenChange={onOpenChange}>
+        <DialogHeader>
+          <DialogTitle>Esc test</DialogTitle>
+        </DialogHeader>
+      </Dialog>
+    )
+    await act(async () => {
+      dispatchKey(document, 'Escape')
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('calls onOpenChange(false) when backdrop is clicked', async () => {
+    const onOpenChange = vi.fn()
+    await harness.render(
+      <Dialog open onOpenChange={onOpenChange}>
+        <DialogHeader>
+          <DialogTitle>Backdrop test</DialogTitle>
+        </DialogHeader>
+      </Dialog>
+    )
+    const overlay = document.querySelector(
+      '[data-slot="dialog-overlay"]'
+    ) as HTMLElement | null
+    expect(overlay).not.toBeNull()
+    await act(async () => {
+      dispatchMouseDown(overlay!)
+    })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('does not dismiss on backdrop click when dismissOnBackdropClick is false', async () => {
+    const onOpenChange = vi.fn()
+    await harness.render(
+      <Dialog open onOpenChange={onOpenChange} dismissOnBackdropClick={false}>
+        <DialogHeader>
+          <DialogTitle>No backdrop</DialogTitle>
+        </DialogHeader>
+      </Dialog>
+    )
+    const overlay = document.querySelector(
+      '[data-slot="dialog-overlay"]'
+    ) as HTMLElement | null
+    await act(async () => {
+      dispatchMouseDown(overlay!)
+    })
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('traps focus inside the dialog on Tab', async () => {
+    function Harnessed() {
+      const ref = useRef<HTMLButtonElement>(null)
+      return (
+        <Dialog open onOpenChange={() => {}} initialFocusRef={ref}>
+          <DialogHeader>
+            <DialogTitle>Focus trap</DialogTitle>
+          </DialogHeader>
+          <DialogFooter>
+            <button type="button" ref={ref}>
+              First
+            </button>
+            <button type="button">Last</button>
+          </DialogFooter>
+        </Dialog>
+      )
+    }
+    await harness.render(<Harnessed />)
+    // Auto-focus is deferred via setTimeout(0); wait for it to land.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+    const buttons = document.querySelectorAll(
+      '[data-slot="dialog"] button'
+    ) as NodeListOf<HTMLButtonElement>
+    expect(buttons.length).toBe(2)
+    const first = buttons[0]
+    const last = buttons[1]
+    expect(document.activeElement).toBe(first)
+
+    // Tab from last should wrap to first.
+    last.focus()
+    await act(async () => {
+      dispatchKey(document, 'Tab')
+    })
+    expect(document.activeElement).toBe(first)
+
+    // Shift+Tab from first should wrap to last.
+    first.focus()
+    await act(async () => {
+      dispatchKey(document, 'Tab', true)
+    })
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('useConfirm resolves true on confirm and false on cancel/escape', async () => {
+    function Host({ onResult }: { onResult: (v: boolean) => void }) {
+      const confirm = useConfirm()
+      const onResultRef = useRef(onResult)
+      React.useEffect(() => {
+        onResultRef.current = onResult
+      }, [onResult])
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              confirm({ title: 'Sure?', confirmLabel: 'Yes', cancelLabel: 'No' }).then(
+                (value) => onResultRef.current(value)
+              )
+            }}
+          >
+            Open
+          </button>
+          {confirm.dialog}
+        </>
+      )
+    }
+
+    const results: boolean[] = []
+    await harness.render(<Host onResult={(v) => results.push(v)} />)
+    const openBtn = harness.container.querySelector('button') as HTMLButtonElement
+
+    // Case 1: clicking confirm resolves true
+    await act(async () => {
+      dispatchClick(openBtn)
+    })
+    const yesBtn = Array.from(
+      document.querySelectorAll('[data-slot="dialog"] button')
+    ).find((b) => b.textContent === 'Yes') as HTMLButtonElement | undefined
+    expect(yesBtn).not.toBeUndefined()
+    await act(async () => {
+      dispatchClick(yesBtn!)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(results[0]).toBe(true)
+
+    // Case 2: clicking cancel resolves false
+    await act(async () => {
+      dispatchClick(openBtn)
+    })
+    const noBtn = Array.from(
+      document.querySelectorAll('[data-slot="dialog"] button')
+    ).find((b) => b.textContent === 'No') as HTMLButtonElement | undefined
+    expect(noBtn).not.toBeUndefined()
+    await act(async () => {
+      dispatchClick(noBtn!)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(results[1]).toBe(false)
+
+    // Case 3: Escape resolves false
+    await act(async () => {
+      dispatchClick(openBtn)
+    })
+    await act(async () => {
+      dispatchKey(document, 'Escape')
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(results[2]).toBe(false)
+  })
+})
+
+describe('Toast primitive', () => {
+  let harness: Harness
+
+  beforeEach(() => {
+    harness = createHarness()
+    vi.useFakeTimers()
+  })
+
+  afterEach(async () => {
+    vi.useRealTimers()
+    await harness.unmount()
+    document.body
+      .querySelectorAll('[data-slot="toast-viewport"]')
+      .forEach((node) => node.remove())
+  })
+
+  it('appears on showToast and dismisses on action click', async () => {
+    const api = await captureToastApi(harness)
+    const onAction = vi.fn()
+    await act(async () => {
+      api.showToast({
+        title: 'Saved',
+        action: { label: 'Undo', onClick: onAction },
+      })
+    })
+    // Advance fake timers so any rAF/setTimeout-driven mounts settle.
+    await act(async () => {
+      vi.advanceTimersByTime(50)
+    })
+    const toastEl = document.querySelector('[data-slot="toast"]')
+    expect(toastEl).not.toBeNull()
+    expect(toastEl?.textContent).toContain('Saved')
+    expect(toastEl?.textContent).toContain('Undo')
+
+    const actionBtn = document.querySelector(
+      '[data-slot="toast-action"]'
+    ) as HTMLButtonElement | null
+    expect(actionBtn).not.toBeNull()
+    await act(async () => {
+      dispatchClick(actionBtn!)
+    })
+    expect(onAction).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+  })
+
+  it('auto-dismisses after duration', async () => {
+    const api = await captureToastApi(harness)
+    await act(async () => {
+      api.showToast({ title: 'Hi', durationMs: 100 })
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(50)
+    })
+    expect(document.querySelector('[data-slot="toast"]')).not.toBeNull()
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+    expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+  })
+
+  it('uses role=alert for destructive variant', async () => {
+    const api = await captureToastApi(harness)
+    await act(async () => {
+      api.showToast({ title: 'Oh no', variant: 'destructive', durationMs: Infinity })
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(50)
+    })
+    const toastEl = document.querySelector('[data-slot="toast"]')
+    expect(toastEl?.getAttribute('role')).toBe('alert')
+  })
+})
+
+describe('Skeleton primitive', () => {
+  it('renders with pulse class', () => {
+    const html = renderToStaticMarkup(<Skeleton className="h-4 w-20" />)
+    expect(html).toContain('animate-pulse')
+    expect(html).toContain('data-slot="skeleton"')
+    expect(html).toContain('h-4')
+    expect(html).toContain('w-20')
+  })
+
+  it('renders SkeletonText with the requested number of lines', () => {
+    const html = renderToStaticMarkup(<SkeletonText lines={4} />)
+    const matches = html.match(/data-slot="skeleton"/g) ?? []
+    expect(matches.length).toBe(4)
+  })
+
+  it('renders SkeletonRow with the requested number of cells', () => {
+    const html = renderToStaticMarkup(
+      <table>
+        <tbody>
+          <SkeletonRow cols={3} />
+        </tbody>
+      </table>
+    )
+    const cellMatches = html.match(/<td/g) ?? []
+    expect(cellMatches.length).toBe(3)
+    expect(html).toContain('animate-pulse')
   })
 })
