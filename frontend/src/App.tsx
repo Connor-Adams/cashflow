@@ -13,6 +13,7 @@ import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
+import { ToastProvider } from './components/ui/toast'
 import './App.css'
 
 function AppRoutes() {
@@ -44,9 +45,11 @@ function AppRoutes() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </ToastProvider>
     </ThemeProvider>
   )
 }
