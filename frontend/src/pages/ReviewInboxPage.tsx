@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
+  Keyboard,
   ListChecks,
   RefreshCw,
   Search,
@@ -50,6 +51,32 @@ type RuleResponse = {
 
 const PAGE_SIZE = 100
 
+const SHORTCUT_HELP: Array<{ keys: string; action: string }> = [
+  { keys: 'j', action: 'Move cursor down' },
+  { keys: 'k', action: 'Move cursor up' },
+  { keys: 'x or Space', action: 'Toggle selection of cursor row' },
+  { keys: 'a', action: 'Select all visible rows' },
+  { keys: 'n', action: 'Clear selection' },
+  { keys: 'c', action: 'Focus category picker (selects cursor row if empty)' },
+  { keys: 'Enter', action: 'Apply current decision when valid' },
+  { keys: '?', action: 'Show this shortcuts list' },
+]
+
+const SHORTCUT_HELP_TEXT = SHORTCUT_HELP.map(
+  (s) => `${s.keys}: ${s.action}`
+).join(' • ')
+
+// Returns true when the active element is a typing surface (an input,
+// textarea, select, or any contenteditable element) where single-key shortcuts
+// would interfere with normal typing.
+function isTypingContext(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (target.isContentEditable) return true
+  return false
+}
+
 function buildRevertPatch(
   row: Transaction,
   patchKeys: string[]
@@ -90,7 +117,10 @@ export function ReviewInboxPage() {
   const [applying, setApplying] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [cursorRowId, setCursorRowId] = useState<number | null>(null)
   const { showToast } = useToast()
+  const categoryPickerRef = useRef<HTMLDivElement>(null)
+  const tableWrapRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -169,6 +199,18 @@ export function ReviewInboxPage() {
   const canCreateRule =
     selectedSummary.commonMerchant != null && category.trim().length > 0
 
+  // Keep cursorRowId valid: clamp to a visible row, or clear if the table is
+  // empty. Default to the first visible row when no cursor exists yet.
+  useEffect(() => {
+    if (visibleRows.length === 0) {
+      if (cursorRowId !== null) setCursorRowId(null)
+      return
+    }
+    if (cursorRowId == null || !visibleRows.some((row) => row.id === cursorRowId)) {
+      setCursorRowId(visibleRows[0].id)
+    }
+  }, [cursorRowId, visibleRows])
+
   function toggleSelected(id: number) {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -187,6 +229,163 @@ export function ReviewInboxPage() {
       return new Set(visibleIds)
     })
   }
+
+  const showShortcutsHelp = useCallback(() => {
+    showToast({
+      title: 'Keyboard shortcuts',
+      description: SHORTCUT_HELP_TEXT,
+      durationMs: 8000,
+    })
+  }, [showToast])
+
+  const focusCategoryPicker = useCallback(() => {
+    const input = categoryPickerRef.current?.querySelector('input')
+    if (input instanceof HTMLInputElement) {
+      input.focus()
+      input.select()
+    }
+  }, [])
+
+  // Use refs so the global keydown listener can read the latest state without
+  // re-attaching on every render. The listener is mounted once.
+  const stateRef = useRef({
+    visibleRows,
+    cursorRowId,
+    canApply,
+    applying,
+    selectedIds,
+  })
+  useEffect(() => {
+    stateRef.current = {
+      visibleRows,
+      cursorRowId,
+      canApply,
+      applying,
+      selectedIds,
+    }
+  })
+
+  const applyDecisionRef = useRef<() => void>(() => {})
+  const focusCategoryPickerRef = useRef(focusCategoryPicker)
+  const showShortcutsHelpRef = useRef(showShortcutsHelp)
+  useEffect(() => {
+    focusCategoryPickerRef.current = focusCategoryPicker
+  }, [focusCategoryPicker])
+  useEffect(() => {
+    showShortcutsHelpRef.current = showShortcutsHelp
+  }, [showShortcutsHelp])
+
+  useEffect(() => {
+    function moveCursor(delta: number) {
+      const { visibleRows: rows, cursorRowId: current } = stateRef.current
+      if (rows.length === 0) return
+      const currentIdx = rows.findIndex((row) => row.id === current)
+      const nextIdx =
+        currentIdx === -1
+          ? 0
+          : Math.min(Math.max(currentIdx + delta, 0), rows.length - 1)
+      const nextId = rows[nextIdx].id
+      setCursorRowId(nextId)
+      // Scroll into view inside the table wrap.
+      const wrap = tableWrapRef.current
+      if (wrap) {
+        const target = wrap.querySelector<HTMLElement>(
+          `[data-row-id="${nextId}"]`
+        )
+        target?.scrollIntoView({ block: 'nearest' })
+      }
+    }
+
+    function toggleCursorRowSelection() {
+      const { cursorRowId: current } = stateRef.current
+      if (current == null) return
+      toggleSelected(current)
+    }
+
+    function selectAllVisible() {
+      const { visibleRows: rows } = stateRef.current
+      if (rows.length === 0) return
+      setSelectedIds(new Set(rows.map((row) => row.id)))
+    }
+
+    function clearSelection() {
+      setSelectedIds(new Set())
+    }
+
+    function openCategoryPicker() {
+      const {
+        cursorRowId: current,
+        selectedIds: ids,
+      } = stateRef.current
+      if (ids.size === 0 && current != null) {
+        setSelectedIds(new Set([current]))
+      }
+      focusCategoryPickerRef.current()
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (isTypingContext(event.target)) return
+
+      const key = event.key
+
+      if (key === 'j' || key === 'J') {
+        event.preventDefault()
+        moveCursor(1)
+        return
+      }
+      if (key === 'k' || key === 'K') {
+        event.preventDefault()
+        moveCursor(-1)
+        return
+      }
+      if (key === ' ' || key === 'x' || key === 'X') {
+        event.preventDefault()
+        toggleCursorRowSelection()
+        return
+      }
+      if (key === 'a' || key === 'A') {
+        event.preventDefault()
+        selectAllVisible()
+        return
+      }
+      if (key === 'n' || key === 'N') {
+        event.preventDefault()
+        clearSelection()
+        return
+      }
+      if (key === 'c' || key === 'C') {
+        event.preventDefault()
+        openCategoryPicker()
+        return
+      }
+      if (key === 'Enter') {
+        const { canApply: ok, applying: busy } = stateRef.current
+        if (!ok || busy) return
+        event.preventDefault()
+        applyDecisionRef.current()
+        return
+      }
+      if (key === '?' || (event.shiftKey && key === '/')) {
+        event.preventDefault()
+        showShortcutsHelpRef.current()
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
+
+  // Keep the keydown listener's applyDecision ref pointed at the latest closure.
+  useEffect(() => {
+    applyDecisionRef.current = () => {
+      void applyDecision()
+    }
+  })
 
   async function applyDecision() {
     if (!canApply) return
@@ -344,12 +543,23 @@ export function ReviewInboxPage() {
                 </Badge>
               ))}
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={showShortcutsHelp}
+              aria-label="Show keyboard shortcuts"
+              title="Keyboard shortcuts (press ?)"
+            >
+              <Keyboard aria-hidden="true" />
+              Shortcuts
+            </Button>
           </div>
 
           {err && <span className="error">{err}</span>}
           {message && <span className="reviewInboxMessage">{message}</span>}
 
-          <div className="reviewInboxTableWrap">
+          <div className="reviewInboxTableWrap" ref={tableWrapRef}>
             <Table className="reviewInboxTable">
               <TableHeader>
                 <TableRow>
@@ -374,10 +584,24 @@ export function ReviewInboxPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibleRows.map((row) => (
+                {visibleRows.map((row) => {
+                  const isCursor = row.id === cursorRowId
+                  return (
                   <TableRow
                     key={row.id}
+                    data-row-id={row.id}
+                    data-cursor={isCursor ? 'true' : undefined}
                     data-state={selectedIds.has(row.id) ? 'selected' : undefined}
+                    aria-current={isCursor ? 'true' : undefined}
+                    style={
+                      isCursor
+                        ? {
+                            boxShadow: 'inset 3px 0 0 0 var(--accent)',
+                            background:
+                              'color-mix(in srgb, var(--accent) 8%, transparent)',
+                          }
+                        : undefined
+                    }
                   >
                     <TableCell>
                       <input
@@ -404,7 +628,8 @@ export function ReviewInboxPage() {
                     <TableCell>{row.finalBusiness ? 'Yes' : 'No'}</TableCell>
                     <TableCell>{row.importBatch}</TableCell>
                   </TableRow>
-                ))}
+                  )
+                })}
                 {!loading && visibleRows.length === 0 && (
                   <EmptyTableRow
                     colSpan={8}
@@ -441,12 +666,14 @@ export function ReviewInboxPage() {
           <div className="reviewInboxDecisionFields">
             <Label>
               Category
-              <CategoryCloudPicker
-                value={category}
-                onChange={(value) => setCategory(value)}
-                options={categoryHints.map((hint) => hint.label)}
-                placeholder="Dining, Transport..."
-              />
+              <div ref={categoryPickerRef}>
+                <CategoryCloudPicker
+                  value={category}
+                  onChange={(value) => setCategory(value)}
+                  options={categoryHints.map((hint) => hint.label)}
+                  placeholder="Dining, Transport..."
+                />
+              </div>
             </Label>
             <Label>
               Split
