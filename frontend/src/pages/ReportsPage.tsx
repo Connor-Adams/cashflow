@@ -42,6 +42,17 @@ type PartnerRow = {
   contactName?: string | null
   sumMy: number
   sumPartner: number
+  /** Raw net before subtracting settlements: sumPartner - sumMy. */
+  rawNet: number
+  /**
+   * Signed sum of settlements applied to this (contact, currency) row:
+   *   settledAmount = sum(i_paid_partner) - sum(partner_paid_me)
+   * So `net = rawNet + settledAmount`.
+   */
+  settledAmount: number
+  /** Number of settlement directions that contributed (0, 1, or 2). */
+  settlementCount: number
+  /** Adjusted net: rawNet + settledAmount. */
   net: number
   direction: PartnerNetDirection
 }
@@ -468,15 +479,15 @@ export function ReportsPage() {
                   </tr>
                 )}
                 {partner?.byCurrency.map((r) => {
-                  let netCell
+                  let netInner
                   if (r.direction === 'even') {
-                    netCell = <span className="muted">Even</span>
+                    netInner = <span className="muted">Even</span>
                   } else {
                     const partnerOwesMe = r.direction === 'partner_owes_me'
                     const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                     const sign = partnerOwesMe ? '+' : '−'
                     const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
-                    netCell = (
+                    netInner = (
                       <span style={{ color }}>
                         {sign}
                         {formatMoney(Math.abs(r.net), r.currency)}{' '}
@@ -484,6 +495,26 @@ export function ReportsPage() {
                       </span>
                     )
                   }
+                  const hasSettlements = r.settlementCount > 0
+                  const formattedRawNet = formatMoney(r.rawNet, r.currency)
+                  const formattedSettled = formatMoney(r.settledAmount, r.currency)
+                  const netTitle = hasSettlements
+                    ? `Raw: ${formattedRawNet}, settled: ${formattedSettled}`
+                    : undefined
+                  const netCell = (
+                    <span title={netTitle}>
+                      {netInner}
+                      {hasSettlements && (
+                        <>
+                          <br />
+                          <span className="muted" style={{ fontSize: '0.75rem' }}>
+                            (after {r.settlementCount} settlement
+                            {r.settlementCount === 1 ? '' : 's'})
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  )
                   return (
                     <tr key={`${r.currency}-${r.ownershipType ?? 'legacy'}-${r.ownershipContactId ?? 'none'}`}>
                       <td>{r.currency}</td>
@@ -545,7 +576,7 @@ export function ReportsPage() {
           <div>
             <h2>Recent settlements</h2>
             <p className="muted">
-              Manual records of money paid between you and a contact. Not yet subtracted from the net above.
+              Manual records of money paid between you and a contact. Applied to the net partner balance above.
             </p>
           </div>
         </div>

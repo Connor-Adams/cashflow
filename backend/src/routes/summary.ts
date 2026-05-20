@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request } from 'express';
 import { Op } from 'sequelize';
-import { Account, Contact, Transaction, sequelize } from '../models';
+import { Account, Contact, PartnerSettlement, Transaction, sequelize } from '../models';
 import { num } from '../util/numbers';
 import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
@@ -397,25 +397,138 @@ export function computePartnerNet(
   return { net, direction };
 }
 
+/**
+ * Direction is derived from a value already adjusted for sub-cent noise:
+ * |value| < 0.005 → 'even'. Same threshold as `computePartnerNet`.
+ */
+function directionFromNet(net: number): PartnerNetDirection {
+  const rounded = Math.round(net * 100) / 100;
+  if (rounded > 0) return 'partner_owes_me';
+  if (rounded < 0) return 'i_owe_partner';
+  return 'even';
+}
+
+/** Pre-aggregated settlement totals for a single (contactId, currency) pair. */
+export type SettlementSummary = {
+  contactId: number;
+  currency: string;
+  iPaid: number;
+  partnerPaid: number;
+};
+
+/** Raw partner-split row, prior to settlement adjustment. */
+export type RawPartnerRow = {
+  currency: string;
+  ownershipType: string;
+  ownershipContactId: number | null;
+  contactName: string | null;
+  sumMy: number | null;
+  sumPartner: number | null;
+};
+
+/** Adjusted partner-split row returned by `/api/summary/partner`. */
+export type AdjustedPartnerRow = RawPartnerRow & {
+  rawNet: number;
+  settledAmount: number;
+  settlementCount: number;
+  net: number;
+  direction: PartnerNetDirection;
+};
+
+/**
+ * Apply pre-aggregated settlement totals to raw partner rows. Pure function
+ * exported so unit tests can exercise the math without spinning up the DB.
+ *
+ * For each row, finds the settlement summary matching (ownershipContactId,
+ * currency) and computes:
+ *   settledAmount = iPaid - partnerPaid
+ *   net (adjusted) = rawNet + settledAmount
+ *
+ * Rationale: `i_paid_partner` reduces what I owe → adds to net.
+ * `partner_paid_me` reduces what partner owes me → subtracts from net.
+ *
+ * Edge case: rows without an `ownershipContactId` (legacy split with no
+ * contact) cannot match a settlement (settlements require a contactId), so
+ * they always get `settledAmount=0`, `settlementCount=0`.
+ *
+ * Orphan settlements — settlement totals with no matching (contact, currency)
+ * row — are intentionally dropped, not surfaced as new rows. We do not want
+ * to confuse "I paid partner but had no shared spend" with an ongoing
+ * balance.
+ */
+export function applySettlements(
+  rows: RawPartnerRow[],
+  settlements: SettlementSummary[]
+): AdjustedPartnerRow[] {
+  const byKey = new Map<string, SettlementSummary>();
+  for (const s of settlements) {
+    byKey.set(`${s.contactId}\0${s.currency}`, s);
+  }
+  return rows.map((r) => {
+    const rawNet = (r.sumPartner ?? 0) - (r.sumMy ?? 0);
+    let settledAmount = 0;
+    let settlementCount = 0;
+    if (r.ownershipContactId != null) {
+      const match = byKey.get(`${r.ownershipContactId}\0${r.currency}`);
+      if (match) {
+        settledAmount = match.iPaid - match.partnerPaid;
+        // Count any settlement that contributed a non-zero side; we surface
+        // the count to the UI so "(after N settlements)" is meaningful.
+        settlementCount =
+          (match.iPaid > 0 ? 1 : 0) + (match.partnerPaid > 0 ? 1 : 0);
+      }
+    }
+    const net = rawNet + settledAmount;
+    return {
+      ...r,
+      rawNet,
+      settledAmount,
+      settlementCount,
+      net,
+      direction: directionFromNet(net),
+    };
+  });
+}
+
 router.get('/partner', async (req, res, next) => {
   try {
     const where = dateWhere(req);
-    const [rows, contacts] = await Promise.all([Transaction.findAll({
-      where,
-      attributes: [
-        'currency',
-        'ownershipType',
-        'ownershipContactId',
-        [sequelize.fn('SUM', sequelize.col('my_share_amount')), 'sumMy'],
-        [
-          sequelize.fn('SUM', sequelize.col('partner_share_amount')),
-          'sumPartner',
+    // Filter settlements by the same date range and currency. The `from`/`to`
+    // (settledDate) constraints mirror the transaction date filter so closing
+    // out an old debt outside the window doesn't leak into a narrow report.
+    const settlementWhere: Record<string, unknown> = { ...householdWhere(req) };
+    if (req.query.dateFrom || req.query.dateTo) {
+      const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
+      if (req.query.dateFrom) dateCond[Op.gte] = String(req.query.dateFrom);
+      if (req.query.dateTo) dateCond[Op.lte] = String(req.query.dateTo);
+      settlementWhere.settledDate = dateCond;
+    }
+    if (req.query.currency) {
+      settlementWhere.currency = String(req.query.currency).toUpperCase().slice(0, 3);
+    }
+
+    const [rows, contacts, settlementRows] = await Promise.all([
+      Transaction.findAll({
+        where,
+        attributes: [
+          'currency',
+          'ownershipType',
+          'ownershipContactId',
+          [sequelize.fn('SUM', sequelize.col('my_share_amount')), 'sumMy'],
+          [
+            sequelize.fn('SUM', sequelize.col('partner_share_amount')),
+            'sumPartner',
+          ],
         ],
-      ],
-      group: ['currency', 'ownershipType', 'ownershipContactId'],
-      raw: true,
-    }),
-    Contact.findAll({ where: householdWhere(req), raw: true }),
+        group: ['currency', 'ownershipType', 'ownershipContactId'],
+        raw: true,
+      }),
+      Contact.findAll({ where: householdWhere(req), raw: true }),
+      PartnerSettlement.findAll({
+        where: settlementWhere,
+        attributes: ['contactId', 'currency', 'direction', 'amount'],
+        raw: true,
+      }),
     ]);
     type PartnerRow = {
       currency: string;
@@ -425,24 +538,42 @@ router.get('/partner', async (req, res, next) => {
       sumPartner: unknown;
     };
     type ContactRow = { id: number; name: string };
+    type SettlementRow = {
+      contactId: number;
+      currency: string;
+      direction: 'i_paid_partner' | 'partner_paid_me';
+      amount: unknown;
+    };
     const contactsById = new Map((contacts as ContactRow[]).map((c) => [c.id, c.name]));
+
+    // Aggregate raw settlement rows into per-(contact, currency) summaries.
+    const settlementByKey = new Map<string, SettlementSummary>();
+    for (const s of settlementRows as unknown as SettlementRow[]) {
+      const amount = num(s.amount) ?? 0;
+      const key = `${s.contactId}\0${s.currency}`;
+      const existing = settlementByKey.get(key) ?? {
+        contactId: s.contactId,
+        currency: s.currency,
+        iPaid: 0,
+        partnerPaid: 0,
+      };
+      if (s.direction === 'i_paid_partner') existing.iPaid += amount;
+      else existing.partnerPaid += amount;
+      settlementByKey.set(key, existing);
+    }
+
+    const rawRows: RawPartnerRow[] = (rows as unknown as PartnerRow[]).map((r) => ({
+      currency: r.currency,
+      ownershipType: r.ownershipType,
+      ownershipContactId: r.ownershipContactId,
+      contactName:
+        r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
+      sumMy: num(r.sumMy),
+      sumPartner: num(r.sumPartner),
+    }));
+
     res.json({
-      byCurrency: (rows as unknown as PartnerRow[]).map((r) => {
-        const sumMy = num(r.sumMy);
-        const sumPartner = num(r.sumPartner);
-        const { net, direction } = computePartnerNet(sumMy, sumPartner);
-        return {
-          currency: r.currency,
-          ownershipType: r.ownershipType,
-          ownershipContactId: r.ownershipContactId,
-          contactName:
-            r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
-          sumMy,
-          sumPartner,
-          net,
-          direction,
-        };
-      }),
+      byCurrency: applySettlements(rawRows, Array.from(settlementByKey.values())),
     });
   } catch (e) {
     next(e);
