@@ -1,12 +1,37 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogBody,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  useConfirm,
+} from '@/components/ui/dialog'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { useToast } from '@/components/ui/toast'
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
-import { getJson } from '../lib/api'
+import { deleteReq, getJson, postJson } from '../lib/api'
 import { useSessionState } from '../lib/useSessionState'
+import type {
+  Contact,
+  PartnerSettlement,
+  PartnerSettlementDirection,
+  PartnerSettlementInput,
+  PartnerSettlementsResponse,
+} from '../types/api'
 
 type PartnerNetDirection = 'partner_owes_me' | 'i_owe_partner' | 'even'
 
@@ -52,6 +77,21 @@ export function ReportsPage() {
   )
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [settlements, setSettlements] = useState<PartnerSettlement[]>([])
+  const [settlementsErr, setSettlementsErr] = useState<string | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [formContactId, setFormContactId] = useState<string>('')
+  const [formDirection, setFormDirection] =
+    useState<PartnerSettlementDirection>('i_paid_partner')
+  const [formCurrency, setFormCurrency] = useState<string>('CAD')
+  const [formAmount, setFormAmount] = useState<string>('')
+  const [formDate, setFormDate] = useState<string>('')
+  const [formNotes, setFormNotes] = useState<string>('')
+  const [formSubmitting, setFormSubmitting] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const { showToast } = useToast()
+  const confirm = useConfirm()
 
   const summaryQs = useMemo(
     () => summaryQueryString({ currency, dateFrom, dateTo }),
@@ -98,6 +138,32 @@ export function ReportsPage() {
       cancelled = true
     }
   }, [summaryQs])
+
+  const loadSettlements = useCallback(async () => {
+    try {
+      const res = await getJson<PartnerSettlementsResponse>('/api/settlements')
+      setSettlements(res.data)
+    } catch (e) {
+      setSettlementsErr(e instanceof Error ? e.message : 'Error')
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await getJson<Contact[]>('/api/contacts')
+        if (!cancelled) setContacts(list)
+      } catch (e) {
+        if (!cancelled)
+          setSettlementsErr(e instanceof Error ? e.message : 'Error')
+      }
+    })()
+    void loadSettlements()
+    return () => {
+      cancelled = true
+    }
+  }, [loadSettlements])
 
   const reportCurrencies = useMemo(() => {
     const found = new Set<string>()
@@ -169,7 +235,90 @@ export function ReportsPage() {
     ? `In ${singleCurrency}`
     : 'Set one currency to see money totals'
 
+  const recentSettlements = useMemo(
+    () => settlements.slice(0, 10),
+    [settlements]
+  )
+  const directionLabel = (dir: PartnerSettlementDirection) =>
+    dir === 'i_paid_partner' ? 'I paid partner' : 'Partner paid me'
+  const directionBadgeVariant = (dir: PartnerSettlementDirection) =>
+    dir === 'i_paid_partner' ? 'secondary' : 'default'
+
+  function openSettlementDialog() {
+    setFormError(null)
+    setFormContactId(contacts.length > 0 ? String(contacts[0].id) : '')
+    setFormDirection('i_paid_partner')
+    setFormCurrency(currency || DEFAULT_REPORTS_CURRENCY)
+    setFormAmount('')
+    setFormDate(toDateInputValue(new Date()))
+    setFormNotes('')
+    setDialogOpen(true)
+  }
+
+  async function submitSettlement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setFormError(null)
+    const contactIdNumber = Number(formContactId)
+    const amountNumber = Number(formAmount)
+    if (!Number.isInteger(contactIdNumber) || contactIdNumber < 1) {
+      setFormError('Choose a contact')
+      return
+    }
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      setFormError('Amount must be greater than zero')
+      return
+    }
+    if (!formDate) {
+      setFormError('Pick a date')
+      return
+    }
+    const body: PartnerSettlementInput = {
+      contactId: contactIdNumber,
+      direction: formDirection,
+      currency: formCurrency.toUpperCase(),
+      amount: amountNumber,
+      settledDate: formDate,
+      notes: formNotes.trim() ? formNotes.trim() : null,
+    }
+    setFormSubmitting(true)
+    try {
+      const created = await postJson<PartnerSettlement>(
+        '/api/settlements',
+        body
+      )
+      setDialogOpen(false)
+      showToast({
+        title: `Recorded settlement of ${formatMoney(amountNumber, body.currency)}`,
+        variant: 'success',
+      })
+      // Optimistically prepend, then refetch to canonicalize ordering.
+      setSettlements((prev) => [created, ...prev])
+      await loadSettlements()
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Could not save')
+    } finally {
+      setFormSubmitting(false)
+    }
+  }
+
+  async function removeSettlement(row: PartnerSettlement) {
+    const ok = await confirm({
+      title: 'Delete settlement?',
+      description: `${row.settledDate} - ${formatMoney(Number(row.amount), row.currency)}`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (!ok) return
+    try {
+      await deleteReq(`/api/settlements/${row.id}`)
+      setSettlements((prev) => prev.filter((s) => s.id !== row.id))
+    } catch (e) {
+      setSettlementsErr(e instanceof Error ? e.message : 'Could not delete')
+    }
+  }
+
   return (
+    <>
     <div className="page">
       <PageHeader
         title="Reports"
@@ -255,6 +404,21 @@ export function ReportsPage() {
               <h2>Partner split totals</h2>
               <p className="muted">How much of the selected spend belongs to each person.</p>
             </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={openSettlementDialog}
+              disabled={contacts.length === 0}
+              title={
+                contacts.length === 0
+                  ? 'Add a contact in Settings before recording a settlement'
+                  : undefined
+              }
+            >
+              <Plus aria-hidden="true" />
+              Record settlement
+            </Button>
           </div>
           {showPartnerRollup && (
             <ul className="partnerNetRollup" style={{ listStyle: 'none', padding: 0, margin: '0 0 0.75rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -375,6 +539,201 @@ export function ReportsPage() {
           </div>
         </section>
       </div>
+
+      <section className="card reportsTableCard">
+        <div className="reportsCardHeader">
+          <div>
+            <h2>Recent settlements</h2>
+            <p className="muted">
+              Manual records of money paid between you and a contact. Not yet subtracted from the net above.
+            </p>
+          </div>
+        </div>
+        {settlementsErr && <span className="error">{settlementsErr}</span>}
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Contact</th>
+                <th>Direction</th>
+                <th>Amount</th>
+                <th>Notes</th>
+                <th aria-label="Actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentSettlements.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="emptyStateCell">
+                    <p className="emptyState">
+                      No settlements yet. Click "Record settlement" above when money changes hands.
+                    </p>
+                  </td>
+                </tr>
+              )}
+              {recentSettlements.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.settledDate}</td>
+                  <td>{row.contactName ?? 'Unknown'}</td>
+                  <td>
+                    <Badge variant={directionBadgeVariant(row.direction)}>
+                      {directionLabel(row.direction)}
+                    </Badge>
+                  </td>
+                  <td>{formatMoney(Number(row.amount), row.currency)}</td>
+                  <td
+                    className="muted"
+                    style={{
+                      maxWidth: '14rem',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={row.notes ?? undefined}
+                  >
+                    {row.notes ?? ''}
+                  </td>
+                  <td>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => void removeSettlement(row)}
+                    >
+                      <Trash2 aria-hidden="true" />
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
+
+    {dialogOpen && (
+      <Dialog
+        open
+        onOpenChange={(open) => {
+          if (!open) {
+            setDialogOpen(false)
+            setFormError(null)
+          }
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Record settlement</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={submitSettlement}>
+          <DialogBody>
+            <div className="formGrid" style={{ display: 'grid', gap: '0.75rem' }}>
+              <Label htmlFor="settlement-contact">
+                Contact
+                <NativeSelect
+                  id="settlement-contact"
+                  value={formContactId}
+                  onChange={(e) => setFormContactId(e.target.value)}
+                  required
+                >
+                  {contacts.length === 0 && (
+                    <NativeSelectOption value="">
+                      No contacts available
+                    </NativeSelectOption>
+                  )}
+                  {contacts.map((c) => (
+                    <NativeSelectOption key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Label>
+              <Label htmlFor="settlement-direction">
+                Direction
+                <NativeSelect
+                  id="settlement-direction"
+                  value={formDirection}
+                  onChange={(e) =>
+                    setFormDirection(
+                      e.target.value as PartnerSettlementDirection
+                    )
+                  }
+                >
+                  <NativeSelectOption value="i_paid_partner">
+                    I paid partner
+                  </NativeSelectOption>
+                  <NativeSelectOption value="partner_paid_me">
+                    Partner paid me
+                  </NativeSelectOption>
+                </NativeSelect>
+              </Label>
+              <Label htmlFor="settlement-currency">
+                Currency
+                <NativeSelect
+                  id="settlement-currency"
+                  value={formCurrency}
+                  onChange={(e) => setFormCurrency(e.target.value)}
+                >
+                  {availableCurrencies.map((c) => (
+                    <NativeSelectOption key={c} value={c}>
+                      {c}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Label>
+              <Label htmlFor="settlement-amount">
+                Amount
+                <Input
+                  id="settlement-amount"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0.01"
+                  value={formAmount}
+                  onChange={(e) => setFormAmount(e.target.value)}
+                  required
+                />
+              </Label>
+              <Label htmlFor="settlement-date">
+                Date
+                <Input
+                  id="settlement-date"
+                  type="date"
+                  value={formDate}
+                  onChange={(e) => setFormDate(e.target.value)}
+                  required
+                />
+              </Label>
+              <Label htmlFor="settlement-notes">
+                Notes
+                <textarea
+                  id="settlement-notes"
+                  rows={3}
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  className="min-h-9 w-full rounded-md border border-input bg-background/70 px-3 py-1 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                />
+              </Label>
+              {formError && <span className="error">{formError}</span>}
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={formSubmitting}>
+              {formSubmitting ? 'Saving...' : 'Save settlement'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
+    )}
+    {confirm.dialog}
+    </>
   )
 }

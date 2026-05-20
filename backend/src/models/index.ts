@@ -10,6 +10,7 @@ import { Household, initHousehold } from './Household';
 import { HouseholdMember, initHouseholdMember } from './HouseholdMember';
 import { HouseholdInvite, initHouseholdInvite } from './HouseholdInvite';
 import { Contact, initContact } from './Contact';
+import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
@@ -25,6 +26,7 @@ initHousehold(sequelize);
 initHouseholdMember(sequelize);
 initHouseholdInvite(sequelize);
 initContact(sequelize);
+initPartnerSettlement(sequelize);
 initAccount(sequelize);
 initRule(sequelize);
 initTransaction(sequelize);
@@ -65,6 +67,19 @@ HouseholdMember.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Contact, { foreignKey: 'household_id', as: 'contacts' });
 Contact.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Transaction.belongsTo(Contact, { foreignKey: 'ownership_contact_id', as: 'ownershipContact' });
+Household.hasMany(PartnerSettlement, {
+  foreignKey: 'household_id',
+  as: 'partnerSettlements',
+});
+PartnerSettlement.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Contact.hasMany(PartnerSettlement, {
+  foreignKey: 'contact_id',
+  as: 'partnerSettlements',
+});
+PartnerSettlement.belongsTo(Contact, { foreignKey: 'contact_id', as: 'contact' });
 Rule.hasMany(Transaction, {
   foreignKey: 'applied_rule_id',
   as: 'appliedTransactions',
@@ -115,6 +130,7 @@ export {
   HouseholdMember,
   HouseholdInvite,
   Contact,
+  PartnerSettlement,
   Account,
   Rule,
   Transaction,
