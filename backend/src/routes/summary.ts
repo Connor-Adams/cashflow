@@ -373,6 +373,30 @@ router.get('/dashboard', async (req, res, next) => {
   }
 });
 
+export type PartnerNetDirection = 'partner_owes_me' | 'i_owe_partner' | 'even';
+
+/**
+ * Compute the net partner balance and a direction label for a single
+ * (currency, ownership) row. Net is defined as `sumPartner - sumMy`:
+ * positive means the partner owes me, negative means I owe the partner.
+ * The direction tolerates sub-cent rounding noise by rounding to 2 decimals
+ * before comparing to zero (|net| < 0.005 → 'even').
+ */
+export function computePartnerNet(
+  sumMy: number | null,
+  sumPartner: number | null
+): { net: number; direction: PartnerNetDirection } {
+  const my = sumMy ?? 0;
+  const partner = sumPartner ?? 0;
+  const net = partner - my;
+  const rounded = Math.round(net * 100) / 100;
+  let direction: PartnerNetDirection;
+  if (rounded > 0) direction = 'partner_owes_me';
+  else if (rounded < 0) direction = 'i_owe_partner';
+  else direction = 'even';
+  return { net, direction };
+}
+
 router.get('/partner', async (req, res, next) => {
   try {
     const where = dateWhere(req);
@@ -403,15 +427,22 @@ router.get('/partner', async (req, res, next) => {
     type ContactRow = { id: number; name: string };
     const contactsById = new Map((contacts as ContactRow[]).map((c) => [c.id, c.name]));
     res.json({
-      byCurrency: (rows as unknown as PartnerRow[]).map((r) => ({
-        currency: r.currency,
-        ownershipType: r.ownershipType,
-        ownershipContactId: r.ownershipContactId,
-        contactName:
-          r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
-        sumMy: num(r.sumMy),
-        sumPartner: num(r.sumPartner),
-      })),
+      byCurrency: (rows as unknown as PartnerRow[]).map((r) => {
+        const sumMy = num(r.sumMy);
+        const sumPartner = num(r.sumPartner);
+        const { net, direction } = computePartnerNet(sumMy, sumPartner);
+        return {
+          currency: r.currency,
+          ownershipType: r.ownershipType,
+          ownershipContactId: r.ownershipContactId,
+          contactName:
+            r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
+          sumMy,
+          sumPartner,
+          net,
+          direction,
+        };
+      }),
     });
   } catch (e) {
     next(e);
