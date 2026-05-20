@@ -8,6 +8,8 @@ import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import { useSessionState } from '../lib/useSessionState'
 
+type PartnerNetDirection = 'partner_owes_me' | 'i_owe_partner' | 'even'
+
 type PartnerRow = {
   currency: string
   ownershipType?: string
@@ -15,6 +17,8 @@ type PartnerRow = {
   contactName?: string | null
   sumMy: number
   sumPartner: number
+  net: number
+  direction: PartnerNetDirection
 }
 
 type BusRow = { currency: string; sumBusiness: number }
@@ -150,6 +154,17 @@ export function ReportsPage() {
   const totalPartnerRows = partner?.byCurrency.filter((row) => !currency || row.currency === currency).length ?? 0
   const totalBusinessRows =
     business?.byCurrency.filter((row) => !currency || row.currency === currency).length ?? 0
+  const partnerNetByCurrency = useMemo(() => {
+    const map = new Map<string, number>()
+    partner?.byCurrency.forEach((r) => {
+      if (!currency || r.currency === currency) {
+        map.set(r.currency, (map.get(r.currency) ?? 0) + r.net)
+      }
+    })
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [partner, currency])
+  const showPartnerRollup =
+    (partner?.byCurrency.filter((r) => !currency || r.currency === currency).length ?? 0) > 1
   const moneySummaryHint = singleCurrency
     ? `In ${singleCurrency}`
     : 'Set one currency to see money totals'
@@ -241,6 +256,32 @@ export function ReportsPage() {
               <p className="muted">How much of the selected spend belongs to each person.</p>
             </div>
           </div>
+          {showPartnerRollup && (
+            <ul className="partnerNetRollup" style={{ listStyle: 'none', padding: 0, margin: '0 0 0.75rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              {partnerNetByCurrency.map(([cur, total]) => {
+                const rounded = Math.round(total * 100) / 100
+                if (rounded === 0) {
+                  return (
+                    <li key={cur} className="muted" style={{ fontSize: '0.875rem' }}>
+                      <strong>{cur}</strong>: even
+                    </li>
+                  )
+                }
+                const partnerOwesMe = rounded > 0
+                const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
+                const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
+                return (
+                  <li key={cur} style={{ fontSize: '0.875rem' }}>
+                    <strong>{cur}</strong>:{' '}
+                    <span style={{ color, fontWeight: 600 }}>
+                      {formatMoney(Math.abs(rounded), cur)}
+                    </span>{' '}
+                    <span className="muted">({label})</span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
           <div className="tableWrap" aria-busy={loading}>
             <table className="table">
               <thead>
@@ -249,30 +290,50 @@ export function ReportsPage() {
                   <th>Ownership</th>
                   <th>My share</th>
                   <th>Partner share</th>
+                  <th>Net</th>
                 </tr>
               </thead>
               <tbody>
                 {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
                   <tr>
-                    <td colSpan={4} className="emptyStateCell">
+                    <td colSpan={5} className="emptyStateCell">
                       <p className="emptyState">
                         No partner-split data for these filters. Import transactions or widen the date range.
                       </p>
                     </td>
                   </tr>
                 )}
-                {partner?.byCurrency.map((r) => (
-                  <tr key={`${r.currency}-${r.ownershipType ?? 'legacy'}-${r.ownershipContactId ?? 'none'}`}>
-                    <td>{r.currency}</td>
-                    <td>
-                      {r.ownershipType === 'contact'
-                        ? r.contactName ?? 'Contact'
-                        : r.ownershipType ?? 'legacy split'}
-                    </td>
-                    <td>{formatMoney(r.sumMy, r.currency)}</td>
-                    <td>{formatMoney(r.sumPartner, r.currency)}</td>
-                  </tr>
-                ))}
+                {partner?.byCurrency.map((r) => {
+                  let netCell
+                  if (r.direction === 'even') {
+                    netCell = <span className="muted">Even</span>
+                  } else {
+                    const partnerOwesMe = r.direction === 'partner_owes_me'
+                    const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
+                    const sign = partnerOwesMe ? '+' : '−'
+                    const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
+                    netCell = (
+                      <span style={{ color }}>
+                        {sign}
+                        {formatMoney(Math.abs(r.net), r.currency)}{' '}
+                        <span className="muted">({label})</span>
+                      </span>
+                    )
+                  }
+                  return (
+                    <tr key={`${r.currency}-${r.ownershipType ?? 'legacy'}-${r.ownershipContactId ?? 'none'}`}>
+                      <td>{r.currency}</td>
+                      <td>
+                        {r.ownershipType === 'contact'
+                          ? r.contactName ?? 'Contact'
+                          : r.ownershipType ?? 'legacy split'}
+                      </td>
+                      <td>{formatMoney(r.sumMy, r.currency)}</td>
+                      <td>{formatMoney(r.sumPartner, r.currency)}</td>
+                      <td>{netCell}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
