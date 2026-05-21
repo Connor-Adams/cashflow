@@ -135,7 +135,7 @@ export async function runBackfill(
         const rules = await getRules(txn.householdId);
         const amazonOrders = await getAmazonOrders(txn.householdId);
         const householdAccountIds = await getHouseholdAccountIds(txn.accountId, txn.householdId);
-        const memory = await findMerchantMemory(txn.householdId, txn.merchantClean);
+        const memory = await findMerchantMemory(txn.householdId, txn.merchantClean, Number(txn.amount));
         const recurringHistory = await loadRecurringHistory(
           txn.householdId,
           txn.merchantClean,

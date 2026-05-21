@@ -54,6 +54,7 @@ test('pipeline applies merchant-memory when no rule matches', async () => {
       pctPartner: null,
       supportCount: 3,
       exampleTransactionIds: [1, 2, 3],
+      matchedByAmount: true,
     },
   }));
   assert.equal(result.fields.autoCategory, 'Dining');

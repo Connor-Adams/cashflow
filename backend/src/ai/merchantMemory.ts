@@ -10,6 +10,13 @@ export type MerchantMemoryMatch = {
   pctPartner: string | null;
   supportCount: number;
   exampleTransactionIds: number[];
+  /**
+   * True when this match was found among priors with similar amount + same
+   * sign (within ±5% or ±$0.50, whichever is greater). False when this is
+   * the fallback "any-amount" modal — less reliable for umbrella merchants
+   * like Apple where amount disambiguates Apps from iCloud from Hardware.
+   */
+  matchedByAmount: boolean;
 };
 
 function normalizeMerchantKey(value: string): string {
@@ -19,23 +26,35 @@ function normalizeMerchantKey(value: string): string {
     .trim();
 }
 
-export async function findMerchantMemory(
-  householdId: number | null | undefined,
-  merchantClean: string,
-): Promise<MerchantMemoryMatch | null> {
-  const key = normalizeMerchantKey(merchantClean);
-  if (!key) return null;
-  const rows = await sequelize.query<{
-    merchantClean: string;
-    category: string | null;
-    business: number | boolean;
-    splitType: string;
-    pctMe: string | null;
-    pctPartner: string | null;
-    supportCount: string;
-    exampleIds: string;
-    lastReviewedAt: string;
-  }>(
+type MemoryRow = {
+  merchantClean: string;
+  category: string | null;
+  business: number | boolean;
+  splitType: string;
+  pctMe: string | null;
+  pctPartner: string | null;
+  supportCount: string;
+  exampleIds: string;
+  lastReviewedAt: string;
+};
+
+async function queryMemory(opts: {
+  householdId: number | null | undefined;
+  merchantCleanLower: string;
+  /** Optional sign + amount-window filter. */
+  amountFilter: { sign: 1 | -1; minAbs: number; maxAbs: number } | null;
+}): Promise<MemoryRow | null> {
+  const replacements: unknown[] = [
+    opts.householdId ?? null,
+    opts.householdId ?? null,
+    opts.merchantCleanLower,
+  ];
+  let amountClause = '';
+  if (opts.amountFilter) {
+    amountClause = ` AND amount ${opts.amountFilter.sign > 0 ? '>' : '<'} 0 AND ABS(amount) BETWEEN ? AND ?`;
+    replacements.push(opts.amountFilter.minAbs, opts.amountFilter.maxAbs);
+  }
+  const rows = await sequelize.query<MemoryRow>(
     `SELECT merchant_clean AS "merchantClean",
             final_category AS category,
             final_business AS business,
@@ -49,17 +68,16 @@ export async function findMerchantMemory(
      WHERE (? IS NULL OR household_id = ?)
        AND LOWER(merchant_clean) = ?
        AND reviewed_at IS NOT NULL
-       AND final_category IS NOT NULL
+       AND final_category IS NOT NULL${amountClause}
      GROUP BY merchant_clean, final_category, final_business, final_split_type, final_pct_me, final_pct_partner
      ORDER BY COUNT(*) DESC, MAX(reviewed_at) DESC
      LIMIT 1`,
-    {
-      replacements: [householdId ?? null, householdId ?? null, merchantClean.toLowerCase()],
-      type: QueryTypes.SELECT,
-    },
+    { replacements, type: QueryTypes.SELECT },
   );
-  const row = rows[0];
-  if (!row) return null;
+  return rows[0] ?? null;
+}
+
+function rowToMatch(row: MemoryRow, matchedByAmount: boolean): MerchantMemoryMatch {
   return {
     merchantClean: row.merchantClean,
     category: row.category,
@@ -73,7 +91,52 @@ export async function findMerchantMemory(
       .map((id) => Number(id))
       .filter((id) => Number.isInteger(id))
       .slice(0, 8),
+    matchedByAmount,
   };
+}
+
+/**
+ * Look up a categorisation for the given merchant from past reviewed
+ * transactions. When `amount` is provided, prefer priors within ±5% (or
+ * ±$0.50, whichever is greater) of that amount AND with the same sign —
+ * this disambiguates umbrella merchants (Apple, Google, PayPal) where the
+ * amount tells you the product. Falls back to any-amount modal when no
+ * amount-bucketed priors exist.
+ */
+export async function findMerchantMemory(
+  householdId: number | null | undefined,
+  merchantClean: string,
+  amount?: number | null,
+): Promise<MerchantMemoryMatch | null> {
+  const key = normalizeMerchantKey(merchantClean);
+  if (!key) return null;
+  const merchantCleanLower = merchantClean.toLowerCase();
+
+  // First, try the amount-bucketed lookup if we have a usable amount.
+  if (amount != null && Number.isFinite(amount) && amount !== 0) {
+    const absAmount = Math.abs(amount);
+    const tolerance = Math.max(0.5, absAmount * 0.05);
+    const bucketed = await queryMemory({
+      householdId,
+      merchantCleanLower,
+      amountFilter: {
+        sign: amount > 0 ? 1 : -1,
+        minAbs: Math.max(0, absAmount - tolerance),
+        maxAbs: absAmount + tolerance,
+      },
+    });
+    if (bucketed && Number(bucketed.supportCount) >= 2) {
+      return rowToMatch(bucketed, true);
+    }
+  }
+
+  // Fall back to the original any-amount modal.
+  const general = await queryMemory({
+    householdId,
+    merchantCleanLower,
+    amountFilter: null,
+  });
+  return general ? rowToMatch(general, false) : null;
 }
 
 export function merchantMemoryToAutoFields(match: MerchantMemoryMatch): {
