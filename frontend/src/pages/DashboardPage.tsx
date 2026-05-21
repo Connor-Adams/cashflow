@@ -319,7 +319,12 @@ export function DashboardPage() {
       const label = r.category ?? '(uncategorized)'
       byCat.set(label, (byCat.get(label) ?? 0) + r.sumAmount)
     }
-    return Array.from(byCat.entries()).map(([name, total]) => ({ name, total }))
+    // Flip sign so spend reads as positive money-out. Charges land in the DB
+    // as negative; refunds/credits as positive. After negation a typical
+    // spend category shows a positive bar (going up), and a category that
+    // net-refunded shows a negative bar (going down) which reads as
+    // "money came back from this category".
+    return Array.from(byCat.entries()).map(([name, total]) => ({ name, total: -total }))
   }, [data, currency])
 
   // Threshold for switching the category-axis layout. Above this count,
@@ -945,13 +950,13 @@ export function DashboardPage() {
       <section
         className="card dashboardChartCard"
         aria-busy={loading}
-        aria-label="Activity by category. Click a bar to view its transactions."
+        aria-label="Net spend by category. Click a bar to view its transactions."
       >
-        <h2>Activity by category</h2>
+        <h2>Net spend by category</h2>
         <p className="muted">
-          Signed totals by category. Click a bar to open those transactions with the
+          Higher bar = more money out. Click a bar to open those transactions with the
           current filters applied. Payments and transfers are excluded; refunds and
-          credits remain positive.
+          credits offset spend in the same category.
         </p>
         <div className="chartWrap">
           {chartData.length === 0 ? (
@@ -1026,7 +1031,7 @@ export function DashboardPage() {
                 )}
                 <Bar
                   dataKey="total"
-                  name="Amount"
+                  name="Net spend"
                   fill="var(--primary)"
                   cursor="pointer"
                   onClick={(entry) => {
