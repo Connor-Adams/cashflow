@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Enable React 19 act() environment for interactive tests in this file.
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+import { buildCsv, escapeCsvField } from '../../lib/csv'
 import { Alert } from './alert'
 import {
   Dialog,
@@ -753,5 +754,49 @@ describe('FilterBar primitive', () => {
     expect(byLabel('90 days')?.getAttribute('aria-pressed')).toBe('true')
     expect(byLabel('30 days')?.getAttribute('aria-pressed')).toBe('false')
     expect(byLabel('All time')?.getAttribute('aria-pressed')).toBe('false')
+  })
+})
+
+describe('csv helpers', () => {
+  it('passes through plain values without quoting', () => {
+    expect(escapeCsvField('hello')).toBe('hello')
+    expect(escapeCsvField('CAD')).toBe('CAD')
+  })
+
+  it('renders numbers as plain numeric strings (no currency symbol)', () => {
+    expect(escapeCsvField(123.45)).toBe('123.45')
+    expect(escapeCsvField(0)).toBe('0')
+    expect(escapeCsvField(-7.5)).toBe('-7.5')
+  })
+
+  it('treats null and undefined as empty cells', () => {
+    expect(escapeCsvField(null)).toBe('')
+    expect(escapeCsvField(undefined)).toBe('')
+  })
+
+  it('quotes fields that contain commas, quotes, or newlines and doubles inner quotes', () => {
+    expect(escapeCsvField('a,b')).toBe('"a,b"')
+    expect(escapeCsvField('he said "hi"')).toBe('"he said ""hi"""')
+    expect(escapeCsvField('line1\nline2')).toBe('"line1\nline2"')
+    expect(escapeCsvField('line1\r\nline2')).toBe('"line1\r\nline2"')
+  })
+
+  it('builds a CSV string with a UTF-8 BOM, CRLF separators, and a trailing newline', () => {
+    const csv = buildCsv(
+      ['Currency', 'Amount'],
+      [
+        ['CAD', 123.45],
+        ['USD', -7.5],
+      ]
+    )
+    // BOM prefix lets Excel detect UTF-8 cleanly.
+    expect(csv.charCodeAt(0)).toBe(0xfeff)
+    expect(csv).toBe('﻿Currency,Amount\r\nCAD,123.45\r\nUSD,-7.5\r\n')
+  })
+
+  it('escapes embedded commas inside ownership-style names', () => {
+    const csv = buildCsv(['Ownership'], [['Smith, John'], ['Solo']])
+    expect(csv).toContain('"Smith, John"')
+    expect(csv).toContain('Solo')
   })
 })
