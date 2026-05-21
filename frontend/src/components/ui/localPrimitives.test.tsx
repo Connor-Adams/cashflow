@@ -100,6 +100,61 @@ describe('local design-system primitives', () => {
     expect(text).toContain('data-sign="neutral"')
   })
 
+  // metricKind controls the styling tone independently of the parsed sign so
+  // a positive delta on a 'spend' metric reads as bad (red), and 'neutral'
+  // metrics stay muted regardless of direction.
+  it('colors StatCard delta tone based on metricKind for positive and negative deltas', () => {
+    // gain: up → positive (green), down → negative (red)
+    const gainUp = renderToStaticMarkup(
+      <StatCard label="Refunds" value="$10" delta="+5" metricKind="gain" />
+    )
+    expect(gainUp).toContain('data-sign="positive"')
+    expect(gainUp).toContain('data-tone="positive"')
+    expect(gainUp).toContain('data-metric-kind="gain"')
+
+    const gainDown = renderToStaticMarkup(
+      <StatCard label="Refunds" value="$10" delta="-5" metricKind="gain" />
+    )
+    expect(gainDown).toContain('data-sign="negative"')
+    expect(gainDown).toContain('data-tone="negative"')
+
+    // spend: up → negative (red), down → positive (green)
+    const spendUp = renderToStaticMarkup(
+      <StatCard label="Spend" value="$100" delta="+12.34" metricKind="spend" />
+    )
+    expect(spendUp).toContain('data-sign="positive"')
+    expect(spendUp).toContain('data-tone="negative"')
+    expect(spendUp).toContain('data-metric-kind="spend"')
+
+    const spendDown = renderToStaticMarkup(
+      <StatCard label="Spend" value="$100" delta="-7" metricKind="spend" />
+    )
+    expect(spendDown).toContain('data-sign="negative"')
+    expect(spendDown).toContain('data-tone="positive"')
+
+    // neutral: always muted regardless of sign
+    const neutralUp = renderToStaticMarkup(
+      <StatCard label="Transactions" value="42" delta="+3" metricKind="neutral" />
+    )
+    expect(neutralUp).toContain('data-sign="positive"')
+    expect(neutralUp).toContain('data-tone="neutral"')
+    expect(neutralUp).toContain('data-metric-kind="neutral"')
+
+    const neutralDown = renderToStaticMarkup(
+      <StatCard label="Transactions" value="42" delta="-3" metricKind="neutral" />
+    )
+    expect(neutralDown).toContain('data-sign="negative"')
+    expect(neutralDown).toContain('data-tone="neutral"')
+  })
+
+  it('defaults StatCard metricKind to gain when prop is omitted', () => {
+    const html = renderToStaticMarkup(
+      <StatCard label="Refunds" value="$10" delta="+5" />
+    )
+    expect(html).toContain('data-metric-kind="gain"')
+    expect(html).toContain('data-tone="positive"')
+  })
+
   it('renders Alert with error variant and role=alert', () => {
     const html = renderToStaticMarkup(
       <Alert variant="error" title="Upload failed">

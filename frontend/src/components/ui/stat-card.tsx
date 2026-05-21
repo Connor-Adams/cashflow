@@ -2,14 +2,25 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { Card } from './card'
 
+// Semantic intent of the metric a StatCard reports on. Drives how the delta
+// color is chosen: for spend metrics, less is good, so a positive (up) delta
+// reads as bad (red). For gain metrics, more is good, so up reads as green.
+// Neutral metrics (transfers, row counts) never color the delta because the
+// direction isn't inherently good or bad.
+export type MetricKind = 'gain' | 'spend' | 'neutral'
+
 type StatCardProps = React.ComponentProps<typeof Card> & {
   label: React.ReactNode
   value: React.ReactNode
   hint?: React.ReactNode
   delta?: React.ReactNode
+  metricKind?: MetricKind
 }
 
-function parseDeltaSign(delta: React.ReactNode): 'positive' | 'negative' | 'neutral' {
+type DeltaSign = 'positive' | 'negative' | 'neutral'
+type DeltaTone = 'positive' | 'negative' | 'neutral'
+
+function parseDeltaSign(delta: React.ReactNode): DeltaSign {
   if (delta == null) return 'neutral'
   const text = typeof delta === 'string' || typeof delta === 'number' ? String(delta) : ''
   if (!text) return 'neutral'
@@ -29,10 +40,21 @@ function parseDeltaSign(delta: React.ReactNode): 'positive' | 'negative' | 'neut
   return num > 0 ? 'positive' : 'negative'
 }
 
-const DELTA_SIGN_STYLE: Record<
-  'positive' | 'negative' | 'neutral',
-  React.CSSProperties
-> = {
+// Map the parsed numeric sign + the metric's semantic intent to the styling
+// tone. For 'gain' metrics the sign and tone agree (up is good → green). For
+// 'spend' metrics the tone is inverted (up is bad → red). For 'neutral'
+// metrics every delta renders muted regardless of sign — the direction is
+// directionally meaningful but not emotionally good or bad.
+function resolveDeltaTone(sign: DeltaSign, kind: MetricKind): DeltaTone {
+  if (kind === 'neutral') return 'neutral'
+  if (sign === 'neutral') return 'neutral'
+  if (kind === 'spend') {
+    return sign === 'positive' ? 'negative' : 'positive'
+  }
+  return sign
+}
+
+const DELTA_SIGN_STYLE: Record<DeltaTone, React.CSSProperties> = {
   positive: {
     background: 'color-mix(in srgb, var(--accent-green) 16%, transparent)',
     borderColor: 'color-mix(in srgb, var(--accent-green) 45%, var(--border))',
@@ -50,8 +72,17 @@ const DELTA_SIGN_STYLE: Record<
   },
 }
 
-function StatCard({ label, value, hint, delta, className, ...props }: StatCardProps) {
+function StatCard({
+  label,
+  value,
+  hint,
+  delta,
+  metricKind = 'gain',
+  className,
+  ...props
+}: StatCardProps) {
   const sign = parseDeltaSign(delta)
+  const tone = resolveDeltaTone(sign, metricKind)
   const valueTitle = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
   return (
     <Card data-slot="stat-card" className={cn('mb-0', className)} {...props}>
@@ -67,8 +98,10 @@ function StatCard({ label, value, hint, delta, className, ...props }: StatCardPr
           <span
             data-slot="stat-card-delta"
             data-sign={sign}
+            data-tone={tone}
+            data-metric-kind={metricKind}
             className="inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-semibold"
-            style={DELTA_SIGN_STYLE[sign]}
+            style={DELTA_SIGN_STYLE[tone]}
           >
             {delta}
           </span>
