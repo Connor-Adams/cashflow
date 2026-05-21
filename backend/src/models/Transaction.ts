@@ -31,6 +31,13 @@ export class Transaction extends Model<
   declare sourceRowFingerprint: string;
   declare appliedRuleId: number | null;
 
+  declare merchantCanonical: string | null;
+  declare txnType: CreationOptional<string>;
+  declare autoSource: string | null;
+  declare autoConfidence: string | null;
+  declare linkedTransactionId: number | null;
+  declare isRecurring: CreationOptional<boolean>;
+
   declare autoCategory: string | null;
   declare categoryOverride: string | null;
   declare finalCategory: string | null;
@@ -234,6 +241,39 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         field: 'business_amount',
         allowNull: false,
         defaultValue: 0,
+      },
+
+      merchantCanonical: {
+        type: DataTypes.STRING(256),
+        field: 'merchant_canonical',
+        allowNull: true,
+      },
+      txnType: {
+        type: DataTypes.STRING(16),
+        field: 'txn_type',
+        allowNull: false,
+        defaultValue: 'purchase',
+      },
+      autoSource: {
+        type: DataTypes.STRING(32),
+        field: 'auto_source',
+        allowNull: true,
+      },
+      autoConfidence: {
+        type: DataTypes.STRING(8),
+        field: 'auto_confidence',
+        allowNull: true,
+      },
+      linkedTransactionId: {
+        type: DataTypes.INTEGER,
+        field: 'linked_transaction_id',
+        allowNull: true,
+      },
+      isRecurring: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_recurring',
+        allowNull: false,
+        defaultValue: false,
       },
 
       reviewFlag: {

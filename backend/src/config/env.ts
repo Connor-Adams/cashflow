@@ -128,3 +128,27 @@ export const corsOrigin = resolved.corsOrigin;
 export const nodeEnv = resolved.nodeEnv;
 export const alphaVantageApiKey = resolved.alphaVantageApiKey;
 export const quoteProvider = resolved.quoteProvider;
+
+function parseIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+export const enrichmentRecurringMinSupport = parseIntEnv(
+  'ENRICHMENT_RECURRING_MIN_SUPPORT',
+  3,
+);
+export const enrichmentAmazonLinkThreshold = parseIntEnv(
+  'ENRICHMENT_AMAZON_LINK_THRESHOLD',
+  70,
+);
+export const enrichmentRefundWindowDays = parseIntEnv(
+  'ENRICHMENT_REFUND_WINDOW_DAYS',
+  60,
+);
+export const enrichmentTransferWindowDays = parseIntEnv(
+  'ENRICHMENT_TRANSFER_WINDOW_DAYS',
+  2,
+);

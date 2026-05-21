@@ -7,17 +7,31 @@ import {
   Account,
   Transaction,
   ImportHistory,
+  TransactionSignal,
 } from '../models';
 import { hashContent, rowFingerprint } from './fingerprint';
-import { findBestRule, loadAllRules, applyRuleToAuto } from './applyRules';
+import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
 import { mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import { assertUnderRoot } from './pathUtils';
-import { findMerchantMemory, merchantMemoryToAutoFields } from '../ai/merchantMemory';
+import { findMerchantMemory } from '../ai/merchantMemory';
 import * as env from '../config/env';
+import { enrichTransaction } from './enrich';
+import {
+  enrichmentRecurringMinSupport,
+  enrichmentAmazonLinkThreshold,
+  enrichmentRefundWindowDays,
+  enrichmentTransferWindowDays,
+} from '../config/env';
+import {
+  loadAmazonOrdersCache,
+  loadHouseholdAccountIds,
+  loadRecurringHistory,
+  loadRelationshipCandidates,
+} from './enrichment/loaders';
 
 /** Max row-level parse diagnostics returned on a single import response */
 export const PARSE_ERRORS_MAX = 50;
@@ -95,6 +109,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   }
 
   const rules = await loadAllRules(opts.householdId);
+  const amazonOrdersCache = await loadAmazonOrdersCache(opts.householdId ?? null);
   const startedAt = new Date();
   let account: AccountModel;
   let importBatch: string;
@@ -186,6 +201,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     importBatch = meta.batchLabel;
   }
 
+  const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
+
   const text = buf.toString('utf8');
   const parsed = parseCsvRecords(text);
   if (!parsed.ok) {
@@ -247,24 +264,44 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         sourceReference: v.sourceReference,
       });
 
-      const { rule, ambiguous } = findBestRule(rules, v.merchantClean);
-      const memory = !rule || ambiguous
-        ? await findMerchantMemory(opts.householdId ?? account.householdId ?? null, v.merchantClean)
-        : null;
-      const autoFields =
-        rule && !ambiguous
-          ? applyRuleToAuto(rule)
-          : memory
-            ? merchantMemoryToAutoFields(memory)
-            : {
-                autoCategory: null as string | null,
-                autoBusiness: null as boolean | null,
-                autoSplitType: null as string | null,
-                autoPctMe: null as string | null,
-                autoPctPartner: null as string | null,
-              };
+      const memory = await findMerchantMemory(opts.householdId ?? account.householdId ?? null, v.merchantClean);
 
-      const reviewFlag = true;
+      const recurringHistory = await loadRecurringHistory(
+        opts.householdId ?? account.householdId ?? null,
+        v.merchantClean,
+        v.date,
+      );
+      const relationshipCandidates = await loadRelationshipCandidates(
+        opts.householdId ?? account.householdId ?? null,
+        householdAccountIds,
+        v.merchantClean,
+        v.date,
+        enrichmentRefundWindowDays,
+      );
+
+      const enriched = await enrichTransaction({
+        raw: {
+          merchantRaw: v.merchantRaw,
+          date: v.date,
+          amount: v.amount,
+          sourceReference: v.sourceReference,
+          notes: null,
+        },
+        accountId: account.id,
+        householdId: opts.householdId ?? account.householdId ?? null,
+        householdAccountIds,
+        rules,
+        amazonOrders: amazonOrdersCache,
+        memory,
+        recurringHistory,
+        relationshipCandidates,
+        refundWindowDays: enrichmentRefundWindowDays,
+        transferWindowDays: enrichmentTransferWindowDays,
+        recurringMinSupport: enrichmentRecurringMinSupport,
+        amazonLinkThreshold: enrichmentAmazonLinkThreshold,
+      });
+
+      const f = enriched.fields;
 
       const txn = Transaction.build({
         accountId: account.id,
@@ -272,29 +309,35 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         createdByUserId: opts.userId ?? account.ownerUserId ?? null,
         visibility: account.visibility === 'shared' ? 'shared' : 'private',
         ownershipType:
-          autoFields.autoSplitType === 'partner' || autoFields.autoSplitType === 'shared'
-            ? autoFields.autoSplitType
-            : 'me',
+          f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
         importBatch,
         date: v.date,
         merchantRaw: v.merchantRaw,
-        merchantClean: v.merchantClean,
+        merchantClean: f.merchantClean,
+        merchantCanonical: f.merchantCanonical,
+        txnType: f.txnType,
         amount: String(v.amount),
         currency: v.currency,
-        notes: memory
-          ? `Auto-categorized from ${memory.supportCount} previous ${memory.merchantClean} transaction${memory.supportCount === 1 ? '' : 's'}.`
-          : null,
+        notes: f.notes,
         sourceReference: v.sourceReference,
         sourceRowFingerprint: fp,
-        appliedRuleId: rule && !ambiguous ? rule.id : null,
-        ...autoFields,
+        appliedRuleId: f.appliedRuleId,
+        autoCategory: f.autoCategory,
+        autoBusiness: f.autoBusiness,
+        autoSplitType: f.autoSplitType,
+        autoPctMe: f.autoPctMe,
+        autoPctPartner: f.autoPctPartner,
         categoryOverride: null,
         businessOverride: null,
         splitOverride: null,
         pctMeOverride: null,
         pctPartnerOverride: null,
-        reviewFlag,
+        autoSource: f.autoSource,
+        autoConfidence: f.autoConfidence,
+        linkedTransactionId: f.linkedTransactionId,
+        isRecurring: f.isRecurring,
+        reviewFlag: f.reviewFlag,
         reviewedAt: null,
       });
 
@@ -302,6 +345,18 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
 
       try {
         await txn.save({ transaction: t });
+        if (enriched.signals.length > 0) {
+          await TransactionSignal.bulkCreate(
+            enriched.signals.map((s) => ({
+              transactionId: txn.id,
+              source: s.source,
+              confidence: s.confidence,
+              fields: s.fields,
+              rationale: s.rationale ?? null,
+            })),
+            { transaction: t },
+          );
+        }
         inserted += 1;
       } catch (e) {
         if (isSequelizeUniqueLike(e)) {
