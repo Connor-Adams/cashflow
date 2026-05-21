@@ -9,10 +9,9 @@ const PROCESSOR_PREFIXES: RegExp[] = [
   /^GH\s*\*\s*/i,
 ];
 
-// Only strip the per-transaction identifier suffix from AMZN MKTP
-const TRAILING_AMZN_MKTP_ID = /(?<=\bMKTP\s+\w{1,3})\*[A-Z0-9]{4,}$/i;
-
+const TRAILING_AMZN_MKTP_ID = /\*[A-Z0-9]{4,}$/;
 const TRAILING_STORE_NUMBER = /\s+(#\d+|STORE\s*#?\d+|\d{4,6})$/i;
+const TRAILING_PHONE = /\s+\+?\d[\d\-.\s()]{6,}\d$/;
 
 // US states and Canadian provinces (2-letter codes used in merchant strings)
 const STATE_PROV_SET = new Set([
@@ -27,8 +26,6 @@ const STATE_PROV_SET = new Set([
 
 const COUNTRY_SET = new Set(['US', 'USA', 'CA', 'CAN']);
 
-const TRAILING_PHONE = /\s+\+?\d[\d\-.\s()]{6,}\d$/;
-
 // All-uppercase word (city name token): 2+ letters, may include apostrophes/hyphens
 const ALL_CAPS_WORD = /^[A-Z][A-Z'\-]+$/;
 
@@ -42,9 +39,6 @@ const ALL_CAPS_WORD = /^[A-Z][A-Z'\-]+$/;
  */
 function stripCityStateTail(s: string): string {
   const words = s.split(' ');
-  let end = words.length; // exclusive upper bound of words we keep
-
-  // Scan backwards, allowing: [0-1 country] [1 state] [0-2 city words]
   let i = words.length - 1;
 
   // Optional trailing country
@@ -66,7 +60,7 @@ function stripCityStateTail(s: string): string {
     cityStripped++;
   }
 
-  end = i + 1; // keep words[0..i]
+  const end = i + 1; // keep words[0..i]
 
   if (end < 1) return s; // would strip everything — bail out
   return words.slice(0, end).join(' ');
@@ -94,15 +88,12 @@ export function normalizeMerchant(raw: unknown): string {
   s = s.replace(TRAILING_AMZN_MKTP_ID, '').trim();
   s = s.replace(TRAILING_PHONE, '').trim();
 
-  // Strip store/location numbers
   let prev = '';
   while (prev !== s) {
     prev = s;
     s = s.replace(TRAILING_STORE_NUMBER, '').trim();
+    s = stripCityStateTail(s);
   }
-
-  // Strip city/state tail
-  s = stripCityStateTail(s);
 
   return s.replace(/\s+/g, ' ').trim();
 }
