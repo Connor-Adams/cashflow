@@ -35,6 +35,18 @@ type ReceiptImportItem = {
   inferredCategory: string | null
 }
 
+type PurchaseHistoryCsvResult = {
+  vendor: string
+  fileName: string
+  totalRows: number
+  ordersBuilt: number
+  unparsedRows: number
+  createdOrders: number
+  skippedDuplicates: number
+  errors: Array<{ rowIndex: number; message: string }>
+  columnMapping: Record<string, string>
+}
+
 type ReceiptImportResult = {
   order: { id: number; vendor: string; total: string | null; currency: string; orderDate: string | null }
   created: boolean
@@ -73,9 +85,38 @@ export function SettingsPage() {
   const [statsError, setStatsError] = useState<string | null>(null)
   const [statsLoading, setStatsLoading] = useState(false)
   const [receiptText, setReceiptText] = useState('')
-  const [receiptBusy, setReceiptBusy] = useState<'text' | 'image' | null>(null)
+  const [receiptBusy, setReceiptBusy] = useState<'text' | 'image' | 'csv' | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const [receiptResult, setReceiptResult] = useState<ReceiptImportResult | null>(null)
+  const [csvVendor, setCsvVendor] = useState<'apple' | 'google' | 'amazon' | 'other'>('apple')
+  const [csvResult, setCsvResult] = useState<PurchaseHistoryCsvResult | null>(null)
+
+  async function uploadPurchaseHistoryCsv(file: File) {
+    if (receiptBusy) return
+    setReceiptBusy('csv')
+    setReceiptError(null)
+    setCsvResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const base = import.meta.env.VITE_API_BASE ?? ''
+      const res = await fetch(`${base}/api/external-orders/import-csv?vendor=${csvVendor}`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText)
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      const r = (await res.json()) as PurchaseHistoryCsvResult
+      setCsvResult(r)
+    } catch (e) {
+      setReceiptError(e instanceof Error ? e.message : 'CSV upload failed')
+    } finally {
+      setReceiptBusy(null)
+    }
+  }
 
   async function parseReceiptText() {
     if (receiptBusy) return
@@ -426,6 +467,76 @@ export function SettingsPage() {
               {receiptBusy === 'image' ? 'Parsing image…' : 'Or upload a receipt image'}
             </label>
           </div>
+          <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+            <div style={{ flex: 1, minWidth: '12rem' }}>
+              <strong style={{ display: 'block' }}>Bulk: purchase-history CSV</strong>
+              <span className="muted" style={{ fontSize: '0.85rem' }}>
+                Apple ID → Account → Purchase History → Export CSV. Google Takeout → Google Pay → orders.csv.
+              </span>
+            </div>
+            <select
+              value={csvVendor}
+              onChange={(e) => setCsvVendor(e.target.value as 'apple' | 'google' | 'amazon' | 'other')}
+              disabled={receiptBusy != null}
+              style={{
+                padding: '0.4rem 0.5rem',
+                background: 'var(--bg)',
+                color: 'var(--fg)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md, 6px)',
+              }}
+            >
+              <option value="apple">Apple</option>
+              <option value="google">Google</option>
+              <option value="amazon">Amazon</option>
+              <option value="other">Other</option>
+            </select>
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                cursor: 'pointer',
+                color: 'var(--accent, currentColor)',
+              }}
+            >
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                disabled={receiptBusy != null}
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void uploadPurchaseHistoryCsv(file)
+                  e.target.value = ''
+                }}
+              />
+              <Sparkles aria-hidden="true" />
+              {receiptBusy === 'csv' ? 'Importing CSV…' : 'Upload CSV'}
+            </label>
+          </div>
+          {csvResult && (
+            <div style={{ marginTop: '0.25rem', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md, 6px)', fontSize: '0.85rem' }}>
+              <div>
+                <strong>{csvResult.fileName}</strong> ({csvResult.vendor})
+              </div>
+              <div className="muted">
+                {csvResult.totalRows} rows · created {csvResult.createdOrders}, duplicates {csvResult.skippedDuplicates},
+                {csvResult.unparsedRows > 0 ? ` skipped ${csvResult.unparsedRows} unparseable,` : ''}
+                {csvResult.errors.length > 0 ? ` ${csvResult.errors.length} errored` : ' no errors'}
+              </div>
+              {Object.keys(csvResult.columnMapping).length > 0 && (
+                <details style={{ marginTop: '0.35rem' }}>
+                  <summary className="muted" style={{ cursor: 'pointer' }}>Column mapping ({Object.keys(csvResult.columnMapping).length})</summary>
+                  <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.1rem' }}>
+                    {Object.entries(csvResult.columnMapping).map(([h, role]) => (
+                      <li key={h}><code>{h}</code> → {role}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
           {receiptError && (
             <span className="error" role="alert">{receiptError}</span>
           )}

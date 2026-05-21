@@ -8,7 +8,9 @@ import {
   extractReceiptFromText,
   type ExtractedReceiptOrder,
 } from '../ai/extractReceiptItems';
+import { parsePurchaseHistoryCsv } from '../import/parsePurchaseHistoryCsv';
 import { aiSuggestLimiter } from './aiRateLimit';
+import { importUploadLimiter } from './importRateLimit';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 
 const router = Router();
@@ -168,6 +170,96 @@ router.post(
         householdId: auth.household.id,
       });
       res.json({ order: order.toJSON(), created, extracted });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * POST /api/external-orders/import-csv?vendor=apple|google|amazon|other
+ *
+ * Bulk import via vendor purchase-history CSV (Apple report-a-problem
+ * export, Google Pay/Takeout, etc.). Each CSV row becomes one ExternalOrder
+ * with one item. Headers are mapped heuristically by name; rows with no
+ * recognisable title or amount are skipped.
+ *
+ * multipart field 'file' = the CSV.
+ * Returns: { vendor, totalRows, createdOrders, skippedDuplicates, errors }
+ */
+router.post(
+  '/import-csv',
+  importUploadLimiter,
+  (req, res, next) => {
+    upload.single('file')(req as never, res as never, (err: unknown) => {
+      if (err) return next(err);
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const auth = currentAuth(req);
+      const file = (req as unknown as { file?: { mimetype: string; buffer: Buffer; originalname: string } }).file;
+      if (!file) {
+        res.status(400).json({ error: 'file is required' });
+        return;
+      }
+      const vendor = (() => {
+        const raw = String(req.query.vendor ?? '').toLowerCase();
+        if (raw === 'apple' || raw === 'google' || raw === 'amazon' || raw === 'other') {
+          return raw as ExtractedReceiptOrder['vendor'];
+        }
+        return 'other';
+      })();
+
+      const text = file.buffer.toString('utf8');
+      const parsed = parsePurchaseHistoryCsv(text, { vendor, defaultCurrency: 'USD' });
+
+      let created = 0;
+      let duplicates = 0;
+      const errors: Array<{ rowIndex: number; message: string }> = [];
+
+      for (let i = 0; i < parsed.orders.length; i++) {
+        const order = parsed.orders[i];
+        try {
+          const result = await persistExtractedOrder(order, {
+            userId: auth.user.id,
+            householdId: auth.household.id,
+            source: `${vendor}-csv`,
+          });
+          if (result.created) created++;
+          else duplicates++;
+        } catch (e) {
+          errors.push({
+            rowIndex: i,
+            message: e instanceof Error ? e.message : 'persist failed',
+          });
+        }
+      }
+
+      logger.info('external_order_csv_imported', {
+        source: `${vendor}-csv`,
+        vendor,
+        totalRows: parsed.totalRows,
+        ordersBuilt: parsed.orders.length,
+        unparsedRows: parsed.unparsedRows,
+        created,
+        duplicates,
+        errored: errors.length,
+        householdId: auth.household.id,
+      });
+
+      res.json({
+        vendor,
+        fileName: file.originalname,
+        totalRows: parsed.totalRows,
+        ordersBuilt: parsed.orders.length,
+        unparsedRows: parsed.unparsedRows,
+        createdOrders: created,
+        skippedDuplicates: duplicates,
+        errors,
+        columnMapping: parsed.columnMapping,
+      });
     } catch (e) {
       next(e);
     }
