@@ -14,7 +14,7 @@ const dbPath = path.join(backendRoot, 'data', 'test-backfill.sqlite');
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
 let models: typeof import('../../src/models/index.js');
-let backfillModule: typeof import('../../scripts/backfillEnrichment.js');
+let backfillModule: typeof import('../../src/import/runEnrichmentBackfill.js');
 
 before(async () => {
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
@@ -28,7 +28,7 @@ before(async () => {
   });
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  backfillModule = await import('../../scripts/backfillEnrichment.js');
+  backfillModule = await import('../../src/import/runEnrichmentBackfill.js');
   authed = request.agent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'backfill@example.com',

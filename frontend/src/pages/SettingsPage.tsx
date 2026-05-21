@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Link2, Plus, Trash2 } from 'lucide-react'
+import { Edit3, Link2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -19,6 +19,16 @@ import { layoutWidthOptions, useLayoutWidth } from '../lib/layoutWidth'
 import { useAuth } from '../lib/useAuth'
 import type { Contact } from '../types/api'
 
+type BackfillResult = {
+  processed: number
+  updated: number
+  reviewFlagCleared: number
+  signalsWritten: number
+  skipped: number
+  durationMs: number
+  dryRun: boolean
+}
+
 export function SettingsPage() {
   const auth = useAuth()
   const [layoutWidth, setLayoutWidth] = useLayoutWidth()
@@ -28,9 +38,49 @@ export function SettingsPage() {
   const [renameTarget, setRenameTarget] = useState<Contact | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [renameSaving, setRenameSaving] = useState(false)
+  const [backfillRunning, setBackfillRunning] = useState<'dry' | 'real' | null>(null)
+  const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null)
+  const [backfillError, setBackfillError] = useState<string | null>(null)
+  const [backfillClearReview, setBackfillClearReview] = useState(true)
+  const [backfillReviewOnly, setBackfillReviewOnly] = useState(false)
+  const [backfillLimit, setBackfillLimit] = useState('')
   const confirm = useConfirm()
   const errorId = 'settings-error'
   const hasError = Boolean(err)
+
+  async function runBackfill(mode: 'dry' | 'real') {
+    if (backfillRunning) return
+    if (mode === 'real') {
+      const ok = await confirm({
+        title: 'Run enrichment backfill?',
+        description:
+          'Re-runs the import enrichment pipeline against every transaction in your household. Override fields and already-reviewed rows are untouched. This may take a minute or two.',
+        confirmLabel: 'Run backfill',
+      })
+      if (!ok) return
+    }
+    setBackfillRunning(mode)
+    setBackfillError(null)
+    if (mode === 'real') setBackfillResult(null)
+    try {
+      const limit = Number(backfillLimit.trim())
+      const body: Record<string, unknown> = {
+        dryRun: mode === 'dry',
+        noReviewFlag: !backfillClearReview,
+        reviewOnly: backfillReviewOnly,
+      }
+      if (Number.isFinite(limit) && limit > 0) body.limit = Math.floor(limit)
+      const result = await postJson<BackfillResult>(
+        '/api/transactions/enrichment/backfill',
+        body,
+      )
+      setBackfillResult(result)
+    } catch (e) {
+      setBackfillError(e instanceof Error ? e.message : 'Backfill failed')
+    } finally {
+      setBackfillRunning(null)
+    }
+  }
 
   const loadContacts = useCallback(async () => {
     try {
@@ -155,6 +205,82 @@ export function SettingsPage() {
             </label>
           ))}
         </div>
+      </Card>
+
+      <Card className="accountsFormCard">
+        <div className="accountsCardHeader">
+          <div>
+            <h2>Enrichment maintenance</h2>
+            <p className="muted">
+              Re-runs the import enrichment pipeline against every transaction in your household. Useful after
+              normalisation or rule changes. Override fields and already-reviewed rows are never touched.
+            </p>
+          </div>
+        </div>
+        <div className="formGrid" style={{ gap: '0.5rem' }}>
+          <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={backfillClearReview}
+              onChange={(e) => setBackfillClearReview(e.target.checked)}
+              disabled={backfillRunning != null}
+            />
+            Clear review flag on rows the pipeline can now confidently categorise
+          </label>
+          <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={backfillReviewOnly}
+              onChange={(e) => setBackfillReviewOnly(e.target.checked)}
+              disabled={backfillRunning != null}
+            />
+            Only re-process rows currently in review
+          </label>
+          <Label htmlFor="settings-backfill-limit" style={{ maxWidth: '20rem' }}>
+            Row limit (optional, for testing)
+            <Input
+              id="settings-backfill-limit"
+              type="number"
+              min={1}
+              placeholder="all rows"
+              value={backfillLimit}
+              onChange={(e) => setBackfillLimit(e.target.value)}
+              disabled={backfillRunning != null}
+            />
+          </Label>
+        </div>
+        <div className="row" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={backfillRunning != null}
+            onClick={() => void runBackfill('dry')}
+          >
+            <Sparkles aria-hidden="true" />
+            {backfillRunning === 'dry' ? 'Running dry run…' : 'Dry run'}
+          </Button>
+          <Button
+            type="button"
+            disabled={backfillRunning != null}
+            onClick={() => void runBackfill('real')}
+          >
+            <Sparkles aria-hidden="true" />
+            {backfillRunning === 'real' ? 'Running backfill…' : 'Run backfill'}
+          </Button>
+        </div>
+        {backfillError && (
+          <span className="error" role="alert" style={{ marginTop: '0.5rem' }}>
+            {backfillError}
+          </span>
+        )}
+        {backfillResult && (
+          <p className="muted" style={{ marginTop: '0.5rem' }}>
+            {backfillResult.dryRun ? 'Dry run — no changes written. ' : 'Backfill complete. '}
+            Processed {backfillResult.processed}, updated {backfillResult.updated}, review flag cleared on{' '}
+            {backfillResult.reviewFlagCleared}, signals written {backfillResult.signalsWritten}, skipped{' '}
+            {backfillResult.skipped} ({(backfillResult.durationMs / 1000).toFixed(1)}s).
+          </p>
+        )}
       </Card>
 
       <Card className="accountsFormCard">
