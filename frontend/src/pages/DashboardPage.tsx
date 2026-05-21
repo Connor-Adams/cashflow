@@ -991,16 +991,16 @@ export function DashboardPage() {
                   tick={narrowAxisTick}
                   // Category-count-aware label handling: once there are more
                   // than 10 categories, default Recharts spacing overlaps even
-                  // on wide viewports. Switch to preserveStartEnd + slight
-                  // negative rotation and give the axis extra height. Narrow
-                  // viewport still stacks the tick-font shrink on top.
-                  interval={
-                    isNarrowViewport || hasManyCategories ? 'preserveStartEnd' : 0
-                  }
+                  // on wide viewports. Steepen the angle and give the axis
+                  // more vertical space so every label still renders (using
+                  // preserveStartEnd silently dropped every other label,
+                  // hiding big categories like Rent under the tallest bar).
+                  // Narrow viewport stacks the tick-font shrink on top.
+                  interval={0}
                   minTickGap={isNarrowViewport ? 12 : 5}
-                  angle={hasManyCategories ? -30 : 0}
+                  angle={hasManyCategories ? -45 : 0}
                   textAnchor={hasManyCategories ? 'end' : 'middle'}
-                  height={hasManyCategories ? 70 : undefined}
+                  height={hasManyCategories ? 110 : undefined}
                 />
                 <YAxis
                   tick={narrowAxisTick}
