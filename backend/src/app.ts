@@ -16,6 +16,7 @@ import contactsRouter from './routes/contacts';
 import settlementsRouter from './routes/settlements';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
+import externalOrdersRouter from './routes/externalOrders';
 import portfolioRouter from './routes/portfolio';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
@@ -56,6 +57,7 @@ app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/amazon', amazonRouter);
+app.use('/api/external-orders', externalOrdersRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api', receiptsRouter);
 

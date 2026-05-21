@@ -27,6 +27,30 @@ type BackfillErrorEvent = Extract<EnrichmentBackfillProgress, { kind: 'error' }>
 
 const MAX_FEED_ROWS = 200
 
+type ReceiptImportItem = {
+  title: string
+  quantity: number
+  unitPrice: number | null
+  totalPrice: number | null
+  inferredCategory: string | null
+}
+
+type ReceiptImportResult = {
+  order: { id: number; vendor: string; total: string | null; currency: string; orderDate: string | null }
+  created: boolean
+  extracted: {
+    vendor: string
+    vendorName: string | null
+    orderDate: string | null
+    orderId: string | null
+    total: number | null
+    currency: string | null
+    paymentLast4: string | null
+    items: ReceiptImportItem[]
+    notes: string | null
+  }
+}
+
 export function SettingsPage() {
   const auth = useAuth()
   const [layoutWidth, setLayoutWidth] = useLayoutWidth()
@@ -48,6 +72,53 @@ export function SettingsPage() {
   const [stats, setStats] = useState<EnrichmentStats | null>(null)
   const [statsError, setStatsError] = useState<string | null>(null)
   const [statsLoading, setStatsLoading] = useState(false)
+  const [receiptText, setReceiptText] = useState('')
+  const [receiptBusy, setReceiptBusy] = useState<'text' | 'image' | null>(null)
+  const [receiptError, setReceiptError] = useState<string | null>(null)
+  const [receiptResult, setReceiptResult] = useState<ReceiptImportResult | null>(null)
+
+  async function parseReceiptText() {
+    if (receiptBusy) return
+    setReceiptBusy('text')
+    setReceiptError(null)
+    setReceiptResult(null)
+    try {
+      const r = await postJson<ReceiptImportResult>('/api/external-orders/import-text', { text: receiptText })
+      setReceiptResult(r)
+      setReceiptText('')
+    } catch (e) {
+      setReceiptError(e instanceof Error ? e.message : 'Receipt parse failed')
+    } finally {
+      setReceiptBusy(null)
+    }
+  }
+
+  async function parseReceiptImage(file: File) {
+    if (receiptBusy) return
+    setReceiptBusy('image')
+    setReceiptError(null)
+    setReceiptResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const base = import.meta.env.VITE_API_BASE ?? ''
+      const res = await fetch(`${base}/api/external-orders/import-image`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText)
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      const r = (await res.json()) as ReceiptImportResult
+      setReceiptResult(r)
+    } catch (e) {
+      setReceiptError(e instanceof Error ? e.message : 'Image parse failed')
+    } finally {
+      setReceiptBusy(null)
+    }
+  }
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true)
@@ -286,6 +357,107 @@ export function SettingsPage() {
               </span>
             </label>
           ))}
+        </div>
+      </Card>
+
+      <Card className="accountsFormCard">
+        <div className="accountsCardHeader">
+          <div>
+            <h2>Import receipts</h2>
+            <p className="muted">
+              Paste a receipt email (Apple, Google, restaurant, anything) or drop an image. The AI extracts the
+              line items and creates a linkable order. Run the enrichment backfill below afterwards to attach the
+              order to a matching card transaction and derive the category from the items.
+            </p>
+          </div>
+        </div>
+        <div className="formGrid" style={{ gap: '0.75rem' }}>
+          <Label htmlFor="settings-receipt-text">
+            Paste receipt email body
+            <textarea
+              id="settings-receipt-text"
+              value={receiptText}
+              onChange={(e) => setReceiptText(e.target.value)}
+              disabled={receiptBusy != null}
+              rows={6}
+              placeholder="Paste the full email body, including header lines like 'Order ID' and item lines…"
+              style={{
+                width: '100%',
+                padding: '0.5rem',
+                fontFamily: 'inherit',
+                fontSize: '0.85rem',
+                background: 'var(--bg)',
+                color: 'var(--fg)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md, 6px)',
+              }}
+            />
+          </Label>
+          <div className="row" style={{ gap: '0.5rem' }}>
+            <Button
+              type="button"
+              disabled={receiptBusy != null || !receiptText.trim()}
+              onClick={() => void parseReceiptText()}
+            >
+              <Sparkles aria-hidden="true" />
+              {receiptBusy === 'text' ? 'Parsing…' : 'Parse pasted text'}
+            </Button>
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                cursor: 'pointer',
+                color: 'var(--accent, currentColor)',
+              }}
+            >
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                disabled={receiptBusy != null}
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void parseReceiptImage(file)
+                  e.target.value = ''
+                }}
+              />
+              <Sparkles aria-hidden="true" />
+              {receiptBusy === 'image' ? 'Parsing image…' : 'Or upload a receipt image'}
+            </label>
+          </div>
+          {receiptError && (
+            <span className="error" role="alert">{receiptError}</span>
+          )}
+          {receiptResult && (
+            <div style={{ marginTop: '0.25rem', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md, 6px)' }}>
+              <div>
+                <strong>{receiptResult.created ? 'Created' : 'Already on file'}:</strong>{' '}
+                {receiptResult.extracted.vendorName ?? receiptResult.extracted.vendor}
+                {receiptResult.extracted.orderDate && ` · ${receiptResult.extracted.orderDate}`}
+                {receiptResult.extracted.total != null && ` · ${receiptResult.extracted.total} ${receiptResult.extracted.currency ?? ''}`}
+              </div>
+              {receiptResult.extracted.items.length > 0 && (
+                <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.1rem', fontSize: '0.85rem' }}>
+                  {receiptResult.extracted.items.slice(0, 8).map((item, i) => (
+                    <li key={i}>
+                      {item.title}
+                      {item.quantity > 1 && ` × ${item.quantity}`}
+                      {item.totalPrice != null && ` — ${item.totalPrice}`}
+                      {item.inferredCategory && <span className="muted"> · {item.inferredCategory}</span>}
+                    </li>
+                  ))}
+                  {receiptResult.extracted.items.length > 8 && (
+                    <li className="muted">…+{receiptResult.extracted.items.length - 8} more</li>
+                  )}
+                </ul>
+              )}
+              <p className="muted" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }}>
+                Now run the backfill below (or wait for your next CSV import) — link-items will attach this
+                order to the matching card transaction and derive its category.
+              </p>
+            </div>
+          )}
         </div>
       </Card>
 

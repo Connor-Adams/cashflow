@@ -1,7 +1,45 @@
-import { isAmazonLikeMerchant, scoreAmazonOrderMatch } from '../../amazon/matcher';
+import { scoreAmazonOrderMatch } from '../../amazon/matcher';
 import type { ExternalOrder } from '../../models/ExternalOrder';
 import type { Transaction } from '../../models/Transaction';
 import type { Signal } from './types';
+
+/**
+ * Vendor-recognition map. Each entry maps the merchant text (merchantRaw +
+ * merchantClean concatenated) to the vendor key stored on ExternalOrder.vendor.
+ * The canonical name is what we display on the linked transaction.
+ *
+ * Order matters — first match wins. Put more-specific patterns first.
+ */
+const VENDOR_MATCHERS: Array<{
+  vendor: string;
+  canonical: string;
+  pattern: RegExp;
+}> = [
+  {
+    vendor: 'amazon',
+    canonical: 'Amazon',
+    pattern: /\b(amazon(?:\.(?:com|ca|co\.uk))?|amzn(?:\s*mktp)?|amzn\s*digital|prime\s*video)\b/i,
+  },
+  {
+    vendor: 'apple',
+    canonical: 'Apple',
+    pattern: /\b(apple(?:\.com)?(?:\/bill)?|itunes|app\s*store|apple\s*music|apple\s*tv|icloud)\b/i,
+  },
+  {
+    vendor: 'google',
+    canonical: 'Google',
+    pattern: /\b(google(?:\s*play)?|google\s*\*|googlepay|youtube\s*premium)\b/i,
+  },
+];
+
+function matchVendor(merchantText: string): { vendor: string; canonical: string } | null {
+  for (const entry of VENDOR_MATCHERS) {
+    if (entry.pattern.test(merchantText)) {
+      return { vendor: entry.vendor, canonical: entry.canonical };
+    }
+  }
+  return null;
+}
 
 export interface LinkItemsCandidateItem {
   id: number;
@@ -13,6 +51,7 @@ export interface LinkItemsCandidateItem {
 
 export interface LinkItemsCandidateOrder {
   id: number;
+  vendor: string;
   total: number;
   orderDate: string;
   shipmentDate: string | null;
@@ -45,10 +84,19 @@ function buildNotes(items: LinkItemsCandidateItem[]): string {
 }
 
 export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
-  if (!isAmazonLikeMerchant(`${input.merchantRaw} ${input.merchantClean}`)) {
-    return [];
-  }
+  const matched = matchVendor(`${input.merchantRaw} ${input.merchantClean}`);
+  if (!matched) return [];
 
+  // Only consider orders of the matched vendor.
+  const vendorOrders = input.candidateOrders.filter((o) => o.vendor === matched.vendor);
+  if (vendorOrders.length === 0) return [];
+
+  // We reuse the Amazon matcher's scoring (amount proximity + date proximity
+  // + payment-last4 match + merchant-text contains vendor) for all vendors.
+  // The merchant-text check inside scoreAmazonOrderMatch only adds +15 when
+  // the merchant looks Amazon-like, so non-Amazon vendors lose 15 points
+  // there. To compensate, we add +15 here since matchVendor already verified
+  // the vendor matches.
   const synthesised: Pick<Transaction, 'amount' | 'date' | 'merchantRaw' | 'merchantClean' | 'notes' | 'sourceReference'> = {
     amount: String(input.amount),
     date: input.date,
@@ -59,7 +107,7 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
   } as Transaction;
 
   let best: { order: LinkItemsCandidateOrder; confidence: number } | null = null;
-  for (const order of input.candidateOrders) {
+  for (const order of vendorOrders) {
     const externalOrder: ExternalOrder = {
       total: String(order.total),
       orderDate: order.orderDate,
@@ -67,8 +115,11 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
       paymentLast4: order.paymentLast4,
     } as ExternalOrder;
     const score = scoreAmazonOrderMatch(synthesised as Transaction, externalOrder);
-    if (score.confidence >= input.threshold && (!best || score.confidence > best.confidence)) {
-      best = { order, confidence: score.confidence };
+    // Add the +15 vendor-match bump for non-Amazon vendors so they reach
+    // the threshold under equivalent conditions.
+    const adjusted = matched.vendor === 'amazon' ? score.confidence : Math.min(100, score.confidence + 15);
+    if (adjusted >= input.threshold && (!best || adjusted > best.confidence)) {
+      best = { order, confidence: adjusted };
     }
   }
 
@@ -101,13 +152,13 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
       source: 'amazon-items',
       confidence,
       fields: {
-        merchantCanonical: 'Amazon',
+        merchantCanonical: matched.canonical,
         autoCategory,
         autoBusiness,
         linkedExternalOrderId: best.order.id,
         notes: buildNotes(items),
       },
-      rationale: `linked to Amazon order ${best.order.id} (match confidence ${best.confidence})`,
+      rationale: `linked to ${matched.canonical} order ${best.order.id} (match confidence ${best.confidence})`,
     },
   ];
 }

@@ -4,6 +4,7 @@ import { runLinkItemsStage, type LinkItemsCandidateOrder } from '../src/import/e
 
 function order(overrides: Partial<LinkItemsCandidateOrder> & { id: number; total: number; orderDate: string }): LinkItemsCandidateOrder {
   return {
+    vendor: 'amazon',
     shipmentDate: null,
     paymentLast4: null,
     items: [],

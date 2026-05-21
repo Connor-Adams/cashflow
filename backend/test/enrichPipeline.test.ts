@@ -92,6 +92,7 @@ test('pipeline applies amazon items signal when order matches', async () => {
     amazonOrders: [
       {
         id: 42,
+        vendor: 'amazon',
         total: 50,
         orderDate: '2026-05-09',
         shipmentDate: null,
