@@ -47,7 +47,7 @@ export async function enrichTransaction(
 
 | # | Stage | Inputs | Outputs (Signal fields) | Notes |
 |---|---|---|---|---|
-| 1 | `normalize-merchant` | `merchantRaw` | `merchantClean`, `merchantCanonical` | Real normalisation: strips processor prefixes (`SQ *`, `TST*`, `PAYPAL *`, `AMZN MKTP US*`, `STRIPE*`, `GOOGLE *`), trailing store/transit numbers (`#1234`, `STORE 5678`), city/state/phone tails, case-normalised, whitespace-collapsed. `merchantCanonical` populated only when a known brand dictionary matches. |
+| 1 | `normalize-merchant` | `merchantRaw` | `merchantClean`, `merchantCanonical` | Real normalisation: strips processor prefixes (`SQ *`, `TST*`, `PAYPAL *`, `AMZN MKTP US*`, `STRIPE*`, `GOOGLE *`), trailing store/transit numbers (`#1234`, `STORE 5678`), city/state/phone tails, case-normalised, whitespace-collapsed. `merchantCanonical` populated when the brand dictionary (seed + learned, see below) matches. |
 | 2 | `detect-type` | `merchantRaw`, narrative, sign | `txnType` | Reuses the credit/debit narrative patterns already in `mapRow.ts` plus sign of amount. Output: `purchase` \| `refund` \| `transfer` \| `payment` \| `fee` \| `interest` \| `reward` \| `unknown`. |
 | 3 | `detect-recurring` | `merchantClean`, amount, history | `is_recurring`, `auto_category` (if confident) | If history shows ≥3 prior transactions with same `merchantClean` + amount within ±5% + monthly cadence (±5 days), mark recurring and propose the modal prior category at high confidence. |
 | 4 | `apply-rule` | `merchantClean`, rules cache | auto-fields, `appliedRuleId` | Existing `findBestRule` against the improved `merchantClean`. High confidence on unambiguous match. |
@@ -55,7 +55,7 @@ export async function enrichTransaction(
 | 6 | `link-items` | `merchantClean`, in-flight batch + DB | `linkedExternalOrderId`, item-derived category | If `isAmazonLikeMerchant`, run `scoreAmazonOrderMatch` against pending Amazon orders. If match confidence ≥70, attach the link. Derive category signal from `ExternalOrderItem.inferredCategory`: if all items share a single category, propose at high confidence; otherwise propose the category of the item with the highest `totalPrice` at medium confidence. If any item has `businessUsePercent > 0`, propose `autoBusiness=true`. Item titles (up to 5) appended to `notes`, truncated to 200 chars. Extensible later to receipt items via the same signal shape. |
 | 7 | `detect-relationships` | `txnType`, amount, sign, window | `linked_transaction_id`, inherited category | **Refund-link:** if `txnType=refund` (or opposite sign + same merchant within 60 days), link to original and inherit its `final_category` / `final_business` at high confidence. **Transfer-link:** for `txnType=transfer` or opposite-sign-matching-amount across owned accounts within ±2 days, link siblings and set `auto_category="Transfer"` at high confidence. Considers both in-flight batch (date-ordered) and DB. |
 | 8 | `ai-batch` | cold rows (no high-confidence signal yet) | per-merchant category/business/split | Collects all cold rows in the import, groups by `merchantCanonical \|\| merchantClean`. Single OpenAI call sends `[{key, sampleAmount, sampleDate, similarTxns, memory}]`; response maps key → suggestion with confidence. High-confidence results auto-applied. Cap: `ENRICHMENT_AI_MAX_MERCHANTS_PER_IMPORT` (default 80) — excess merchants stay in review. |
-| 9 | `compute-review-flag` | all signals | `auto_source`, `auto_confidence`, `review_flag` | `review_flag = false` iff merged result includes `auto_category` AND merged `auto_confidence === 'high'`. Otherwise `true`. |
+| 9 | `compute-review-flag` | all signals | `auto_source`, `auto_confidence`, `review_flag` | `review_flag = false` iff (a) the merged result includes `auto_category`, AND (b) at least one **non-AI** signal has `confidence='high'`. AI alone — even at high confidence — is never sufficient to skip review. AI-high without deterministic corroboration still sets `auto_*` fields (so Review Inbox is prefilled) but leaves `review_flag=true`. |
 
 ### Signal type
 
@@ -91,6 +91,15 @@ export interface Signal {
 
 Stages may emit 0 or more signals. `enrichTransaction` returns the merged result plus the raw `signals[]` for transparency.
 
+### Brand dictionary (drives `merchantCanonical`)
+
+Two-source lookup, queried in order:
+
+1. **Hardcoded seed list** in `backend/src/import/brandDictionary.ts` — an array of `{ pattern: RegExp, canonical: string, mcc?: string }` covering ~30–50 common brands (Amazon, Netflix, Spotify, Apple, Google, Uber, Lyft, Costco, Walmart, Target, Starbucks, McDonald's, Shell, Esso, etc.). Maintained in code; PR to add a brand. Patterns are case-insensitive and match against the cleaned merchant string from stage 1.
+2. **Learned-from-memory fallback** — if no seed hits, scan `merchant_memory` clusters for the household. When ≥5 reviewed transactions share a stable prefix (first 2–3 tokens of `merchantClean`), the most common cleaned form becomes a learned canonical. Cached in memory for the import's lifetime (or 5 minutes for the per-row enrich endpoint). Avoids polluting the seed list with personal merchants while still recognising regulars.
+
+On tie, the seed entry wins (provides better cross-household consistency). `auto_source` for the normalize stage records `'normalize-seed'` or `'normalize-learned'` so we can see in Review Inbox which dictionary path fired.
+
 ### Conflict resolution (explicit precedence)
 
 When multiple stages produce values for the same field, the winner is chosen by source precedence (higher wins):
@@ -103,7 +112,7 @@ rule  >  recurring(high)  >  memory(supportCount≥2)
       >  ai(low)
 ```
 
-Ties broken in source-list order above (deterministic > AI). All signals retained in `enrichment_signals` for Review Inbox display. `auto_source` records the winning source; if multiple sources contributed to different winning fields, `auto_source='composite'`.
+Ties broken in source-list order above (deterministic > AI). All signals are persisted to `transaction_signals` (one row per emitted signal) for Review Inbox display and future analysis. `auto_source` on the transaction records the winning source; if multiple sources contributed to different winning fields, `auto_source='composite'`.
 
 ### Failure isolation
 
@@ -131,19 +140,32 @@ Caches eliminate per-row queries. `inFlightBatch` lets refund-link / transfer-li
 
 Single migration: `20260520000002-transaction-enrichment.js`.
 
-Added columns on `transactions`:
+### New columns on `transactions`
 
 | Column | Type | Default | Purpose |
 |---|---|---|---|
 | `merchant_canonical` | `TEXT NULL` | — | Brand identity ("Amazon", "Netflix") when normaliser recognises it. |
 | `txn_type` | `TEXT NOT NULL` | `'purchase'` | `purchase` / `refund` / `transfer` / `payment` / `fee` / `interest` / `reward` / `unknown`. |
-| `auto_source` | `TEXT NULL` | — | Winning signal source. |
+| `auto_source` | `TEXT NULL` | — | Winning signal source for the merged auto fields. |
 | `auto_confidence` | `TEXT NULL` | — | `high` / `medium` / `low`. |
 | `linked_transaction_id` | `INTEGER NULL` | — | FK self; refund→original, transfer→sibling. Indexed. |
 | `is_recurring` | `BOOLEAN NOT NULL` | `false` | From `detect-recurring`. |
-| `enrichment_signals` | `JSON NULL` | — | Full `Signal[]` for transparency / debugging / Review Inbox display. |
 
-`Transaction` model in `backend/src/models/Transaction.ts` extended with the seven new declared fields and init definitions. Migrations runtime-tested both forward and rollback.
+### New table `transaction_signals`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PK AUTOINCREMENT` | |
+| `transaction_id` | `INTEGER NOT NULL` | FK `transactions.id`, indexed, `ON DELETE CASCADE`. |
+| `source` | `TEXT NOT NULL` | One of `SignalSource` enum values. |
+| `confidence` | `TEXT NOT NULL` | `high` / `medium` / `low`. |
+| `fields` | `JSON NOT NULL` | Partial-fields payload from the Signal type. |
+| `rationale` | `TEXT NULL` | Optional human-readable note from the stage. |
+| `created_at` | `TIMESTAMP NOT NULL` | Standard Sequelize timestamp. |
+
+Index on `(transaction_id)` for the Review Inbox display query. Each transaction typically has 3–7 signal rows (one per stage that fired). Re-enriching a transaction (via `POST /api/transactions/:id/enrich` or the backfill script) deletes-and-replaces its signal rows in the same DB transaction as the column update — keeps signals in sync with the row's current enrichment state.
+
+`Transaction` model in `backend/src/models/Transaction.ts` extended with the six new declared fields. New `TransactionSignal` model in `backend/src/models/TransactionSignal.ts`. Migrations runtime-tested forward and rollback.
 
 ## Call site changes
 
@@ -161,13 +183,13 @@ This means import is now a two-phase loop:
 
 If the import has zero cold rows, phase 2 is skipped entirely. If AI is disabled (`OPENAI_API_KEY` missing or `ENRICHMENT_AI_ENABLED=false`), phase 2 is skipped and cold rows save with `review_flag=true`.
 
-Note: `enrichment_signals` is stored per row as JSON. For typical imports this is a handful of small objects; no perf concern at expected scale. If a future use case wants to query across signals, migrating to a normalised `transaction_signals` table is straightforward.
+Note: signal rows are written in the same DB transaction as the parent transaction row, so a partial enrichment never leaks. Expected scale is small (3–7 signals/txn), well-indexed for the Review Inbox display query.
 
 ## New endpoint
 
 `POST /api/transactions/:id/enrich` — runs the full pipeline against an existing row.
 
-- Re-derives `merchant_clean`, `merchant_canonical`, `txn_type`, `is_recurring`, `linked_transaction_id`, `auto_*`, `enrichment_signals`.
+- Re-derives `merchant_clean`, `merchant_canonical`, `txn_type`, `is_recurring`, `linked_transaction_id`, `auto_*`. Deletes-and-replaces all rows in `transaction_signals` for this transaction in the same DB transaction.
 - **Never touches** `*_override` columns or `final_*` fields directly — those are owned by user edits and `recomputeTransactionAmounts`.
 - Re-computes `review_flag` from new confidence.
 - Rate-limited under the same middleware as other AI endpoints.
@@ -199,7 +221,7 @@ New env vars (all optional, sensible defaults):
 
 ## UI surfacing (Review Inbox)
 
-Review Inbox row component reads `enrichment_signals` and displays a compact "Why" tooltip: source + confidence + rationale per signal. No new endpoints needed — the data ships with the existing transaction GET.
+Review Inbox row component reads `transaction_signals` (eager-loaded with the transaction GET) and displays a compact "Why" tooltip: source + confidence + rationale per signal.
 
 Add a small "Recently auto-applied" view (filter `review_flag=false AND reviewed_at IS NULL AND auto_source IS NOT NULL`) so spot-checking high-confidence auto-applies is one click away. Future improvement; not required for first ship.
 
@@ -207,7 +229,7 @@ Add a small "Recently auto-applied" view (filter `review_flag=false AND reviewed
 
 Unit tests per stage:
 
-- `normalize-merchant`: golden fixtures from real bank/card statements covering Amex, Chase, Capital One, Square, Stripe, PayPal, Amazon variants. Each fixture maps a raw memo to expected `merchantClean` + `merchantCanonical`.
+- `normalize-merchant`: golden fixtures from real bank/card statements covering Amex, Chase, Capital One, Square, Stripe, PayPal, Amazon variants. Each fixture maps a raw memo to expected `merchantClean` + `merchantCanonical`. Brand dictionary tested with both seed hits and learned-from-memory hits (synthesised memory rows) plus a seed-wins-on-tie case.
 - `detect-type`: table-driven from `mapRow.ts` patterns plus sign combinations.
 - `detect-recurring`: synthetic histories asserting cadence + amount tolerance behaviour.
 - `apply-rule`: existing tests stand; add cases that fail today but pass after improved `merchantClean`.
@@ -215,7 +237,7 @@ Unit tests per stage:
 - `link-items`: fixture orders + transactions; assert link + item-derived signal.
 - `detect-relationships`: in-flight batch cases (refund and original in same import); cross-account transfer pairs.
 - `ai-batch`: mock OpenAI; assert batch payload shape, response parsing, cap enforcement, per-row fallback on batch failure.
-- `compute-review-flag`: precedence ladder table-driven.
+- `compute-review-flag`: precedence ladder table-driven, including the explicit AI-alone case (AI-high with no other source → `review_flag=true`).
 
 Integration tests:
 
@@ -239,10 +261,10 @@ The spec is one cohesive design, but implementation can be staged. Suggested ord
 8. Stage 8 (`ai-batch`) with per-row fallback.
 9. `POST /api/transactions/:id/enrich` route.
 10. Backfill script.
-11. Review Inbox surfacing of `enrichment_signals`.
+11. Review Inbox surfacing of `transaction_signals`.
 
-## Open questions for spec review
+## Resolved design decisions (from spec review)
 
-- Is `enrichment_signals` as a JSON column acceptable, or do we want a normalised `transaction_signals` table for future querying? (Default: JSON column; cheap to migrate later if needed.)
-- Should `auto_confidence='high'` from `ai` alone (no deterministic signal at all) be enough to skip review? Current design: yes. Alternative: require at least medium-confidence corroboration from any non-AI source for cold rows.
-- `merchantCanonical` brand dictionary — start with a hardcoded list of common brands (Amazon, Netflix, Spotify, Uber, Lyft, Apple, Google, etc.) or derive from `merchant_memory` modal cleaned merchants?
+- **Signals storage:** normalised `transaction_signals` table (not a JSON column on transactions). Queryable for future analyses ("rows where AI overrode rule").
+- **AI-alone skip:** No. AI-high without a non-AI corroborating signal still sets `auto_*` fields (prefills Review Inbox) but leaves `review_flag=true`. Confidence in AI grows as deterministic memory grows.
+- **Brand dictionary:** Hardcoded seed list **and** learn-from-memory fallback. Seed wins on tie.
