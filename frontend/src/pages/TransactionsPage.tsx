@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import {
   getJson,
   patchJson,
@@ -283,6 +284,7 @@ export function TransactionsPage() {
   const [previewing, setPreviewing] = useState(false)
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
   const [aiEnabled, setAiEnabled] = useState(false)
+  const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
@@ -1975,6 +1977,7 @@ export function TransactionsPage() {
                       receiptFileRef.current?.click()
                     }}
                     onError={(msg) => setErr(msg)}
+                    onOpenSignals={(id) => setSignalsDialogTxnId(id)}
                   />
                 ))
               )}
@@ -2003,6 +2006,41 @@ export function TransactionsPage() {
           </Button>
         </div>
       </section>
+      <EnrichmentSignalsDialog
+        transactionId={signalsDialogTxnId}
+        transactionSummary={
+          signalsDialogTxnId == null
+            ? null
+            : (() => {
+                const row = sortedRows.find((r) => r.id === signalsDialogTxnId)
+                if (!row) return null
+                return {
+                  merchantRaw: row.merchantRaw,
+                  merchantClean: row.merchantClean,
+                  merchantCanonical: row.merchantCanonical,
+                  autoSource: row.autoSource,
+                  autoConfidence: row.autoConfidence,
+                  autoCategory: row.autoCategory,
+                  txnType: row.txnType,
+                  reviewFlag: row.reviewFlag,
+                  isRecurring: row.isRecurring,
+                }
+              })()
+        }
+        onClose={() => setSignalsDialogTxnId(null)}
+        onReenriched={(updated) => {
+          setRes((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  data: prev.data.map((r) =>
+                    r.id === updated.id ? ({ ...r, ...updated } as Transaction) : r,
+                  ),
+                }
+              : prev,
+          )
+        }}
+      />
     </div>
   )
 }
@@ -2017,6 +2055,7 @@ function TransactionRow({
   aiEnabled,
   onAttachReceipt,
   onError,
+  onOpenSignals,
 }: {
   t: Transaction
   categoryOptions: string[]
@@ -2027,6 +2066,7 @@ function TransactionRow({
   aiEnabled: boolean
   onAttachReceipt: (transactionId: number) => void
   onError: (message: string) => void
+  onOpenSignals: (id: number) => void
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
@@ -2247,6 +2287,15 @@ function TransactionRow({
       </TableCell>
       <TableCell className="transactionsActionsCol">
         <div className="txnActionGroup">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenSignals(t.id)}
+            title="Show enrichment signals for this transaction"
+          >
+            Why?
+          </Button>
           {aiEnabled ? (
             <Button
               type="button"

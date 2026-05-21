@@ -38,6 +38,8 @@ export interface BackfillFlags {
   householdId: number | null;
   limit: number | null;
   batchSize: number;
+  /** Optional: enrich only this single transaction id (used by the single-row re-enrich route). */
+  transactionId?: number | null;
 }
 
 export interface BackfillResult {
@@ -48,7 +50,29 @@ export interface BackfillResult {
   skipped: number;
 }
 
-export async function runBackfill(flags: BackfillFlags): Promise<BackfillResult> {
+export interface BackfillProgressEvent {
+  txnId: number;
+  merchantRaw: string;
+  merchantClean: string;
+  merchantCanonical: string | null;
+  txnType: string;
+  autoSource: string | null;
+  autoConfidence: string | null;
+  reviewFlagCleared: boolean;
+  signalsCount: number;
+}
+
+export interface BackfillCallbacks {
+  /** Called after each row is processed (or attempted). */
+  onProgress?: (e: BackfillProgressEvent) => void;
+  /** Called when a row fails. Backfill continues to the next row. */
+  onError?: (e: { txnId: number; message: string }) => void;
+}
+
+export async function runBackfill(
+  flags: BackfillFlags,
+  callbacks: BackfillCallbacks = {},
+): Promise<BackfillResult> {
   const rulesByHousehold = new Map<string, Awaited<ReturnType<typeof loadAllRules>>>();
   const amazonByHousehold = new Map<string, Awaited<ReturnType<typeof loadAmazonOrdersCache>>>();
   const householdAccountIdsByAccount = new Map<number, number[]>();
@@ -72,6 +96,7 @@ export async function runBackfill(flags: BackfillFlags): Promise<BackfillResult>
   }
 
   const where: Record<string, unknown> = {};
+  if (flags.transactionId != null) where.id = flags.transactionId;
   if (flags.accountId != null) where.accountId = flags.accountId;
   if (flags.householdId != null) where.householdId = flags.householdId;
   if (flags.reviewOnly) where.reviewFlag = true;
@@ -170,6 +195,17 @@ export async function runBackfill(flags: BackfillFlags): Promise<BackfillResult>
           updated++;
           if (willClearReview) reviewFlagCleared++;
           signalsWritten += enriched.signals.length;
+          callbacks.onProgress?.({
+            txnId: txn.id,
+            merchantRaw: txn.merchantRaw,
+            merchantClean: f.merchantClean,
+            merchantCanonical: f.merchantCanonical,
+            txnType: f.txnType,
+            autoSource: f.autoSource,
+            autoConfidence: f.autoConfidence,
+            reviewFlagCleared: willClearReview,
+            signalsCount: enriched.signals.length,
+          });
           continue;
         }
 
@@ -221,9 +257,23 @@ export async function runBackfill(flags: BackfillFlags): Promise<BackfillResult>
         updated++;
         if (willClearReview) reviewFlagCleared++;
         signalsWritten += enriched.signals.length;
+
+        callbacks.onProgress?.({
+          txnId: txn.id,
+          merchantRaw: txn.merchantRaw,
+          merchantClean: f.merchantClean,
+          merchantCanonical: f.merchantCanonical,
+          txnType: f.txnType,
+          autoSource: f.autoSource,
+          autoConfidence: f.autoConfidence,
+          reviewFlagCleared: willClearReview,
+          signalsCount: enriched.signals.length,
+        });
       } catch (err) {
         skipped++;
+        const message = err instanceof Error ? err.message : String(err);
         console.error(`[backfill] txn ${txn.id} failed:`, err);
+        callbacks.onError?.({ txnId: txn.id, message });
       }
     }
 
