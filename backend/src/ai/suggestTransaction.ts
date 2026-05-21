@@ -210,7 +210,7 @@ export async function buildTransactionSuggestionContext(
        LIMIT 5`,
       { replacements: [txn.id], type: QueryTypes.SELECT },
     ),
-    findMerchantMemory(householdId, txn.merchantClean),
+    findMerchantMemory(householdId, txn.merchantClean, num(txn.amount)),
   ]);
   const matching = findBestRule(rules, txn.merchantClean);
   const similarTransactions = priorRows

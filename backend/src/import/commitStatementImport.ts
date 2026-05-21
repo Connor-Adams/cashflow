@@ -217,7 +217,7 @@ export async function commitStatementImport(
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
-      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean);
+      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean, row.amount);
 
       const recurringHistory = await loadRecurringHistory(
         account.householdId ?? null,
