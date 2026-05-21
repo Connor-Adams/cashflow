@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Download, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { useToast } from '@/components/ui/toast'
+import { buildCsv, downloadCsv } from '../lib/csv'
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
@@ -312,6 +313,79 @@ export function ReportsPage() {
     }
   }
 
+  // Filter the visible rows once so the CSV mirrors exactly what the
+  // user sees on screen.
+  const visiblePartnerRows = useMemo(
+     () => (partner?.byCurrency ?? []).filter((r) => !currency || r.currency === currency),
+    [partner, currency]
+  )
+  const visibleBusinessRows = useMemo(
+    () => (business?.byCurrency ?? []).filter((r) => !currency || r.currency === currency),
+    [business, currency]
+  )
+  const partnerExportDisabled = visiblePartnerRows.length === 0
+  const businessExportDisabled = visibleBusinessRows.length === 0
+
+  // Build a "{from}-to-{to}" stub for the filename. Falls back to "all-dates"
+  // and uses today's date as a leg when only one bound is set, so filenames
+  // still sort sensibly on disk. Uses toDateInputValue for the today stub.
+  const exportDateStub = useMemo(() => {
+    if (!dateFrom && !dateTo) return 'all-dates'
+    const today = toDateInputValue(new Date())
+    return `${dateFrom || 'earliest'}-to-${dateTo || today}`
+  }, [dateFrom, dateTo])
+  const currencyStub = currency ? currency.toLowerCase() : 'all'
+
+  const partnerDirectionLabel = (dir: PartnerNetDirection) => {
+    if (dir === 'partner_owes_me') return 'partner owes me'
+    if (dir === 'i_owe_partner') return 'i owe partner'
+    return 'even'
+  }
+
+  function exportPartnerCsv() {
+    if (partnerExportDisabled) return
+    const headers = [
+      'Currency',
+      'Ownership',
+      'My share',
+      'Partner share',
+      'Net',
+      'Direction',
+      'Settlements applied',
+      'Settled amount',
+      'Raw net',
+    ] as const
+    const rows = visiblePartnerRows.map((r) => {
+      const ownership =
+        r.ownershipType === 'contact'
+          ? r.contactName ?? 'Contact'
+          : r.ownershipType ?? 'legacy split'
+      return [
+        r.currency,
+        ownership,
+        r.sumMy,
+        r.sumPartner,
+        r.net,
+        partnerDirectionLabel(r.direction),
+        r.settlementCount,
+        r.settledAmount,
+        r.rawNet,
+      ]
+    })
+    const csv = buildCsv(headers, rows)
+    const filename = `cashflow-partner-${currencyStub}-${exportDateStub}.csv`
+    downloadCsv(filename, csv)
+  }
+
+  function exportBusinessCsv() {
+    if (businessExportDisabled) return
+    const headers = ['Currency', 'Business amount'] as const
+    const rows = visibleBusinessRows.map((r) => [r.currency, r.sumBusiness])
+    const csv = buildCsv(headers, rows)
+    const filename = `cashflow-business-${currencyStub}-${exportDateStub}.csv`
+    downloadCsv(filename, csv)
+  }
+
   async function removeSettlement(row: PartnerSettlement) {
     const ok = await confirm({
       title: 'Delete settlement?',
@@ -415,21 +489,38 @@ export function ReportsPage() {
               <h2>Partner split totals</h2>
               <p className="muted">How much of the selected spend belongs to each person.</p>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={openSettlementDialog}
-              disabled={contacts.length === 0}
-              title={
-                contacts.length === 0
-                  ? 'Add a contact in Settings before recording a settlement'
-                  : undefined
-              }
-            >
-              <Plus aria-hidden="true" />
-              Record settlement
-            </Button>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={exportPartnerCsv}
+                disabled={partnerExportDisabled}
+                title={
+                  partnerExportDisabled
+                    ? 'No partner rows to export'
+                    : 'Download the partner split table as CSV'
+                }
+              >
+                <Download aria-hidden="true" />
+                Export CSV
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={openSettlementDialog}
+                disabled={contacts.length === 0}
+                title={
+                  contacts.length === 0
+                    ? 'Add a contact in Settings before recording a settlement'
+                    : undefined
+                }
+              >
+                <Plus aria-hidden="true" />
+                Record settlement
+              </Button>
+            </div>
           </div>
           {showPartnerRollup && (
             <ul className="partnerNetRollup" style={{ listStyle: 'none', padding: 0, margin: '0 0 0.75rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -540,6 +631,21 @@ export function ReportsPage() {
               <h2>Business expenses</h2>
               <p className="muted">Transactions marked business, grouped by currency.</p>
             </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={exportBusinessCsv}
+              disabled={businessExportDisabled}
+              title={
+                businessExportDisabled
+                  ? 'No business rows to export'
+                  : 'Download the business totals table as CSV'
+              }
+            >
+              <Download aria-hidden="true" />
+              Export CSV
+            </Button>
           </div>
           <div className="tableWrap" aria-busy={loading}>
             <table className="table">
