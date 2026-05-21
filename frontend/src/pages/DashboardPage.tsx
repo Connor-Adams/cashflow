@@ -728,40 +728,47 @@ export function DashboardPage() {
           value={summaryStats.spendLabel}
           hint={`Charges only (absolute values). ${summaryStats.moneyHint}`}
           delta={hasComparisonPeriod ? summaryStats.spendDeltaLabel : undefined}
+          metricKind="spend"
         />
         <StatCard
           label="Refunds / credits"
           value={summaryStats.creditsLabel}
           hint="Positive amounts excluding payments and transfers."
           delta={hasComparisonPeriod ? summaryStats.creditsDeltaLabel : undefined}
+          metricKind="gain"
         />
         <StatCard
           label="Payments / transfers"
           value={summaryStats.paymentsLabel}
           hint="Card payments and transfer-like inflows, tracked separately."
           delta={hasComparisonPeriod ? summaryStats.paymentsDeltaLabel : undefined}
+          metricKind="neutral"
         />
         <StatCard
           label="Net spend"
           value={summaryStats.netSpendLabel}
           hint="Spend minus refunds/credits. Payments excluded."
           delta={hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined}
+          metricKind="spend"
         />
         <StatCard
           label="Transactions"
           value={summaryStats.txCount}
           hint="Rows in current filters"
           delta={hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined}
+          metricKind="neutral"
         />
         <StatCard
           label="Merchants"
           value={summaryStats.merchantCount}
           hint="Distinct merchants in the current filters"
+          metricKind="neutral"
         />
         <StatCard
           label="Accounts"
           value={summaryStats.accountCount}
           hint="Accounts contributing activity in this view"
+          metricKind="neutral"
         />
       </section>
 

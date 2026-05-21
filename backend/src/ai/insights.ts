@@ -99,7 +99,6 @@ export async function buildFinancialInsights(
       'finalCategory',
       'finalBusiness',
       'finalSplitType',
-      'reviewFlag',
     ];
   const [rows, previousRows] = await Promise.all([
     Transaction.findAll({
@@ -129,12 +128,18 @@ export async function buildFinancialInsights(
     finalCategory: string | null;
     finalBusiness: boolean;
     finalSplitType: string;
-    reviewFlag: boolean;
   };
   const byCategory = new Map<string, { amount: number; ids: number[] }>();
   const previousByCategory = new Map<string, number>();
   const byMerchant = new Map<string, { amount: number; ids: number[] }>();
-  let reviewCount = 0;
+  // Track rows with no final category across every flow type in the period.
+  // The dedicated "Uncategorized transactions" insight reports against this
+  // list so the label matches the underlying data: literal no-category rows,
+  // not the broader review-flag backlog (which mixes uncategorized rows with
+  // rows flagged for split/business review). The "Uncategorized spend"
+  // insight below uses the spend-only `byCategory.get('Uncategorized')`
+  // entry and is unaffected.
+  const noCategoryIds: number[] = [];
   let businessSpend = 0;
   let sharedSpend = 0;
   let totalSpend = 0;
@@ -147,7 +152,7 @@ export async function buildFinancialInsights(
   for (const row of rows as unknown as Row[]) {
     const amount = num(row.amount);
     if (amount == null) continue;
-    if (row.reviewFlag) reviewCount += 1;
+    if (!row.finalCategory) noCategoryIds.push(row.id);
     if (amount >= 0 && classifyPositiveFlow(row) === 'payment') continue;
     if (amount >= 0) continue;
     const spend = -amount;
@@ -234,20 +239,17 @@ export async function buildFinancialInsights(
       suggestedAction: 'Check whether this merchant should have a rule or category adjustment.',
     });
   }
-  if (reviewCount > 0) {
+  if (noCategoryIds.length > 0) {
     insights.push({
       title: 'Uncategorized transactions',
-      summary: `${reviewCount} transaction${reviewCount === 1 ? '' : 's'} have no category.`,
+      summary: `${noCategoryIds.length} transaction${noCategoryIds.length === 1 ? '' : 's'} have no category.`,
       severity: 'action',
-      metric: 'review_count',
-      amount: reviewCount,
+      metric: 'no_category_count',
+      amount: noCategoryIds.length,
       comparison: `${rows.length} transactions in period`,
-      supportingTransactionIds: (rows as unknown as Row[])
-        .filter((r) => r.reviewFlag)
-        .map((r) => r.id)
-        .slice(0, 8),
-      rationale: 'Review flags come from transaction state.',
-      suggestedAction: 'Use AI suggestions or rules to clear the queue.',
+      supportingTransactionIds: noCategoryIds.slice(0, 8),
+      rationale: 'Counts rows whose finalCategory is null or empty.',
+      suggestedAction: 'Use AI suggestions or rules to categorize these rows.',
     });
   }
   if (businessSpend > 0 || sharedSpend > 0) {
