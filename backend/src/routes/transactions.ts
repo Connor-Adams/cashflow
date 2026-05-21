@@ -18,6 +18,71 @@ import { logger } from '../observability/logger';
 
 const router = Router();
 
+/**
+ * Maximum number of transactions the filter-mode bulk patch endpoint will
+ * touch in a single call. The frontend uses this to warn the user before
+ * submitting; the server enforces it authoritatively with a 422.
+ */
+export const BULK_PATCH_FILTER_MAX = 1000;
+
+/**
+ * Pure helper used to enforce {@link BULK_PATCH_FILTER_MAX}. Extracted from
+ * the route handler so it can be unit-tested without a database.
+ * Returns `null` when the count is within range, or a payload describing the
+ * overage so the route can respond with 422.
+ */
+export function enforceBulkPatchCap(
+  matchedCount: number,
+  max: number = BULK_PATCH_FILTER_MAX
+): { error: string; matched: number; max: number } | null {
+  if (!Number.isFinite(matchedCount) || matchedCount < 0) {
+    return { error: 'matched count must be a non-negative number', matched: 0, max };
+  }
+  if (matchedCount > max) {
+    return {
+      error: `Filter matches ${matchedCount} transactions; the cap per operation is ${max}. Narrow your filters and try again.`,
+      matched: matchedCount,
+      max,
+    };
+  }
+  return null;
+}
+
+/**
+ * Build the Sequelize `where` clause for transaction listings/filtered bulk
+ * operations. Reads the same fields the GET handler reads from the request
+ * (query params for GET, body.filter for filtered bulk patch). Keeping this
+ * in one place ensures the bulk-patch-filter endpoint operates on exactly
+ * the same set the user sees in the table.
+ */
+function buildTransactionFilterWhere(
+  req: import('express').Request,
+  source: Record<string, unknown>
+): Record<string, unknown> {
+  const where: Record<string, unknown> = { ...visibleTransactionWhere(req) };
+  if (source.accountId) {
+    where.accountId = parseInt(String(source.accountId), 10);
+  }
+  if (source.reviewFlag === 'true' || source.reviewFlag === true) where.reviewFlag = true;
+  if (source.reviewFlag === 'false' || source.reviewFlag === false) where.reviewFlag = false;
+  if (source.currency) {
+    where.currency = String(source.currency).toUpperCase().slice(0, 3);
+  }
+  if (source.category) {
+    where.finalCategory = String(source.category);
+  }
+  if (source.importBatch) {
+    where.importBatch = String(source.importBatch);
+  }
+  if (source.dateFrom || source.dateTo) {
+    const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
+    if (source.dateFrom) dateCond[Op.gte] = String(source.dateFrom);
+    if (source.dateTo) dateCond[Op.lte] = String(source.dateTo);
+    where.date = dateCond;
+  }
+  return where;
+}
+
 function logTransactionEvent(
   event: string,
   details: Record<string, string | number | boolean | null | undefined>
@@ -211,6 +276,73 @@ router.post('/bulk-patch', async (req, res, next) => {
   }
 });
 
+router.post('/bulk-patch-filter', async (req, res, next) => {
+  try {
+    const body = (req.body || {}) as { filter?: unknown; patch?: unknown };
+    const filter =
+      body.filter && typeof body.filter === 'object' && body.filter !== null
+        ? (body.filter as Record<string, unknown>)
+        : {};
+    const patch =
+      body.patch && typeof body.patch === 'object' && body.patch !== null
+        ? (body.patch as Record<string, unknown>)
+        : {};
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: 'patch must include at least one field' });
+      return;
+    }
+
+    const where = buildTransactionFilterWhere(req, filter);
+    const matchedCount = await Transaction.count({ where });
+    const overage = enforceBulkPatchCap(matchedCount);
+    if (overage) {
+      logTransactionEvent('bulk_patch_filter_capped', {
+        matched: overage.matched,
+        max: overage.max,
+        filterKeys: Object.keys(filter).join(','),
+      });
+      res
+        .status(422)
+        .json({ error: overage.error, matched: overage.matched, max: overage.max });
+      return;
+    }
+
+    logTransactionEvent('bulk_patch_filter_started', {
+      matched: matchedCount,
+      filterKeys: Object.keys(filter).join(','),
+      patchKeys: Object.keys(patch).join(','),
+    });
+
+    const updatedIds: number[] = [];
+    await sequelize.transaction(async (t) => {
+      // Pull every matching row up front to keep the patched set deterministic
+      // for the duration of the transaction. The count above also gates this
+      // against runaway memory use via {@link BULK_PATCH_FILTER_MAX}.
+      const matched = await Transaction.findAll({
+        where,
+        transaction: t,
+        order: [
+          ['date', 'DESC'],
+          ['id', 'DESC'],
+        ],
+      });
+      for (const txn of matched) {
+        await applyPatchBody(req, txn, patch);
+        recomputeTransactionAmounts(txn);
+        await txn.save({ transaction: t });
+        updatedIds.push(txn.id);
+      }
+    });
+
+    logTransactionEvent('bulk_patch_filter_completed', {
+      updated: updatedIds.length,
+    });
+    res.json({ updated: updatedIds.length, ids: updatedIds });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/category-hints', async (_req, res, next) => {
   try {
     const householdId = isSuperadmin(_req) ? null : currentAuth(_req).household.id;
@@ -273,27 +405,10 @@ router.get('/', async (req, res, next) => {
     );
     const offset = (page - 1) * pageSize;
 
-    const where: Record<string, unknown> = { ...visibleTransactionWhere(req) };
-    if (req.query.accountId) {
-      where.accountId = parseInt(String(req.query.accountId), 10);
-    }
-    if (req.query.reviewFlag === 'true') where.reviewFlag = true;
-    if (req.query.reviewFlag === 'false') where.reviewFlag = false;
-    if (req.query.currency) {
-      where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
-    }
-    if (req.query.category) {
-      where.finalCategory = String(req.query.category);
-    }
-    if (req.query.importBatch) {
-      where.importBatch = String(req.query.importBatch);
-    }
-    if (req.query.dateFrom || req.query.dateTo) {
-      const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
-      if (req.query.dateFrom) dateCond[Op.gte] = String(req.query.dateFrom);
-      if (req.query.dateTo) dateCond[Op.lte] = String(req.query.dateTo);
-      where.date = dateCond;
-    }
+    const where = buildTransactionFilterWhere(
+      req,
+      req.query as Record<string, unknown>
+    );
 
     const { rows, count } = await Transaction.findAndCountAll({
       where,

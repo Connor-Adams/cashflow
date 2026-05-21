@@ -66,3 +66,45 @@ export type PartnerSettlementInput = {
   settledDate: string
   notes?: string | null
 }
+
+/**
+ * Filter shape accepted by POST /api/transactions/bulk-patch-filter. Mirrors
+ * the subset of GET /api/transactions query params relevant for narrowing
+ * the bulk-apply scope. Field names match the backend query helper.
+ */
+export type TransactionFilterPayload = {
+  accountId?: number
+  reviewFlag?: boolean
+  currency?: string
+  category?: string
+  importBatch?: string
+  dateFrom?: string
+  dateTo?: string
+}
+
+/**
+ * Patch shape for transaction bulk operations. Mirrors the per-row PATCH
+ * body but limited to fields a household-wide override can sensibly set.
+ */
+export type TransactionBulkPatch = {
+  categoryOverride?: string
+  businessOverride?: boolean
+  splitOverride?: 'me' | 'partner' | 'shared'
+  pctMeOverride?: number
+  pctPartnerOverride?: number
+  ownershipType?: 'me' | 'partner' | 'shared' | 'contact'
+  ownershipContactId?: number | null
+  reviewFlag?: boolean
+}
+
+/** Request body for POST /api/transactions/bulk-patch-filter. */
+export type BulkPatchFilterRequest = {
+  filter: TransactionFilterPayload
+  patch: TransactionBulkPatch
+}
+
+/** Success body for POST /api/transactions/bulk-patch-filter. */
+export type BulkPatchFilterResponse = {
+  updated: number
+  ids: number[]
+}

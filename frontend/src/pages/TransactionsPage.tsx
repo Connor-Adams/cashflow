@@ -10,6 +10,7 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Alert, type AlertVariant } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -27,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import {
   getJson,
@@ -37,7 +39,16 @@ import {
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { formatParseErrorLines } from '../lib/formatParseErrors'
-import type { Account, Contact, Paginated, StatementPreview, Transaction } from '../types/api'
+import type {
+  Account,
+  BulkPatchFilterResponse,
+  Contact,
+  Paginated,
+  StatementPreview,
+  Transaction,
+  TransactionBulkPatch,
+  TransactionFilterPayload,
+} from '../types/api'
 import { useSessionState } from '../lib/useSessionState'
 
 type UploadResult = {
@@ -245,6 +256,9 @@ export function TransactionsPage() {
   const [bulkPctPartner, setBulkPctPartner] = useState('')
   const [bulkMarkReviewed, setBulkMarkReviewed] = useState(false)
   const [bulkApplying, setBulkApplying] = useState(false)
+  const [bulkAllApplying, setBulkAllApplying] = useState(false)
+  const confirmAction = useConfirm()
+  const { showToast } = useToast()
   const [importHistory, setImportHistory] = useState<ImportHistoryRow[]>([])
   const [res, setRes] = useState<Paginated<Transaction> | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -786,6 +800,101 @@ export function TransactionsPage() {
       setErr(e instanceof Error ? e.message : 'Bulk update failed')
     } finally {
       setBulkApplying(false)
+    }
+  }
+
+  /**
+   * Snapshot of the active filter set, in a shape the backend's
+   * /api/transactions/bulk-patch-filter route accepts. Mirrors the fields the
+   * GET list endpoint receives in {@link load}, so "Apply to all matching"
+   * targets exactly the rows the user is currently looking at.
+   */
+  function buildActiveFilterPayload(): TransactionFilterPayload {
+    const payload: TransactionFilterPayload = {}
+    if (reviewOnly) payload.reviewFlag = true
+    if (currency) payload.currency = currency
+    if (categoryFilter.trim()) payload.category = categoryFilter.trim()
+    if (dateFrom.trim()) payload.dateFrom = dateFrom.trim()
+    if (dateTo.trim()) payload.dateTo = dateTo.trim()
+    if (batchFilter.trim()) payload.importBatch = batchFilter.trim()
+    return payload
+  }
+
+  function describePatch(patch: Record<string, unknown>): string {
+    const parts: string[] = []
+    if (typeof patch.categoryOverride === 'string') parts.push(`category=${patch.categoryOverride}`)
+    if (typeof patch.businessOverride === 'boolean')
+      parts.push(`business=${patch.businessOverride ? 'yes' : 'no'}`)
+    if (typeof patch.splitOverride === 'string') parts.push(`split=${patch.splitOverride}`)
+    if (typeof patch.pctMeOverride === 'number') parts.push(`pct me=${patch.pctMeOverride}`)
+    if (typeof patch.pctPartnerOverride === 'number')
+      parts.push(`pct partner=${patch.pctPartnerOverride}`)
+    if (patch.reviewFlag === false) parts.push('mark reviewed')
+    return parts.length ? parts.join(', ') : 'no fields'
+  }
+
+  /**
+   * Applies the current bulk-bar patch to every transaction matching the
+   * active filter — not just the rows the user has manually selected on this
+   * page. The user is shown a destructive-style prompt with the row count
+   * before any write happens; the server independently enforces a cap and
+   * rejects oversize selections with 422.
+   */
+  async function applyBulkToAllMatching() {
+    const patch = buildBulkPatch()
+    if (!patch) return
+    if (totalCount === 0) {
+      showToast({
+        title: 'Nothing to update',
+        description: 'The current filter has no matching transactions.',
+        variant: 'warning',
+      })
+      return
+    }
+    const summary = describePatch(patch)
+    const ok = await confirmAction({
+      title: `Apply to all ${totalCount} matching transactions?`,
+      description: `Patch [${summary}] will be written to every transaction matching the active filter across all pages.`,
+      confirmLabel: `Apply to ${totalCount}`,
+      cancelLabel: 'Back',
+      destructive: true,
+    })
+    if (!ok) return
+    setBulkAllApplying(true)
+    setErr(null)
+    try {
+      const filter = buildActiveFilterPayload()
+      const result = await postJson<BulkPatchFilterResponse>(
+        '/api/transactions/bulk-patch-filter',
+        { filter, patch: patch as TransactionBulkPatch }
+      )
+      setBulkCat('')
+      setBulkBiz('')
+      setBulkSplit('')
+      setBulkPctMe('')
+      setBulkPctPartner('')
+      setBulkMarkReviewed(false)
+      setSelectedIds(new Set())
+      await load()
+      showToast({
+        title: `Updated ${result.updated} transactions`,
+        variant: 'success',
+      })
+    } catch (e) {
+      const status = (e as { status?: number } | null | undefined)?.status
+      const message = e instanceof Error ? e.message : 'Bulk update across filter failed'
+      if (status === 422) {
+        showToast({
+          title: 'Too many matching transactions',
+          description: message,
+          variant: 'warning',
+          durationMs: 8000,
+        })
+      } else {
+        setErr(message)
+      }
+    } finally {
+      setBulkAllApplying(false)
     }
   }
 
@@ -1640,10 +1749,14 @@ export function TransactionsPage() {
           ) : null}
         </section>
       )}
-      {selectedIds.size > 0 && (
+      {(selectedIds.size > 0 || totalCount > 0) && (
         <div className="card bulkBar transactionsBulkCard">
           <div className="transactionsBulkHeader">
-            <strong>{selectedIds.size} selected</strong>
+            <strong>
+              {selectedIds.size > 0
+                ? `${selectedIds.size} selected`
+                : `${totalCount} matching`}
+            </strong>
             <span className="muted">Apply a batch override without opening each row.</span>
           </div>
           {aiEnabled ? (
@@ -1741,7 +1854,10 @@ export function TransactionsPage() {
           <Button
             type="button"
             disabled={
-              bulkApplying || !buildBulkPatch() || selectedIds.size === 0
+              bulkApplying ||
+              bulkAllApplying ||
+              !buildBulkPatch() ||
+              selectedIds.size === 0
             }
             onClick={() => void applyBulk()}
           >
@@ -1750,12 +1866,34 @@ export function TransactionsPage() {
           <Button
             type="button"
             variant="secondary"
+            disabled={
+              bulkApplying ||
+              bulkAllApplying ||
+              !buildBulkPatch() ||
+              totalCount === 0
+            }
+            onClick={() => void applyBulkToAllMatching()}
+            title={
+              totalCount === 0
+                ? 'No transactions match the active filter'
+                : `Apply the bulk patch to every transaction matching the current filter (${totalCount})`
+            }
+          >
+            {bulkAllApplying
+              ? 'Applying…'
+              : `Apply to all ${totalCount} matching`}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
             onClick={() => setSelectedIds(new Set())}
+            disabled={selectedIds.size === 0}
           >
             Clear selection
           </Button>
         </div>
       )}
+      {confirmAction.dialog}
       <section className="card transactionsTableCard">
         <div className="transactionsPanelHeader">
           <div>
