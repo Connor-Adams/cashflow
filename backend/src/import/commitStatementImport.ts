@@ -7,11 +7,25 @@ import {
   InvestmentActivity,
   Security,
   Transaction,
+  TransactionSignal,
   sequelize,
 } from '../models';
-import { applyRuleToAuto, findBestRule, loadAllRules } from './applyRules';
+import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
-import { findMerchantMemory, merchantMemoryToAutoFields } from '../ai/merchantMemory';
+import { findMerchantMemory } from '../ai/merchantMemory';
+import { enrichTransaction } from './enrich';
+import {
+  enrichmentRecurringMinSupport,
+  enrichmentAmazonLinkThreshold,
+  enrichmentRefundWindowDays,
+  enrichmentTransferWindowDays,
+} from '../config/env';
+import {
+  loadAmazonOrdersCache,
+  loadHouseholdAccountIds,
+  loadRecurringHistory,
+  loadRelationshipCandidates,
+} from './enrichment/loaders';
 import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
@@ -194,6 +208,8 @@ export async function commitStatementImport(
   }
 
   const rules = await loadAllRules(account.householdId);
+  const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
+  const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
   let insertedHoldings = 0;
@@ -201,56 +217,97 @@ export async function commitStatementImport(
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
-      const { rule, ambiguous } = findBestRule(rules, row.merchantClean);
-      const memory = !rule || ambiguous
-        ? await findMerchantMemory(account.householdId, row.merchantClean)
-        : null;
-      const autoFields =
-        rule && !ambiguous
-          ? applyRuleToAuto(rule)
-          : memory
-            ? merchantMemoryToAutoFields(memory)
-            : {
-                autoCategory: null as string | null,
-                autoBusiness: null as boolean | null,
-                autoSplitType: null as string | null,
-                autoPctMe: null as string | null,
-                autoPctPartner: null as string | null,
-              };
+      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean);
+
+      const recurringHistory = await loadRecurringHistory(
+        account.householdId ?? null,
+        row.merchantClean,
+        row.date,
+      );
+      const relationshipCandidates = await loadRelationshipCandidates(
+        account.householdId ?? null,
+        householdAccountIds,
+        row.merchantClean,
+        row.date,
+        enrichmentRefundWindowDays,
+      );
+
+      const enriched = await enrichTransaction({
+        raw: {
+          merchantRaw: row.merchantRaw,
+          date: row.date,
+          amount: row.amount,
+          sourceReference: row.sourceReference ?? null,
+          notes: null,
+        },
+        accountId: account.id,
+        householdId: account.householdId ?? null,
+        householdAccountIds,
+        rules,
+        amazonOrders: amazonOrdersCache,
+        memory,
+        recurringHistory,
+        relationshipCandidates,
+        refundWindowDays: enrichmentRefundWindowDays,
+        transferWindowDays: enrichmentTransferWindowDays,
+        recurringMinSupport: enrichmentRecurringMinSupport,
+        amazonLinkThreshold: enrichmentAmazonLinkThreshold,
+      });
+
+      const f = enriched.fields;
+
       const txn = Transaction.build({
         accountId: account.id,
-        householdId: account.householdId,
+        householdId: account.householdId ?? null,
         createdByUserId: userId ?? account.ownerUserId,
         visibility: account.visibility === 'shared' ? 'shared' : 'private',
         ownershipType:
-          autoFields.autoSplitType === 'partner' || autoFields.autoSplitType === 'shared'
-            ? autoFields.autoSplitType
-            : 'me',
+          f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
         importBatch: preview.importBatch,
         date: row.date,
         merchantRaw: row.merchantRaw,
-        merchantClean: row.merchantClean,
+        merchantClean: f.merchantClean,
+        merchantCanonical: f.merchantCanonical,
+        txnType: f.txnType,
         amount: String(row.amount),
         currency: row.currency,
-        notes: memory
-          ? `Auto-categorized from ${memory.supportCount} previous ${memory.merchantClean} transaction${memory.supportCount === 1 ? '' : 's'}.`
-          : null,
-        sourceReference: row.sourceReference,
+        notes: f.notes,
+        sourceReference: row.sourceReference ?? null,
         sourceRowFingerprint: row.sourceRowFingerprint,
-        appliedRuleId: rule && !ambiguous ? rule.id : null,
-        ...autoFields,
+        appliedRuleId: f.appliedRuleId,
+        autoCategory: f.autoCategory,
+        autoBusiness: f.autoBusiness,
+        autoSplitType: f.autoSplitType,
+        autoPctMe: f.autoPctMe,
+        autoPctPartner: f.autoPctPartner,
         categoryOverride: null,
         businessOverride: null,
         splitOverride: null,
         pctMeOverride: null,
         pctPartnerOverride: null,
-        reviewFlag: true,
+        autoSource: f.autoSource,
+        autoConfidence: f.autoConfidence,
+        linkedTransactionId: f.linkedTransactionId,
+        isRecurring: f.isRecurring,
+        reviewFlag: f.reviewFlag,
         reviewedAt: null,
       });
       recomputeTransactionAmounts(txn);
       try {
         await txn.save({ transaction: t });
+        if (enriched.signals.length > 0) {
+          await TransactionSignal.bulkCreate(
+            enriched.signals.map((s) => ({
+              transactionId: txn.id,
+              source: s.source,
+              confidence: s.confidence,
+              fields: s.fields,
+              rationale: s.rationale ?? null,
+            })),
+            { transaction: t },
+          );
+        }
         insertedTransactions += 1;
       } catch (e) {
         if (isUniqueLike(e)) skippedDuplicates += 1;
