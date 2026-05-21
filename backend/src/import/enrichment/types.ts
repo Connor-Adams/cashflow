@@ -83,6 +83,7 @@ export interface EnrichmentResultFields {
   autoPctPartner: string | null;
   appliedRuleId: number | null;
   linkedTransactionId: number | null;
+  linkedExternalOrderId: number | null;
   isRecurring: boolean;
   notes: string | null;
   autoSource: SignalSource | 'composite' | null;
