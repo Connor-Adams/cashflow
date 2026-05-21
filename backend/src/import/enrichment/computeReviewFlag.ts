@@ -47,6 +47,24 @@ const AUTO_FIELD_KEYS: Array<keyof SignalFields> = [
   'notes',
 ];
 
+/**
+ * Only classification fields count toward autoSource. Structural fields
+ * (merchantClean, merchantCanonical, txnType, isRecurring) are provided by
+ * normalize/type-detect stages and should not pollute autoSource with 'composite'
+ * when a single classification source (e.g. rule or memory) applies.
+ */
+const CLASSIFICATION_FIELD_KEYS = new Set<keyof SignalFields>([
+  'autoCategory',
+  'autoBusiness',
+  'autoSplitType',
+  'autoPctMe',
+  'autoPctPartner',
+  'appliedRuleId',
+  'linkedTransactionId',
+  'linkedExternalOrderId',
+  'notes',
+]);
+
 export function mergeSignals(signals: Signal[]): EnrichmentResult {
   const sorted = [...signals].sort((a, b) => signalRank(b) - signalRank(a));
 
@@ -64,7 +82,12 @@ export function mergeSignals(signals: Signal[]): EnrichmentResult {
     }
   }
 
-  const distinctSources = new Set(winningSourceByKey.values());
+  const classificationSources = new Set(
+    [...winningSourceByKey.entries()]
+      .filter(([key]) => CLASSIFICATION_FIELD_KEYS.has(key as keyof SignalFields))
+      .map(([, source]) => source),
+  );
+  const distinctSources = classificationSources;
   const autoSource: EnrichmentResultFields['autoSource'] = (() => {
     if (distinctSources.size === 0) return null;
     if (distinctSources.size === 1) return [...distinctSources][0]!;
