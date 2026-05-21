@@ -48,7 +48,7 @@ test('attaches high-confidence link when all items share one inferredCategory', 
     ],
   });
   assert.equal(signals.length, 1);
-  assert.equal(signals[0].source, 'amazon-items');
+  assert.equal(signals[0].source, 'item-link');
   assert.equal(signals[0].confidence, 'high');
   assert.equal(signals[0].fields.autoCategory, 'Office');
   assert.equal(signals[0].fields.linkedExternalOrderId, 42);

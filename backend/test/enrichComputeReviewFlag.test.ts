@@ -17,14 +17,14 @@ test('rule wins over memory and ai for category', () => {
   assert.equal(merged.fields.autoSource, 'rule');
 });
 
-test('rule + memory + amazon-items: rule wins, autoSource=rule', () => {
+test('rule + memory + item-link: rule wins, autoSource=composite', () => {
   const merged = mergeSignals([
     s('memory', 'high', { autoCategory: 'M' }),
     s('rule', 'high', { autoCategory: 'R', appliedRuleId: 5 }),
-    s('amazon-items', 'high', { autoCategory: 'A', linkedExternalOrderId: 7 }),
+    s('item-link', 'high', { autoCategory: 'A', linkedExternalOrderId: 7 }),
   ]);
   assert.equal(merged.fields.appliedRuleId, 5);
-  // amazon-items still contributes a non-conflicting field
+  // item-link still contributes a non-conflicting field
   assert.equal(merged.fields.linkedExternalOrderId, 7);
   assert.equal(merged.fields.autoSource, 'composite');
 });
