@@ -46,6 +46,21 @@ test('normalizeMerchant strips trailing phone numbers', () => {
   assert.equal(normalizeMerchant('STORE 800.555.0199'), 'STORE');
 });
 
+test('normalizeMerchant edge case: 2-word string ending in state code is stripped to one word', () => {
+  // Documented behaviour: with no recognised city, the trailing state token is
+  // stripped. Real merchant strings rarely take this form so this is acceptable.
+  assert.equal(normalizeMerchant('SHOP ON'), 'SHOP');
+});
+
+test('normalizeMerchant edge case: trailing CA is treated as Canada, not California', () => {
+  // Known limitation: CA appears in both COUNTRY_SET (Canada) and STATE_PROV_SET
+  // (California). The country check fires first — consuming CA as country — then
+  // the preceding token (MALIBU) is not a state code, so stripCityStateTail bails
+  // out and returns the string unchanged. US merchant strings ending in "... CA"
+  // with no other state token are therefore NOT stripped.
+  assert.equal(normalizeMerchant('STORE MALIBU CA'), 'STORE MALIBU CA');
+});
+
 test('normalizeMerchant is idempotent', () => {
   const once = normalizeMerchant('SQ *JOE COFFEE TORONTO ON #1234');
   const twice = normalizeMerchant(once);

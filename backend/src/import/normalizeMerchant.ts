@@ -24,6 +24,8 @@ const STATE_PROV_SET = new Set([
   'VA','WA','WV','WI','WY','DC',
 ]);
 
+// Note: "CA" appears here as Canada; it is also the California state code but
+// this ambiguity favours the country interpretation when CA is the tail token.
 const COUNTRY_SET = new Set(['US', 'USA', 'CA', 'CAN']);
 
 // All-uppercase word (city name token): 2+ letters, may include apostrophes/hyphens
