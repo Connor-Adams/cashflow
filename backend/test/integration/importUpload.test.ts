@@ -9,6 +9,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
+let models: typeof import('../../src/models/index.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
@@ -42,6 +43,7 @@ before(async () => {
     stdio: 'pipe',
   });
 
+  models = await import('../../src/models/index.js');
   const mod = await import('../../src/app.js');
   app = mod.default;
   authed = request.agent(app);
@@ -775,4 +777,76 @@ test('POST /api/import/upload keeps payment rows positive when generic profile n
   );
   assert.equal(byDescription.get('Grocery Store'), -1200);
   assert.equal(byDescription.get('ONLINE PAYMENT THANK YOU'), 1200);
+});
+
+test('enrichment: rule-matched row has confident auto fields and signals; cold row stays in review', async () => {
+  // Get the householdId by calling /api/auth/me (session cookie already set on authed agent).
+  const me = await authed.get('/api/auth/me');
+  assert.equal(me.status, 200);
+  const householdId = me.body.user.household.id as number;
+
+  const acc = await authed.post('/api/accounts').send({
+    name: 'Enrichment Smoke Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const ruleRow = await models.Rule.create({
+    householdId,
+    merchantPattern: 'NETFLIX',
+    matchKind: 'substring',
+    priority: 5,
+    category: 'Subscriptions',
+    isBusiness: false,
+    splitType: 'shared',
+    pctMe: '0.5',
+    pctPartner: '0.5',
+  });
+
+  const csv =
+    'Date,Description,Amount\n' +
+    '2026-04-15,NETFLIX.COM,-14.99\n' +
+    '2026-04-16,Random Unknown Vendor XYZ,-5.00\n';
+
+  const up = await authed
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .field('profileId', 'generic_simple')
+    .attach('file', Buffer.from(csv, 'utf8'), {
+      filename: 'enrichment-smoke.csv',
+      contentType: 'text/csv',
+    });
+  assert.equal(up.status, 200);
+  assert.equal(up.body.inserted, 2);
+
+  const txns = await models.Transaction.findAll({
+    where: { accountId },
+    order: [['date', 'ASC']],
+  });
+  assert.equal(txns.length, 2);
+
+  const netflix = txns.find((t) => t.merchantRaw.includes('NETFLIX'));
+  const unknown = txns.find((t) => t.merchantRaw.includes('Random Unknown'));
+  assert.ok(netflix, `expected NETFLIX transaction; got ${txns.map((t) => t.merchantRaw).join(', ')}`);
+  assert.ok(unknown, `expected Random Unknown transaction; got ${txns.map((t) => t.merchantRaw).join(', ')}`);
+
+  assert.equal(netflix.autoSource, 'rule', `NETFLIX autoSource should be 'rule'`);
+  assert.equal(netflix.autoConfidence, 'high', `NETFLIX autoConfidence should be 'high'`);
+  assert.equal(netflix.reviewFlag, false, `NETFLIX reviewFlag should be false`);
+  assert.equal(netflix.autoCategory, 'Subscriptions', `NETFLIX autoCategory should be 'Subscriptions'`);
+  assert.equal(netflix.appliedRuleId, ruleRow.id, `NETFLIX appliedRuleId should match rule`);
+
+  assert.equal(unknown.reviewFlag, true, `unknown vendor reviewFlag should be true`);
+  assert.equal(unknown.autoSource, null, `unknown vendor autoSource should be null`);
+  assert.equal(unknown.autoCategory, null, `unknown vendor autoCategory should be null`);
+
+  for (const t of [netflix, unknown]) {
+    const signals = await models.TransactionSignal.findAll({ where: { transactionId: t.id } });
+    assert.ok(
+      signals.some((s) => s.source === 'normalize-seed'),
+      `transaction ${t.merchantRaw} (id=${t.id}) should have a normalize-seed signal; got sources: ${signals.map((s) => s.source).join(', ')}`
+    );
+  }
 });
