@@ -15,6 +15,7 @@ import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
+import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
@@ -36,6 +37,7 @@ initAiSuggestion(sequelize);
 initExternalOrder(sequelize);
 initExternalOrderItem(sequelize);
 initTransactionOrderLink(sequelize);
+initTransactionSignal(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
@@ -121,6 +123,14 @@ TransactionOrderLink.belongsTo(ExternalOrder, {
   foreignKey: 'external_order_id',
   as: 'order',
 });
+Transaction.hasMany(TransactionSignal, {
+  foreignKey: 'transaction_id',
+  as: 'enrichmentSignals',
+});
+TransactionSignal.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
 
 export {
   sequelize,
@@ -140,6 +150,7 @@ export {
   ExternalOrder,
   ExternalOrderItem,
   TransactionOrderLink,
+  TransactionSignal,
   Security,
   InvestmentActivity,
   HoldingSnapshot,
