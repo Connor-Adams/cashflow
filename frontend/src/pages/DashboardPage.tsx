@@ -322,6 +322,10 @@ export function DashboardPage() {
     return Array.from(byCat.entries()).map(([name, total]) => ({ name, total }))
   }, [data, currency])
 
+  // Threshold for switching the category-axis layout. Above this count,
+  // labels overlap even on a wide viewport with default tick spacing.
+  const hasManyCategories = chartData.length > 10
+
   // Drill from a category bar into a pre-filtered Transactions view. Preserves
   // the active currency and date filters so the destination opens with the
   // same slice the chart was showing. Uses the literal '(uncategorized)'
@@ -609,6 +613,13 @@ export function DashboardPage() {
     dateFrom !== defaultRange.from ||
     dateTo !== defaultRange.to
 
+  // When the view is unbounded on both ends ("All time"), there is no prior
+  // window to compare against — the previous-period totals collapse to zero
+  // and any rendered delta is misleading (always "+ entire amount" in green).
+  // Suppress the delta prop in that case; StatCard handles `undefined` by not
+  // rendering the badge.
+  const hasComparisonPeriod = Boolean(dateFrom || dateTo)
+
   const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
   const formatDashboardAmount = (value: number): string =>
     displayCurrency
@@ -658,15 +669,15 @@ export function DashboardPage() {
           variant="warning"
           title={`${summaryStats.reviewCount} transaction${
             summaryStats.reviewCount === 1 ? '' : 's'
-          } need review`}
+          } flagged for review`}
           action={
             <Link to="/review" className="text-sm font-semibold underline">
               Open Review Inbox
             </Link>
           }
         >
-          Flagged transactions are waiting on category, split, or business
-          decisions before they roll into your totals.
+          Transactions flagged for review are waiting on category, split, or
+          business decisions before they roll into your totals.
         </Alert>
       ) : null}
 
@@ -716,31 +727,31 @@ export function DashboardPage() {
           label="Total spend"
           value={summaryStats.spendLabel}
           hint={`Charges only (absolute values). ${summaryStats.moneyHint}`}
-          delta={summaryStats.spendDeltaLabel}
+          delta={hasComparisonPeriod ? summaryStats.spendDeltaLabel : undefined}
         />
         <StatCard
           label="Refunds / credits"
           value={summaryStats.creditsLabel}
           hint="Positive amounts excluding payments and transfers."
-          delta={summaryStats.creditsDeltaLabel}
+          delta={hasComparisonPeriod ? summaryStats.creditsDeltaLabel : undefined}
         />
         <StatCard
           label="Payments / transfers"
           value={summaryStats.paymentsLabel}
           hint="Card payments and transfer-like inflows, tracked separately."
-          delta={summaryStats.paymentsDeltaLabel}
+          delta={hasComparisonPeriod ? summaryStats.paymentsDeltaLabel : undefined}
         />
         <StatCard
           label="Net spend"
           value={summaryStats.netSpendLabel}
           hint="Spend minus refunds/credits. Payments excluded."
-          delta={summaryStats.netSpendDeltaLabel}
+          delta={hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined}
         />
         <StatCard
           label="Transactions"
           value={summaryStats.txCount}
           hint="Rows in current filters"
-          delta={summaryStats.txDeltaLabel}
+          delta={hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined}
         />
         <StatCard
           label="Merchants"
@@ -971,8 +982,18 @@ export function DashboardPage() {
                 <XAxis
                   dataKey="name"
                   tick={narrowAxisTick}
-                  interval={isNarrowViewport ? 'preserveStartEnd' : 0}
+                  // Category-count-aware label handling: once there are more
+                  // than 10 categories, default Recharts spacing overlaps even
+                  // on wide viewports. Switch to preserveStartEnd + slight
+                  // negative rotation and give the axis extra height. Narrow
+                  // viewport still stacks the tick-font shrink on top.
+                  interval={
+                    isNarrowViewport || hasManyCategories ? 'preserveStartEnd' : 0
+                  }
                   minTickGap={isNarrowViewport ? 12 : 5}
+                  angle={hasManyCategories ? -30 : 0}
+                  textAnchor={hasManyCategories ? 'end' : 'middle'}
+                  height={hasManyCategories ? 70 : undefined}
                 />
                 <YAxis
                   tick={narrowAxisTick}
