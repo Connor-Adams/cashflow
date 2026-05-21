@@ -38,6 +38,7 @@ import {
   formatShortMonth,
   useIsNarrowViewport,
 } from '../lib/chartViewport'
+import type { BudgetProgress, BudgetProgressResponse } from '../types/api'
 
 type Row = {
   currency: string
@@ -245,6 +246,7 @@ export function DashboardPage() {
   >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
   const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
+  const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -303,6 +305,40 @@ export function DashboardPage() {
       cancelled = true
     }
   }, [summaryQs, previousRange, currency, dateFrom, dateTo])
+
+  // Budget progress is scoped to the active currency filter only — periods
+  // are always "current calendar month" on the backend, so date filters
+  // don't apply. Kept in its own effect so a failing /budgets/progress
+  // request doesn't tank the main dashboard rendering.
+  useEffect(() => {
+    let cancelled = false
+    const qs = currency
+      ? `?currency=${encodeURIComponent(currency)}`
+      : ''
+    ;(async () => {
+      try {
+        const resp = await getJson<BudgetProgressResponse>(
+          `/api/budgets/progress${qs}`
+        )
+        if (!cancelled) setBudgetProgress(resp.items)
+      } catch {
+        if (!cancelled) setBudgetProgress([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currency])
+
+  // Sort most-at-risk first; ties broken by category label so layout is
+  // deterministic between renders. Overall budgets ("null" category) get a
+  // stable label for the sort comparator.
+  const budgetProgressSorted = useMemo(() => {
+    return [...budgetProgress].sort((a, b) => {
+      if (b.percentUsed !== a.percentUsed) return b.percentUsed - a.percentUsed
+      return (a.category ?? '').localeCompare(b.category ?? '')
+    })
+  }, [budgetProgress])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -726,6 +762,103 @@ export function DashboardPage() {
           />
         </CardContent>
       </Card>
+
+      {budgetProgressSorted.length > 0 && (
+        <Card className="dashboardChartCard" aria-label="Monthly budget progress">
+          <h2>Monthly budget progress</h2>
+          <p className="muted">
+            Spend so far this calendar month against the targets set in
+            Settings. Sorted by share used.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {budgetProgressSorted.map((item) => {
+              // Color thresholds: under 80% is comfortably on-pace, 80-100%
+              // is a warning band, anything over 100% spills into the
+              // danger color. The bar itself is capped at 100% width so
+              // overage doesn't break the layout — the caption still shows
+              // the true percent.
+              const barColor =
+                item.percentUsed > 100
+                  ? 'var(--danger)'
+                  : item.percentUsed >= 80
+                    ? 'var(--accent-warm)'
+                    : 'var(--accent-green)'
+              const width = `${Math.min(100, item.percentUsed)}%`
+              const label = item.category ?? 'Overall'
+              const percentRounded = Math.round(item.percentUsed)
+              return (
+                <div
+                  key={item.budgetId}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.35rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.5rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                      }}
+                    >
+                      <strong>{label}</strong>
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.1rem 0.45rem',
+                          borderRadius: '999px',
+                          border: '1px solid var(--border)',
+                          color: 'var(--muted-foreground)',
+                          background: 'var(--bg2)',
+                        }}
+                      >
+                        {item.currency}
+                      </span>
+                    </div>
+                    <span className="muted" style={{ fontSize: '0.85rem' }}>
+                      {formatMoney(item.spent, item.currency)} of{' '}
+                      {formatMoney(item.target, item.currency)} ({percentRounded}%)
+                    </span>
+                  </div>
+                  <div
+                    role="img"
+                    aria-label={`${label} ${percentRounded} percent of monthly target used`}
+                    style={{
+                      position: 'relative',
+                      height: '10px',
+                      width: '100%',
+                      background: 'var(--bg2)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '999px',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'block',
+                        height: '100%',
+                        width,
+                        background: barColor,
+                        transition: 'width 0.3s ease-out',
+                      }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
 
       <section className="dashboardStats" aria-busy={loading}>
         <StatCard

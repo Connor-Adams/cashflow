@@ -11,6 +11,7 @@ import { HouseholdMember, initHouseholdMember } from './HouseholdMember';
 import { HouseholdInvite, initHouseholdInvite } from './HouseholdInvite';
 import { Contact, initContact } from './Contact';
 import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
+import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
@@ -31,6 +32,7 @@ initHouseholdMember(sequelize);
 initHouseholdInvite(sequelize);
 initContact(sequelize);
 initPartnerSettlement(sequelize);
+initBudgetTarget(sequelize);
 initAccount(sequelize);
 initRule(sequelize);
 initTransaction(sequelize);
@@ -112,6 +114,11 @@ Contact.hasMany(PartnerSettlement, {
   as: 'partnerSettlements',
 });
 PartnerSettlement.belongsTo(Contact, { foreignKey: 'contact_id', as: 'contact' });
+Household.hasMany(BudgetTarget, {
+  foreignKey: 'household_id',
+  as: 'budgetTargets',
+});
+BudgetTarget.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Rule.hasMany(Transaction, {
   foreignKey: 'applied_rule_id',
   as: 'appliedTransactions',
@@ -171,6 +178,7 @@ export {
   HouseholdInvite,
   Contact,
   PartnerSettlement,
+  BudgetTarget,
   Account,
   Rule,
   Transaction,
