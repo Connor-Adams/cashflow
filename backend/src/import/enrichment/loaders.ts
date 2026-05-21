@@ -65,6 +65,16 @@ export async function loadRelationshipCandidates(
   refundWindowDays: number,
 ): Promise<RelationshipCandidate[]> {
   if (householdAccountIds.length === 0) return [];
+  const windowStart = new Date(`${date}T00:00:00Z`);
+  windowStart.setUTCDate(windowStart.getUTCDate() - refundWindowDays);
+  const windowEnd = new Date(`${date}T00:00:00Z`);
+  windowEnd.setUTCDate(windowEnd.getUTCDate() + refundWindowDays);
+  const windowStartStr = windowStart.toISOString().slice(0, 10);
+  const windowEndStr = windowEnd.toISOString().slice(0, 10);
+  const householdClause = householdId != null
+    ? `AND (merchant_clean = ? OR household_id = ?)`
+    : '';
+  const householdReplacements = householdId != null ? [merchantClean, householdId] : [];
   const placeholders = householdAccountIds.map(() => '?').join(',');
   const rows = await sequelize.query<{
     id: number;
@@ -80,10 +90,10 @@ export async function loadRelationshipCandidates(
             final_business AS "finalBusiness"
        FROM transactions
        WHERE account_id IN (${placeholders})
-         AND ABS(julianday(?) - julianday(date)) <= ?
-         AND (merchant_clean = ? OR (? IS NULL OR household_id = ?))`,
+         AND date BETWEEN ? AND ?
+         ${householdClause}`,
     {
-      replacements: [...householdAccountIds, date, refundWindowDays, merchantClean, householdId, householdId],
+      replacements: [...householdAccountIds, windowStartStr, windowEndStr, ...householdReplacements],
       type: QueryTypes.SELECT,
     },
   );

@@ -36,6 +36,16 @@ export interface EnrichInputs {
   learnedBrandLookup?: (merchantClean: string) => string | null;
 }
 
+function safeStage<T>(name: string, fn: () => T, fallback: T): T {
+  try {
+    return fn();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[enrichment] stage "${name}" threw — continuing with no signals`, err);
+    return fallback;
+  }
+}
+
 function pickTxnType(signals: Signal[]): TxnType {
   for (const s of signals) {
     if (s.fields.txnType) return s.fields.txnType;
@@ -54,44 +64,44 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
   const signals: Signal[] = [];
 
   // Stage 1: normalize
-  signals.push(...runNormalizeStage({
+  signals.push(...safeStage('normalize', () => runNormalizeStage({
     merchantRaw: input.raw.merchantRaw,
     learnedLookup: input.learnedBrandLookup,
-  }));
+  }), []));
 
   const merchantClean = pickMerchantClean(signals);
 
   // Stage 2: detect-type
-  signals.push(...runDetectTypeStage({
+  signals.push(...safeStage('detect-type', () => runDetectTypeStage({
     merchantRaw: input.raw.merchantRaw,
     merchantClean,
     amount: input.raw.amount,
-  }));
+  }), []));
 
   const txnType = pickTxnType(signals);
 
   // Stage 3: detect-recurring
-  signals.push(...runDetectRecurringStage({
+  signals.push(...safeStage('detect-recurring', () => runDetectRecurringStage({
     merchantClean,
     amount: input.raw.amount,
     date: input.raw.date,
     history: input.recurringHistory,
     minSupport: input.recurringMinSupport,
-  }));
+  }), []));
 
   // Stage 4: apply-rule
-  signals.push(...runApplyRuleStage({
+  signals.push(...safeStage('apply-rule', () => runApplyRuleStage({
     merchantClean,
     rules: input.rules,
-  }));
+  }), []));
 
   // Stage 5: merchant-memory
-  signals.push(...runMerchantMemoryStage({
+  signals.push(...safeStage('merchant-memory', () => runMerchantMemoryStage({
     memory: input.memory,
-  }));
+  }), []));
 
   // Stage 6: link-items
-  signals.push(...runLinkItemsStage({
+  signals.push(...safeStage('link-items', () => runLinkItemsStage({
     merchantRaw: input.raw.merchantRaw,
     merchantClean,
     amount: input.raw.amount,
@@ -100,10 +110,10 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     sourceReference: input.raw.sourceReference,
     threshold: input.amazonLinkThreshold,
     candidateOrders: input.amazonOrders,
-  }));
+  }), []));
 
   // Stage 7: detect-relationships
-  signals.push(...runDetectRelationshipsStage({
+  signals.push(...safeStage('detect-relationships', () => runDetectRelationshipsStage({
     txnType,
     merchantClean,
     amount: input.raw.amount,
@@ -113,7 +123,7 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     refundWindowDays: input.refundWindowDays,
     transferWindowDays: input.transferWindowDays,
     candidates: input.relationshipCandidates,
-  }));
+  }), []));
 
   // Stage 9: compute-review-flag (merge)
   return mergeSignals(signals);

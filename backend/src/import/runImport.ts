@@ -201,6 +201,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     importBatch = meta.batchLabel;
   }
 
+  const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
+
   const text = buf.toString('utf8');
   const parsed = parseCsvRecords(text);
   if (!parsed.ok) {
@@ -261,8 +263,6 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         merchantClean: v.merchantClean,
         sourceReference: v.sourceReference,
       });
-
-      const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
 
       const memory = await findMerchantMemory(opts.householdId ?? account.householdId ?? null, v.merchantClean);
 

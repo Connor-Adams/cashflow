@@ -209,6 +209,7 @@ export async function commitStatementImport(
 
   const rules = await loadAllRules(account.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
+  const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
   let insertedHoldings = 0;
@@ -216,8 +217,6 @@ export async function commitStatementImport(
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
-      const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
-
       const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean);
 
       const recurringHistory = await loadRecurringHistory(
