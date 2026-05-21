@@ -133,6 +133,7 @@ module.exports = {
       fields: { type: Sequelize.JSON, allowNull: false },
       rationale: { type: Sequelize.TEXT, allowNull: true },
       created_at: { type: Sequelize.DATE, allowNull: false },
+      updated_at: { type: Sequelize.DATE, allowNull: false },
     });
     await queryInterface.addIndex('transaction_signals', ['transaction_id'], {
       name: 'transaction_signals_transaction_id',
@@ -319,7 +320,6 @@ export function initTransactionSignal(
       tableName: 'transaction_signals',
       underscored: true,
       timestamps: true,
-      updatedAt: false,
     },
   );
   return TransactionSignal;
