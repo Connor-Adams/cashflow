@@ -149,7 +149,7 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
 
   return [
     {
-      source: 'amazon-items',
+      source: 'item-link',
       confidence,
       fields: {
         merchantCanonical: matched.canonical,
