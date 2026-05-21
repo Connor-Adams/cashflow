@@ -701,11 +701,11 @@ router.get('/enrichment/stats', async (req, res, next) => {
         { replacements: reps, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} review_flag = 1`,
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} review_flag`,
         { replacements: reps, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} review_flag = 0`,
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} NOT review_flag`,
         { replacements: reps, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ n: number }>(
@@ -713,7 +713,7 @@ router.get('/enrichment/stats', async (req, res, next) => {
         { replacements: reps, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} is_recurring = 1`,
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} is_recurring`,
         { replacements: reps, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ n: number }>(
