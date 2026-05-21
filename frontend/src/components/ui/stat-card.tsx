@@ -56,7 +56,7 @@ function StatCard({ label, value, hint, delta, className, ...props }: StatCardPr
   return (
     <Card data-slot="stat-card" className={cn('mb-0', className)} {...props}>
       <p className="statLabel">{label}</p>
-      <p className={cn('statValue', 'text-2xl font-semibold truncate')} title={valueTitle}>
+      <p className={cn('statValue', 'text-xl font-semibold truncate')} title={valueTitle}>
         {value}
       </p>
       {hint ? (

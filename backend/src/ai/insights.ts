@@ -236,8 +236,8 @@ export async function buildFinancialInsights(
   }
   if (reviewCount > 0) {
     insights.push({
-      title: 'Review queue needs attention',
-      summary: `${reviewCount} transaction${reviewCount === 1 ? '' : 's'} still need review.`,
+      title: 'Uncategorized transactions',
+      summary: `${reviewCount} transaction${reviewCount === 1 ? '' : 's'} have no category.`,
       severity: 'action',
       metric: 'review_count',
       amount: reviewCount,
