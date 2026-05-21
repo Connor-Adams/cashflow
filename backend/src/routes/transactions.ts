@@ -807,13 +807,15 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       batchSize: 100,
     };
 
-    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('X-Accel-Buffering', 'no');
-
-    function emit(obj: unknown) {
-      res.write(`${JSON.stringify(obj)}\n`);
-    }
+    // Content negotiation: NDJSON streaming only when the client explicitly
+    // asks for it (Accept header or ?stream=1). Otherwise return a single
+    // JSON summary, matching the original v1 endpoint shape. This keeps
+    // pre-streaming-frontend clients working after the backend deploy.
+    const accept = String(req.headers['accept'] ?? '').toLowerCase();
+    const wantsStream =
+      accept.includes('application/x-ndjson') ||
+      accept.includes('application/ndjson') ||
+      req.query.stream === '1';
 
     backfillRunning.add(household.id);
     const startedAt = Date.now();
@@ -823,26 +825,54 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       noReviewFlag: flags.noReviewFlag,
       reviewOnly: flags.reviewOnly,
       limit: flags.limit,
+      streaming: wantsStream,
     });
 
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Accel-Buffering', 'no');
+      function emit(obj: unknown) {
+        res.write(`${JSON.stringify(obj)}\n`);
+      }
+      try {
+        const result = await runBackfill(flags, {
+          onProgress: (e) => emit({ kind: 'progress', ...e }),
+          onError: (e) => emit({ kind: 'error', ...e }),
+        });
+        const durationMs = Date.now() - startedAt;
+        logger.info('enrichment_backfill_completed', {
+          householdId: household.id,
+          durationMs,
+          ...result,
+        });
+        emit({ kind: 'summary', ...result, durationMs, dryRun: flags.dryRun });
+        res.end();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error('enrichment_backfill_failed', { householdId: household.id, message });
+        emit({ kind: 'error', message });
+        res.end();
+      } finally {
+        backfillRunning.delete(household.id);
+      }
+      return;
+    }
+
+    // Non-streaming path: run to completion, return single JSON summary.
     try {
-      const result = await runBackfill(flags, {
-        onProgress: (e) => emit({ kind: 'progress', ...e }),
-        onError: (e) => emit({ kind: 'error', ...e }),
-      });
+      const result = await runBackfill(flags);
       const durationMs = Date.now() - startedAt;
       logger.info('enrichment_backfill_completed', {
         householdId: household.id,
         durationMs,
         ...result,
       });
-      emit({ kind: 'summary', ...result, durationMs, dryRun: flags.dryRun });
-      res.end();
+      res.json({ ...result, durationMs, dryRun: flags.dryRun });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('enrichment_backfill_failed', { householdId: household.id, message });
-      emit({ kind: 'error', message });
-      res.end();
+      next(err);
     } finally {
       backfillRunning.delete(household.id);
     }

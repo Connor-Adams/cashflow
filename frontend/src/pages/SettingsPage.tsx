@@ -96,10 +96,13 @@ export function SettingsPage() {
 
     try {
       const base = import.meta.env.VITE_API_BASE ?? ''
-      const res = await fetch(`${base}/api/transactions/enrichment/backfill`, {
+      const res = await fetch(`${base}/api/transactions/enrichment/backfill?stream=1`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/x-ndjson',
+        },
         body: JSON.stringify(body),
       })
       if (!res.ok || !res.body) {
