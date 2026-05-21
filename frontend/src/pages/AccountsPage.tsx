@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account, AccountType } from '../types/api'
 
@@ -44,6 +45,7 @@ export function AccountsPage() {
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
+  const { showToast } = useToast()
   const errorId = 'accounts-error'
   const hasError = Boolean(err)
 
@@ -102,18 +104,55 @@ export function AccountsPage() {
     }
   }
 
-  async function removeAccount(id: number, name: string) {
+  async function removeAccount(account: Account) {
     const ok = await confirm({
       title: 'Delete account?',
-      description: `“${name}” and all its transactions will be removed. This cannot be undone.`,
+      description: `“${account.name}” and all its transactions will be removed. Linked transactions cannot be restored by undo.`,
       confirmLabel: 'Delete',
       destructive: true,
     })
     if (!ok) return
     setErr(null)
+    // Snapshot the account shape BEFORE the delete so the undo handler can
+    // re-create it. Backend hard-cascades transactions on delete, so the
+    // toast copy makes that limit explicit.
+    const snapshot = {
+      name: account.name,
+      owner: account.owner,
+      shortCode: account.shortCode,
+      defaultCurrency: account.defaultCurrency,
+      accountType: account.accountType,
+      visibility: account.visibility,
+    }
     try {
-      await deleteReq(`/api/accounts/${id}`)
+      await deleteReq(`/api/accounts/${account.id}`)
       await load()
+
+      const revert = async () => {
+        try {
+          await postJson<Account>('/api/accounts', snapshot)
+          await load()
+          showToast({
+            title: 'Account restored',
+            description:
+              'Linked transactions could not be recovered — re-import the CSVs to repopulate.',
+            durationMs: 4000,
+          })
+        } catch (revertError) {
+          setErr(
+            revertError instanceof Error
+              ? revertError.message
+              : 'Could not restore account'
+          )
+        }
+      }
+
+      showToast({
+        title: `Deleted account ${account.name}`,
+        variant: 'success',
+        durationMs: 10000,
+        action: { label: 'Undo', onClick: () => void revert() },
+      })
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not delete account')
     }
@@ -452,7 +491,7 @@ export function AccountsPage() {
                           type="button"
                           size="sm"
                           variant="destructive"
-                          onClick={() => void removeAccount(a.id, a.name)}
+                          onClick={() => void removeAccount(a)}
                         >
                           <Trash2 aria-hidden="true" />
                           Delete

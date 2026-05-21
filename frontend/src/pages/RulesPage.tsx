@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
+import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
@@ -30,6 +31,7 @@ export function RulesPage() {
   const [err, setErr] = useState<string | null>(null)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
+  const { showToast } = useToast()
   const categoryLabels = useMemo(
     () => categoryHints.map((hint) => hint.label),
     [categoryHints]
@@ -97,9 +99,43 @@ export function RulesPage() {
     })
     if (!ok) return
     setErr(null)
+    // Snapshot the rule before delete so undo can POST it back. The backend
+    // assigns a fresh id on re-create, but pattern/priority/category/etc all
+    // round-trip cleanly.
+    const snapshot = {
+      merchantPattern: rule.merchantPattern,
+      matchKind: rule.matchKind,
+      priority: rule.priority,
+      category: rule.category,
+      isBusiness: rule.isBusiness,
+      splitType: rule.splitType,
+      pctMe: rule.pctMe,
+      pctPartner: rule.pctPartner,
+    }
     try {
       await deleteReq(`/api/rules/${rule.id}`)
       await load()
+
+      const revert = async () => {
+        try {
+          await postJson('/api/rules', snapshot)
+          await load()
+          showToast({ title: 'Rule restored', durationMs: 4000 })
+        } catch (revertError) {
+          setErr(
+            revertError instanceof Error
+              ? revertError.message
+              : 'Could not restore rule'
+          )
+        }
+      }
+
+      showToast({
+        title: `Deleted rule for ${rule.merchantPattern}`,
+        variant: 'success',
+        durationMs: 10000,
+        action: { label: 'Undo', onClick: () => void revert() },
+      })
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not delete rule')
     }
