@@ -35,6 +35,19 @@ type ReceiptImportItem = {
   inferredCategory: string | null
 }
 
+type AllowlistDefault = { address: string; vendorHint: string; label: string }
+type AllowlistCustom = {
+  id: number
+  emailAddress: string
+  label: string | null
+  vendorHint: string | null
+  enabled: boolean
+}
+type AllowlistResponse = {
+  defaults: AllowlistDefault[]
+  custom: AllowlistCustom[]
+}
+
 type GmailStatus = {
   featureEnabled: boolean
   connected: boolean
@@ -123,6 +136,59 @@ export function SettingsPage() {
   const [gmailScanning, setGmailScanning] = useState(false)
   const [gmailScanResult, setGmailScanResult] = useState<GmailScanResult | null>(null)
   const [gmailError, setGmailError] = useState<string | null>(null)
+  const [allowlist, setAllowlist] = useState<AllowlistResponse | null>(null)
+  const [allowlistDraftEmail, setAllowlistDraftEmail] = useState('')
+  const [allowlistDraftLabel, setAllowlistDraftLabel] = useState('')
+  const [allowlistError, setAllowlistError] = useState<string | null>(null)
+
+  const loadAllowlist = useCallback(async () => {
+    try {
+      setAllowlist(await getJson<AllowlistResponse>('/api/email/allowlist'))
+    } catch (e) {
+      setAllowlistError(e instanceof Error ? e.message : 'Could not load allowlist')
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadAllowlist()
+  }, [loadAllowlist])
+
+  async function addAllowlistRow() {
+    setAllowlistError(null)
+    const emailAddress = allowlistDraftEmail.trim().toLowerCase()
+    if (!emailAddress) return
+    try {
+      await postJson('/api/email/allowlist', {
+        emailAddress,
+        label: allowlistDraftLabel.trim() || undefined,
+      })
+      setAllowlistDraftEmail('')
+      setAllowlistDraftLabel('')
+      await loadAllowlist()
+    } catch (e) {
+      setAllowlistError(e instanceof Error ? e.message : 'Could not add sender')
+    }
+  }
+
+  async function toggleAllowlistRow(id: number, enabled: boolean) {
+    setAllowlistError(null)
+    try {
+      await patchJson(`/api/email/allowlist/${id}`, { enabled })
+      await loadAllowlist()
+    } catch (e) {
+      setAllowlistError(e instanceof Error ? e.message : 'Could not update sender')
+    }
+  }
+
+  async function deleteAllowlistRow(id: number) {
+    setAllowlistError(null)
+    try {
+      await deleteReq(`/api/email/allowlist/${id}`)
+      await loadAllowlist()
+    } catch (e) {
+      setAllowlistError(e instanceof Error ? e.message : 'Could not remove sender')
+    }
+  }
 
   const loadGmailStatus = useCallback(async () => {
     try {
@@ -594,6 +660,87 @@ export function SettingsPage() {
             {gmailError && (
               <span className="error" role="alert">{gmailError}</span>
             )}
+            <details style={{ marginTop: '0.25rem' }}>
+              <summary style={{ cursor: 'pointer' }}>
+                Sender allowlist ({allowlist ? (allowlist.defaults.length + allowlist.custom.filter((c) => c.enabled).length) : '…'} active)
+              </summary>
+              <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
+                <p className="muted" style={{ fontSize: '0.8rem', margin: 0 }}>
+                  Senders we'll pull receipts from on each scan. Defaults are baked in; add custom ones below.
+                </p>
+                {allowlist && (
+                  <details>
+                    <summary className="muted" style={{ cursor: 'pointer', fontSize: '0.8rem' }}>
+                      Built-in defaults ({allowlist.defaults.length})
+                    </summary>
+                    <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1rem', fontSize: '0.8rem' }}>
+                      {allowlist.defaults.map((d) => (
+                        <li key={d.address}><code>{d.address}</code> — {d.label}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {allowlist && allowlist.custom.length > 0 && (
+                  <div>
+                    <strong style={{ fontSize: '0.85rem' }}>Your additions</strong>
+                    <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1rem', fontSize: '0.85rem', listStyle: 'none' }}>
+                      {allowlist.custom.map((row) => (
+                        <li key={row.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.15rem 0' }}>
+                          <input
+                            type="checkbox"
+                            checked={row.enabled}
+                            onChange={() => void toggleAllowlistRow(row.id, !row.enabled)}
+                            aria-label={`Enabled: ${row.emailAddress}`}
+                          />
+                          <code style={{ flex: 1 }}>{row.emailAddress}</code>
+                          {row.label && <span className="muted">{row.label}</span>}
+                          <button
+                            type="button"
+                            onClick={() => void deleteAllowlistRow(row.id)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--destructive, #c00)',
+                              cursor: 'pointer',
+                              fontSize: '0.85rem',
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void addAllowlistRow()
+                  }}
+                  style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}
+                >
+                  <Input
+                    type="email"
+                    placeholder="receipts@somemerchant.com"
+                    value={allowlistDraftEmail}
+                    onChange={(e) => setAllowlistDraftEmail(e.target.value)}
+                    required
+                    style={{ minWidth: '16rem' }}
+                  />
+                  <Input
+                    type="text"
+                    placeholder="Label (optional)"
+                    value={allowlistDraftLabel}
+                    onChange={(e) => setAllowlistDraftLabel(e.target.value)}
+                    style={{ minWidth: '10rem' }}
+                  />
+                  <Button type="submit" size="sm" variant="outline">Add</Button>
+                </form>
+                {allowlistError && (
+                  <span className="error" role="alert" style={{ fontSize: '0.85rem' }}>{allowlistError}</span>
+                )}
+              </div>
+            </details>
           </div>
         )}
       </Card>

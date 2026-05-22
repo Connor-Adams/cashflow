@@ -21,6 +21,7 @@ import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
+import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -44,6 +45,16 @@ initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
 initUserEmailIntegration(sequelize);
+initReceiptSenderAllowlist(sequelize);
+
+Household.hasMany(ReceiptSenderAllowlist, {
+  foreignKey: 'household_id',
+  as: 'receiptSenderAllowlist',
+});
+ReceiptSenderAllowlist.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
 
 User.hasMany(UserEmailIntegration, {
   foreignKey: 'user_id',
@@ -164,4 +175,5 @@ export {
   HoldingSnapshot,
   SecurityPrice,
   UserEmailIntegration,
+  ReceiptSenderAllowlist,
 };

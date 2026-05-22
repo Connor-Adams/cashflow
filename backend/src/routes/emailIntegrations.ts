@@ -9,8 +9,9 @@
  */
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
-import { UserEmailIntegration } from '../models';
+import { ReceiptSenderAllowlist, UserEmailIntegration } from '../models';
 import {
+  DEFAULT_RECEIPT_SENDERS,
   completeConnection,
   disconnect,
   initiateConnection,
@@ -140,6 +141,128 @@ router.post('/scan/google', async (req, res, next) => {
       messageCount: result.messages.length,
     });
     res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET  /api/email/allowlist        — defaults + this household's custom senders
+ * POST /api/email/allowlist        — add a sender
+ * PATCH /api/email/allowlist/:id   — toggle enabled / edit label
+ * DELETE /api/email/allowlist/:id  — remove a custom sender (defaults aren't deletable)
+ */
+router.get('/allowlist', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const custom = await ReceiptSenderAllowlist.findAll({
+      where: { householdId: household.id },
+      order: [['email_address', 'ASC']],
+    });
+    res.json({
+      defaults: DEFAULT_RECEIPT_SENDERS,
+      custom: custom.map((r) => ({
+        id: r.id,
+        emailAddress: r.emailAddress,
+        label: r.label,
+        vendorHint: r.vendorHint,
+        enabled: r.enabled,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/allowlist', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const emailAddress = String(body.emailAddress ?? '').trim().toLowerCase();
+    if (!emailAddress || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
+      res.status(400).json({ error: 'emailAddress must be a valid email' });
+      return;
+    }
+    const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 128) : null;
+    const vendorHint = typeof body.vendorHint === 'string' && body.vendorHint.trim() ? body.vendorHint.trim().slice(0, 32) : null;
+    const [row, created] = await ReceiptSenderAllowlist.findOrCreate({
+      where: { householdId: household.id, emailAddress },
+      defaults: {
+        householdId: household.id,
+        emailAddress,
+        label,
+        vendorHint,
+        enabled: true,
+      },
+    });
+    if (!created) {
+      // Re-enable + update label if the user is re-adding an existing row.
+      row.set({ enabled: true });
+      if (label) row.set({ label });
+      if (vendorHint) row.set({ vendorHint });
+      await row.save();
+    }
+    res.status(created ? 201 : 200).json({
+      id: row.id,
+      emailAddress: row.emailAddress,
+      label: row.label,
+      vendorHint: row.vendorHint,
+      enabled: row.enabled,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.patch('/allowlist/:id', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const row = await ReceiptSenderAllowlist.findOne({
+      where: { id, householdId: household.id },
+    });
+    if (!row) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof body.enabled === 'boolean') row.set({ enabled: body.enabled });
+    if (typeof body.label === 'string') row.set({ label: body.label.trim() || null });
+    if (typeof body.vendorHint === 'string') row.set({ vendorHint: body.vendorHint.trim() || null });
+    await row.save();
+    res.json({
+      id: row.id,
+      emailAddress: row.emailAddress,
+      label: row.label,
+      vendorHint: row.vendorHint,
+      enabled: row.enabled,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.delete('/allowlist/:id', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const row = await ReceiptSenderAllowlist.findOne({
+      where: { id, householdId: household.id },
+    });
+    if (!row) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    await row.destroy();
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }
