@@ -64,11 +64,17 @@ type GmailScanResult = {
   createdOrders: number
   duplicateOrders: number
   failedExtractions: number
+  filteredBySubject: number
+  skippedAlreadySeen: number
+  byParser: Record<string, number>
+  aiExtractions: number
   messages: Array<{
     messageId: string
     from: string | null
     subject: string | null
     vendor: string
+    parser: string | null
+    status: string
     itemsCount: number
     orderCreated: boolean
     error: string | null
@@ -632,7 +638,15 @@ export function SettingsPage() {
             {gmailScanResult && (
               <div style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md, 6px)', fontSize: '0.85rem' }}>
                 <div>
-                  Scanned {gmailScanResult.scannedMessages} messages · created {gmailScanResult.createdOrders} orders, duplicates {gmailScanResult.duplicateOrders}, failed extractions {gmailScanResult.failedExtractions}
+                  <strong>Scanned {gmailScanResult.scannedMessages}</strong> · created {gmailScanResult.createdOrders}, duplicates {gmailScanResult.duplicateOrders}, already seen {gmailScanResult.skippedAlreadySeen}, filtered by subject {gmailScanResult.filteredBySubject}, failed {gmailScanResult.failedExtractions}
+                </div>
+                <div className="muted">
+                  Parsers:{' '}
+                  {Object.entries(gmailScanResult.byParser)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([k, v]) => `${k}: ${v}`)
+                    .join(' · ') || 'none'}{' '}
+                  · AI calls: {gmailScanResult.aiExtractions}
                 </div>
                 {gmailScanResult.messages.length > 0 && (
                   <details style={{ marginTop: '0.35rem' }}>
@@ -641,9 +655,18 @@ export function SettingsPage() {
                       {gmailScanResult.messages.slice(0, 30).map((m) => (
                         <li key={m.messageId}>
                           {m.from ?? '(no from)'} — {m.subject ?? '(no subject)'} →{' '}
-                          {m.error
-                            ? <span className="error">{m.error}</span>
-                            : `${m.vendor} · ${m.itemsCount} items${m.orderCreated ? ' · new order' : ' · duplicate'}`}
+                          {m.status === 'skipped_already_seen' ? (
+                            <span className="muted">already processed</span>
+                          ) : m.status === 'filtered_subject' ? (
+                            <span className="muted">filtered: {m.error}</span>
+                          ) : m.error ? (
+                            <span className="error">{m.error}</span>
+                          ) : (
+                            <>
+                              {m.vendor} · {m.itemsCount} items · parser <code>{m.parser ?? '—'}</code>
+                              {m.orderCreated ? ' · new order' : ' · duplicate'}
+                            </>
+                          )}
                         </li>
                       ))}
                       {gmailScanResult.messages.length > 30 && (
