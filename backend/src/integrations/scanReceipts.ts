@@ -15,9 +15,13 @@ import {
   sequelize,
   ExternalOrder,
   ExternalOrderItem,
+  ProcessedEmailMessage,
   ReceiptSenderAllowlist,
   UserEmailIntegration,
 } from '../models';
+import { classifySubject } from './subjectFilter';
+import { tryDeterministicParse } from './parsers';
+import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { decryptSecret, encryptSecret } from '../util/symmetricEncryption';
 import {
   buildAuthUrl,
@@ -228,6 +232,10 @@ export interface ScanResultMessage {
   from: string | null;
   subject: string | null;
   internalDate: string | null;
+  /** 'extracted' | 'duplicate' | 'skipped_already_seen' | 'filtered_subject' | 'no_items' | 'extraction_failed' */
+  status: string;
+  /** 'apple' | 'google' | 'amazon' | 'ai' | null */
+  parser: string | null;
   orderId: number | null;
   orderCreated: boolean;
   itemsCount: number;
@@ -240,7 +248,11 @@ export interface ScanResult {
   scannedMessages: number;
   createdOrders: number;
   duplicateOrders: number;
+  filteredBySubject: number;
+  skippedAlreadySeen: number;
   failedExtractions: number;
+  byParser: Record<string, number>;
+  aiExtractions: number;
   messages: ScanResultMessage[];
   query: string;
   sinceDate: string | null;
@@ -282,10 +294,61 @@ export async function scanInbox(opts: {
     maxResults: opts.maxMessages ?? 50,
   });
 
+  // Pre-load the set of already-seen Gmail message IDs for this household so
+  // we can skip them before fetching/extracting.
+  const seen = new Set<string>();
+  if (opts.householdId != null && summaries.length > 0) {
+    const seenRows = await ProcessedEmailMessage.findAll({
+      where: {
+        householdId: opts.householdId,
+        provider: 'google',
+        messageId: summaries.map((s) => s.id),
+      },
+      attributes: ['messageId'],
+    });
+    for (const r of seenRows) seen.add(r.messageId);
+  }
+
   const results: ScanResultMessage[] = [];
   let created = 0;
   let dupes = 0;
   let failed = 0;
+  let filteredBySubject = 0;
+  let skippedAlreadySeen = 0;
+  let aiExtractions = 0;
+  const byParser: Record<string, number> = {};
+
+  async function recordProcessed(opts2: {
+    messageId: string;
+    status: string;
+    parser?: string | null;
+    externalOrderId?: number | null;
+    errorMessage?: string | null;
+    subject: string | null;
+    fromAddr: string | null;
+  }): Promise<void> {
+    if (opts.householdId == null) return;
+    try {
+      await ProcessedEmailMessage.upsert({
+        householdId: opts.householdId,
+        provider: 'google',
+        messageId: opts2.messageId,
+        status: opts2.status,
+        parser: opts2.parser ?? null,
+        externalOrderId: opts2.externalOrderId ?? null,
+        errorMessage: opts2.errorMessage ?? null,
+        subject: opts2.subject?.slice(0, 512) ?? null,
+        fromAddr: opts2.fromAddr?.slice(0, 256) ?? null,
+        scannedAt: new Date(),
+      } as never);
+    } catch (err) {
+      // Don't let the audit-log fail bring down a scan.
+      logger.warn('processed_email_log_failed', {
+        messageId: opts2.messageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   for (const summary of summaries) {
     const result: ScanResultMessage = {
@@ -293,6 +356,8 @@ export async function scanInbox(opts: {
       from: null,
       subject: null,
       internalDate: null,
+      status: 'unknown',
+      parser: null,
       orderId: null,
       orderCreated: false,
       itemsCount: 0,
@@ -300,27 +365,89 @@ export async function scanInbox(opts: {
       total: null,
       error: null,
     };
+
+    if (seen.has(summary.id)) {
+      result.status = 'skipped_already_seen';
+      skippedAlreadySeen++;
+      results.push(result);
+      continue;
+    }
+
     try {
       const full = await fetchMessage({ accessToken, messageId: summary.id });
       result.from = getHeader(full.payload, 'From');
       result.subject = getHeader(full.payload, 'Subject');
       result.internalDate = full.internalDate;
 
-      const body = extractMessageBody(full.payload);
-      if (!body.trim()) {
-        result.error = 'empty body';
-        failed++;
+      const subjectVerdict = classifySubject(result.subject);
+      if (subjectVerdict.decision === 'block') {
+        result.status = 'filtered_subject';
+        result.error = subjectVerdict.reason;
+        filteredBySubject++;
+        await recordProcessed({
+          messageId: summary.id,
+          status: 'filtered_subject',
+          parser: null,
+          subject: result.subject,
+          fromAddr: result.from,
+        });
         results.push(result);
         continue;
       }
-      const extracted = await extractReceiptFromText(body);
+
+      const body = extractMessageBody(full.payload);
+      if (!body.trim()) {
+        result.status = 'extraction_failed';
+        result.error = 'empty body';
+        failed++;
+        await recordProcessed({
+          messageId: summary.id,
+          status: 'extraction_failed',
+          parser: null,
+          errorMessage: 'empty body',
+          subject: result.subject,
+          fromAddr: result.from,
+        });
+        results.push(result);
+        continue;
+      }
+
+      // 1) Try the cheap deterministic vendor parser first.
+      let extracted: ExtractedReceiptOrder | null = null;
+      let parser: string = 'ai';
+      const detResult = tryDeterministicParse({
+        fromAddress: result.from,
+        subject: result.subject,
+        body,
+      });
+      if (detResult.ok) {
+        extracted = detResult.order;
+        parser = detResult.parser;
+      } else {
+        // 2) Fall back to AI extraction.
+        extracted = await extractReceiptFromText(body);
+        parser = 'ai';
+        aiExtractions++;
+      }
+
+      result.parser = parser;
+      byParser[parser] = (byParser[parser] ?? 0) + 1;
       result.vendor = extracted.vendor;
       result.total = extracted.total;
       result.itemsCount = extracted.items.length;
 
       if (extracted.total == null && extracted.items.length === 0) {
+        result.status = 'no_items';
         result.error = 'no items extracted';
         failed++;
+        await recordProcessed({
+          messageId: summary.id,
+          status: 'no_items',
+          parser,
+          errorMessage: 'no items extracted',
+          subject: result.subject,
+          fromAddr: result.from,
+        });
         results.push(result);
         continue;
       }
@@ -345,27 +472,27 @@ export async function scanInbox(opts: {
           defaults: {
             householdId: opts.householdId,
             createdByUserId: opts.userId,
-            vendor: extracted.vendor,
-            vendorOrderId: extracted.orderId,
+            vendor: extracted!.vendor,
+            vendorOrderId: extracted!.orderId,
             dedupeKey,
-            orderDate: extracted.orderDate,
+            orderDate: extracted!.orderDate,
             shipmentDate: null,
             subtotal: null,
             tax: null,
             shipping: null,
-            total: extracted.total != null ? String(extracted.total) : null,
-            currency: extracted.currency ?? 'USD',
-            paymentLast4: extracted.paymentLast4,
-            source: 'gmail-scan',
-            rawPayload: { extracted, gmailMessageId: summary.id } as unknown,
+            total: extracted!.total != null ? String(extracted!.total) : null,
+            currency: extracted!.currency ?? 'USD',
+            paymentLast4: extracted!.paymentLast4,
+            source: `gmail-scan:${parser}`,
+            rawPayload: { extracted, gmailMessageId: summary.id, parser } as unknown,
           } as never,
           transaction: t,
         });
         result.orderId = order.id;
         result.orderCreated = createdOrder;
-        if (createdOrder && extracted.items.length > 0) {
+        if (createdOrder && extracted!.items.length > 0) {
           await ExternalOrderItem.bulkCreate(
-            extracted.items.map((it) => ({
+            extracted!.items.map((it) => ({
               externalOrderId: order.id,
               title: it.title,
               quantity: it.quantity,
@@ -381,11 +508,29 @@ export async function scanInbox(opts: {
         }
       });
 
+      result.status = result.orderCreated ? 'extracted' : 'duplicate';
       if (result.orderCreated) created++;
       else dupes++;
+      await recordProcessed({
+        messageId: summary.id,
+        status: result.status,
+        parser,
+        externalOrderId: result.orderId,
+        subject: result.subject,
+        fromAddr: result.from,
+      });
     } catch (err) {
+      result.status = 'extraction_failed';
       result.error = err instanceof Error ? err.message : String(err);
       failed++;
+      await recordProcessed({
+        messageId: summary.id,
+        status: 'extraction_failed',
+        parser: result.parser,
+        errorMessage: result.error,
+        subject: result.subject,
+        fromAddr: result.from,
+      });
     }
     results.push(result);
   }
@@ -397,7 +542,11 @@ export async function scanInbox(opts: {
     scannedMessages: summaries.length,
     createdOrders: created,
     duplicateOrders: dupes,
+    filteredBySubject,
+    skippedAlreadySeen,
     failedExtractions: failed,
+    byParser,
+    aiExtractions,
     messages: results,
     query,
     sinceDate: sinceDate ? sinceDate.toISOString() : null,
