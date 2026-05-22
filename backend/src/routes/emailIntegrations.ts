@@ -118,29 +118,83 @@ router.post('/scan/google', async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
     const body = (req.body ?? {}) as Record<string, unknown>;
+    // Bumped cap from 200 to 5000 now that we paginate Gmail listMessageIds.
     const maxMessages =
       typeof body.maxMessages === 'number' && body.maxMessages > 0
-        ? Math.min(200, Math.floor(body.maxMessages))
-        : 50;
+        ? Math.min(5000, Math.floor(body.maxMessages))
+        : 200;
     const sinceDateOverride = (() => {
       if (typeof body.sinceDays === 'number' && body.sinceDays > 0) {
-        return new Date(Date.now() - Math.min(365, body.sinceDays) * 86_400_000);
+        return new Date(Date.now() - Math.min(3650, body.sinceDays) * 86_400_000);
       }
       return undefined;
     })();
-    const result = await scanInbox({
-      userId: user.id,
-      householdId: household.id,
-      maxMessages,
-      sinceDateOverride,
-    });
-    logger.info('gmail_scan_completed', {
-      userId: user.id,
-      ...result,
-      messages: undefined, // don't log every message body in the structured log
-      messageCount: result.messages.length,
-    });
-    res.json(result);
+
+    const accept = String(req.headers['accept'] ?? '').toLowerCase();
+    const wantsStream =
+      accept.includes('application/x-ndjson') ||
+      accept.includes('application/ndjson') ||
+      req.query.stream === '1';
+
+    if (!wantsStream) {
+      const result = await scanInbox({
+        userId: user.id,
+        householdId: household.id,
+        maxMessages,
+        sinceDateOverride,
+      });
+      logger.info('gmail_scan_completed', {
+        userId: user.id,
+        ...result,
+        messages: undefined,
+        messageCount: result.messages.length,
+      });
+      res.json(result);
+      return;
+    }
+
+    // NDJSON streaming path: emit one event per Gmail-list page, per
+    // processed message, and a final summary event.
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    function emit(obj: unknown) {
+      res.write(`${JSON.stringify(obj)}\n`);
+    }
+    emit({ kind: 'started', maxMessages, sinceDays: body.sinceDays ?? null });
+
+    try {
+      const result = await scanInbox(
+        {
+          userId: user.id,
+          householdId: household.id,
+          maxMessages,
+          sinceDateOverride,
+        },
+        {
+          onPhase: (e) => emit({ kind: 'phase', ...e }),
+          onMessage: (m) => emit({ kind: 'message', ...m }),
+        },
+      );
+      logger.info('gmail_scan_completed', {
+        userId: user.id,
+        ...result,
+        messages: undefined,
+        messageCount: result.messages.length,
+      });
+      emit({
+        kind: 'summary',
+        ...result,
+        messages: undefined,
+        messageCount: result.messages.length,
+      });
+      res.end();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('gmail_scan_failed', { userId: user.id, message });
+      emit({ kind: 'error', message });
+      res.end();
+    }
   } catch (e) {
     next(e);
   }

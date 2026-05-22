@@ -258,13 +258,28 @@ export interface ScanResult {
   sinceDate: string | null;
 }
 
-export async function scanInbox(opts: {
-  userId: number;
-  householdId: number | null;
-  maxMessages?: number;
-  /** Override sinceDate manually (e.g. one-time backfill of more history). */
-  sinceDateOverride?: Date | null;
-}): Promise<ScanResult> {
+export type ScanPhaseEvent =
+  | { phase: 'listing'; fetched: number; hasMore: boolean }
+  | { phase: 'processing-start'; total: number }
+  | { phase: 'processed'; index: number; total: number };
+
+export interface ScanCallbacks {
+  /** Coarse phase markers — "listing", "processing started", per-message done. */
+  onPhase?: (e: ScanPhaseEvent) => void;
+  /** Per-message result the moment it's processed. */
+  onMessage?: (msg: ScanResultMessage) => void;
+}
+
+export async function scanInbox(
+  opts: {
+    userId: number;
+    householdId: number | null;
+    maxMessages?: number;
+    /** Override sinceDate manually (e.g. one-time backfill of more history). */
+    sinceDateOverride?: Date | null;
+  },
+  callbacks: ScanCallbacks = {},
+): Promise<ScanResult> {
   const integ = await UserEmailIntegration.findOne({
     where: { userId: opts.userId, provider: 'google' },
   });
@@ -292,7 +307,10 @@ export async function scanInbox(opts: {
     accessToken,
     query,
     maxResults: opts.maxMessages ?? 50,
+    onPage: ({ fetched, hasMore }) =>
+      callbacks.onPhase?.({ phase: 'listing', fetched, hasMore }),
   });
+  callbacks.onPhase?.({ phase: 'processing-start', total: summaries.length });
 
   // Pre-load the set of already-seen Gmail message IDs for this household so
   // we can skip them before fetching/extracting.
@@ -350,7 +368,11 @@ export async function scanInbox(opts: {
     }
   }
 
-  for (const summary of summaries) {
+  /** Process a single Gmail message ID and return its result. All counter
+   *  bookkeeping (skipped/filtered/created/...) and DB writes happen here;
+   *  the outer loop only handles streaming callbacks.
+   */
+  async function processOne(summary: { id: string }): Promise<ScanResultMessage> {
     const result: ScanResultMessage = {
       messageId: summary.id,
       from: null,
@@ -369,8 +391,7 @@ export async function scanInbox(opts: {
     if (seen.has(summary.id)) {
       result.status = 'skipped_already_seen';
       skippedAlreadySeen++;
-      results.push(result);
-      continue;
+      return result;
     }
 
     try {
@@ -391,8 +412,7 @@ export async function scanInbox(opts: {
           subject: result.subject,
           fromAddr: result.from,
         });
-        results.push(result);
-        continue;
+        return result;
       }
 
       const body = extractMessageBody(full.payload);
@@ -408,8 +428,7 @@ export async function scanInbox(opts: {
           subject: result.subject,
           fromAddr: result.from,
         });
-        results.push(result);
-        continue;
+        return result;
       }
 
       // 1) Try the cheap deterministic vendor parser first.
@@ -448,8 +467,7 @@ export async function scanInbox(opts: {
           subject: result.subject,
           fromAddr: result.from,
         });
-        results.push(result);
-        continue;
+        return result;
       }
 
       const dedupeKey = [
@@ -532,7 +550,14 @@ export async function scanInbox(opts: {
         fromAddr: result.from,
       });
     }
+    return result;
+  }
+
+  for (let i = 0; i < summaries.length; i++) {
+    const result = await processOne(summaries[i]);
     results.push(result);
+    callbacks.onMessage?.(result);
+    callbacks.onPhase?.({ phase: 'processed', index: i + 1, total: summaries.length });
   }
 
   integ.set({ lastScanAt: new Date() });
