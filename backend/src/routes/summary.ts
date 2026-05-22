@@ -376,31 +376,22 @@ router.get('/dashboard', async (req, res, next) => {
 export type PartnerNetDirection = 'partner_owes_me' | 'i_owe_partner' | 'even';
 
 /**
- * Compute the net partner balance and a direction label for a single
- * (currency, ownership) row. Net is defined as `sumPartner - sumMy`:
- * positive means the partner owes me, negative means I owe the partner.
- * The direction tolerates sub-cent rounding noise by rounding to 2 decimals
- * before comparing to zero (|net| < 0.005 → 'even').
+ * Per-row "what partner owes me" (signed): positive → partner owes me, negative → I owe partner.
+ *
+ * Single-payer model: the uploader (me) always pays the transactions, so every transaction's
+ * partner_share is what partner owes me back. sumMy is my own portion (not a debt to anyone),
+ * so it does NOT enter the net. The previous formula `sumPartner − sumMy` double-counted
+ * personal spending as debt and reported wildly inflated balances.
+ *
+ * If multi-payer is ever added (partner uploads from their own account, true joint pool),
+ * this is the single place to branch on a real `paid_by` field. `ownershipType` today is
+ * stamped from `autoSplitType` at import, so it is not a reliable payer signal.
  */
-export function computePartnerNet(
-  sumMy: number | null,
-  sumPartner: number | null
-): { net: number; direction: PartnerNetDirection } {
-  const my = sumMy ?? 0;
-  const partner = sumPartner ?? 0;
-  const net = partner - my;
-  const rounded = Math.round(net * 100) / 100;
-  let direction: PartnerNetDirection;
-  if (rounded > 0) direction = 'partner_owes_me';
-  else if (rounded < 0) direction = 'i_owe_partner';
-  else direction = 'even';
-  return { net, direction };
+export function rawNetForRow(r: RawPartnerRow): number {
+  const partner = r.sumPartner ?? 0;
+  return partner === 0 ? 0 : partner;
 }
 
-/**
- * Direction is derived from a value already adjusted for sub-cent noise:
- * |value| < 0.005 → 'even'. Same threshold as `computePartnerNet`.
- */
 function directionFromNet(net: number): PartnerNetDirection {
   const rounded = Math.round(net * 100) / 100;
   if (rounded > 0) return 'partner_owes_me';
@@ -465,7 +456,7 @@ export function applySettlements(
     byKey.set(`${s.contactId}\0${s.currency}`, s);
   }
   return rows.map((r) => {
-    const rawNet = (r.sumPartner ?? 0) - (r.sumMy ?? 0);
+    const rawNet = rawNetForRow(r);
     let settledAmount = 0;
     let settlementCount = 0;
     if (r.ownershipContactId != null) {
