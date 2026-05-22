@@ -20,6 +20,7 @@ import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
+import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -42,6 +43,13 @@ initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
+initUserEmailIntegration(sequelize);
+
+User.hasMany(UserEmailIntegration, {
+  foreignKey: 'user_id',
+  as: 'emailIntegrations',
+});
+UserEmailIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -155,4 +163,5 @@ export {
   InvestmentActivity,
   HoldingSnapshot,
   SecurityPrice,
+  UserEmailIntegration,
 };

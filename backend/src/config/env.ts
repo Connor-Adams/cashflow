@@ -152,3 +152,12 @@ export const enrichmentTransferWindowDays = parseIntEnv(
   'ENRICHMENT_TRANSFER_WINDOW_DAYS',
   2,
 );
+
+export const googleOauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
+export const googleOauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;
+export const googleOauthRedirectUri =
+  process.env.GOOGLE_OAUTH_REDIRECT_URI?.trim() ||
+  'http://localhost:3001/api/email/callback/google';
+export const emailIntegrationEnabled = Boolean(
+  googleOauthClientId && googleOauthClientSecret && process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY,
+);
