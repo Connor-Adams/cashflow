@@ -15,8 +15,15 @@ import { currentAuth } from '../auth/middleware';
 import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { logger } from '../observability/logger';
+import { runBackfill } from '../import/runEnrichmentBackfill';
 
 const router = Router();
+
+/**
+ * In-memory guard so a household can only run one backfill at a time.
+ * A second concurrent request returns 409.
+ */
+const backfillRunning = new Set<number>();
 
 /**
  * Maximum number of transactions the filter-mode bulk patch endpoint will
@@ -566,6 +573,68 @@ router.patch('/:id', async (req, res, next) => {
     });
     logTransactionEvent('patch_completed', { id });
     res.json(serializeTransaction(txn));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/enrichment/backfill
+ *
+ * Re-runs the enrichment pipeline against the caller's household's existing
+ * transactions. Body is optional; defaults backfill everything in-place,
+ * clearing review_flag where the pipeline is now confident.
+ *
+ * Body:
+ *   { dryRun?: boolean, noReviewFlag?: boolean, reviewOnly?: boolean, limit?: number }
+ *
+ * Returns:
+ *   { processed, updated, reviewFlagCleared, signalsWritten, skipped, durationMs }
+ */
+router.post('/enrichment/backfill', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    if (backfillRunning.has(household.id)) {
+      res.status(409).json({ error: 'Backfill already running for this household' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const flags = {
+      dryRun: Boolean(body.dryRun),
+      noReviewFlag: Boolean(body.noReviewFlag),
+      reviewOnly: Boolean(body.reviewOnly),
+      verbose: false,
+      accountId: null,
+      householdId: household.id,
+      limit:
+        typeof body.limit === 'number' && Number.isFinite(body.limit) && body.limit > 0
+          ? Math.floor(body.limit)
+          : null,
+      batchSize: 100,
+    };
+
+    backfillRunning.add(household.id);
+    const startedAt = Date.now();
+    logger.info('enrichment_backfill_started', {
+      householdId: household.id,
+      dryRun: flags.dryRun,
+      noReviewFlag: flags.noReviewFlag,
+      reviewOnly: flags.reviewOnly,
+      limit: flags.limit,
+    });
+    try {
+      const result = await runBackfill(flags);
+      const durationMs = Date.now() - startedAt;
+      logger.info('enrichment_backfill_completed', {
+        householdId: household.id,
+        durationMs,
+        ...result,
+      });
+      res.json({ ...result, durationMs, dryRun: flags.dryRun });
+    } finally {
+      backfillRunning.delete(household.id);
+    }
   } catch (e) {
     next(e);
   }
