@@ -59,6 +59,27 @@ type GmailStatus = {
   scopes?: string | null
 }
 
+type GmailScanFeedMessage = {
+  messageId: string
+  from: string | null
+  subject: string | null
+  vendor: string
+  parser: string | null
+  status: string
+  itemsCount: number
+  orderCreated: boolean
+  error: string | null
+}
+
+type GmailStreamEvent =
+  | { kind: 'started'; maxMessages: number; sinceDays: number | null }
+  | { kind: 'phase'; phase: 'listing'; fetched: number; hasMore: boolean }
+  | { kind: 'phase'; phase: 'processing-start'; total: number }
+  | { kind: 'phase'; phase: 'processed'; index: number; total: number }
+  | ({ kind: 'message' } & GmailScanFeedMessage)
+  | ({ kind: 'summary'; messageCount: number } & Omit<GmailScanResult, 'messages'>)
+  | { kind: 'error'; message: string }
+
 type GmailScanResult = {
   scannedMessages: number
   createdOrders: number
@@ -68,17 +89,8 @@ type GmailScanResult = {
   skippedAlreadySeen: number
   byParser: Record<string, number>
   aiExtractions: number
-  messages: Array<{
-    messageId: string
-    from: string | null
-    subject: string | null
-    vendor: string
-    parser: string | null
-    status: string
-    itemsCount: number
-    orderCreated: boolean
-    error: string | null
-  }>
+  messages?: Array<GmailScanFeedMessage>
+  messageCount?: number
   query: string
   sinceDate: string | null
 }
@@ -142,6 +154,14 @@ export function SettingsPage() {
   const [gmailScanning, setGmailScanning] = useState(false)
   const [gmailScanResult, setGmailScanResult] = useState<GmailScanResult | null>(null)
   const [gmailError, setGmailError] = useState<string | null>(null)
+  const [gmailScanFeed, setGmailScanFeed] = useState<GmailScanFeedMessage[]>([])
+  const [gmailScanLive, setGmailScanLive] = useState<{
+    listed: number
+    processed: number
+    total: number
+    hasMore: boolean
+    listing: boolean
+  } | null>(null)
   const [allowlist, setAllowlist] = useState<AllowlistResponse | null>(null)
   const [allowlistDraftEmail, setAllowlistDraftEmail] = useState('')
   const [allowlistDraftLabel, setAllowlistDraftLabel] = useState('')
@@ -256,16 +276,93 @@ export function SettingsPage() {
     setGmailScanning(true)
     setGmailError(null)
     setGmailScanResult(null)
+    setGmailScanFeed([])
+    setGmailScanLive({ listed: 0, processed: 0, total: 0, hasMore: false, listing: true })
+    const body: Record<string, unknown> = { maxMessages }
+    if (sinceDays != null) body.sinceDays = sinceDays
     try {
-      const body: Record<string, unknown> = { maxMessages }
-      if (sinceDays != null) body.sinceDays = sinceDays
-      const result = await postJson<GmailScanResult>('/api/email/scan/google', body)
-      setGmailScanResult(result)
+      const base = import.meta.env.VITE_API_BASE ?? ''
+      const res = await fetch(`${base}/api/email/scan/google?stream=1`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/x-ndjson',
+        },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok || !res.body) {
+        const t = await res.text().catch(() => res.statusText)
+        throw new Error(t || `HTTP ${res.status}`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let liveFeed: GmailScanFeedMessage[] = []
+      let liveListed = 0
+      let liveProcessed = 0
+      let liveTotal = 0
+      let liveHasMore = false
+      let liveListing = true
+      let lastFlush = Date.now()
+      const flush = () => {
+        setGmailScanFeed(liveFeed.slice())
+        setGmailScanLive({
+          listed: liveListed,
+          processed: liveProcessed,
+          total: liveTotal,
+          hasMore: liveHasMore,
+          listing: liveListing,
+        })
+        lastFlush = Date.now()
+      }
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let nl = buffer.indexOf('\n')
+        while (nl !== -1) {
+          const line = buffer.slice(0, nl).trim()
+          buffer = buffer.slice(nl + 1)
+          nl = buffer.indexOf('\n')
+          if (!line) continue
+          let event: GmailStreamEvent
+          try {
+            event = JSON.parse(line) as GmailStreamEvent
+          } catch {
+            continue
+          }
+          if (event.kind === 'phase') {
+            if (event.phase === 'listing') {
+              liveListed = event.fetched
+              liveHasMore = event.hasMore
+              liveListing = true
+            } else if (event.phase === 'processing-start') {
+              liveListing = false
+              liveTotal = event.total
+            } else if (event.phase === 'processed') {
+              liveProcessed = event.index
+              liveTotal = event.total
+            }
+          } else if (event.kind === 'message') {
+            liveFeed = [event, ...liveFeed].slice(0, 200)
+          } else if (event.kind === 'summary') {
+            const rest = { ...event } as Partial<{ kind: string }> & GmailScanResult
+            delete rest.kind
+            setGmailScanResult(rest as GmailScanResult)
+          } else if (event.kind === 'error') {
+            setGmailError(event.message)
+          }
+          if (Date.now() - lastFlush > 100) flush()
+        }
+      }
+      flush()
       await loadGmailStatus()
     } catch (e) {
       setGmailError(e instanceof Error ? e.message : 'Scan failed')
     } finally {
       setGmailScanning(false)
+      setGmailScanLive((prev) => (prev ? { ...prev, listing: false } : prev))
     }
   }
 
@@ -415,7 +512,6 @@ export function SettingsPage() {
         setBackfillLive({ processed, cleared, skipped })
         lastFlush = Date.now()
       }
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
@@ -613,18 +709,27 @@ export function SettingsPage() {
               )}
             </div>
             <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
-              <Button type="button" disabled={gmailScanning} onClick={() => void runGmailScan(50)}>
+              <Button type="button" disabled={gmailScanning} onClick={() => void runGmailScan(500)}>
                 <Sparkles aria-hidden="true" />
-                {gmailScanning ? 'Scanning…' : 'Scan inbox now'}
+                {gmailScanning ? 'Scanning…' : 'Scan inbox (up to 500)'}
               </Button>
               <Button
                 type="button"
                 variant="secondary"
                 disabled={gmailScanning}
-                onClick={() => void runGmailScan(50, 90)}
-                title="Scan the last 90 days (first-time backfill)"
+                onClick={() => void runGmailScan(2000, 90)}
+                title="Scan the last 90 days (first-time backfill, up to 2000 msgs)"
               >
-                Initial 90-day backfill
+                90-day backfill (2000 msgs)
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={gmailScanning}
+                onClick={() => void runGmailScan(5000, 365)}
+                title="Scan the last year (up to 5000 messages — can take a while)"
+              >
+                1-year backfill (5000 msgs)
               </Button>
               <Button
                 type="button"
@@ -635,6 +740,56 @@ export function SettingsPage() {
                 Disconnect
               </Button>
             </div>
+            {gmailScanLive && (gmailScanning || gmailScanFeed.length > 0) && !gmailScanResult && (
+              <div style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md, 6px)', fontSize: '0.85rem' }}>
+                <div>
+                  {gmailScanLive.listing ? (
+                    <>Listing matching messages… <strong>{gmailScanLive.listed}</strong> found{gmailScanLive.hasMore ? ' (more pages)' : ''}</>
+                  ) : (
+                    <>Processing <strong>{gmailScanLive.processed} / {gmailScanLive.total}</strong> messages…</>
+                  )}
+                </div>
+                {gmailScanFeed.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: '0.4rem',
+                      maxHeight: '14rem',
+                      overflowY: 'auto',
+                      fontSize: '0.78rem',
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      lineHeight: 1.3,
+                    }}
+                    role="log"
+                    aria-live="polite"
+                  >
+                    {gmailScanFeed.map((m) => (
+                      <div key={m.messageId} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline' }}>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.subject ?? '(no subject)'}
+                        </span>
+                        <span className="muted" style={{ minWidth: '7rem', textAlign: 'right' }}>
+                          {m.status === 'extracted' ? (
+                            <span style={{ color: 'var(--success, green)' }}>
+                              {m.parser}/{m.itemsCount}
+                            </span>
+                          ) : m.status === 'duplicate' ? (
+                            'duplicate'
+                          ) : m.status === 'skipped_already_seen' ? (
+                            'already-seen'
+                          ) : m.status === 'filtered_subject' ? (
+                            'filtered'
+                          ) : m.status === 'no_items' ? (
+                            'no items'
+                          ) : (
+                            <span className="error">{m.status}</span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {gmailScanResult && (
               <div style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md, 6px)', fontSize: '0.85rem' }}>
                 <div>
@@ -648,33 +803,36 @@ export function SettingsPage() {
                     .join(' · ') || 'none'}{' '}
                   · AI calls: {gmailScanResult.aiExtractions}
                 </div>
-                {gmailScanResult.messages.length > 0 && (
-                  <details style={{ marginTop: '0.35rem' }}>
-                    <summary className="muted" style={{ cursor: 'pointer' }}>Per-message detail</summary>
-                    <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.1rem' }}>
-                      {gmailScanResult.messages.slice(0, 30).map((m) => (
-                        <li key={m.messageId}>
-                          {m.from ?? '(no from)'} — {m.subject ?? '(no subject)'} →{' '}
-                          {m.status === 'skipped_already_seen' ? (
-                            <span className="muted">already processed</span>
-                          ) : m.status === 'filtered_subject' ? (
-                            <span className="muted">filtered: {m.error}</span>
-                          ) : m.error ? (
-                            <span className="error">{m.error}</span>
-                          ) : (
-                            <>
-                              {m.vendor} · {m.itemsCount} items · parser <code>{m.parser ?? '—'}</code>
-                              {m.orderCreated ? ' · new order' : ' · duplicate'}
-                            </>
-                          )}
-                        </li>
-                      ))}
-                      {gmailScanResult.messages.length > 30 && (
-                        <li className="muted">…+{gmailScanResult.messages.length - 30} more</li>
-                      )}
-                    </ul>
-                  </details>
-                )}
+                {(() => {
+                  const detail = gmailScanResult.messages ?? gmailScanFeed
+                  return detail.length > 0 ? (
+                    <details style={{ marginTop: '0.35rem' }}>
+                      <summary className="muted" style={{ cursor: 'pointer' }}>
+                        Per-message detail ({detail.length}{gmailScanResult.messageCount && gmailScanResult.messageCount !== detail.length ? ` of ${gmailScanResult.messageCount}` : ''})
+                      </summary>
+                      <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.1rem' }}>
+                        {detail.slice(0, 50).map((m) => (
+                          <li key={m.messageId}>
+                            {m.from ?? '(no from)'} — {m.subject ?? '(no subject)'} →{' '}
+                            {m.status === 'skipped_already_seen' ? (
+                              <span className="muted">already processed</span>
+                            ) : m.status === 'filtered_subject' ? (
+                              <span className="muted">filtered: {m.error}</span>
+                            ) : m.error ? (
+                              <span className="error">{m.error}</span>
+                            ) : (
+                              <>
+                                {m.vendor} · {m.itemsCount} items · parser <code>{m.parser ?? '—'}</code>
+                                {m.orderCreated ? ' · new order' : ' · duplicate'}
+                              </>
+                            )}
+                          </li>
+                        ))}
+                        {detail.length > 50 && <li className="muted">…+{detail.length - 50} more</li>}
+                      </ul>
+                    </details>
+                  ) : null
+                })()}
                 <p className="muted" style={{ marginTop: '0.35rem', fontSize: '0.8rem' }}>
                   Run the backfill below to attach the new orders to your card transactions.
                 </p>

@@ -137,23 +137,61 @@ export async function fetchUserEmail(accessToken: string): Promise<string | null
   return j.email ?? null;
 }
 
+/**
+ * Lists message IDs matching the query. Follows `nextPageToken` until either
+ * `maxResults` is reached or Gmail says there are no more pages. Each Gmail
+ * API page returns up to 100 IDs.
+ *
+ * `onPage` (optional) fires after each page so the caller can stream progress
+ * (e.g. "found 100… 200… 300 matching messages so far").
+ */
 export async function listMessageIds(opts: {
   accessToken: string;
   query: string;
   maxResults?: number;
+  onPage?: (info: { fetched: number; pageSize: number; hasMore: boolean }) => void;
 }): Promise<GmailMessageSummary[]> {
-  const url = new URL(`${GMAIL_API}/messages`);
-  url.searchParams.set('q', opts.query);
-  url.searchParams.set('maxResults', String(opts.maxResults ?? 100));
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${opts.accessToken}` },
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Gmail list failed (${res.status}): ${t.slice(0, 400)}`);
+  const cap = opts.maxResults ?? 500;
+  const results: GmailMessageSummary[] = [];
+  let pageToken: string | undefined;
+  // Gmail caps each page at 500 (with 100 as default). We'll request 100 per
+  // page to balance throughput and rate-limit safety.
+  const PAGE_SIZE = 100;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const url = new URL(`${GMAIL_API}/messages`);
+    url.searchParams.set('q', opts.query);
+    url.searchParams.set('maxResults', String(Math.min(PAGE_SIZE, cap - results.length)));
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${opts.accessToken}` },
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`Gmail list failed (${res.status}): ${t.slice(0, 400)}`);
+    }
+    const j = (await res.json()) as {
+      messages?: GmailMessageSummary[];
+      nextPageToken?: string;
+      resultSizeEstimate?: number;
+    };
+    const pageMsgs = j.messages ?? [];
+    results.push(...pageMsgs);
+
+    const hasMore = Boolean(j.nextPageToken) && results.length < cap;
+    opts.onPage?.({
+      fetched: results.length,
+      pageSize: pageMsgs.length,
+      hasMore,
+    });
+
+    if (!j.nextPageToken || results.length >= cap || pageMsgs.length === 0) break;
+    pageToken = j.nextPageToken;
   }
-  const j = (await res.json()) as { messages?: GmailMessageSummary[] };
-  return j.messages ?? [];
+
+  return results.slice(0, cap);
 }
 
 export async function fetchMessage(opts: {
