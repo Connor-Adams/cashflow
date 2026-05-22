@@ -35,6 +35,35 @@ type ReceiptImportItem = {
   inferredCategory: string | null
 }
 
+type GmailStatus = {
+  featureEnabled: boolean
+  connected: boolean
+  provider?: string
+  accountEmail?: string | null
+  status?: string
+  statusReason?: string | null
+  lastScanAt?: string | null
+  scopes?: string | null
+}
+
+type GmailScanResult = {
+  scannedMessages: number
+  createdOrders: number
+  duplicateOrders: number
+  failedExtractions: number
+  messages: Array<{
+    messageId: string
+    from: string | null
+    subject: string | null
+    vendor: string
+    itemsCount: number
+    orderCreated: boolean
+    error: string | null
+  }>
+  query: string
+  sinceDate: string | null
+}
+
 type PurchaseHistoryCsvResult = {
   vendor: string
   fileName: string
@@ -90,6 +119,83 @@ export function SettingsPage() {
   const [receiptResult, setReceiptResult] = useState<ReceiptImportResult | null>(null)
   const [csvVendor, setCsvVendor] = useState<'apple' | 'google' | 'amazon' | 'other'>('apple')
   const [csvResult, setCsvResult] = useState<PurchaseHistoryCsvResult | null>(null)
+  const [gmailStatus, setGmailStatus] = useState<GmailStatus | null>(null)
+  const [gmailScanning, setGmailScanning] = useState(false)
+  const [gmailScanResult, setGmailScanResult] = useState<GmailScanResult | null>(null)
+  const [gmailError, setGmailError] = useState<string | null>(null)
+
+  const loadGmailStatus = useCallback(async () => {
+    try {
+      setGmailStatus(await getJson<GmailStatus>('/api/email/status'))
+    } catch (e) {
+      setGmailError(e instanceof Error ? e.message : 'Could not load Gmail status')
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadGmailStatus()
+  }, [loadGmailStatus])
+
+  // Surface the post-OAuth redirect status from the query string.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const gmail = params.get('gmail')
+    if (gmail === 'connected') {
+      void loadGmailStatus()
+      // Clean URL so a refresh doesn't keep showing the toast.
+      params.delete('gmail')
+      const nextSearch = params.toString()
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${nextSearch ? '?' + nextSearch : ''}${window.location.hash}`,
+      )
+    } else if (gmail === 'denied') {
+      setGmailError('Gmail consent denied. You can try again any time.')
+      params.delete('gmail')
+      const nextSearch = params.toString()
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${nextSearch ? '?' + nextSearch : ''}${window.location.hash}`,
+      )
+    }
+  }, [loadGmailStatus])
+
+  function connectGmail() {
+    const base = import.meta.env.VITE_API_BASE ?? ''
+    // Browser-level redirect — server responds with 302 to Google's consent screen.
+    window.location.href = `${base}/api/email/auth/google`
+  }
+
+  async function disconnectGmail() {
+    setGmailError(null)
+    try {
+      await postJson('/api/email/disconnect/google')
+      await loadGmailStatus()
+      setGmailScanResult(null)
+    } catch (e) {
+      setGmailError(e instanceof Error ? e.message : 'Disconnect failed')
+    }
+  }
+
+  async function runGmailScan(maxMessages: number, sinceDays?: number) {
+    if (gmailScanning) return
+    setGmailScanning(true)
+    setGmailError(null)
+    setGmailScanResult(null)
+    try {
+      const body: Record<string, unknown> = { maxMessages }
+      if (sinceDays != null) body.sinceDays = sinceDays
+      const result = await postJson<GmailScanResult>('/api/email/scan/google', body)
+      setGmailScanResult(result)
+      await loadGmailStatus()
+    } catch (e) {
+      setGmailError(e instanceof Error ? e.message : 'Scan failed')
+    } finally {
+      setGmailScanning(false)
+    }
+  }
 
   async function uploadPurchaseHistoryCsv(file: File) {
     if (receiptBusy) return
@@ -399,6 +505,97 @@ export function SettingsPage() {
             </label>
           ))}
         </div>
+      </Card>
+
+      <Card className="accountsFormCard">
+        <div className="accountsCardHeader">
+          <div>
+            <h2>Connect Gmail</h2>
+            <p className="muted">
+              Connect your Gmail once and Cashflow auto-scrapes receipt emails (Apple, Google, Amazon,
+              Uber, DoorDash, etc.), extracts the line items, and links them to your card transactions.
+              Read-only access; tokens encrypted at rest; disconnect any time.
+            </p>
+          </div>
+        </div>
+        {!gmailStatus?.featureEnabled && (
+          <p className="muted" role="status">
+            Email integration isn&apos;t configured on this server. Ask the operator to set
+            <code> GOOGLE_OAUTH_CLIENT_ID</code>, <code>GOOGLE_OAUTH_CLIENT_SECRET</code>, and{' '}
+            <code>EMAIL_INTEGRATION_ENCRYPTION_KEY</code>.
+          </p>
+        )}
+        {gmailStatus?.featureEnabled && !gmailStatus.connected && (
+          <Button type="button" onClick={() => connectGmail()}>
+            <Sparkles aria-hidden="true" />
+            Connect Gmail
+          </Button>
+        )}
+        {gmailStatus?.connected && (
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            <div>
+              <strong>Connected as</strong> {gmailStatus.accountEmail ?? '(unknown email)'} · status{' '}
+              <code>{gmailStatus.status}</code>
+              {gmailStatus.lastScanAt && (
+                <> · last scan {new Date(gmailStatus.lastScanAt).toLocaleString()}</>
+              )}
+            </div>
+            <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
+              <Button type="button" disabled={gmailScanning} onClick={() => void runGmailScan(50)}>
+                <Sparkles aria-hidden="true" />
+                {gmailScanning ? 'Scanning…' : 'Scan inbox now'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={gmailScanning}
+                onClick={() => void runGmailScan(50, 90)}
+                title="Scan the last 90 days (first-time backfill)"
+              >
+                Initial 90-day backfill
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={gmailScanning}
+                onClick={() => void disconnectGmail()}
+              >
+                Disconnect
+              </Button>
+            </div>
+            {gmailScanResult && (
+              <div style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md, 6px)', fontSize: '0.85rem' }}>
+                <div>
+                  Scanned {gmailScanResult.scannedMessages} messages · created {gmailScanResult.createdOrders} orders, duplicates {gmailScanResult.duplicateOrders}, failed extractions {gmailScanResult.failedExtractions}
+                </div>
+                {gmailScanResult.messages.length > 0 && (
+                  <details style={{ marginTop: '0.35rem' }}>
+                    <summary className="muted" style={{ cursor: 'pointer' }}>Per-message detail</summary>
+                    <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.1rem' }}>
+                      {gmailScanResult.messages.slice(0, 30).map((m) => (
+                        <li key={m.messageId}>
+                          {m.from ?? '(no from)'} — {m.subject ?? '(no subject)'} →{' '}
+                          {m.error
+                            ? <span className="error">{m.error}</span>
+                            : `${m.vendor} · ${m.itemsCount} items${m.orderCreated ? ' · new order' : ' · duplicate'}`}
+                        </li>
+                      ))}
+                      {gmailScanResult.messages.length > 30 && (
+                        <li className="muted">…+{gmailScanResult.messages.length - 30} more</li>
+                      )}
+                    </ul>
+                  </details>
+                )}
+                <p className="muted" style={{ marginTop: '0.35rem', fontSize: '0.8rem' }}>
+                  Run the backfill below to attach the new orders to your card transactions.
+                </p>
+              </div>
+            )}
+            {gmailError && (
+              <span className="error" role="alert">{gmailError}</span>
+            )}
+          </div>
+        )}
       </Card>
 
       <Card className="accountsFormCard">
