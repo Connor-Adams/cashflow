@@ -11,7 +11,13 @@
  * The link-items pipeline stage matches the new orders to card transactions
  * on the next backfill / import.
  */
-import { sequelize, ExternalOrder, ExternalOrderItem, UserEmailIntegration } from '../models';
+import {
+  sequelize,
+  ExternalOrder,
+  ExternalOrderItem,
+  ReceiptSenderAllowlist,
+  UserEmailIntegration,
+} from '../models';
 import { decryptSecret, encryptSecret } from '../util/symmetricEncryption';
 import {
   buildAuthUrl,
@@ -30,31 +36,64 @@ import {
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import { logger } from '../observability/logger';
 
-/** Email addresses we'll fetch and try to extract receipts from. */
-export const RECEIPT_SENDER_ALLOWLIST: string[] = [
+/**
+ * Default sender allowlist baked into the app. Every household gets these
+ * automatically. Per-household additions (via the receipt_sender_allowlist
+ * table) are merged on top so the user can curate without code changes.
+ */
+export const DEFAULT_RECEIPT_SENDERS: Array<{ address: string; vendorHint: string; label: string }> = [
   // Apple
-  'no_reply@email.apple.com',
-  'no-reply@apple.com',
-  'noreply@apple.com',
+  { address: 'no_reply@email.apple.com', vendorHint: 'apple', label: 'Apple receipts' },
+  { address: 'no-reply@apple.com', vendorHint: 'apple', label: 'Apple' },
+  { address: 'noreply@apple.com', vendorHint: 'apple', label: 'Apple' },
   // Google
-  'googleplay-noreply@google.com',
-  'payments-noreply@google.com',
-  'no-reply@accounts.google.com',
-  // Amazon
-  'auto-confirm@amazon.com',
-  'auto-confirm@amazon.ca',
-  'ship-confirm@amazon.com',
-  'ship-confirm@amazon.ca',
-  'order-update@amazon.com',
-  // Common food / ride / general receipts
-  'receipts@uber.com',
-  'no-reply@uber.com',
-  'no-reply@doordash.com',
-  'no-reply@grubhub.com',
+  { address: 'googleplay-noreply@google.com', vendorHint: 'google', label: 'Google Play' },
+  { address: 'payments-noreply@google.com', vendorHint: 'google', label: 'Google Pay' },
+  { address: 'no-reply@accounts.google.com', vendorHint: 'google', label: 'Google account' },
+  // Amazon (US/CA/UK/DE)
+  { address: 'auto-confirm@amazon.com', vendorHint: 'amazon', label: 'Amazon (order)' },
+  { address: 'auto-confirm@amazon.ca', vendorHint: 'amazon', label: 'Amazon.ca (order)' },
+  { address: 'auto-confirm@amazon.co.uk', vendorHint: 'amazon', label: 'Amazon.co.uk (order)' },
+  { address: 'auto-confirm@amazon.de', vendorHint: 'amazon', label: 'Amazon.de (order)' },
+  { address: 'ship-confirm@amazon.com', vendorHint: 'amazon', label: 'Amazon (shipped)' },
+  { address: 'ship-confirm@amazon.ca', vendorHint: 'amazon', label: 'Amazon.ca (shipped)' },
+  { address: 'order-update@amazon.com', vendorHint: 'amazon', label: 'Amazon (order update)' },
+  { address: 'order-update@amazon.ca', vendorHint: 'amazon', label: 'Amazon.ca (order update)' },
+  { address: 'digital-no-reply@amazon.com', vendorHint: 'amazon', label: 'Amazon digital / Kindle' },
+  { address: 'no-reply@primevideo.com', vendorHint: 'amazon', label: 'Prime Video' },
+  { address: 'noreply@audible.com', vendorHint: 'amazon', label: 'Audible' },
+  // Rides / food
+  { address: 'receipts@uber.com', vendorHint: 'other', label: 'Uber receipts' },
+  { address: 'noreply@uber.com', vendorHint: 'other', label: 'Uber' },
+  { address: 'no-reply@uber.com', vendorHint: 'other', label: 'Uber' },
+  { address: 'no-reply@lyftmail.com', vendorHint: 'other', label: 'Lyft' },
+  { address: 'no-reply@doordash.com', vendorHint: 'other', label: 'DoorDash' },
+  { address: 'no-reply@grubhub.com', vendorHint: 'other', label: 'Grubhub' },
+  { address: 'noreply@skipthedishes.com', vendorHint: 'other', label: 'SkipTheDishes' },
+  // Subscriptions / streaming
+  { address: 'info@netflix.com', vendorHint: 'other', label: 'Netflix' },
+  { address: 'no-reply@spotify.com', vendorHint: 'other', label: 'Spotify' },
 ];
 
-function buildGmailQuery(opts: { sinceDate: Date | null }): string {
-  const fromClause = RECEIPT_SENDER_ALLOWLIST.map((addr) => `from:${addr}`).join(' OR ');
+/** Backward-compat: a flat list of just the addresses. */
+export const RECEIPT_SENDER_ALLOWLIST: string[] = DEFAULT_RECEIPT_SENDERS.map((d) => d.address);
+
+/** Returns the effective allowlist for a household (defaults + DB additions),
+ *  filtered to enabled entries. Addresses are normalised to lowercase. */
+export async function getEffectiveAllowlist(householdId: number): Promise<string[]> {
+  const customRows = await ReceiptSenderAllowlist.findAll({
+    where: { householdId, enabled: true },
+    attributes: ['emailAddress'],
+  });
+  const merged = new Set<string>();
+  for (const d of DEFAULT_RECEIPT_SENDERS) merged.add(d.address.toLowerCase());
+  for (const r of customRows) merged.add(r.emailAddress.toLowerCase());
+  return [...merged];
+}
+
+export function buildGmailQuery(opts: { sinceDate: Date | null; senders: string[] }): string {
+  if (opts.senders.length === 0) return 'in:nowhere'; // safe empty query
+  const fromClause = opts.senders.map((addr) => `from:${addr}`).join(' OR ');
   const parts = [`(${fromClause})`];
   if (opts.sinceDate) {
     const y = opts.sinceDate.getUTCFullYear();
@@ -231,7 +270,11 @@ export async function scanInbox(opts: {
     opts.sinceDateOverride !== undefined
       ? opts.sinceDateOverride
       : integ.lastScanAt ?? new Date(Date.now() - 30 * 86_400_000);
-  const query = buildGmailQuery({ sinceDate });
+  const senders =
+    opts.householdId != null
+      ? await getEffectiveAllowlist(opts.householdId)
+      : DEFAULT_RECEIPT_SENDERS.map((d) => d.address);
+  const query = buildGmailQuery({ sinceDate, senders });
 
   const summaries = await listMessageIds({
     accessToken,
