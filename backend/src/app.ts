@@ -20,7 +20,7 @@ import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
 import emailIntegrationsRouter from './routes/emailIntegrations';
 import portfolioRouter from './routes/portfolio';
-import captureRouter from './routes/capture';
+import captureRouter, { captureCors } from './routes/capture';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -35,6 +35,14 @@ app.get('/', (_req, res) => {
     health: '/api/health',
   });
 });
+
+// Apply the capture CORS allow-list BEFORE the global cors() middleware. The
+// global middleware uses a static `origin: env.corsOrigin` (the frontend host)
+// which rejects preflights from amazon.{com,ca,co.uk} / reportaproblem.apple.com
+// before they ever reach the /api/capture/orders router. By mounting captureCors
+// first on that exact path, the bookmarklet preflight gets the right
+// Access-Control-Allow-Origin header.
+app.use('/api/capture/orders', captureCors);
 
 app.use(
   cors({

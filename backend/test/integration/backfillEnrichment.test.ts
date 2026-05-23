@@ -265,6 +265,56 @@ test('backfill is idempotent', async () => {
   for (const [k, v] of before) assert.equal(after.get(k), v);
 });
 
+test('backfill links a transaction to an Apple ExternalOrder', async () => {
+  const acc = await models.Account.findOne();
+  assert.ok(acc);
+  const order = await models.ExternalOrder.create({
+    householdId: acc.householdId,
+    createdByUserId: acc.ownerUserId,
+    vendor: 'apple',
+    vendorOrderId: 'APPL-OR-1',
+    dedupeKey: 'apple:APPL-OR-1',
+    orderDate: '2026-04-25',
+    shipmentDate: null,
+    total: '4.99',
+    currency: 'CAD',
+    paymentLast4: null,
+    source: 'bookmarklet-apple-v1',
+    rawPayload: null,
+  } as never);
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'iCloud 50GB',
+    quantity: 1,
+    totalPrice: '4.99',
+    inferredCategory: 'Subscriptions',
+  } as never);
+
+  const txn = await createTxn({
+    merchantRaw: 'APPLE.COM/BILL',
+    merchantClean: 'APPLE.COM/BILL',
+    amount: -4.99,
+    date: '2026-04-26',
+    reviewFlag: true,
+  });
+
+  await backfillModule.runBackfill(seedFlags({}));
+
+  await txn.reload();
+  assert.equal(txn.merchantCanonical, 'Apple');
+  assert.match(String(txn.notes ?? ''), /iCloud 50GB/);
+
+  // linkedExternalOrderId lives in the item-link signal's fields JSON,
+  // not on the Transaction row directly (no schema column for it).
+  // Origin's matcher emits source='item-link' for ALL vendors, not vendor-specific names.
+  const signal = await models.TransactionSignal.findOne({
+    where: { transactionId: txn.id, source: 'item-link' },
+  });
+  assert.ok(signal, 'expected an item-link signal');
+  const fields = signal!.fields as { linkedExternalOrderId?: number };
+  assert.equal(fields.linkedExternalOrderId, order.id);
+});
+
 test('backfill respects dateFrom/dateTo filter', async () => {
   const inWindow = await createTxn({
     merchantRaw: 'WINDOW INSIDE',
