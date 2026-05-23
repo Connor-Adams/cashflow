@@ -4,7 +4,7 @@
 
 **Goal:** Move Cashflow from "every push to `main` deploys to prod" to "merging a release PR cuts a version tag, which advances a `production` branch that Railway tracks for deployment."
 
-**Architecture:** Two GitHub Actions plus one long-lived branch. `release-please` watches `main` for conventional commits and keeps an open release PR with the proposed version bump and CHANGELOG diff. Merging that PR creates a git tag and GitHub Release. A second workflow listens for `release: published` and fast-forwards the `production` branch to the tagged commit. Railway is reconfigured to deploy from `production` instead of `main`, so `main` pushes no longer touch prod — only Release-PR merges do.
+**Architecture:** One GitHub Action plus one long-lived branch. `release-please` watches `main` for conventional commits and keeps an open release PR with the proposed version bump and CHANGELOG diff. release-please-action opens/updates the release PR on every main push, and on the same run — when a release is actually created — it fast-forwards the production branch to the released tag. No second cross-workflow event is involved. Railway is reconfigured to deploy from `production` instead of `main`, so `main` pushes no longer touch prod — only Release-PR merges do.
 
 **Tech Stack:** GitHub Actions, [`googleapis/release-please-action@v4`](https://github.com/googleapis/release-please-action), Railway's branch-tracking GitHub integration.
 
@@ -15,8 +15,7 @@
 **Created:**
 - `release-please-config.json` — bump rules, changelog sections, package layout
 - `.release-please-manifest.json` — current version state read/written by release-please
-- `.github/workflows/release-please.yml` — opens/updates the Release PR on every `main` push
-- `.github/workflows/promote-to-production.yml` — fast-forwards `production` to the released tag on Release publish
+- `.github/workflows/release-please.yml` — opens/updates the Release PR on every `main` push AND, when that same run creates a release, fast-forwards the `production` branch to the released tag
 
 **Modified:**
 - `package.json` (root) — add `"version": "0.1.0"`
@@ -185,10 +184,17 @@ If `default_workflow_permissions` is still `"read"`, return to Step 1.
 
 ---
 
-## Task 4: Add release-please workflow
+## Task 4: Add release-please + promote workflow
 
 **Files:**
 - Create: `.github/workflows/release-please.yml`
+
+This single workflow does two things on every push to `main`:
+
+1. Always: run `release-please-action` to open/update the release PR.
+2. Conditionally (only when that run actually created a release — i.e. a release PR was merged): checkout the freshly created tag and fast-forward the `production` branch to it.
+
+Why one workflow instead of two? `release-please-action` defaults to using `GITHUB_TOKEN` to create the release, and GitHub explicitly does NOT trigger downstream workflows from events caused by `GITHUB_TOKEN` (except `workflow_dispatch` and `repository_dispatch`). So a separate workflow listening for `release: published` would never fire. Doing the promote in the same run avoids the cross-workflow event entirely.
 
 - [ ] **Step 1: Write the workflow**
 
@@ -201,23 +207,58 @@ on:
 
 permissions:
   contents: write
+  issues: write
   pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Checkout released tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag_name }}
+          fetch-depth: 0
+
+      - name: Fast-forward production to released tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.release.outputs.tag_name }}"
+          echo "Promoting $TAG to production"
+          if git fetch origin "refs/heads/production:refs/remotes/origin/production" 2>/dev/null; then
+            EXPECTED="$(git rev-parse refs/remotes/origin/production)"
+            git push origin "$TAG:refs/heads/production" \
+              --force-with-lease="refs/heads/production:$EXPECTED"
+          else
+            echo "production branch does not exist yet; creating it"
+            git push origin "$TAG:refs/heads/production"
+          fi
 ```
+
+Notes:
+- `issues: write` is required because release-please labels its PRs (`autorelease: pending`, etc.) via the issues API.
+- `concurrency` with `cancel-in-progress: false` prevents two simultaneous main pushes from racing on the manifest PR or the production push, and crucially never aborts a half-done release.
+- The `--force-with-lease="refs/heads/production:$EXPECTED"` form is explicit — `actions/checkout@v4` with `ref: <tag>` does NOT fetch `refs/remotes/origin/production`, so without the explicit fetch the lease has no remote-tracking ref to compare against and degrades to behave like `--force`.
+- The first promotion handles the case where `production` does not yet exist on origin (Task 5 creates it). If the fetch fails, fall back to a plain create push.
+- If `production` ever diverges from the previous release tag (because someone pushed to it manually), `--force-with-lease` refuses — the right failure mode. Resolve by hand at that point rather than silently overwriting.
 
 - [ ] **Step 2: Commit and push**
 
 ```bash
 git add .github/workflows/release-please.yml
-git commit -m "ci: add release-please workflow"
+git commit -m "ci: add release-please + promote workflow"
 git push origin main
 ```
 
@@ -229,7 +270,7 @@ Wait ~30 seconds after the push, then:
 gh run list --workflow=release-please.yml --limit 1
 ```
 
-Expected: latest run shows `status: completed`, `conclusion: success`.
+Expected: latest run shows `status: completed`, `conclusion: success`. On this first run there are no `feat:`/`fix:` commits after `bootstrap-sha`, so the `release_created` output is `false` and the Checkout/Fast-forward steps are skipped — only the `release-please-action` step actually executes.
 
 If `conclusion: failure`, debug with:
 
@@ -251,64 +292,7 @@ Expected: empty. At this point there are no `feat:`/`fix:` commits after `bootst
 
 ---
 
-## Task 5: Add promote-to-production workflow
-
-**Files:**
-- Create: `.github/workflows/promote-to-production.yml`
-
-- [ ] **Step 1: Write the workflow**
-
-```yaml
-name: promote-to-production
-
-on:
-  release:
-    types: [published]
-
-permissions:
-  contents: write
-
-jobs:
-  promote:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout release tag
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name }}
-          fetch-depth: 0
-
-      - name: Fast-forward production to released tag
-        run: |
-          set -euo pipefail
-          TAG="${{ github.event.release.tag_name }}"
-          echo "Promoting $TAG to production branch"
-          git push origin "$TAG:refs/heads/production" --force-with-lease
-```
-
-Notes:
-- `--force-with-lease` is safe here because release tags only move forward in time and no human should be pushing to `production` directly (Task 8 enforces this).
-- If `production` ever diverges from the previous release tag (because someone pushed to it manually), `--force-with-lease` refuses — the right failure mode. Resolve by hand at that point rather than silently overwriting.
-
-- [ ] **Step 2: Commit and push**
-
-```bash
-git add .github/workflows/promote-to-production.yml
-git commit -m "ci: add promote-to-production workflow"
-git push origin main
-```
-
-- [ ] **Step 3: Verify workflow is registered**
-
-```bash
-gh workflow list
-```
-
-Expected: both `release-please` and `promote-to-production` appear in the output. `promote-to-production` will not have any runs yet — it only fires on Release publish.
-
----
-
-## Task 6: Create the production branch (one-time bootstrap)
+## Task 5: Create the production branch (one-time bootstrap)
 
 The branch must exist before Railway can be repointed to it.
 
@@ -343,7 +327,7 @@ git checkout main
 
 ---
 
-## Task 7: Reconfigure Railway to track production (manual, Railway dashboard)
+## Task 6: Reconfigure Railway to track production (manual, Railway dashboard)
 
 Read all steps before doing any of them. Order matters to keep prod up.
 
@@ -377,11 +361,11 @@ Expected: HTTP 200 with `{"ok": true, ...}`. The deployed code is unchanged.
 
 Make any small commit to `main` (e.g. add a blank line to README), push, and watch Railway's deployments tab. Expected: no new deployment is triggered for either service. Revert the commit afterward if you don't want it in history (`git reset --hard HEAD~1 && git push --force-with-lease origin main` — only safe if no one else has pulled).
 
-Skip this step if you'd rather not produce a throwaway commit. The behavior is verified end-to-end in Task 9.
+Skip this step if you'd rather not produce a throwaway commit. The behavior is verified end-to-end in Task 8.
 
 ---
 
-## Task 8: (Optional) Protect the production branch
+## Task 7: (Optional) Protect the production branch
 
 Branch protection prevents accidental local pushes to `production` from advancing prod outside the release flow. Requires GitHub Pro for private repos; available on any public repo.
 
@@ -416,7 +400,7 @@ If your GitHub plan doesn't support these options, skip this whole task. The rel
 
 ---
 
-## Task 9: Trigger and verify the first end-to-end release
+## Task 8: Trigger and verify the first end-to-end release
 
 This is the integration test. Two paths to choose from:
 
@@ -477,14 +461,16 @@ gh release view vX.Y.Z
 
 Expected: release body matches the CHANGELOG entry; tag points at the squash-merge commit on `main`.
 
-- [ ] **Step 5: Watch promote-to-production fire**
+- [ ] **Step 5: Verify the release-please run promoted production**
+
+The promotion happens as a later step of the same release-please run that created the release. There is no separate workflow to watch.
 
 ```bash
-gh run list --workflow=promote-to-production.yml --limit 1
+gh run list --workflow=release-please.yml --limit 1
 gh run view --log
 ```
 
-Expected: workflow `success`. Log's final step shows the force-with-lease push to `production` completed.
+Expected: workflow `success`. The run's logs show the **Fast-forward production to released tag** step executed (i.e. the conditional `release_created == 'true'` evaluated true) and that step completed without error.
 
 - [ ] **Step 6: Verify production branch advanced**
 
@@ -507,7 +493,7 @@ Expected: HTTP 200. The deployment logs in Railway should show the same SHA as i
 
 ---
 
-## Task 10: Document the release flow in README
+## Task 9: Document the release flow in README
 
 **Files:**
 - Modify: `README.md`
@@ -549,12 +535,17 @@ Railway tracks for deployment.
 
 **Rollback:**
 
+If branch protection isn't enabled on `production`:
+
 ```bash
 git push origin <older-tag>:refs/heads/production --force-with-lease
 ```
 
-Must be done by an account in the production branch protection allowlist (or
-by anyone if protection isn't configured).
+If branch protection IS enabled (recommended; only `github-actions[bot]` can
+push to `production`), this command will be rejected. Temporarily disable
+the protection rule in **Settings → Branches**, run the push, then
+re-enable. A dedicated `workflow_dispatch` rollback workflow that runs as
+the bot is a cleaner long-term option but not currently configured.
 ```
 
 - [ ] **Step 2: Commit and push**
@@ -575,7 +566,7 @@ After all tasks complete, these should all be true:
 
 - [ ] `package.json` (root) has `"version": "0.1.0"`
 - [ ] `release-please-config.json` and `.release-please-manifest.json` exist at repo root and are valid JSON
-- [ ] `.github/workflows/release-please.yml` and `.github/workflows/promote-to-production.yml` exist
+- [ ] `.github/workflows/release-please.yml` exists
 - [ ] `git branch -r` shows both `origin/main` and `origin/production`
 - [ ] Pushing to `main` runs CI but does NOT trigger a Railway deployment for either service
 - [ ] At least one `vX.Y.Z` tag and matching GitHub Release exist
