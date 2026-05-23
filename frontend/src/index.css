@@ -2,99 +2,306 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
+/* ─────────────────────────────────────────────────────────────────────────
+ * Cashflow palette tokens (single source of truth).
+ *
+ * Light is the default :root so first paint renders correctly before
+ * ThemeProvider sets data-theme="dark|light".
+ * ──────────────────────────────────────────────────────────────────────── */
+
+:root,
+:root[data-theme="light"] {
   --radius: 0.5rem;
-  --background: oklch(0.14 0.015 125);
-  --foreground: oklch(0.95 0.015 92);
-  --card: oklch(0.18 0.018 125);
+
+  /* Amber / Primary */
+  --amber-50: #FFF8E5;
+  --amber-100: #FCEBBC;
+  --amber-200: #F5D47A;
+  --amber-300: #EABD3D;
+  --amber-400: #E0A726;
+  --amber-500: #C78C13;
+  --amber-600: #9C6A0A;
+  --amber-700: #704B07;
+  --amber-800: #463005;
+  --amber-900: #221803;
+
+  /* Plum / Accent */
+  --plum-50: #FAEEF6;
+  --plum-100: #EFCFE2;
+  --plum-200: #DFA3C7;
+  --plum-300: #C66FA4;
+  --plum-400: #9E4C7A;
+  --plum-500: #7B385E;
+  --plum-600: #5B2B46;
+  --plum-700: #421F33;
+  --plum-800: #2B1422;
+  --plum-900: #160A12;
+
+  /* Jade / Success */
+  --jade-50: #EAF8F0;
+  --jade-100: #C9EBD8;
+  --jade-200: #98D8B5;
+  --jade-300: #67C391;
+  --jade-400: #3FA46D;
+  --jade-500: #2F8657;
+  --jade-600: #236843;
+  --jade-700: #184A30;
+  --jade-800: #0E2E1E;
+  --jade-900: #06150D;
+
+  /* Rust / Alert */
+  --rust-50: #FFF0EA;
+  --rust-100: #FFD4C5;
+  --rust-200: #F8A98D;
+  --rust-300: #EB7B56;
+  --rust-400: #C14E2A;
+  --rust-500: #A33D1F;
+  --rust-600: #7E2E17;
+  --rust-700: #5A2010;
+  --rust-800: #381309;
+  --rust-900: #1A0804;
+
+  /* Neutrals */
+  --bone: #FAF7F0;
+  --sand: #E8DED0;
+  --taupe: #B9AA98;
+  --stone: #776C61;
+  --charcoal: #302D34;
+  --ink: #121118;
+
+  /* Supporting colors */
+  --cream: #FFFDF7;
+  --champagne: #F3E2B8;
+  --brass: #B9852F;
+  --copper: #A95C36;
+  --fig: #3A1E32;
+  --moss: #667A4F;
+  --sage: #A9B79B;
+  --clay: #B56D4A;
+  --smoke: #D8D2C8;
+  --graphite: #24222A;
+
+  /* Surfaces */
+  --background: var(--bone);
+  --card: var(--cream);
+  --popover: var(--cream);
+  --muted: var(--sand);
+
+  /* Text */
+  --foreground: var(--ink);
   --card-foreground: var(--foreground);
-  --popover: oklch(0.17 0.018 125);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.77 0.09 151);
-  --primary-foreground: oklch(0.16 0.02 145);
-  --secondary: oklch(0.25 0.02 125);
-  --secondary-foreground: var(--foreground);
-  --muted: oklch(0.24 0.018 125);
-  --muted-foreground: oklch(0.72 0.025 95);
-  --accent: oklch(0.28 0.025 143);
-  --accent-foreground: var(--foreground);
-  --destructive: oklch(0.66 0.19 27);
-  --border: oklch(0.31 0.018 118);
-  --input: oklch(0.33 0.018 118);
-  --ring: oklch(0.72 0.09 151);
-  --chart-1: oklch(0.74 0.11 151);
-  --chart-2: oklch(0.72 0.13 82);
-  --chart-3: oklch(0.68 0.12 248);
-  --chart-4: oklch(0.71 0.14 35);
-  --chart-5: oklch(0.65 0.13 300);
+  --muted-foreground: var(--stone);
+
+  /* Brand */
+  --primary: var(--amber-400);
+  --primary-hover: var(--amber-500);
+  --primary-foreground: var(--ink);
+
+  /* Accent */
+  --accent: var(--plum-50);
+  --accent-foreground: var(--plum-700);
+
+  /* Semantic signals */
+  --success: var(--jade-400);
+  --success-bg: var(--jade-50);
+  --success-foreground: var(--jade-700);
+  --warning: var(--rust-400);
+  --warning-bg: var(--rust-50);
+  --warning-foreground: var(--rust-700);
+  --danger: #B93A2E;
+  --danger-bg: #FCECEA;
+  --danger-foreground: var(--rust-700);
+  --positive: var(--jade-500);
+  --positive-foreground: var(--cream);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--cream);
+
+  /* Borders / structural */
+  --secondary: var(--plum-600);
+  --secondary-hover: var(--plum-700);
+  --secondary-foreground: var(--bone);
+  --border: var(--sand);
+  --input: var(--taupe);
+  --ring: var(--amber-500);
+  --shadow: 0 8px 18px rgb(18 17 24 / 0.10);
+
+  /* Chart palette */
+  --chart-1: var(--amber-500);
+  --chart-2: var(--jade-500);
+  --chart-3: var(--plum-500);
+  --chart-4: var(--rust-500);
+  --chart-5: var(--stone);
+
+  --chart-spend: var(--amber-500);
+  --chart-credit: var(--jade-500);
+  --chart-payment: var(--stone);
+  --chart-business: var(--plum-600);
+  --chart-personal: var(--positive);
+
+  --chart-line-1: var(--primary);
+  --chart-line-2: var(--positive);
+  --chart-line-3: var(--chart-business);
+  --chart-line-4: var(--destructive);
+  --chart-line-5: var(--moss);
+  --chart-line-6: var(--clay);
+
+  /* Legacy aliases — one migration cycle, then removed.
+   * App.css component classes (.navLink.isActive, .brandMark, .superadminBadge,
+   * etc.) still reference these. They'll get sweeped in a follow-up. */
+  --bg:            var(--background);
+  --bg2:           var(--card);
+  --bg3:           var(--muted);
+  --fg:            var(--foreground);
+  --muted-legacy:  var(--muted-foreground);
+  --accent-legacy: var(--primary);
+  --accent-soft:   var(--accent);
+  --accent-warm:   var(--primary);
+  --accent-green:  var(--positive);
+
+  color-scheme: light;
 }
+
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --background: var(--ink);
+  --card: var(--graphite);
+  --popover: var(--charcoal);
+  --muted: var(--charcoal);
+
+  /* Text */
+  --foreground: var(--bone);
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --muted-foreground: var(--taupe);
+
+  /* Brand */
+  --primary: var(--amber-300);
+  --primary-hover: var(--amber-400);
+  --primary-foreground: var(--ink);
+
+  /* Accent */
+  --accent: var(--plum-700);
+  --accent-foreground: var(--bone);
+
+  /* Semantic signals */
+  --success: var(--jade-300);
+  --success-bg: var(--jade-800);
+  --success-foreground: var(--jade-100);
+  --warning: var(--rust-300);
+  --warning-bg: var(--rust-800);
+  --warning-foreground: var(--rust-100);
+  --danger: var(--rust-300);
+  --danger-bg: var(--rust-800);
+  --danger-foreground: var(--rust-100);
+  --positive: var(--jade-300);
+  --positive-foreground: var(--ink);
+  --destructive: var(--rust-300);
+  --destructive-foreground: var(--ink);
+
+  /* Borders / structural */
+  --secondary: var(--plum-600);
+  --secondary-hover: var(--plum-500);
+  --secondary-foreground: var(--bone);
+  --border: var(--charcoal);
+  --input: var(--stone);
+  --ring: var(--amber-300);
+  --shadow: 0 14px 28px rgb(0 0 0 / 0.45);
+
+  /* Chart palette overrides — values that don't auto-derive from above */
+  --chart-1: var(--amber-300);
+  --chart-2: var(--jade-300);
+  --chart-3: var(--plum-300);
+  --chart-4: var(--rust-300);
+  --chart-5: var(--taupe);
+  --chart-spend: var(--amber-300);
+  --chart-credit: var(--jade-300);
+  --chart-payment: var(--taupe);
+  --chart-business: var(--plum-300);
+  --chart-line-1: var(--chart-spend);
+  --chart-line-2: var(--chart-credit);
+  --chart-line-3: var(--chart-business);
+  --chart-line-4: var(--chart-4);
+  --chart-line-5: var(--sage);
+  --chart-line-6: var(--clay);
+
+  color-scheme: dark;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Tailwind theme mapping (unchanged structure; values flow from tokens above).
+ * Wander DS semantic naming: --color-primary is FOREGROUND TEXT,
+ * --color-brand is the BRAND COLOR. Don't be misled by Tailwind's default
+ * meaning of "primary".
+ * ──────────────────────────────────────────────────────────────────────── */
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
+
+  --color-background:        var(--background);
+  --color-foreground:        var(--foreground);
+  --color-card:              var(--card);
+  --color-card-foreground:   var(--card-foreground);
+  --color-popover:           var(--popover);
   --color-popover-foreground: var(--popover-foreground);
 
   /* Semantic text colors (Wander naming) */
-  --color-primary: var(--foreground);
-  --color-secondary: var(--muted-foreground);
-  --color-destructive: var(--destructive);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
+  --color-primary:           var(--foreground);
+  --color-secondary:         var(--muted-foreground);
+  --color-destructive:       var(--destructive);
+  --color-muted:             var(--muted);
+  --color-muted-foreground:  var(--muted-foreground);
+  --color-accent:            var(--accent);
   --color-accent-foreground: var(--accent-foreground);
 
-  /* Brand alias — cashflow green; use for accent UI, badges, etc. */
-  --color-brand: var(--primary);
-  --color-brand-foreground: var(--primary-foreground);
+  /* Brand alias — cashflow amber; use for accent UI, badges, etc. */
+  --color-brand:             var(--primary);
+  --color-brand-foreground:  var(--primary-foreground);
 
   /* Kept for backward compat with remaining shadcn components */
-  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-foreground:   var(--primary-foreground);
   --color-secondary-foreground: var(--foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-border:               var(--border);
+  --color-input:                var(--input);
+  --color-ring:                 var(--ring);
 
   /* Border semantic tokens — must cover all border-* classes in use */
-  --color-border-primary: var(--border);
-  --color-border-secondary: var(--input);
-  --color-border-ring: var(--ring);
-  --color-border-destructive: var(--destructive);
-  --color-border-transparent: transparent;
-  --color-border-border: var(--border);
-  --color-border-input: var(--input);
+  --color-border-primary:      var(--border);
+  --color-border-secondary:    var(--input);
+  --color-border-ring:         var(--ring);
+  --color-border-destructive:  var(--destructive);
+  --color-border-transparent:  transparent;
+  --color-border-border:       var(--border);
+  --color-border-input:        var(--input);
 
   /* Button semantic tokens (Wander naming, cashflow palette) */
-  --color-button-primary: var(--primary);
-  --color-text-button-primary: var(--primary-foreground);
-  --color-button-hover-primary: oklch(0.70 0.09 151);
-  --color-button-focus-primary: oklch(0.70 0.09 151);
+  --color-button-primary:        var(--primary);
+  --color-text-button-primary:   var(--primary-foreground);
+  --color-button-hover-primary:  color-mix(in oklch, var(--primary) 88%, black);
+  --color-button-focus-primary:  color-mix(in oklch, var(--primary) 88%, black);
 
-  --color-button-secondary: var(--secondary);
-  --color-button-hover-secondary: oklch(0.28 0.02 125);
-  --color-button-focus-secondary: oklch(0.28 0.02 125);
+  --color-button-secondary:        var(--secondary);
+  --color-button-hover-secondary:  color-mix(in oklch, var(--secondary) 88%, black);
+  --color-button-focus-secondary:  color-mix(in oklch, var(--secondary) 88%, black);
 
-  --color-button-outline: oklch(0 0 0 / 0);
-  --color-button-hover-outline: var(--secondary);
-  --color-button-focus-outline: var(--secondary);
+  --color-button-outline:        oklch(0 0 0 / 0);
+  --color-button-hover-outline:  var(--secondary);
+  --color-button-focus-outline:  var(--secondary);
 
-  --color-button-ghost: oklch(0 0 0 / 0);
-  --color-button-hover-ghost: var(--secondary);
-  --color-button-focus-ghost: var(--secondary);
+  --color-button-ghost:        oklch(0 0 0 / 0);
+  --color-button-hover-ghost:  var(--secondary);
+  --color-button-focus-ghost:  var(--secondary);
 
-  --color-button-destructive: oklch(0.66 0.19 27 / 0.12);
-  --color-button-hover-destructive: oklch(0.66 0.19 27 / 0.20);
-  --color-button-focus-destructive: oklch(0.66 0.19 27 / 0.20);
+  --color-button-destructive:        color-mix(in oklch, var(--destructive) 12%, transparent);
+  --color-button-hover-destructive:  color-mix(in oklch, var(--destructive) 20%, transparent);
+  --color-button-focus-destructive:  color-mix(in oklch, var(--destructive) 20%, transparent);
 
-  --color-button-checkout: var(--primary);
-  --color-button-hover-checkout: oklch(0.70 0.09 151);
-  --color-button-focus-checkout: oklch(0.70 0.09 151);
+  --color-button-checkout:        var(--primary);
+  --color-button-hover-checkout:  color-mix(in oklch, var(--primary) 88%, black);
+  --color-button-focus-checkout:  color-mix(in oklch, var(--primary) 88%, black);
 
   /* Typography scale (Wander DS) */
   --text-display-lg: 3.25rem;
@@ -176,18 +383,6 @@
     sans-serif;
   line-height: 1.45;
   font-weight: 400;
-  color-scheme: dark;
-  --bg: color-mix(in oklch, var(--background) 96%, black 4%);
-  --bg2: var(--card);
-  --bg3: var(--secondary);
-  --fg: var(--foreground);
-  --muted-legacy: var(--muted-foreground);
-  --accent-legacy: var(--primary);
-  --accent-soft: #b6dfc6;
-  --accent-warm: #d9a441;
-  --accent-green: #55c47c;
-  --danger: var(--destructive);
-  --shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
 }
 
 * {
@@ -197,10 +392,14 @@
 body {
   margin: 0;
   min-height: 100vh;
+  /* Token-driven background. The radial wash uses the brand amber at low
+   * alpha so the top-left has a subtle warm glow in both modes. */
   background:
-    radial-gradient(circle at 20% -10%, color-mix(in oklch, var(--primary) 18%, transparent), transparent 30rem),
-    linear-gradient(180deg, #12170f 0%, var(--bg) 30%, #0b0d0b 100%);
-  color: var(--fg);
+    radial-gradient(circle at 20% -10%,
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 30rem),
+    var(--background);
+  color: var(--foreground);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -210,8 +409,8 @@ body {
 }
 
 ::selection {
-  background: rgba(119, 167, 255, 0.3);
-  color: var(--fg);
+  background: color-mix(in oklch, var(--accent) 30%, transparent);
+  color: var(--foreground);
 }
 
 button,

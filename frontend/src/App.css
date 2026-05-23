@@ -1,45 +1,6 @@
 @reference "./index.css";
 
-/* Theme variables - will be set by ThemeContext */
-:root[data-theme="dark"] {
-  --background: #0f0f0f;
-  --bg: #1a1a1a;
-  --bg2: #242424;
-  --bg3: #2d2d2d;
-  --card: #1e1e1e;
-  --fg: #f0f0f0;
-  --muted-foreground: #a0a0a0;
-  --muted: #707070;
-  --primary: #3b82f6;
-  --primary-foreground: #ffffff;
-  --accent: #8b5cf6;
-  --accent-soft: #fbbf24;
-  --accent-warm: #f97316;
-  --accent-green: #10b981;
-  --border: #333333;
-  --danger: #ef4444;
-  --shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-}
-
-:root[data-theme="light"] {
-  --background: #ffffff;
-  --bg: #f9f9f9;
-  --bg2: #f3f3f3;
-  --bg3: #e8e8e8;
-  --card: #fafafa;
-  --fg: #1f1f1f;
-  --muted-foreground: #555555;
-  --muted: #808080;
-  --primary: #2563eb;
-  --primary-foreground: #ffffff;
-  --accent: #7c3aed;
-  --accent-soft: #d97706;
-  --accent-warm: #ea580c;
-  --accent-green: #059669;
-  --border: #d0d0d0;
-  --danger: #dc2626;
-  --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
+/* Tokens live in index.css. This file owns component classes only. */
 
 @layer base {
   /* Legacy fallback while older pages migrate to local ui primitives. */
@@ -222,6 +183,10 @@
     color: var(--accent-soft);
   }
 
+  [data-slot='alert'] a {
+    color: inherit;
+  }
+
   .muted {
     @apply mb-4 text-sm leading-6;
     color: var(--muted-foreground);
@@ -377,7 +342,7 @@
   .quickFilterButton[aria-pressed='true'] {
     border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
-    color: #10110f;
+    color: var(--accent-foreground);
   }
 
   .dashboardStats {
@@ -842,11 +807,11 @@
   }
 
   .txnAmount--expense {
-    color: #fca5a5;
+    color: var(--destructive);
   }
 
   .txnAmount--credit {
-    color: #86efac;
+    color: var(--positive);
   }
 
   .txnBadge {
@@ -858,8 +823,8 @@
 
   .txnBadge--review {
     border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border));
-    color: #fcd34d;
-    background: rgba(245, 158, 11, 0.12);
+    color: var(--warning-foreground);
+    background: var(--warning-bg);
   }
 
   .txnReceiptCount {
@@ -916,7 +881,7 @@
   .txnSaveButton {
     border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
-    color: #10110f;
+    color: var(--accent-foreground);
   }
 
   .txnSaveButton:disabled {
@@ -1086,7 +1051,7 @@
   }
 
   .uploadCard .uploadMsg.warn {
-    color: #e8b86a;
+    color: var(--warning);
   }
 
   .uploadCard .parseErrorList {
@@ -1143,6 +1108,229 @@
   .formGrid .check {
     @apply flex-row items-center gap-2;
   }
+
+  /* ─── Bento dashboard ─────────────────────────────────────────────────
+   * Grid container + tile chrome for the bento layout. Tiles are <section>
+   * elements with data-span / data-rows / data-variant attributes set by
+   * BentoTile.tsx. Tables sit below the bento in .dashboardTableCard
+   * (renamed-but-equivalent .dashboardChartCard) and stay full-width.
+   * ─────────────────────────────────────────────────────────────────── */
+
+  .dashboardBento {
+    @apply mb-4 grid;
+    grid-template-columns: repeat(12, 1fr);
+    /* 160px × 2-row tile + 16px gap = 336px tile height; leaves ~240px for
+     * a chart body once header + padding are deducted. */
+    grid-auto-rows: 160px;
+    gap: 16px;
+  }
+
+  .bentoTile {
+    @apply flex flex-col gap-3 rounded-lg border p-4 sm:p-5;
+    border-color: color-mix(in srgb, var(--border) 88%, white 4%);
+    background: var(--card);
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+
+  .bentoTile[data-span="3"]  { grid-column: span 3; }
+  .bentoTile[data-span="4"]  { grid-column: span 4; }
+  .bentoTile[data-span="6"]  { grid-column: span 6; }
+  .bentoTile[data-span="8"]  { grid-column: span 8; }
+  .bentoTile[data-span="12"] { grid-column: span 12; }
+  .bentoTile[data-rows="1"]  { grid-row: span 1; }
+  .bentoTile[data-rows="2"]  { grid-row: span 2; }
+
+  .bentoTile--hero {
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklch, var(--primary) 10%, transparent),
+        transparent 32%),
+      var(--card);
+  }
+
+  .bentoTile__header {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .bentoTile__heading {
+    @apply min-w-0 flex-1;
+  }
+
+  .bentoTile__label {
+    @apply m-0 text-sm font-semibold;
+    color: var(--foreground);
+  }
+
+  .bentoTile__description {
+    @apply mt-1 mb-0 text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .bentoTile__actions {
+    @apply flex shrink-0 items-center gap-2;
+  }
+
+  .bentoTile__body {
+    @apply flex min-h-0 flex-1 flex-col;
+  }
+
+  /* ─── HeroTile ─────────────────────────────────────────────────────── */
+
+  .heroTile {
+    @apply flex h-full flex-col gap-2;
+  }
+
+  .heroTile__label {
+    @apply m-0 text-xs font-semibold uppercase tracking-wide;
+    color: var(--muted-foreground);
+  }
+
+  .heroTile__value {
+    @apply m-0 truncate font-semibold;
+    font-size: var(--text-display-sm);
+    line-height: var(--text-display-sm--line-height);
+    letter-spacing: var(--text-display-sm--letter-spacing);
+    color: var(--foreground);
+  }
+
+  .heroTile__delta {
+    @apply m-0;
+  }
+
+  .heroTile__sparkline {
+    @apply mt-1 block w-full;
+    height: 48px;
+  }
+
+  .heroTile__subMetrics {
+    @apply mt-auto m-0 grid gap-1.5 pt-3;
+    border-top: 1px solid var(--border);
+  }
+
+  .heroTile__subMetric {
+    @apply m-0 flex items-baseline justify-between gap-3;
+  }
+
+  .heroTile__subMetric dt {
+    @apply m-0 text-sm;
+    color: var(--muted-foreground);
+  }
+
+  .heroTile__subMetric dd {
+    @apply m-0 flex items-baseline gap-2 text-sm font-semibold;
+    color: var(--foreground);
+  }
+
+  .heroTile__subMetricValue {
+    @apply font-mono tabular-nums;
+  }
+
+  .heroTile__hint {
+    @apply m-0 text-xs;
+    color: var(--muted-foreground);
+  }
+
+  /* ─── KpiStack ─────────────────────────────────────────────────────── */
+
+  .kpiStack {
+    @apply flex h-full flex-col;
+    gap: 0;
+  }
+
+  .kpiStack__row {
+    @apply flex flex-1 flex-col justify-center gap-1 py-2;
+  }
+
+  .kpiStack__row + .kpiStack__row {
+    border-top: 1px solid var(--border);
+  }
+
+  .kpiStack__label {
+    @apply m-0 text-xs font-semibold uppercase tracking-wide;
+    color: var(--muted-foreground);
+  }
+
+  .kpiStack__value {
+    @apply m-0 truncate text-2xl font-semibold tabular-nums;
+    color: var(--foreground);
+  }
+
+  .kpiStack__hint {
+    @apply m-0 text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .kpiStack__delta {
+    @apply m-0 mt-1;
+  }
+
+  /* ─── Budget pills (compact horizontal strip in a 12×1 bento tile) ── */
+
+  .budgetPillStrip {
+    @apply flex h-full gap-3 overflow-x-auto pb-1;
+    scrollbar-width: thin;
+  }
+
+  .budgetPill {
+    @apply flex shrink-0 flex-col justify-center gap-1.5 rounded-md border p-2.5;
+    border-color: var(--border);
+    background: color-mix(in oklch, var(--muted) 50%, transparent);
+    min-width: 200px;
+    max-width: 240px;
+  }
+
+  .budgetPill__header {
+    @apply flex items-baseline justify-between gap-2;
+  }
+
+  .budgetPill__label {
+    @apply truncate text-sm font-semibold;
+    color: var(--foreground);
+  }
+
+  .budgetPill__pct {
+    @apply shrink-0 text-xs font-semibold tabular-nums;
+    color: var(--muted-foreground);
+  }
+
+  .budgetPill__bar {
+    @apply relative h-1.5 w-full overflow-hidden rounded-full;
+    background: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  .budgetPill__fill {
+    @apply block h-full;
+    background: var(--positive);
+    transition: width 0.3s ease-out;
+  }
+
+  .budgetPill--warn .budgetPill__fill { background: var(--primary); }
+  .budgetPill--over .budgetPill__fill { background: var(--destructive); }
+
+  .budgetPill__amount {
+    @apply m-0 truncate text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .budgetPill__currency {
+    @apply ml-1 opacity-70;
+  }
+
+  /* ─── Dashboard table card (post-bento, drill-down stack) ──────────── */
+
+  .dashboardTableCard {
+    @apply mb-4;
+  }
+
+  .dashboardTableCard h2 {
+    @apply mt-0;
+  }
+
+  .dashboardTableCard .muted {
+    @apply mb-1;
+  }
 }
 
 @media (width <= 720px) {
@@ -1185,5 +1373,35 @@
 
   .businessFocusMetrics {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Bento responsive collapse ──────────────────────────────────────────
+ * Tablet (≤1023px): grid collapses 12 → 6 columns. Wide tiles (span 8/12)
+ *   become full-width; medium tiles (span 4) become half-width.
+ * Mobile (≤639px): single column, each tile takes its natural height.
+ * ──────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+  .dashboardBento {
+    grid-template-columns: repeat(6, 1fr);
+  }
+  .bentoTile[data-span="8"],
+  .bentoTile[data-span="12"] {
+    grid-column: span 6;
+  }
+  .bentoTile[data-span="4"] {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 639px) {
+  .dashboardBento {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+  }
+  .bentoTile {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
   }
 }
