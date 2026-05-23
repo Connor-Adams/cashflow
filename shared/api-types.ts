@@ -293,6 +293,251 @@ export type PortfolioSummary = {
   quoteConfigured: boolean
 }
 
+/**
+ * Per-bucket row in the allocation response. Percentages are computed
+ * per-currency — never mix CAD and USD into one denominator.
+ */
+export type AllocationByAssetType = {
+  assetType: string
+  marketValue: number
+  currency: string
+  percentage: number
+}
+
+export type AllocationBySecurity = {
+  securityId: number
+  symbol: string
+  name: string | null
+  marketValue: number
+  currency: string
+  percentage: number
+}
+
+export type AllocationByAccount = {
+  accountId: number
+  accountName: string
+  marketValue: number
+  currency: string
+  percentage: number
+}
+
+/** Response shape for GET /api/portfolio/allocation. */
+export type PortfolioAllocation = {
+  byAssetType: AllocationByAssetType[]
+  bySecurity: AllocationBySecurity[]
+  byAccount: AllocationByAccount[]
+}
+
+/** One month bucket of dividend + interest income. `month` is YYYY-MM. */
+export type IncomeMonthRow = {
+  month: string
+  currency: string
+  dividend: number
+  interest: number
+  total: number
+}
+
+export type IncomeSecurityRow = {
+  securityId: number | null
+  symbol: string | null
+  currency: string
+  dividend: number
+  interest: number
+  total: number
+  activityCount: number
+}
+
+export type IncomeAccountRow = {
+  accountId: number
+  accountName: string
+  currency: string
+  dividend: number
+  interest: number
+  total: number
+}
+
+export type IncomeTotalsRow = {
+  currency: string
+  dividend: number
+  interest: number
+  total: number
+}
+
+/** Response shape for GET /api/portfolio/income. */
+export type PortfolioIncome = {
+  byMonth: IncomeMonthRow[]
+  bySecurity: IncomeSecurityRow[]
+  byAccount: IncomeAccountRow[]
+  totals: IncomeTotalsRow[]
+}
+
+/** Latest-quote payload nested inside other portfolio DTOs. */
+export type PortfolioLatestPrice = {
+  price: number
+  pricedAt: string
+  provider: string
+  currency: string
+}
+
+/** Per-account contribution to a cross-account aggregate. */
+export type BySecurityAccountBreakdown = {
+  accountId: number
+  accountName: string
+  quantity: number
+  costBasis: number | null
+  marketValue: number
+}
+
+export type BySecurityRow = {
+  securityId: number
+  symbol: string
+  name: string | null
+  assetType: string | null
+  currency: string
+  totalQuantity: number
+  totalCostBasis: number | null
+  totalMarketValue: number
+  unrealizedGainLoss: number | null
+  accountBreakdown: BySecurityAccountBreakdown[]
+  latestPrice: PortfolioLatestPrice | null
+}
+
+/** Response shape for GET /api/portfolio/by-security. */
+export type PortfolioBySecurity = {
+  rows: BySecurityRow[]
+}
+
+/** Aggregate realized-gain row per currency. */
+export type RealizedTotalsRow = {
+  currency: string
+  realizedGain: number
+  eventCount: number
+}
+
+export type RealizedSecurityRow = {
+  securityId: number
+  symbol: string
+  name: string | null
+  currency: string
+  realizedGain: number
+  eventCount: number
+}
+
+export type RealizedEvent = {
+  activityId: number
+  securityId: number
+  symbol: string
+  tradeDate: string
+  qtySold: number
+  proceeds: number
+  acbAtSale: number
+  realizedGain: number
+  currency: string
+  accountId: number
+  accountName: string
+}
+
+/** Response shape for GET /api/portfolio/realized. */
+export type PortfolioRealized = {
+  totals: RealizedTotalsRow[]
+  bySecurity: RealizedSecurityRow[]
+  events: RealizedEvent[]
+}
+
+/** One state in the per-account ACB timeline (after each buy/sell). */
+export type AcbTimelineState = {
+  asOf: string
+  quantity: number
+  totalCost: number
+  acbPerUnit: number
+}
+
+/** One SELL event resolved against weighted-average ACB. */
+export type AcbRealizedEvent = {
+  activityId: number
+  tradeDate: string
+  qtySold: number
+  proceeds: number
+  acbPerUnitAtSale: number
+  costRemoved: number
+  realizedGain: number
+  currency: string
+}
+
+export type AcbResult = {
+  finalState: AcbTimelineState
+  timeline: AcbTimelineState[]
+  realizedEvents: AcbRealizedEvent[]
+  realizedTotal: number
+  currency: string
+  warnings: string[]
+}
+
+export type PortfolioPerAccountDetail = {
+  accountId: number
+  accountName: string
+  currentQuantity: number
+  currentMarketValue: number
+  currentCostBasis: number
+  currentUnrealizedGainLoss: number | null
+  acb: AcbResult
+}
+
+export type PortfolioSecurityHeader = {
+  id: number
+  symbol: string
+  name: string | null
+  assetType: string | null
+  currency: string
+}
+
+export type PortfolioSecurityCombined = {
+  currentQuantity: number
+  currentMarketValue: number
+  currentCostBasis: number
+  realizedTotal: number
+  income: { dividend: number; interest: number }
+  currency: string
+}
+
+export type PortfolioSecurityActivity = {
+  id: number
+  accountId: number
+  accountName: string
+  activityType: string
+  tradeDate: string
+  settlementDate: string | null
+  description: string
+  quantity: number | null
+  price: number | null
+  amount: number | null
+  fees: number | null
+  currency: string
+}
+
+export type PortfolioSecurityHolding = {
+  id: number
+  accountId: number
+  accountName: string
+  statementDate: string
+  quantity: number
+  price: number | null
+  marketValue: number | null
+  costBasis: number | null
+  unrealizedGainLoss: number | null
+  currency: string
+}
+
+/** Response shape for GET /api/portfolio/security/:id. */
+export type PortfolioSecurityDetail = {
+  security: PortfolioSecurityHeader
+  perAccount: PortfolioPerAccountDetail[]
+  combined: PortfolioSecurityCombined
+  activities: PortfolioSecurityActivity[]
+  holdings: PortfolioSecurityHolding[]
+  latestPrice: PortfolioLatestPrice | null
+}
+
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export type ClientLogPayload = {

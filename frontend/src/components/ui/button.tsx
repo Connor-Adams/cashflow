@@ -14,7 +14,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     let variantClass = ""
 
     if (variant === "danger" || variant === "destructive") {
-      variantClass = "bg-red-600 hover:bg-red-700 text-white"
+      variantClass = "border border-[var(--danger)] bg-[var(--danger)] text-[var(--destructive-foreground)] hover:bg-[var(--rust-500)]"
     } else if (variant === "link") {
       variantClass = "text-primary underline-offset-4 hover:underline"
     } else if (variant === "outline") {
@@ -22,7 +22,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     } else if (variant === "ghost") {
       variantClass = "hover:bg-accent hover:text-accent-foreground"
     } else if (variant === "primary" || variant === "default") {
-      variantClass = "text-white"
       return (
         <button
           ref={ref}

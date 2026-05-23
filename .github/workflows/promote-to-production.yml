@@ -15,6 +15,8 @@ concurrency:
 env:
   RAILWAY_BACKEND_SERVICE_ID: 20be1e3f-0c3e-4624-a286-276c0704487a
   RAILWAY_FRONTEND_SERVICE_ID: bd2f774d-4e3c-460c-8e3d-2b0211763bfd
+  IMAGE_WAIT_ATTEMPTS: 30
+  IMAGE_WAIT_SECONDS: 10
 
 jobs:
   promote:
@@ -64,8 +66,23 @@ jobs:
         run: |
           set -euo pipefail
           echo "Inspecting source images at :sha-$SHA_SHORT"
-          docker buildx imagetools inspect "$BACKEND:sha-$SHA_SHORT" > /dev/null
-          docker buildx imagetools inspect "$FRONTEND:sha-$SHA_SHORT" > /dev/null
+          for attempt in $(seq 1 "$IMAGE_WAIT_ATTEMPTS"); do
+            if docker buildx imagetools inspect "$BACKEND:sha-$SHA_SHORT" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$FRONTEND:sha-$SHA_SHORT" > /dev/null 2>&1; then
+              echo "Source images are available."
+              exit 0
+            fi
+
+            if [ "$attempt" -lt "$IMAGE_WAIT_ATTEMPTS" ]; then
+              echo "Source images not ready yet (attempt $attempt/$IMAGE_WAIT_ATTEMPTS). Waiting ${IMAGE_WAIT_SECONDS}s..."
+              sleep "$IMAGE_WAIT_SECONDS"
+            fi
+          done
+
+          echo "Source images are not available after $(( IMAGE_WAIT_ATTEMPTS * IMAGE_WAIT_SECONDS )) seconds:" >&2
+          echo "  $BACKEND:sha-$SHA_SHORT" >&2
+          echo "  $FRONTEND:sha-$SHA_SHORT" >&2
+          exit 1
 
       - name: Re-tag backend image as release version and :production
         env:

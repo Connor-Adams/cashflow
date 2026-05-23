@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "test": "tsx --test test/*.test.ts",
+    "test": "tsx --test test/*.test.ts test/portfolio/*.test.ts",
     "test:integration": "tsx --test test/integration/*.test.ts",
     "ai:eval": "tsx scripts/ai-eval.ts"
   },
