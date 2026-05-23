@@ -122,6 +122,51 @@ account, rules, and sample transactions are ensured without duplicating on
 later deploys. The auth screen exposes a **Continue with demo account** button
 backed by `POST /api/auth/demo-login`.
 
+## Releases
+
+Cashflow uses [Release Drafter](https://github.com/release-drafter/release-drafter)
+to maintain a draft GitHub Release from merged PRs, plus a `production` branch
+that Railway tracks for deployment.
+
+**To ship to production:**
+
+1. Open a PR with a conventional-commit title (`feat:`, `fix:`, `docs:`, etc.).
+   Release Drafter auto-labels the PR based on the title prefix.
+2. When the PR merges to `main`, Release Drafter updates the draft GitHub
+   Release with a new entry under the matching category. The draft also
+   suggests the next semver version (`feat:` → minor, `fix:` → patch,
+   `feat!:` → major).
+3. When ready to ship, go to **Releases → Drafts** in GitHub, eyeball the
+   notes and version, edit if needed, click **Publish release**.
+4. Publishing fires a `release: published` event (human action, not
+   `GITHUB_TOKEN`). The `promote-to-production` workflow fast-forwards the
+   `production` branch to the released tag. Railway, which tracks
+   `production`, deploys.
+
+`main` does not auto-deploy to prod. Only publishing a release advances
+`production`.
+
+**Version bumps (suggested by Drafter; override at Publish time):**
+- `feat:` → minor bump
+- `fix:` / `perf:` / `deps:` → patch bump
+- `feat!:` or any title with `!` after the type → major bump
+- `docs:`, `chore:`, `refactor:`, `test:`, `build:`, `ci:` → fall to patch
+  default; you choose whether to publish a release with only these
+
+**Rollback:**
+
+If branch protection isn't enabled on `production`:
+
+```bash
+git push origin <older-tag>:refs/heads/production --force-with-lease
+```
+
+If branch protection IS enabled (recommended; only `github-actions[bot]` can
+push to `production`), this command will be rejected. Temporarily disable
+the protection rule in **Settings → Branches**, run the push, then
+re-enable. A dedicated `workflow_dispatch` rollback workflow that runs as
+the bot is a cleaner long-term option but not currently configured.
+
 ## Deploy
 
 See [docs/deploy-railway.md](docs/deploy-railway.md) for Railway service
