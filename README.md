@@ -1,193 +1,137 @@
 # Cashflow
 
-See [Amazon Transaction Enrichment](docs/amazon-enrichment.md) for importing Amazon order reports, matching them to card transactions, and reviewing item-level categories.
+Local-first personal and partner expense tracker. Import card CSVs, apply
+merchant rules, split with a partner, attach receipts, and roll spend up into
+per-currency summaries — all running on your own machine.
 
-Local-first personal and partner expense tracker: import card CSVs, apply merchant rules, override categorization and splits, and view per-currency summaries.
+## Features
 
-## Stack
-
-- **Backend:** Node.js, Express, Sequelize, SQLite (TypeScript)
-- **Frontend:** React (Vite, TypeScript), Recharts
-- **Package manager:** [Yarn Classic](https://classic.yarnpkg.com/) (v1) at the repo root — workspaces cover **backend**, **frontend**, and **shared**.
+- **Imports** — CSV upload from the UI or folder-scan import. Auto-detects
+  generic-bank vs Amex layouts; pluggable profiles for other issuers.
+  See [docs/csv-import.md](docs/csv-import.md).
+- **Rules** — merchant-pattern rules apply categories, splits, and notes to
+  matching transactions on import.
+- **Review inbox** — uncategorized or flagged transactions surface for review
+  in one place.
+- **Splits and settlements** — partner / business / personal splits per
+  transaction, with running settlement balances.
+- **Recurring** — detection and tracking of subscriptions and recurring
+  charges.
+- **Receipts** — attach JPEG/PNG/WebP receipts to a transaction.
+- **AI suggestions** (optional) — OpenAI-backed category / split / note
+  suggestions; vision-based receipt extraction.
+- **Amazon enrichment** — match Amazon order reports to card transactions for
+  item-level categories. See [docs/amazon-enrichment.md](docs/amazon-enrichment.md).
+- **Portfolio** — track investment balances alongside spending.
+- **Dashboards and reports** — per-currency summaries for self, partner, and
+  business.
 
 ## Quick start
 
-From the **repo root**, install once for all packages ([Yarn workspaces](https://classic.yarnpkg.com/en/docs/workspaces/)). If you still have old `node_modules` only inside `backend/` or `frontend/`, delete those folders and reinstall from the root.
-
 ```bash
-yarn install
-yarn db:migrate
-yarn dev
+yarn setup     # install + run migrations
+yarn dev       # API + Vite together
 ```
 
-**All-in-one** (install deps + run migrations):
+- API: `http://localhost:3001`
+- UI: `http://localhost:5173` (proxies `/api` to the API)
 
-```bash
-yarn setup
-```
+Requires **Node 20+** and **Yarn Classic v1**. Yarn workspaces cover
+`backend`, `frontend`, and `shared` — install from the repo root, not from
+sub-directories. If old `node_modules` exist inside `backend/` or `frontend/`,
+delete them and reinstall from the root.
 
-Then start dev with `yarn dev`.
+Optional: copy `backend/.env.example` to `backend/.env`. Defaults use
+`backend/data/cashflow.sqlite`, `backend/uploads/csv`, and
+`DEFAULT_CURRENCY=CAD`.
 
-Optional: copy `backend/.env.example` to `backend/.env`. Defaults use `backend/data/cashflow.sqlite`, `backend/uploads/csv`, and **`DEFAULT_CURRENCY=CAD`** (override in `.env` if needed). Set `DATABASE_URL` to use Postgres instead of the SQLite fallback. Developer setup, CI parity, and git hooks: [CONTRIBUTING.md](CONTRIBUTING.md).
+For full dev setup (CI parity, git hooks, project layout) see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-With `yarn dev`:
+## Configuration
 
-- API: `http://localhost:3001` (proxied as `/api` from Vite)
-- UI: `http://localhost:5173`
+Key environment variables (set in `backend/.env`):
 
-**Using npm instead:** same scripts work with `npm run <script>` and `npm install` from the root (npm workspaces). Prefer one lockfile — this repo is maintained with **`yarn.lock`** only.
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEFAULT_CURRENCY` | `CAD` | Fallback currency when a transaction has none |
+| `DATABASE_URL` | _(unset)_ | Postgres connection string; SQLite is used when unset |
+| `CSV_UPLOAD_DIR` | `backend/uploads/csv` | Folder-scan import source |
+| `RECEIPTS_UPLOAD_DIR` | `backend/uploads/receipts` | Local receipt storage path (when not using S3) |
+| `OPENAI_API_KEY` | _(unset)_ | Enables AI suggestion and vision endpoints |
+| `DEMO_ACCOUNT_ENABLED` | `true` | Seed a demo account on startup |
+| `UPLOAD_RATE_LIMIT_MAX` | `30` | CSV upload requests per IP per minute |
 
-## CSV import
+Set `OPENAI_API_KEY` to enable AI features; without it, the rest of the app
+works unchanged and the UI shows how to enable AI.
 
-### Web upload (recommended)
+## API overview
 
-1. Under **Accounts**, create at least one account (name, optional short code for filename matching, default currency).
-2. Open **Transactions**, use **Upload CSV**: pick the account, optional batch label, and your `.csv` file → **Import CSV**. Leave the profile on **Automatic** to detect column layout from the file (Amex vs generic bank exports), or choose a specific profile if you need to override.
-3. Use **Preview first rows** to sanity-check parsing before importing.
-4. Same parsing, rules, and dedupe as folder import; filename does not need a special pattern when you choose the account in the form.
+All endpoints are under `/api`. Authentication uses cookie sessions; mutating
+routes require login.
 
-### Folder scan (optional)
-
-1. Create an account whose `short_code` or `name` matches the card token in the filename.
-2. Put files in `CSV_UPLOAD_DIR` as `CardName_YYYY_MM.csv` (e.g. `Amex_2025_01.csv`).
-3. Use **Run import** on Transactions or `POST /api/import/run`.
-
-### API
-
-- `POST /api/import/upload` — multipart field `file` (required), `accountId` (required), optional `batchLabel`, `profileId`.
-- `POST /api/import/run` — scan folder only.
-
-### Column mapping (profiles)
-
-Automatic mode scores your CSV’s headers and the first rows against built-in profiles and picks **`generic_simple`** (ISO-style dates and common bank columns) or **`generic_amex`** (Amex-style columns and US date order). Override with **`generic_simple`**, **`generic_amex`**, or **`amex`** when needed.
-
-Profiles are defined in `backend/src/import/csvProfiles.ts`. The default `generic_simple` profile expects headers such as `Date`, `Description`, `Amount`, and optional `Currency`. Amounts follow **charges_negative** (spending is negative after normalization).
-
-**American Express:** **`generic_amex`** recognizes many Amex column names (e.g. `Transaction Date`, `Posted Date`, `Charge Amount`, `Amount (CAD)`). Dates are parsed flexibly (US `MM/DD/YYYY`, Canadian `DD/MM/YYYY`, ISO `YYYY-MM-DD`, etc.).
-
-To match another issuer, add a profile or set `CSV_PROFILE_ID` / pass `profileId` on import (use `auto` or omit for automatic detection when not setting env).
-
-## Scripts
-
-Run from the repo root:
-
-| Command | Description |
-|--------|-------------|
-| `yarn setup` | `install` + `db:migrate` (first-time or after pulling migrations) |
-| `yarn dev` | API + Vite dev servers |
-| `yarn db:migrate` | Apply Sequelize migrations |
-| `yarn build` | Production build of backend + frontend |
-| `yarn test` | Backend unit + integration tests, frontend Vitest |
-| `yarn ci` | Typecheck, all tests, production builds (same as CI) |
-
-## Railway deployment
-
-Deploy this as a shared JavaScript monorepo with two Railway services. Keep both services pointed at the repo root and set service-specific commands in Railway.
-
-Backend service:
-
-```bash
-Root Directory: /
-Build Command: yarn railway:build
-Pre-deploy Command: yarn railway:migrate
-Start Command: yarn railway:start
-Healthcheck Path: /api/health
-```
-
-Frontend service:
-
-```bash
-Root Directory: /
-Build Command: yarn railway:build
-Start Command: yarn railway:start
-Healthcheck Path: /
-```
-
-Do not set a Railway config file path for either service. This is a Yarn workspace repo with shared root configuration, so both services need the repo root available at build time.
-
-The repo root also has a generic `start` script only so Railpack can detect a runnable Node app during analysis. Keep the explicit service start commands above in Railway, especially for the frontend service.
-
-Recommended Railway variables:
-
-```bash
-CORS_ORIGIN=https://your-frontend-domain.example
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-CSV_UPLOAD_DIR=/data/uploads/csv
-DEFAULT_CURRENCY=CAD
-DEMO_ACCOUNT_ENABLED=false
-RAILWAY_DEPLOY_TARGET=backend
-YARN_PRODUCTION=false
-```
-
-For receipt uploads on Railway Buckets, create a bucket and set its S3-compatible
-credentials on the backend service:
-
-```bash
-AWS_ENDPOINT_URL=<bucket endpoint>
-AWS_ACCESS_KEY_ID=<bucket access key>
-AWS_SECRET_ACCESS_KEY=<bucket secret key>
-AWS_S3_BUCKET_NAME=<bucket name>
-AWS_DEFAULT_REGION=<bucket region>
-```
-
-Optional:
-
-```bash
-RECEIPTS_S3_KEY_PREFIX=receipts
-AWS_S3_FORCE_PATH_STYLE=true
-```
-
-For the frontend service, set:
-
-```bash
-RAILWAY_DEPLOY_TARGET=frontend
-VITE_API_BASE=https://your-backend-service-url
-YARN_PRODUCTION=false
-```
-
-Do not set `NODE_ENV=production` as a Railway variable for these services. Yarn Classic uses it during install and may skip build tools like TypeScript, Vite, and Sequelize CLI. The backend start script sets `NODE_ENV=production` only at runtime.
-
-Attach a Railway volume mounted at `/data` if you use folder-based CSV imports with `CSV_UPLOAD_DIR`; web CSV uploads are parsed from memory and do not store the source file. Receipt files should use Railway Buckets via the S3 variables above. Application records should use the Railway Postgres service via `DATABASE_URL`. Deploy the Vite frontend as a separate static service and set `VITE_API_BASE` to the backend public URL.
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `POST` | `/auth/register \| login \| demo-login \| logout` | Auth |
+| `GET` | `/auth/me` | Current user |
+| `GET\|POST\|DELETE` | `/accounts[/:id]` | Manage accounts |
+| `GET\|POST\|PATCH\|DELETE` | `/rules[/:id]` | Merchant rules |
+| `GET` | `/transactions` | List with filters (`reviewFlag`, `currency`, `dateFrom`, `dateTo`, …) |
+| `PATCH` | `/transactions/:id` | Override category / split / notes |
+| `POST` | `/transactions/bulk-patch[-filter]` | Bulk edit by ids or by filter |
+| `POST` | `/transactions/:id/ai-suggest` | Single AI suggestion (requires `OPENAI_API_KEY`) |
+| `POST` | `/transactions/bulk-ai-suggest` | Batch AI suggestions (max 15 ids) |
+| `POST` | `/import/upload` | Multipart CSV upload: `file`, `accountId`, optional `batchLabel`, `profileId` |
+| `POST` | `/import/run` | Scan `CSV_UPLOAD_DIR` for new files |
+| `GET` | `/import/profiles` | List CSV profiles |
+| `GET` | `/summary/dashboard \| partner \| business \| monthly` | Aggregates (per currency; filter with `?currency=`) |
+| `GET\|POST\|DELETE` | `/contacts[/:id]` | Partner / payee contacts |
+| `GET\|POST\|DELETE` | `/settlements[/:id]` | Settle balances between contacts |
+| `GET` | `/recurring` | Detected recurring charges |
+| `GET\|POST` | `/portfolio[/prices/refresh]` | Investment holdings + price refresh |
+| `GET\|POST\|PATCH\|DELETE` | `/amazon/...` | Order import, matching, item categorization, link review |
+| `POST` | `/transactions/:id/receipts` | Upload receipt (multipart `file`) |
+| `GET` | `/transactions/:id/receipts` | List receipts for a transaction |
+| `GET\|DELETE` | `/receipts/:id[/file]` | Download or delete a receipt |
+| `POST` | `/receipts/:id/analyze` | Vision-based extraction (requires `OPENAI_API_KEY`) |
+| `GET` | `/ai/status` | `{ "openai": true }` when configured |
 
 ## Tests
 
 ```bash
-yarn test
+yarn test    # backend unit + integration + frontend Vitest
+yarn ci      # everything CI runs: typecheck, tests, production builds
 ```
 
-Covers split math, rule matching, CSV row mapping, env validation, import integration (HTTP + DB), and frontend unit tests. Sample CSV: `backend/test/fixtures/sample.csv`.
-
-## AI and receipts (optional)
-
-Set **`OPENAI_API_KEY`** in `backend/.env` to enable:
-
-- **`GET /api/ai/status`** — `{ "openai": true }` when configured.
-- **`POST /api/transactions/:id/ai-suggest`** — JSON suggestions for category, business, split, and notes (uses your existing category labels as hints).
-- **`POST /api/transactions/bulk-ai-suggest`** — body `{ "ids": [1,2,3] }` (max 15) for batch suggestions.
-- **Receipt images** — `POST /api/transactions/:transactionId/receipts` (multipart `file`: JPEG/PNG/WebP, stored under `RECEIPTS_UPLOAD_DIR`), **`GET /api/transactions/:id/receipts`** list, **`GET /api/receipts/:id/file`** download, **`DELETE /api/receipts/:id`**, **`POST /api/receipts/:id/analyze`** (vision extract; costs API usage).
-
-Without an API key, CSV import and the rest of the app work unchanged; the UI shows how to enable AI.
+Coverage spans split math, rule matching, CSV row mapping, env validation,
+import integration (HTTP + DB), and frontend unit tests. Sample CSV:
+`backend/test/fixtures/sample.csv`.
 
 ## Demo account
 
-The backend seeds a demo account on startup, including in production, unless
-`DEMO_ACCOUNT_ENABLED=false` is set. Defaults:
+The backend seeds a demo account on startup (including in production) unless
+`DEMO_ACCOUNT_ENABLED=false`. Defaults:
 
 - Email: `dev@cashflow.local`
 - Password: `cashflow-demo`
 
 Override with `DEMO_ACCOUNT_EMAIL`, `DEMO_ACCOUNT_PASSWORD`, and
-`DEMO_ACCOUNT_NAME`. The seed is idempotent: it ensures the user, household,
-demo account, rules, and sample transactions exist without duplicating the
-sample ledger on later deploys. The auth screen also exposes a **Continue with
-demo account** button backed by `POST /api/auth/demo-login`.
+`DEMO_ACCOUNT_NAME`. The seed is idempotent: the demo user, household,
+account, rules, and sample transactions are ensured without duplicating on
+later deploys. The auth screen exposes a **Continue with demo account** button
+backed by `POST /api/auth/demo-login`.
 
-## API overview
+## Deploy
 
-- `GET|POST|DELETE /api/accounts/:id` — list, create, delete account (delete removes all transactions for that account first)
-- `GET /api/transactions` — pagination and filters (`reviewFlag`, `currency`, `dateFrom`, `dateTo`, …)
-- `PATCH /api/transactions/:id` — overrides; recalculates share amounts
-- `GET|POST|PATCH|DELETE /api/rules` — merchant rules
-- `POST /api/import/upload` — multipart: `file`, `accountId`, optional `batchLabel`, `profileId`
-- `POST /api/import/run` — scan `CSV_UPLOAD_DIR` and import new files
-- `GET /api/summary/dashboard|partner|business` — aggregates (per currency; use `currency` query to filter)
+See [docs/deploy-railway.md](docs/deploy-railway.md) for Railway service
+configuration, environment variables, and storage setup (Postgres, volume
+mount for folder imports, Railway Buckets for receipts).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, individual workspace
+commands, CI parity, project layout, and git hooks.
+
+Design specs and implementation plans live under
+[docs/superpowers/](docs/superpowers).
