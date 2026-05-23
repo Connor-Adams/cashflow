@@ -611,9 +611,13 @@ export function DashboardPage() {
     const prevNetSpendTotal = prevSelected.reduce((sum, row) => sum + row.netSpend, 0)
     const prevTxCount = prevSelected.reduce((sum, row) => sum + row.transactionCount, 0)
     const singleCurrency = selected.length === 1 ? selected[0].currency : null
+    // When previousRange is null the deltas are suppressed (HeroTile / KpiStack
+    // skip the badges), so the hint at the bottom needs to explain *why* there
+    // are no comparison numbers rather than read as a generic footnote under
+    // populated totals.
     const comparisonHint =
       previousRange == null
-        ? 'Set both dates for period comparison.'
+        ? 'Period comparison unavailable — pick a start AND end date.'
         : `${previousRange.from} to ${previousRange.to}`
     const spendDelta = spendTotal - prevSpendTotal
     const creditDelta = creditTotal - prevCreditTotal
@@ -733,9 +737,12 @@ export function DashboardPage() {
           maximumFractionDigits: 0,
         }).format(v)
   }
+  // Always render "Jan", "Feb", … on the month axis — handing Recharts the raw
+  // "2025-01" string causes label fragmentation once there are ~12+ months in
+  // the chart (Recharts truncates and renders partial year prefixes).
   const monthTickFormatter = (value: string | number): string => {
     if (typeof value !== 'string') return String(value)
-    return isNarrowViewport ? formatShortMonth(value) : value
+    return formatShortMonth(value)
   }
 
   // Column specs for the bento table-tiles. Defined inside the component
@@ -855,9 +862,39 @@ export function DashboardPage() {
               ) : null
             }
             caption={
-              <p className="muted" style={{ marginBottom: 0 }}>
-                Showing <strong>{currency || 'all currencies'}</strong> for{' '}
-                <strong>{activeRangeLabel}</strong>.
+              <p
+                className="muted"
+                style={{
+                  marginBottom: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '0.4rem',
+                }}
+              >
+                Showing
+                {/* Pill-style active-filter chip — reads as the currently
+                    applied scope rather than a low-contrast footnote. Uses
+                    --muted as the surface and --border for the outline to stay
+                    on the brand token palette (no hex). */}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0.25rem 0.65rem',
+                    borderRadius: '9999px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--muted)',
+                    color: 'var(--foreground)',
+                    fontSize: '0.8rem',
+                    lineHeight: 1.2,
+                  }}
+                >
+                  <strong>{currency || 'all currencies'}</strong>
+                  <span style={{ color: 'var(--muted-foreground)' }}>·</span>
+                  <strong>{activeRangeLabel}</strong>
+                </span>
               </p>
             }
           />
@@ -987,7 +1024,7 @@ export function DashboardPage() {
               {
                 label: 'Accounts',
                 value: summaryStats.accountCount,
-                hint: 'Contributing activity',
+                hint: 'With activity in period',
                 metricKind: 'neutral',
               },
             ]}
@@ -1046,8 +1083,22 @@ export function DashboardPage() {
 
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              <span>Business {businessSpotlight.businessShare.toFixed(0)}%</span>
-              <span>Personal {businessSpotlight.personalShare.toFixed(0)}%</span>
+              {/* Override the .businessShareLabels muted color: these split
+                  percentages are load-bearing context for the bar below and
+                  read as ghosted at --muted-foreground. Bumping to --foreground
+                  + semibold restores them as primary labels. */}
+              <span
+                className="font-semibold"
+                style={{ color: 'var(--foreground)' }}
+              >
+                Business {businessSpotlight.businessShare.toFixed(0)}%
+              </span>
+              <span
+                className="font-semibold"
+                style={{ color: 'var(--foreground)' }}
+              >
+                Personal {businessSpotlight.personalShare.toFixed(0)}%
+              </span>
             </div>
             <div
               className="businessShareBar"
@@ -1093,8 +1144,13 @@ export function DashboardPage() {
                   dataKey="month"
                   tick={narrowAxisTick}
                   tickFormatter={monthTickFormatter}
-                  interval={isNarrowViewport ? 'preserveStartEnd' : 0}
-                  minTickGap={isNarrowViewport ? 12 : 5}
+                  // preserveStartEnd at every viewport: with ~16 months of data,
+                  // forcing interval={0} on wide caused Recharts to fragment the
+                  // year-prefixed labels. preserveStartEnd lets it drop interior
+                  // ticks to keep the start/end pinned. minTickGap widens the
+                  // spacing once the short "Jan"/"Feb" labels fit.
+                  interval="preserveStartEnd"
+                  minTickGap={isNarrowViewport ? 12 : 24}
                 />
                 <YAxis
                   tick={narrowAxisTick}
@@ -1170,16 +1226,18 @@ export function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="name"
-                  tick={narrowAxisTick}
                   // Category-count-aware label handling: once there are more
                   // than 10 categories, default Recharts spacing overlaps even
                   // on wide viewports. Steepen the angle and give the axis
-                  // more vertical space so every label still renders.
+                  // more vertical space so every label still renders without
+                  // clipping (long names like "Snowboarding Gear" need both
+                  // the steeper angle and the extra height to fit).
+                  tick={hasManyCategories ? { fontSize: 11 } : narrowAxisTick}
                   interval={0}
                   minTickGap={isNarrowViewport ? 12 : 5}
-                  angle={hasManyCategories ? -45 : 0}
+                  angle={hasManyCategories ? -55 : 0}
                   textAnchor={hasManyCategories ? 'end' : 'middle'}
-                  height={hasManyCategories ? 90 : undefined}
+                  height={hasManyCategories ? 110 : undefined}
                 />
                 <YAxis
                   tick={narrowAxisTick}
@@ -1301,8 +1359,10 @@ export function DashboardPage() {
                   dataKey="month"
                   tick={narrowAxisTick}
                   tickFormatter={monthTickFormatter}
-                  interval={isNarrowViewport ? 'preserveStartEnd' : 0}
-                  minTickGap={isNarrowViewport ? 12 : 5}
+                  // See Monthly flow BarChart above for rationale — keep the two
+                  // monthly axes in lockstep.
+                  interval="preserveStartEnd"
+                  minTickGap={isNarrowViewport ? 12 : 24}
                 />
                 <YAxis
                   tick={narrowAxisTick}
