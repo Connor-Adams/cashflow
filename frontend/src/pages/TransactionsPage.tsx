@@ -1191,7 +1191,7 @@ export function TransactionsPage() {
               <Input
                 ref={fileRef}
                 type="file"
-                accept=".csv,text/csv,.ofx,.qfx"
+                accept=".csv,text/csv,.ofx,.qfx,.pdf,application/pdf"
                 multiple
                 onChange={() => {
                   setPreviewData(null)
