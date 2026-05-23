@@ -1,3 +1,5 @@
+import type { TxnType } from './enrichment/types';
+
 export type StatementParserId = 'csv' | 'ofx';
 
 export type NormalizedCashTransaction = {
@@ -9,6 +11,18 @@ export type NormalizedCashTransaction = {
   sourceReference: string | null;
   sourceRowFingerprint: string;
   duplicate?: boolean;
+  /**
+   * Authoritative txnType supplied by the source file when the source has
+   * stronger signal than the narrative-detector regex. Used by the
+   * Wealthsimple bundle importer to stamp BUY, SELL, DIV, AFT_IN, AFT_OUT,
+   * and FEE rows from the WS `transaction` column instead of letting them
+   * default to 'purchase' (which would inflate the dashboard totalSpend
+   * metric).
+   *
+   * When set, the commit pipeline uses this value verbatim instead of the
+   * enrichment-pipeline output.
+   */
+  overrideTxnType?: TxnType;
 };
 
 export type NormalizedSecurity = {

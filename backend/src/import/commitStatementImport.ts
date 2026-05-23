@@ -271,6 +271,14 @@ export async function commitStatementImport(
 
       const f = enriched.fields;
 
+      // Wealthsimple bundle imports stamp an authoritative `overrideTxnType`
+      // from the WS TX code (BUY → 'investment', AFT_OUT → 'transfer', etc).
+      // When present, it wins over the enrichment-pipeline output so the
+      // dashboard's spend math correctly excludes these flows. See
+      // wealthsimpleTxnType.ts for the mapping and root-cause analysis in
+      // backend/scripts/backfill-ws-txn-types.ts.
+      const effectiveTxnType = row.overrideTxnType ?? f.txnType;
+
       const txn = Transaction.build({
         accountId: account.id,
         householdId: account.householdId ?? null,
@@ -284,7 +292,7 @@ export async function commitStatementImport(
         merchantRaw: row.merchantRaw,
         merchantClean: f.merchantClean,
         merchantCanonical: f.merchantCanonical,
-        txnType: f.txnType,
+        txnType: effectiveTxnType,
         amount: String(row.amount),
         currency: row.currency,
         notes: f.notes,
