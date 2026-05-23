@@ -59,6 +59,41 @@ type PartnerRow = {
 }
 
 type BusRow = { currency: string; sumBusiness: number }
+
+// Merchant + account rollups consumed for the comprehensive
+// merchant/account tables linked from the Dashboard bento "View all".
+// Types mirror what /api/summary/dashboard returns; DashboardPage defines
+// them inline today — extract to types/api.ts in a follow-up sweep.
+type MerchantSummaryRow = {
+  currency: string
+  merchant: string
+  totalSpend: number
+  totalCredits: number
+  totalPayments: number
+  netSpend: number
+  transactionCount: number
+  lastDate: string
+  reviewCount: number
+}
+
+type AccountSummaryRow = {
+  currency: string
+  accountId: number
+  accountName: string
+  accountShortCode: string | null
+  totalSpend: number
+  totalCredits: number
+  totalPayments: number
+  netSpend: number
+  transactionCount: number
+  reviewCount: number
+}
+
+type DashboardSummarySubset = {
+  merchantSummaries: MerchantSummaryRow[]
+  accountSummaries: AccountSummaryRow[]
+}
+
 const DEFAULT_REPORTS_CURRENCY = 'CAD'
 
 function getRelativeDateRange(days: number): { from: string; to: string } {
@@ -86,6 +121,12 @@ export function ReportsPage() {
   )
   const [business, setBusiness] = useState<{ byCurrency: BusRow[] } | null>(
     null
+  )
+  const [merchantSummaries, setMerchantSummaries] = useState<MerchantSummaryRow[]>(
+    []
+  )
+  const [accountSummaries, setAccountSummaries] = useState<AccountSummaryRow[]>(
+    []
   )
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -127,17 +168,22 @@ export function ReportsPage() {
       setLoading(true)
       setErr(null)
       try {
-        const [p, b] = await Promise.all([
+        const [p, b, dash] = await Promise.all([
           getJson<{ byCurrency: PartnerRow[] }>(
             `/api/summary/partner${summaryQs}`
           ),
           getJson<{ byCurrency: BusRow[] }>(
             `/api/summary/business${summaryQs}`
           ),
+          getJson<DashboardSummarySubset>(
+            `/api/summary/dashboard${summaryQs}`
+          ),
         ])
         if (!cancelled) {
           setPartner(p)
           setBusiness(b)
+          setMerchantSummaries(dash.merchantSummaries ?? [])
+          setAccountSummaries(dash.accountSummaries ?? [])
         }
       } catch (e) {
         if (!cancelled)
@@ -176,6 +222,43 @@ export function ReportsPage() {
       cancelled = true
     }
   }, [loadSettlements])
+
+  // Merchant/account rollups filtered to the active currency (if set) and
+  // sorted by net spend desc. Drives the comprehensive tables linked from
+  // the Dashboard bento "View all" → /reports#merchants and #accounts.
+  const filteredMerchantSummaries = useMemo(() => {
+    return merchantSummaries
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) =>
+        b.netSpend === a.netSpend
+          ? b.transactionCount - a.transactionCount
+          : b.netSpend - a.netSpend
+      )
+  }, [merchantSummaries, currency])
+
+  const filteredAccountSummaries = useMemo(() => {
+    return accountSummaries
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) =>
+        b.netSpend === a.netSpend
+          ? b.transactionCount - a.transactionCount
+          : b.netSpend - a.netSpend
+      )
+  }, [accountSummaries, currency])
+
+  // Hash-anchor scroll on mount + on hash change. React Router does not
+  // scroll-into-view on hash navigation by default, so handle it here.
+  useEffect(() => {
+    const id = window.location.hash.replace(/^#/, '')
+    if (!id) return
+    // Wait one tick so the section has rendered before scrolling.
+    const timer = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const reportCurrencies = useMemo(() => {
     const found = new Set<string>()
@@ -742,6 +825,110 @@ export function ReportsPage() {
                       Delete
                     </Button>
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="merchants" className="card reportsTableCard">
+        <div className="reportsCardHeader">
+          <div>
+            <h2>Merchants</h2>
+            <p className="muted">
+              All merchants in this view, ranked by net spend. Linked from
+              the Dashboard's <em>Top merchants</em> tile.
+            </p>
+          </div>
+        </div>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                {!currency && <th>Currency</th>}
+                <th>Merchant</th>
+                <th>Txns</th>
+                <th>Spend</th>
+                <th>Refunds / credits</th>
+                <th>Payments</th>
+                <th>Net spend</th>
+                <th>Needs review</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && filteredMerchantSummaries.length === 0 && (
+                <tr>
+                  <td colSpan={currency ? 8 : 9} className="emptyStateCell">
+                    <p className="emptyState">
+                      No merchant activity for these filters.
+                    </p>
+                  </td>
+                </tr>
+              )}
+              {filteredMerchantSummaries.map((row) => (
+                <tr key={`${row.currency}:${row.merchant}`}>
+                  {!currency && <td>{row.currency}</td>}
+                  <td>{row.merchant}</td>
+                  <td>{row.transactionCount}</td>
+                  <td>{formatMoney(row.totalSpend, row.currency)}</td>
+                  <td>{formatMoney(row.totalCredits, row.currency)}</td>
+                  <td>{formatMoney(row.totalPayments, row.currency)}</td>
+                  <td>{formatMoney(row.netSpend, row.currency)}</td>
+                  <td>{row.reviewCount}</td>
+                  <td>{row.lastDate}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="accounts" className="card reportsTableCard">
+        <div className="reportsCardHeader">
+          <div>
+            <h2>Accounts</h2>
+            <p className="muted">
+              All accounts in this view, ranked by net spend. Linked from
+              the Dashboard's <em>Top accounts</em> tile.
+            </p>
+          </div>
+        </div>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                {!currency && <th>Currency</th>}
+                <th>Account</th>
+                <th>Txns</th>
+                <th>Spend</th>
+                <th>Refunds / credits</th>
+                <th>Payments</th>
+                <th>Net spend</th>
+                <th>Needs review</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && filteredAccountSummaries.length === 0 && (
+                <tr>
+                  <td colSpan={currency ? 7 : 8} className="emptyStateCell">
+                    <p className="emptyState">
+                      No account activity for these filters.
+                    </p>
+                  </td>
+                </tr>
+              )}
+              {filteredAccountSummaries.map((row) => (
+                <tr key={`${row.currency}:${row.accountId}`}>
+                  {!currency && <td>{row.currency}</td>}
+                  <td>{row.accountShortCode ?? row.accountName}</td>
+                  <td>{row.transactionCount}</td>
+                  <td>{formatMoney(row.totalSpend, row.currency)}</td>
+                  <td>{formatMoney(row.totalCredits, row.currency)}</td>
+                  <td>{formatMoney(row.totalPayments, row.currency)}</td>
+                  <td>{formatMoney(row.netSpend, row.currency)}</td>
+                  <td>{row.reviewCount}</td>
                 </tr>
               ))}
             </tbody>
