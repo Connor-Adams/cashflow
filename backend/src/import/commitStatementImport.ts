@@ -43,7 +43,7 @@ function isUniqueLike(e: unknown): boolean {
   );
 }
 
-async function findOrCreateSecurity(
+export async function findOrCreateSecurity(
   security: NormalizedSecurity,
   householdId: number | null,
   transaction: SequelizeTransaction
