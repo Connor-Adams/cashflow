@@ -153,6 +153,30 @@ export const enrichmentTransferWindowDays = parseIntEnv(
   2,
 );
 
+const TRUTHY = new Set(['true', '1', 'yes']);
+const FALSY = new Set(['false', '0', 'no']);
+function parseBoolEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (TRUTHY.has(raw)) return true;
+  if (FALSY.has(raw)) return false;
+  return fallback;
+}
+
+/** Stage 8 ai-batch: enabled when set true AND OPENAI_API_KEY present. */
+export const enrichmentAiEnabled = parseBoolEnv(
+  'ENRICHMENT_AI_ENABLED',
+  true,
+);
+export const enrichmentAiMaxMerchants = parseIntEnv(
+  'ENRICHMENT_AI_MAX_MERCHANTS_PER_IMPORT',
+  80,
+);
+export const enrichmentAiPerRowConcurrency = parseIntEnv(
+  'ENRICHMENT_AI_PER_ROW_CONCURRENCY',
+  4,
+);
+
 export const googleOauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
 export const googleOauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;
 export const googleOauthRedirectUri =
