@@ -75,6 +75,13 @@ export type StatementPreview = {
   warnings: string[];
   rowErrors: number;
   parseErrors: { rowIndex: number; message: string }[];
+  /**
+   * When true, every Transaction inserted during commit forces
+   * autoBusiness=true, regardless of what the enrichment pipeline produced.
+   * Used by the Wealthsimple bundle importer to mark corporate-account txns
+   * (Save for business, Corporate investing) as business income/expenses.
+   */
+  overrideBusiness?: boolean;
   duplicateCounts: {
     transactions: number;
     investmentActivities: number;

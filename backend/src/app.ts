@@ -14,9 +14,13 @@ import receiptsRouter from './routes/receipts';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import settlementsRouter from './routes/settlements';
+import budgetsRouter from './routes/budgets';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
+import externalOrdersRouter from './routes/externalOrders';
+import emailIntegrationsRouter from './routes/emailIntegrations';
 import portfolioRouter from './routes/portfolio';
+import captureRouter, { captureCors } from './routes/capture';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -32,6 +36,14 @@ app.get('/', (_req, res) => {
   });
 });
 
+// Apply the capture CORS allow-list BEFORE the global cors() middleware. The
+// global middleware uses a static `origin: env.corsOrigin` (the frontend host)
+// which rejects preflights from amazon.{com,ca,co.uk} / reportaproblem.apple.com
+// before they ever reach the /api/capture/orders router. By mounting captureCors
+// first on that exact path, the bookmarklet preflight gets the right
+// Access-Control-Allow-Origin header.
+app.use('/api/capture/orders', captureCors);
+
 app.use(
   cors({
     origin: env.corsOrigin,
@@ -45,17 +57,21 @@ app.use(attachAuth);
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
+app.use('/api/capture', captureRouter);
 app.use('/api', requireAuth);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/settlements', settlementsRouter);
+app.use('/api/budgets', budgetsRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/amazon', amazonRouter);
+app.use('/api/external-orders', externalOrdersRouter);
+app.use('/api/email', emailIntegrationsRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api', receiptsRouter);
 

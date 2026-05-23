@@ -3,7 +3,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
@@ -19,16 +18,15 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
-import { StatCard } from '@/components/ui/stat-card'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { BentoTile } from '@/components/dashboard/BentoTile'
+import { HeroTile } from '@/components/dashboard/HeroTile'
+import { KpiStack } from '@/components/dashboard/KpiStack'
+import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
+import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
+import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
+import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { formatMoney } from '../lib/formatMoney'
+import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import { toDateInputValue } from '../lib/dateInput'
@@ -38,6 +36,12 @@ import {
   formatShortMonth,
   useIsNarrowViewport,
 } from '../lib/chartViewport'
+import type {
+  BudgetProgress,
+  BudgetProgressResponse,
+  RecurringItem,
+  RecurringResponse,
+} from '../types/api'
 
 type Row = {
   currency: string
@@ -149,32 +153,37 @@ type AiInsightsResp = {
   insights: AiInsight[]
 }
 
+// Ordinal palette for the multi-currency line chart. Each entry resolves
+// against the active theme (Honey & Ink dual-mode tokens in index.css).
 const LINE_COLORS = [
-  'var(--primary)',
-  '#94a3b8',
-  '#f59e0b',
-  '#22c55e',
-  '#8b5cf6',
-  '#ec4899',
+  'var(--chart-line-1)',  // amber
+  'var(--chart-line-2)',  // jade
+  'var(--chart-line-3)',  // plum
+  'var(--chart-line-4)',  // rust
+  'var(--chart-line-5)',  // steel
+  'var(--chart-line-6)',  // mauve
 ]
 const DEFAULT_DASHBOARD_CURRENCY = 'CAD'
-const BUSINESS_COLOR = '#f59e0b'
-const PERSONAL_COLOR = '#22c55e'
 const CHART_TOOLTIP_STYLE = {
-  backgroundColor: 'rgba(11, 16, 22, 0.96)',
-  border: '1px solid rgba(119, 167, 255, 0.28)',
+  backgroundColor: 'var(--popover)',
+  border: '1px solid var(--border)',
   borderRadius: '14px',
-  boxShadow: '0 18px 40px rgba(0, 0, 0, 0.4)',
-  color: '#eef3f8',
+  boxShadow: 'var(--shadow)',
+  color: 'var(--popover-foreground)',
 }
 const CHART_TOOLTIP_LABEL_STYLE = {
-  color: '#eef3f8',
+  color: 'var(--popover-foreground)',
   fontWeight: 600,
   marginBottom: '0.35rem',
 }
 const CHART_TOOLTIP_ITEM_STYLE = {
-  color: '#eef3f8',
+  color: 'var(--popover-foreground)',
   padding: 0,
+}
+// Cursor highlight rendered behind the focused datum on hover. The default is
+// near-white which becomes invisible on a white card in light mode.
+const CHART_TOOLTIP_CURSOR = {
+  fill: 'color-mix(in oklch, var(--accent) 30%, transparent)',
 }
 
 function parseDateInput(value: string): Date | null {
@@ -223,6 +232,38 @@ function getYearToDateRange(): { from: string; to: string } {
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
+/**
+ * Fetch /api/recurring with the given currency filter. Returns the items
+ * on success or an empty list on failure — never throws. Pulled out so
+ * the useEffect that uses it stays small enough for the complexity gate.
+ */
+async function fetchRecurringSafely(currency: string): Promise<RecurringItem[]> {
+  const qs = currency ? `?currency=${encodeURIComponent(currency)}` : ''
+  try {
+    const resp = await getJson<RecurringResponse>(`/api/recurring${qs}`)
+    return resp.items
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Build a `/transactions?…` URL with the dashboard's current
+ * filter context layered on top of the caller's extra params.
+ * Dedupes the bento drill-click handlers (top categories chart,
+ * top merchants, top accounts) which all preserve the same context.
+ */
+function transactionsUrl(
+  extra: Record<string, string>,
+  ctx: { currency: string; dateFrom: string; dateTo: string }
+): string {
+  const qs = new URLSearchParams(extra)
+  if (ctx.currency) qs.set('currency', ctx.currency)
+  if (ctx.dateFrom) qs.set('dateFrom', ctx.dateFrom)
+  if (ctx.dateTo) qs.set('dateTo', ctx.dateTo)
+  return `/transactions?${qs.toString()}`
+}
+
 export function DashboardPage() {
   const navigate = useNavigate()
   const isNarrowViewport = useIsNarrowViewport()
@@ -243,8 +284,20 @@ export function DashboardPage() {
   const [previousMetricsByCurrency, setPreviousMetricsByCurrency] = useState<
     CurrencyMetrics[]
   >([])
+  // Previous-period category rollups, used by the Top growers tile. The
+  // /api/summary/dashboard response already includes categoryReports for
+  // the previous-period fetch; before this it was discarded.
+  const [previousCategoryReports, setPreviousCategoryReports] = useState<
+    CategoryReportRow[]
+  >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
   const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
+  const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
+  // Recurring charges, fetched separately so a /api/recurring failure
+  // never tanks the rest of the dashboard. Empty list on failure or
+  // initial load.
+  const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
+  const [recurringLoading, setRecurringLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -291,6 +344,7 @@ export function DashboardPage() {
           setData(d)
           setMonthly(m)
           setPreviousMetricsByCurrency(prev?.metricsByCurrency ?? [])
+          setPreviousCategoryReports(prev?.categoryReports ?? [])
           setAiInsights(insights)
         }
       } catch (e) {
@@ -303,6 +357,56 @@ export function DashboardPage() {
       cancelled = true
     }
   }, [summaryQs, previousRange, currency, dateFrom, dateTo])
+
+  // Budget progress is scoped to the active currency filter only — periods
+  // are always "current calendar month" on the backend, so date filters
+  // don't apply. Kept in its own effect so a failing /budgets/progress
+  // request doesn't tank the main dashboard rendering.
+  useEffect(() => {
+    let cancelled = false
+    const qs = currency
+      ? `?currency=${encodeURIComponent(currency)}`
+      : ''
+    ;(async () => {
+      try {
+        const resp = await getJson<BudgetProgressResponse>(
+          `/api/budgets/progress${qs}`
+        )
+        if (!cancelled) setBudgetProgress(resp.items)
+      } catch {
+        if (!cancelled) setBudgetProgress([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currency])
+
+  // Sort most-at-risk first; ties broken by category label so layout is
+  // deterministic between renders. Overall budgets ("null" category) get a
+  // stable label for the sort comparator.
+  const budgetProgressSorted = useMemo(() => {
+    return [...budgetProgress].sort((a, b) => {
+      if (b.percentUsed !== a.percentUsed) return b.percentUsed - a.percentUsed
+      return (a.category ?? '').localeCompare(b.category ?? '')
+    })
+  }, [budgetProgress])
+
+  // Recurring charges, fetched separately on currency change. Wrapped in
+  // try/catch so a failed fetch falls back to empty (same pattern as
+  // budgets above) — the Recurring tile self-handles empty/error states.
+  useEffect(() => {
+    let cancelled = false
+    setRecurringLoading(true)
+    void fetchRecurringSafely(currency).then((items) => {
+      if (cancelled) return
+      setRecurringItems(items)
+      setRecurringLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [currency])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -339,12 +443,12 @@ export function DashboardPage() {
   const navigateToCategory = useCallback(
     (categoryName: string) => {
       if (!categoryName) return
-      const qs = new URLSearchParams()
-      qs.set('category', categoryName)
-      if (currency) qs.set('currency', currency)
-      if (dateFrom) qs.set('dateFrom', dateFrom)
-      if (dateTo) qs.set('dateTo', dateTo)
-      navigate(`/transactions?${qs.toString()}`)
+      navigate(
+        transactionsUrl(
+          { category: categoryName },
+          { currency, dateFrom, dateTo }
+        )
+      )
     },
     [navigate, currency, dateFrom, dateTo]
   )
@@ -409,7 +513,6 @@ export function DashboardPage() {
       {
         label: string
         tone: 'business' | 'personal'
-        fill: string
         totalSpend: number
         totalCredits: number
         netSpend: number
@@ -421,7 +524,6 @@ export function DashboardPage() {
       const existing = byFlag.get(key) ?? {
         label: key,
         tone: row.business ? 'business' : 'personal',
-        fill: row.business ? BUSINESS_COLOR : PERSONAL_COLOR,
         totalSpend: 0,
         totalCredits: 0,
         netSpend: 0,
@@ -439,7 +541,6 @@ export function DashboardPage() {
       businessReportData.find((row) => row.tone === 'business') ?? {
         label: 'Business',
         tone: 'business' as const,
-        fill: BUSINESS_COLOR,
         totalSpend: 0,
         totalCredits: 0,
         netSpend: 0,
@@ -448,7 +549,6 @@ export function DashboardPage() {
       businessReportData.find((row) => row.tone === 'personal') ?? {
         label: 'Personal',
         tone: 'personal' as const,
-        fill: PERSONAL_COLOR,
         totalSpend: 0,
         totalCredits: 0,
         netSpend: 0,
@@ -471,37 +571,15 @@ export function DashboardPage() {
     }
   }, [businessReportData])
 
-  const categoryReportData = useMemo(() => {
-    const rows = data?.categoryReports ?? []
-    return rows
-      .filter((row) => !currency || row.currency === currency)
-      .slice()
-      .sort((a, b) => b.netSpend - a.netSpend)
-  }, [data?.categoryReports, currency])
+  const merchantReportData = useMemo(
+    () => rankByNetSpend(data?.merchantSummaries ?? [], currency),
+    [data?.merchantSummaries, currency]
+  )
 
-  const merchantReportData = useMemo(() => {
-    const rows = data?.merchantSummaries ?? []
-    return rows
-      .filter((row) => !currency || row.currency === currency)
-      .slice()
-      .sort((a, b) =>
-        b.netSpend === a.netSpend
-          ? b.transactionCount - a.transactionCount
-          : b.netSpend - a.netSpend
-      )
-  }, [data?.merchantSummaries, currency])
-
-  const accountReportData = useMemo(() => {
-    const rows = data?.accountSummaries ?? []
-    return rows
-      .filter((row) => !currency || row.currency === currency)
-      .slice()
-      .sort((a, b) =>
-        b.netSpend === a.netSpend
-          ? b.transactionCount - a.transactionCount
-          : b.netSpend - a.netSpend
-      )
-  }, [data?.accountSummaries, currency])
+  const accountReportData = useMemo(
+    () => rankByNetSpend(data?.accountSummaries ?? [], currency),
+    [data?.accountSummaries, currency]
+  )
 
   const reviewQueueData = useMemo(() => {
     const rows = data?.reviewQueue ?? []
@@ -660,6 +738,65 @@ export function DashboardPage() {
     return isNarrowViewport ? formatShortMonth(value) : value
   }
 
+  // Column specs for the bento table-tiles. Defined inside the component
+  // so the render closures can reference `formatMoney` directly without
+  // tunneling it through the column spec.
+  const merchantColumns: TableTileColumn<MerchantSummaryRow>[] = [
+    { key: 'merchant', label: 'Merchant', render: (r) => r.merchant },
+    {
+      key: 'txns',
+      label: 'Txns',
+      align: 'right',
+      width: '3rem',
+      render: (r) => r.transactionCount,
+    },
+    {
+      key: 'net',
+      label: 'Net spend',
+      align: 'right',
+      render: (r) => formatMoney(r.netSpend, r.currency),
+    },
+  ]
+
+  const accountColumns: TableTileColumn<AccountSummaryRow>[] = [
+    {
+      key: 'account',
+      label: 'Account',
+      render: (r) => r.accountShortCode ?? r.accountName,
+    },
+    {
+      key: 'txns',
+      label: 'Txns',
+      align: 'right',
+      width: '3rem',
+      render: (r) => r.transactionCount,
+    },
+    {
+      key: 'net',
+      label: 'Net spend',
+      align: 'right',
+      render: (r) => formatMoney(r.netSpend, r.currency),
+    },
+  ]
+
+  const reviewColumns: TableTileColumn<ReviewQueueRow>[] = [
+    { key: 'date', label: 'Date', width: '6rem', render: (r) => r.date },
+    { key: 'merchant', label: 'Merchant', render: (r) => r.merchant },
+    { key: 'account', label: 'Account', render: (r) => r.accountName },
+    {
+      key: 'category',
+      label: 'Category',
+      render: (r) => r.category ?? '(uncategorized)',
+    },
+    {
+      key: 'amount',
+      label: 'Amount',
+      align: 'right',
+      width: '6rem',
+      render: (r) => formatMoney(r.amount, r.currency),
+    },
+  ]
+
   return (
     <div className="page">
       <PageHeader
@@ -727,186 +864,231 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
-      <section className="dashboardStats" aria-busy={loading}>
-        <StatCard
-          label="Total spend"
-          value={summaryStats.spendLabel}
-          hint={`Charges only (absolute values). ${summaryStats.moneyHint}`}
-          delta={hasComparisonPeriod ? summaryStats.spendDeltaLabel : undefined}
-          metricKind="spend"
-        />
-        <StatCard
-          label="Refunds / credits"
-          value={summaryStats.creditsLabel}
-          hint="Positive amounts excluding payments and transfers."
-          delta={hasComparisonPeriod ? summaryStats.creditsDeltaLabel : undefined}
-          metricKind="gain"
-        />
-        <StatCard
-          label="Payments / transfers"
-          value={summaryStats.paymentsLabel}
-          hint="Card payments and transfer-like inflows, tracked separately."
-          delta={hasComparisonPeriod ? summaryStats.paymentsDeltaLabel : undefined}
-          metricKind="neutral"
-        />
-        <StatCard
-          label="Net spend"
-          value={summaryStats.netSpendLabel}
-          hint="Spend minus refunds/credits. Payments excluded."
-          delta={hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined}
-          metricKind="spend"
-        />
-        <StatCard
-          label="Transactions"
-          value={summaryStats.txCount}
-          hint="Rows in current filters"
-          delta={hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined}
-          metricKind="neutral"
-        />
-        <StatCard
-          label="Merchants"
-          value={summaryStats.merchantCount}
-          hint="Distinct merchants in the current filters"
-          metricKind="neutral"
-        />
-        <StatCard
-          label="Accounts"
-          value={summaryStats.accountCount}
-          hint="Accounts contributing activity in this view"
-          metricKind="neutral"
-        />
-      </section>
-
-      {aiInsights && (
-        <section className="card dashboardChartCard" aria-busy={loading}>
-          <h2>AI insights</h2>
-          <p className="muted">
-            Calculated from finalized {aiInsights.currency} transactions for{' '}
-            {aiInsights.period}; supporting transaction ids are shown for audit.
-          </p>
-          <div className="aiVisibilityList">
-            {aiInsights.insights.length === 0 ? (
-              <p className="emptyState">No AI insights for this period yet.</p>
-            ) : (
-              aiInsights.insights.map((insight) => (
-                <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
-                  <div className="aiVisibilityItemHeader">
-                    <strong>{insight.title}</strong>
-                    <span className="muted">{insight.severity}</span>
-                  </div>
-                  <p>{insight.summary}</p>
-                  <p className="muted">
-                    {insight.comparison} · {formatDashboardAmount(insight.amount)}
-                  </p>
-                  {insight.supportingTransactionIds.length > 0 ? (
-                    <p className="muted">
-                      Transactions: #{insight.supportingTransactionIds.join(', #')}
-                    </p>
-                  ) : null}
-                  <p className="muted">{insight.suggestedAction}</p>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
-      )}
-
-      <section className="card dashboardBusinessSpotlight" aria-busy={loading}>
-        <div className="businessSpotlightHeader">
-          <div>
-            <h2>Business vs personal</h2>
-            <p className="muted">
-              A direct split of current net spend so business charges do not get lost
-              in the overall totals.
-            </p>
-          </div>
-          <div className="businessSpotlightTotals">
-            <p className="businessSpotlightTotalLabel">Combined net spend</p>
-            <p className="businessSpotlightTotalValue">
-              {formatDashboardAmount(businessSpotlight.totalNetSpend)}
-            </p>
-          </div>
-        </div>
-
-        <div className="businessSpotlightGrid">
-          {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
-            const share =
-              businessSpotlight.totalNetSpend > 0
-                ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
-                : 0
-            return (
-              <article
-                key={row.label}
-                className={`businessFocusCard businessFocusCard--${row.tone}`}
-              >
-                <p className="businessFocusLabel">{row.label}</p>
-                <p className="businessFocusValue">
-                  {formatDashboardAmount(row.netSpend)}
-                </p>
-                <p className="businessFocusShare">
-                  {businessSpotlight.totalNetSpend > 0
-                    ? `${share.toFixed(0)}% of current net spend`
-                    : 'No net spend in current filters'}
-                </p>
-                <dl className="businessFocusMetrics">
-                  <div>
-                    <dt>Gross spend</dt>
-                    <dd>{formatDashboardAmount(row.totalSpend)}</dd>
-                  </div>
-                  <div>
-                    <dt>Credits</dt>
-                    <dd>{formatDashboardAmount(row.totalCredits)}</dd>
-                  </div>
-                </dl>
-              </article>
-            )
-          })}
-        </div>
-
-        <div className="businessSharePanel">
-          <div className="businessShareLabels" aria-hidden="true">
-            <span>Business {businessSpotlight.businessShare.toFixed(0)}%</span>
-            <span>Personal {businessSpotlight.personalShare.toFixed(0)}%</span>
-          </div>
-          <div
-            className="businessShareBar"
-            role="img"
-            aria-label={`Business ${businessSpotlight.businessShare.toFixed(
-              0
-            )} percent, personal ${businessSpotlight.personalShare.toFixed(
-              0
-            )} percent of net spend`}
+      <div className="dashboardBento" aria-busy={loading}>
+        {budgetProgressSorted.length > 0 && (
+          <BentoTile
+            span={12}
+            rows={1}
+            aria-busy={loading}
+            label="Monthly budget progress"
+            description="Spend so far this calendar month against targets in Settings. Sorted by share used."
           >
-            <span
-              className="businessShareFill businessShareFill--business"
-              style={{ width: `${businessSpotlight.businessShare}%` }}
-            />
-            <span
-              className="businessShareFill businessShareFill--personal"
-              style={{ width: `${businessSpotlight.personalShare}%` }}
-            />
-          </div>
-          <p className="muted businessShareCaption">
-            Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
-            Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
-          </p>
-        </div>
-      </section>
+            <div className="budgetPillStrip">
+              {budgetProgressSorted.map((item) => {
+                // Color thresholds: under 80% is on-pace, 80-100% warns,
+                // over 100% spills to destructive. Bar fill capped at 100%
+                // width so overage doesn't break layout; the percent caption
+                // still shows the true value.
+                const tone =
+                  item.percentUsed > 100
+                    ? 'over'
+                    : item.percentUsed >= 80
+                      ? 'warn'
+                      : 'ok'
+                const width = `${Math.min(100, item.percentUsed)}%`
+                const label = item.category ?? 'Overall'
+                const percentRounded = Math.round(item.percentUsed)
+                return (
+                  <article
+                    key={item.budgetId}
+                    className={`budgetPill budgetPill--${tone}`}
+                  >
+                    <header className="budgetPill__header">
+                      <strong className="budgetPill__label" title={label}>
+                        {label}
+                      </strong>
+                      <span className="budgetPill__pct">{percentRounded}%</span>
+                    </header>
+                    <div
+                      className="budgetPill__bar"
+                      role="img"
+                      aria-label={`${label} ${percentRounded} percent of monthly target used`}
+                    >
+                      <span
+                        className="budgetPill__fill"
+                        style={{ width }}
+                      />
+                    </div>
+                    <p className="budgetPill__amount">
+                      {formatMoney(item.spent, item.currency)} /{' '}
+                      {formatMoney(item.target, item.currency)}{' '}
+                      <span className="budgetPill__currency">{item.currency}</span>
+                    </p>
+                  </article>
+                )
+              })}
+            </div>
+          </BentoTile>
+        )}
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Monthly breakdown</h2>
-        <p className="muted">
-          Gross spend, refunds/credits, and payments/transfers by month.
-        </p>
-        <div className="chartWrap">
+        <BentoTile
+          span={8}
+          rows={2}
+          variant="hero"
+          aria-busy={loading}
+          aria-label="This period at a glance"
+        >
+          <HeroTile
+            netSpendLabel={summaryStats.netSpendLabel}
+            netSpendDelta={
+              hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined
+            }
+            subMetrics={[
+              {
+                label: 'Spend',
+                value: summaryStats.spendLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.spendDeltaLabel
+                  : undefined,
+                metricKind: 'spend',
+              },
+              {
+                label: 'Refunds / credits',
+                value: summaryStats.creditsLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.creditsDeltaLabel
+                  : undefined,
+                metricKind: 'gain',
+              },
+              {
+                label: 'Payments / transfers',
+                value: summaryStats.paymentsLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.paymentsDeltaLabel
+                  : undefined,
+                metricKind: 'neutral',
+              },
+            ]}
+            comparisonHint={summaryStats.comparisonHint}
+            moneyHint={summaryStats.moneyHint}
+            sparklineData={monthlyBreakdownData.map((m) => ({
+              month: m.month,
+              value: m.netSpend,
+            }))}
+          />
+        </BentoTile>
+
+        <BentoTile span={4} rows={2} aria-busy={loading} aria-label="Activity counts">
+          <KpiStack
+            items={[
+              {
+                label: 'Transactions',
+                value: summaryStats.txCount,
+                hint: 'Rows in current filters',
+                delta: hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined,
+                metricKind: 'neutral',
+              },
+              {
+                label: 'Merchants',
+                value: summaryStats.merchantCount,
+                hint: 'Distinct merchants',
+                metricKind: 'neutral',
+              },
+              {
+                label: 'Accounts',
+                value: summaryStats.accountCount,
+                hint: 'Contributing activity',
+                metricKind: 'neutral',
+              },
+            ]}
+          />
+        </BentoTile>
+
+        <BentoTile
+          span={6}
+          rows={2}
+          aria-busy={loading}
+          label="Business vs personal"
+          description="A direct split of current net spend so business charges do not get lost in the overall totals."
+          actions={
+            <div className="businessSpotlightTotals">
+              <p className="businessSpotlightTotalLabel">Combined net spend</p>
+              <p className="businessSpotlightTotalValue">
+                {formatDashboardAmount(businessSpotlight.totalNetSpend)}
+              </p>
+            </div>
+          }
+        >
+          <div className="businessSpotlightGrid">
+            {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
+              const share =
+                businessSpotlight.totalNetSpend > 0
+                  ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
+                  : 0
+              return (
+                <article
+                  key={row.label}
+                  className={`businessFocusCard businessFocusCard--${row.tone}`}
+                >
+                  <p className="businessFocusLabel">{row.label}</p>
+                  <p className="businessFocusValue">
+                    {formatDashboardAmount(row.netSpend)}
+                  </p>
+                  <p className="businessFocusShare">
+                    {businessSpotlight.totalNetSpend > 0
+                      ? `${share.toFixed(0)}% of current net spend`
+                      : 'No net spend in current filters'}
+                  </p>
+                  <dl className="businessFocusMetrics">
+                    <div>
+                      <dt>Gross spend</dt>
+                      <dd>{formatDashboardAmount(row.totalSpend)}</dd>
+                    </div>
+                    <div>
+                      <dt>Credits</dt>
+                      <dd>{formatDashboardAmount(row.totalCredits)}</dd>
+                    </div>
+                  </dl>
+                </article>
+              )
+            })}
+          </div>
+
+          <div className="businessSharePanel">
+            <div className="businessShareLabels" aria-hidden="true">
+              <span>Business {businessSpotlight.businessShare.toFixed(0)}%</span>
+              <span>Personal {businessSpotlight.personalShare.toFixed(0)}%</span>
+            </div>
+            <div
+              className="businessShareBar"
+              role="img"
+              aria-label={`Business ${businessSpotlight.businessShare.toFixed(
+                0
+              )} percent, personal ${businessSpotlight.personalShare.toFixed(
+                0
+              )} percent of net spend`}
+            >
+              <span
+                className="businessShareFill businessShareFill--business"
+                style={{ width: `${businessSpotlight.businessShare}%` }}
+              />
+              <span
+                className="businessShareFill businessShareFill--personal"
+                style={{ width: `${businessSpotlight.personalShare}%` }}
+              />
+            </div>
+            <p className="muted businessShareCaption">
+              Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
+              Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
+            </p>
+          </div>
+        </BentoTile>
+
+        <BentoTile
+          span={6}
+          rows={2}
+          aria-busy={loading}
+          label="Monthly flow"
+          description="Gross spend, refunds / credits, and payments / transfers by month."
+        >
           {monthlyBreakdownData.length === 0 ? (
             !loading ? (
               <p className="emptyState">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 280 : 320}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={monthlyBreakdownData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="month"
                   tick={narrowAxisTick}
@@ -923,6 +1105,7 @@ export function DashboardPage() {
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -932,33 +1115,27 @@ export function DashboardPage() {
                 <Legend
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={isNarrowViewport ? { fontSize: 11 } : undefined}
+                  wrapperStyle={{ fontSize: 11 }}
                 />
-                <Bar dataKey="totalSpend" name="Spend" fill="var(--primary)" />
-                <Bar dataKey="totalCredits" name="Refunds / credits" fill="#22c55e" />
+                <Bar dataKey="totalSpend" name="Spend" fill="var(--chart-spend)" />
+                <Bar dataKey="totalCredits" name="Refunds / credits" fill="var(--chart-credit)" />
                 <Bar
                   dataKey="totalPayments"
                   name="Payments / transfers"
-                  fill="#94a3b8"
+                  fill="var(--chart-payment)"
                 />
               </BarChart>
             </ResponsiveContainer>
           )}
-        </div>
-      </section>
+        </BentoTile>
 
-      <section
-        className="card dashboardChartCard"
-        aria-busy={loading}
-        aria-label="Net spend by category. Click a bar to view its transactions."
-      >
-        <h2>Net spend by category</h2>
-        <p className="muted">
-          Higher bar = more money out. Click a bar to open those transactions with the
-          current filters applied. Payments and transfers are excluded; refunds and
-          credits offset spend in the same category.
-        </p>
-        <div className="chartWrap">
+        <BentoTile
+          span={8}
+          rows={2}
+          aria-busy={loading}
+          label="Net spend by category"
+          description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
+        >
           {chartData.length === 0 ? (
             !loading ? (
               <div>
@@ -988,24 +1165,21 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 260 : 320}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={chartData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="name"
                   tick={narrowAxisTick}
                   // Category-count-aware label handling: once there are more
                   // than 10 categories, default Recharts spacing overlaps even
                   // on wide viewports. Steepen the angle and give the axis
-                  // more vertical space so every label still renders (using
-                  // preserveStartEnd silently dropped every other label,
-                  // hiding big categories like Rent under the tallest bar).
-                  // Narrow viewport stacks the tick-font shrink on top.
+                  // more vertical space so every label still renders.
                   interval={0}
                   minTickGap={isNarrowViewport ? 12 : 5}
                   angle={hasManyCategories ? -45 : 0}
                   textAnchor={hasManyCategories ? 'end' : 'middle'}
-                  height={hasManyCategories ? 110 : undefined}
+                  height={hasManyCategories ? 90 : undefined}
                 />
                 <YAxis
                   tick={narrowAxisTick}
@@ -1016,6 +1190,7 @@ export function DashboardPage() {
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -1026,13 +1201,10 @@ export function DashboardPage() {
                         }).format(v)
                   }}
                 />
-                {!isNarrowViewport && (
-                  <Legend verticalAlign="bottom" align="center" />
-                )}
                 <Bar
                   dataKey="total"
                   name="Net spend"
-                  fill="var(--primary)"
+                  fill="var(--chart-spend)"
                   cursor="pointer"
                   onClick={(entry) => {
                     // Recharts hands us the data row as the click payload. Guard
@@ -1048,88 +1220,83 @@ export function DashboardPage() {
               </BarChart>
             </ResponsiveContainer>
           )}
-        </div>
-        {chartData.length > 0 ? (
-          <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-            Jump to transactions:{' '}
-            {chartData.map((entry, index) => (
-              <span key={entry.name}>
-                {index > 0 ? ', ' : ''}
-                <Link
-                  to={`/transactions?${new URLSearchParams({
-                    category: entry.name,
-                    ...(currency ? { currency } : {}),
-                    ...(dateFrom ? { dateFrom } : {}),
-                    ...(dateTo ? { dateTo } : {}),
-                  }).toString()}`}
-                  className="text-sm font-semibold underline"
-                >
-                  {entry.name}
-                </Link>
-              </span>
-            ))}
-            .
-          </p>
-        ) : null}
-      </section>
+          {chartData.length > 0 ? (
+            <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
+              Jump to:{' '}
+              {chartData.slice(0, 8).map((entry, index) => (
+                <span key={entry.name}>
+                  {index > 0 ? ', ' : ''}
+                  <Link
+                    to={`/transactions?${new URLSearchParams({
+                      category: entry.name,
+                      ...(currency ? { currency } : {}),
+                      ...(dateFrom ? { dateFrom } : {}),
+                      ...(dateTo ? { dateTo } : {}),
+                    }).toString()}`}
+                    className="font-semibold underline"
+                  >
+                    {entry.name}
+                  </Link>
+                </span>
+              ))}
+              {chartData.length > 8 ? '…' : '.'}
+            </p>
+          ) : null}
+        </BentoTile>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Net spend by business flag</h2>
-        <p className="muted">
-          Same split, charted directly with separate business and personal colors.
-        </p>
-        <div className="chartWrap">
-          {businessReportData.length === 0 ? (
-            !loading ? (
-              <p className="emptyState">No business breakdown data for these filters.</p>
-            ) : null
-          ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 240 : 280}>
-              <BarChart data={businessReportData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" tick={narrowAxisTick} />
-                <YAxis
-                  tick={narrowAxisTick}
-                  width={isNarrowViewport ? 44 : 60}
-                  tickFormatter={compactCurrencyTickFormatter}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  formatter={(value) => {
-                    const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
-                    return formatDashboardAmount(v)
-                  }}
-                />
-                {!isNarrowViewport && (
-                  <Legend verticalAlign="bottom" align="center" />
-                )}
-                <Bar dataKey="netSpend" name="Net spend">
-                  {businessReportData.map((entry) => (
-                    <Cell key={entry.label} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </section>
+        <BentoTile
+          span={4}
+          rows={2}
+          aria-busy={loading}
+          label="AI insights"
+          description={
+            aiInsights
+              ? `${aiInsights.currency} · ${aiInsights.period}`
+              : 'Awaiting fetch'
+          }
+        >
+          <div className="aiVisibilityList">
+            {!aiInsights ? (
+              <p className="emptyState">
+                {loading ? 'Loading insights…' : 'No insights available yet.'}
+              </p>
+            ) : aiInsights.insights.length === 0 ? (
+              <p className="emptyState">No AI insights for {aiInsights.period} yet.</p>
+            ) : (
+              aiInsights.insights.map((insight) => (
+                <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
+                  <div className="aiVisibilityItemHeader">
+                    <strong>{insight.title}</strong>
+                    <span className="muted">{insight.severity}</span>
+                  </div>
+                  <p>{insight.summary}</p>
+                  <p className="muted">
+                    {insight.comparison} · {formatDashboardAmount(insight.amount)}
+                  </p>
+                  {insight.supportingTransactionIds.length > 0 ? (
+                    <p className="muted">
+                      Transactions: #{insight.supportingTransactionIds.join(', #')}
+                    </p>
+                  ) : null}
+                  <p className="muted">{insight.suggestedAction}</p>
+                </article>
+              ))
+            )}
+          </div>
+        </BentoTile>
 
-      <section className="card dashboardChartCard">
-        <h2>Activity by month</h2>
-        <p className="muted">
-          One line per currency using signed monthly totals, excluding payments and
-          transfers.
-        </p>
-        <div className="chartWrap">
+        <BentoTile
+          span={6}
+          rows={2}
+          label="Activity by month"
+          description="One line per currency using signed monthly totals, excluding payments and transfers."
+        >
           {monthlyChartData.length === 0 ? (
             !loading ? <p className="muted">No transactions in this range.</p> : null
           ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 280 : 320}>
+            <ResponsiveContainer width="100%" height={220}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="month"
                   tick={narrowAxisTick}
@@ -1146,6 +1313,7 @@ export function DashboardPage() {
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value, name) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -1171,190 +1339,82 @@ export function DashboardPage() {
               </LineChart>
             </ResponsiveContainer>
           )}
-        </div>
-      </section>
+        </BentoTile>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Category report</h2>
-        <p className="muted">
-          Top categories ranked by net spend for the current filters.
-        </p>
-        <div className="tableWrap">
-          <Table className="table">
-            <TableHeader>
-              <TableRow>
-                {!currency && <TableHead>Currency</TableHead>}
-                <TableHead>Category</TableHead>
-                <TableHead>Spend</TableHead>
-                <TableHead>Refunds / credits</TableHead>
-                <TableHead>Net spend</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!loading && categoryReportData.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={currency ? 4 : 5}
-                    className="emptyStateCell"
-                  >
-                    <p className="emptyState">
-                      No category report data for these filters.
-                    </p>
-                  </TableCell>
-                </TableRow>
-              ) : null}
-              {categoryReportData.slice(0, 12).map((row) => (
-                  <TableRow key={`${row.currency}:${row.category ?? 'uncategorized'}`}>
-                    {!currency && <TableCell>{row.currency}</TableCell>}
-                    <TableCell>{row.category ?? '(uncategorized)'}</TableCell>
-                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+        <TopGrowersTile
+          currentRows={data?.categoryReports ?? []}
+          previousRows={previousCategoryReports}
+          hasComparisonPeriod={hasComparisonPeriod}
+          currency={currency}
+          loading={loading}
+        />
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Merchant report</h2>
-        <p className="muted">
-          Where the money is actually going, ranked by net spend with refunds,
-          payments, and review backlog shown beside it.
-        </p>
-        <div className="tableWrap">
-          <Table className="table">
-            <TableHeader>
-              <TableRow>
-                {!currency && <TableHead>Currency</TableHead>}
-                <TableHead>Merchant</TableHead>
-                <TableHead>Transactions</TableHead>
-                <TableHead>Spend</TableHead>
-                <TableHead>Refunds / credits</TableHead>
-                <TableHead>Payments</TableHead>
-                <TableHead>Net spend</TableHead>
-                <TableHead>Needs review</TableHead>
-                <TableHead>Last seen</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!loading && merchantReportData.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={currency ? 8 : 9} className="emptyStateCell">
-                    <p className="emptyState">
-                      No merchant-level activity for these filters.
-                    </p>
-                  </TableCell>
-                </TableRow>
-              ) : null}
-              {merchantReportData.slice(0, 12).map((row) => (
-                  <TableRow key={`${row.currency}:${row.merchant}`}>
-                    {!currency && <TableCell>{row.currency}</TableCell>}
-                    <TableCell>{row.merchant}</TableCell>
-                    <TableCell>{row.transactionCount}</TableCell>
-                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.totalPayments, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
-                    <TableCell>{row.reviewCount}</TableCell>
-                    <TableCell>{row.lastDate}</TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+        <RecurringThisMonthTile
+          items={recurringItems}
+          loading={recurringLoading}
+        />
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Account report</h2>
-        <p className="muted">
-          Which accounts are driving the totals, including payment volume and review
-          backlog.
-        </p>
-        <div className="tableWrap">
-          <Table className="table">
-            <TableHeader>
-              <TableRow>
-                {!currency && <TableHead>Currency</TableHead>}
-                <TableHead>Account</TableHead>
-                <TableHead>Transactions</TableHead>
-                <TableHead>Spend</TableHead>
-                <TableHead>Refunds / credits</TableHead>
-                <TableHead>Payments</TableHead>
-                <TableHead>Net spend</TableHead>
-                <TableHead>Needs review</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!loading && accountReportData.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={currency ? 7 : 8} className="emptyStateCell">
-                    <p className="emptyState">
-                      No account-level totals for these filters.
-                    </p>
-                  </TableCell>
-                </TableRow>
-              ) : null}
-              {accountReportData.map((row) => (
-                  <TableRow key={`${row.currency}:${row.accountId}`}>
-                    {!currency && <TableCell>{row.currency}</TableCell>}
-                    <TableCell>{row.accountShortCode ?? row.accountName}</TableCell>
-                    <TableCell>{row.transactionCount}</TableCell>
-                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.totalPayments, row.currency)}</TableCell>
-                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
-                    <TableCell>{row.reviewCount}</TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+        <CurrencyMixTile
+          metrics={data?.metricsByCurrency ?? []}
+          loading={loading}
+        />
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Review queue</h2>
-        <p className="muted">
-          Recent flagged transactions from the current view so you can see what still
-          needs cleanup.
-        </p>
-        <div className="tableWrap">
-          <Table className="table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                {!currency && <TableHead>Currency</TableHead>}
-                <TableHead>Merchant</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Amount</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!loading && reviewQueueData.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={currency ? 5 : 6} className="emptyStateCell">
-                    <p className="emptyState">
-                      No flagged transactions in the current filters.
-                    </p>
-                  </TableCell>
-                </TableRow>
-              ) : null}
-              {reviewQueueData.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>{row.date}</TableCell>
-                    {!currency && <TableCell>{row.currency}</TableCell>}
-                    <TableCell>{row.merchant}</TableCell>
-                    <TableCell>{row.accountName}</TableCell>
-                    <TableCell>{row.category ?? '(uncategorized)'}</TableCell>
-                    <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+        <TableTile
+          span={6}
+          label="Top merchants"
+          description="Highest net spend in this view."
+          columns={merchantColumns}
+          rows={merchantReportData.slice(0, 6)}
+          rowKey={(r) => `${r.currency}:${r.merchant}`}
+          onRowClick={(r) =>
+            navigate(
+              transactionsUrl(
+                { merchant: r.merchant },
+                { currency, dateFrom, dateTo }
+              )
+            )
+          }
+          viewAllLabel="All merchants in Reports"
+          viewAllHref="/reports#merchants"
+          emptyLabel="No merchant activity in this view."
+          loading={loading}
+        />
+
+        <TableTile
+          span={6}
+          label="Top accounts"
+          description="Highest net spend in this view."
+          columns={accountColumns}
+          rows={accountReportData.slice(0, 6)}
+          rowKey={(r) => `${r.currency}:${r.accountId}`}
+          onRowClick={(r) =>
+            navigate(
+              transactionsUrl(
+                { account: String(r.accountId) },
+                { currency, dateFrom, dateTo }
+              )
+            )
+          }
+          viewAllLabel="All accounts in Reports"
+          viewAllHref="/reports#accounts"
+          emptyLabel="No account activity in this view."
+          loading={loading}
+        />
+
+        <TableTile
+          span={12}
+          label="Review queue"
+          description="Flagged transactions in this view, most recent first."
+          columns={reviewColumns}
+          rows={reviewQueueData.slice(0, 6)}
+          rowKey={(r) => String(r.id)}
+          onRowClick={() => navigate('/review')}
+          viewAllLabel="Open Review Inbox"
+          viewAllHref="/review"
+          emptyLabel="Nothing flagged in this view."
+          loading={loading}
+        />
+      </div>
     </div>
   )
 }

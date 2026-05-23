@@ -25,6 +25,7 @@ import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { deleteReq, getJson, postJson } from '../lib/api'
+import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { useSessionState } from '../lib/useSessionState'
 import type {
   Contact,
@@ -59,6 +60,41 @@ type PartnerRow = {
 }
 
 type BusRow = { currency: string; sumBusiness: number }
+
+// Merchant + account rollups consumed for the comprehensive
+// merchant/account tables linked from the Dashboard bento "View all".
+// Types mirror what /api/summary/dashboard returns; DashboardPage defines
+// them inline today — extract to types/api.ts in a follow-up sweep.
+type MerchantSummaryRow = {
+  currency: string
+  merchant: string
+  totalSpend: number
+  totalCredits: number
+  totalPayments: number
+  netSpend: number
+  transactionCount: number
+  lastDate: string
+  reviewCount: number
+}
+
+type AccountSummaryRow = {
+  currency: string
+  accountId: number
+  accountName: string
+  accountShortCode: string | null
+  totalSpend: number
+  totalCredits: number
+  totalPayments: number
+  netSpend: number
+  transactionCount: number
+  reviewCount: number
+}
+
+type DashboardSummarySubset = {
+  merchantSummaries: MerchantSummaryRow[]
+  accountSummaries: AccountSummaryRow[]
+}
+
 const DEFAULT_REPORTS_CURRENCY = 'CAD'
 
 function getRelativeDateRange(days: number): { from: string; to: string } {
@@ -86,6 +122,12 @@ export function ReportsPage() {
   )
   const [business, setBusiness] = useState<{ byCurrency: BusRow[] } | null>(
     null
+  )
+  const [merchantSummaries, setMerchantSummaries] = useState<MerchantSummaryRow[]>(
+    []
+  )
+  const [accountSummaries, setAccountSummaries] = useState<AccountSummaryRow[]>(
+    []
   )
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -127,17 +169,22 @@ export function ReportsPage() {
       setLoading(true)
       setErr(null)
       try {
-        const [p, b] = await Promise.all([
+        const [p, b, dash] = await Promise.all([
           getJson<{ byCurrency: PartnerRow[] }>(
             `/api/summary/partner${summaryQs}`
           ),
           getJson<{ byCurrency: BusRow[] }>(
             `/api/summary/business${summaryQs}`
           ),
+          getJson<DashboardSummarySubset>(
+            `/api/summary/dashboard${summaryQs}`
+          ),
         ])
         if (!cancelled) {
           setPartner(p)
           setBusiness(b)
+          setMerchantSummaries(dash.merchantSummaries ?? [])
+          setAccountSummaries(dash.accountSummaries ?? [])
         }
       } catch (e) {
         if (!cancelled)
@@ -176,6 +223,31 @@ export function ReportsPage() {
       cancelled = true
     }
   }, [loadSettlements])
+
+  // Merchant/account rollups filtered to the active currency (if set) and
+  // sorted by net spend desc. Drives the comprehensive tables linked from
+  // the Dashboard bento "View all" → /reports#merchants and #accounts.
+  const filteredMerchantSummaries = useMemo(
+    () => rankByNetSpend(merchantSummaries, currency),
+    [merchantSummaries, currency]
+  )
+
+  const filteredAccountSummaries = useMemo(
+    () => rankByNetSpend(accountSummaries, currency),
+    [accountSummaries, currency]
+  )
+
+  // Hash-anchor scroll on mount + on hash change. React Router does not
+  // scroll-into-view on hash navigation by default, so handle it here.
+  useEffect(() => {
+    const id = window.location.hash.replace(/^#/, '')
+    if (!id) return
+    // Wait one tick so the section has rendered before scrolling.
+    const timer = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const reportCurrencies = useMemo(() => {
     const found = new Set<string>()
@@ -748,6 +820,82 @@ export function ReportsPage() {
           </table>
         </div>
       </section>
+
+      <RankedReportSection
+        id="merchants"
+        title="Merchants"
+        description={
+          <>
+            All merchants in this view, ranked by net spend. Linked from
+            the Dashboard's <em>Top merchants</em> tile.
+          </>
+        }
+        headers={[
+          'Merchant',
+          'Txns',
+          'Spend',
+          'Refunds / credits',
+          'Payments',
+          'Net spend',
+          'Needs review',
+          'Last seen',
+        ]}
+        showCurrencyColumn={!currency}
+        rows={filteredMerchantSummaries}
+        rowKey={(r) => `${r.currency}:${r.merchant}`}
+        renderRow={(r) => (
+          <>
+            {!currency && <td>{r.currency}</td>}
+            <td>{r.merchant}</td>
+            <td>{r.transactionCount}</td>
+            <td>{formatMoney(r.totalSpend, r.currency)}</td>
+            <td>{formatMoney(r.totalCredits, r.currency)}</td>
+            <td>{formatMoney(r.totalPayments, r.currency)}</td>
+            <td>{formatMoney(r.netSpend, r.currency)}</td>
+            <td>{r.reviewCount}</td>
+            <td>{r.lastDate}</td>
+          </>
+        )}
+        emptyMessage="No merchant activity for these filters."
+        loading={loading}
+      />
+
+      <RankedReportSection
+        id="accounts"
+        title="Accounts"
+        description={
+          <>
+            All accounts in this view, ranked by net spend. Linked from
+            the Dashboard's <em>Top accounts</em> tile.
+          </>
+        }
+        headers={[
+          'Account',
+          'Txns',
+          'Spend',
+          'Refunds / credits',
+          'Payments',
+          'Net spend',
+          'Needs review',
+        ]}
+        showCurrencyColumn={!currency}
+        rows={filteredAccountSummaries}
+        rowKey={(r) => `${r.currency}:${r.accountId}`}
+        renderRow={(r) => (
+          <>
+            {!currency && <td>{r.currency}</td>}
+            <td>{r.accountShortCode ?? r.accountName}</td>
+            <td>{r.transactionCount}</td>
+            <td>{formatMoney(r.totalSpend, r.currency)}</td>
+            <td>{formatMoney(r.totalCredits, r.currency)}</td>
+            <td>{formatMoney(r.totalPayments, r.currency)}</td>
+            <td>{formatMoney(r.netSpend, r.currency)}</td>
+            <td>{r.reviewCount}</td>
+          </>
+        )}
+        emptyMessage="No account activity for these filters."
+        loading={loading}
+      />
     </div>
 
     {dialogOpen && (
@@ -872,5 +1020,76 @@ export function ReportsPage() {
     )}
     {confirm.dialog}
     </>
+  )
+}
+
+type RankedReportSectionProps<R> = {
+  id: string
+  title: string
+  description: React.ReactNode
+  /** When true, render a leading "Currency" header column. The row
+   *  renderer is still responsible for emitting the matching <td>. */
+  showCurrencyColumn: boolean
+  /** Header labels for non-currency columns. */
+  headers: string[]
+  rows: R[]
+  rowKey: (row: R) => string
+  /** Returns the row's `<td>` cells (currency cell included when shown). */
+  renderRow: (row: R) => React.ReactNode
+  emptyMessage: string
+  loading: boolean
+}
+
+/**
+ * Shared chrome for the comprehensive ranking sections at the bottom of
+ * the Reports page (Merchants, Accounts). Extracted to kill duplication
+ * between two near-identical table layouts.
+ */
+function RankedReportSection<R>({
+  id,
+  title,
+  description,
+  showCurrencyColumn,
+  headers,
+  rows,
+  rowKey,
+  renderRow,
+  emptyMessage,
+  loading,
+}: RankedReportSectionProps<R>) {
+  const totalColumns = (showCurrencyColumn ? 1 : 0) + headers.length
+  return (
+    <section id={id} className="card reportsTableCard">
+      <div className="reportsCardHeader">
+        <div>
+          <h2>{title}</h2>
+          <p className="muted">{description}</p>
+        </div>
+      </div>
+      <div className="tableWrap">
+        <table className="table">
+          <thead>
+            <tr>
+              {showCurrencyColumn && <th>Currency</th>}
+              {headers.map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {!loading && rows.length === 0 && (
+              <tr>
+                <td colSpan={totalColumns} className="emptyStateCell">
+                  <p className="emptyState">{emptyMessage}</p>
+                </td>
+              </tr>
+            )}
+            {rows.map((row) => (
+              <tr key={rowKey(row)}>{renderRow(row)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }

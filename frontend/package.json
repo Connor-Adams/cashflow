@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "yarn build:bookmarklets && tsc -b && vite build",
+    "build:bookmarklets": "BOOKMARKLET_ENTRY=amazon vite build --config vite.bookmarklets.config.ts && BOOKMARKLET_ENTRY=apple vite build --config vite.bookmarklets.config.ts",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run"

@@ -1,97 +1,70 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import {
-  BarChart3,
-  BookOpenCheck,
-  PackageSearch,
-  CreditCard,
-  ClipboardCheck,
-  LineChart,
-  LayoutDashboard,
-  LogOut,
-  ReceiptText,
-  Repeat,
-  Settings,
-  Shield,
-  Sun,
-  Moon,
-} from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { useCallback, useEffect, useState } from 'react'
+import { Outlet, useLocation } from 'react-router-dom'
+import { Menu } from 'lucide-react'
 import { useLayoutWidth } from '../lib/layoutWidth'
-import { useAuth } from '../lib/useAuth'
-import { useTheme } from '../hooks/useTheme'
-
-const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/accounts', label: 'Accounts', icon: CreditCard },
-  { to: '/review', label: 'Review', icon: ClipboardCheck },
-  { to: '/transactions', label: 'Transactions', icon: ReceiptText },
-  { to: '/portfolio', label: 'Portfolio', icon: LineChart },
-  { to: '/amazon', label: 'Amazon', icon: PackageSearch },
-  { to: '/recurring', label: 'Recurring', icon: Repeat },
-  { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/settings', label: 'Settings', icon: Settings },
-]
+import { Sidebar } from './Sidebar'
 
 export function Layout() {
-  const auth = useAuth()
   const [layoutWidth] = useLayoutWidth()
-  const { theme, toggleTheme } = useTheme()
-  const isDark = theme === 'dark'
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+  const openSidebar = useCallback(() => setSidebarOpen(true), [])
+  const location = useLocation()
+
+  // Auto-close on route change so the mobile drawer doesn't linger after
+  // the user picks a destination. Desktop ignores `open` so this is a
+  // no-op there.
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [location.pathname])
+
+  // Escape-to-close + body-scroll-lock while the mobile drawer is open.
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeSidebar()
+    }
+    document.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [sidebarOpen, closeSidebar])
+
   return (
-    <div className="layout">
-      <header className="header">
-        <div className="brandLockup">
-          <div className="brandMark">CF</div>
-          <div>
-            <div className="brandEyebrow">Household ledger</div>
-            <div className="brand">Cashflow</div>
-          </div>
-        </div>
-        <nav className="nav" aria-label="Main">
-          {navItems.map((item) => {
-            const Icon = item.icon
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => `navLink${isActive ? ' isActive' : ''}`}
-              >
-                <Icon aria-hidden="true" />
-                <span>{item.label}</span>
-              </NavLink>
-            )
-          })}
-        </nav>
-        <div className="userMenu">
-          <span>{auth.user?.displayName}</span>
-          {auth.user?.globalRole === 'superadmin' && (
-            <Badge variant="outline" className="superadminBadge">
-              <Shield aria-hidden="true" />
-              God mode
-            </Badge>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleTheme}
-            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-            aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-            aria-pressed={isDark}
+    <div className="layout" data-sidebar-open={sidebarOpen}>
+      <Sidebar open={sidebarOpen} onClose={closeSidebar} />
+
+      {/* Mobile backdrop. Hidden via CSS on desktop. */}
+      <button
+        type="button"
+        aria-label="Close navigation"
+        className="sidebarBackdrop"
+        onClick={closeSidebar}
+        tabIndex={sidebarOpen ? 0 : -1}
+      />
+
+      <div className="layoutMain">
+        <header className="topBar" aria-label="Top bar">
+          <button
+            type="button"
+            className="hamburger"
+            onClick={openSidebar}
+            aria-label="Open navigation"
+            aria-expanded={sidebarOpen}
+            aria-controls="primary-navigation"
           >
-            {isDark ? <Sun size={18} /> : <Moon size={18} />}
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void auth.logout()}>
-            <LogOut aria-hidden="true" />
-            Log out
-          </Button>
-        </div>
-      </header>
-      <main className="main" data-layout-width={layoutWidth}>
-        <Outlet />
-      </main>
+            <Menu size={20} aria-hidden="true" />
+          </button>
+          <span className="topBar__wordmark">Cashflow</span>
+        </header>
+
+        <main className="main" data-layout-width={layoutWidth}>
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

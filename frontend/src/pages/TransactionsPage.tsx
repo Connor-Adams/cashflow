@@ -1,14 +1,12 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
-import type { ChangeEvent, FormEvent } from 'react'
+import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Alert, type AlertVariant } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -30,6 +28,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import {
   getJson,
   patchJson,
@@ -38,104 +37,19 @@ import {
 } from '../lib/api'
 import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
-import { formatParseErrorLines } from '../lib/formatParseErrors'
 import type {
-  Account,
   BulkPatchFilterResponse,
   Contact,
   Paginated,
-  StatementPreview,
   Transaction,
   TransactionBulkPatch,
   TransactionFilterPayload,
 } from '../types/api'
 import { useSessionState } from '../lib/useSessionState'
 
-type UploadResult = {
-  file: string
-  batchLabel?: string
-  inserted?: number
-  skippedDuplicates?: number
-  rowErrors?: number
-  parseErrors?: { rowIndex: number; message: string }[]
-  skipped?: boolean
-  reason?: string
-  message?: string
-  warning?: string
-  usedProfileId?: string
-  profileInferred?: boolean
-  insertedTransactions?: number
-  insertedInvestmentActivities?: number
-  insertedHoldings?: number
-  warnings?: string[]
-}
-
-type FolderImportResponse = {
-  results: UploadResult[]
-  uploadDir: string
-}
-
-type MultiUploadResponse = {
-  results: UploadResult[]
-}
-
-type ImportHistoryRow = {
-  id: number
-  fileName: string
-  batchLabel: string
-  status: string
-  rowCount: number | null
-  errorMessage: string | null
-  startedAt: string
-  finishedAt: string | null
-}
-
-type CsvProfileOption = { id: string; label: string; hint: string }
-
-type PreviewResponse = StatementPreview
-
 type CategoryHint = {
   label: string
   usageCount: number
-}
-
-function classifyUploadMessage(message: string): 'warning' | 'success' {
-  if (
-    message.includes('No rows') ||
-    message.includes('duplicate') ||
-    message.includes('Skipped')
-  ) {
-    return 'warning'
-  }
-  return 'success'
-}
-
-function summarizeUploadResult(result: UploadResult): string {
-  if (result.skipped) {
-    return [
-      `Skipped (${result.reason ?? 'unknown'}): ${result.file}`,
-      result.message,
-    ]
-      .filter(Boolean)
-      .join(' — ')
-  }
-  const profileNote =
-    result.usedProfileId != null
-      ? `Profile: ${result.usedProfileId}${result.profileInferred ? ' (auto-detected)' : ''}`
-      : ''
-  return [
-    result.insertedInvestmentActivities != null || result.insertedHoldings != null
-      ? `Imported ${result.inserted ?? 0} record(s): ${result.insertedTransactions ?? 0} transactions, ${result.insertedInvestmentActivities ?? 0} activities, ${result.insertedHoldings ?? 0} holdings · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`
-      : `Imported ${result.inserted ?? 0} row(s) · batch “${result.batchLabel ?? ''}” · dupes skipped: ${result.skippedDuplicates ?? 0}`,
-    profileNote,
-    (result.rowErrors ?? 0) > 0
-      ? `${result.rowErrors} row(s) could not be parsed`
-      : '',
-    result.warning,
-    result.warnings?.length ? `${result.warnings.length} warning(s)` : '',
-  ]
-    .filter(Boolean)
-    .join(' — ')
 }
 
 type AiSuggestion = {
@@ -181,24 +95,6 @@ type AiAuditResult = AiAuditIssue & {
   amount: number
   currency: string
   status: 'open' | 'applied' | 'dismissed'
-}
-
-type ImportCleanup = {
-  batch: string | null
-  total: number
-  readyToConfirmCount: number
-  needsCategoryCount: number
-  alreadyReviewedCount: number
-  topReady: Array<{
-    id: number
-    date: string
-    merchant: string
-    amount: number
-    currency: string
-    category: string | null
-    source: 'rule' | 'merchant_memory'
-  }>
-  batches: Array<{ importBatch: string; count: number }>
 }
 
 function formatAiSuggestion(suggestion: AiSuggestion): string {
@@ -259,30 +155,12 @@ export function TransactionsPage() {
   const [bulkAllApplying, setBulkAllApplying] = useState(false)
   const confirmAction = useConfirm()
   const { showToast } = useToast()
-  const [importHistory, setImportHistory] = useState<ImportHistoryRow[]>([])
   const [res, setRes] = useState<Paginated<Transaction> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [accounts, setAccounts] = useState<Account[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
-  const [uploadAccountId, setUploadAccountId] = useState('')
-  const [batchLabel, setBatchLabel] = useState('')
-  const [csvProfileOptions, setCsvProfileOptions] = useState<CsvProfileOption[]>(
-    []
-  )
-  const [profileId, setProfileId] = useState('auto')
-  // Unified upload feedback — replaces the prior trio (uploadMsg, uploadParseLines,
-  // previewErr) so error/warning/info/success states render through one Alert.
-  const [uploadFeedback, setUploadFeedback] = useState<{
-    variant: AlertVariant
-    title: string
-    lines?: string[]
-  } | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [runningFolderImport, setRunningFolderImport] = useState(false)
-  const [previewing, setPreviewing] = useState(false)
-  const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
   const [aiEnabled, setAiEnabled] = useState(false)
+  const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
@@ -290,18 +168,17 @@ export function TransactionsPage() {
   const [aiAuditBusy, setAiAuditBusy] = useState(false)
   const [aiAuditResults, setAiAuditResults] = useState<AiAuditResult[]>([])
   const [aiAuditMessage, setAiAuditMessage] = useState<string | null>(null)
-  const [importCleanup, setImportCleanup] = useState<ImportCleanup | null>(null)
   const [sortBy, setSortBy] = useState<
     'date' | 'merchant' | 'amount' | 'category' | 'review'
   >('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const fileRef = useRef<HTMLInputElement>(null)
   const receiptFileRef = useRef<HTMLInputElement>(null)
   const loadRequestRef = useRef(0)
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Consume URL query params on navigation (e.g. when arriving from the
-  // Dashboard category chart drill-down). Filters from the URL take precedence
+  // Dashboard category chart drill-down, or from the /import batch detail
+  // page's "View transactions →" link). Filters from the URL take precedence
   // over session state. After applying, we clear the params so manual filter
   // edits do not fight the URL on subsequent renders.
   useEffect(() => {
@@ -309,16 +186,22 @@ export function TransactionsPage() {
     const urlCurrency = searchParams.get('currency')
     const urlDateFrom = searchParams.get('dateFrom')
     const urlDateTo = searchParams.get('dateTo')
+    const urlImportBatch = searchParams.get('importBatch')
+    const urlReviewFlag = searchParams.get('reviewFlag')
     const hasAny =
       urlCategory != null ||
       urlCurrency != null ||
       urlDateFrom != null ||
-      urlDateTo != null
+      urlDateTo != null ||
+      urlImportBatch != null ||
+      urlReviewFlag != null
     if (!hasAny) return
     if (urlCategory != null) setCategoryFilter(urlCategory)
     if (urlCurrency != null) setCurrency(urlCurrency.toUpperCase().slice(0, 3))
     if (urlDateFrom != null) setDateFrom(urlDateFrom)
     if (urlDateTo != null) setDateTo(urlDateTo)
+    if (urlImportBatch != null) setBatchFilter(urlImportBatch)
+    if (urlReviewFlag != null) setReviewOnly(urlReviewFlag === 'true')
     setPage(1)
     setSearchParams({}, { replace: true })
   }, [
@@ -328,12 +211,11 @@ export function TransactionsPage() {
     setCurrency,
     setDateFrom,
     setDateTo,
+    setBatchFilter,
+    setReviewOnly,
   ])
 
   useEffect(() => {
-    void getJson<Account[]>('/api/accounts')
-      .then(setAccounts)
-      .catch(() => {})
     void getJson<Contact[]>('/api/contacts')
       .then(setContacts)
       .catch(() => {})
@@ -346,31 +228,10 @@ export function TransactionsPage() {
   }, [])
 
   useEffect(() => {
-    void getJson<CsvProfileOption[]>('/api/import/profiles')
-      .then((list) => {
-        setCsvProfileOptions(list)
-        setProfileId((prev) =>
-          list.some((p) => p.id === prev) ? prev : list[0]?.id ?? 'auto'
-        )
-      })
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
       .then((data) => setCategoryHints(data.categories))
       .catch(() => setCategoryHints([]))
   }, [])
-
-  const refreshImportHistory = useCallback(() => {
-    void getJson<ImportHistoryRow[]>('/api/import/history')
-      .then(setImportHistory)
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    refreshImportHistory()
-  }, [refreshImportHistory])
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current
@@ -387,16 +248,11 @@ export function TransactionsPage() {
       if (dateFrom.trim()) qs.set('dateFrom', dateFrom.trim())
       if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
-      const cleanupQs = new URLSearchParams()
-      if (batchFilter.trim()) cleanupQs.set('batch', batchFilter.trim())
-      if (currency) cleanupQs.set('currency', currency)
-      const [data, cleanup] = await Promise.all([
-        getJson<Paginated<Transaction>>(`/api/transactions?${qs.toString()}`),
-        getJson<ImportCleanup>(`/api/ai/import-cleanup?${cleanupQs.toString()}`),
-      ])
+      const data = await getJson<Paginated<Transaction>>(
+        `/api/transactions?${qs.toString()}`,
+      )
       if (loadRequestRef.current === requestId) {
         setRes(data)
-        setImportCleanup(cleanup)
       }
     } catch (e) {
       if (loadRequestRef.current === requestId) {
@@ -583,9 +439,18 @@ export function TransactionsPage() {
                 setPage(1)
                 setBatchFilter('')
               },
+              // Drill-back: clicking the label navigates to the batch
+              // detail. The × clear button stays on the chip for clearing
+              // the filter without leaving the page.
+              href: `/import/${encodeURIComponent(batchFilter.trim())}`,
             }
           : null,
-      ].filter(Boolean) as Array<{ key: string; label: string; clear: () => void }>,
+      ].filter(Boolean) as Array<{
+        key: string
+        label: string
+        clear: () => void
+        href?: string
+      }>,
     [
       reviewOnly,
       hasCustomCurrency,
@@ -898,150 +763,6 @@ export function TransactionsPage() {
     }
   }
 
-  async function onPreview() {
-    const input = fileRef.current
-    const files = Array.from(input?.files ?? [])
-    const file = files[0]
-    if (!file) {
-      setUploadFeedback({ variant: 'error', title: 'Choose a .csv file first.' })
-      setPreviewData(null)
-      return
-    }
-    if (files.length > 1) {
-      setUploadFeedback({
-        variant: 'error',
-        title:
-          'Preview supports one file at a time. Select one CSV to preview, or import all selected files.',
-      })
-      setPreviewData(null)
-      return
-    }
-    if (!uploadAccountId) {
-      setUploadFeedback({ variant: 'error', title: 'Select an account.' })
-      setPreviewData(null)
-      return
-    }
-    setPreviewing(true)
-    setUploadFeedback(null)
-    setPreviewData(null)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      fd.append('accountId', uploadAccountId)
-      fd.append('profileId', profileId)
-      const r = await postFormData<PreviewResponse>('/api/import/preview', fd)
-      setPreviewData(r)
-    } catch (e) {
-      setUploadFeedback({
-        variant: 'error',
-        title: e instanceof Error ? e.message : 'Preview failed',
-      })
-    } finally {
-      setPreviewing(false)
-    }
-  }
-
-  async function onUpload(e: FormEvent) {
-    e.preventDefault()
-    if (previewData?.previewToken) {
-      setUploading(true)
-      setUploadFeedback(null)
-      setErr(null)
-      try {
-        const result = await postJson<UploadResult>('/api/import/commit', {
-          previewToken: previewData.previewToken,
-        })
-        const title = summarizeUploadResult(result)
-        setUploadFeedback({
-          variant: classifyUploadMessage(title),
-          title,
-          lines: result.parseErrors?.length
-            ? formatParseErrorLines(result.parseErrors)
-            : undefined,
-        })
-        setPreviewData(null)
-        const input = fileRef.current
-        if (input) input.value = ''
-        await load()
-        refreshImportHistory()
-      } catch (e) {
-        setUploadFeedback({
-          variant: 'error',
-          title: e instanceof Error ? e.message : 'Import failed',
-        })
-      } finally {
-        setUploading(false)
-      }
-      return
-    }
-    const input = fileRef.current
-    const files = Array.from(input?.files ?? [])
-    if (files.length === 0) {
-      setUploadFeedback({
-        variant: 'error',
-        title: 'Choose at least one statement file first.',
-      })
-      return
-    }
-    if (!uploadAccountId) {
-      setUploadFeedback({ variant: 'error', title: 'Select an account.' })
-      return
-    }
-    setUploading(true)
-    setUploadFeedback(null)
-    setErr(null)
-    try {
-      const fd = new FormData()
-      fd.append('accountId', uploadAccountId)
-      if (batchLabel.trim()) fd.append('batchLabel', batchLabel.trim())
-      fd.append('profileId', profileId)
-      if (files.length === 1) {
-        fd.append('file', files[0])
-        const result = await postFormData<UploadResult>('/api/import/upload', fd)
-        const title = summarizeUploadResult(result)
-        setUploadFeedback({
-          variant: classifyUploadMessage(title),
-          title,
-          lines: result.parseErrors?.length
-            ? formatParseErrorLines(result.parseErrors)
-            : undefined,
-        })
-      } else {
-        files.forEach((file) => fd.append('files', file))
-        const out = await postFormData<MultiUploadResponse>('/api/import/upload-many', fd)
-        const imported = out.results.filter((r) => !r.skipped).length
-        const inserted = out.results.reduce((sum, r) => sum + (r.inserted ?? 0), 0)
-        const skipped = out.results.length - imported
-        const failedRows = out.results.reduce((sum, r) => sum + (r.rowErrors ?? 0), 0)
-        const lines = out.results.slice(0, 6).map((r) => `${r.file}: ${summarizeUploadResult(r)}`)
-        const title = `Multi-file import complete — ${inserted} row(s), ${imported} file(s) imported, ${skipped} skipped${failedRows ? `, ${failedRows} row error(s)` : ''}. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
-        const parseLines = out.results.flatMap((result) =>
-          result.parseErrors?.length
-            ? formatParseErrorLines(result.parseErrors).map(
-                (line) => `${result.file}: ${line}`,
-              )
-            : [],
-        )
-        setUploadFeedback({
-          variant:
-            failedRows > 0 ? 'warning' : classifyUploadMessage(title),
-          title,
-          lines: parseLines.length > 0 ? parseLines : undefined,
-        })
-      }
-      if (input) input.value = ''
-      await load()
-      refreshImportHistory()
-    } catch (e) {
-      setUploadFeedback({
-        variant: 'error',
-        title: e instanceof Error ? e.message : 'Upload failed',
-      })
-    } finally {
-      setUploading(false)
-    }
-  }
-
   return (
     <div className="page">
       <PageHeader
@@ -1065,347 +786,6 @@ export function TransactionsPage() {
         <StatCard label="Receipts" value={receiptCountOnPage} hint="Attachments on the current page" />
       </section>
 
-      {importCleanup && importCleanup.total > 0 && (
-        <section className="card aiVisibilityPanel" aria-label="Import cleanup assistant">
-          <div className="aiVisibilityHeader">
-            <strong>Import cleanup</strong>
-            <span className="muted">
-              {importCleanup.readyToConfirmCount} auto-categorized ·{' '}
-              {importCleanup.needsCategoryCount} need categories ·{' '}
-              {importCleanup.alreadyReviewedCount} reviewed
-            </span>
-          </div>
-          {importCleanup.readyToConfirmCount > 0 ? (
-            <div className="aiVisibilityList">
-              {importCleanup.topReady.slice(0, 6).map((row) => (
-                <article key={row.id} className="aiVisibilityItem">
-                  <div className="aiVisibilityItemHeader">
-                    <strong>{row.merchant}</strong>
-                    <span className="muted">#{row.id}</span>
-                  </div>
-                  <p>
-                    {row.category ?? 'Uncategorized'} ·{' '}
-                    {formatMoney(Math.abs(row.amount), row.currency)}
-                  </p>
-                  <p className="muted">
-                    Source: {row.source === 'rule' ? 'rule' : 'merchant memory'}
-                  </p>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">
-              Nothing is ready to confirm for the current filters.
-            </p>
-          )}
-          <div className="row">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setReviewOnly(true)
-                if (importCleanup.batch) setBatchFilter(importCleanup.batch)
-              }}
-            >
-              Review cleanup queue
-            </Button>
-            {importCleanup.batches.length > 0 && !batchFilter && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setBatchFilter(importCleanup.batches[0].importBatch)}
-              >
-                Focus latest batch
-              </Button>
-            )}
-          </div>
-        </section>
-      )}
-
-      <div className="transactionsTopGrid">
-        <form className="card uploadCard transactionsPanel" onSubmit={onUpload}>
-          <div className="transactionsPanelHeader">
-            <div>
-              <h2>Upload CSV</h2>
-              <p className="muted">
-                Pick the account, then drop in CSV, OFX, or QFX files. With{' '}
-                <strong>Automatic</strong>, the app detects the column layout from
-                CSV files; OFX/QFX files use their embedded statement data.
-              </p>
-            </div>
-            <span className="transactionsPanelBadge">
-              {csvProfileOptions.length || 3} profiles
-            </span>
-          </div>
-          {accounts.length === 0 && (
-            <p className="error">
-              No accounts yet — <Link to="/accounts">create one under Accounts</Link>.
-            </p>
-          )}
-          <div className="formGrid transactionsFilterGrid">
-            <Label>
-              Account
-              <NativeSelect
-                value={uploadAccountId}
-                onChange={(e) => setUploadAccountId(e.target.value)}
-                required
-              >
-                <NativeSelectOption value="">— select —</NativeSelectOption>
-                {accounts.map((a) => (
-                  <NativeSelectOption key={a.id} value={a.id}>
-                    {a.name}
-                    {a.shortCode ? ` (${a.shortCode})` : ''}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Label>
-            <Label>
-              Batch label (optional)
-              <Input
-                value={batchLabel}
-                onChange={(e) => setBatchLabel(e.target.value)}
-                placeholder="defaults to YYYY-MM + account code"
-              />
-            </Label>
-            <Label>
-              CSV profile
-              <NativeSelect value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-                {csvProfileOptions.length > 0 ? (
-                  csvProfileOptions.map((p) => (
-                    <NativeSelectOption key={p.id} value={p.id} title={p.hint}>
-                      {p.label}
-                      {p.hint ? ` — ${p.hint}` : ''}
-                    </NativeSelectOption>
-                  ))
-                ) : (
-                  <Fragment>
-                    <NativeSelectOption value="auto">Automatic</NativeSelectOption>
-                    <NativeSelectOption value="generic_simple">generic_simple (ISO dates)</NativeSelectOption>
-                    <NativeSelectOption value="generic_amex">generic_amex (Amex)</NativeSelectOption>
-                  </Fragment>
-                )}
-              </NativeSelect>
-            </Label>
-            <Label className="filePick">
-              Statement files
-              <Input
-                ref={fileRef}
-                type="file"
-                accept=".csv,text/csv,.ofx,.qfx,.pdf,application/pdf"
-                multiple
-                onChange={() => {
-                  setPreviewData(null)
-                  setUploadFeedback(null)
-                }}
-              />
-            </Label>
-          </div>
-          <div className="row transactionsActionRow">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={
-                uploading ||
-                previewing ||
-                !uploadAccountId ||
-                accounts.length === 0
-              }
-              onClick={() => void onPreview()}
-            >
-              {previewing ? 'Previewing…' : 'Preview statement'}
-            </Button>
-            <Button type="submit" disabled={uploading}>
-              {uploading ? 'Importing…' : previewData?.previewToken ? 'Commit preview' : 'Import CSV file(s)'}
-            </Button>
-          </div>
-          {uploadFeedback && (
-            <Alert
-              className="mt-3"
-              variant={uploadFeedback.variant}
-              title={uploadFeedback.title}
-            >
-              {uploadFeedback.lines && uploadFeedback.lines.length > 0 ? (
-                <ul
-                  className="parseErrorList m-0 pl-5"
-                  aria-label="Rows that failed to parse"
-                >
-                  {uploadFeedback.lines.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </Alert>
-          )}
-          {previewData && (
-            <div className="previewBlock">
-              <p className="muted">
-                Parser: <strong>{previewData.usedParser}</strong>
-                {previewData.headers?.length ? (
-                  <>
-                    {' · '}Parsed columns: <code>{previewData.headers.join(', ')}</code>
-                  </>
-                ) : null}
-                {' · '}
-                Showing up to {previewData.previewRowLimit} data rows (not imported).
-              </p>
-              {previewData.usedProfileId != null && (
-                <p className="muted">
-                  Profile used: <strong>{previewData.usedProfileId}</strong>
-                  {previewData.profileInferred ? ' (auto-detected)' : ''}
-                </p>
-              )}
-              <p className="muted">
-                Preview contains {previewData.transactions.length} transaction(s),{' '}
-                {previewData.investmentActivities.length} investment activit{previewData.investmentActivities.length === 1 ? 'y' : 'ies'}, and{' '}
-                {previewData.holdings.length} holding(s). Duplicates detected:{' '}
-                {previewData.duplicateCounts.transactions + previewData.duplicateCounts.investmentActivities + previewData.duplicateCounts.holdings}.
-              </p>
-              {previewData.warnings.length > 0 && (
-                <ul className="parseErrorList" aria-label="Statement import warnings">
-                  {previewData.warnings.slice(0, 8).map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              )}
-              <div className="tableWrap">
-                <Table className="table">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Row</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Merchant</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Cur</TableHead>
-                      <TableHead>Parse note</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(previewData.rows ?? []).map((row) => (
-                      <TableRow key={row.rowIndex}>
-                        <TableCell>{row.rowIndex}</TableCell>
-                        <TableCell>{row.ok ? 'OK' : 'Error'}</TableCell>
-                        <TableCell>{row.ok ? row.mapped.date : '—'}</TableCell>
-                        <TableCell>{row.ok ? row.mapped.merchantClean : '—'}</TableCell>
-                        <TableCell>{row.ok ? String(row.mapped.amount) : '—'}</TableCell>
-                        <TableCell>{row.ok ? row.mapped.currency : '—'}</TableCell>
-                        <TableCell className={row.ok ? '' : 'error'}>
-                          {row.ok ? '—' : row.error}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-        </form>
-
-        <section
-          className="card transactionsPanel transactionsHistoryCard"
-          aria-labelledby="import-history-heading"
-        >
-          <div className="transactionsPanelHeader">
-            <div>
-              <h2 id="import-history-heading">Recent imports</h2>
-              <p className="muted">
-                Last 50 runs. Filter transactions by batch directly from here.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={async () => {
-                try {
-                  setRunningFolderImport(true)
-                  setErr(null)
-                  setUploadFeedback(null)
-                  const out = await postJson<FolderImportResponse>('/api/import/run', {})
-                  const imported = out.results.filter((r) => !r.skipped).length
-                  const skipped = out.results.length - imported
-                  const lines = out.results.slice(0, 6).map((r) => {
-                    if (r.skipped) {
-                      return `${r.file}: skipped (${r.reason})${r.message ? ` — ${r.message}` : ''}`
-                    }
-                    return `${r.file}: ${r.inserted ?? 0} rows${r.warning ? ` — ${r.warning}` : ''}`
-                  })
-                  const title = lines.length
-                    ? `Folder import complete — ${imported} imported, ${skipped} skipped. ${lines.join(' | ')}${out.results.length > 6 ? ' | …' : ''}`
-                    : `No .csv files in upload folder: ${out.uploadDir}`
-                  setUploadFeedback({
-                    variant: classifyUploadMessage(title),
-                    title,
-                  })
-                  await load()
-                  refreshImportHistory()
-                } catch (e) {
-                  setErr(e instanceof Error ? e.message : 'Import failed')
-                } finally {
-                  setRunningFolderImport(false)
-                }
-              }}
-              disabled={runningFolderImport}
-            >
-              {runningFolderImport ? 'Running import…' : 'Run folder import'}
-            </Button>
-          </div>
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Started</TableHead>
-                  <TableHead>File</TableHead>
-                  <TableHead>Batch</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Rows</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {importHistory.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="muted pad">
-                      No import history yet.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  importHistory.map((h) => (
-                    <TableRow key={h.id}>
-                      <TableCell>{h.startedAt.slice(0, 19).replace('T', ' ')}</TableCell>
-                      <TableCell title={h.fileName}>{h.fileName}</TableCell>
-                      <TableCell>{h.batchLabel}</TableCell>
-                      <TableCell>
-                        {h.status}
-                        {h.errorMessage ? (
-                          <span className="muted" title={h.errorMessage}>
-                            {' '}
-                            ({h.errorMessage.slice(0, 40)}
-                            {h.errorMessage.length > 40 ? '…' : ''})
-                          </span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>{h.rowCount ?? '—'}</TableCell>
-                      <TableCell>
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          onClick={() => {
-                            setPage(1)
-                            setBatchFilter(h.batchLabel)
-                          }}
-                        >
-                          Filter by batch
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </section>
-      </div>
 
       <section className="card transactionsToolbar">
         <div className="transactionsPanelHeader">
@@ -1573,19 +953,42 @@ export function TransactionsPage() {
         </div>
         {activeFilters.length > 0 ? (
           <div className="transactionsFilterPills" aria-label="Active filters">
-            {activeFilters.map((filter) => (
-              <Button
-                key={filter.key}
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="transactionsFilterPill"
-                onClick={filter.clear}
-              >
-                <span>{filter.label}</span>
-                <span aria-hidden>×</span>
-              </Button>
-            ))}
+            {activeFilters.map((filter) =>
+              filter.href ? (
+                <span
+                  key={filter.key}
+                  className="transactionsFilterPill transactionsFilterPill--link"
+                >
+                  <Link
+                    to={filter.href}
+                    className="transactionsFilterPill__label"
+                    title={`Open ${filter.label.toLowerCase()}`}
+                  >
+                    {filter.label}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={filter.clear}
+                    className="transactionsFilterPill__clear"
+                    aria-label={`Clear ${filter.label}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ) : (
+                <Button
+                  key={filter.key}
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="transactionsFilterPill"
+                  onClick={filter.clear}
+                >
+                  <span>{filter.label}</span>
+                  <span aria-hidden>×</span>
+                </Button>
+              )
+            )}
           </div>
         ) : (
           <p className="muted transactionsHelperCopy">
@@ -1975,6 +1378,7 @@ export function TransactionsPage() {
                       receiptFileRef.current?.click()
                     }}
                     onError={(msg) => setErr(msg)}
+                    onOpenSignals={(id) => setSignalsDialogTxnId(id)}
                   />
                 ))
               )}
@@ -2003,6 +1407,41 @@ export function TransactionsPage() {
           </Button>
         </div>
       </section>
+      <EnrichmentSignalsDialog
+        transactionId={signalsDialogTxnId}
+        transactionSummary={
+          signalsDialogTxnId == null
+            ? null
+            : (() => {
+                const row = sortedRows.find((r) => r.id === signalsDialogTxnId)
+                if (!row) return null
+                return {
+                  merchantRaw: row.merchantRaw,
+                  merchantClean: row.merchantClean,
+                  merchantCanonical: row.merchantCanonical,
+                  autoSource: row.autoSource,
+                  autoConfidence: row.autoConfidence,
+                  autoCategory: row.autoCategory,
+                  txnType: row.txnType,
+                  reviewFlag: row.reviewFlag,
+                  isRecurring: row.isRecurring,
+                }
+              })()
+        }
+        onClose={() => setSignalsDialogTxnId(null)}
+        onReenriched={(updated) => {
+          setRes((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  data: prev.data.map((r) =>
+                    r.id === updated.id ? ({ ...r, ...updated } as Transaction) : r,
+                  ),
+                }
+              : prev,
+          )
+        }}
+      />
     </div>
   )
 }
@@ -2017,6 +1456,7 @@ function TransactionRow({
   aiEnabled,
   onAttachReceipt,
   onError,
+  onOpenSignals,
 }: {
   t: Transaction
   categoryOptions: string[]
@@ -2027,6 +1467,7 @@ function TransactionRow({
   aiEnabled: boolean
   onAttachReceipt: (transactionId: number) => void
   onError: (message: string) => void
+  onOpenSignals: (id: number) => void
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
@@ -2247,6 +1688,15 @@ function TransactionRow({
       </TableCell>
       <TableCell className="transactionsActionsCol">
         <div className="txnActionGroup">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenSignals(t.id)}
+            title="Show enrichment signals for this transaction"
+          >
+            Why?
+          </Button>
           {aiEnabled ? (
             <Button
               type="button"

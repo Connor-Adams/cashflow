@@ -1,0 +1,291 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  validateBudgetInput,
+  validateBudgetPatch,
+  aggregateSpendByCategory,
+  computeBudgetProgress,
+  currentMonthBounds,
+} from '../src/routes/budgets';
+
+// ---- validateBudgetInput ------------------------------------------------
+
+test('validateBudgetInput: rejects zero amount', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 0,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.status, 400);
+    assert.match(result.error, /amount must be a positive number/);
+  }
+});
+
+test('validateBudgetInput: rejects negative amount', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: -10,
+  });
+  assert.equal(result.ok, false);
+});
+
+test('validateBudgetInput: rejects non-numeric amount', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 'big',
+  });
+  assert.equal(result.ok, false);
+});
+
+test('validateBudgetInput: rejects missing currency', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    amount: 50,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /3-letter ISO code/);
+});
+
+test('validateBudgetInput: rejects bad currency length', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'USDS',
+    amount: 50,
+  });
+  assert.equal(result.ok, false);
+});
+
+test('validateBudgetInput: normalizes currency to uppercase', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'cad',
+    amount: 100,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.currency, 'CAD');
+});
+
+test('validateBudgetInput: null category preserved as null (overall)', () => {
+  const result = validateBudgetInput({
+    category: null,
+    currency: 'CAD',
+    amount: 1000,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.category, null);
+});
+
+test('validateBudgetInput: empty-string category coerces to null', () => {
+  const result = validateBudgetInput({
+    category: '  ',
+    currency: 'CAD',
+    amount: 1000,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.category, null);
+});
+
+test('validateBudgetInput: trims and preserves category', () => {
+  const result = validateBudgetInput({
+    category: '  Groceries  ',
+    currency: 'CAD',
+    amount: 200,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.category, 'Groceries');
+});
+
+test('validateBudgetInput: defaults period to monthly', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 200,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.period, 'monthly');
+});
+
+test('validateBudgetInput: rejects unknown period', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 200,
+    period: 'fortnightly',
+  });
+  assert.equal(result.ok, false);
+});
+
+test('validateBudgetInput: formats amount to 4 decimal places', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 12.5,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.amount, '12.5000');
+});
+
+// ---- validateBudgetPatch ------------------------------------------------
+
+test('validateBudgetPatch: empty body ok and yields no changes', () => {
+  const result = validateBudgetPatch({});
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.value, {});
+});
+
+test('validateBudgetPatch: rejects zero amount when provided', () => {
+  const result = validateBudgetPatch({ amount: 0 });
+  assert.equal(result.ok, false);
+});
+
+test('validateBudgetPatch: keeps `category: null` patch as null (overall)', () => {
+  const result = validateBudgetPatch({ category: null });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.category, null);
+});
+
+test('validateBudgetPatch: rejects bad currency', () => {
+  const result = validateBudgetPatch({ currency: 'CADS' });
+  assert.equal(result.ok, false);
+});
+
+// ---- aggregateSpendByCategory ------------------------------------------
+
+test('aggregateSpendByCategory: charges are summed as positive spend', () => {
+  const out = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -25.5 },
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -10 },
+  ]);
+  const entry = out.get('CAD\0Groceries');
+  assert.ok(entry);
+  assert.equal(entry!.spent, 35.5);
+});
+
+test('aggregateSpendByCategory: positive amounts (credits/refunds/payments) are ignored', () => {
+  const out = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: 30 },
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -5 },
+  ]);
+  const entry = out.get('CAD\0Groceries');
+  assert.ok(entry);
+  assert.equal(entry!.spent, 5);
+});
+
+test('aggregateSpendByCategory: null category is preserved as its own bucket', () => {
+  const out = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: null, amount: -7 },
+  ]);
+  const entry = out.get('CAD\0');
+  assert.ok(entry);
+  assert.equal(entry!.category, null);
+  assert.equal(entry!.spent, 7);
+});
+
+test('aggregateSpendByCategory: different currencies are kept separate', () => {
+  const out = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Travel', amount: -100 },
+    { currency: 'USD', finalCategory: 'Travel', amount: -50 },
+  ]);
+  assert.equal(out.size, 2);
+  assert.equal(out.get('CAD\0Travel')!.spent, 100);
+  assert.equal(out.get('USD\0Travel')!.spent, 50);
+});
+
+// ---- computeBudgetProgress ---------------------------------------------
+
+test('computeBudgetProgress: per-category budget reads its own bucket', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const items = computeBudgetProgress(
+    [
+      {
+        id: 1,
+        category: 'Groceries',
+        currency: 'CAD',
+        amount: '400.0000',
+      },
+    ],
+    new Map([
+      [
+        'CAD\0Groceries',
+        { currency: 'CAD', category: 'Groceries', spent: 120 },
+      ],
+      [
+        'CAD\0Rent',
+        { currency: 'CAD', category: 'Rent', spent: 2000 },
+      ],
+    ]),
+    bounds
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].spent, 120);
+  assert.equal(items[0].target, 400);
+  assert.equal(items[0].remaining, 280);
+  assert.equal(items[0].percentUsed, (120 / 400) * 100);
+  assert.equal(items[0].periodStart, '2026-05-01');
+  assert.equal(items[0].periodEnd, '2026-05-31');
+});
+
+test('computeBudgetProgress: overall budget (category=null) sums every category in that currency', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const items = computeBudgetProgress(
+    [{ id: 2, category: null, currency: 'CAD', amount: '3000.0000' }],
+    new Map([
+      ['CAD\0Groceries', { currency: 'CAD', category: 'Groceries', spent: 120 }],
+      ['CAD\0Rent', { currency: 'CAD', category: 'Rent', spent: 2000 }],
+      ['USD\0Travel', { currency: 'USD', category: 'Travel', spent: 500 }],
+    ]),
+    bounds
+  );
+  assert.equal(items[0].spent, 2120);
+  assert.equal(items[0].target, 3000);
+});
+
+test('computeBudgetProgress: percentUsed > 100 when overspent', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const items = computeBudgetProgress(
+    [{ id: 3, category: 'Coffee', currency: 'CAD', amount: '50.0000' }],
+    new Map([
+      ['CAD\0Coffee', { currency: 'CAD', category: 'Coffee', spent: 75 }],
+    ]),
+    bounds
+  );
+  assert.equal(items[0].spent, 75);
+  assert.equal(items[0].remaining, -25);
+  assert.equal(items[0].percentUsed, 150);
+});
+
+test('computeBudgetProgress: budget with no matching spend yields zero spent', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const items = computeBudgetProgress(
+    [{ id: 4, category: 'Pets', currency: 'CAD', amount: '50.0000' }],
+    new Map(),
+    bounds
+  );
+  assert.equal(items[0].spent, 0);
+  assert.equal(items[0].remaining, 50);
+  assert.equal(items[0].percentUsed, 0);
+});
+
+// ---- currentMonthBounds ------------------------------------------------
+
+test('currentMonthBounds: returns ISO YYYY-MM-DD bounds for the calendar month', () => {
+  const bounds = currentMonthBounds(new Date(2026, 4, 17));
+  assert.equal(bounds.periodStart, '2026-05-01');
+  assert.equal(bounds.periodEnd, '2026-05-31');
+});
+
+test('currentMonthBounds: leap year February ends on the 29th', () => {
+  const bounds = currentMonthBounds(new Date(2024, 1, 10));
+  assert.equal(bounds.periodStart, '2024-02-01');
+  assert.equal(bounds.periodEnd, '2024-02-29');
+});
+
+test('currentMonthBounds: short month (April) ends on the 30th', () => {
+  const bounds = currentMonthBounds(new Date(2026, 3, 12));
+  assert.equal(bounds.periodStart, '2026-04-01');
+  assert.equal(bounds.periodEnd, '2026-04-30');
+});

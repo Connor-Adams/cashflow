@@ -1,45 +1,6 @@
 @reference "./index.css";
 
-/* Theme variables - will be set by ThemeContext */
-:root[data-theme="dark"] {
-  --background: #0f0f0f;
-  --bg: #1a1a1a;
-  --bg2: #242424;
-  --bg3: #2d2d2d;
-  --card: #1e1e1e;
-  --fg: #f0f0f0;
-  --muted-foreground: #a0a0a0;
-  --muted: #707070;
-  --primary: #3b82f6;
-  --primary-foreground: #ffffff;
-  --accent: #8b5cf6;
-  --accent-soft: #fbbf24;
-  --accent-warm: #f97316;
-  --accent-green: #10b981;
-  --border: #333333;
-  --danger: #ef4444;
-  --shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
-}
-
-:root[data-theme="light"] {
-  --background: #ffffff;
-  --bg: #f9f9f9;
-  --bg2: #f3f3f3;
-  --bg3: #e8e8e8;
-  --card: #fafafa;
-  --fg: #1f1f1f;
-  --muted-foreground: #555555;
-  --muted: #808080;
-  --primary: #2563eb;
-  --primary-foreground: #ffffff;
-  --accent: #7c3aed;
-  --accent-soft: #d97706;
-  --accent-warm: #ea580c;
-  --accent-green: #059669;
-  --border: #d0d0d0;
-  --danger: #dc2626;
-  --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
+/* Tokens live in index.css. This file owns component classes only. */
 
 @layer base {
   /* Legacy fallback while older pages migrate to local ui primitives. */
@@ -84,15 +45,106 @@
 }
 
 @layer components {
+  /* ─── Layout shell ────────────────────────────────────────────────────
+   * Two-column grid: sidebar | main. Sidebar is sticky-pinned on desktop;
+   * collapses to off-canvas drawer below 768px (see media query below).
+   * Top bar is hidden on desktop; mobile renders it for the hamburger.
+   * ──────────────────────────────────────────────────────────────────── */
+
   .layout {
-    @apply flex min-h-screen flex-col;
+    @apply grid min-h-screen;
+    grid-template-columns: 240px 1fr;
   }
 
-  .header {
-    @apply sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 backdrop-blur-xl sm:px-6;
-    border-color: color-mix(in srgb, var(--border) 86%, white 4%);
-    background: color-mix(in oklch, var(--card) 88%, transparent);
+  .layoutMain {
+    @apply flex min-w-0 flex-col;
   }
+
+  .topBar {
+    @apply hidden items-center gap-3 border-b px-4 py-2;
+    border-color: var(--border);
+    background: color-mix(in oklch, var(--card) 92%, transparent);
+    backdrop-filter: blur(12px);
+  }
+
+  .topBar__wordmark {
+    @apply text-base font-semibold;
+    color: var(--foreground);
+  }
+
+  .hamburger {
+    @apply inline-flex items-center justify-center rounded-md p-2;
+    color: var(--foreground);
+  }
+  .hamburger:hover { background: var(--muted); }
+  .hamburger:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Backdrop hidden on desktop; mobile overrides below. */
+  .sidebarBackdrop { @apply hidden; }
+
+  /* ─── Sidebar ─────────────────────────────────────────────────────────
+   * Brand at top, primary nav in the middle (fills available height),
+   * theme + user + logout at the bottom. Vertical layout, ~240px wide.
+   * ──────────────────────────────────────────────────────────────────── */
+
+  .sidebar {
+    @apply sticky top-0 z-10 flex h-screen min-h-screen flex-col gap-3 p-3;
+    border-right: 1px solid var(--border);
+    background: var(--card);
+    overflow-y: auto;
+  }
+
+  .sidebar__brand {
+    @apply flex min-w-0 items-center gap-3 px-2 py-1;
+  }
+
+  .sidebar__nav {
+    @apply flex flex-1 flex-col gap-0.5;
+  }
+
+  .sidebar__navLink {
+    @apply relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold no-underline transition-colors duration-150;
+    color: var(--muted-foreground);
+  }
+  .sidebar__navLink:hover {
+    color: var(--foreground);
+    background: color-mix(in oklch, var(--muted) 60%, transparent);
+  }
+  .sidebar__navLink:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .sidebar__navLink.isActive {
+    color: var(--foreground);
+    background: color-mix(in oklch, var(--primary) 14%, transparent);
+    /* Inset rail uses the brand amber as the unambiguous "current page"
+     * marker. Survives high-contrast / forced-colors modes too. */
+    box-shadow: inset 3px 0 0 0 var(--primary);
+  }
+  .sidebar__navLink svg {
+    @apply h-4 w-4 shrink-0;
+  }
+
+  .sidebar__footer {
+    @apply mt-auto flex flex-col gap-2 pt-3;
+    border-top: 1px solid var(--border);
+  }
+
+  .sidebar__themeToggle,
+  .sidebar__logout {
+    @apply w-full justify-start gap-2;
+  }
+
+  .sidebar__user {
+    @apply flex flex-wrap items-center gap-2 px-2 text-sm;
+    color: var(--muted-foreground);
+  }
+  .sidebar__userName { @apply truncate; }
+
+  /* ─── Brand pieces (sidebar reuses; kept stable) ─────────────────── */
 
   .brandLockup {
     @apply flex min-w-0 items-center gap-3;
@@ -115,22 +167,6 @@
     color: var(--fg);
   }
 
-  .nav {
-    @apply flex max-w-full gap-1 overflow-x-auto rounded-lg border p-1;
-    border-color: color-mix(in srgb, var(--border) 78%, transparent);
-    background: color-mix(in oklch, var(--background) 72%, transparent);
-    scrollbar-width: none;
-  }
-
-  .nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .userMenu {
-    @apply flex items-center gap-2 text-sm;
-    color: var(--muted-foreground);
-  }
-
   .superadminBadge {
     @apply gap-1 rounded-lg border px-2 py-1 text-xs font-semibold;
     border-color: color-mix(in srgb, var(--danger) 46%, var(--border));
@@ -138,9 +174,7 @@
     background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 
-  .superadminBadge svg,
-  .navLink svg,
-  .userMenu button svg {
+  .superadminBadge svg {
     @apply h-4 w-4 shrink-0;
   }
 
@@ -173,28 +207,6 @@
 
   .authForm label {
     @apply grid gap-1 text-sm;
-  }
-
-  .navLink {
-    @apply relative inline-flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold no-underline transition-colors duration-150;
-    color: var(--muted-foreground);
-  }
-
-  .navLink:hover {
-    color: var(--fg);
-    background: color-mix(in srgb, var(--bg3) 78%, transparent);
-  }
-
-  .navLink:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  .navLink.isActive {
-    color: var(--primary-foreground);
-    background: var(--primary);
-    /* Non-color signal for current page: inset underline that survives high-contrast / forced-colors. */
-    box-shadow: inset 0 -2px 0 0 var(--primary-foreground);
   }
 
   .main {
@@ -400,13 +412,24 @@
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   }
 
-  .reviewInboxTableCard,
-  .reviewInboxDecisionCard {
+  .reviewInboxTableCard {
     @apply mb-0;
   }
 
+  /* Decision card gets a subtle amber gradient at the top edge, mirroring
+   * the bento hero tile pattern. Pulls the eye to the action surface
+   * without a heavy border. */
+  .reviewInboxDecisionCard {
+    @apply mb-0;
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklch, var(--primary) 6%, transparent),
+        transparent 28%),
+      var(--card);
+  }
+
   .reviewInboxToolbar {
-    @apply mb-4 flex flex-wrap items-end gap-3;
+    @apply mb-3 flex flex-wrap items-end gap-3;
   }
 
   .reviewInboxToolbar label,
@@ -427,11 +450,24 @@
     @apply flex flex-wrap gap-2;
   }
 
+  /* Inline keyboard shortcut hint. Daily-driver keys only; the full
+   * shortcut list is still one click away via the Shortcuts button. */
+  .reviewInboxShortcutsHint {
+    @apply mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs;
+    color: var(--muted-foreground);
+  }
+  .reviewInboxShortcutsHint kbd {
+    @apply inline-flex min-w-5 items-center justify-center rounded border px-1 py-0.5 font-mono text-[0.7rem];
+    border-color: var(--border);
+    background: var(--muted);
+    color: var(--foreground);
+  }
+
   .reviewInboxMessage {
     @apply mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold;
-    border-color: color-mix(in srgb, var(--accent-green) 45%, var(--border));
-    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
-    color: var(--accent-green);
+    border-color: color-mix(in srgb, var(--positive) 45%, var(--border));
+    background: color-mix(in srgb, var(--positive) 10%, transparent);
+    color: var(--positive);
   }
 
   .reviewInboxTableWrap {
@@ -442,12 +478,38 @@
 
   .reviewInboxTable thead th {
     @apply sticky top-0 z-10;
-    background: color-mix(in srgb, var(--bg3) 88%, transparent);
+    background: color-mix(in srgb, var(--muted) 88%, transparent);
+  }
+
+  /* Cursor row — replaces an inline style block on the row JSX. Uses
+   * --primary (amber) instead of --accent (plum); the cursor is the
+   * user's attention point, so it should match the brand attention
+   * color. Rail 4px (was 3px) + tint 10% (was 8%) for visibility. */
+  .reviewInboxTable tr[data-cursor="true"] {
+    box-shadow: inset 4px 0 0 0 var(--primary);
+    background: color-mix(in oklch, var(--primary) 10%, transparent);
   }
 
   .reviewInboxHint {
     @apply text-xs;
-    color: var(--muted);
+    color: var(--muted-foreground);
+  }
+
+  /* Inline-link button variant of .reviewInboxHint (e.g. the "Why?"
+   * trigger that opens the enrichment signals dialog). */
+  .reviewInboxHintLink {
+    @apply text-xs;
+    background: none;
+    border: none;
+    padding: 0;
+    text-decoration: underline;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  .reviewInboxHintLink:hover { color: var(--primary); }
+  .reviewInboxHintLink:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   .reviewInboxDecisionFields {
@@ -458,8 +520,8 @@
   .reviewInboxToolbar select {
     @apply min-h-9 rounded-md border px-3 text-sm;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    background: color-mix(in srgb, var(--bg2) 94%, transparent);
-    color: var(--fg);
+    background: color-mix(in srgb, var(--card) 94%, transparent);
+    color: var(--foreground);
   }
 
   .reviewInboxPreview {
@@ -470,7 +532,7 @@
   .reviewInboxPreview div {
     @apply rounded-lg border p-3;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    background: color-mix(in srgb, var(--bg3) 46%, transparent);
+    background: color-mix(in srgb, var(--muted) 46%, transparent);
   }
 
   .reviewInboxPreview strong,
@@ -490,7 +552,7 @@
   .reviewInboxGuardrail {
     @apply mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5;
     border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
-    background: color-mix(in srgb, var(--bg3) 42%, transparent);
+    background: color-mix(in srgb, var(--muted) 42%, transparent);
     color: var(--muted-foreground);
   }
 
@@ -706,6 +768,33 @@
     border-color: color-mix(in srgb, var(--primary) 20%, var(--border));
     background: color-mix(in srgb, var(--bg3) 68%, transparent);
     color: var(--fg);
+  }
+
+  /* Link-variant chip: label is a Link (drill into another page), the X
+   * clear lives beside it. Visual match to the all-button variant, but
+   * the chip becomes split-control. */
+  .transactionsFilterPill--link {
+    border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+    padding: 0;
+    overflow: hidden;
+  }
+  .transactionsFilterPill__label {
+    @apply px-3 py-1.5 no-underline;
+    color: var(--fg);
+  }
+  .transactionsFilterPill__label:hover {
+    color: var(--primary);
+    background: color-mix(in oklch, var(--primary) 8%, transparent);
+  }
+  .transactionsFilterPill__clear {
+    @apply inline-flex h-full items-center px-2 py-1.5 text-sm;
+    border-left: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  .transactionsFilterPill__clear:hover {
+    background: color-mix(in oklch, var(--destructive) 10%, transparent);
+    color: var(--destructive);
   }
 
   .transactionsHelperCopy {
@@ -1143,21 +1232,471 @@
   .formGrid .check {
     @apply flex-row items-center gap-2;
   }
+
+  /* ─── Bento dashboard ─────────────────────────────────────────────────
+   * Grid container + tile chrome for the bento layout. Tiles are <section>
+   * elements with data-span / data-rows / data-variant attributes set by
+   * BentoTile.tsx. Tables sit below the bento in .dashboardTableCard
+   * (renamed-but-equivalent .dashboardChartCard) and stay full-width.
+   * ─────────────────────────────────────────────────────────────────── */
+
+  .dashboardBento {
+    @apply mb-4 grid;
+    grid-template-columns: repeat(12, 1fr);
+    /* 160px × 2-row tile + 16px gap = 336px tile height; leaves ~240px for
+     * a chart body once header + padding are deducted. */
+    grid-auto-rows: 160px;
+    gap: 16px;
+  }
+
+  .bentoTile {
+    @apply flex flex-col gap-3 rounded-lg border p-4 sm:p-5;
+    border-color: color-mix(in srgb, var(--border) 88%, white 4%);
+    background: var(--card);
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+
+  .bentoTile[data-span="3"]  { grid-column: span 3; }
+  .bentoTile[data-span="4"]  { grid-column: span 4; }
+  .bentoTile[data-span="6"]  { grid-column: span 6; }
+  .bentoTile[data-span="8"]  { grid-column: span 8; }
+  .bentoTile[data-span="12"] { grid-column: span 12; }
+  .bentoTile[data-rows="1"]  { grid-row: span 1; }
+  .bentoTile[data-rows="2"]  { grid-row: span 2; }
+
+  .bentoTile--hero {
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklch, var(--primary) 10%, transparent),
+        transparent 32%),
+      var(--card);
+  }
+
+  .bentoTile__header {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .bentoTile__heading {
+    @apply min-w-0 flex-1;
+  }
+
+  .bentoTile__label {
+    @apply m-0 text-sm font-semibold;
+    color: var(--foreground);
+  }
+
+  .bentoTile__description {
+    @apply mt-1 mb-0 text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .bentoTile__actions {
+    @apply flex shrink-0 items-center gap-2;
+  }
+
+  .bentoTile__body {
+    @apply flex min-h-0 flex-1 flex-col;
+  }
+
+  /* ─── HeroTile ─────────────────────────────────────────────────────── */
+
+  .heroTile {
+    @apply flex h-full flex-col gap-2;
+  }
+
+  .heroTile__label {
+    @apply m-0 text-xs font-semibold uppercase tracking-wide;
+    color: var(--muted-foreground);
+  }
+
+  .heroTile__value {
+    @apply m-0 truncate font-semibold;
+    font-size: var(--text-display-sm);
+    line-height: var(--text-display-sm--line-height);
+    letter-spacing: var(--text-display-sm--letter-spacing);
+    color: var(--foreground);
+  }
+
+  .heroTile__delta {
+    @apply m-0;
+  }
+
+  .heroTile__sparkline {
+    @apply mt-1 block w-full;
+    height: 48px;
+  }
+
+  .heroTile__subMetrics {
+    @apply mt-auto m-0 grid gap-1.5 pt-3;
+    border-top: 1px solid var(--border);
+  }
+
+  .heroTile__subMetric {
+    @apply m-0 flex items-baseline justify-between gap-3;
+  }
+
+  .heroTile__subMetric dt {
+    @apply m-0 text-sm;
+    color: var(--muted-foreground);
+  }
+
+  .heroTile__subMetric dd {
+    @apply m-0 flex items-baseline gap-2 text-sm font-semibold;
+    color: var(--foreground);
+  }
+
+  .heroTile__subMetricValue {
+    @apply font-mono tabular-nums;
+  }
+
+  .heroTile__hint {
+    @apply m-0 text-xs;
+    color: var(--muted-foreground);
+  }
+
+  /* ─── KpiStack ─────────────────────────────────────────────────────── */
+
+  .kpiStack {
+    @apply flex h-full flex-col;
+    gap: 0;
+  }
+
+  .kpiStack__row {
+    @apply flex flex-1 flex-col justify-center gap-1 py-2;
+  }
+
+  .kpiStack__row + .kpiStack__row {
+    border-top: 1px solid var(--border);
+  }
+
+  .kpiStack__label {
+    @apply m-0 text-xs font-semibold uppercase tracking-wide;
+    color: var(--muted-foreground);
+  }
+
+  .kpiStack__value {
+    @apply m-0 truncate text-2xl font-semibold tabular-nums;
+    color: var(--foreground);
+  }
+
+  .kpiStack__hint {
+    @apply m-0 text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .kpiStack__delta {
+    @apply m-0 mt-1;
+  }
+
+  /* ─── Top growers tile ─────────────────────────────────────────────── */
+
+  .growersList {
+    @apply m-0 flex h-full flex-col gap-1.5 p-0;
+    list-style: none;
+  }
+
+  .growersList__row {
+    @apply flex items-center gap-2 py-1;
+  }
+  .growersList__row + .growersList__row {
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+  }
+
+  .growersList__main {
+    @apply flex min-w-0 flex-1 items-center gap-2;
+  }
+
+  .growersList__category {
+    @apply truncate text-sm font-medium;
+    color: var(--foreground);
+  }
+
+  .growersList__newBadge {
+    @apply shrink-0 rounded-full border px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide;
+    border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
+    background: color-mix(in oklch, var(--primary) 12%, transparent);
+    color: var(--primary);
+  }
+
+  .growersList__current {
+    @apply shrink-0 text-xs tabular-nums;
+    color: var(--muted-foreground);
+  }
+
+  .growersList__delta {
+    @apply shrink-0 tabular-nums;
+  }
+
+  /* ─── Recurring this month tile ────────────────────────────────────── */
+
+  .recurringList {
+    @apply m-0 flex flex-col gap-1.5 p-0;
+    list-style: none;
+  }
+
+  .recurringList__row {
+    @apply grid items-baseline gap-2 py-1;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .recurringList__row + .recurringList__row {
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+  }
+
+  .recurringList__merchant {
+    @apply truncate text-sm font-semibold no-underline;
+    color: var(--foreground);
+  }
+  .recurringList__merchant:hover {
+    color: var(--primary);
+    text-decoration: underline;
+  }
+
+  .recurringList__amount {
+    @apply text-sm tabular-nums;
+    color: var(--foreground);
+  }
+
+  .recurringList__date {
+    @apply text-xs tabular-nums;
+    color: var(--muted-foreground);
+  }
+
+  .recurringList__footer {
+    @apply mt-auto flex items-baseline justify-between gap-2 pt-2 text-xs;
+    border-top: 1px solid var(--border);
+  }
+
+  .recurringList__total {
+    @apply truncate tabular-nums;
+    color: var(--muted-foreground);
+  }
+
+  .recurringList__viewAll {
+    @apply shrink-0 font-semibold no-underline;
+    color: var(--primary);
+  }
+  .recurringList__viewAll:hover { text-decoration: underline; }
+
+  /* ─── Currency mix tile ───────────────────────────────────────────── */
+
+  .currencyMixBar {
+    @apply mt-1 flex h-6 w-full overflow-hidden rounded-md border;
+    border-color: var(--border);
+  }
+
+  .currencyMixBar__segment {
+    @apply block h-full;
+    transition: width 0.3s ease-out;
+  }
+  .currencyMixBar__segment + .currencyMixBar__segment {
+    border-left: 1px solid color-mix(in oklch, var(--card) 65%, transparent);
+  }
+
+  .currencyMixLegend {
+    @apply m-0 mt-3 flex flex-col gap-1.5 p-0;
+    list-style: none;
+  }
+
+  .currencyMixLegend__row {
+    @apply grid items-center gap-2 text-xs;
+    grid-template-columns: 10px auto 1fr auto;
+  }
+
+  .currencyMixLegend__dot {
+    @apply h-2.5 w-2.5 rounded-full;
+  }
+
+  .currencyMixLegend__code {
+    @apply font-semibold;
+    color: var(--foreground);
+  }
+
+  .currencyMixLegend__amount {
+    @apply truncate text-right tabular-nums;
+    color: var(--muted-foreground);
+  }
+
+  .currencyMixLegend__pct {
+    @apply shrink-0 tabular-nums font-semibold;
+    color: var(--foreground);
+  }
+
+  /* ─── TableTile (compact top-N grid living in a bento tile) ───────── */
+
+  .tableTile {
+    @apply flex min-h-0 flex-1 flex-col;
+  }
+
+  .tableTile__header,
+  .tableTile__row {
+    @apply grid items-center gap-2 py-1;
+  }
+
+  .tableTile__header {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tableTile__head {
+    @apply truncate text-[0.7rem] font-bold uppercase tracking-wide;
+    color: var(--muted-foreground);
+  }
+
+  .tableTile__body {
+    @apply flex min-h-0 flex-1 flex-col;
+    overflow-y: auto;
+  }
+
+  .tableTile__row + .tableTile__row {
+    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+  }
+
+  .tableTile__row[data-interactive="true"] {
+    cursor: pointer;
+    border-radius: 6px;
+    margin: 0 -4px;
+    padding-left: 4px;
+    padding-right: 4px;
+    transition: background-color 0.15s;
+  }
+  .tableTile__row[data-interactive="true"]:hover {
+    background: color-mix(in oklch, var(--muted) 50%, transparent);
+  }
+  .tableTile__row[data-interactive="true"]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .tableTile__cell {
+    @apply truncate text-sm;
+    color: var(--foreground);
+  }
+
+  .tableTile__head[data-align="right"],
+  .tableTile__cell[data-align="right"] {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tableTile__footer {
+    @apply mt-2 flex justify-end pt-2;
+    border-top: 1px solid var(--border);
+  }
+
+  .tableTile__viewAll {
+    @apply text-xs font-semibold no-underline;
+    color: var(--primary);
+  }
+  .tableTile__viewAll:hover { text-decoration: underline; }
+
+  /* ─── Budget pills (compact horizontal strip in a 12×1 bento tile) ── */
+
+  .budgetPillStrip {
+    @apply flex h-full gap-3 overflow-x-auto pb-1;
+    scrollbar-width: thin;
+  }
+
+  .budgetPill {
+    @apply flex shrink-0 flex-col justify-center gap-1.5 rounded-md border p-2.5;
+    border-color: var(--border);
+    background: color-mix(in oklch, var(--muted) 50%, transparent);
+    min-width: 200px;
+    max-width: 240px;
+  }
+
+  .budgetPill__header {
+    @apply flex items-baseline justify-between gap-2;
+  }
+
+  .budgetPill__label {
+    @apply truncate text-sm font-semibold;
+    color: var(--foreground);
+  }
+
+  .budgetPill__pct {
+    @apply shrink-0 text-xs font-semibold tabular-nums;
+    color: var(--muted-foreground);
+  }
+
+  .budgetPill__bar {
+    @apply relative h-1.5 w-full overflow-hidden rounded-full;
+    background: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  .budgetPill__fill {
+    @apply block h-full;
+    background: var(--positive);
+    transition: width 0.3s ease-out;
+  }
+
+  .budgetPill--warn .budgetPill__fill { background: var(--primary); }
+  .budgetPill--over .budgetPill__fill { background: var(--destructive); }
+
+  .budgetPill__amount {
+    @apply m-0 truncate text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .budgetPill__currency {
+    @apply ml-1 opacity-70;
+  }
+
+  /* ─── Dashboard table card (post-bento, drill-down stack) ──────────── */
+
+  .dashboardTableCard {
+    @apply mb-4;
+  }
+
+  .dashboardTableCard h2 {
+    @apply mt-0;
+  }
+
+  .dashboardTableCard .muted {
+    @apply mb-1;
+  }
+}
+
+@media (max-width: 768px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    @apply fixed inset-y-0 left-0 z-30;
+    width: 280px;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease-out;
+    box-shadow: 0 10px 30px oklch(0 0 0 / 0.25);
+  }
+
+  .layout[data-sidebar-open="true"] .sidebar {
+    transform: translateX(0);
+  }
+
+  .sidebarBackdrop {
+    @apply fixed inset-0 z-20 block border-0 p-0;
+    background: oklch(0 0 0 / 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-out;
+    cursor: pointer;
+  }
+
+  .layout[data-sidebar-open="true"] .sidebarBackdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .topBar {
+    @apply flex;
+  }
 }
 
 @media (width <= 720px) {
-  .header {
-    @apply items-start;
-  }
-
-  .nav {
-    @apply w-full;
-  }
-
-  .navLink {
-    @apply flex-1 text-center;
-  }
-
   .transactionsTopGrid {
     grid-template-columns: 1fr;
   }
@@ -1185,5 +1724,35 @@
 
   .businessFocusMetrics {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Bento responsive collapse ──────────────────────────────────────────
+ * Tablet (≤1023px): grid collapses 12 → 6 columns. Wide tiles (span 8/12)
+ *   become full-width; medium tiles (span 4) become half-width.
+ * Mobile (≤639px): single column, each tile takes its natural height.
+ * ──────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+  .dashboardBento {
+    grid-template-columns: repeat(6, 1fr);
+  }
+  .bentoTile[data-span="8"],
+  .bentoTile[data-span="12"] {
+    grid-column: span 6;
+  }
+  .bentoTile[data-span="4"] {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 639px) {
+  .dashboardBento {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+  }
+  .bentoTile {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
   }
 }

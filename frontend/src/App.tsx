@@ -3,6 +3,8 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { Layout } from './components/Layout'
 import { AccountsPage } from './pages/AccountsPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { ImportBatchPage } from './pages/ImportBatchPage'
+import { ImportPage } from './pages/ImportPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { RecurringPage } from './pages/RecurringPage'
@@ -31,6 +33,8 @@ function AppRoutes() {
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="review" element={<ReviewInboxPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="import" element={<ImportPage />} />
+          <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="amazon" element={<AmazonPage />} />
           <Route path="recurring" element={<RecurringPage />} />

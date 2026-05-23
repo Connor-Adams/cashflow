@@ -54,6 +54,7 @@ test('pipeline applies merchant-memory when no rule matches', async () => {
       pctPartner: null,
       supportCount: 3,
       exampleTransactionIds: [1, 2, 3],
+      matchedByAmount: true,
     },
   }));
   assert.equal(result.fields.autoCategory, 'Dining');
@@ -91,6 +92,7 @@ test('pipeline applies amazon items signal when order matches', async () => {
     amazonOrders: [
       {
         id: 42,
+        vendor: 'amazon',
         total: 50,
         orderDate: '2026-05-09',
         shipmentDate: null,
@@ -100,7 +102,7 @@ test('pipeline applies amazon items signal when order matches', async () => {
     ],
   }));
   assert.equal(result.fields.merchantCanonical, 'Amazon');
-  // amazon-items alone is high confidence but NOT in the non-AI-high set per precedence? Actually it IS non-AI.
+  // item-link is non-AI; should clear review when category is unanimous.
   assert.equal(result.fields.autoCategory, 'Office');
   assert.equal(result.fields.reviewFlag, false);
 });

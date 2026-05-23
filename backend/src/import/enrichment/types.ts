@@ -12,7 +12,7 @@ export type SignalSource =
   | 'recurring'
   | 'rule'
   | 'memory'
-  | 'amazon-items'
+  | 'item-link'
   | 'refund-link'
   | 'transfer-link'
   | 'ai';
