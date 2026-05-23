@@ -144,8 +144,11 @@ Cashflow uses a three-piece pipeline:
    - The `build-images` workflow builds the backend and frontend images and
      pushes them to GHCR (`ghcr.io/connor-adams/cashflow-{backend,frontend}:sha-<short>`).
    - Release Drafter updates the draft GitHub Release with the new entry.
-3. When ready to ship, go to **Releases → Drafts** in GitHub, eyeball the
-   notes and version, edit if needed, click **Publish release**.
+3. When ready to ship, go to **Releases → Drafts** in GitHub. **Wait for the
+   `build-images` run on the latest `main` commit to finish** before
+   publishing — the promote workflow re-tags those images, and will fail
+   fast if they don't exist yet. Eyeball the notes and version, edit if
+   needed, click **Publish release**.
 4. Publishing fires a `release: published` event (human action, not
    `GITHUB_TOKEN`). The `promote-to-production` workflow:
    - Re-tags the released commit's images as `:vX.Y.Z` and `:production`.
