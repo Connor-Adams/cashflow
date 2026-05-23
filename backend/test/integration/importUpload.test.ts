@@ -903,3 +903,41 @@ test('POST /api/import/upload: rejects an unknown-layout PDF with a clear error'
   assert.equal(res.body.reason, 'pdf_parse_error');
   assert.match(String(res.body.message ?? ''), /PDF|parser/i);
 });
+
+test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped (no double-insert)', async () => {
+  const acc = await authed.post('/api/accounts').send({
+    name: 'CIBC Costco MC (dedup)',
+    owner: 'me',
+    accountType: 'credit_card',
+    defaultCurrency: 'CAD',
+  });
+  assert.equal(acc.status, 201);
+  const accountId = acc.body.id as number;
+
+  const pdfPath = path.join(backendRoot, 'test', 'fixtures', 'pdf', 'cibc-costco-2025-12-12.pdf');
+  const buf = fs.readFileSync(pdfPath);
+
+  // First upload — 5 charges inserted, no duplicates.
+  const first = await authed
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .attach('file', buf, { filename: 'cibc-costco-2025-12-12.pdf', contentType: 'application/pdf' });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.inserted, 5, JSON.stringify(first.body));
+
+  // Second upload of the same bytes — should not insert anything new.
+  const second = await authed
+    .post('/api/import/upload')
+    .field('accountId', String(accountId))
+    .attach('file', buf, { filename: 'cibc-costco-2025-12-12.pdf', contentType: 'application/pdf' });
+  assert.equal(second.status, 200);
+  // Either the contentHash short-circuit returns { skipped: true, reason: 'duplicate_file' }
+  // (or whatever the project's duplicate-content reason is), OR the row-level dedup catches
+  // every transaction and reports inserted: 0. Accept either — both achieve "no double-insert".
+  const insertedAgain = second.body?.inserted ?? 0;
+  const skipped = second.body?.skipped === true;
+  assert.ok(
+    skipped || insertedAgain === 0,
+    `expected the second upload to be skipped or insert 0 rows, got ${JSON.stringify(second.body)}`,
+  );
+});
