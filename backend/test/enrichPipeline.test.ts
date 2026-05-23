@@ -116,3 +116,45 @@ test('pipeline returns all stage signals in result', async () => {
   assert.ok(sources.includes('type-detect'));
   assert.ok(sources.includes('rule'));
 });
+
+test('enrichTransaction labels WS investment txn via ws-investment stage', async () => {
+  const result = await enrichTransaction({
+    raw: {
+      merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: Bought 0.3921 shares at $40.78 per share (executed at 2026-01-06)',
+      amount: 0,
+      date: '2026-01-06',
+      notes: null,
+      sourceReference: null,
+    },
+    rules: [],
+    memory: null,
+    recurringHistory: [],
+    amazonOrders: [],
+    relationshipCandidates: [],
+    accountId: 1,
+    householdAccountIds: [1],
+  } as any);
+
+  assert.equal(result.fields.merchantCanonical, 'XEQT — Buy');
+});
+
+test('enrichTransaction labels regular merchant via normalize-seed (not WS stage)', async () => {
+  const result = await enrichTransaction({
+    raw: {
+      merchantRaw: 'STARBUCKS 04747 GUELPH',
+      amount: 5.25,
+      date: '2026-01-06',
+      notes: null,
+      sourceReference: null,
+    },
+    rules: [],
+    memory: null,
+    recurringHistory: [],
+    amazonOrders: [],
+    relationshipCandidates: [],
+    accountId: 1,
+    householdAccountIds: [1],
+  } as any);
+
+  assert.equal(result.fields.merchantCanonical, 'Starbucks');
+});

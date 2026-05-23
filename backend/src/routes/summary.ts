@@ -43,6 +43,7 @@ router.get('/dashboard', async (req, res, next) => {
           'finalSplitType',
           'merchantRaw',
           'merchantClean',
+          'merchantCanonical',
           'amount',
           'reviewFlag',
           'txnType',
@@ -66,6 +67,7 @@ router.get('/dashboard', async (req, res, next) => {
       finalSplitType: string;
       merchantRaw: string | null;
       merchantClean: string | null;
+      merchantCanonical: string | null;
       amount: unknown;
       reviewFlag: boolean;
       txnType: string | null;
@@ -188,7 +190,10 @@ router.get('/dashboard', async (req, res, next) => {
       const currency = row.currency;
       const month = row.date.slice(0, 7);
       const merchant =
-        row.merchantClean?.trim() || row.merchantRaw?.trim() || '(unknown merchant)';
+        row.merchantCanonical?.trim() ||
+        row.merchantClean?.trim() ||
+        row.merchantRaw?.trim() ||
+        '(unknown merchant)';
       const account = accountById.get(row.accountId);
       const accountName = account?.name ?? `Account ${row.accountId}`;
       // Spend totals must exclude transfers, investment buys, dividend

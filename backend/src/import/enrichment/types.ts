@@ -8,6 +8,7 @@ export type Confidence = 'high' | 'medium' | 'low';
 export type SignalSource =
   | 'normalize-seed'
   | 'normalize-learned'
+  | 'ws-investment'
   | 'type-detect'
   | 'recurring'
   | 'rule'
