@@ -59,6 +59,8 @@ function seedFlags(overrides: Partial<Parameters<typeof backfillModule.runBackfi
     householdId: null,
     limit: null,
     batchSize: 50,
+    dateFrom: null,
+    dateTo: null,
     ...overrides,
   };
 }
@@ -261,4 +263,37 @@ test('backfill is idempotent', async () => {
   const after = countPerTxn(signalsAfter);
   assert.equal(after.size, before.size);
   for (const [k, v] of before) assert.equal(after.get(k), v);
+});
+
+test('backfill respects dateFrom/dateTo filter', async () => {
+  const inWindow = await createTxn({
+    merchantRaw: 'WINDOW INSIDE',
+    merchantClean: 'WINDOW INSIDE',
+    amount: -1,
+    date: '2026-04-10',
+    autoSource: 'rule',
+  });
+  const outOfWindow = await createTxn({
+    merchantRaw: 'WINDOW OUTSIDE',
+    merchantClean: 'WINDOW OUTSIDE',
+    amount: -1,
+    date: '2025-01-01',
+    autoSource: 'rule',
+  });
+
+  // Sanity: both rows have no signals yet.
+  const beforeInSignals = await models.TransactionSignal.count({ where: { transactionId: inWindow.id } });
+  const beforeOutSignals = await models.TransactionSignal.count({ where: { transactionId: outOfWindow.id } });
+  assert.equal(beforeInSignals, 0);
+  assert.equal(beforeOutSignals, 0);
+
+  await backfillModule.runBackfill(seedFlags({ dateFrom: '2026-04-01', dateTo: '2026-04-30' }));
+
+  // The out-of-window row must not have been processed: no signals written.
+  const afterOutSignals = await models.TransactionSignal.count({ where: { transactionId: outOfWindow.id } });
+  assert.equal(afterOutSignals, 0, 'out-of-window row must not be processed when dateTo excludes it');
+
+  // The in-window row was processed: it picked up at least one signal.
+  const afterInSignals = await models.TransactionSignal.count({ where: { transactionId: inWindow.id } });
+  assert.ok(afterInSignals > 0, 'in-window row should be processed and have signals');
 });

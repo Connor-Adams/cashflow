@@ -11,6 +11,7 @@
  *
  * Caller-supplied flags control filtering and write behaviour.
  */
+import { Op } from 'sequelize';
 import { sequelize, Transaction, TransactionSignal } from '../models';
 import { loadAllRules } from './applyRules';
 import { findMerchantMemory } from '../ai/merchantMemory';
@@ -40,6 +41,10 @@ export interface BackfillFlags {
   batchSize: number;
   /** Optional: enrich only this single transaction id (used by the single-row re-enrich route). */
   transactionId?: number | null;
+  /** Inclusive lower bound on Transaction.date (YYYY-MM-DD). */
+  dateFrom: string | null;
+  /** Inclusive upper bound on Transaction.date (YYYY-MM-DD). */
+  dateTo: string | null;
 }
 
 export interface BackfillResult {
@@ -100,6 +105,14 @@ export async function runBackfill(
   if (flags.accountId != null) where.accountId = flags.accountId;
   if (flags.householdId != null) where.householdId = flags.householdId;
   if (flags.reviewOnly) where.reviewFlag = true;
+
+  if (flags.dateFrom && flags.dateTo) {
+    where.date = { [Op.between]: [flags.dateFrom, flags.dateTo] };
+  } else if (flags.dateFrom) {
+    where.date = { [Op.gte]: flags.dateFrom };
+  } else if (flags.dateTo) {
+    where.date = { [Op.lte]: flags.dateTo };
+  }
 
   const total = await Transaction.count({ where });
   console.log(`[backfill] ${total} transactions match filter`);
