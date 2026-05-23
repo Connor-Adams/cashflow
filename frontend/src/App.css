@@ -412,13 +412,24 @@
     grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   }
 
-  .reviewInboxTableCard,
-  .reviewInboxDecisionCard {
+  .reviewInboxTableCard {
     @apply mb-0;
   }
 
+  /* Decision card gets a subtle amber gradient at the top edge, mirroring
+   * the bento hero tile pattern. Pulls the eye to the action surface
+   * without a heavy border. */
+  .reviewInboxDecisionCard {
+    @apply mb-0;
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklch, var(--primary) 6%, transparent),
+        transparent 28%),
+      var(--card);
+  }
+
   .reviewInboxToolbar {
-    @apply mb-4 flex flex-wrap items-end gap-3;
+    @apply mb-3 flex flex-wrap items-end gap-3;
   }
 
   .reviewInboxToolbar label,
@@ -439,11 +450,24 @@
     @apply flex flex-wrap gap-2;
   }
 
+  /* Inline keyboard shortcut hint. Daily-driver keys only; the full
+   * shortcut list is still one click away via the Shortcuts button. */
+  .reviewInboxShortcutsHint {
+    @apply mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs;
+    color: var(--muted-foreground);
+  }
+  .reviewInboxShortcutsHint kbd {
+    @apply inline-flex min-w-5 items-center justify-center rounded border px-1 py-0.5 font-mono text-[0.7rem];
+    border-color: var(--border);
+    background: var(--muted);
+    color: var(--foreground);
+  }
+
   .reviewInboxMessage {
     @apply mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold;
-    border-color: color-mix(in srgb, var(--accent-green) 45%, var(--border));
-    background: color-mix(in srgb, var(--accent-green) 10%, transparent);
-    color: var(--accent-green);
+    border-color: color-mix(in srgb, var(--positive) 45%, var(--border));
+    background: color-mix(in srgb, var(--positive) 10%, transparent);
+    color: var(--positive);
   }
 
   .reviewInboxTableWrap {
@@ -454,12 +478,38 @@
 
   .reviewInboxTable thead th {
     @apply sticky top-0 z-10;
-    background: color-mix(in srgb, var(--bg3) 88%, transparent);
+    background: color-mix(in srgb, var(--muted) 88%, transparent);
+  }
+
+  /* Cursor row — replaces an inline style block on the row JSX. Uses
+   * --primary (amber) instead of --accent (plum); the cursor is the
+   * user's attention point, so it should match the brand attention
+   * color. Rail 4px (was 3px) + tint 10% (was 8%) for visibility. */
+  .reviewInboxTable tr[data-cursor="true"] {
+    box-shadow: inset 4px 0 0 0 var(--primary);
+    background: color-mix(in oklch, var(--primary) 10%, transparent);
   }
 
   .reviewInboxHint {
     @apply text-xs;
-    color: var(--muted);
+    color: var(--muted-foreground);
+  }
+
+  /* Inline-link button variant of .reviewInboxHint (e.g. the "Why?"
+   * trigger that opens the enrichment signals dialog). */
+  .reviewInboxHintLink {
+    @apply text-xs;
+    background: none;
+    border: none;
+    padding: 0;
+    text-decoration: underline;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  .reviewInboxHintLink:hover { color: var(--primary); }
+  .reviewInboxHintLink:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   .reviewInboxDecisionFields {
@@ -470,8 +520,8 @@
   .reviewInboxToolbar select {
     @apply min-h-9 rounded-md border px-3 text-sm;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    background: color-mix(in srgb, var(--bg2) 94%, transparent);
-    color: var(--fg);
+    background: color-mix(in srgb, var(--card) 94%, transparent);
+    color: var(--foreground);
   }
 
   .reviewInboxPreview {
@@ -482,7 +532,7 @@
   .reviewInboxPreview div {
     @apply rounded-lg border p-3;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    background: color-mix(in srgb, var(--bg3) 46%, transparent);
+    background: color-mix(in srgb, var(--muted) 46%, transparent);
   }
 
   .reviewInboxPreview strong,
@@ -502,7 +552,7 @@
   .reviewInboxGuardrail {
     @apply mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5;
     border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
-    background: color-mix(in srgb, var(--bg3) 42%, transparent);
+    background: color-mix(in srgb, var(--muted) 42%, transparent);
     color: var(--muted-foreground);
   }
 
