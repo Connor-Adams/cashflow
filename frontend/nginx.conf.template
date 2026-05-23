@@ -1,0 +1,18 @@
+server {
+  listen ${PORT};
+  server_name _;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # SPA fallback: React Router needs unknown paths to return index.html
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+
+  # Vite produces content-hashed asset filenames; safe to cache forever
+  location /assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+}
