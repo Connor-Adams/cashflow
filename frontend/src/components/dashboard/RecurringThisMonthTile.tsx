@@ -95,9 +95,7 @@ export function RecurringThisMonthTile({
 /** Format "2026-05-28" as "May 28". Defensively returns the raw string
  *  if parsing fails so the tile never crashes on unexpected input. */
 function formatDueDate(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number)
-  if (!y || !m || !d) return iso
-  const dt = new Date(y, m - 1, d)
+  const dt = new Date(`${iso}T00:00:00`)
   if (Number.isNaN(dt.getTime())) return iso
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }

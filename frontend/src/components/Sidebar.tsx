@@ -59,81 +59,131 @@ type SidebarProps = {
  * sidebar pinned in the grid.
  */
 export function Sidebar({ open, onClose }: SidebarProps) {
-  const auth = useAuth()
-  const { theme, toggleTheme } = useTheme()
-  const isDark = theme === 'dark'
-
   return (
     <aside
       className="sidebar"
       data-open={open}
       aria-label="Primary navigation"
     >
-      <div className="sidebar__brand">
-        <div className="brandMark">CF</div>
-        <div>
-          <div className="brandEyebrow">Household ledger</div>
-          <div className="brand">Cashflow</div>
-        </div>
-      </div>
-
-      <nav className="sidebar__nav" aria-label="Main">
-        {navItems.map((item) => {
-          const Icon = item.icon
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={onClose}
-              className={({ isActive }) =>
-                `sidebar__navLink${isActive ? ' isActive' : ''}`
-              }
-            >
-              <Icon aria-hidden="true" />
-              <span>{item.label}</span>
-            </NavLink>
-          )
-        })}
-      </nav>
-
-      <div className="sidebar__footer">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={toggleTheme}
-          title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
-          aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-          aria-pressed={isDark}
-          className="sidebar__themeToggle"
-        >
-          {isDark ? <Sun size={18} /> : <Moon size={18} />}
-          <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
-        </Button>
-
-        <div className="sidebar__user">
-          <span className="sidebar__userName">
-            {auth.user?.displayName ?? 'Signed in'}
-          </span>
-          {auth.user?.globalRole === 'superadmin' && (
-            <Badge variant="outline" className="superadminBadge">
-              <Shield aria-hidden="true" />
-              God mode
-            </Badge>
-          )}
-        </div>
-
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => void auth.logout()}
-          className="sidebar__logout"
-        >
-          <LogOut aria-hidden="true" />
-          Log out
-        </Button>
-      </div>
+      <SidebarBrand />
+      <SidebarNavList items={navItems} onItemClick={onClose} />
+      <SidebarFooter />
     </aside>
+  )
+}
+
+function SidebarBrand() {
+  return (
+    <div className="sidebar__brand">
+      <div className="brandMark">CF</div>
+      <div>
+        <div className="brandEyebrow">Household ledger</div>
+        <div className="brand">Cashflow</div>
+      </div>
+    </div>
+  )
+}
+
+function SidebarNavList({
+  items,
+  onItemClick,
+}: {
+  items: NavItem[]
+  onItemClick: () => void
+}) {
+  return (
+    <nav className="sidebar__nav" aria-label="Main">
+      {items.map((item) => (
+        <SidebarNavLink key={item.to} item={item} onClick={onItemClick} />
+      ))}
+    </nav>
+  )
+}
+
+function SidebarNavLink({
+  item,
+  onClick,
+}: {
+  item: NavItem
+  onClick: () => void
+}) {
+  const Icon = item.icon
+  return (
+    <NavLink
+      to={item.to}
+      end={item.end}
+      onClick={onClick}
+      className={navLinkClass}
+    >
+      <Icon aria-hidden="true" />
+      <span>{item.label}</span>
+    </NavLink>
+  )
+}
+
+function navLinkClass({ isActive }: { isActive: boolean }): string {
+  return isActive ? 'sidebar__navLink isActive' : 'sidebar__navLink'
+}
+
+function SidebarFooter() {
+  const auth = useAuth()
+  return (
+    <div className="sidebar__footer">
+      <ThemeToggleButton />
+      <SidebarUser
+        displayName={auth.user?.displayName}
+        isSuperadmin={auth.user?.globalRole === 'superadmin'}
+      />
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={() => void auth.logout()}
+        className="sidebar__logout"
+      >
+        <LogOut aria-hidden="true" />
+        Log out
+      </Button>
+    </div>
+  )
+}
+
+function ThemeToggleButton() {
+  const { theme, toggleTheme } = useTheme()
+  const isDark = theme === 'dark'
+  const targetLabel = isDark ? 'light' : 'dark'
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={toggleTheme}
+      title={`Switch to ${targetLabel} mode`}
+      aria-label={`Switch to ${targetLabel} theme`}
+      aria-pressed={isDark}
+      className="sidebar__themeToggle"
+    >
+      {isDark ? <Sun size={18} /> : <Moon size={18} />}
+      <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
+    </Button>
+  )
+}
+
+function SidebarUser({
+  displayName,
+  isSuperadmin,
+}: {
+  displayName: string | undefined
+  isSuperadmin: boolean
+}) {
+  return (
+    <div className="sidebar__user">
+      <span className="sidebar__userName">{displayName ?? 'Signed in'}</span>
+      {isSuperadmin && (
+        <Badge variant="outline" className="superadminBadge">
+          <Shield aria-hidden="true" />
+          God mode
+        </Badge>
+      )}
+    </div>
   )
 }

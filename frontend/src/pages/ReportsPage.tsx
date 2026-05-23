@@ -832,109 +832,81 @@ export function ReportsPage() {
         </div>
       </section>
 
-      <section id="merchants" className="card reportsTableCard">
-        <div className="reportsCardHeader">
-          <div>
-            <h2>Merchants</h2>
-            <p className="muted">
-              All merchants in this view, ranked by net spend. Linked from
-              the Dashboard's <em>Top merchants</em> tile.
-            </p>
-          </div>
-        </div>
-        <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                {!currency && <th>Currency</th>}
-                <th>Merchant</th>
-                <th>Txns</th>
-                <th>Spend</th>
-                <th>Refunds / credits</th>
-                <th>Payments</th>
-                <th>Net spend</th>
-                <th>Needs review</th>
-                <th>Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!loading && filteredMerchantSummaries.length === 0 && (
-                <tr>
-                  <td colSpan={currency ? 8 : 9} className="emptyStateCell">
-                    <p className="emptyState">
-                      No merchant activity for these filters.
-                    </p>
-                  </td>
-                </tr>
-              )}
-              {filteredMerchantSummaries.map((row) => (
-                <tr key={`${row.currency}:${row.merchant}`}>
-                  {!currency && <td>{row.currency}</td>}
-                  <td>{row.merchant}</td>
-                  <td>{row.transactionCount}</td>
-                  <td>{formatMoney(row.totalSpend, row.currency)}</td>
-                  <td>{formatMoney(row.totalCredits, row.currency)}</td>
-                  <td>{formatMoney(row.totalPayments, row.currency)}</td>
-                  <td>{formatMoney(row.netSpend, row.currency)}</td>
-                  <td>{row.reviewCount}</td>
-                  <td>{row.lastDate}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <RankedReportSection
+        id="merchants"
+        title="Merchants"
+        description={
+          <>
+            All merchants in this view, ranked by net spend. Linked from
+            the Dashboard's <em>Top merchants</em> tile.
+          </>
+        }
+        headers={[
+          'Merchant',
+          'Txns',
+          'Spend',
+          'Refunds / credits',
+          'Payments',
+          'Net spend',
+          'Needs review',
+          'Last seen',
+        ]}
+        showCurrencyColumn={!currency}
+        rows={filteredMerchantSummaries}
+        rowKey={(r) => `${r.currency}:${r.merchant}`}
+        renderRow={(r) => (
+          <>
+            {!currency && <td>{r.currency}</td>}
+            <td>{r.merchant}</td>
+            <td>{r.transactionCount}</td>
+            <td>{formatMoney(r.totalSpend, r.currency)}</td>
+            <td>{formatMoney(r.totalCredits, r.currency)}</td>
+            <td>{formatMoney(r.totalPayments, r.currency)}</td>
+            <td>{formatMoney(r.netSpend, r.currency)}</td>
+            <td>{r.reviewCount}</td>
+            <td>{r.lastDate}</td>
+          </>
+        )}
+        emptyMessage="No merchant activity for these filters."
+        loading={loading}
+      />
 
-      <section id="accounts" className="card reportsTableCard">
-        <div className="reportsCardHeader">
-          <div>
-            <h2>Accounts</h2>
-            <p className="muted">
-              All accounts in this view, ranked by net spend. Linked from
-              the Dashboard's <em>Top accounts</em> tile.
-            </p>
-          </div>
-        </div>
-        <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                {!currency && <th>Currency</th>}
-                <th>Account</th>
-                <th>Txns</th>
-                <th>Spend</th>
-                <th>Refunds / credits</th>
-                <th>Payments</th>
-                <th>Net spend</th>
-                <th>Needs review</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!loading && filteredAccountSummaries.length === 0 && (
-                <tr>
-                  <td colSpan={currency ? 7 : 8} className="emptyStateCell">
-                    <p className="emptyState">
-                      No account activity for these filters.
-                    </p>
-                  </td>
-                </tr>
-              )}
-              {filteredAccountSummaries.map((row) => (
-                <tr key={`${row.currency}:${row.accountId}`}>
-                  {!currency && <td>{row.currency}</td>}
-                  <td>{row.accountShortCode ?? row.accountName}</td>
-                  <td>{row.transactionCount}</td>
-                  <td>{formatMoney(row.totalSpend, row.currency)}</td>
-                  <td>{formatMoney(row.totalCredits, row.currency)}</td>
-                  <td>{formatMoney(row.totalPayments, row.currency)}</td>
-                  <td>{formatMoney(row.netSpend, row.currency)}</td>
-                  <td>{row.reviewCount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <RankedReportSection
+        id="accounts"
+        title="Accounts"
+        description={
+          <>
+            All accounts in this view, ranked by net spend. Linked from
+            the Dashboard's <em>Top accounts</em> tile.
+          </>
+        }
+        headers={[
+          'Account',
+          'Txns',
+          'Spend',
+          'Refunds / credits',
+          'Payments',
+          'Net spend',
+          'Needs review',
+        ]}
+        showCurrencyColumn={!currency}
+        rows={filteredAccountSummaries}
+        rowKey={(r) => `${r.currency}:${r.accountId}`}
+        renderRow={(r) => (
+          <>
+            {!currency && <td>{r.currency}</td>}
+            <td>{r.accountShortCode ?? r.accountName}</td>
+            <td>{r.transactionCount}</td>
+            <td>{formatMoney(r.totalSpend, r.currency)}</td>
+            <td>{formatMoney(r.totalCredits, r.currency)}</td>
+            <td>{formatMoney(r.totalPayments, r.currency)}</td>
+            <td>{formatMoney(r.netSpend, r.currency)}</td>
+            <td>{r.reviewCount}</td>
+          </>
+        )}
+        emptyMessage="No account activity for these filters."
+        loading={loading}
+      />
     </div>
 
     {dialogOpen && (
@@ -1059,5 +1031,76 @@ export function ReportsPage() {
     )}
     {confirm.dialog}
     </>
+  )
+}
+
+type RankedReportSectionProps<R> = {
+  id: string
+  title: string
+  description: React.ReactNode
+  /** When true, render a leading "Currency" header column. The row
+   *  renderer is still responsible for emitting the matching <td>. */
+  showCurrencyColumn: boolean
+  /** Header labels for non-currency columns. */
+  headers: string[]
+  rows: R[]
+  rowKey: (row: R) => string
+  /** Returns the row's `<td>` cells (currency cell included when shown). */
+  renderRow: (row: R) => React.ReactNode
+  emptyMessage: string
+  loading: boolean
+}
+
+/**
+ * Shared chrome for the comprehensive ranking sections at the bottom of
+ * the Reports page (Merchants, Accounts). Extracted to kill duplication
+ * between two near-identical table layouts.
+ */
+function RankedReportSection<R>({
+  id,
+  title,
+  description,
+  showCurrencyColumn,
+  headers,
+  rows,
+  rowKey,
+  renderRow,
+  emptyMessage,
+  loading,
+}: RankedReportSectionProps<R>) {
+  const totalColumns = (showCurrencyColumn ? 1 : 0) + headers.length
+  return (
+    <section id={id} className="card reportsTableCard">
+      <div className="reportsCardHeader">
+        <div>
+          <h2>{title}</h2>
+          <p className="muted">{description}</p>
+        </div>
+      </div>
+      <div className="tableWrap">
+        <table className="table">
+          <thead>
+            <tr>
+              {showCurrencyColumn && <th>Currency</th>}
+              {headers.map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {!loading && rows.length === 0 && (
+              <tr>
+                <td colSpan={totalColumns} className="emptyStateCell">
+                  <p className="emptyState">{emptyMessage}</p>
+                </td>
+              </tr>
+            )}
+            {rows.map((row) => (
+              <tr key={rowKey(row)}>{renderRow(row)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }

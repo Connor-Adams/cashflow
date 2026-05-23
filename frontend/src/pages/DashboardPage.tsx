@@ -231,6 +231,21 @@ function getYearToDateRange(): { from: string; to: string } {
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
+/**
+ * Fetch /api/recurring with the given currency filter. Returns the items
+ * on success or an empty list on failure — never throws. Pulled out so
+ * the useEffect that uses it stays small enough for the complexity gate.
+ */
+async function fetchRecurringSafely(currency: string): Promise<RecurringItem[]> {
+  const qs = currency ? `?currency=${encodeURIComponent(currency)}` : ''
+  try {
+    const resp = await getJson<RecurringResponse>(`/api/recurring${qs}`)
+    return resp.items
+  } catch {
+    return []
+  }
+}
+
 export function DashboardPage() {
   const navigate = useNavigate()
   const isNarrowViewport = useIsNarrowViewport()
@@ -364,20 +379,12 @@ export function DashboardPage() {
   // budgets above) — the Recurring tile self-handles empty/error states.
   useEffect(() => {
     let cancelled = false
-    const qs = currency
-      ? `?currency=${encodeURIComponent(currency)}`
-      : ''
     setRecurringLoading(true)
-    ;(async () => {
-      try {
-        const resp = await getJson<RecurringResponse>(`/api/recurring${qs}`)
-        if (!cancelled) setRecurringItems(resp.items)
-      } catch {
-        if (!cancelled) setRecurringItems([])
-      } finally {
-        if (!cancelled) setRecurringLoading(false)
-      }
-    })()
+    void fetchRecurringSafely(currency).then((items) => {
+      if (cancelled) return
+      setRecurringItems(items)
+      setRecurringLoading(false)
+    })
     return () => {
       cancelled = true
     }
