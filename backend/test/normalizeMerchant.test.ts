@@ -97,3 +97,18 @@ test('normalizeMerchant does not strip short leading numbers', () => {
   // Single-digit '# 5' (with space) isn't a store ID under our regex.
   assert.equal(normalizeMerchant('ZEHRS GUELPH CLAIR # 5'), 'ZEHRS GUELPH CLAIR # 5');
 });
+
+test('normalizeMerchant collapses duplicate trailing city tokens', () => {
+  assert.equal(normalizeMerchant('FARM BOY GUELPH GUELPH'), 'FARM BOY GUELPH');
+  assert.equal(normalizeMerchant("A&W TORONTO TORONTO"), 'A&W TORONTO');
+  assert.equal(normalizeMerchant('BEERTOWN GUELPH GUELPH'), 'BEERTOWN GUELPH');
+});
+
+test('normalizeMerchant does not collapse non-duplicate tails', () => {
+  assert.equal(normalizeMerchant('REN PETS GUELPH'), 'REN PETS GUELPH');
+  assert.equal(normalizeMerchant('FOO BAR BAZ'), 'FOO BAR BAZ');
+});
+
+test('normalizeMerchant duplicate-tail collapse is case-insensitive', () => {
+  assert.equal(normalizeMerchant('SLAP BURGERS Guelph guelph'), 'SLAP BURGERS Guelph');
+});

@@ -80,6 +80,28 @@ function stripCityStateTail(s: string): string {
   return words.slice(0, end).join(' ');
 }
 
+/**
+ * Collapse a duplicated trailing word, case-insensitively.
+ *   "FARM BOY GUELPH GUELPH" -> "FARM BOY GUELPH"
+ *   "A&W TORONTO TORONTO"    -> "A&W TORONTO"
+ *   "SLAP BURGERS Guelph guelph" -> "SLAP BURGERS Guelph"
+ * Only the immediate last two tokens are compared; one duplicate is dropped
+ * per call. The surrounding while-loop in `normalizeMerchant` re-applies this
+ * (alongside store-number and city/state stripping) until the string stops
+ * changing, so chains like "X Y Y Y" collapse over multiple iterations.
+ */
+function collapseDuplicateTailWord(s: string): string {
+  const words = s.split(' ');
+  if (
+    words.length >= 2 &&
+    words[words.length - 1].toLowerCase() === words[words.length - 2].toLowerCase()
+  ) {
+    words.pop();
+    return words.join(' ');
+  }
+  return s;
+}
+
 function decodeHtmlEntities(s: string): string {
   return s
     .replace(/&#39;/g, "'")
@@ -107,6 +129,7 @@ export function normalizeMerchant(raw: unknown): string {
   while (prev !== s) {
     prev = s;
     s = s.replace(TRAILING_STORE_NUMBER, '').trim();
+    s = collapseDuplicateTailWord(s);
     s = stripCityStateTail(s);
   }
 
