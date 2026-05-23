@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
+import { EnrichmentSignalsDialog } from '@/components/EnrichmentSignalsDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -118,6 +119,7 @@ export function ReviewInboxPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [cursorRowId, setCursorRowId] = useState<number | null>(null)
+  const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   const { showToast } = useToast()
   const categoryPickerRef = useRef<HTMLDivElement>(null)
   const tableWrapRef = useRef<HTMLDivElement>(null)
@@ -620,6 +622,21 @@ export function ReviewInboxPage() {
                         ) : (
                           <span className="reviewInboxHint">No rule</span>
                         )}
+                        <button
+                          type="button"
+                          className="reviewInboxHint"
+                          onClick={() => setSignalsDialogTxnId(row.id)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            textDecoration: 'underline',
+                            cursor: 'pointer',
+                            color: 'inherit',
+                          }}
+                        >
+                          Why?
+                        </button>
                       </span>
                     </TableCell>
                     <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
@@ -743,6 +760,32 @@ export function ReviewInboxPage() {
           </div>
         </Card>
       </section>
+      <EnrichmentSignalsDialog
+        transactionId={signalsDialogTxnId}
+        transactionSummary={
+          signalsDialogTxnId == null
+            ? null
+            : (() => {
+                const row = rows.find((r) => r.id === signalsDialogTxnId)
+                if (!row) return null
+                return {
+                  merchantRaw: row.merchantRaw,
+                  merchantClean: row.merchantClean,
+                  merchantCanonical: row.merchantCanonical,
+                  autoSource: row.autoSource,
+                  autoConfidence: row.autoConfidence,
+                  autoCategory: row.autoCategory,
+                  txnType: row.txnType,
+                  reviewFlag: row.reviewFlag,
+                  isRecurring: row.isRecurring,
+                }
+              })()
+        }
+        onClose={() => setSignalsDialogTxnId(null)}
+        onReenriched={(updated) => {
+          setRows((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)))
+        }}
+      />
     </div>
   )
 }

@@ -264,7 +264,11 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         sourceReference: v.sourceReference,
       });
 
-      const memory = await findMerchantMemory(opts.householdId ?? account.householdId ?? null, v.merchantClean);
+      const memory = await findMerchantMemory(
+        opts.householdId ?? account.householdId ?? null,
+        v.merchantClean,
+        v.amount,
+      );
 
       const recurringHistory = await loadRecurringHistory(
         opts.householdId ?? account.householdId ?? null,

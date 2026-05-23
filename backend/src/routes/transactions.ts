@@ -16,14 +16,9 @@ import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { logger } from '../observability/logger';
 import { runBackfill } from '../import/runEnrichmentBackfill';
+import { backfillRunning } from '../import/backfillCoordinator';
 
 const router = Router();
-
-/**
- * In-memory guard so a household can only run one backfill at a time.
- * A second concurrent request returns 409.
- */
-const backfillRunning = new Set<number>();
 
 /**
  * Maximum number of transactions the filter-mode bulk patch endpoint will
@@ -579,17 +574,212 @@ router.patch('/:id', async (req, res, next) => {
 });
 
 /**
+ * POST /api/transactions/:id/re-enrich
+ *
+ * Re-runs the enrichment pipeline against a single transaction. Same safety
+ * rules as the backfill (no override clobber, no reviewed_at change, review
+ * flag only cleared when pipeline now confident and row was unreviewed).
+ * Returns the updated serialized transaction.
+ */
+router.post('/:id/re-enrich', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const result = await runBackfill({
+      dryRun: false,
+      noReviewFlag: false,
+      reviewOnly: false,
+      verbose: false,
+      accountId: null,
+      householdId: txn.householdId,
+      transactionId: txn.id,
+      limit: 1,
+      batchSize: 1,
+      dateFrom: null,
+      dateTo: null,
+    });
+    logger.info('enrichment_single_reenrich', {
+      householdId: txn.householdId,
+      transactionId: id,
+      ...result,
+    });
+    await txn.reload({
+      include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
+    });
+    res.json(serializeTransaction(txn));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/:id/signals
+ *
+ * Returns all enrichment signals emitted for a single transaction, ordered by
+ * creation time. Used by the per-row "Why" panel.
+ */
+router.get('/:id/signals', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const { TransactionSignal } = await import('../models');
+    const rows = await TransactionSignal.findAll({
+      where: { transactionId: id },
+      order: [['id', 'ASC']],
+    });
+    res.json(rows.map((r) => r.toJSON()));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/enrichment/stats
+ *
+ * Aggregate enrichment stats for the caller's household. Used by the
+ * Settings dashboard.
+ */
+router.get('/enrichment/stats', async (req, res, next) => {
+  try {
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const hhClause = householdId == null ? '' : 'WHERE t.household_id = ?';
+    const reps = householdId == null ? [] : [householdId];
+
+    type CountRow = { k: string | null; n: number };
+
+    async function bucket(column: string): Promise<Record<string, number>> {
+      const rows = await sequelize.query<CountRow>(
+        `SELECT ${column} AS k, COUNT(*) AS n FROM transactions t ${hhClause} GROUP BY ${column}`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      );
+      const out: Record<string, number> = {};
+      for (const r of rows) {
+        out[r.k ?? '(none)'] = Number(r.n);
+      }
+      return out;
+    }
+
+    const [
+      totalRow,
+      reviewTrueRow,
+      reviewFalseRow,
+      reviewedRow,
+      recurringRow,
+      refundLinkedRow,
+      transferLinkedRow,
+      bySource,
+      byConfidence,
+      byTxnType,
+      topMerchants,
+      topRules,
+    ] = await Promise.all([
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} review_flag`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} NOT review_flag`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} reviewed_at IS NOT NULL`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} is_recurring`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} linked_transaction_id IS NOT NULL AND txn_type = 'refund'`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} linked_transaction_id IS NOT NULL AND txn_type = 'transfer'`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      bucket('auto_source'),
+      bucket('auto_confidence'),
+      bucket('txn_type'),
+      sequelize.query<{ name: string; n: number }>(
+        `SELECT merchant_canonical AS name, COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} merchant_canonical IS NOT NULL GROUP BY merchant_canonical ORDER BY n DESC LIMIT 15`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ ruleId: number; pattern: string; category: string | null; n: number }>(
+        `SELECT t.applied_rule_id AS "ruleId",
+                r.merchant_pattern AS pattern,
+                r.category AS category,
+                COUNT(*) AS n
+         FROM transactions t
+         JOIN rules r ON r.id = t.applied_rule_id
+         ${hhClause}${hhClause ? ' AND' : ' WHERE'} t.applied_rule_id IS NOT NULL
+         GROUP BY t.applied_rule_id, r.merchant_pattern, r.category
+         ORDER BY n DESC LIMIT 15`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+    ]);
+
+    res.json({
+      total: Number(totalRow[0]?.n ?? 0),
+      reviewFlagTrue: Number(reviewTrueRow[0]?.n ?? 0),
+      reviewFlagFalse: Number(reviewFalseRow[0]?.n ?? 0),
+      reviewedTrue: Number(reviewedRow[0]?.n ?? 0),
+      bySource,
+      byConfidence,
+      byTxnType,
+      isRecurringCount: Number(recurringRow[0]?.n ?? 0),
+      refundLinkedCount: Number(refundLinkedRow[0]?.n ?? 0),
+      transferLinkedCount: Number(transferLinkedRow[0]?.n ?? 0),
+      topCanonicalMerchants: topMerchants.map((r) => ({
+        name: r.name,
+        count: Number(r.n),
+      })),
+      topRules: topRules.map((r) => ({
+        ruleId: r.ruleId,
+        pattern: r.pattern,
+        category: r.category,
+        count: Number(r.n),
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/transactions/enrichment/backfill
  *
  * Re-runs the enrichment pipeline against the caller's household's existing
- * transactions. Body is optional; defaults backfill everything in-place,
- * clearing review_flag where the pipeline is now confident.
+ * transactions. Streams NDJSON (one row per line):
+ *   - One `{kind: "progress", ...}` event per processed transaction
+ *   - One `{kind: "error", txnId, message}` event per failed row
+ *   - A final `{kind: "summary", processed, updated, ...}` event
  *
  * Body:
  *   { dryRun?: boolean, noReviewFlag?: boolean, reviewOnly?: boolean, limit?: number }
- *
- * Returns:
- *   { processed, updated, reviewFlagCleared, signalsWritten, skipped, durationMs }
  */
 router.post('/enrichment/backfill', async (req, res, next) => {
   try {
@@ -600,6 +790,11 @@ router.post('/enrichment/backfill', async (req, res, next) => {
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    const dateFrom =
+      typeof body.dateFrom === 'string' && dateRe.test(body.dateFrom) ? body.dateFrom : null;
+    const dateTo =
+      typeof body.dateTo === 'string' && dateRe.test(body.dateTo) ? body.dateTo : null;
     const flags = {
       dryRun: Boolean(body.dryRun),
       noReviewFlag: Boolean(body.noReviewFlag),
@@ -612,7 +807,19 @@ router.post('/enrichment/backfill', async (req, res, next) => {
           ? Math.floor(body.limit)
           : null,
       batchSize: 100,
+      dateFrom,
+      dateTo,
     };
+
+    // Content negotiation: NDJSON streaming only when the client explicitly
+    // asks for it (Accept header or ?stream=1). Otherwise return a single
+    // JSON summary, matching the original v1 endpoint shape. This keeps
+    // pre-streaming-frontend clients working after the backend deploy.
+    const accept = String(req.headers['accept'] ?? '').toLowerCase();
+    const wantsStream =
+      accept.includes('application/x-ndjson') ||
+      accept.includes('application/ndjson') ||
+      req.query.stream === '1';
 
     backfillRunning.add(household.id);
     const startedAt = Date.now();
@@ -622,7 +829,41 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       noReviewFlag: flags.noReviewFlag,
       reviewOnly: flags.reviewOnly,
       limit: flags.limit,
+      streaming: wantsStream,
     });
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Accel-Buffering', 'no');
+      function emit(obj: unknown) {
+        res.write(`${JSON.stringify(obj)}\n`);
+      }
+      try {
+        const result = await runBackfill(flags, {
+          onProgress: (e) => emit({ kind: 'progress', ...e }),
+          onError: (e) => emit({ kind: 'error', ...e }),
+        });
+        const durationMs = Date.now() - startedAt;
+        logger.info('enrichment_backfill_completed', {
+          householdId: household.id,
+          durationMs,
+          ...result,
+        });
+        emit({ kind: 'summary', ...result, durationMs, dryRun: flags.dryRun });
+        res.end();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error('enrichment_backfill_failed', { householdId: household.id, message });
+        emit({ kind: 'error', message });
+        res.end();
+      } finally {
+        backfillRunning.delete(household.id);
+      }
+      return;
+    }
+
+    // Non-streaming path: run to completion, return single JSON summary.
     try {
       const result = await runBackfill(flags);
       const durationMs = Date.now() - startedAt;
@@ -632,6 +873,10 @@ router.post('/enrichment/backfill', async (req, res, next) => {
         ...result,
       });
       res.json({ ...result, durationMs, dryRun: flags.dryRun });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('enrichment_backfill_failed', { householdId: household.id, message });
+      next(err);
     } finally {
       backfillRunning.delete(household.id);
     }

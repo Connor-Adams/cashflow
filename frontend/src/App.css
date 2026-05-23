@@ -1261,6 +1261,59 @@
     @apply m-0 mt-1;
   }
 
+  /* ─── Budget pills (compact horizontal strip in a 12×1 bento tile) ── */
+
+  .budgetPillStrip {
+    @apply flex h-full gap-3 overflow-x-auto pb-1;
+    scrollbar-width: thin;
+  }
+
+  .budgetPill {
+    @apply flex shrink-0 flex-col justify-center gap-1.5 rounded-md border p-2.5;
+    border-color: var(--border);
+    background: color-mix(in oklch, var(--muted) 50%, transparent);
+    min-width: 200px;
+    max-width: 240px;
+  }
+
+  .budgetPill__header {
+    @apply flex items-baseline justify-between gap-2;
+  }
+
+  .budgetPill__label {
+    @apply truncate text-sm font-semibold;
+    color: var(--foreground);
+  }
+
+  .budgetPill__pct {
+    @apply shrink-0 text-xs font-semibold tabular-nums;
+    color: var(--muted-foreground);
+  }
+
+  .budgetPill__bar {
+    @apply relative h-1.5 w-full overflow-hidden rounded-full;
+    background: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  .budgetPill__fill {
+    @apply block h-full;
+    background: var(--positive);
+    transition: width 0.3s ease-out;
+  }
+
+  .budgetPill--warn .budgetPill__fill { background: var(--primary); }
+  .budgetPill--over .budgetPill__fill { background: var(--destructive); }
+
+  .budgetPill__amount {
+    @apply m-0 truncate text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .budgetPill__currency {
+    @apply ml-1 opacity-70;
+  }
+
   /* ─── Dashboard table card (post-bento, drill-down stack) ──────────── */
 
   .dashboardTableCard {

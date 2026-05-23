@@ -39,6 +39,7 @@ import {
   formatShortMonth,
   useIsNarrowViewport,
 } from '../lib/chartViewport'
+import type { BudgetProgress, BudgetProgressResponse } from '../types/api'
 
 type Row = {
   currency: string
@@ -251,6 +252,7 @@ export function DashboardPage() {
   >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
   const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
+  const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -309,6 +311,40 @@ export function DashboardPage() {
       cancelled = true
     }
   }, [summaryQs, previousRange, currency, dateFrom, dateTo])
+
+  // Budget progress is scoped to the active currency filter only — periods
+  // are always "current calendar month" on the backend, so date filters
+  // don't apply. Kept in its own effect so a failing /budgets/progress
+  // request doesn't tank the main dashboard rendering.
+  useEffect(() => {
+    let cancelled = false
+    const qs = currency
+      ? `?currency=${encodeURIComponent(currency)}`
+      : ''
+    ;(async () => {
+      try {
+        const resp = await getJson<BudgetProgressResponse>(
+          `/api/budgets/progress${qs}`
+        )
+        if (!cancelled) setBudgetProgress(resp.items)
+      } catch {
+        if (!cancelled) setBudgetProgress([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currency])
+
+  // Sort most-at-risk first; ties broken by category label so layout is
+  // deterministic between renders. Overall budgets ("null" category) get a
+  // stable label for the sort comparator.
+  const budgetProgressSorted = useMemo(() => {
+    return [...budgetProgress].sort((a, b) => {
+      if (b.percentUsed !== a.percentUsed) return b.percentUsed - a.percentUsed
+      return (a.category ?? '').localeCompare(b.category ?? '')
+    })
+  }, [budgetProgress])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -730,6 +766,62 @@ export function DashboardPage() {
       </Card>
 
       <div className="dashboardBento" aria-busy={loading}>
+        {budgetProgressSorted.length > 0 && (
+          <BentoTile
+            span={12}
+            rows={1}
+            aria-busy={loading}
+            label="Monthly budget progress"
+            description="Spend so far this calendar month against targets in Settings. Sorted by share used."
+          >
+            <div className="budgetPillStrip">
+              {budgetProgressSorted.map((item) => {
+                // Color thresholds: under 80% is on-pace, 80-100% warns,
+                // over 100% spills to destructive. Bar fill capped at 100%
+                // width so overage doesn't break layout; the percent caption
+                // still shows the true value.
+                const tone =
+                  item.percentUsed > 100
+                    ? 'over'
+                    : item.percentUsed >= 80
+                      ? 'warn'
+                      : 'ok'
+                const width = `${Math.min(100, item.percentUsed)}%`
+                const label = item.category ?? 'Overall'
+                const percentRounded = Math.round(item.percentUsed)
+                return (
+                  <article
+                    key={item.budgetId}
+                    className={`budgetPill budgetPill--${tone}`}
+                  >
+                    <header className="budgetPill__header">
+                      <strong className="budgetPill__label" title={label}>
+                        {label}
+                      </strong>
+                      <span className="budgetPill__pct">{percentRounded}%</span>
+                    </header>
+                    <div
+                      className="budgetPill__bar"
+                      role="img"
+                      aria-label={`${label} ${percentRounded} percent of monthly target used`}
+                    >
+                      <span
+                        className="budgetPill__fill"
+                        style={{ width }}
+                      />
+                    </div>
+                    <p className="budgetPill__amount">
+                      {formatMoney(item.spent, item.currency)} /{' '}
+                      {formatMoney(item.target, item.currency)}{' '}
+                      <span className="budgetPill__currency">{item.currency}</span>
+                    </p>
+                  </article>
+                )
+              })}
+            </div>
+          </BentoTile>
+        )}
+
         <BentoTile
           span={8}
           rows={2}
