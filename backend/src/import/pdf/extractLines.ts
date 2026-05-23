@@ -9,6 +9,60 @@ type TextItem = {
   width: number;
 };
 
+type Bucket = { y: number; items: TextItem[] };
+
+function bucketByY(items: TextItem[]): Bucket[] {
+  const buckets: Bucket[] = [];
+  for (const it of items) {
+    const y = it.transform[5];
+    const found = buckets.find((b) => Math.abs(b.y - y) <= Y_TOLERANCE);
+    if (found) {
+      found.items.push(it);
+      found.y = (found.y + y) / 2;
+    } else {
+      buckets.push({ y, items: [it] });
+    }
+  }
+  return buckets;
+}
+
+function joinBucket(items: TextItem[]): string {
+  items.sort((a, c) => a.transform[4] - c.transform[4]);
+  const parts: string[] = [];
+  let prevRight = -Infinity;
+  let prevSpaceWidth = 0;
+  for (const it of items) {
+    const x = it.transform[4];
+    if (parts.length === 0) {
+      parts.push(it.str);
+    } else {
+      const gap = x - prevRight;
+      const spaceWidth = prevSpaceWidth || 4;
+      const spaces = Math.max(1, Math.round(gap / spaceWidth));
+      parts.push(' '.repeat(Math.min(spaces, 40)) + it.str);
+    }
+    prevRight = x + it.width;
+    if (it.width > 0 && it.str.length > 0) {
+      prevSpaceWidth = it.width / it.str.length;
+    }
+  }
+  return parts.join('').replace(/\s+$/, '');
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function extractPageLines(page: any, pageNum: number): Promise<PdfLine[]> {
+  const content = await page.getTextContent();
+  const items = (content.items as TextItem[]).filter((it) => typeof it.str === 'string');
+  const buckets = bucketByY(items);
+  buckets.sort((a, b) => b.y - a.y);
+  const out: PdfLine[] = [];
+  for (const b of buckets) {
+    const text = joinBucket(b.items);
+    if (text.length > 0) out.push({ page: pageNum, y: b.y, text });
+  }
+  return out;
+}
+
 /**
  * Extract text lines from a PDF buffer.
  *
@@ -25,59 +79,14 @@ export async function extractPdfLines(buffer: Buffer): Promise<PdfLine[]> {
   // The "legacy" build avoids the Web Worker; required in Node.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-  const doc = await pdfjs.getDocument({
-    data,
-    useSystemFonts: true,
-    disableFontFace: true,
-  }).promise;
-
-  const out: PdfLine[] = [];
-
+  const doc = await pdfjs.getDocument({ data, useSystemFonts: true, disableFontFace: true }).promise;
   try {
+    const out: PdfLine[] = [];
     for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
       const page = await doc.getPage(pageNum);
-      const content = await page.getTextContent();
-      const items = (content.items as TextItem[]).filter((it) => typeof it.str === 'string');
-
-      type Bucket = { y: number; items: TextItem[] };
-      const buckets: Bucket[] = [];
-      for (const it of items) {
-        const y = it.transform[5];
-        const found = buckets.find((b) => Math.abs(b.y - y) <= Y_TOLERANCE);
-        if (found) {
-          found.items.push(it);
-          found.y = (found.y + y) / 2;
-        } else {
-          buckets.push({ y, items: [it] });
-        }
-      }
-
-      buckets.sort((a, b) => b.y - a.y);
-      for (const b of buckets) {
-        b.items.sort((a, c) => a.transform[4] - c.transform[4]);
-        const parts: string[] = [];
-        let prevRight = -Infinity;
-        let prevSpaceWidth = 0;
-        for (const it of b.items) {
-          const x = it.transform[4];
-          const gap = x - prevRight;
-          if (parts.length === 0) {
-            parts.push(it.str);
-          } else {
-            const spaceWidth = prevSpaceWidth || 4;
-            const spaces = Math.max(1, Math.round(gap / spaceWidth));
-            parts.push(' '.repeat(Math.min(spaces, 40)) + it.str);
-          }
-          prevRight = x + it.width;
-          prevSpaceWidth = it.width > 0 && it.str.length > 0 ? it.width / it.str.length : prevSpaceWidth;
-        }
-        const text = parts.join('').replace(/\s+$/, '');
-        if (text.length > 0) out.push({ page: pageNum, y: b.y, text });
-      }
-
+      out.push(...await extractPageLines(page, pageNum));
       page.cleanup();
     }
-
     return out;
   } finally {
     await doc.destroy();

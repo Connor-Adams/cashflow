@@ -16,10 +16,6 @@ export function findPdfParser(lines: PdfLine[]): PdfParser | null {
   return null;
 }
 
-export function listPdfParsers(): readonly PdfParser[] {
-  return [...parsers];
-}
-
 /** Test-only — wipe the registry and reset the built-ins guard. Production code never calls this. */
 export function clearPdfParsersForTest(): void {
   parsers.length = 0;

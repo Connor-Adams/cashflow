@@ -62,50 +62,52 @@ function parsePeriod(s: string): { start: string; end: string } | null {
   return null;
 }
 
-export function parseCibcCostcoHeader(lines: PdfLine[]): CibcCostcoHeader {
-  const page1 = lines.filter((l) => l.page === 1);
-
-  // Statement date — labelled "Statement Date" on one line, value on the next or same line.
-  let statementDate: string | null = null;
+function findStatementDate(page1: PdfLine[]): string | null {
   for (let i = 0; i < page1.length; i++) {
-    if (/statement date/i.test(page1[i].text)) {
-      const sameLine = parseLongDate(page1[i].text);
-      if (sameLine) { statementDate = sameLine; break; }
-      const next = page1[i + 1]?.text ?? '';
-      const nextParsed = parseLongDate(next);
-      if (nextParsed) { statementDate = nextParsed; break; }
-    }
+    if (!/statement date/i.test(page1[i].text)) continue;
+    const sameLine = parseLongDate(page1[i].text);
+    if (sameLine) return sameLine;
+    const next = page1[i + 1]?.text ?? '';
+    const nextParsed = parseLongDate(next);
+    if (nextParsed) return nextParsed;
   }
-  if (!statementDate) throw new Error('CIBC Costco header: could not parse Statement Date');
+  return null;
+}
 
-  // Period — appears as "<Month> statement period" followed by the period line.
-  let period: { start: string; end: string } | null = null;
+function findPeriod(lines: PdfLine[]): { start: string; end: string } | null {
+  const page1 = lines.filter((l) => l.page === 1);
   for (let i = 0; i < page1.length; i++) {
-    if (/statement period/i.test(page1[i].text)) {
-      period = parsePeriod(page1[i].text) || parsePeriod(page1[i + 1]?.text ?? '');
-      if (period) break;
-    }
+    if (!/statement period/i.test(page1[i].text)) continue;
+    const found = parsePeriod(page1[i].text) || parsePeriod(page1[i + 1]?.text ?? '');
+    if (found) return found;
   }
   // Fallback: scan "Transactions from <DATE> to <DATE>" anywhere.
-  if (!period) {
-    for (const l of lines) {
-      const m = /Transactions from\s+(.+)/.exec(l.text);
-      if (m) {
-        period = parsePeriod(m[1]);
-        if (period) break;
-      }
+  for (const l of lines) {
+    const m = /Transactions from\s+(.+)/.exec(l.text);
+    if (m) {
+      const found = parsePeriod(m[1]);
+      if (found) return found;
     }
   }
-  if (!period) throw new Error('CIBC Costco header: could not parse statement period');
+  return null;
+}
 
-  // Account last 4 — "5160 XXXX XXXX NNNN".
-  let last4: string | null = null;
+function findAccountLast4(page1: PdfLine[]): string | null {
   for (const l of page1) {
     const m = /5160\s+[Xx]{4}\s+[Xx]{4}\s+(\d{4})/.exec(l.text);
-    if (m) { last4 = m[1]; break; }
+    if (m) return m[1];
   }
-  if (!last4) throw new Error('CIBC Costco header: could not parse account last4');
+  return null;
+}
 
+export function parseCibcCostcoHeader(lines: PdfLine[]): CibcCostcoHeader {
+  const page1 = lines.filter((l) => l.page === 1);
+  const statementDate = findStatementDate(page1);
+  if (!statementDate) throw new Error('CIBC Costco header: could not parse Statement Date');
+  const period = findPeriod(lines);
+  if (!period) throw new Error('CIBC Costco header: could not parse statement period');
+  const last4 = findAccountLast4(page1);
+  if (!last4) throw new Error('CIBC Costco header: could not parse account last4');
   return {
     statementDate,
     periodStart: period.start,
@@ -147,6 +149,31 @@ export function inferYearForMonthDay(monthDay: string, period: Period): number {
   );
 }
 
+type ParsedAmount = { magnitude: number; isCredit: boolean };
+
+function parseRowAmount(amountStr: string): ParsedAmount {
+  const cleaned = amountStr.replace(/[$,]/g, '').trim();
+  const crMatch = /^(-?)([\d.]+)\s*CR$/i.exec(cleaned);
+  if (crMatch) return { magnitude: Number(crMatch[2]), isCredit: true };
+  const n = Number(cleaned);
+  return { magnitude: n, isCredit: cleaned.startsWith('-') };
+}
+
+function applySectionSign(magnitude: number, isCredit: boolean, section: CibcCostcoSection): number {
+  const abs = Math.abs(magnitude);
+  if (section === 'payments') return isCredit ? -abs : abs;
+  return isCredit ? abs : -abs;
+}
+
+function rowDateFromPost(postDate: string, period: Period): string {
+  const year = inferYearForMonthDay(postDate, period);
+  const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(postDate);
+  if (!m) throw new Error(`Unparseable post date: ${postDate}`);
+  const month = MONTHS[m[1]];
+  if (month === undefined) throw new Error(`Unknown month abbreviation: ${m[1]}`);
+  return toIso(year, month, Number(m[2]));
+}
+
 /**
  * Parse one transaction row from the layout-reconstructed line text.
  *
@@ -161,8 +188,6 @@ export function parseCibcCostcoRow(
   section: CibcCostcoSection,
 ): { date: string; merchantRaw: string; amount: number } {
   const line = rawLine.replace(/^\s+|\s+$/g, '');
-  const stripBonus = (s: string) => s.replace(/\s*Ý\s+/g, ' ').trim();
-
   const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length > 0);
   const minCols = section === 'payments' ? 3 : 5;
   if (cols.length < minCols) {
@@ -170,48 +195,17 @@ export function parseCibcCostcoRow(
       `CIBC Costco row has too few columns (need ${minCols}, got ${cols.length}) — likely a collapsed column gap: ${JSON.stringify(rawLine)}`,
     );
   }
-
-  const postDate = cols[1];
-  const amountStr = cols[cols.length - 1];
-
   const middleEnd = section === 'payments' ? cols.length - 1 : cols.length - 2;
-  const merchantRaw = stripBonus(cols.slice(2, middleEnd).join(' ')).replace(/\s+/g, ' ');
+  const merchantRaw = cols.slice(2, middleEnd).join(' ').replace(/\s*Ý\s+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!merchantRaw) {
     throw new Error(`CIBC Costco row: empty merchant after column extraction: ${JSON.stringify(rawLine)}`);
   }
-
-  const year = inferYearForMonthDay(postDate, period);
-  const md = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(postDate);
-  if (!md) throw new Error(`Unparseable post date: ${postDate}`);
-  const postMonth = MONTHS[md[1]];
-  if (postMonth === undefined) throw new Error(`Unknown month abbreviation: ${md[1]}`);
-  const day = Number(md[2]);
-  const date = toIso(year, postMonth, day);
-
-  const cleaned = amountStr.replace(/[$,]/g, '').trim();
-  let magnitude = NaN;
-  let isCredit = false;
-  const crMatch = /^(-?)([\d.]+)\s*CR$/i.exec(cleaned);
-  if (crMatch) {
-    magnitude = Number(crMatch[2]);
-    isCredit = true;
-  } else {
-    magnitude = Number(cleaned);
-    if (cleaned.startsWith('-')) isCredit = true;
-  }
+  const date = rowDateFromPost(cols[1], period);
+  const { magnitude, isCredit } = parseRowAmount(cols[cols.length - 1]);
   if (!Number.isFinite(magnitude)) {
-    throw new Error(`CIBC Costco row has unparseable amount: ${JSON.stringify(amountStr)}`);
+    throw new Error(`CIBC Costco row has unparseable amount: ${JSON.stringify(cols[cols.length - 1])}`);
   }
-
-  const abs = Math.abs(magnitude);
-  let amount: number;
-  if (section === 'payments') {
-    amount = isCredit ? -abs : abs;
-  } else {
-    amount = isCredit ? abs : -abs;
-  }
-
-  return { date, merchantRaw, amount };
+  return { date, merchantRaw, amount: applySectionSign(magnitude, isCredit, section) };
 }
 
 const SECTION_HEADERS: Record<CibcCostcoSection, RegExp> = {
