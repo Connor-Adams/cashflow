@@ -3,92 +3,14 @@ import type { Request } from 'express';
 import { Op } from 'sequelize';
 import { Account, Contact, PartnerSettlement, Transaction, sequelize } from '../models';
 import { num } from '../util/numbers';
-import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
+import {
+  classifyPositiveAmount,
+  isNonCategorical,
+  isNonSpend,
+} from '../summary/classifyTransactionFlow';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 
 const router = Router();
-
-/**
- * Transaction.txnType values that DO NOT contribute to spend totals.
- *
- * Excluded from `totalSpend` (and the parallel monthly/split/business/
- * category totals):
- *   - `transfer`  — moving money between accounts I own (or to a contact who
- *     repays). Not consumption.
- *   - `investment` — BUY/SELL cash leg from an invest statement. Buying
- *     securities is not spend (the money still belongs to me).
- *   - `dividend` — cash dividend distribution from a holding (already positive,
- *     but belt-and-suspenders).
- *   - `payment`   — credit-card statement payments (negative on chequing,
- *     positive on the card; either way, not consumption).
- *   - `refund`    — positive amount, already on the credits side; listed
- *     here for symmetry with the brief.
- *   - `reward`    — cashback / points redemption.
- *   - `income`    — historical value (never emitted by the enricher today
- *     but listed for forward-compat with seeded rules).
- *
- * Note: `purchase`, `fee`, `interest`, `unknown`, and `null` (unset) still
- * count as spend so we don't silently lose legitimate negative-amount
- * transactions that haven't been classified.
- */
-const NON_SPEND_TXN_TYPES: ReadonlySet<string> = new Set([
-  'transfer',
-  'investment',
-  'dividend',
-  'payment',
-  'refund',
-  'reward',
-  'income',
-]);
-
-/**
- * Subset of NON_SPEND_TXN_TYPES that should ALSO be excluded from the
- * by-category / by-month / by-split / by-business breakdowns. These rows
- * represent money flows that don't belong to any spending category at all
- * (you can't categorize a brokerage BUY as "Groceries"). Refunds, rewards,
- * and statement credits stay IN the breakdowns because they net against
- * category spend in a meaningful way (e.g. an Amazon refund on a Groceries
- * purchase should show in the Groceries category as a credit).
- */
-const NON_CATEGORICAL_TXN_TYPES: ReadonlySet<string> = new Set([
-  'transfer',
-  'investment',
-  'dividend',
-]);
-
-/**
- * True when this transaction's amount should NOT contribute to spend totals.
- *
- * A row is excluded when EITHER:
- *   - its `txnType` is in NON_SPEND_TXN_TYPES, or
- *   - its account is an investment account (`accountType === 'investment'`).
- *
- * Investment-account exclusion is belt-and-suspenders: even if an old row
- * still carries `txnType='purchase'`, a negative amount on an invest account
- * is by definition not consumption.
- */
-function isNonSpend(
-  txnType: string | null | undefined,
-  accountType: string | null | undefined,
-): boolean {
-  if (txnType && NON_SPEND_TXN_TYPES.has(txnType)) return true;
-  if (accountType === 'investment') return true;
-  return false;
-}
-
-/**
- * True when this transaction should be omitted from category / monthly /
- * split / business breakdowns entirely (it's not a category of spend nor a
- * credit against any category — it's a money-movement / brokerage flow).
- */
-function isNonCategorical(
-  txnType: string | null | undefined,
-  accountType: string | null | undefined,
-): boolean {
-  if (txnType && NON_CATEGORICAL_TXN_TYPES.has(txnType)) return true;
-  if (accountType === 'investment') return true;
-  return false;
-}
 
 function dateWhere(req: Request) {
   const w: Record<string, unknown> = { ...visibleTransactionWhere(req) };
@@ -284,14 +206,19 @@ router.get('/dashboard', async (req, res, next) => {
       };
       metrics.transactionCount += 1;
 
-      const positiveKind =
+      // Route positives via the authoritative classifier: txnType wins,
+      // then merchant regex as fallback. 'skip' = non-categorical money
+      // movement (transfer/invest/dividend) — contributes to nothing.
+      const positiveBucket =
         amount > 0
-          ? classifyPositiveFlow({
+          ? classifyPositiveAmount({
+              txnType: row.txnType,
+              accountType: account?.accountType,
               merchantRaw: row.merchantRaw,
               merchantClean: row.merchantClean,
               category: row.finalCategory,
             })
-          : null;
+          : 'skip';
       const merchantKey = `${currency}\0${merchant}`;
       const merchantSummary = merchantSummaries.get(merchantKey) ?? {
         currency,
@@ -328,15 +255,18 @@ router.get('/dashboard', async (req, res, next) => {
         metrics.totalSpend += -amount;
         merchantSummary.totalSpend += -amount;
         accountSummary.totalSpend += -amount;
-      } else if (amount > 0 && positiveKind === 'payment') {
+      } else if (positiveBucket === 'payment') {
         metrics.totalPayments += amount;
         merchantSummary.totalPayments += amount;
         accountSummary.totalPayments += amount;
-      } else if (amount > 0) {
+      } else if (positiveBucket === 'credit') {
         metrics.totalCredits += amount;
         merchantSummary.totalCredits += amount;
         accountSummary.totalCredits += amount;
       }
+      // 'skip' (positive non-categorical) and negative non-spend fall
+      // through without contributing to any bucket — matches the
+      // per-category aggregation below so the headline reconciles.
       metrics.netSpend = metrics.totalSpend - metrics.totalCredits;
       merchantSummary.netSpend = merchantSummary.totalSpend - merchantSummary.totalCredits;
       accountSummary.netSpend = accountSummary.totalSpend - accountSummary.totalCredits;
@@ -356,13 +286,15 @@ router.get('/dashboard', async (req, res, next) => {
         });
       }
 
-      if (amount > 0 && positiveKind === 'payment') {
+      // Per-category skip: statement payments (positive) aren't category
+      // signal. Refunds/rewards/income (positiveBucket==='credit') stay
+      // IN — they net against category spend meaningfully (Amazon refund
+      // credits the Groceries category it offset).
+      if (amount > 0 && positiveBucket === 'payment') {
         continue;
       }
-      // Transfers, investment buys, and dividends aren't a category of
-      // spend at all (you can't put a brokerage BUY in "Groceries"), so
-      // they're skipped here. Refunds / rewards / income credits stay IN
-      // because they net meaningfully against category spend.
+      // Non-categorical (transfer/invest/dividend, either sign, or any
+      // invest-account row) is money movement, not category data.
       if (isNonCategorical(row.txnType, account?.accountType)) {
         continue;
       }
@@ -751,9 +683,12 @@ router.get('/monthly', async (req, res, next) => {
     }[]) {
       const amount = num(row.amount);
       if (amount == null) continue;
+      const accountType = accountTypeById.get(row.accountId);
       if (
         amount > 0 &&
-        classifyPositiveFlow({
+        classifyPositiveAmount({
+          txnType: row.txnType,
+          accountType,
           merchantRaw: row.merchantRaw,
           merchantClean: row.merchantClean,
           category: row.finalCategory,
@@ -765,7 +700,7 @@ router.get('/monthly', async (req, res, next) => {
       // curve, so refunds/rewards stay IN (they net against month spend
       // for the same category in the UI). We only drop transfers and
       // investment / dividend flows that don't belong to any category.
-      if (isNonCategorical(row.txnType, accountTypeById.get(row.accountId))) {
+      if (isNonCategorical(row.txnType, accountType)) {
         continue;
       }
       const month = String(row.date).slice(0, 7);

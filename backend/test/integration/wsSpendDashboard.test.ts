@@ -146,6 +146,45 @@ test('WS bundle import + /api/summary/dashboard: totalSpend excludes transfers a
     `expected totalSpend=150, got ${metrics.totalSpend} — transfers/investments leaked`,
   );
 
+  // Positive-side reconciliation. AFT_IN +5000 (chequing transfer),
+  // SELL +500 (invest), DIV +10 (invest) are all non-categorical money
+  // flows — none of them is a refund, statement payment, or income
+  // credit against spend. They must NOT appear in totalCredits or
+  // totalPayments, and netSpend must reconcile to totalSpend.
+  // Pre-fix: totalCredits leaked all three ($5510) because the headline
+  // positive branch didn't apply isNonCategorical / accountType filters,
+  // dragging netSpend negative (~-5360).
+  assert.equal(
+    metrics.totalCredits,
+    0,
+    `expected totalCredits=0, got ${metrics.totalCredits} — transfer/investment positives leaked into credits`,
+  );
+  assert.equal(
+    metrics.totalPayments,
+    0,
+    `expected totalPayments=0, got ${metrics.totalPayments} — transfer/investment positives leaked into payments`,
+  );
+  assert.equal(
+    metrics.netSpend,
+    150,
+    `expected netSpend=150 (= totalSpend), got ${metrics.netSpend} — credits leakage broke reconciliation`,
+  );
+
+  // Headline reconciles with business+personal sum: with no credit leakage,
+  // sum of per-bucket netSpend across business/personal/etc must equal
+  // headline netSpend. Pre-fix divergence was the central symptom.
+  const business = (dash.body.netSpendByBusiness as Array<{
+    currency: string;
+    business: boolean;
+    netSpend: number;
+  }>).filter((b) => b.currency === 'CAD');
+  const bizSum = business.reduce((s, b) => s + b.netSpend, 0);
+  assert.equal(
+    bizSum,
+    metrics.netSpend,
+    `business+personal netSpend (${bizSum}) must equal headline netSpend (${metrics.netSpend})`,
+  );
+
   // None of the per-merchant breakdowns should contain a "transfer" line
   // labelled with an inflated spend.
   const merchantSummaries = dash.body.merchantSummaries as Array<{
@@ -177,6 +216,47 @@ test('WS bundle import + /api/summary/dashboard: totalSpend excludes transfers a
     0,
     `TFSA spend should be 0 (all invest-account rows excluded); got ${tfsaSummary.totalSpend}`,
   );
+});
+
+test('/api/ai/insights: investment buys + transfers excluded from Uncategorized spend totals', async () => {
+  const insights = await authed
+    .get('/api/ai/insights')
+    .query({ currency: 'CAD', dateFrom: '2025-06-01', dateTo: '2025-06-30' });
+  assert.equal(insights.status, 200, `insights body=${JSON.stringify(insights.body)}`);
+
+  type Insight = {
+    title: string;
+    metric: string;
+    amount: number;
+    comparison: string;
+  };
+  const list = insights.body.insights as Insight[];
+
+  // Pre-fix: the TFSA BUY (-2500) and any other negative non-spend rows
+  // landed in byCategory.get('Uncategorized') because the insights loop
+  // never consulted accountType or txnType. Post-fix: applying isNonSpend
+  // means BUY is excluded from spend → Uncategorized spend bucket holds
+  // ONLY genuine spend rows whose finalCategory is null (none, in this
+  // fixture, since the enricher categorizes the hydro bill).
+  const uncatSpend = list.find((i) => i.metric === 'uncategorized_spend');
+  if (uncatSpend) {
+    assert.ok(
+      uncatSpend.amount < 2500,
+      `Uncategorized spend (${uncatSpend.amount}) should not include the $2500 TFSA BUY (txnType=investment, investment account)`,
+    );
+  }
+
+  // The "Top category" insight, when present, must not name a category
+  // whose total is inflated by non-spend rows. With this fixture the only
+  // surviving spend is the chequing hydro bill ($150), so any topCategory
+  // amount must be ≤ 150.
+  const top = list.find((i) => i.metric === 'category_spend');
+  if (top) {
+    assert.ok(
+      top.amount <= 150,
+      `Top category spend (${top.amount}) exceeds the only legitimate spend row ($150) — non-spend rows leaked`,
+    );
+  }
 });
 
 test('/api/summary/monthly: investment buys + transfers excluded from monthly curve', async () => {
