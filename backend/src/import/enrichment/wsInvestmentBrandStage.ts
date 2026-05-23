@@ -10,6 +10,30 @@ interface Rule {
   toCanonical: (m: RegExpMatchArray) => string;
 }
 
+/** Build a rule for "TICKER - Name: <verb>..." security txns. */
+function tickerRule(verbSrc: string, action: string): Rule {
+  return {
+    pattern: new RegExp(`^([A-Z][A-Z0-9.]{1,5})\\s+-\\s+.+?:\\s*${verbSrc}`, 'i'),
+    toCanonical: (m) => `${m[1].toUpperCase()} — ${action}`,
+  };
+}
+
+/** Build a rule for "<verb> of N TICKER ..." crypto txns. */
+function cryptoVerbRule(verbSrc: string, action: string): Rule {
+  return {
+    pattern: new RegExp(`^${verbSrc}\\s+[\\d.]+\\s+([A-Z]{2,5})\\b`, 'i'),
+    toCanonical: (m) => `${m[1].toUpperCase()} — ${action}`,
+  };
+}
+
+/** Build a rule for cash-flow lines that have no ticker (constant canonical). */
+function literalRule(patternSrc: string, canonical: string): Rule {
+  return {
+    pattern: new RegExp(patternSrc, 'i'),
+    toCanonical: () => canonical,
+  };
+}
+
 // Ordered: first match wins. More specific patterns first.
 const RULES: Rule[] = [
   // Crypto rewards: "0.001... of DOT rewards earned"
@@ -27,94 +51,46 @@ const RULES: Rule[] = [
     pattern: /^Fee paid on\s+([A-Z]{2,5})-.*staking reward/i,
     toCanonical: (m) => `${m[1].toUpperCase()} — Stake fee`,
   },
-  // Crypto trading fee: "Trading fee for sale of N XRP ..."
-  {
-    pattern: /^Trading fee for\s+(?:sale|purchase) of\s+[\d.]+\s+([A-Z]{2,5})\b/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Trading fee`,
-  },
-  // Crypto buy: "Purchase of 500000.0 PEPE (executed at ...)"
-  {
-    pattern: /^Purchase of\s+[\d.]+\s+([A-Z]{2,5})\b/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Buy`,
-  },
-  // Crypto sell: "Sale of 4.0 XRP (executed at ...)"
-  {
-    pattern: /^Sale of\s+[\d.]+\s+([A-Z]{2,5})\b/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Sell`,
-  },
-  // Ticker dividend: "XEQT - iShares ...: Cash dividend distribution, received on ..."
-  {
-    pattern: /^([A-Z][A-Z0-9.]{1,5})\s+-\s+.+?:\s*Cash dividend distribution/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Dividend`,
-  },
-  // Ticker buy with optional price: "XEQT - iShares ...: Bought 0.3921 shares ..."
-  {
-    pattern: /^([A-Z][A-Z0-9.]{1,5})\s+-\s+.+?:\s*Bought\b/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Buy`,
-  },
-  // Ticker sell: "NFLD - Exploits ...: Sold 1500.0 shares ..."
-  {
-    pattern: /^([A-Z][A-Z0-9.]{1,5})\s+-\s+.+?:\s*Sold\b/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Sell`,
-  },
-  // Loan out: "PLUR - Plurilock ...: 2.0 Shares on loan ..."
-  {
-    pattern: /^([A-Z][A-Z0-9.]{1,5})\s+-\s+.+?:\s*[\d.]+\s+Shares on loan/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Loan out`,
-  },
-  // Loan terminated: "PLUR - Plurilock ...: Loan of 3.0 shares terminated ..."
-  {
-    pattern: /^([A-Z][A-Z0-9.]{1,5})\s+-\s+.+?:\s*Loan of\s+[\d.]+\s+shares terminated/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Loan terminated`,
-  },
-  // Ticker transfer in: "ETH - Ethereum: Transfer of 0.0036 ETH into the account ..."
-  {
-    pattern: /^([A-Z][A-Z0-9.]{1,5})\s+-\s+.+?:\s*Transfer of\s+.+\s+into the account/i,
-    toCanonical: (m) => `${m[1].toUpperCase()} — Transfer in`,
-  },
+  // Crypto trading fee MUST come before generic Purchase/Sale rules.
+  cryptoVerbRule('Trading fee for\\s+(?:sale|purchase) of', 'Trading fee'),
+  cryptoVerbRule('Purchase of', 'Buy'),
+  cryptoVerbRule('Sale of', 'Sell'),
 
-  // Cash account flow lines (no ticker)
-  {
-    pattern: /^(?:Tax-free\s+)?Money transfer into the account/i,
-    toCanonical: () => 'Money transfer in',
-  },
-  {
-    pattern: /^(?:Tax-free\s+)?Money transfer out of the account/i,
-    toCanonical: () => 'Money transfer out',
-  },
-  {
-    pattern: /^Contribution\s*\(executed at\b/i,
-    toCanonical: () => 'Contribution',
-  },
-  {
-    pattern: /^Subscription fee paid for period/i,
-    toCanonical: () => 'WS Premium fee',
-  },
-  {
-    pattern: /^Stock lending monthly interest payment/i,
-    toCanonical: () => 'Stock lending interest',
-  },
-  {
-    pattern: /^Interest received\b/i,
-    toCanonical: () => 'Interest received',
-  },
+  // Ticker-prefixed security txns: "TICKER - Name: <verb>..."
+  tickerRule('Cash dividend distribution', 'Dividend'),
+  tickerRule('Bought\\b', 'Buy'),
+  tickerRule('Sold\\b', 'Sell'),
+  tickerRule('[\\d.]+\\s+Shares on loan', 'Loan out'),
+  tickerRule('Loan of\\s+[\\d.]+\\s+shares terminated', 'Loan terminated'),
+  tickerRule('Transfer of\\s+.+\\s+into the account', 'Transfer in'),
+
+  // Cash-flow lines (no ticker)
+  literalRule('^(?:Tax-free\\s+)?Money transfer into the account', 'Money transfer in'),
+  literalRule('^(?:Tax-free\\s+)?Money transfer out of the account', 'Money transfer out'),
+  literalRule('^Contribution\\s*\\(executed at\\b', 'Contribution'),
+  literalRule('^Subscription fee paid for period', 'WS Premium fee'),
+  literalRule('^Stock lending monthly interest payment', 'Stock lending interest'),
+  literalRule('^Interest received\\b', 'Interest received'),
 ];
+
+function findMatchingRule(raw: string): { rule: Rule; m: RegExpMatchArray } | null {
+  for (const rule of RULES) {
+    const m = raw.match(rule.pattern);
+    if (m) return { rule, m };
+  }
+  return null;
+}
 
 export function runWsInvestmentBrandStage(input: WsInvestmentBrandStageInput): Signal[] {
   const raw = input.merchantRaw?.trim() ?? '';
   if (!raw) return [];
-
-  for (const rule of RULES) {
-    const m = raw.match(rule.pattern);
-    if (m) {
-      return [
-        {
-          source: 'ws-investment',
-          confidence: 'high',
-          fields: { merchantCanonical: rule.toCanonical(m) },
-        },
-      ];
-    }
-  }
-  return [];
+  const hit = findMatchingRule(raw);
+  if (!hit) return [];
+  return [
+    {
+      source: 'ws-investment',
+      confidence: 'high',
+      fields: { merchantCanonical: hit.rule.toCanonical(hit.m) },
+    },
+  ];
 }
