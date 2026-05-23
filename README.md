@@ -168,8 +168,8 @@ redeploy.
 **Required GitHub Secrets:**
 - `VITE_API_BASE` — public URL of the backend Railway service, baked into
   the frontend image at build time
-- `RAILWAY_BACKEND_DEPLOY_HOOK`, `RAILWAY_FRONTEND_DEPLOY_HOOK` — Railway
-  deploy hook URLs for each service
+- `RAILWAY_TOKEN` — Railway project token used by the promote workflow to
+  call `railway redeploy` against each service
 
 **Rollback:**
 
@@ -184,8 +184,9 @@ IMG_FE=ghcr.io/connor-adams/cashflow-frontend
 docker buildx imagetools create --tag $IMG_BE:production $IMG_BE:$TAG
 docker buildx imagetools create --tag $IMG_FE:production $IMG_FE:$TAG
 
-curl -fsS -X POST $RAILWAY_BACKEND_DEPLOY_HOOK
-curl -fsS -X POST $RAILWAY_FRONTEND_DEPLOY_HOOK
+# With Railway CLI linked + authed:
+railway redeploy --service 20be1e3f-0c3e-4624-a286-276c0704487a -y
+railway redeploy --service bd2f774d-4e3c-460c-8e3d-2b0211763bfd -y
 ```
 
 A dedicated `workflow_dispatch` rollback workflow would be cleaner but is

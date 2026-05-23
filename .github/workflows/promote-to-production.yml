@@ -12,6 +12,10 @@ concurrency:
   group: promote-to-production
   cancel-in-progress: false
 
+env:
+  RAILWAY_BACKEND_SERVICE_ID: 20be1e3f-0c3e-4624-a286-276c0704487a
+  RAILWAY_FRONTEND_SERVICE_ID: bd2f774d-4e3c-460c-8e3d-2b0211763bfd
+
 jobs:
   promote:
     runs-on: ubuntu-latest
@@ -85,24 +89,30 @@ jobs:
             --tag "$FRONTEND:production" \
             "$FRONTEND:sha-$SHA_SHORT"
 
-      - name: Trigger Railway backend redeploy
-        env:
-          HOOK: ${{ secrets.RAILWAY_BACKEND_DEPLOY_HOOK }}
+      - name: Install Railway CLI
         run: |
           set -euo pipefail
-          if [ -z "${HOOK}" ]; then
-            echo "RAILWAY_BACKEND_DEPLOY_HOOK secret is not set" >&2
+          curl -fsSL https://railway.com/install.sh | sh
+          echo "$HOME/.railway/bin" >> "$GITHUB_PATH"
+
+      - name: Trigger Railway backend redeploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "RAILWAY_TOKEN secret is not set" >&2
             exit 1
           fi
-          curl -fsS -X POST "$HOOK"
+          railway redeploy --service "$RAILWAY_BACKEND_SERVICE_ID" -y
 
       - name: Trigger Railway frontend redeploy
         env:
-          HOOK: ${{ secrets.RAILWAY_FRONTEND_DEPLOY_HOOK }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${HOOK}" ]; then
-            echo "RAILWAY_FRONTEND_DEPLOY_HOOK secret is not set" >&2
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "RAILWAY_TOKEN secret is not set" >&2
             exit 1
           fi
-          curl -fsS -X POST "$HOOK"
+          railway redeploy --service "$RAILWAY_FRONTEND_SERVICE_ID" -y
