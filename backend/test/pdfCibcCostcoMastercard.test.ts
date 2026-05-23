@@ -27,6 +27,7 @@ test('parseCibcCostcoHeader — December 2025 statement', async () => {
   assert.equal(h.statementDate, '2025-12-12');
   assert.equal(h.periodStart, '2025-11-13');
   assert.equal(h.periodEnd, '2025-12-12');
+  assert.equal(h.accountLast4, '3114');
 });
 
 test('parseCibcCostcoHeader — November 2025 statement', async () => {
@@ -35,4 +36,5 @@ test('parseCibcCostcoHeader — November 2025 statement', async () => {
   assert.equal(h.statementDate, '2025-11-12');
   assert.equal(h.periodStart, '2025-10-13');
   assert.equal(h.periodEnd, '2025-11-12');
+  assert.equal(h.accountLast4, '3114');
 });

@@ -23,7 +23,9 @@ function parseLongDate(s: string): string | null {
   const m = /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})/.exec(s);
   if (!m) return null;
   const monthName = m[1].slice(0, 3) as keyof typeof MONTHS;
-  return toIso(Number(m[3]), MONTHS[monthName], Number(m[2]));
+  const month = MONTHS[monthName];
+  if (month === undefined) return null;
+  return toIso(Number(m[3]), month, Number(m[2]));
 }
 
 /**
@@ -37,6 +39,7 @@ function parsePeriod(s: string): { start: string; end: string } | null {
   if (both) {
     const startMonth = MONTHS[both[1].slice(0, 3)];
     const endMonth = MONTHS[both[4].slice(0, 3)];
+    if (startMonth === undefined || endMonth === undefined) return null;
     return {
       start: toIso(Number(both[3]), startMonth, Number(both[2])),
       end: toIso(Number(both[6]), endMonth, Number(both[5])),
@@ -46,10 +49,13 @@ function parsePeriod(s: string): { start: string; end: string } | null {
   if (abbrev) {
     const startMonth = MONTHS[abbrev[1].slice(0, 3)];
     const endMonth = MONTHS[abbrev[3].slice(0, 3)];
+    if (startMonth === undefined || endMonth === undefined) return null;
     const year = Number(abbrev[5]);
+    const start = toIso(year, startMonth, Number(abbrev[2]));
+    const end = toIso(year, endMonth, Number(abbrev[4]));
     return {
-      start: toIso(year, startMonth, Number(abbrev[2])),
-      end: toIso(year, endMonth, Number(abbrev[4])),
+      start: start > end ? toIso(year - 1, startMonth, Number(abbrev[2])) : start,
+      end,
     };
   }
   return null;
@@ -61,7 +67,7 @@ export function parseCibcCostcoHeader(lines: PdfLine[]): CibcCostcoHeader {
   // Statement date — labelled "Statement Date" on one line, value on the next or same line.
   let statementDate: string | null = null;
   for (let i = 0; i < page1.length; i++) {
-    if (page1[i].text.includes('Statement Date')) {
+    if (/statement date/i.test(page1[i].text)) {
       const sameLine = parseLongDate(page1[i].text);
       if (sameLine) { statementDate = sameLine; break; }
       const next = page1[i + 1]?.text ?? '';
@@ -94,7 +100,7 @@ export function parseCibcCostcoHeader(lines: PdfLine[]): CibcCostcoHeader {
   // Account last 4 — "5160 XXXX XXXX NNNN".
   let last4: string | null = null;
   for (const l of page1) {
-    const m = /5160\s+X{4}\s+X{4}\s+(\d{4})/.exec(l.text);
+    const m = /5160\s+[Xx]{4}\s+[Xx]{4}\s+(\d{4})/.exec(l.text);
     if (m) { last4 = m[1]; break; }
   }
   if (!last4) throw new Error('CIBC Costco header: could not parse account last4');
