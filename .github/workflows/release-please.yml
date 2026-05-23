@@ -6,13 +6,41 @@ on:
 
 permissions:
   contents: write
+  issues: write
   pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Checkout released tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag_name }}
+          fetch-depth: 0
+
+      - name: Fast-forward production to released tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.release.outputs.tag_name }}"
+          echo "Promoting $TAG to production"
+          if git fetch origin "refs/heads/production:refs/remotes/origin/production" 2>/dev/null; then
+            EXPECTED="$(git rev-parse refs/remotes/origin/production)"
+            git push origin "$TAG:refs/heads/production" \
+              --force-with-lease="refs/heads/production:$EXPECTED"
+          else
+            echo "production branch does not exist yet; creating it"
+            git push origin "$TAG:refs/heads/production"
+          fi
