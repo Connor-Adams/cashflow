@@ -210,6 +210,7 @@ export async function commitStatementImport(
   const rules = await loadAllRules(account.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
   const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
+  const overrideBusiness = preview.overrideBusiness === true;
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
   let insertedHoldings = 0;
@@ -277,7 +278,7 @@ export async function commitStatementImport(
         sourceRowFingerprint: row.sourceRowFingerprint,
         appliedRuleId: f.appliedRuleId,
         autoCategory: f.autoCategory,
-        autoBusiness: f.autoBusiness,
+        autoBusiness: overrideBusiness ? true : f.autoBusiness,
         autoSplitType: f.autoSplitType,
         autoPctMe: f.autoPctMe,
         autoPctPartner: f.autoPctPartner,
