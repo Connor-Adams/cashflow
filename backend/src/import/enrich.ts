@@ -6,6 +6,7 @@ import { runApplyRuleStage } from './enrichment/applyRuleStage';
 import { runMerchantMemoryStage } from './enrichment/merchantMemoryStage';
 import { runLinkItemsStage, type LinkItemsCandidateOrder } from './enrichment/linkItemsStage';
 import { runDetectRelationshipsStage, type RelationshipCandidate } from './enrichment/detectRelationshipsStage';
+import { runWsInvestmentBrandStage } from './enrichment/wsInvestmentBrandStage';
 import type { EnrichmentResult, Signal, TxnType } from './enrichment/types';
 import type { RuleRow } from './applyRules';
 import type { MerchantMemoryMatch } from '../ai/merchantMemory';
@@ -62,6 +63,13 @@ function pickMerchantClean(signals: Signal[]): string {
 
 export async function enrichTransaction(input: EnrichInputs): Promise<EnrichmentResult> {
   const signals: Signal[] = [];
+
+  // Stage 0: ws-investment (Wealthsimple investment-txn rollup)
+  // Runs before normalize; PRECEDENCE ranks ws-investment above normalize-seed
+  // so when both fire, the WS canonical wins.
+  signals.push(...safeStage('ws-investment', () => runWsInvestmentBrandStage({
+    merchantRaw: input.raw.merchantRaw,
+  }), []));
 
   // Stage 1: normalize
   signals.push(...safeStage('normalize', () => runNormalizeStage({
