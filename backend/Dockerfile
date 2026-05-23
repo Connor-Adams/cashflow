@@ -34,4 +34,4 @@ ENV NODE_ENV=production
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "yarn run db:migrate && node dist/server.js"]
+CMD ["sh", "-c", "yarn run db:migrate && exec node dist/server.js"]
