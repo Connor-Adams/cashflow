@@ -11,6 +11,7 @@ const PRECEDENCE: Array<{ source: SignalSource; minConfidence: Confidence }> = [
   { source: 'memory', minConfidence: 'medium' },
   { source: 'item-link', minConfidence: 'medium' },
   { source: 'ai', minConfidence: 'medium' },
+  { source: 'ws-investment', minConfidence: 'high' },
   { source: 'normalize-seed', minConfidence: 'high' },
   { source: 'normalize-learned', minConfidence: 'medium' },
   { source: 'type-detect', minConfidence: 'high' },

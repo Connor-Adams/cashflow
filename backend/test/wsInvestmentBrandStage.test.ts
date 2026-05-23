@@ -99,6 +99,10 @@ test('ws-investment: cash account flow lines', () => {
     'Money transfer in',
   );
   assert.equal(
+    canonicalOf('Tax-free money transfer out of the account (executed at 2025-08-18)'),
+    'Money transfer out',
+  );
+  assert.equal(
     canonicalOf('Contribution (executed at 2025-11-02)'),
     'Contribution',
   );
