@@ -20,6 +20,12 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // buys come in negative, sells positive, lending legs come in at zero.
   { type: 'investment', re: /\b(bought|sold)\s+[\d.]+\s+shares\b/i },
   { type: 'investment', re: /\bloan of\s+[\d.]+\s+shares\s+(?:terminated|created)\b/i },
+  // "X.X Shares on loan" — active share-lending state ledger entry, distinct
+  // from the loan terminated/created state transitions above.
+  { type: 'investment', re: /\b[\d.]+\s+shares\s+on\s+loan\b/i },
+  // "Staked X of TOKEN-Name" — crypto staking initiation; counterpart to the
+  // "X of TOKEN rewards earned" reward pattern below.
+  { type: 'investment', re: /\bstaked\s+[\d.]+\s+of\s+[\w-]+/i },
   // Fee: must come BEFORE the reward 'rewards earned' pattern so
   // "Fee paid on ... staking reward" doesn't get mis-routed to reward.
   {

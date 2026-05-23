@@ -262,3 +262,23 @@ test('dividend: negative-amount cash dividend distribution (WS sign bug)', () =>
   });
   assert.equal(out[0].fields.txnType, 'dividend');
 });
+
+test('investment: WS active "Shares on loan" state record', () => {
+  // Distinct from "Loan of X shares terminated/created" — this is the
+  // ongoing-state ledger entry while shares are out on loan.
+  const out = runDetectTypeStage({
+    merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: 2.0000 Shares on loan (executed at 2025-09-10)',
+    merchantClean: 'XEQT - iShares Core Equity ETF Portfolio: 2.0000 Shares on loan (executed at 2025-09-10)',
+    amount: 0,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('investment: WS "Staked X of TOKEN" crypto staking initiation', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Staked 0.0544286100 of ETH-Ethereum',
+    merchantClean: 'Staked 0.0544286100 of ETH-Ethereum',
+    amount: 0,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
