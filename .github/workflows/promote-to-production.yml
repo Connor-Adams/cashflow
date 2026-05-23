@@ -1,0 +1,25 @@
+name: promote-to-production
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Fast-forward production to released tag
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          echo "Promoting $TAG to production branch"
+          git push origin "$TAG:refs/heads/production" --force-with-lease
