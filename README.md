@@ -124,27 +124,36 @@ backed by `POST /api/auth/demo-login`.
 
 ## Releases
 
-Cashflow uses [Release Drafter](https://github.com/release-drafter/release-drafter)
-to maintain a draft GitHub Release from merged PRs, plus a `production` branch
-that Railway tracks for deployment.
+Cashflow uses a three-piece pipeline:
+
+1. **CI builds Docker images** on every push to `main` and pushes them to
+   GitHub Container Registry (GHCR), tagged with the commit SHA.
+2. **[Release Drafter](https://github.com/release-drafter/release-drafter)**
+   maintains a draft GitHub Release with auto-generated notes from merged
+   PR titles.
+3. **Publishing a release** re-tags the corresponding images as
+   `:vX.Y.Z` and `:production`, then triggers Railway to redeploy.
+   Railway services are configured to pull images from GHCR — they don't
+   build anything themselves.
 
 **To ship to production:**
 
 1. Open a PR with a conventional-commit title (`feat:`, `fix:`, `docs:`, etc.).
    Release Drafter auto-labels the PR based on the title prefix.
-2. When the PR merges to `main`, Release Drafter updates the draft GitHub
-   Release with a new entry under the matching category. The draft also
-   suggests the next semver version (`feat:` → minor, `fix:` → patch,
-   `feat!:` → major).
+2. When the PR merges to `main`:
+   - The `build-images` workflow builds the backend and frontend images and
+     pushes them to GHCR (`ghcr.io/connor-adams/cashflow-{backend,frontend}:sha-<short>`).
+   - Release Drafter updates the draft GitHub Release with the new entry.
 3. When ready to ship, go to **Releases → Drafts** in GitHub, eyeball the
    notes and version, edit if needed, click **Publish release**.
 4. Publishing fires a `release: published` event (human action, not
-   `GITHUB_TOKEN`). The `promote-to-production` workflow fast-forwards the
-   `production` branch to the released tag. Railway, which tracks
-   `production`, deploys.
+   `GITHUB_TOKEN`). The `promote-to-production` workflow:
+   - Re-tags the released commit's images as `:vX.Y.Z` and `:production`.
+   - Calls Railway's deploy hooks for both services.
+   Railway pulls the new `:production` image and runs it.
 
-`main` does not auto-deploy to prod. Only publishing a release advances
-`production`.
+`main` does not auto-deploy. Only publishing a release triggers a Railway
+redeploy.
 
 **Version bumps (suggested by Drafter; override at Publish time):**
 - `feat:` → minor bump
@@ -153,19 +162,31 @@ that Railway tracks for deployment.
 - `docs:`, `chore:`, `refactor:`, `test:`, `build:`, `ci:` → fall to patch
   default; you choose whether to publish a release with only these
 
+**Required GitHub Secrets:**
+- `VITE_API_BASE` — public URL of the backend Railway service, baked into
+  the frontend image at build time
+- `RAILWAY_BACKEND_DEPLOY_HOOK`, `RAILWAY_FRONTEND_DEPLOY_HOOK` — Railway
+  deploy hook URLs for each service
+
 **Rollback:**
 
-If branch protection isn't enabled on `production`:
+Re-tag an older `:vX.Y.Z` image as `:production`, then trigger the Railway
+hooks. From a workstation with `docker buildx`:
 
 ```bash
-git push origin <older-tag>:refs/heads/production --force-with-lease
+TAG=v0.1.4
+IMG_BE=ghcr.io/connor-adams/cashflow-backend
+IMG_FE=ghcr.io/connor-adams/cashflow-frontend
+
+docker buildx imagetools create --tag $IMG_BE:production $IMG_BE:$TAG
+docker buildx imagetools create --tag $IMG_FE:production $IMG_FE:$TAG
+
+curl -fsS -X POST $RAILWAY_BACKEND_DEPLOY_HOOK
+curl -fsS -X POST $RAILWAY_FRONTEND_DEPLOY_HOOK
 ```
 
-If branch protection IS enabled (recommended; only `github-actions[bot]` can
-push to `production`), this command will be rejected. Temporarily disable
-the protection rule in **Settings → Branches**, run the push, then
-re-enable. A dedicated `workflow_dispatch` rollback workflow that runs as
-the bot is a cleaner long-term option but not currently configured.
+A dedicated `workflow_dispatch` rollback workflow would be cleaner but is
+not currently configured.
 
 ## Deploy
 
