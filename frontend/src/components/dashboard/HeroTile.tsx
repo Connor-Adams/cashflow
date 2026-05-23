@@ -83,6 +83,11 @@ export function HeroTile({
       )}
 
       {sparkPath && (
+        // TODO: hover affordance (cursor + per-month tooltip) skipped — this
+        // sparkline is a decorative inline SVG (no per-point markers, no event
+        // surface). Adding interactivity means a mouse-to-bucket mapping +
+        // crosshair overlay; better handled by promoting to a Recharts
+        // LineChart in a follow-up than bolting onto raw paths here.
         <svg
           className="heroTile__sparkline"
           viewBox={`0 0 ${SPARKLINE_WIDTH} ${SPARKLINE_HEIGHT}`}

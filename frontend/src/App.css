@@ -234,6 +234,10 @@
     color: var(--accent-soft);
   }
 
+  [data-slot='alert'] a {
+    color: inherit;
+  }
+
   .muted {
     @apply mb-4 text-sm leading-6;
     color: var(--muted-foreground);
@@ -389,7 +393,7 @@
   .quickFilterButton[aria-pressed='true'] {
     border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
-    color: #10110f;
+    color: var(--accent-foreground);
   }
 
   .dashboardStats {
@@ -931,11 +935,11 @@
   }
 
   .txnAmount--expense {
-    color: #fca5a5;
+    color: var(--destructive);
   }
 
   .txnAmount--credit {
-    color: #86efac;
+    color: var(--positive);
   }
 
   .txnBadge {
@@ -947,8 +951,8 @@
 
   .txnBadge--review {
     border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border));
-    color: #fcd34d;
-    background: rgba(245, 158, 11, 0.12);
+    color: var(--warning-foreground);
+    background: var(--warning-bg);
   }
 
   .txnReceiptCount {
@@ -1005,7 +1009,7 @@
   .txnSaveButton {
     border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
-    color: #10110f;
+    color: var(--accent-foreground);
   }
 
   .txnSaveButton:disabled {
@@ -1175,7 +1179,7 @@
   }
 
   .uploadCard .uploadMsg.warn {
-    color: #e8b86a;
+    color: var(--warning);
   }
 
   .uploadCard .parseErrorList {

@@ -1,9 +1,12 @@
 import type { Request } from 'express';
 import { Op } from 'sequelize';
-import { Transaction } from '../models';
-import { visibleTransactionWhere } from '../auth/scope';
+import { Account, Transaction } from '../models';
+import { visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
-import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
+import {
+  classifyPositiveAmount,
+  isNonSpend,
+} from '../summary/classifyTransactionFlow';
 
 export type AiFinancialInsight = {
   title: string;
@@ -92,6 +95,7 @@ export async function buildFinancialInsights(
   const previousDateWhere = previousRange ? dateWhere(previousRange) : undefined;
   const attributes = [
       'id',
+      'accountId',
       'date',
       'merchantClean',
       'merchantRaw',
@@ -99,8 +103,9 @@ export async function buildFinancialInsights(
       'finalCategory',
       'finalBusiness',
       'finalSplitType',
+      'txnType',
     ];
-  const [rows, previousRows] = await Promise.all([
+  const [rows, previousRows, accounts] = await Promise.all([
     Transaction.findAll({
       where: {
         ...visibleTransactionWhere(req),
@@ -119,26 +124,37 @@ export async function buildFinancialInsights(
       attributes,
       raw: true,
     }),
+    Account.findAll({
+      where: visibleAccountWhere(req),
+      attributes: ['id', 'accountType'],
+      raw: true,
+    }),
   ]);
+  const accountTypeById = new Map<number, string | null>(
+    (accounts as unknown as Array<{ id: number; accountType: string | null }>).map((a) => [
+      a.id,
+      a.accountType,
+    ]),
+  );
   type Row = {
     id: number;
+    accountId: number;
     merchantClean: string;
     merchantRaw: string;
     amount: unknown;
     finalCategory: string | null;
     finalBusiness: boolean;
     finalSplitType: string;
+    txnType: string | null;
   };
   const byCategory = new Map<string, { amount: number; ids: number[] }>();
   const previousByCategory = new Map<string, number>();
   const byMerchant = new Map<string, { amount: number; ids: number[] }>();
-  // Track rows with no final category across every flow type in the period.
-  // The dedicated "Uncategorized transactions" insight reports against this
-  // list so the label matches the underlying data: literal no-category rows,
-  // not the broader review-flag backlog (which mixes uncategorized rows with
-  // rows flagged for split/business review). The "Uncategorized spend"
-  // insight below uses the spend-only `byCategory.get('Uncategorized')`
-  // entry and is unaffected.
+  // Track rows with no final category across every spend-eligible flow in
+  // the period. The dedicated "Uncategorized transactions" insight reports
+  // against this list so the label matches the underlying data: literal
+  // no-category rows, not the broader review-flag backlog (which mixes
+  // uncategorized rows with rows flagged for split/business review).
   const noCategoryIds: number[] = [];
   let businessSpend = 0;
   let sharedSpend = 0;
@@ -146,15 +162,43 @@ export async function buildFinancialInsights(
   for (const row of previousRows as unknown as Row[]) {
     const amount = num(row.amount);
     if (amount == null || amount >= 0) continue;
+    // Apply the same spend filter as the dashboard route so previous-period
+    // baselines don't include transfer/investment legs.
+    if (isNonSpend(row.txnType, accountTypeById.get(row.accountId))) continue;
     const category = row.finalCategory || 'Uncategorized';
     previousByCategory.set(category, (previousByCategory.get(category) ?? 0) + -amount);
   }
   for (const row of rows as unknown as Row[]) {
     const amount = num(row.amount);
     if (amount == null) continue;
-    if (!row.finalCategory) noCategoryIds.push(row.id);
-    if (amount >= 0 && classifyPositiveFlow(row) === 'payment') continue;
+    const accountType = accountTypeById.get(row.accountId);
+    // Track no-category count BEFORE filtering — but only for rows that
+    // could meaningfully carry a category. Transfers, investment buys,
+    // dividends, and any invest-account row aren't expected to have a
+    // category and shouldn't pad the cleanup queue.
+    const positiveBucket =
+      amount >= 0
+        ? classifyPositiveAmount({
+            txnType: row.txnType,
+            accountType,
+            merchantRaw: row.merchantRaw,
+            merchantClean: row.merchantClean,
+            category: row.finalCategory,
+          })
+        : null;
+    const isNonCategorizable =
+      (amount < 0 && isNonSpend(row.txnType, accountType)) ||
+      positiveBucket === 'skip' ||
+      positiveBucket === 'payment';
+    if (!row.finalCategory && !isNonCategorizable) {
+      noCategoryIds.push(row.id);
+    }
+    // Spend aggregation: only negative amounts that pass the same
+    // non-spend filter the dashboard uses. Pre-fix this loop accepted any
+    // negative amount, so BUY/AFT_OUT/CONT cash legs all inflated the
+    // Uncategorized spend bucket.
     if (amount >= 0) continue;
+    if (isNonSpend(row.txnType, accountType)) continue;
     const spend = -amount;
     totalSpend += spend;
     if (row.finalBusiness) businessSpend += spend;
@@ -173,7 +217,12 @@ export async function buildFinancialInsights(
   const topCategory = Array.from(byCategory.entries()).sort((a, b) => b[1].amount - a[1].amount)[0];
   const topMerchant = Array.from(byMerchant.entries()).sort((a, b) => b[1].amount - a[1].amount)[0];
   const insights: AiFinancialInsight[] = [];
-  if (topCategory) {
+  // Suppress "Top category" when it's Uncategorized — the dedicated
+  // action-severity "Uncategorized spend is blocking" card below already
+  // surfaces this with the right framing, so showing both is a redundant
+  // duplicate (observed on the dashboard: same metric repeated as
+  // info+action cards).
+  if (topCategory && topCategory[0] !== 'Uncategorized') {
     insights.push({
       title: `Top category: ${topCategory[0]}`,
       summary: `${topCategory[0]} is the largest spend category for this period.`,

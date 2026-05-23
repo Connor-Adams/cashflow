@@ -77,6 +77,11 @@ export function mergeSignals(signals: Signal[]): EnrichmentResult {
       if (!(key in sig.fields)) continue;
       const value = sig.fields[key];
       if (value === undefined) continue;
+      // Treat explicit null on a classification field as "no claim". detectRecurringStage
+      // emits autoCategory:null when monthly cadence matches but no prior had a category;
+      // before this guard, null still claimed autoSource='recurring' while categoryWinner
+      // (which requires non-null) skipped it → auto_source set, auto_confidence NULL.
+      if (value === null && CLASSIFICATION_FIELD_KEYS.has(key)) continue;
       if (merged[key as keyof EnrichmentResultFields] !== undefined) continue;
       (merged as Record<string, unknown>)[key] = value;
       winningSourceByKey.set(key, sig.source);
