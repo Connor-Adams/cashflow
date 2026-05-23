@@ -16,14 +16,9 @@ import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { logger } from '../observability/logger';
 import { runBackfill } from '../import/runEnrichmentBackfill';
+import { backfillRunning } from '../import/backfillCoordinator';
 
 const router = Router();
-
-/**
- * In-memory guard so a household can only run one backfill at a time.
- * A second concurrent request returns 409.
- */
-const backfillRunning = new Set<number>();
 
 /**
  * Maximum number of transactions the filter-mode bulk patch endpoint will
@@ -610,6 +605,8 @@ router.post('/:id/re-enrich', async (req, res, next) => {
       transactionId: txn.id,
       limit: 1,
       batchSize: 1,
+      dateFrom: null,
+      dateTo: null,
     });
     logger.info('enrichment_single_reenrich', {
       householdId: txn.householdId,
@@ -793,6 +790,11 @@ router.post('/enrichment/backfill', async (req, res, next) => {
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    const dateFrom =
+      typeof body.dateFrom === 'string' && dateRe.test(body.dateFrom) ? body.dateFrom : null;
+    const dateTo =
+      typeof body.dateTo === 'string' && dateRe.test(body.dateTo) ? body.dateTo : null;
     const flags = {
       dryRun: Boolean(body.dryRun),
       noReviewFlag: Boolean(body.noReviewFlag),
@@ -805,6 +807,8 @@ router.post('/enrichment/backfill', async (req, res, next) => {
           ? Math.floor(body.limit)
           : null,
       batchSize: 100,
+      dateFrom,
+      dateTo,
     };
 
     // Content negotiation: NDJSON streaming only when the client explicitly
