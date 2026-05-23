@@ -25,8 +25,6 @@ import { commitStatementImport } from './commitStatementImport';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import * as env from '../config/env';
-import { parseStatementFile } from './parseStatementFile';
-import { commitStatementImport } from './commitStatementImport';
 import { enrichTransaction } from './enrich';
 import {
   enrichmentRecurringMinSupport,
