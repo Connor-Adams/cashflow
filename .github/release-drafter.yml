@@ -2,6 +2,10 @@ name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
 
 categories:
+  - title: 'Breaking Changes'
+    labels:
+      - 'breaking'
+      - 'major'
   - title: 'Features'
     labels:
       - 'feature'
