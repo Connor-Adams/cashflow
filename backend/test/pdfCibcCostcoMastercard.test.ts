@@ -93,8 +93,33 @@ test('parseCibcCostcoRow — charge row with bonus Ý prefix is stripped', () =>
   );
   assert.equal(row.date, '2025-12-09');
   assert.ok(!row.merchantRaw.includes('Ý'), 'Ý marker should be stripped');
-  assert.ok(row.merchantRaw.startsWith('COSTCO GAS W1168'));
+  assert.equal(row.merchantRaw, 'COSTCO GAS W1168 GUELPH ON');
   assert.equal(row.amount, -61.71);
+});
+
+test('parseCibcCostcoRow — throws on charge row with too few columns (collapsed gap)', () => {
+  const period = { start: '2025-12-13', end: '2026-01-12' };
+  // 4 cols instead of 5 — merchant+category collapsed
+  assert.throws(
+    () => parseCibcCostcoRow(
+      'Dec 13   Dec 15   COSTCO WHOLESALE   947.04',
+      period,
+      'charges',
+    ),
+    /too few columns|empty merchant/,
+  );
+});
+
+test('parseCibcCostcoRow — CR suffix on a charge row flips sign to credit', () => {
+  const period = { start: '2025-12-13', end: '2026-01-12' };
+  const row = parseCibcCostcoRow(
+    'Dec 20   Dec 21   COSTCO REFUND W1168 GUELPH   ON   Retail and Grocery   125.00 CR',
+    period,
+    'charges',
+  );
+  assert.equal(row.date, '2025-12-21');
+  assert.equal(row.merchantRaw, 'COSTCO REFUND W1168 GUELPH ON');
+  assert.equal(row.amount, 125);  // positive because CR flipped the default-negative
 });
 
 test('parseCibcCostcoRow — interest row', () => {

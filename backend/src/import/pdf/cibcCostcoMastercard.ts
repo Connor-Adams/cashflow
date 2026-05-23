@@ -163,8 +163,11 @@ export function parseCibcCostcoRow(
   const stripBonus = (s: string) => s.replace(/\s*Ý\s+/g, ' ').trim();
 
   const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length > 0);
-  if (cols.length < 3) {
-    throw new Error(`CIBC Costco row has too few columns: ${JSON.stringify(rawLine)}`);
+  const minCols = section === 'payments' ? 3 : 5;
+  if (cols.length < minCols) {
+    throw new Error(
+      `CIBC Costco row has too few columns (need ${minCols}, got ${cols.length}) — likely a collapsed column gap: ${JSON.stringify(rawLine)}`,
+    );
   }
 
   const postDate = cols[1];
@@ -172,6 +175,9 @@ export function parseCibcCostcoRow(
 
   const middleEnd = section === 'payments' ? cols.length - 1 : cols.length - 2;
   const merchantRaw = stripBonus(cols.slice(2, middleEnd).join(' ')).replace(/\s+/g, ' ');
+  if (!merchantRaw) {
+    throw new Error(`CIBC Costco row: empty merchant after column extraction: ${JSON.stringify(rawLine)}`);
+  }
 
   const year = inferYearForMonthDay(postDate, period);
   const md = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(postDate);
