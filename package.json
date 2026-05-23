@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "fallow": "^2.79.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0"
   }

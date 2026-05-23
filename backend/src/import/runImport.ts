@@ -16,6 +16,12 @@ import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
 import { mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
+import {
+  parseWealthsimpleFilename,
+  type WsProductHint,
+} from './parseWealthsimpleFilename';
+import { parseStatementFile } from './parseStatementFile';
+import { commitStatementImport } from './commitStatementImport';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import * as env from '../config/env';
@@ -264,7 +270,11 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         sourceReference: v.sourceReference,
       });
 
-      const memory = await findMerchantMemory(opts.householdId ?? account.householdId ?? null, v.merchantClean);
+      const memory = await findMerchantMemory(
+        opts.householdId ?? account.householdId ?? null,
+        v.merchantClean,
+        v.amount,
+      );
 
       const recurringHistory = await loadRecurringHistory(
         opts.householdId ?? account.householdId ?? null,
@@ -454,4 +464,160 @@ export async function runImport(options: {
   }
 
   return { results, uploadDir };
+}
+
+// ─── Wealthsimple bundle import ─────────────────────────────────────────────
+
+/** Per-file result emitted by `importWsBundleFile`. */
+export type BundleFileResult = {
+  file: string;
+  wsid: string | null;
+  accountId: number | null;
+  accountName: string | null;
+  accountCreated: boolean;
+  inserted: number;
+  insertedTransactions: number;
+  insertedInvestmentActivities: number;
+  skippedDuplicates: number;
+  rowErrors: number;
+  parseErrors: { rowIndex: number; message: string }[];
+  warnings: string[];
+  error?: string;
+};
+
+type WsAccountTemplate = {
+  name: string;
+  accountType: 'checking' | 'credit_card' | 'investment';
+};
+
+/**
+ * Maps a Wealthsimple product hint (derived from the filename) to the account
+ * name + accountType we auto-create on first sighting of that WSID.
+ *
+ * We deliberately restrict accountType to the existing enum
+ * (`checking | credit_card | investment`) — no new types added.
+ */
+const WS_ACCOUNT_TEMPLATES: Record<WsProductHint, WsAccountTemplate> = {
+  chequing: { name: 'Wealthsimple Chequing', accountType: 'checking' },
+  save_for_business: {
+    name: 'Wealthsimple Save for Business',
+    accountType: 'checking',
+  },
+  tfsa: { name: 'Wealthsimple TFSA', accountType: 'investment' },
+  fhsa: { name: 'Wealthsimple FHSA', accountType: 'investment' },
+  margin: { name: 'Wealthsimple Investing', accountType: 'investment' },
+  corporate_investing: {
+    name: 'Wealthsimple Corporate Investing',
+    accountType: 'investment',
+  },
+  crypto: { name: 'Wealthsimple Crypto', accountType: 'investment' },
+  credit_card: { name: 'Wealthsimple Credit Card', accountType: 'credit_card' },
+};
+
+function emptyBundleResult(file: string, error: string): BundleFileResult {
+  return {
+    file,
+    wsid: null,
+    accountId: null,
+    accountName: null,
+    accountCreated: false,
+    inserted: 0,
+    insertedTransactions: 0,
+    insertedInvestmentActivities: 0,
+    skippedDuplicates: 0,
+    rowErrors: 0,
+    parseErrors: [],
+    warnings: [],
+    error,
+  };
+}
+
+/**
+ * Import a single file from a Wealthsimple bulk-statement-bundle drop.
+ *
+ * Pipeline:
+ *   1. Parse filename → `{wsid, productHint, isCreditCard, periodEnd}`.
+ *   2. `Account.findOrCreate` keyed on `(householdId, shortCode=wsid)` —
+ *      race-safe because the unique index on `(household_id, short_code)`
+ *      guarantees serialized insertions.
+ *   3. Pick a generic CSV profile: `generic_simple` for credit-card-style
+ *      Purchase/Payment files, `generic_passthrough` for the standard
+ *      pre-signed monthly statements.
+ *   4. For newly-created corporate accounts (`corporate_investing`,
+ *      `save_for_business`), flip `overrideBusiness=true` so every
+ *      Transaction gets `autoBusiness=true`.
+ *   5. Parse + commit using the standard preview/commit pipeline.
+ */
+export async function importWsBundleFile(opts: {
+  buffer: Buffer;
+  fileName: string;
+  householdId: number;
+  userId: number;
+}): Promise<BundleFileResult> {
+  const file = path.basename(opts.fileName || 'upload.csv').replace(/[\\/]/g, '');
+  const parsed = parseWealthsimpleFilename(file);
+  if (!parsed) {
+    return emptyBundleResult(file, 'unrecognized Wealthsimple filename');
+  }
+
+  const template = WS_ACCOUNT_TEMPLATES[parsed.productHint];
+
+  const [account, accountCreated] = await Account.findOrCreate({
+    where: { householdId: opts.householdId, shortCode: parsed.wsid },
+    defaults: {
+      householdId: opts.householdId,
+      name: template.name,
+      accountType: template.accountType,
+      owner: 'me',
+      visibility: 'private',
+      defaultCurrency: 'CAD',
+      ownerUserId: opts.userId,
+      shortCode: parsed.wsid,
+    },
+  });
+
+  const profileId = parsed.isCreditCard ? 'generic_simple' : 'generic_passthrough';
+
+  // Force business flag for newly-discovered corporate accounts. Existing
+  // accounts retain whatever the user previously chose — don't surprise the
+  // user by retroactively flipping flags on prior Wealthsimple data.
+  const overrideBusiness =
+    accountCreated &&
+    (parsed.productHint === 'corporate_investing' ||
+      parsed.productHint === 'save_for_business');
+
+  const preview = await parseStatementFile({
+    buffer: opts.buffer,
+    fileName: file,
+    accountId: account.id,
+    profileId,
+    householdId: opts.householdId,
+    overrideBusiness,
+  });
+  if ('error' in preview) {
+    return {
+      ...emptyBundleResult(file, preview.error),
+      wsid: parsed.wsid,
+      accountId: account.id,
+      accountName: account.name,
+      accountCreated,
+    };
+  }
+
+  const commit = await commitStatementImport(preview, opts.userId, opts.householdId);
+
+  return {
+    file,
+    wsid: parsed.wsid,
+    accountId: account.id,
+    accountName: account.name,
+    accountCreated,
+    inserted: commit.insertedTransactions + commit.insertedInvestmentActivities,
+    insertedTransactions: commit.insertedTransactions,
+    insertedInvestmentActivities: commit.insertedInvestmentActivities,
+    skippedDuplicates: commit.skippedDuplicates,
+    rowErrors: commit.rowErrors,
+    parseErrors: commit.parseErrors,
+    warnings: commit.warnings,
+  };
 }

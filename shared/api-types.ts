@@ -58,12 +58,74 @@ export type Transaction = {
   businessAmount: number
   reviewFlag: boolean
   reviewedAt: string | null
+  /** Canonical brand name when the normalize stage recognised it (e.g. "Amazon", "Netflix") */
+  merchantCanonical: string | null
+  /** Detected transaction type from narrative + sign */
+  txnType: 'purchase' | 'refund' | 'transfer' | 'payment' | 'fee' | 'interest' | 'reward' | 'unknown'
+  /** Winning enrichment signal source for the auto_* fields */
+  autoSource: string | null
+  /** Confidence of the winning enrichment signal */
+  autoConfidence: 'high' | 'medium' | 'low' | null
+  /** Linked sibling transaction id (refund→original, transfer→sibling) */
+  linkedTransactionId: number | null
+  /** True when the detect-recurring stage flagged this as a recurring/subscription charge */
+  isRecurring: boolean
   /** Count of attached receipt files */
   receiptCount?: number
   /** Receipt extraction mismatches that need review */
   receiptWarnings?: string[]
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
 }
+
+export type EnrichmentSignal = {
+  id: number
+  transactionId: number
+  source: string
+  confidence: 'high' | 'medium' | 'low'
+  fields: Record<string, unknown>
+  rationale: string | null
+  createdAt: string
+}
+
+export type EnrichmentStats = {
+  total: number
+  reviewFlagTrue: number
+  reviewFlagFalse: number
+  reviewedTrue: number
+  bySource: Record<string, number>
+  byConfidence: Record<string, number>
+  byTxnType: Record<string, number>
+  isRecurringCount: number
+  refundLinkedCount: number
+  transferLinkedCount: number
+  topCanonicalMerchants: Array<{ name: string; count: number }>
+  topRules: Array<{ ruleId: number; pattern: string; category: string | null; count: number }>
+}
+
+export type EnrichmentBackfillProgress =
+  | {
+      kind: 'progress'
+      txnId: number
+      merchantRaw: string
+      merchantClean: string
+      merchantCanonical: string | null
+      txnType: string
+      autoSource: string | null
+      autoConfidence: string | null
+      reviewFlagCleared: boolean
+      signalsCount: number
+    }
+  | {
+      kind: 'summary'
+      processed: number
+      updated: number
+      reviewFlagCleared: number
+      signalsWritten: number
+      skipped: number
+      durationMs: number
+      dryRun: boolean
+    }
+  | { kind: 'error'; message: string; txnId?: number }
 
 export type Contact = {
   id: number

@@ -6,14 +6,16 @@
  * can be shared with the HTTP route. This file is just argv parsing + invocation.
  *
  * Flags:
- *   --dry-run            print would-update count, write nothing
- *   --no-review-flag     don't touch review_flag (only enrich descriptive fields)
- *   --review-only        only re-enrich rows currently in review (review_flag=true)
- *   --account-id N       filter to one account
- *   --household-id N     filter to one household
- *   --limit N            process at most N rows
- *   --batch-size N       fetch batch size (default 100)
- *   --verbose            print per-row decision
+ *   --dry-run                  print would-update count, write nothing
+ *   --no-review-flag           don't touch review_flag (only enrich descriptive fields)
+ *   --review-only              only re-enrich rows currently in review (review_flag=true)
+ *   --account-id N             filter to one account
+ *   --household-id N           filter to one household
+ *   --limit N                  process at most N rows
+ *   --batch-size N             fetch batch size (default 100)
+ *   --date-from YYYY-MM-DD     only re-enrich txns on/after this date
+ *   --date-to YYYY-MM-DD       only re-enrich txns on/before this date
+ *   --verbose                  print per-row decision
  *
  * Usage on Railway:
  *   railway run --service backend yarn workspace cashflow-backend tsx scripts/backfillEnrichment.ts --dry-run
@@ -29,6 +31,12 @@ function parseFlags(argv: string[]): BackfillFlags {
     const n = Number(argv[idx + 1]);
     return Number.isFinite(n) ? n : null;
   }
+  function strFlag(name: string): string | null {
+    const idx = argv.indexOf(name);
+    if (idx === -1 || idx === argv.length - 1) return null;
+    const v = argv[idx + 1];
+    return v && v.length > 0 ? v : null;
+  }
   return {
     dryRun: argv.includes('--dry-run'),
     noReviewFlag: argv.includes('--no-review-flag'),
@@ -38,6 +46,8 @@ function parseFlags(argv: string[]): BackfillFlags {
     householdId: intFlag('--household-id'),
     limit: intFlag('--limit'),
     batchSize: intFlag('--batch-size') ?? 100,
+    dateFrom: strFlag('--date-from'),
+    dateTo: strFlag('--date-to'),
   };
 }
 

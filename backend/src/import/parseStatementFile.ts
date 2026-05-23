@@ -8,6 +8,7 @@ import { normalizeMerchant } from './normalizeMerchant';
 import { parseDateFlexible } from './parseDateFlexible';
 import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
 import { saveStatementPreview } from './statementPreviewStore';
+import { parseWsInvestRow, type WsRow } from './wealthsimpleInvestParse';
 import type {
   NormalizedCashTransaction,
   NormalizedHoldingSnapshot,
@@ -393,6 +394,19 @@ async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): 
   preview.duplicateCounts.holdings = preview.holdings.filter((r) => r.duplicate).length;
 }
 
+/**
+ * Returns true when the parsed CSV headers look like a Wealthsimple monthly
+ * invest statement: `date,transaction,description,amount,balance,currency`.
+ * Used to switch the investment-row parsing path to `parseWsInvestRow` and
+ * to enable the zero-value non-CAD crypto-noise filter.
+ */
+function isWsMonthlyHeaders(headers: string[]): boolean {
+  if (!headers || headers.length < 6) return false;
+  const wanted = ['date', 'transaction', 'description', 'amount', 'balance', 'currency'];
+  const lower = new Set(headers.map((h) => String(h).trim().toLowerCase()));
+  return wanted.every((w) => lower.has(w));
+}
+
 export async function parseStatementFile(opts: {
   buffer: Buffer;
   fileName: string;
@@ -400,6 +414,12 @@ export async function parseStatementFile(opts: {
   profileId?: string | null;
   batchLabel?: string | null;
   householdId?: number | null;
+  /**
+   * Force autoBusiness=true on every committed Transaction for this file.
+   * Used by the Wealthsimple bundle importer for corporate-tagged accounts
+   * (Save for business, Corporate investing).
+   */
+  overrideBusiness?: boolean;
 }): Promise<StatementPreview | { ok: false; error: string }> {
   const account = await Account.findOne({
     where: {
@@ -429,6 +449,7 @@ export async function parseStatementFile(opts: {
     warnings: [] as string[],
     rowErrors: 0,
     parseErrors: [] as { rowIndex: number; message: string }[],
+    overrideBusiness: opts.overrideBusiness === true ? true : undefined,
     duplicateCounts: {
       transactions: 0,
       investmentActivities: 0,
@@ -447,8 +468,28 @@ export async function parseStatementFile(opts: {
       records,
       defaultCurrency
     );
+    const wsMonthly = isWsMonthlyHeaders(headers);
     const previewRows: NonNullable<StatementPreview['rows']> = [];
+    let zeroValueNonCadFiltered = 0;
     records.forEach((row, index) => {
+      // Wealthsimple crypto statements emit one zero-value CAD/non-CAD pair per
+      // staking reward. The CAD half makes it through (amount=0, currency=CAD)
+      // but the non-CAD halves are noise — filter them before mapping.
+      // Also: WS invest CSVs end with one blank row that would otherwise hit
+      // "Missing required columns" — drop silently.
+      if (wsMonthly) {
+        const amtStr = String(row['amount'] ?? row['Amount'] ?? '').trim();
+        const curStr = String(row['currency'] ?? row['Currency'] ?? '').trim().toUpperCase();
+        const dateStr = String(row['date'] ?? row['Date'] ?? '').trim();
+        if (amtStr === '' && curStr === '' && dateStr === '') {
+          // trailing blank row — silently skip
+          return;
+        }
+        if (amtStr !== '' && parseFloat(amtStr) === 0 && curStr !== 'CAD') {
+          zeroValueNonCadFiltered += 1;
+          return;
+        }
+      }
       const mapped = mapCsvRow(row, headers, resolved.profileId, defaultCurrency);
       if ('error' in mapped) {
         previewRows.push({ rowIndex: index + 1, ok: false, error: mapped.error });
@@ -478,13 +519,46 @@ export async function parseStatementFile(opts: {
       }
     });
 
+    if (zeroValueNonCadFiltered > 0) {
+      base.warnings.push(
+        `Filtered ${zeroValueNonCadFiltered} zero-value non-CAD row(s) (crypto staking noise)`,
+      );
+    }
+
     if (String(account.accountType) === 'investment') {
-      const inv = parseInvestmentCsv(records, defaultCurrency, account.id);
-      base.investmentActivities.push(...inv.investmentActivities);
-      base.holdings.push(...inv.holdings);
-      base.warnings.push(...inv.warnings);
-      base.parseErrors.push(...inv.parseErrors);
-      base.rowErrors += inv.parseErrors.length;
+      if (wsMonthly) {
+        // Wealthsimple monthly invest CSV: emit InvestmentActivity rows from
+        // the BUY/SELL/DIV/INT/CONT/FEE/FPLINT lines. Other TX codes return
+        // null and stay only as Transaction rows.
+        //
+        // Apply the same zero-value non-CAD filter as the cash loop so we
+        // don't emit hundreds of nuisance FEE-only activities for the USD
+        // half of Wealthsimple's CAD/USD crypto-staking pairs.
+        records.forEach((row) => {
+          const amtStr = String(row['amount'] ?? row['Amount'] ?? '').trim();
+          const curStr = String(row['currency'] ?? row['Currency'] ?? '').trim().toUpperCase();
+          if (amtStr !== '' && parseFloat(amtStr) === 0 && curStr !== 'CAD') {
+            return;
+          }
+          const wsRow: WsRow = {
+            date: String(row['date'] ?? row['Date'] ?? ''),
+            transaction: String(row['transaction'] ?? row['Transaction'] ?? ''),
+            description: String(row['description'] ?? row['Description'] ?? ''),
+            amount: amtStr || '0',
+            balance: String(row['balance'] ?? row['Balance'] ?? ''),
+            currency: String(row['currency'] ?? row['Currency'] ?? ''),
+          };
+          const activity = parseWsInvestRow(wsRow, account.id, defaultCurrency);
+          if (activity) base.investmentActivities.push(activity);
+        });
+      } else {
+        const inv = parseInvestmentCsv(records, defaultCurrency, account.id);
+        base.investmentActivities.push(...inv.investmentActivities);
+        base.holdings.push(...inv.holdings);
+        base.warnings.push(...inv.warnings);
+        base.parseErrors.push(...inv.parseErrors);
+        base.rowErrors += inv.parseErrors.length;
+      }
     }
 
     const preview = {

@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import {
   getJson,
   patchJson,
@@ -77,6 +78,30 @@ type FolderImportResponse = {
 
 type MultiUploadResponse = {
   results: UploadResult[]
+}
+
+/**
+ * Per-file result from the Wealthsimple bundle endpoint
+ * (POST /api/import/upload-bundle). Mirrors backend `BundleFileResult`.
+ */
+type BundleFileResult = {
+  file: string
+  wsid: string | null
+  accountId: number | null
+  accountName: string | null
+  accountCreated: boolean
+  inserted: number
+  insertedTransactions: number
+  insertedInvestmentActivities: number
+  skippedDuplicates: number
+  rowErrors: number
+  parseErrors: { rowIndex: number; message: string }[]
+  warnings: string[]
+  error?: string
+}
+
+type BundleUploadResponse = {
+  results: BundleFileResult[]
 }
 
 type ImportHistoryRow = {
@@ -282,7 +307,18 @@ export function TransactionsPage() {
   const [runningFolderImport, setRunningFolderImport] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
+  const [bundleMode, setBundleMode] = useState(false)
+  const [bundleUploading, setBundleUploading] = useState(false)
+  const [bundleResults, setBundleResults] = useState<BundleFileResult[] | null>(
+    null,
+  )
+  const [bundleFeedback, setBundleFeedback] = useState<{
+    variant: AlertVariant
+    title: string
+  } | null>(null)
+  const bundleFileRef = useRef<HTMLInputElement>(null)
   const [aiEnabled, setAiEnabled] = useState(false)
+  const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
@@ -1042,6 +1078,61 @@ export function TransactionsPage() {
     }
   }
 
+  async function onBundleUpload(e: FormEvent) {
+    e.preventDefault()
+    const input = bundleFileRef.current
+    const files = Array.from(input?.files ?? [])
+    if (files.length === 0) {
+      setBundleFeedback({
+        variant: 'error',
+        title: 'Choose at least one Wealthsimple statement CSV first.',
+      })
+      return
+    }
+    setBundleUploading(true)
+    setBundleFeedback(null)
+    setBundleResults(null)
+    setErr(null)
+    try {
+      const fd = new FormData()
+      files.forEach((file) => fd.append('files', file))
+      const out = await postFormData<BundleUploadResponse>(
+        '/api/import/upload-bundle',
+        fd,
+      )
+      setBundleResults(out.results)
+      const filesWithErrors = out.results.filter((r) => r.error).length
+      const accountsCreated = out.results.filter((r) => r.accountCreated).length
+      const importedTxns = out.results.reduce(
+        (sum, r) => sum + r.insertedTransactions,
+        0,
+      )
+      const importedActs = out.results.reduce(
+        (sum, r) => sum + r.insertedInvestmentActivities,
+        0,
+      )
+      const dupes = out.results.reduce((sum, r) => sum + r.skippedDuplicates, 0)
+      const title = `Bundle import complete — ${out.results.length} file(s), ${accountsCreated} new account(s), ${importedTxns} transaction(s), ${importedActs} investment activity(ies), ${dupes} dup(s) skipped${filesWithErrors ? `, ${filesWithErrors} file error(s)` : ''}.`
+      setBundleFeedback({
+        variant: filesWithErrors > 0 ? 'warning' : 'success',
+        title,
+      })
+      if (input) input.value = ''
+      await load()
+      refreshImportHistory()
+      void getJson<Account[]>('/api/accounts')
+        .then(setAccounts)
+        .catch(() => {})
+    } catch (e) {
+      setBundleFeedback({
+        variant: 'error',
+        title: e instanceof Error ? e.message : 'Bundle upload failed',
+      })
+    } finally {
+      setBundleUploading(false)
+    }
+  }
+
   return (
     <div className="page">
       <PageHeader
@@ -1123,6 +1214,107 @@ export function TransactionsPage() {
       )}
 
       <div className="transactionsTopGrid">
+        {bundleMode ? (
+          <form
+            className="card uploadCard transactionsPanel"
+            onSubmit={onBundleUpload}
+          >
+            <div className="transactionsPanelHeader">
+              <div>
+                <h2>Wealthsimple bundle (auto-route)</h2>
+                <p className="muted">
+                  Drop the entire monthly-statement download. Files are routed
+                  to accounts by the WS account ID in each filename — new
+                  accounts are created on first sight, corporate-account
+                  transactions are tagged as business automatically.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setBundleMode(false)
+                  setBundleFeedback(null)
+                  setBundleResults(null)
+                }}
+              >
+                Switch to standard upload
+              </Button>
+            </div>
+            <div className="formGrid transactionsFilterGrid">
+              <Label className="filePick">
+                Wealthsimple statement files
+                <Input
+                  ref={bundleFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  multiple
+                  onChange={() => {
+                    setBundleFeedback(null)
+                    setBundleResults(null)
+                  }}
+                />
+              </Label>
+            </div>
+            <div className="row transactionsActionRow">
+              <Button type="submit" disabled={bundleUploading}>
+                {bundleUploading ? 'Importing bundle…' : 'Import bundle'}
+              </Button>
+            </div>
+            {bundleFeedback && (
+              <Alert
+                className="mt-3"
+                variant={bundleFeedback.variant}
+                title={bundleFeedback.title}
+              />
+            )}
+            {bundleResults && bundleResults.length > 0 && (
+              <div className="tableWrap">
+                <Table className="table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>File</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead>Transactions</TableHead>
+                      <TableHead>Invest activities</TableHead>
+                      <TableHead>Skipped dupes</TableHead>
+                      <TableHead>Errors</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[...bundleResults]
+                      .sort((a, b) => {
+                        const an = a.accountName ?? 'zzzzz'
+                        const bn = b.accountName ?? 'zzzzz'
+                        return an === bn ? a.file.localeCompare(b.file) : an.localeCompare(bn)
+                      })
+                      .map((r) => (
+                        <TableRow key={r.file}>
+                          <TableCell title={r.file}>{r.file}</TableCell>
+                          <TableCell>
+                            {r.accountName ?? '—'}
+                            {r.accountCreated ? (
+                              <span className="muted"> (new)</span>
+                            ) : null}
+                          </TableCell>
+                          <TableCell>{r.insertedTransactions}</TableCell>
+                          <TableCell>{r.insertedInvestmentActivities}</TableCell>
+                          <TableCell>{r.skippedDuplicates}</TableCell>
+                          <TableCell className={r.error ? 'error' : ''}>
+                            {r.error
+                              ? r.error
+                              : r.rowErrors > 0
+                                ? `${r.rowErrors} row error(s)`
+                                : '—'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </form>
+        ) : (
         <form className="card uploadCard transactionsPanel" onSubmit={onUpload}>
           <div className="transactionsPanelHeader">
             <div>
@@ -1133,9 +1325,22 @@ export function TransactionsPage() {
                 CSV files; OFX/QFX files use their embedded statement data.
               </p>
             </div>
-            <span className="transactionsPanelBadge">
-              {csvProfileOptions.length || 3} profiles
-            </span>
+            <div className="row">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setBundleMode(true)
+                  setUploadFeedback(null)
+                  setPreviewData(null)
+                }}
+              >
+                Wealthsimple bundle
+              </Button>
+              <span className="transactionsPanelBadge">
+                {csvProfileOptions.length || 3} profiles
+              </span>
+            </div>
           </div>
           {accounts.length === 0 && (
             <p className="error">
@@ -1300,6 +1505,7 @@ export function TransactionsPage() {
             </div>
           )}
         </form>
+        )}
 
         <section
           className="card transactionsPanel transactionsHistoryCard"
@@ -1975,6 +2181,7 @@ export function TransactionsPage() {
                       receiptFileRef.current?.click()
                     }}
                     onError={(msg) => setErr(msg)}
+                    onOpenSignals={(id) => setSignalsDialogTxnId(id)}
                   />
                 ))
               )}
@@ -2003,6 +2210,41 @@ export function TransactionsPage() {
           </Button>
         </div>
       </section>
+      <EnrichmentSignalsDialog
+        transactionId={signalsDialogTxnId}
+        transactionSummary={
+          signalsDialogTxnId == null
+            ? null
+            : (() => {
+                const row = sortedRows.find((r) => r.id === signalsDialogTxnId)
+                if (!row) return null
+                return {
+                  merchantRaw: row.merchantRaw,
+                  merchantClean: row.merchantClean,
+                  merchantCanonical: row.merchantCanonical,
+                  autoSource: row.autoSource,
+                  autoConfidence: row.autoConfidence,
+                  autoCategory: row.autoCategory,
+                  txnType: row.txnType,
+                  reviewFlag: row.reviewFlag,
+                  isRecurring: row.isRecurring,
+                }
+              })()
+        }
+        onClose={() => setSignalsDialogTxnId(null)}
+        onReenriched={(updated) => {
+          setRes((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  data: prev.data.map((r) =>
+                    r.id === updated.id ? ({ ...r, ...updated } as Transaction) : r,
+                  ),
+                }
+              : prev,
+          )
+        }}
+      />
     </div>
   )
 }
@@ -2017,6 +2259,7 @@ function TransactionRow({
   aiEnabled,
   onAttachReceipt,
   onError,
+  onOpenSignals,
 }: {
   t: Transaction
   categoryOptions: string[]
@@ -2027,6 +2270,7 @@ function TransactionRow({
   aiEnabled: boolean
   onAttachReceipt: (transactionId: number) => void
   onError: (message: string) => void
+  onOpenSignals: (id: number) => void
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
@@ -2247,6 +2491,15 @@ function TransactionRow({
       </TableCell>
       <TableCell className="transactionsActionsCol">
         <div className="txnActionGroup">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenSignals(t.id)}
+            title="Show enrichment signals for this transaction"
+          >
+            Why?
+          </Button>
           {aiEnabled ? (
             <Button
               type="button"
