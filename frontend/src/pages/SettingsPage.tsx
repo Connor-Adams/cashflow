@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Link2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,12 @@ import { PageHeader } from '@/components/ui/page-header'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import {
+  listCaptureTokens,
+  mintCaptureToken,
+  revokeCaptureToken,
+  type CaptureTokenRow,
+} from '../lib/captureTokens'
 import { layoutWidthOptions, useLayoutWidth } from '../lib/layoutWidth'
 import { useAuth } from '../lib/useAuth'
 import type { Budget, BudgetInput, BudgetsResponse, Contact } from '../types/api'
@@ -225,6 +231,102 @@ export function SettingsPage() {
   const [allowlistDraftEmail, setAllowlistDraftEmail] = useState('')
   const [allowlistDraftLabel, setAllowlistDraftLabel] = useState('')
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
+
+  const [captureToken, setCaptureToken] = useState<CaptureTokenRow | null>(null)
+  const [captureTokenPlaintext, setCaptureTokenPlaintext] = useState<string | null>(null)
+  const [captureBookmarklets, setCaptureBookmarklets] = useState<{
+    amazon: string
+    apple: string
+  } | null>(null)
+  const [captureLoading, setCaptureLoading] = useState(false)
+  const [captureError, setCaptureError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const rows = await listCaptureTokens()
+        if (!mountedRef.current) return
+        setCaptureToken(rows[0] ?? null)
+      } catch (e) {
+        if (!mountedRef.current) return
+        setCaptureError(e instanceof Error ? e.message : 'Could not load capture tokens')
+      }
+    })()
+  }, [])
+
+  async function buildBookmarkletHref(
+    name: 'amazon' | 'apple',
+    token: string,
+  ): Promise<string> {
+    const sourceRes = await fetch(`/bookmarklets/${name}.js`)
+    if (!sourceRes.ok) {
+      throw new Error(
+        `Could not load bookmarklet bundle (${sourceRes.status}). Run yarn build:bookmarklets if you're in dev.`,
+      )
+    }
+    const source = await sourceRes.text()
+    const apiUrl = `${window.location.origin}/api/capture/orders`
+    // Wrap in outer IIFE so __CFC_TOKEN__ / __CFC_API__ stay in closure
+    // and don't leak onto window for other scripts on the vendor page to read.
+    const full = `(function(){var __CFC_TOKEN__=${JSON.stringify(token)};var __CFC_API__=${JSON.stringify(apiUrl)};${source}})()`
+    return `javascript:${encodeURIComponent(full)}`
+  }
+
+  async function mintNewCaptureToken() {
+    if (captureLoading) return
+    setCaptureLoading(true)
+    setCaptureError(null)
+    try {
+      const result = await mintCaptureToken('Browser')
+      if (!mountedRef.current) return
+      setCaptureToken({
+        id: result.id,
+        label: result.label,
+        lastUsedAt: null,
+        createdAt: result.createdAt,
+      })
+      setCaptureTokenPlaintext(result.plaintext)
+      const [amazonHref, appleHref] = await Promise.all([
+        buildBookmarkletHref('amazon', result.plaintext),
+        buildBookmarkletHref('apple', result.plaintext),
+      ])
+      if (!mountedRef.current) return
+      setCaptureBookmarklets({ amazon: amazonHref, apple: appleHref })
+    } catch (e) {
+      if (!mountedRef.current) return
+      setCaptureError(e instanceof Error ? e.message : 'Mint failed')
+    } finally {
+      if (mountedRef.current) setCaptureLoading(false)
+    }
+  }
+
+  async function revokeActiveToken() {
+    if (!captureToken) return
+    const ok = await confirm({
+      title: 'Revoke capture token?',
+      description:
+        'Existing bookmarklets that use this token will stop working. You can mint a new one after.',
+      confirmLabel: 'Revoke',
+      destructive: true,
+    })
+    if (!ok) return
+    try {
+      await revokeCaptureToken(captureToken.id)
+      if (!mountedRef.current) return
+      setCaptureToken(null)
+      setCaptureTokenPlaintext(null)
+      setCaptureBookmarklets(null)
+    } catch (e) {
+      if (!mountedRef.current) return
+      setCaptureError(e instanceof Error ? e.message : 'Revoke failed')
+    }
+  }
 
   const loadAllowlist = useCallback(async () => {
     try {
@@ -1587,6 +1689,100 @@ export function SettingsPage() {
         </div>
         {inviteUrl && (
           <Input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} />
+        )}
+      </Card>
+
+      <Card className="accountsFormCard">
+        <div className="accountsCardHeader">
+          <div>
+            <h2>Receipt capture</h2>
+            <p className="muted">
+              Capture itemised order data from Amazon and Apple without forwarding emails. Mint a
+              personal token, then drag the bookmarklets to your bookmark bar.
+            </p>
+          </div>
+          {captureToken ? (
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void revokeActiveToken()}
+            >
+              Revoke token
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              disabled={captureLoading}
+              onClick={() => void mintNewCaptureToken()}
+            >
+              {captureLoading ? 'Minting…' : 'Mint capture token'}
+            </Button>
+          )}
+        </div>
+        {captureError && (
+          <span className="error" role="alert">
+            {captureError}
+          </span>
+        )}
+        {captureTokenPlaintext && (
+          <>
+            <p className="muted">
+              Token created — copy or install now. You won't see it again after you leave this
+              page.
+            </p>
+            <Input
+              readOnly
+              autoComplete="off"
+              value={captureTokenPlaintext}
+              onFocus={(e) => e.currentTarget.select()}
+            />
+          </>
+        )}
+        {captureToken && !captureTokenPlaintext && (
+          <p className="muted">
+            Active token: <code>{captureToken.label}</code>
+            {captureToken.lastUsedAt && (
+              <> · Last used {new Date(captureToken.lastUsedAt).toLocaleString()}</>
+            )}
+          </p>
+        )}
+        {captureBookmarklets && (
+          <div className="row" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
+            <a
+              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--bg2)',
+                color: 'var(--fg)',
+                borderColor: 'var(--border)',
+              }}
+              href={captureBookmarklets.amazon}
+              draggable
+              onClick={(e) => e.preventDefault()}
+            >
+              ↗ Capture Amazon orders
+            </a>
+            <a
+              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--bg2)',
+                color: 'var(--fg)',
+                borderColor: 'var(--border)',
+              }}
+              href={captureBookmarklets.apple}
+              draggable
+              onClick={(e) => e.preventDefault()}
+            >
+              ↗ Capture Apple purchases
+            </a>
+          </div>
+        )}
+        {captureToken && !captureBookmarklets && (
+          <p className="muted">
+            <em>
+              Bookmarklet links are only shown immediately after minting. Re-mint if you need to
+              install them on a new browser.
+            </em>
+          </p>
         )}
       </Card>
 
