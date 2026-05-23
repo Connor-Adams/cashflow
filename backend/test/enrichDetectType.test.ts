@@ -180,3 +180,105 @@ test('interest: stock lending monthly interest', () => {
   });
   assert.equal(out[0].fields.txnType, 'interest');
 });
+
+// === Bug-driven additions from 2026-05-23 prod audit ===
+// 506 of 1391 prod txns landed as 'unknown'. These tests cover the patterns
+// that were missing (crypto staking rewards/fees, stock-lending loan
+// termination, WS chequing transfers) plus the dividend sign bug where
+// negative-amount cash dividends fell through to 'purchase'.
+
+test('reward: crypto staking rewards earned (negative-amount WS narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: '0.0015954570 of DOT rewards earned',
+    merchantClean: '0.0015954570 of DOT rewards earned',
+    amount: -0.012,
+  });
+  assert.equal(out[0].fields.txnType, 'reward');
+});
+
+test('reward: ETH rewards earned', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: '0.0000214112 of ETH rewards earned',
+    merchantClean: '0.0000214112 of ETH rewards earned',
+    amount: -0.08,
+  });
+  assert.equal(out[0].fields.txnType, 'reward');
+});
+
+test('fee: staking reward fee without trailing "fee" (Fee paid on X staking reward:)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Fee paid on DOT-Polkadot staking reward: 0.0005020227',
+    merchantClean: 'Fee paid on DOT-Polkadot staking reward: 0.0005020227',
+    amount: -0.004,
+  });
+  assert.equal(out[0].fields.txnType, 'fee');
+});
+
+test('investment: stock-lending loan terminated', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'DOO - BRP Inc: Loan of 3.0000 shares terminated (executed at 2025-10-10)',
+    merchantClean: 'DOO - BRP Inc: Loan of 3.0000 shares terminated (executed at 2025-10-10)',
+    amount: 0,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('investment: stock-lending loan created (counterpart of terminated)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: Loan of 2.0000 shares created (executed at 2026-01-21)',
+    merchantClean: 'XEQT - iShares Core Equity ETF Portfolio: Loan of 2.0000 shares created (executed at 2026-01-21)',
+    amount: 0,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('transfer: WS chequing "From chequing account"', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'From chequing account',
+    merchantClean: 'From chequing account',
+    amount: 500,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: bare "Deposit" narrative + positive amount', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Deposit',
+    merchantClean: 'Deposit',
+    amount: 200,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('dividend: negative-amount cash dividend distribution (WS sign bug)', () => {
+  // Regression for 2026-05-23 finding: ~20 VFV/XEQT/DOO "Cash dividend
+  // distribution" rows imported with negative amount fell through to
+  // 'purchase' because the rule required positive sign. The literal phrase
+  // is unambiguous; sign should not gate it.
+  const out = runDetectTypeStage({
+    merchantRaw: 'VFV - Vanguard S&P 500 Index ETF: Cash dividend distribution, received on 2025-10-07',
+    merchantClean: 'VFV - Vanguard S&P 500 Index ETF: Cash dividend distribution, received on 2025-10-07',
+    amount: -42.17,
+  });
+  assert.equal(out[0].fields.txnType, 'dividend');
+});
+
+test('investment: WS active "Shares on loan" state record', () => {
+  // Distinct from "Loan of X shares terminated/created" — this is the
+  // ongoing-state ledger entry while shares are out on loan.
+  const out = runDetectTypeStage({
+    merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: 2.0000 Shares on loan (executed at 2025-09-10)',
+    merchantClean: 'XEQT - iShares Core Equity ETF Portfolio: 2.0000 Shares on loan (executed at 2025-09-10)',
+    amount: 0,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('investment: WS "Staked X of TOKEN" crypto staking initiation', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Staked 0.0544286100 of ETH-Ethereum',
+    merchantClean: 'Staked 0.0544286100 of ETH-Ethereum',
+    amount: 0,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
