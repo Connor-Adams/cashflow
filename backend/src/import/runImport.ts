@@ -19,6 +19,8 @@ import { parseStatementFilename } from './parseStatementFilename';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import * as env from '../config/env';
+import { parseStatementFile } from './parseStatementFile';
+import { commitStatementImport } from './commitStatementImport';
 import { enrichTransaction } from './enrich';
 import {
   enrichmentRecurringMinSupport,
@@ -106,6 +108,28 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       message:
         'This file was already imported. Change the CSV or clear duplicate import history to try again.',
     };
+  }
+
+  // Delegate PDF files to parseStatementFile + commitStatementImport.
+  const ext = path.extname(name).toLowerCase();
+  if (ext === '.pdf') {
+    const accountIdNum =
+      opts.accountId != null && opts.accountId !== '' ? Number(opts.accountId) : NaN;
+    if (Number.isNaN(accountIdNum)) {
+      return { file: name, skipped: true, reason: 'invalid_account', error: 'Invalid accountId for PDF' };
+    }
+    const parsed = await parseStatementFile({
+      buffer: opts.buffer,
+      fileName: name,
+      accountId: accountIdNum,
+      batchLabel: opts.batchLabel,
+      householdId: opts.householdId,
+    });
+    if ('error' in parsed) {
+      return { file: name, error: parsed.error, inserted: 0, parseErrors: [] };
+    }
+    const result = await commitStatementImport(parsed, opts.userId ?? null, opts.householdId ?? null);
+    return result;
   }
 
   const rules = await loadAllRules(opts.householdId);

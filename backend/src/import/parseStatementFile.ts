@@ -8,6 +8,8 @@ import { normalizeMerchant } from './normalizeMerchant';
 import { parseDateFlexible } from './parseDateFlexible';
 import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
 import { saveStatementPreview } from './statementPreviewStore';
+import { extractPdfLines } from './pdf/extractLines';
+import { findPdfParser, registerBuiltInPdfParsers } from './pdf/registry';
 import type {
   NormalizedCashTransaction,
   NormalizedHoldingSnapshot,
@@ -436,6 +438,8 @@ export async function parseStatementFile(opts: {
     },
   };
 
+  registerBuiltInPdfParsers();
+
   if (ext === '.csv') {
     const parsed = parseCsvRecords(opts.buffer.toString('utf8'));
     if (!parsed.ok) return { ok: false, error: parsed.error };
@@ -523,5 +527,59 @@ export async function parseStatementFile(opts: {
     return saveStatementPreview(preview);
   }
 
-  return { ok: false, error: 'Only .csv, .ofx, and .qfx files are supported' };
+  if (ext === '.pdf') {
+    let lines;
+    try {
+      lines = await extractPdfLines(opts.buffer);
+    } catch (err) {
+      return { ok: false, error: `Could not read PDF: ${(err as Error).message}` };
+    }
+    const parser = findPdfParser(lines);
+    if (!parser) {
+      return {
+        ok: false,
+        error: 'No PDF parser registered for this statement layout',
+      };
+    }
+    const out = parser.parse(lines, { defaultCurrency });
+    const transactions = out.transactions.map((v) => ({
+      date: v.date,
+      merchantRaw: v.merchantRaw,
+      merchantClean: v.merchantClean,
+      amount: v.amount,
+      currency: v.currency,
+      sourceReference: v.sourceReference,
+      sourceRowFingerprint: rowFingerprint({
+        accountId: account.id,
+        date: v.date,
+        amount: v.amount,
+        currency: v.currency,
+        merchantClean: v.merchantClean,
+        sourceReference: v.sourceReference,
+      }),
+    }));
+    const preview = {
+      ...base,
+      usedParser: 'pdf' as const,
+      usedProfileId: parser.id,
+      transactions,
+      warnings: out.warnings,
+      parseErrors: out.parseErrors,
+      rowErrors: out.parseErrors.length,
+      rows: transactions.slice(0, 25).map((row, index) => ({
+        rowIndex: index + 1,
+        ok: true as const,
+        mapped: {
+          date: row.date,
+          merchantClean: row.merchantClean,
+          amount: row.amount,
+          currency: row.currency,
+        },
+      })),
+    };
+    await markDuplicates(preview);
+    return saveStatementPreview(preview);
+  }
+
+  return { ok: false, error: 'Only .csv, .ofx, .qfx, and .pdf files are supported' };
 }

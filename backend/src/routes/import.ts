@@ -245,8 +245,8 @@ router.post(
           result && typeof result === 'object' ? result.profileInferred : undefined,
         inserted: result && typeof result === 'object' ? result.inserted : undefined,
         skipped:
-          result && typeof result === 'object' ? result.skipped : undefined,
-        reason: result && typeof result === 'object' ? result.reason : undefined,
+          result && typeof result === 'object' ? (result as Record<string, unknown>).skipped : undefined,
+        reason: result && typeof result === 'object' ? (result as Record<string, unknown>).reason : undefined,
       });
       res.json(result);
     } catch (e) {
