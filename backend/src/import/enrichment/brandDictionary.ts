@@ -11,7 +11,7 @@ const SEED_BRANDS: BrandEntry[] = [
   { pattern: /\b(google\s*\*|google\s*play|google\s*storage|google\s*one|youtube\s*premium|googlepay)\b/i, canonical: 'Google' },
   { pattern: /\b(uber(?:\s*eats)?|uber\.com)\b/i, canonical: 'Uber' },
   { pattern: /\b(lyft)\b/i, canonical: 'Lyft' },
-  { pattern: /\b(doordash|dd\s*\*doordash)\b/i, canonical: 'DoorDash' },
+  { pattern: /\b(doordash|dd\s*\*doordash)/i, canonical: 'DoorDash' },
   { pattern: /\b(starbucks|sbux)\b/i, canonical: 'Starbucks' },
   { pattern: /\b(mcdonalds|mcdonald's|mcd\s*\d*)\b/i, canonical: "McDonald's" },
   { pattern: /\b(costco(?:\s*whse)?)\b/i, canonical: 'Costco' },

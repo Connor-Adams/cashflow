@@ -25,3 +25,15 @@ test('lookupSeedBrand normalizes case', () => {
   assert.equal(lookupSeedBrand('SPOTIFY'), 'Spotify');
   assert.equal(lookupSeedBrand('spotify usa'), 'Spotify');
 });
+
+test('lookupSeedBrand matches DoorDash on glued restaurant suffixes', () => {
+  assert.equal(lookupSeedBrand('DOORDASHTHESAFFRONI DOWNTOWN'), 'DoorDash');
+  assert.equal(lookupSeedBrand('DOORDASHBARBURRITO DOWNTOWN'), 'DoorDash');
+  assert.equal(lookupSeedBrand('DOORDASHMCDONALDS DOWNTOWN'), 'DoorDash');
+  assert.equal(lookupSeedBrand('DOORDASHPOPEYESLOUI'), 'DoorDash');
+});
+
+test('lookupSeedBrand still matches plain DoorDash', () => {
+  assert.equal(lookupSeedBrand('DOORDASH'), 'DoorDash');
+  assert.equal(lookupSeedBrand('DD *DOORDASH'), 'DoorDash');
+});
