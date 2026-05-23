@@ -153,16 +153,15 @@ function coerceBool(v: unknown): boolean | null {
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n));
 
-function toFiniteNumber(v: unknown): number | null {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  if (typeof v !== 'string') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+function coerceRawNumber(v: unknown): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') return Number(v);
+  return NaN;
 }
 
 function coercePct(v: unknown): number | null {
-  const n = toFiniteNumber(v);
-  return n == null ? null : clamp01(n);
+  const n = coerceRawNumber(v);
+  return Number.isFinite(n) ? clamp01(n) : null;
 }
 
 function trimmedStr(v: unknown): string | null {
