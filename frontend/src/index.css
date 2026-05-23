@@ -2,99 +2,216 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
+/* ─────────────────────────────────────────────────────────────────────────
+ * Honey & Ink — Cashflow brand tokens (single source of truth).
+ *
+ * Anchors (constant across modes):
+ *   amber  oklch(0.72 0.14 80)   — brand primary
+ *   plum   oklch(0.32 0.08 350)  — accent (deep form)
+ *   jade   oklch(0.62 0.11 155)  — positive / credit / gain
+ *   rust   oklch(0.58 0.16 30)   — alert / destructive / spend
+ *   ink    oklch(0.16 0.01 280)  — surface dark
+ *   bone   oklch(0.97 0.005 90)  — surface light
+ *
+ * Light is the default :root so first paint (before ThemeProvider runs)
+ * renders correctly. ThemeProvider toggles data-theme="dark|light".
+ * ──────────────────────────────────────────────────────────────────────── */
+
+:root,
+:root[data-theme="light"] {
   --radius: 0.5rem;
-  --background: oklch(0.14 0.015 125);
-  --foreground: oklch(0.95 0.015 92);
-  --card: oklch(0.18 0.018 125);
-  --card-foreground: var(--foreground);
-  --popover: oklch(0.17 0.018 125);
+
+  /* Surfaces */
+  --background:       oklch(0.97 0.005 90);   /* bone */
+  --card:             oklch(1.00 0 0);         /* pure white tiles on bone */
+  --popover:          oklch(1.00 0 0);
+  --muted:            oklch(0.94 0.006 85);
+
+  /* Text */
+  --foreground:       oklch(0.20 0.01 280);
+  --card-foreground:  var(--foreground);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.77 0.09 151);
-  --primary-foreground: oklch(0.16 0.02 145);
-  --secondary: oklch(0.25 0.02 125);
-  --secondary-foreground: var(--foreground);
-  --muted: oklch(0.24 0.018 125);
-  --muted-foreground: oklch(0.72 0.025 95);
-  --accent: oklch(0.28 0.025 143);
-  --accent-foreground: var(--foreground);
-  --destructive: oklch(0.66 0.19 27);
-  --border: oklch(0.31 0.018 118);
-  --input: oklch(0.33 0.018 118);
-  --ring: oklch(0.72 0.09 151);
-  --chart-1: oklch(0.74 0.11 151);
-  --chart-2: oklch(0.72 0.13 82);
-  --chart-3: oklch(0.68 0.12 248);
-  --chart-4: oklch(0.71 0.14 35);
-  --chart-5: oklch(0.65 0.13 300);
+  --muted-foreground: oklch(0.45 0.015 80);
+
+  /* Brand */
+  --primary:                oklch(0.68 0.16 78);  /* amber, darker for weight on bone */
+  --primary-foreground:     oklch(0.20 0.01 280);
+
+  /* Accent (pale surface, deep text — mirrored in dark) */
+  --accent:                 oklch(0.92 0.04 350);
+  --accent-foreground:      oklch(0.32 0.08 350);
+
+  /* Semantic signals */
+  --positive:               oklch(0.52 0.13 155);
+  --positive-foreground:    oklch(0.97 0.005 90);
+  --destructive:            oklch(0.52 0.18 30);
+  --destructive-foreground: oklch(0.97 0.005 90);
+
+  /* Borders / structural */
+  --secondary:              oklch(0.92 0.008 85);
+  --secondary-foreground:   var(--foreground);
+  --border:                 oklch(0.88 0.008 85);
+  --input:                  oklch(0.82 0.01 85);
+  --ring:                   oklch(0.68 0.16 78);
+  --shadow:                 0 8px 18px oklch(0.20 0.01 280 / 0.10);
+
+  /* Chart palette */
+  --chart-1: var(--primary);                  /* amber */
+  --chart-2: var(--positive);                 /* jade */
+  --chart-3: oklch(0.42 0.10 350);            /* plum, deep on bone */
+  --chart-4: var(--destructive);              /* rust */
+  --chart-5: oklch(0.55 0.02 250);            /* steel */
+
+  --chart-spend:    var(--primary);
+  --chart-credit:   var(--positive);
+  --chart-payment:  oklch(0.55 0.02 250);     /* steel — visually inert */
+  --chart-business: oklch(0.42 0.10 350);     /* deep plum on bone */
+  --chart-personal: var(--positive);
+
+  --chart-line-1: var(--primary);
+  --chart-line-2: var(--positive);
+  --chart-line-3: var(--chart-business);
+  --chart-line-4: var(--destructive);
+  --chart-line-5: oklch(0.55 0.02 250);       /* steel */
+  --chart-line-6: oklch(0.45 0.10 320);       /* mauve */
+
+  /* Legacy aliases — one migration cycle, then removed.
+   * App.css component classes (.navLink.isActive, .brandMark, .superadminBadge,
+   * etc.) still reference these. They'll get sweeped in a follow-up. */
+  --bg:            var(--background);
+  --bg2:           var(--card);
+  --bg3:           var(--muted);
+  --fg:            var(--foreground);
+  --muted-legacy:  var(--muted-foreground);
+  --accent-legacy: var(--primary);
+  --accent-soft:   var(--accent);
+  --accent-warm:   var(--primary);
+  --accent-green:  var(--positive);
+  --danger:        var(--destructive);
+
+  color-scheme: light;
 }
+
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --background:       oklch(0.16 0.01 280);   /* ink */
+  --card:             oklch(0.20 0.012 280);
+  --popover:          oklch(0.22 0.012 280);
+  --muted:            oklch(0.23 0.012 280);
+
+  /* Text */
+  --foreground:       oklch(0.96 0.005 90);   /* warm bone-white */
+  --card-foreground:  var(--foreground);
+  --popover-foreground: var(--foreground);
+  --muted-foreground: oklch(0.72 0.015 80);
+
+  /* Brand */
+  --primary:                oklch(0.72 0.14 80);  /* amber */
+  --primary-foreground:     oklch(0.16 0.01 280);
+
+  /* Accent — deep plum surface, bone text (mirror of light) */
+  --accent:                 oklch(0.32 0.08 350);
+  --accent-foreground:      oklch(0.96 0.005 90);
+
+  /* Semantic signals */
+  --positive:               oklch(0.62 0.11 155);
+  --positive-foreground:    oklch(0.16 0.01 280);
+  --destructive:            oklch(0.58 0.16 30);
+  --destructive-foreground: oklch(0.96 0.005 90);
+
+  /* Borders / structural */
+  --secondary:              oklch(0.25 0.012 280);
+  --secondary-foreground:   var(--foreground);
+  --border:                 oklch(0.30 0.012 280);
+  --input:                  oklch(0.34 0.012 280);
+  --ring:                   oklch(0.72 0.14 80);
+  --shadow:                 0 14px 28px oklch(0 0 0 / 0.45);
+
+  /* Chart palette overrides — values that don't auto-derive from above */
+  --chart-3: oklch(0.65 0.10 350);            /* lifted plum, readable on ink */
+  --chart-business: oklch(0.65 0.10 350);
+  --chart-payment:  oklch(0.65 0.02 250);     /* lifted steel */
+  --chart-line-3:   var(--chart-business);
+  --chart-line-5:   oklch(0.65 0.02 250);
+  --chart-line-6:   oklch(0.55 0.10 320);
+
+  color-scheme: dark;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Tailwind theme mapping (unchanged structure; values flow from tokens above).
+ * Wander DS semantic naming: --color-primary is FOREGROUND TEXT,
+ * --color-brand is the BRAND COLOR. Don't be misled by Tailwind's default
+ * meaning of "primary".
+ * ──────────────────────────────────────────────────────────────────────── */
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
+
+  --color-background:        var(--background);
+  --color-foreground:        var(--foreground);
+  --color-card:              var(--card);
+  --color-card-foreground:   var(--card-foreground);
+  --color-popover:           var(--popover);
   --color-popover-foreground: var(--popover-foreground);
 
   /* Semantic text colors (Wander naming) */
-  --color-primary: var(--foreground);
-  --color-secondary: var(--muted-foreground);
-  --color-destructive: var(--destructive);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
+  --color-primary:           var(--foreground);
+  --color-secondary:         var(--muted-foreground);
+  --color-destructive:       var(--destructive);
+  --color-muted:             var(--muted);
+  --color-muted-foreground:  var(--muted-foreground);
+  --color-accent:            var(--accent);
   --color-accent-foreground: var(--accent-foreground);
 
-  /* Brand alias — cashflow green; use for accent UI, badges, etc. */
-  --color-brand: var(--primary);
-  --color-brand-foreground: var(--primary-foreground);
+  /* Brand alias — cashflow amber; use for accent UI, badges, etc. */
+  --color-brand:             var(--primary);
+  --color-brand-foreground:  var(--primary-foreground);
 
   /* Kept for backward compat with remaining shadcn components */
-  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-foreground:   var(--primary-foreground);
   --color-secondary-foreground: var(--foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-border:               var(--border);
+  --color-input:                var(--input);
+  --color-ring:                 var(--ring);
 
   /* Border semantic tokens — must cover all border-* classes in use */
-  --color-border-primary: var(--border);
-  --color-border-secondary: var(--input);
-  --color-border-ring: var(--ring);
-  --color-border-destructive: var(--destructive);
-  --color-border-transparent: transparent;
-  --color-border-border: var(--border);
-  --color-border-input: var(--input);
+  --color-border-primary:      var(--border);
+  --color-border-secondary:    var(--input);
+  --color-border-ring:         var(--ring);
+  --color-border-destructive:  var(--destructive);
+  --color-border-transparent:  transparent;
+  --color-border-border:       var(--border);
+  --color-border-input:        var(--input);
 
   /* Button semantic tokens (Wander naming, cashflow palette) */
-  --color-button-primary: var(--primary);
-  --color-text-button-primary: var(--primary-foreground);
-  --color-button-hover-primary: oklch(0.70 0.09 151);
-  --color-button-focus-primary: oklch(0.70 0.09 151);
+  --color-button-primary:        var(--primary);
+  --color-text-button-primary:   var(--primary-foreground);
+  --color-button-hover-primary:  color-mix(in oklch, var(--primary) 88%, black);
+  --color-button-focus-primary:  color-mix(in oklch, var(--primary) 88%, black);
 
-  --color-button-secondary: var(--secondary);
-  --color-button-hover-secondary: oklch(0.28 0.02 125);
-  --color-button-focus-secondary: oklch(0.28 0.02 125);
+  --color-button-secondary:        var(--secondary);
+  --color-button-hover-secondary:  color-mix(in oklch, var(--secondary) 88%, black);
+  --color-button-focus-secondary:  color-mix(in oklch, var(--secondary) 88%, black);
 
-  --color-button-outline: oklch(0 0 0 / 0);
-  --color-button-hover-outline: var(--secondary);
-  --color-button-focus-outline: var(--secondary);
+  --color-button-outline:        oklch(0 0 0 / 0);
+  --color-button-hover-outline:  var(--secondary);
+  --color-button-focus-outline:  var(--secondary);
 
-  --color-button-ghost: oklch(0 0 0 / 0);
-  --color-button-hover-ghost: var(--secondary);
-  --color-button-focus-ghost: var(--secondary);
+  --color-button-ghost:        oklch(0 0 0 / 0);
+  --color-button-hover-ghost:  var(--secondary);
+  --color-button-focus-ghost:  var(--secondary);
 
-  --color-button-destructive: oklch(0.66 0.19 27 / 0.12);
-  --color-button-hover-destructive: oklch(0.66 0.19 27 / 0.20);
-  --color-button-focus-destructive: oklch(0.66 0.19 27 / 0.20);
+  --color-button-destructive:        color-mix(in oklch, var(--destructive) 12%, transparent);
+  --color-button-hover-destructive:  color-mix(in oklch, var(--destructive) 20%, transparent);
+  --color-button-focus-destructive:  color-mix(in oklch, var(--destructive) 20%, transparent);
 
-  --color-button-checkout: var(--primary);
-  --color-button-hover-checkout: oklch(0.70 0.09 151);
-  --color-button-focus-checkout: oklch(0.70 0.09 151);
+  --color-button-checkout:        var(--primary);
+  --color-button-hover-checkout:  color-mix(in oklch, var(--primary) 88%, black);
+  --color-button-focus-checkout:  color-mix(in oklch, var(--primary) 88%, black);
 
   /* Typography scale (Wander DS) */
   --text-display-lg: 3.25rem;
@@ -176,18 +293,6 @@
     sans-serif;
   line-height: 1.45;
   font-weight: 400;
-  color-scheme: dark;
-  --bg: color-mix(in oklch, var(--background) 96%, black 4%);
-  --bg2: var(--card);
-  --bg3: var(--secondary);
-  --fg: var(--foreground);
-  --muted-legacy: var(--muted-foreground);
-  --accent-legacy: var(--primary);
-  --accent-soft: #b6dfc6;
-  --accent-warm: #d9a441;
-  --accent-green: #55c47c;
-  --danger: var(--destructive);
-  --shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
 }
 
 * {
@@ -197,10 +302,14 @@
 body {
   margin: 0;
   min-height: 100vh;
+  /* Token-driven background. The radial wash uses the brand amber at low
+   * alpha so the top-left has a subtle warm glow in both modes. */
   background:
-    radial-gradient(circle at 20% -10%, color-mix(in oklch, var(--primary) 18%, transparent), transparent 30rem),
-    linear-gradient(180deg, #12170f 0%, var(--bg) 30%, #0b0d0b 100%);
-  color: var(--fg);
+    radial-gradient(circle at 20% -10%,
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 30rem),
+    var(--background);
+  color: var(--foreground);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -210,8 +319,8 @@ body {
 }
 
 ::selection {
-  background: rgba(119, 167, 255, 0.3);
-  color: var(--fg);
+  background: color-mix(in oklch, var(--accent) 30%, transparent);
+  color: var(--foreground);
 }
 
 button,
