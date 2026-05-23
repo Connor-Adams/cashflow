@@ -5,11 +5,12 @@ import type { Account as AccountModel } from '../models/Account';
 import {
   sequelize,
   Account,
+  HoldingSnapshot,
   Transaction,
   ImportHistory,
   TransactionSignal,
 } from '../models';
-import { hashContent, rowFingerprint } from './fingerprint';
+import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
@@ -21,7 +22,11 @@ import {
   type WsProductHint,
 } from './parseWealthsimpleFilename';
 import { parseStatementFile } from './parseStatementFile';
-import { commitStatementImport } from './commitStatementImport';
+import {
+  commitStatementImport,
+  findOrCreateSecurity,
+} from './commitStatementImport';
+import { parseWsHoldingsCsv } from './wealthsimpleHoldingsParse';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import * as env from '../config/env';
@@ -112,6 +117,49 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       message:
         'This file was already imported. Change the CSV or clear duplicate import history to try again.',
     };
+  }
+
+  // Delegate PDF files to parseStatementFile + commitStatementImport.
+  // Note: /api/import/upload calls importCsvFile directly (not parseStatementFile), so PDF
+  // delegation lives here rather than in the route handler or a separate entry point.
+  const ext = path.extname(name).toLowerCase();
+  if (ext === '.pdf') {
+    const accountIdNum =
+      opts.accountId != null && opts.accountId !== '' ? Number(opts.accountId) : NaN;
+    if (Number.isNaN(accountIdNum)) {
+      return { file: name, skipped: true, reason: 'invalid_account', error: 'Invalid accountId for PDF' };
+    }
+    const parsed = await parseStatementFile({
+      buffer: opts.buffer,
+      fileName: name,
+      accountId: accountIdNum,
+      batchLabel: opts.batchLabel,
+      householdId: opts.householdId,
+    });
+    if ('error' in parsed) {
+      // Write an audit record so import history reflects the failure (mirrors CSV parse-failure path).
+      await ImportHistory.create({
+        fileName: name,
+        filePathSafe: name,
+        contentHash,
+        batchLabel: 'pdf-parse-error',
+        status: 'failed',
+        rowCount: 0,
+        errorMessage: parsed.error,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+        householdId: opts.householdId ?? null,
+        createdByUserId: opts.userId ?? null,
+      });
+      return {
+        file: name,
+        skipped: true,
+        reason: 'pdf_parse_error',
+        message: parsed.error,
+      };
+    }
+    const result = await commitStatementImport(parsed, opts.userId ?? null, opts.householdId ?? null);
+    return result;
   }
 
   const rules = await loadAllRules(opts.householdId);
@@ -619,5 +667,206 @@ export async function importWsBundleFile(opts: {
     rowErrors: commit.rowErrors,
     parseErrors: commit.parseErrors,
     warnings: commit.warnings,
+  };
+}
+
+// ─── Wealthsimple holdings import ───────────────────────────────────────────
+
+/** Summary returned by `importWsHoldingsFile`. */
+export type HoldingsImportResult = {
+  file: string;
+  statementDate: string | null;
+  totalRows: number;
+  inserted: number;
+  updated: number;
+  skippedUnknownAccount: number;
+  warnings: string[];
+  errors: string[];
+  accountsAffected: number;
+};
+
+/**
+ * Import a single Wealthsimple holdings/positions CSV.
+ *
+ * Pipeline:
+ *   1. Parse the file via `parseWsHoldingsCsv` — extracts the trailing
+ *      `"As of YYYY-MM-DD …"` line as `statementDate` and emits a normalized
+ *      row per holding.
+ *   2. Group rows by `accountShortCode` and resolve each to an existing
+ *      `Account` keyed on `(householdId, shortCode)`.  Holdings reports
+ *      target existing accounts — we do NOT auto-create accounts here.
+ *      Unknown account numbers increment `skippedUnknownAccount`.
+ *   3. Per row:
+ *      - `findOrCreateSecurity` (reused from the bundle commit path so
+ *        securities created by BUY/SELL/DIV rows are reused — no duplicates).
+ *      - Compute `sourceRowFingerprint =
+ *          stableFingerprint({kind:'ws_holding', accountId, statementDate,
+ *                             symbol, currency})`.
+ *      - Look up an existing `HoldingSnapshot` by `(accountId, fingerprint)`.
+ *        If found: UPDATE its market value / price / cost basis / unrealized
+ *        (data is fresher than what's stored).
+ *        If not: INSERT a new row.
+ *   4. Wrap the whole thing in a transaction so a single failure rolls back
+ *      cleanly without leaving partial state behind.
+ *
+ * `importBatch` is `Wealthsimple Holdings <YYYY-MM-DD>` based on
+ * statementDate — keeps batches stable when the same report is re-uploaded.
+ */
+export async function importWsHoldingsFile(opts: {
+  buffer: Buffer;
+  fileName: string;
+  householdId: number;
+  userId: number;
+}): Promise<HoldingsImportResult> {
+  const file = path.basename(opts.fileName || 'holdings.csv').replace(/[\\/]/g, '');
+  const text = opts.buffer.toString('utf8');
+  const parsed = parseWsHoldingsCsv(text);
+  if ('error' in parsed) {
+    return {
+      file,
+      statementDate: null,
+      totalRows: 0,
+      inserted: 0,
+      updated: 0,
+      skippedUnknownAccount: 0,
+      warnings: [],
+      errors: [parsed.error],
+      accountsAffected: 0,
+    };
+  }
+  const { statementDate, rows, warnings: parseWarnings } = parsed;
+  const importBatch = `Wealthsimple Holdings ${statementDate}`;
+  const startedAt = new Date();
+  const contentHash = hashContent(opts.buffer);
+
+  // Cache: shortCode -> Account|null.  Holdings reports tend to repeat the
+  // same Account Number across many rows (one per security); we only want
+  // to hit the accounts table once per unique shortCode.
+  const accountCache = new Map<string, AccountModel | null>();
+  async function resolveByShortCode(shortCode: string): Promise<AccountModel | null> {
+    const cached = accountCache.get(shortCode);
+    if (cached !== undefined) return cached;
+    const acct = await Account.findOne({
+      where: { householdId: opts.householdId, shortCode },
+    });
+    accountCache.set(shortCode, acct);
+    return acct;
+  }
+
+  let inserted = 0;
+  let updated = 0;
+  let skippedUnknownAccount = 0;
+  const warnings = [...parseWarnings];
+  const errors: string[] = [];
+  const accountsTouched = new Set<number>();
+
+  await sequelize.transaction(async (t) => {
+    for (const row of rows) {
+      const account = await resolveByShortCode(row.accountShortCode);
+      if (!account) {
+        skippedUnknownAccount += 1;
+        warnings.push(
+          `Unknown account: ${row.accountShortCode} (${row.symbol}) — create the account first to import its holdings.`,
+        );
+        continue;
+      }
+
+      const security = await findOrCreateSecurity(
+        {
+          symbol: row.symbol,
+          name: row.name || null,
+          assetType: row.assetType || null,
+          currency: row.currency,
+        },
+        account.householdId,
+        t,
+      );
+
+      const fingerprint = stableFingerprint({
+        kind: 'ws_holding',
+        accountId: account.id,
+        statementDate,
+        symbol: row.symbol.toUpperCase(),
+        currency: row.currency,
+      });
+
+      const existing = await HoldingSnapshot.findOne({
+        where: {
+          accountId: account.id,
+          sourceRowFingerprint: fingerprint,
+        },
+        transaction: t,
+      });
+
+      if (existing) {
+        existing.securityId = security.id;
+        existing.statementDate = statementDate;
+        existing.quantity = String(row.quantity);
+        existing.price = row.price == null ? null : String(row.price);
+        existing.marketValue =
+          row.marketValue == null ? null : String(row.marketValue);
+        existing.costBasis = row.costBasis == null ? null : String(row.costBasis);
+        existing.unrealizedGainLoss =
+          row.unrealizedGainLoss == null ? null : String(row.unrealizedGainLoss);
+        existing.currency = row.currency;
+        existing.importBatch = importBatch;
+        await existing.save({ transaction: t });
+        updated += 1;
+      } else {
+        await HoldingSnapshot.create(
+          {
+            accountId: account.id,
+            householdId: account.householdId,
+            securityId: security.id,
+            statementDate,
+            quantity: String(row.quantity),
+            price: row.price == null ? null : String(row.price),
+            marketValue:
+              row.marketValue == null ? null : String(row.marketValue),
+            costBasis: row.costBasis == null ? null : String(row.costBasis),
+            unrealizedGainLoss:
+              row.unrealizedGainLoss == null
+                ? null
+                : String(row.unrealizedGainLoss),
+            currency: row.currency,
+            sourceReference: null,
+            sourceRowFingerprint: fingerprint,
+            importBatch,
+          },
+          { transaction: t },
+        );
+        inserted += 1;
+      }
+      accountsTouched.add(account.id);
+    }
+
+    await ImportHistory.create(
+      {
+        fileName: file,
+        filePathSafe: file,
+        contentHash,
+        batchLabel: importBatch,
+        status: errors.length > 0 ? 'partial' : 'success',
+        rowCount: inserted + updated,
+        errorMessage: errors.length > 0 ? errors.join('; ') : null,
+        startedAt,
+        finishedAt: new Date(),
+        householdId: opts.householdId,
+        createdByUserId: opts.userId,
+      },
+      { transaction: t },
+    );
+  });
+
+  return {
+    file,
+    statementDate,
+    totalRows: rows.length,
+    inserted,
+    updated,
+    skippedUnknownAccount,
+    warnings,
+    errors,
+    accountsAffected: accountsTouched.size,
   };
 }

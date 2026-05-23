@@ -1,6 +1,6 @@
 import type { TxnType } from './enrichment/types';
 
-export type StatementParserId = 'csv' | 'ofx';
+export type StatementParserId = 'csv' | 'ofx' | 'pdf';
 
 export type NormalizedCashTransaction = {
   date: string;
