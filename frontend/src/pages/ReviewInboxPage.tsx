@@ -558,6 +558,11 @@ export function ReviewInboxPage() {
             </Button>
           </div>
 
+          <p className="reviewInboxShortcutsHint" aria-hidden="true">
+            <kbd>j</kbd>/<kbd>k</kbd> navigate · <kbd>space</kbd> select ·{' '}
+            <kbd>c</kbd> category · <kbd>Enter</kbd> apply · <kbd>?</kbd> help
+          </p>
+
           {err && <span className="error">{err}</span>}
           {message && <span className="reviewInboxMessage">{message}</span>}
 
@@ -595,15 +600,6 @@ export function ReviewInboxPage() {
                     data-cursor={isCursor ? 'true' : undefined}
                     data-state={selectedIds.has(row.id) ? 'selected' : undefined}
                     aria-current={isCursor ? 'true' : undefined}
-                    style={
-                      isCursor
-                        ? {
-                            boxShadow: 'inset 3px 0 0 0 var(--accent)',
-                            background:
-                              'color-mix(in srgb, var(--accent) 8%, transparent)',
-                          }
-                        : undefined
-                    }
                   >
                     <TableCell>
                       <input
@@ -624,16 +620,8 @@ export function ReviewInboxPage() {
                         )}
                         <button
                           type="button"
-                          className="reviewInboxHint"
+                          className="reviewInboxHintLink"
                           onClick={() => setSignalsDialogTxnId(row.id)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            padding: 0,
-                            textDecoration: 'underline',
-                            cursor: 'pointer',
-                            color: 'inherit',
-                          }}
                         >
                           Why?
                         </button>
