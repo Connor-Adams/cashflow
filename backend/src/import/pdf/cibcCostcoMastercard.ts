@@ -113,6 +113,100 @@ export function parseCibcCostcoHeader(lines: PdfLine[]): CibcCostcoHeader {
   };
 }
 
+export type Period = { start: string; end: string };
+
+export type CibcCostcoSection = 'payments' | 'interest' | 'charges';
+
+/**
+ * Date columns in CIBC statements are "Mon DD" with no year. Pick the year
+ * (period-start or period-end) whose calendar makes the date land inside the
+ * statement window with a small slack (trans date can precede period start
+ * by a few days; post date sits inside).
+ */
+export function inferYearForMonthDay(monthDay: string, period: Period): number {
+  const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(monthDay);
+  if (!m) throw new Error(`Unparseable month-day: ${JSON.stringify(monthDay)}`);
+  const month = MONTHS[m[1]];
+  if (month === undefined) throw new Error(`Unknown month abbreviation: ${m[1]}`);
+  const day = Number(m[2]);
+
+  const startMs = Date.parse(period.start + 'T00:00:00Z');
+  const endMs = Date.parse(period.end + 'T00:00:00Z');
+  const slackMs = 5 * 24 * 60 * 60 * 1000;
+  const startYear = new Date(startMs).getUTCFullYear();
+  const endYear = new Date(endMs).getUTCFullYear();
+
+  const candidates = startYear === endYear ? [startYear] : [startYear, endYear];
+  for (const year of candidates) {
+    const ms = Date.UTC(year, month, day);
+    if (ms >= startMs - slackMs && ms <= endMs + slackMs) return year;
+  }
+  throw new Error(
+    `Month-day ${monthDay} does not fit statement period ${period.start}…${period.end}`,
+  );
+}
+
+/**
+ * Parse one transaction row from the layout-reconstructed line text.
+ *
+ * Strategy: trans-date and post-date are at the LEFT (fixed width); amount is
+ * the LAST token on the line (decimal with optional CR / leading minus); the
+ * description is everything in between, minus the spend-category column for
+ * `charges` rows. We tokenize by run of 2+ spaces (the column separator).
+ */
+export function parseCibcCostcoRow(
+  rawLine: string,
+  period: Period,
+  section: CibcCostcoSection,
+): { date: string; merchantRaw: string; amount: number } {
+  const line = rawLine.replace(/^\s+|\s+$/g, '');
+  const stripBonus = (s: string) => s.replace(/\s*Ý\s+/g, ' ').trim();
+
+  const cols = line.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length > 0);
+  if (cols.length < 3) {
+    throw new Error(`CIBC Costco row has too few columns: ${JSON.stringify(rawLine)}`);
+  }
+
+  const postDate = cols[1];
+  const amountStr = cols[cols.length - 1];
+
+  const middleEnd = section === 'payments' ? cols.length - 1 : cols.length - 2;
+  const merchantRaw = stripBonus(cols.slice(2, middleEnd).join(' ')).replace(/\s+/g, ' ');
+
+  const year = inferYearForMonthDay(postDate, period);
+  const md = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(postDate);
+  if (!md) throw new Error(`Unparseable post date: ${postDate}`);
+  const postMonth = MONTHS[md[1]];
+  if (postMonth === undefined) throw new Error(`Unknown month abbreviation: ${md[1]}`);
+  const day = Number(md[2]);
+  const date = toIso(year, postMonth, day);
+
+  const cleaned = amountStr.replace(/[$,]/g, '').trim();
+  let magnitude = NaN;
+  let isCredit = false;
+  const crMatch = /^(-?)([\d.]+)\s*CR$/i.exec(cleaned);
+  if (crMatch) {
+    magnitude = Number(crMatch[2]);
+    isCredit = true;
+  } else {
+    magnitude = Number(cleaned);
+    if (cleaned.startsWith('-')) isCredit = true;
+  }
+  if (!Number.isFinite(magnitude)) {
+    throw new Error(`CIBC Costco row has unparseable amount: ${JSON.stringify(amountStr)}`);
+  }
+
+  const abs = Math.abs(magnitude);
+  let amount: number;
+  if (section === 'payments') {
+    amount = isCredit ? -abs : abs;
+  } else {
+    amount = isCredit ? abs : -abs;
+  }
+
+  return { date, merchantRaw, amount };
+}
+
 export const cibcCostcoMastercardParser: PdfParser = {
   id: 'cibc_costco_mastercard',
   label: 'CIBC Costco Mastercard',

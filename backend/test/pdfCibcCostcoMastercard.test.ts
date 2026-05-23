@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { extractPdfLines } from '../src/import/pdf/extractLines';
-import { parseCibcCostcoHeader } from '../src/import/pdf/cibcCostcoMastercard';
+import { parseCibcCostcoHeader, parseCibcCostcoRow, inferYearForMonthDay } from '../src/import/pdf/cibcCostcoMastercard';
 
 const fixturesDir = join(__dirname, 'fixtures', 'pdf');
 
@@ -37,4 +37,74 @@ test('parseCibcCostcoHeader — November 2025 statement', async () => {
   assert.equal(h.periodStart, '2025-10-13');
   assert.equal(h.periodEnd, '2025-11-12');
   assert.equal(h.accountLast4, '3114');
+});
+
+test('inferYearForMonthDay picks the period-start year for Nov 23 in a Nov→Dec period', () => {
+  const y = inferYearForMonthDay('Nov 23', { start: '2025-11-13', end: '2025-12-12' });
+  assert.equal(y, 2025);
+});
+
+test('inferYearForMonthDay handles year-rollover periods: Dec 24 in Dec→Jan period is the start year', () => {
+  const y = inferYearForMonthDay('Dec 24', { start: '2025-12-13', end: '2026-01-12' });
+  assert.equal(y, 2025);
+});
+
+test('inferYearForMonthDay handles year-rollover periods: Jan 02 in Dec→Jan period is the end year', () => {
+  const y = inferYearForMonthDay('Jan 02', { start: '2025-12-13', end: '2026-01-12' });
+  assert.equal(y, 2026);
+});
+
+test('inferYearForMonthDay throws when month is outside the period', () => {
+  assert.throws(() => inferYearForMonthDay('Jun 15', { start: '2025-12-13', end: '2026-01-12' }));
+});
+
+test('parseCibcCostcoRow — payment row (no spend category, no Ý)', () => {
+  const period = { start: '2025-12-13', end: '2026-01-12' };
+  const row = parseCibcCostcoRow(
+    'Dec 24           Dec 29          PAYMENT THANK YOU/PAIEMENT MERCI                                                                                                                                  577.04',
+    period,
+    'payments',
+  );
+  assert.deepEqual(row, {
+    date: '2025-12-29',
+    merchantRaw: 'PAYMENT THANK YOU/PAIEMENT MERCI',
+    amount: 577.04,
+  });
+});
+
+test('parseCibcCostcoRow — charge row with spend category', () => {
+  const period = { start: '2025-12-13', end: '2026-01-12' };
+  const row = parseCibcCostcoRow(
+    'Dec 13           Dec 15            COSTCO WHOLESALE W1168 GUELPH                             ON                          Retail and Grocery                                                        947.04',
+    period,
+    'charges',
+  );
+  assert.equal(row.date, '2025-12-15');
+  assert.equal(row.merchantRaw, 'COSTCO WHOLESALE W1168 GUELPH ON');
+  assert.equal(row.amount, -947.04);
+});
+
+test('parseCibcCostcoRow — charge row with bonus Ý prefix is stripped', () => {
+  const period = { start: '2025-11-13', end: '2025-12-12' };
+  const row = parseCibcCostcoRow(
+    'Dec 08           Dec 09      Ý COSTCO GAS W1168                        GUELPH           ON                               Transportation                                                              61.71',
+    period,
+    'charges',
+  );
+  assert.equal(row.date, '2025-12-09');
+  assert.ok(!row.merchantRaw.includes('Ý'), 'Ý marker should be stripped');
+  assert.ok(row.merchantRaw.startsWith('COSTCO GAS W1168'));
+  assert.equal(row.amount, -61.71);
+});
+
+test('parseCibcCostcoRow — interest row', () => {
+  const period = { start: '2025-10-13', end: '2025-11-12' };
+  const row = parseCibcCostcoRow(
+    'Nov 12           Nov 12          REGULAR PURCHASES                                                                     21.75%                                                                          0.07',
+    period,
+    'interest',
+  );
+  assert.equal(row.date, '2025-11-12');
+  assert.equal(row.merchantRaw, 'REGULAR PURCHASES');
+  assert.equal(row.amount, -0.07);
 });
