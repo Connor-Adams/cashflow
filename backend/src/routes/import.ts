@@ -2,7 +2,12 @@ import { Router } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
 import { PREVIEW_MAX_ROWS } from '../import/previewImport';
-import { runImport, importCsvFile } from '../import/runImport';
+import {
+  runImport,
+  importCsvFile,
+  importWsBundleFile,
+  type BundleFileResult,
+} from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
 import { commitStatementImport } from '../import/commitStatementImport';
@@ -33,6 +38,22 @@ const statementUpload = multer({
   fileFilter: (_req, file, cb) => {
     if (!/\.(csv|ofx|qfx)$/i.test(file.originalname)) {
       const e = new Error('Only .csv, .ofx, and .qfx files are allowed') as Error & { status?: number };
+      e.status = 400;
+      cb(e);
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+// Higher per-request file count for the Wealthsimple bundle drop — a full
+// 2-year archive across 8 accounts produces ~100+ CSVs. CSV-only filter.
+const bundleUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 120 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.csv')) {
+      const e = new Error('Only .csv files are allowed') as Error & { status?: number };
       e.status = 400;
       cb(e);
       return;
@@ -330,6 +351,57 @@ router.post(
       next(e);
     }
   }
+);
+
+router.post(
+  '/upload-bundle',
+  importUploadLimiter,
+  (req, res, next) => {
+    bundleUpload.array('files', 120)(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        res.status(400).json({ error: 'Missing files field "files"' });
+        return;
+      }
+      const { user, household } = currentAuth(req);
+      logImportEvent('bundle_started', {
+        fileCount: files.length,
+        totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
+      });
+
+      const results: BundleFileResult[] = [];
+      for (const file of files) {
+        const result = await importWsBundleFile({
+          buffer: file.buffer,
+          fileName: file.originalname,
+          householdId: household.id,
+          userId: user.id,
+        });
+        results.push(result);
+      }
+
+      const accountsCreated = results.filter((r) => r.accountCreated).length;
+      const filesImported = results.filter((r) => !r.error).length;
+      logImportEvent('bundle_completed', {
+        fileCount: files.length,
+        filesImported,
+        accountsCreated,
+      });
+
+      res.json({ results });
+    } catch (e) {
+      next(e);
+    }
+  },
 );
 
 router.get('/history', async (req, res, next) => {
