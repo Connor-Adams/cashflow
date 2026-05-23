@@ -13,6 +13,18 @@ const TRAILING_AMZN_MKTP_ID = /\*[A-Z0-9]{4,}$/;
 const TRAILING_STORE_NUMBER = /\s+(#\d+|STORE\s*#?\d+|\d{4,6})$/i;
 const TRAILING_PHONE = /\s+\+?\d[\d\-.\s()]{6,}\d$/;
 
+// Strip a mid-string store-id token plus any trailing all-caps city tokens.
+// e.g. "#12164 GUELPH", "04747 GUELPH", "C12587 GUELPH", "W1168" (no trailing city).
+// Anchored to end of string. Two variants:
+//   - Hash/letter-prefixed IDs (#\d{2,} or [A-Z]\d{4,}) match with or without
+//     trailing city words — the prefix unambiguously marks a store ID.
+//   - Bare numeric IDs (\d{3,}) require at least one trailing all-caps city word;
+//     otherwise the existing TRAILING_STORE_NUMBER pass handles them (and we
+//     avoid double-stripping cases like "TARGET STORE 5678").
+// Subsequent trailing-store-number stripping in the existing while-loop handles
+// cases like "WALMART 3144 3144 GUELPH" where one store number remains.
+const MID_STORE_WITH_CITY = /\s+(?:(?:#\s*\d{2,}|[A-Z]\d{4,})(?:\s+[A-Z][A-Z'\-]+){0,2}|\d{3,}(?:\s+[A-Z][A-Z'\-]+){1,2})\s*$/;
+
 // US states and Canadian provinces (2-letter codes used in merchant strings)
 const STATE_PROV_SET = new Set([
   // Canadian provinces / territories
@@ -89,6 +101,7 @@ export function normalizeMerchant(raw: unknown): string {
 
   s = s.replace(TRAILING_AMZN_MKTP_ID, '').trim();
   s = s.replace(TRAILING_PHONE, '').trim();
+  s = s.replace(MID_STORE_WITH_CITY, '').trim();
 
   let prev = '';
   while (prev !== s) {

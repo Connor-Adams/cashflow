@@ -76,3 +76,24 @@ test('normalizeMerchant handles empty / non-string input', () => {
 test('normalizeMerchant leaves recognised cleaned merchants untouched', () => {
   assert.equal(normalizeMerchant('NETFLIX.COM'), 'NETFLIX.COM');
 });
+
+test('normalizeMerchant strips mid-string numeric store IDs', () => {
+  assert.equal(normalizeMerchant("MCDONALD'S #12164 GUELPH"), "MCDONALD'S");
+  assert.equal(normalizeMerchant('STARBUCKS 04747 GUELPH'), 'STARBUCKS');
+  assert.equal(normalizeMerchant('PETRO-CANADA 10585 GUELPH'), 'PETRO-CANADA');
+  assert.equal(normalizeMerchant('WALMART 3144 3144 GUELPH'), 'WALMART');
+  assert.equal(normalizeMerchant('DOMINOS PIZZA 10263 GUELPH'), 'DOMINOS PIZZA');
+});
+
+test('normalizeMerchant strips mid-string alphanumeric store IDs', () => {
+  assert.equal(normalizeMerchant('SHELL C12587 GUELPH'), 'SHELL');
+  assert.equal(normalizeMerchant('COSTCO GAS W1168'), 'COSTCO GAS');
+});
+
+test('normalizeMerchant does not strip short leading numbers', () => {
+  // 500 is part of the merchant name (sports box seat), don't drop it.
+  // TORONTO stays because no state code follows and no store ID precedes it.
+  assert.equal(normalizeMerchant('500 LOGE CLUB TORONTO'), '500 LOGE CLUB TORONTO');
+  // Single-digit '# 5' (with space) isn't a store ID under our regex.
+  assert.equal(normalizeMerchant('ZEHRS GUELPH CLAIR # 5'), 'ZEHRS GUELPH CLAIR # 5');
+});
