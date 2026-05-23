@@ -2,7 +2,13 @@ import { Router } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
 import { PREVIEW_MAX_ROWS } from '../import/previewImport';
-import { runImport, importCsvFile } from '../import/runImport';
+import {
+  runImport,
+  importCsvFile,
+  importWsBundleFile,
+  importWsHoldingsFile,
+  type BundleFileResult,
+} from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
 import { commitStatementImport } from '../import/commitStatementImport';
@@ -17,8 +23,8 @@ const csvUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 20 },
   fileFilter: (_req, file, cb) => {
-    if (!file.originalname.toLowerCase().endsWith('.csv')) {
-      const e = new Error('Only .csv files are allowed') as Error & { status?: number };
+    if (!/\.(csv|pdf)$/i.test(file.originalname)) {
+      const e = new Error('Only .csv and .pdf files are allowed') as Error & { status?: number };
       e.status = 400;
       cb(e);
       return;
@@ -31,8 +37,41 @@ const statementUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 20 },
   fileFilter: (_req, file, cb) => {
-    if (!/\.(csv|ofx|qfx)$/i.test(file.originalname)) {
-      const e = new Error('Only .csv, .ofx, and .qfx files are allowed') as Error & { status?: number };
+    if (!/\.(csv|ofx|qfx|pdf)$/i.test(file.originalname)) {
+      const e = new Error('Only .csv, .ofx, .qfx, and .pdf files are allowed') as Error & { status?: number };
+      e.status = 400;
+      cb(e);
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+// Higher per-request file count for the Wealthsimple bundle drop — a full
+// 2-year archive across 8 accounts produces ~100+ CSVs. CSV-only filter.
+const bundleUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 120 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.csv')) {
+      const e = new Error('Only .csv files are allowed') as Error & { status?: number };
+      e.status = 400;
+      cb(e);
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+// Wealthsimple holdings/positions report is always a single CSV (one report
+// covers all accounts).  Cap at 5 MB; tight `files: 1` so the route fails
+// loudly if the frontend ever tries to multi-attach by mistake.
+const holdingsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.csv')) {
+      const e = new Error('Only .csv files are allowed') as Error & { status?: number };
       e.status = 400;
       cb(e);
       return;
@@ -245,8 +284,8 @@ router.post(
           result && typeof result === 'object' ? result.profileInferred : undefined,
         inserted: result && typeof result === 'object' ? result.inserted : undefined,
         skipped:
-          result && typeof result === 'object' ? result.skipped : undefined,
-        reason: result && typeof result === 'object' ? result.reason : undefined,
+          result && typeof result === 'object' ? (result as Record<string, unknown>).skipped : undefined,
+        reason: result && typeof result === 'object' ? (result as Record<string, unknown>).reason : undefined,
       });
       res.json(result);
     } catch (e) {
@@ -330,6 +369,135 @@ router.post(
       next(e);
     }
   }
+);
+
+router.post(
+  '/upload-bundle',
+  importUploadLimiter,
+  (req, res, next) => {
+    bundleUpload.array('files', 120)(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        res.status(400).json({ error: 'Missing files field "files"' });
+        return;
+      }
+      const { user, household } = currentAuth(req);
+      logImportEvent('bundle_started', {
+        fileCount: files.length,
+        totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
+      });
+
+      // Per-file try/catch so a single throw (e.g. a DB constraint
+      // violation that bubbled past the savepoint, an unexpected parser
+      // error) never kills the whole bundle response. Every file gets a
+      // result row; the response always includes the full `results`
+      // array, which the frontend's per-file table relies on for
+      // visibility into partial failures.
+      const results: BundleFileResult[] = [];
+      for (const file of files) {
+        try {
+          const result = await importWsBundleFile({
+            buffer: file.buffer,
+            fileName: file.originalname,
+            householdId: household.id,
+            userId: user.id,
+          });
+          results.push(result);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          logImportEvent('bundle_file_failed', {
+            file: file.originalname,
+            error: message,
+          });
+          results.push({
+            file: file.originalname,
+            wsid: null,
+            accountId: null,
+            accountName: null,
+            accountCreated: false,
+            inserted: 0,
+            insertedTransactions: 0,
+            insertedInvestmentActivities: 0,
+            skippedDuplicates: 0,
+            rowErrors: 0,
+            parseErrors: [],
+            warnings: [],
+            error: message,
+          });
+        }
+      }
+
+      const accountsCreated = results.filter((r) => r.accountCreated).length;
+      const filesImported = results.filter((r) => !r.error).length;
+      logImportEvent('bundle_completed', {
+        fileCount: files.length,
+        filesImported,
+        accountsCreated,
+      });
+
+      res.json({ results });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/upload-holdings',
+  importUploadLimiter,
+  (req, res, next) => {
+    holdingsUpload.single('file')(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'Missing file field "file"' });
+        return;
+      }
+      const { user, household } = currentAuth(req);
+      logImportEvent('holdings_started', {
+        fileName: req.file.originalname,
+        fileSizeBytes: req.file.size,
+      });
+
+      const result = await importWsHoldingsFile({
+        buffer: req.file.buffer,
+        fileName: req.file.originalname,
+        householdId: household.id,
+        userId: user.id,
+      });
+
+      logImportEvent('holdings_completed', {
+        fileName: req.file.originalname,
+        statementDate: result.statementDate,
+        totalRows: result.totalRows,
+        inserted: result.inserted,
+        updated: result.updated,
+        skippedUnknownAccount: result.skippedUnknownAccount,
+        accountsAffected: result.accountsAffected,
+        errors: result.errors.length,
+      });
+
+      res.json(result);
+    } catch (e) {
+      next(e);
+    }
+  },
 );
 
 router.get('/history', async (req, res, next) => {

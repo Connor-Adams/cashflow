@@ -8,6 +8,88 @@ import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '..
 
 const router = Router();
 
+/**
+ * Transaction.txnType values that DO NOT contribute to spend totals.
+ *
+ * Excluded from `totalSpend` (and the parallel monthly/split/business/
+ * category totals):
+ *   - `transfer`  — moving money between accounts I own (or to a contact who
+ *     repays). Not consumption.
+ *   - `investment` — BUY/SELL cash leg from an invest statement. Buying
+ *     securities is not spend (the money still belongs to me).
+ *   - `dividend` — cash dividend distribution from a holding (already positive,
+ *     but belt-and-suspenders).
+ *   - `payment`   — credit-card statement payments (negative on chequing,
+ *     positive on the card; either way, not consumption).
+ *   - `refund`    — positive amount, already on the credits side; listed
+ *     here for symmetry with the brief.
+ *   - `reward`    — cashback / points redemption.
+ *   - `income`    — historical value (never emitted by the enricher today
+ *     but listed for forward-compat with seeded rules).
+ *
+ * Note: `purchase`, `fee`, `interest`, `unknown`, and `null` (unset) still
+ * count as spend so we don't silently lose legitimate negative-amount
+ * transactions that haven't been classified.
+ */
+const NON_SPEND_TXN_TYPES: ReadonlySet<string> = new Set([
+  'transfer',
+  'investment',
+  'dividend',
+  'payment',
+  'refund',
+  'reward',
+  'income',
+]);
+
+/**
+ * Subset of NON_SPEND_TXN_TYPES that should ALSO be excluded from the
+ * by-category / by-month / by-split / by-business breakdowns. These rows
+ * represent money flows that don't belong to any spending category at all
+ * (you can't categorize a brokerage BUY as "Groceries"). Refunds, rewards,
+ * and statement credits stay IN the breakdowns because they net against
+ * category spend in a meaningful way (e.g. an Amazon refund on a Groceries
+ * purchase should show in the Groceries category as a credit).
+ */
+const NON_CATEGORICAL_TXN_TYPES: ReadonlySet<string> = new Set([
+  'transfer',
+  'investment',
+  'dividend',
+]);
+
+/**
+ * True when this transaction's amount should NOT contribute to spend totals.
+ *
+ * A row is excluded when EITHER:
+ *   - its `txnType` is in NON_SPEND_TXN_TYPES, or
+ *   - its account is an investment account (`accountType === 'investment'`).
+ *
+ * Investment-account exclusion is belt-and-suspenders: even if an old row
+ * still carries `txnType='purchase'`, a negative amount on an invest account
+ * is by definition not consumption.
+ */
+function isNonSpend(
+  txnType: string | null | undefined,
+  accountType: string | null | undefined,
+): boolean {
+  if (txnType && NON_SPEND_TXN_TYPES.has(txnType)) return true;
+  if (accountType === 'investment') return true;
+  return false;
+}
+
+/**
+ * True when this transaction should be omitted from category / monthly /
+ * split / business breakdowns entirely (it's not a category of spend nor a
+ * credit against any category — it's a money-movement / brokerage flow).
+ */
+function isNonCategorical(
+  txnType: string | null | undefined,
+  accountType: string | null | undefined,
+): boolean {
+  if (txnType && NON_CATEGORICAL_TXN_TYPES.has(txnType)) return true;
+  if (accountType === 'investment') return true;
+  return false;
+}
+
 function dateWhere(req: Request) {
   const w: Record<string, unknown> = { ...visibleTransactionWhere(req) };
   if (req.query.dateFrom || req.query.dateTo) {
@@ -41,12 +123,13 @@ router.get('/dashboard', async (req, res, next) => {
           'merchantClean',
           'amount',
           'reviewFlag',
+          'txnType',
         ],
         raw: true,
       }),
       Account.findAll({
         where: visibleAccountWhere(req),
-        attributes: ['id', 'name', 'shortCode'],
+        attributes: ['id', 'name', 'shortCode', 'accountType'],
         raw: true,
       }),
     ]);
@@ -63,8 +146,14 @@ router.get('/dashboard', async (req, res, next) => {
       merchantClean: string | null;
       amount: unknown;
       reviewFlag: boolean;
+      txnType: string | null;
     };
-    type AccountRow = { id: number; name: string; shortCode: string | null };
+    type AccountRow = {
+      id: number;
+      name: string;
+      shortCode: string | null;
+      accountType: string | null;
+    };
 
     const accountById = new Map<number, AccountRow>(
       (accounts as unknown as AccountRow[]).map((account) => [account.id, account])
@@ -180,6 +269,11 @@ router.get('/dashboard', async (req, res, next) => {
         row.merchantClean?.trim() || row.merchantRaw?.trim() || '(unknown merchant)';
       const account = accountById.get(row.accountId);
       const accountName = account?.name ?? `Account ${row.accountId}`;
+      // Spend totals must exclude transfers, investment buys, dividend
+      // credits, statement payments, refunds and rewards — these aren't
+      // consumption. Also exclude any negative amount on an investment
+      // account regardless of txnType (belt-and-suspenders for legacy data).
+      const nonSpend = isNonSpend(row.txnType, account?.accountType);
       const metrics = metricsByCurrency.get(currency) ?? {
         currency,
         totalSpend: 0,
@@ -230,7 +324,7 @@ router.get('/dashboard', async (req, res, next) => {
       accountSummary.transactionCount += 1;
       if (row.reviewFlag) accountSummary.reviewCount += 1;
 
-      if (amount < 0) {
+      if (amount < 0 && !nonSpend) {
         metrics.totalSpend += -amount;
         merchantSummary.totalSpend += -amount;
         accountSummary.totalSpend += -amount;
@@ -263,6 +357,13 @@ router.get('/dashboard', async (req, res, next) => {
       }
 
       if (amount > 0 && positiveKind === 'payment') {
+        continue;
+      }
+      // Transfers, investment buys, and dividends aren't a category of
+      // spend at all (you can't put a brokerage BUY in "Groceries"), so
+      // they're skipped here. Refunds / rewards / income credits stay IN
+      // because they net meaningfully against category spend.
+      if (isNonCategorical(row.txnType, account?.accountType)) {
         continue;
       }
       const key = [
@@ -315,18 +416,22 @@ router.get('/dashboard', async (req, res, next) => {
         netSpend: 0,
       };
 
-      if (amount < 0) {
+      if (amount < 0 && !nonSpend) {
         const spend = -amount;
         monthly.totalSpend += spend;
         split.totalSpend += spend;
         business.totalSpend += spend;
         category.totalSpend += spend;
-      } else {
+      } else if (amount > 0) {
         monthly.totalCredits += amount;
         split.totalCredits += amount;
         business.totalCredits += amount;
         category.totalCredits += amount;
       }
+      // Note: negative-amount non-spend rows (transfers, investment buys, etc)
+      // contribute to neither side; they're tracked elsewhere (transaction
+      // count is still incremented above) but don't move spend or credit
+      // totals because they aren't consumption nor income.
       monthly.netSpend = monthly.totalSpend - monthly.totalCredits;
       split.netSpend = split.totalSpend - split.totalCredits;
       business.netSpend = business.totalSpend - business.totalCredits;
@@ -376,31 +481,22 @@ router.get('/dashboard', async (req, res, next) => {
 export type PartnerNetDirection = 'partner_owes_me' | 'i_owe_partner' | 'even';
 
 /**
- * Compute the net partner balance and a direction label for a single
- * (currency, ownership) row. Net is defined as `sumPartner - sumMy`:
- * positive means the partner owes me, negative means I owe the partner.
- * The direction tolerates sub-cent rounding noise by rounding to 2 decimals
- * before comparing to zero (|net| < 0.005 → 'even').
+ * Per-row "what partner owes me" (signed): positive → partner owes me, negative → I owe partner.
+ *
+ * Single-payer model: the uploader (me) always pays the transactions, so every transaction's
+ * partner_share is what partner owes me back. sumMy is my own portion (not a debt to anyone),
+ * so it does NOT enter the net. The previous formula `sumPartner − sumMy` double-counted
+ * personal spending as debt and reported wildly inflated balances.
+ *
+ * If multi-payer is ever added (partner uploads from their own account, true joint pool),
+ * this is the single place to branch on a real `paid_by` field. `ownershipType` today is
+ * stamped from `autoSplitType` at import, so it is not a reliable payer signal.
  */
-export function computePartnerNet(
-  sumMy: number | null,
-  sumPartner: number | null
-): { net: number; direction: PartnerNetDirection } {
-  const my = sumMy ?? 0;
-  const partner = sumPartner ?? 0;
-  const net = partner - my;
-  const rounded = Math.round(net * 100) / 100;
-  let direction: PartnerNetDirection;
-  if (rounded > 0) direction = 'partner_owes_me';
-  else if (rounded < 0) direction = 'i_owe_partner';
-  else direction = 'even';
-  return { net, direction };
+export function rawNetForRow(r: RawPartnerRow): number {
+  const partner = r.sumPartner ?? 0;
+  return partner === 0 ? 0 : partner;
 }
 
-/**
- * Direction is derived from a value already adjusted for sub-cent noise:
- * |value| < 0.005 → 'even'. Same threshold as `computePartnerNet`.
- */
 function directionFromNet(net: number): PartnerNetDirection {
   const rounded = Math.round(net * 100) / 100;
   if (rounded > 0) return 'partner_owes_me';
@@ -465,7 +561,7 @@ export function applySettlements(
     byKey.set(`${s.contactId}\0${s.currency}`, s);
   }
   return rows.map((r) => {
-    const rawNet = (r.sumPartner ?? 0) - (r.sumMy ?? 0);
+    const rawNet = rawNetForRow(r);
     let settledAmount = 0;
     let settlementCount = 0;
     if (r.ownershipContactId != null) {
@@ -611,20 +707,47 @@ router.get('/business', async (req, res, next) => {
 router.get('/monthly', async (req, res, next) => {
   try {
     const where = dateWhere(req);
-    const rows = await Transaction.findAll({
-      where,
-      attributes: ['date', 'currency', 'merchantRaw', 'merchantClean', 'finalCategory', 'amount'],
-      raw: true,
-    });
+    // Join account_type so we can exclude any negative row on an
+    // investment account from the spend curve. Same belt-and-suspenders
+    // rationale as the /dashboard route — see isNonSpend above.
+    const [rows, accounts] = await Promise.all([
+      Transaction.findAll({
+        where,
+        attributes: [
+          'accountId',
+          'date',
+          'currency',
+          'merchantRaw',
+          'merchantClean',
+          'finalCategory',
+          'amount',
+          'txnType',
+        ],
+        raw: true,
+      }),
+      Account.findAll({
+        where: visibleAccountWhere(req),
+        attributes: ['id', 'accountType'],
+        raw: true,
+      }),
+    ]);
+    const accountTypeById = new Map<number, string | null>(
+      (accounts as unknown as Array<{ id: number; accountType: string | null }>).map((a) => [
+        a.id,
+        a.accountType,
+      ]),
+    );
 
     const points = new Map<string, { month: string; currency: string; sumAmount: number }>();
     for (const row of rows as unknown as {
+      accountId: number;
       date: string;
       currency: string;
       merchantRaw: string | null;
       merchantClean: string | null;
       finalCategory: string | null;
       amount: unknown;
+      txnType: string | null;
     }[]) {
       const amount = num(row.amount);
       if (amount == null) continue;
@@ -636,6 +759,13 @@ router.get('/monthly', async (req, res, next) => {
           category: row.finalCategory,
         }) === 'payment'
       ) {
+        continue;
+      }
+      // /monthly aggregates signed amounts into a single "activity"
+      // curve, so refunds/rewards stay IN (they net against month spend
+      // for the same category in the UI). We only drop transfers and
+      // investment / dividend flows that don't belong to any category.
+      if (isNonCategorical(row.txnType, accountTypeById.get(row.accountId))) {
         continue;
       }
       const month = String(row.date).slice(0, 7);

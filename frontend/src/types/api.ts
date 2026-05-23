@@ -3,6 +3,9 @@ export type {
   AccountType,
   AuthUser,
   Contact,
+  EnrichmentBackfillProgress,
+  EnrichmentSignal,
+  EnrichmentStats,
   HoldingSnapshot,
   InvestmentActivity,
   Transaction,
@@ -107,4 +110,59 @@ export type BulkPatchFilterRequest = {
 export type BulkPatchFilterResponse = {
   updated: number
   ids: number[]
+}
+
+/**
+ * One row from GET /api/budgets. Mirrors the BudgetTarget serializer in
+ * backend/src/routes/budgets.ts — `amount` arrives as a string (decimal)
+ * because the column is DECIMAL(14,4) and we want lossless transport. UI
+ * code that needs arithmetic must coerce with `Number(...)`.
+ *
+ * `category` is `null` for "overall" budgets that aggregate every category
+ * sharing the budget's currency.
+ */
+export type Budget = {
+  id: number
+  householdId: number
+  category: string | null
+  currency: string
+  amount: string
+  period: 'monthly'
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/budgets. */
+export type BudgetsResponse = {
+  data: Budget[]
+}
+
+/**
+ * One row from GET /api/budgets/progress — combines a budget with current
+ * spend for the active calendar month. Amounts here are pre-coerced to
+ * numbers by the backend so UI code can format/compare directly.
+ */
+export type BudgetProgress = {
+  budgetId: number
+  category: string | null
+  currency: string
+  target: number
+  spent: number
+  remaining: number
+  percentUsed: number
+  periodStart: string
+  periodEnd: string
+}
+
+/** Response shape for GET /api/budgets/progress. */
+export type BudgetProgressResponse = {
+  items: BudgetProgress[]
+}
+
+/** POST/PUT /api/budgets body shape. */
+export type BudgetInput = {
+  category: string | null
+  currency: string
+  amount: number
+  period?: 'monthly'
 }

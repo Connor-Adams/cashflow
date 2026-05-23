@@ -12,7 +12,7 @@ export type SignalSource =
   | 'recurring'
   | 'rule'
   | 'memory'
-  | 'amazon-items'
+  | 'item-link'
   | 'refund-link'
   | 'transfer-link'
   | 'ai';
@@ -25,6 +25,8 @@ export type TxnType =
   | 'fee'
   | 'interest'
   | 'reward'
+  | 'investment'
+  | 'dividend'
   | 'unknown';
 
 export type SignalFields = Partial<{

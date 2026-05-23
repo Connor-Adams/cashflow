@@ -43,7 +43,7 @@ function isUniqueLike(e: unknown): boolean {
   );
 }
 
-async function findOrCreateSecurity(
+export async function findOrCreateSecurity(
   security: NormalizedSecurity,
   householdId: number | null,
   transaction: SequelizeTransaction
@@ -85,27 +85,36 @@ async function createInvestmentActivity(
   const security = row.security
     ? await findOrCreateSecurity(row.security, account.householdId, t)
     : null;
+  // SAVEPOINT around the INSERT: on Postgres, any query error inside an
+  // open transaction aborts the whole transaction and every subsequent
+  // query returns "current transaction is aborted". By nesting through
+  // sequelize.transaction({ transaction: t }, …) Sequelize emits a
+  // SAVEPOINT; if the inner block throws (e.g. unique violation we want
+  // to treat as a duplicate), only the savepoint rolls back and the
+  // outer transaction stays alive.
   try {
-    await InvestmentActivity.create(
-      {
-        accountId: account.id,
-        householdId: account.householdId,
-        securityId: security?.id ?? null,
-        activityType: row.activityType,
-        tradeDate: row.tradeDate,
-        settlementDate: row.settlementDate,
-        description: row.description,
-        quantity: row.quantity == null ? null : String(row.quantity),
-        price: row.price == null ? null : String(row.price),
-        amount: row.amount == null ? null : String(row.amount),
-        fees: row.fees == null ? null : String(row.fees),
-        currency: row.currency,
-        sourceReference: row.sourceReference,
-        sourceRowFingerprint: row.sourceRowFingerprint,
-        importBatch: preview.importBatch,
-      },
-      { transaction: t }
-    );
+    await sequelize.transaction({ transaction: t }, async (sp) => {
+      await InvestmentActivity.create(
+        {
+          accountId: account.id,
+          householdId: account.householdId,
+          securityId: security?.id ?? null,
+          activityType: row.activityType,
+          tradeDate: row.tradeDate,
+          settlementDate: row.settlementDate,
+          description: row.description,
+          quantity: row.quantity == null ? null : String(row.quantity),
+          price: row.price == null ? null : String(row.price),
+          amount: row.amount == null ? null : String(row.amount),
+          fees: row.fees == null ? null : String(row.fees),
+          currency: row.currency,
+          sourceReference: row.sourceReference,
+          sourceRowFingerprint: row.sourceRowFingerprint,
+          importBatch: preview.importBatch,
+        },
+        { transaction: sp }
+      );
+    });
     return 'inserted';
   } catch (e) {
     if (isUniqueLike(e)) return 'duplicate';
@@ -120,26 +129,31 @@ async function createHolding(
   t: SequelizeTransaction
 ): Promise<'inserted' | 'duplicate'> {
   const security = await findOrCreateSecurity(row.security, account.householdId, t);
+  // SAVEPOINT around the INSERT — same Postgres-safety rationale as
+  // createInvestmentActivity. Without this, a unique violation here
+  // would poison the surrounding bundle transaction.
   try {
-    await HoldingSnapshot.create(
-      {
-        accountId: account.id,
-        householdId: account.householdId,
-        securityId: security.id,
-        statementDate: row.statementDate,
-        quantity: String(row.quantity),
-        price: row.price == null ? null : String(row.price),
-        marketValue: row.marketValue == null ? null : String(row.marketValue),
-        costBasis: row.costBasis == null ? null : String(row.costBasis),
-        unrealizedGainLoss:
-          row.unrealizedGainLoss == null ? null : String(row.unrealizedGainLoss),
-        currency: row.currency,
-        sourceReference: row.sourceReference,
-        sourceRowFingerprint: row.sourceRowFingerprint,
-        importBatch: preview.importBatch,
-      },
-      { transaction: t }
-    );
+    await sequelize.transaction({ transaction: t }, async (sp) => {
+      await HoldingSnapshot.create(
+        {
+          accountId: account.id,
+          householdId: account.householdId,
+          securityId: security.id,
+          statementDate: row.statementDate,
+          quantity: String(row.quantity),
+          price: row.price == null ? null : String(row.price),
+          marketValue: row.marketValue == null ? null : String(row.marketValue),
+          costBasis: row.costBasis == null ? null : String(row.costBasis),
+          unrealizedGainLoss:
+            row.unrealizedGainLoss == null ? null : String(row.unrealizedGainLoss),
+          currency: row.currency,
+          sourceReference: row.sourceReference,
+          sourceRowFingerprint: row.sourceRowFingerprint,
+          importBatch: preview.importBatch,
+        },
+        { transaction: sp }
+      );
+    });
     return 'inserted';
   } catch (e) {
     if (isUniqueLike(e)) return 'duplicate';
@@ -210,6 +224,7 @@ export async function commitStatementImport(
   const rules = await loadAllRules(account.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
   const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
+  const overrideBusiness = preview.overrideBusiness === true;
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
   let insertedHoldings = 0;
@@ -217,7 +232,7 @@ export async function commitStatementImport(
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
-      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean);
+      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean, row.amount);
 
       const recurringHistory = await loadRecurringHistory(
         account.householdId ?? null,
@@ -256,6 +271,14 @@ export async function commitStatementImport(
 
       const f = enriched.fields;
 
+      // Wealthsimple bundle imports stamp an authoritative `overrideTxnType`
+      // from the WS TX code (BUY → 'investment', AFT_OUT → 'transfer', etc).
+      // When present, it wins over the enrichment-pipeline output so the
+      // dashboard's spend math correctly excludes these flows. See
+      // wealthsimpleTxnType.ts for the mapping and root-cause analysis in
+      // backend/scripts/backfill-ws-txn-types.ts.
+      const effectiveTxnType = row.overrideTxnType ?? f.txnType;
+
       const txn = Transaction.build({
         accountId: account.id,
         householdId: account.householdId ?? null,
@@ -269,7 +292,7 @@ export async function commitStatementImport(
         merchantRaw: row.merchantRaw,
         merchantClean: f.merchantClean,
         merchantCanonical: f.merchantCanonical,
-        txnType: f.txnType,
+        txnType: effectiveTxnType,
         amount: String(row.amount),
         currency: row.currency,
         notes: f.notes,
@@ -277,7 +300,7 @@ export async function commitStatementImport(
         sourceRowFingerprint: row.sourceRowFingerprint,
         appliedRuleId: f.appliedRuleId,
         autoCategory: f.autoCategory,
-        autoBusiness: f.autoBusiness,
+        autoBusiness: overrideBusiness ? true : f.autoBusiness,
         autoSplitType: f.autoSplitType,
         autoPctMe: f.autoPctMe,
         autoPctPartner: f.autoPctPartner,
@@ -294,20 +317,30 @@ export async function commitStatementImport(
         reviewedAt: null,
       });
       recomputeTransactionAmounts(txn);
+      // SAVEPOINT around the per-row insert + its signal sidecar. On
+      // Postgres, any unique-violation here would otherwise abort the
+      // outer transaction and every subsequent SELECT in this loop
+      // would fail with "current transaction is aborted, commands
+      // ignored until end of transaction block". Nesting through
+      // sequelize.transaction({ transaction: t }, …) emits a SAVEPOINT
+      // so the unique-violation rolls back only this row and the loop
+      // continues.
       try {
-        await txn.save({ transaction: t });
-        if (enriched.signals.length > 0) {
-          await TransactionSignal.bulkCreate(
-            enriched.signals.map((s) => ({
-              transactionId: txn.id,
-              source: s.source,
-              confidence: s.confidence,
-              fields: s.fields,
-              rationale: s.rationale ?? null,
-            })),
-            { transaction: t },
-          );
-        }
+        await sequelize.transaction({ transaction: t }, async (sp) => {
+          await txn.save({ transaction: sp });
+          if (enriched.signals.length > 0) {
+            await TransactionSignal.bulkCreate(
+              enriched.signals.map((s) => ({
+                transactionId: txn.id,
+                source: s.source,
+                confidence: s.confidence,
+                fields: s.fields,
+                rationale: s.rationale ?? null,
+              })),
+              { transaction: sp },
+            );
+          }
+        });
         insertedTransactions += 1;
       } catch (e) {
         if (isUniqueLike(e)) skippedDuplicates += 1;

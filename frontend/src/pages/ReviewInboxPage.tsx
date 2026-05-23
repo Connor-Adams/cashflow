@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
+import { EnrichmentSignalsDialog } from '@/components/EnrichmentSignalsDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -118,6 +119,7 @@ export function ReviewInboxPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [cursorRowId, setCursorRowId] = useState<number | null>(null)
+  const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   const { showToast } = useToast()
   const categoryPickerRef = useRef<HTMLDivElement>(null)
   const tableWrapRef = useRef<HTMLDivElement>(null)
@@ -556,6 +558,11 @@ export function ReviewInboxPage() {
             </Button>
           </div>
 
+          <p className="reviewInboxShortcutsHint" aria-hidden="true">
+            <kbd>j</kbd>/<kbd>k</kbd> navigate · <kbd>space</kbd> select ·{' '}
+            <kbd>c</kbd> category · <kbd>Enter</kbd> apply · <kbd>?</kbd> help
+          </p>
+
           {err && <span className="error">{err}</span>}
           {message && <span className="reviewInboxMessage">{message}</span>}
 
@@ -593,15 +600,6 @@ export function ReviewInboxPage() {
                     data-cursor={isCursor ? 'true' : undefined}
                     data-state={selectedIds.has(row.id) ? 'selected' : undefined}
                     aria-current={isCursor ? 'true' : undefined}
-                    style={
-                      isCursor
-                        ? {
-                            boxShadow: 'inset 3px 0 0 0 var(--accent)',
-                            background:
-                              'color-mix(in srgb, var(--accent) 8%, transparent)',
-                          }
-                        : undefined
-                    }
                   >
                     <TableCell>
                       <input
@@ -620,6 +618,13 @@ export function ReviewInboxPage() {
                         ) : (
                           <span className="reviewInboxHint">No rule</span>
                         )}
+                        <button
+                          type="button"
+                          className="reviewInboxHintLink"
+                          onClick={() => setSignalsDialogTxnId(row.id)}
+                        >
+                          Why?
+                        </button>
                       </span>
                     </TableCell>
                     <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
@@ -743,6 +748,32 @@ export function ReviewInboxPage() {
           </div>
         </Card>
       </section>
+      <EnrichmentSignalsDialog
+        transactionId={signalsDialogTxnId}
+        transactionSummary={
+          signalsDialogTxnId == null
+            ? null
+            : (() => {
+                const row = rows.find((r) => r.id === signalsDialogTxnId)
+                if (!row) return null
+                return {
+                  merchantRaw: row.merchantRaw,
+                  merchantClean: row.merchantClean,
+                  merchantCanonical: row.merchantCanonical,
+                  autoSource: row.autoSource,
+                  autoConfidence: row.autoConfidence,
+                  autoCategory: row.autoCategory,
+                  txnType: row.txnType,
+                  reviewFlag: row.reviewFlag,
+                  isRecurring: row.isRecurring,
+                }
+              })()
+        }
+        onClose={() => setSignalsDialogTxnId(null)}
+        onReenriched={(updated) => {
+          setRows((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)))
+        }}
+      />
     </div>
   )
 }

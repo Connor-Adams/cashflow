@@ -11,6 +11,7 @@ import { HouseholdMember, initHouseholdMember } from './HouseholdMember';
 import { HouseholdInvite, initHouseholdInvite } from './HouseholdInvite';
 import { Contact, initContact } from './Contact';
 import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
+import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
@@ -20,6 +21,10 @@ import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
+import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
+import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
+import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
+import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -28,6 +33,7 @@ initHouseholdMember(sequelize);
 initHouseholdInvite(sequelize);
 initContact(sequelize);
 initPartnerSettlement(sequelize);
+initBudgetTarget(sequelize);
 initAccount(sequelize);
 initRule(sequelize);
 initTransaction(sequelize);
@@ -42,6 +48,34 @@ initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
+initUserEmailIntegration(sequelize);
+initReceiptSenderAllowlist(sequelize);
+initProcessedEmailMessage(sequelize);
+initUserCaptureToken(sequelize);
+
+Household.hasMany(ProcessedEmailMessage, {
+  foreignKey: 'household_id',
+  as: 'processedEmailMessages',
+});
+ProcessedEmailMessage.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
+Household.hasMany(ReceiptSenderAllowlist, {
+  foreignKey: 'household_id',
+  as: 'receiptSenderAllowlist',
+});
+ReceiptSenderAllowlist.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
+User.hasMany(UserEmailIntegration, {
+  foreignKey: 'user_id',
+  as: 'emailIntegrations',
+});
+UserEmailIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -82,6 +116,11 @@ Contact.hasMany(PartnerSettlement, {
   as: 'partnerSettlements',
 });
 PartnerSettlement.belongsTo(Contact, { foreignKey: 'contact_id', as: 'contact' });
+Household.hasMany(BudgetTarget, {
+  foreignKey: 'household_id',
+  as: 'budgetTargets',
+});
+BudgetTarget.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Rule.hasMany(Transaction, {
   foreignKey: 'applied_rule_id',
   as: 'appliedTransactions',
@@ -141,6 +180,7 @@ export {
   HouseholdInvite,
   Contact,
   PartnerSettlement,
+  BudgetTarget,
   Account,
   Rule,
   Transaction,
@@ -155,4 +195,8 @@ export {
   InvestmentActivity,
   HoldingSnapshot,
   SecurityPrice,
+  UserEmailIntegration,
+  ReceiptSenderAllowlist,
+  ProcessedEmailMessage,
+  UserCaptureToken,
 };

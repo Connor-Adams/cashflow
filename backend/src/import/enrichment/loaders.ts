@@ -5,13 +5,19 @@ import type { LinkItemsCandidateOrder } from './linkItemsStage';
 import type { RecurringHistoryRow } from './detectRecurringStage';
 import type { RelationshipCandidate } from './detectRelationshipsStage';
 
-export async function loadAmazonOrdersCache(householdId: number | null): Promise<LinkItemsCandidateOrder[]> {
+/**
+ * Loads all external orders (any vendor) so the link-items stage can match
+ * by vendor inside the pipeline. Previously Amazon-only; now generalised so
+ * Apple/Google receipts work too.
+ */
+export async function loadExternalOrdersCache(householdId: number | null): Promise<LinkItemsCandidateOrder[]> {
   const orders = await ExternalOrder.findAll({
-    where: householdId != null ? { householdId, vendor: 'amazon' } : { vendor: 'amazon' },
+    where: householdId != null ? { householdId } : undefined,
     include: [{ model: ExternalOrderItem, as: 'items' }],
   });
   return orders.map((o) => ({
     id: o.id,
+    vendor: o.vendor,
     total: Number(o.total ?? 0),
     orderDate: o.orderDate ?? '',
     shipmentDate: o.shipmentDate,
@@ -25,6 +31,9 @@ export async function loadAmazonOrdersCache(householdId: number | null): Promise
     })),
   }));
 }
+
+/** Backward-compat alias used by older call sites. Prefer loadExternalOrdersCache. */
+export const loadAmazonOrdersCache = loadExternalOrdersCache;
 
 export async function loadHouseholdAccountIds(accountId: number, householdId: number | null): Promise<number[]> {
   const rows = await Account.findAll({

@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Bookmarklet IIFE bundles are built into public/ so vite can serve them from
+# the same origin (no static-host hop needed). They're generated artifacts —
+# never commit them.
+public/bookmarklets
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,4 +1,6 @@
-export type StatementParserId = 'csv' | 'ofx';
+import type { TxnType } from './enrichment/types';
+
+export type StatementParserId = 'csv' | 'ofx' | 'pdf';
 
 export type NormalizedCashTransaction = {
   date: string;
@@ -9,6 +11,18 @@ export type NormalizedCashTransaction = {
   sourceReference: string | null;
   sourceRowFingerprint: string;
   duplicate?: boolean;
+  /**
+   * Authoritative txnType supplied by the source file when the source has
+   * stronger signal than the narrative-detector regex. Used by the
+   * Wealthsimple bundle importer to stamp BUY, SELL, DIV, AFT_IN, AFT_OUT,
+   * and FEE rows from the WS `transaction` column instead of letting them
+   * default to 'purchase' (which would inflate the dashboard totalSpend
+   * metric).
+   *
+   * When set, the commit pipeline uses this value verbatim instead of the
+   * enrichment-pipeline output.
+   */
+  overrideTxnType?: TxnType;
 };
 
 export type NormalizedSecurity = {
@@ -75,6 +89,13 @@ export type StatementPreview = {
   warnings: string[];
   rowErrors: number;
   parseErrors: { rowIndex: number; message: string }[];
+  /**
+   * When true, every Transaction inserted during commit forces
+   * autoBusiness=true, regardless of what the enrichment pipeline produced.
+   * Used by the Wealthsimple bundle importer to mark corporate-account txns
+   * (Save for business, Corporate investing) as business income/expenses.
+   */
+  overrideBusiness?: boolean;
   duplicateCounts: {
     transactions: number;
     investmentActivities: number;

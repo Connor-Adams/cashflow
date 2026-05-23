@@ -2,169 +2,167 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applySettlements,
-  computePartnerNet,
+  rawNetForRow,
   type RawPartnerRow,
   type SettlementSummary,
 } from '../src/routes/summary';
 
-test('computePartnerNet: partner owes me when sumPartner > sumMy', () => {
-  const r = computePartnerNet(100, 250);
-  assert.equal(r.net, 150);
-  assert.equal(r.direction, 'partner_owes_me');
-});
-
-test('computePartnerNet: I owe partner when sumPartner < sumMy', () => {
-  const r = computePartnerNet(300, 200);
-  assert.equal(r.net, -100);
-  assert.equal(r.direction, 'i_owe_partner');
-});
-
-test('computePartnerNet: even within sub-cent tolerance', () => {
-  // Difference of 0.004 — below the 0.005 threshold — counts as even.
-  const r = computePartnerNet(100.001, 100.005);
-  assert.equal(r.direction, 'even');
-});
-
-test('computePartnerNet: exact zero is even', () => {
-  const r = computePartnerNet(0, 0);
-  assert.equal(r.net, 0);
-  assert.equal(r.direction, 'even');
-});
-
-test('computePartnerNet: nulls coerce to zero', () => {
-  const r = computePartnerNet(null, null);
-  assert.equal(r.net, 0);
-  assert.equal(r.direction, 'even');
-});
-
-test('computePartnerNet: null sumMy treats partner as full debt', () => {
-  const r = computePartnerNet(null, 42);
-  assert.equal(r.net, 42);
-  assert.equal(r.direction, 'partner_owes_me');
-});
-
-test('computePartnerNet: just over half a cent flips out of even', () => {
-  // 0.006 difference → rounds to 0.01, not even.
-  const r = computePartnerNet(0, 0.006);
-  assert.equal(r.direction, 'partner_owes_me');
-});
-
 function makeRow(over: Partial<RawPartnerRow> = {}): RawPartnerRow {
   return {
     currency: 'CAD',
-    ownershipType: 'contact',
-    ownershipContactId: 1,
-    contactName: 'Sam',
+    ownershipType: 'me',
+    ownershipContactId: null,
+    contactName: null,
     sumMy: 0,
     sumPartner: 0,
     ...over,
   };
 }
 
-test('applySettlements: i_paid_partner pushes net higher (partner owes me more)', () => {
-  // Raw: partner=200, my=100 → rawNet=+100 (partner owes me 100).
-  // I paid partner 50 → I overpaid → partner now owes me 150.
-  const rows = [makeRow({ sumMy: 100, sumPartner: 200 })];
+// Single-payer model: I (the uploader) always pay. Per-row net is just sumPartner —
+// what partner owes me from their share. sumMy is my own portion (not debt).
+
+test('rawNetForRow: net = sumPartner (partner owes me their share)', () => {
+  assert.equal(rawNetForRow(makeRow({ sumMy: 10_991.53, sumPartner: 250 })), 250);
+});
+
+test('rawNetForRow: negative sumPartner means net refunds on partner-split items → I owe partner', () => {
+  // Refunds on partner-split items came back to my card → I owe partner that money.
+  // Critically: my own sumMy (10,991.53) is NOT added to the debt.
+  assert.equal(rawNetForRow(makeRow({ sumMy: 10_991.53, sumPartner: -7_273.64 })), -7_273.64);
+});
+
+test('rawNetForRow: ownershipType is irrelevant under single-payer', () => {
+  // Whether the auto-classifier tagged the row 'me' / 'partner' / 'shared' / 'contact',
+  // the uploader paid → net is always sumPartner.
+  assert.equal(rawNetForRow(makeRow({ ownershipType: 'me', sumPartner: 100 })), 100);
+  assert.equal(rawNetForRow(makeRow({ ownershipType: 'partner', sumPartner: 100 })), 100);
+  assert.equal(rawNetForRow(makeRow({ ownershipType: 'shared', sumPartner: 100 })), 100);
+  assert.equal(rawNetForRow(makeRow({ ownershipType: 'contact', ownershipContactId: 1, sumPartner: 100 })), 100);
+});
+
+test('rawNetForRow: zero / null sumPartner → 0', () => {
+  assert.equal(rawNetForRow(makeRow({ sumPartner: 0 })), 0);
+  assert.equal(rawNetForRow(makeRow({ sumPartner: null })), 0);
+});
+
+// applySettlements: only contact-tagged rows can match a settlement (settlements carry a contactId).
+// Settlement signs: iPaid raises net (I paid partner → they're more in credit with me).
+//                   partnerPaid lowers net (partner paid me → less in credit).
+
+test('applySettlements: contact row + I paid partner → net rises', () => {
+  // Partner's share = 100 → partner owes me 100. I paid them 30 → they owe me 130 (or equivalently
+  // I have +30 credit waiting to come back).
+  const rows = [makeRow({ ownershipType: 'contact', ownershipContactId: 1, contactName: 'Sam', sumPartner: 100 })];
   const settlements: SettlementSummary[] = [
-    { contactId: 1, currency: 'CAD', iPaid: 50, partnerPaid: 0 },
+    { contactId: 1, currency: 'CAD', iPaid: 30, partnerPaid: 0 },
   ];
   const [adj] = applySettlements(rows, settlements);
   assert.equal(adj.rawNet, 100);
-  assert.equal(adj.settledAmount, 50);
-  assert.equal(adj.net, 150);
+  assert.equal(adj.settledAmount, 30);
+  assert.equal(adj.net, 130);
   assert.equal(adj.direction, 'partner_owes_me');
-  assert.equal(adj.settlementCount, 1);
 });
 
-test('applySettlements: partner_paid_me pushes net lower (I owe partner more)', () => {
-  // Raw: partner=100, my=200 → rawNet=-100 (I owe partner 100).
-  // Partner paid me 50 → they overpaid me → I now owe partner 150.
-  const rows = [makeRow({ sumMy: 200, sumPartner: 100 })];
+test('applySettlements: contact row + partner paid me → net falls', () => {
+  // Partner owes me 100. They paid me 40 → they now owe me 60.
+  const rows = [makeRow({ ownershipType: 'contact', ownershipContactId: 1, contactName: 'Sam', sumPartner: 100 })];
   const settlements: SettlementSummary[] = [
-    { contactId: 1, currency: 'CAD', iPaid: 0, partnerPaid: 50 },
+    { contactId: 1, currency: 'CAD', iPaid: 0, partnerPaid: 40 },
   ];
   const [adj] = applySettlements(rows, settlements);
-  assert.equal(adj.rawNet, -100);
-  assert.equal(adj.settledAmount, -50);
-  assert.equal(adj.net, -150);
-  assert.equal(adj.direction, 'i_owe_partner');
-  assert.equal(adj.settlementCount, 1);
+  assert.equal(adj.rawNet, 100);
+  assert.equal(adj.settledAmount, -40);
+  assert.equal(adj.net, 60);
+  assert.equal(adj.direction, 'partner_owes_me');
 });
 
-test('applySettlements: partner_paid_me of exactly the raw debt zeroes out to even', () => {
-  // Raw: rawNet=+100. Partner paid me 100 → fully settled → even.
-  const rows = [makeRow({ sumMy: 0, sumPartner: 100 })];
+test('applySettlements: settled to exactly zero is "even"', () => {
+  const rows = [makeRow({ ownershipType: 'contact', ownershipContactId: 1, contactName: 'Sam', sumPartner: 100 })];
   const settlements: SettlementSummary[] = [
     { contactId: 1, currency: 'CAD', iPaid: 0, partnerPaid: 100 },
   ];
   const [adj] = applySettlements(rows, settlements);
-  assert.equal(adj.rawNet, 100);
-  assert.equal(adj.settledAmount, -100);
   assert.equal(adj.net, 0);
   assert.equal(adj.direction, 'even');
 });
 
-test('applySettlements: orphan settlement with no matching row does NOT create a new row', () => {
-  // The shared spend has no rows for contact 1 / CAD. A recorded settlement
-  // for that contact should not surface as a new balance row — we only
-  // adjust existing rows.
-  const rows: RawPartnerRow[] = [];
-  const settlements: SettlementSummary[] = [
-    { contactId: 1, currency: 'CAD', iPaid: 25, partnerPaid: 0 },
-  ];
-  const adjusted = applySettlements(rows, settlements);
-  assert.equal(adjusted.length, 0);
-});
-
-test('applySettlements: settlement in a different currency does not adjust the row', () => {
-  // Settlements are currency-scoped. A USD settlement does not touch a CAD
-  // row even if it shares the same contact.
-  const rows = [makeRow({ currency: 'CAD', sumMy: 100, sumPartner: 200 })];
-  const settlements: SettlementSummary[] = [
-    { contactId: 1, currency: 'USD', iPaid: 50, partnerPaid: 0 },
-  ];
-  const [adj] = applySettlements(rows, settlements);
-  assert.equal(adj.settledAmount, 0);
-  assert.equal(adj.net, 100);
-  assert.equal(adj.rawNet, 100);
-  assert.equal(adj.settlementCount, 0);
-});
-
-test('applySettlements: legacy row without ownershipContactId gets no adjustment', () => {
-  // Settlements always carry a contactId, so legacy (non-contact) rows have
-  // nothing to match against.
-  const rows = [
-    makeRow({ ownershipType: 'legacy', ownershipContactId: null, contactName: null, sumMy: 50, sumPartner: 100 }),
-  ];
+test('applySettlements: me-owned row gets no settlement (no contactId)', () => {
+  // Settlements only attach to contact rows; the typical 'me' row passes through unchanged.
+  const rows = [makeRow({ sumMy: 10_991.53, sumPartner: -7_273.64 })];
   const settlements: SettlementSummary[] = [
     { contactId: 1, currency: 'CAD', iPaid: 999, partnerPaid: 0 },
   ];
   const [adj] = applySettlements(rows, settlements);
+  assert.equal(adj.rawNet, -7_273.64);
   assert.equal(adj.settledAmount, 0);
   assert.equal(adj.settlementCount, 0);
-  assert.equal(adj.net, 50);
+  assert.equal(adj.net, -7_273.64);
+  assert.equal(adj.direction, 'i_owe_partner');
 });
 
-test('applySettlements: both directions on same key collapse via signed sum', () => {
-  // iPaid=80, partnerPaid=30 → settledAmount = 50 (net I overpaid).
-  const rows = [makeRow({ sumMy: 0, sumPartner: 0 })];
+test('applySettlements: orphan settlement with no matching row does NOT create a new row', () => {
+  const adjusted = applySettlements([], [
+    { contactId: 1, currency: 'CAD', iPaid: 25, partnerPaid: 0 },
+  ]);
+  assert.equal(adjusted.length, 0);
+});
+
+test('applySettlements: settlement in a different currency does not adjust the row', () => {
+  const rows = [makeRow({ ownershipType: 'contact', ownershipContactId: 1, contactName: 'Sam', sumPartner: 100 })];
+  const settlements: SettlementSummary[] = [
+    { contactId: 1, currency: 'USD', iPaid: 50, partnerPaid: 0 },
+  ];
+  const [adj] = applySettlements(rows, settlements);
+  assert.equal(adj.rawNet, 100);
+  assert.equal(adj.settledAmount, 0);
+  assert.equal(adj.net, 100);
+  assert.equal(adj.settlementCount, 0);
+});
+
+test('applySettlements: both settlement directions on same key collapse via signed sum', () => {
+  const rows = [makeRow({ ownershipType: 'contact', ownershipContactId: 1, contactName: 'Sam', sumPartner: 0 })];
   const settlements: SettlementSummary[] = [
     { contactId: 1, currency: 'CAD', iPaid: 80, partnerPaid: 30 },
   ];
   const [adj] = applySettlements(rows, settlements);
+  assert.equal(adj.rawNet, 0);
   assert.equal(adj.settledAmount, 50);
   assert.equal(adj.net, 50);
   assert.equal(adj.direction, 'partner_owes_me');
-  // Both sides contributed → count both.
   assert.equal(adj.settlementCount, 2);
 });
 
-test('applySettlements: preserves rawNet alongside adjusted net', () => {
-  const rows = [makeRow({ sumMy: 100, sumPartner: 250 })];
+test('applySettlements: sub-cent diff is "even"', () => {
+  const rows = [makeRow({ ownershipType: 'contact', ownershipContactId: 1, contactName: 'Sam', sumPartner: 0.001 })];
   const settlements: SettlementSummary[] = [
-    { contactId: 1, currency: 'CAD', iPaid: 25, partnerPaid: 0 },
+    { contactId: 1, currency: 'CAD', iPaid: 0, partnerPaid: 0.005 },
   ];
   const [adj] = applySettlements(rows, settlements);
-  assert.equal(adj.rawNet, 150);
-  assert.equal(adj.net, 175);
+  assert.equal(adj.direction, 'even');
+});
+
+// Regression: the screenshot scenario the user reported on 2026-05-22.
+// One ownership='me' row with my=$10,991.53 (own spending) and partner=−$7,273.64 (refunds on
+// partner-split items that came back to my card). Pre-fix: net = −$18,265.17. Post-fix: net =
+// −$7,273.64 (I owe partner $7,273.64, the refund money that conceptually belongs to them).
+test('regression: me-owned with refunds on partner-split does NOT count own spending as debt', () => {
+  const rows = [makeRow({ sumMy: 10_991.53, sumPartner: -7_273.64 })];
+  const [adj] = applySettlements(rows, []);
+  assert.equal(adj.rawNet, -7_273.64);
+  assert.equal(adj.net, -7_273.64);
+  assert.equal(adj.direction, 'i_owe_partner');
+});
+
+// Household rollup: sum of `net` across rows should equal the actual debt to partner.
+test('applySettlements: rollup across multiple rows sums sumPartner totals', () => {
+  const rows = [
+    makeRow({ ownershipType: 'me', sumMy: 1_000, sumPartner: 250 }),
+    makeRow({ ownershipType: 'shared', sumMy: 500, sumPartner: 500 }),
+    makeRow({ ownershipType: 'contact', ownershipContactId: 1, contactName: 'Sam', sumMy: 0, sumPartner: -100 }),
+  ];
+  const adjusted = applySettlements(rows, []);
+  const rollup = adjusted.reduce((sum, r) => sum + r.net, 0);
+  // 250 (partner owes me their share of my-tagged) + 500 (partner's half of shared) − 100 (refund on contact-tagged)
+  assert.equal(rollup, 650);
 });
