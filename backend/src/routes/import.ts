@@ -378,15 +378,44 @@ router.post(
         totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
 
+      // Per-file try/catch so a single throw (e.g. a DB constraint
+      // violation that bubbled past the savepoint, an unexpected parser
+      // error) never kills the whole bundle response. Every file gets a
+      // result row; the response always includes the full `results`
+      // array, which the frontend's per-file table relies on for
+      // visibility into partial failures.
       const results: BundleFileResult[] = [];
       for (const file of files) {
-        const result = await importWsBundleFile({
-          buffer: file.buffer,
-          fileName: file.originalname,
-          householdId: household.id,
-          userId: user.id,
-        });
-        results.push(result);
+        try {
+          const result = await importWsBundleFile({
+            buffer: file.buffer,
+            fileName: file.originalname,
+            householdId: household.id,
+            userId: user.id,
+          });
+          results.push(result);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          logImportEvent('bundle_file_failed', {
+            file: file.originalname,
+            error: message,
+          });
+          results.push({
+            file: file.originalname,
+            wsid: null,
+            accountId: null,
+            accountName: null,
+            accountCreated: false,
+            inserted: 0,
+            insertedTransactions: 0,
+            insertedInvestmentActivities: 0,
+            skippedDuplicates: 0,
+            rowErrors: 0,
+            parseErrors: [],
+            warnings: [],
+            error: message,
+          });
+        }
       }
 
       const accountsCreated = results.filter((r) => r.accountCreated).length;
