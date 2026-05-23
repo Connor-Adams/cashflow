@@ -154,12 +154,17 @@ Railway tracks for deployment.
 
 **Rollback:**
 
+If branch protection isn't enabled on `production`:
+
 ```bash
 git push origin <older-tag>:refs/heads/production --force-with-lease
 ```
 
-Must be done by an account in the production branch protection allowlist (or
-by anyone if protection isn't configured).
+If branch protection IS enabled (recommended; only `github-actions[bot]` can
+push to `production`), this command will be rejected. Temporarily disable
+the protection rule in **Settings → Branches**, run the push, then
+re-enable. A dedicated `workflow_dispatch` rollback workflow that runs as
+the bot is a cleaner long-term option but not currently configured.
 
 ## Deploy
 
