@@ -25,6 +25,7 @@ import { toDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { deleteReq, getJson, postJson } from '../lib/api'
+import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { useSessionState } from '../lib/useSessionState'
 import type {
   Contact,
@@ -95,24 +96,6 @@ type DashboardSummarySubset = {
 }
 
 const DEFAULT_REPORTS_CURRENCY = 'CAD'
-
-/**
- * Filter rows to the active currency (or pass-through when currency is
- * empty) and sort by net spend desc, breaking ties on transaction count.
- * Pulled out to dedupe the merchant + account filter/sort useMemos.
- */
-function filterAndRankByNetSpend<
-  T extends { currency: string; netSpend: number; transactionCount: number },
->(rows: T[], currency: string): T[] {
-  return rows
-    .filter((row) => !currency || row.currency === currency)
-    .slice()
-    .sort((a, b) =>
-      b.netSpend === a.netSpend
-        ? b.transactionCount - a.transactionCount
-        : b.netSpend - a.netSpend
-    )
-}
 
 function getRelativeDateRange(days: number): { from: string; to: string } {
   const to = new Date()
@@ -245,12 +228,12 @@ export function ReportsPage() {
   // sorted by net spend desc. Drives the comprehensive tables linked from
   // the Dashboard bento "View all" → /reports#merchants and #accounts.
   const filteredMerchantSummaries = useMemo(
-    () => filterAndRankByNetSpend(merchantSummaries, currency),
+    () => rankByNetSpend(merchantSummaries, currency),
     [merchantSummaries, currency]
   )
 
   const filteredAccountSummaries = useMemo(
-    () => filterAndRankByNetSpend(accountSummaries, currency),
+    () => rankByNetSpend(accountSummaries, currency),
     [accountSummaries, currency]
   )
 

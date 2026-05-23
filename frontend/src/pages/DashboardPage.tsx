@@ -26,6 +26,7 @@ import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMont
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { formatMoney } from '../lib/formatMoney'
+import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import { toDateInputValue } from '../lib/dateInput'
@@ -570,29 +571,15 @@ export function DashboardPage() {
     }
   }, [businessReportData])
 
-  const merchantReportData = useMemo(() => {
-    const rows = data?.merchantSummaries ?? []
-    return rows
-      .filter((row) => !currency || row.currency === currency)
-      .slice()
-      .sort((a, b) =>
-        b.netSpend === a.netSpend
-          ? b.transactionCount - a.transactionCount
-          : b.netSpend - a.netSpend
-      )
-  }, [data?.merchantSummaries, currency])
+  const merchantReportData = useMemo(
+    () => rankByNetSpend(data?.merchantSummaries ?? [], currency),
+    [data?.merchantSummaries, currency]
+  )
 
-  const accountReportData = useMemo(() => {
-    const rows = data?.accountSummaries ?? []
-    return rows
-      .filter((row) => !currency || row.currency === currency)
-      .slice()
-      .sort((a, b) =>
-        b.netSpend === a.netSpend
-          ? b.transactionCount - a.transactionCount
-          : b.netSpend - a.netSpend
-      )
-  }, [data?.accountSummaries, currency])
+  const accountReportData = useMemo(
+    () => rankByNetSpend(data?.accountSummaries ?? [], currency),
+    [data?.accountSummaries, currency]
+  )
 
   const reviewQueueData = useMemo(() => {
     const rows = data?.reviewQueue ?? []
