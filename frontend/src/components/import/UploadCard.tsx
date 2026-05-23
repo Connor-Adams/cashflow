@@ -73,6 +73,25 @@ type BundleUploadResponse = {
   results: BundleFileResult[]
 }
 
+/**
+ * Per-file result from the Wealthsimple holdings/positions endpoint
+ * (POST /api/import/upload-holdings). Mirrors backend `HoldingsImportResult`.
+ */
+type HoldingsResult = {
+  file: string
+  statementDate: string | null
+  totalRows: number
+  inserted: number
+  updated: number
+  skippedUnknownAccount: number
+  warnings: string[]
+  errors: string[]
+  accountsAffected: number
+}
+
+/** Which upload form is currently rendered. */
+type UploadMode = 'standard' | 'bundle' | 'holdings'
+
 type CsvProfileOption = { id: string; label: string; hint: string }
 
 type PreviewResponse = StatementPreview
@@ -158,7 +177,7 @@ export function UploadCard({
   const [runningFolderImport, setRunningFolderImport] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null)
-  const [bundleMode, setBundleMode] = useState(false)
+  const [mode, setMode] = useState<UploadMode>('standard')
   const [bundleUploading, setBundleUploading] = useState(false)
   const [bundleResults, setBundleResults] = useState<BundleFileResult[] | null>(
     null,
@@ -167,8 +186,17 @@ export function UploadCard({
     variant: AlertVariant
     title: string
   } | null>(null)
+  const [holdingsUploading, setHoldingsUploading] = useState(false)
+  const [holdingsResult, setHoldingsResult] = useState<HoldingsResult | null>(
+    null,
+  )
+  const [holdingsFeedback, setHoldingsFeedback] = useState<{
+    variant: AlertVariant
+    title: string
+  } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const bundleFileRef = useRef<HTMLInputElement>(null)
+  const holdingsFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void getJson<CsvProfileOption[]>('/api/import/profiles')
@@ -372,6 +400,50 @@ export function UploadCard({
     }
   }
 
+  async function onHoldingsUpload(e: FormEvent) {
+    e.preventDefault()
+    const input = holdingsFileRef.current
+    const file = input?.files?.[0]
+    if (!file) {
+      setHoldingsFeedback({
+        variant: 'error',
+        title: 'Choose a Wealthsimple holdings CSV first.',
+      })
+      return
+    }
+    setHoldingsUploading(true)
+    setHoldingsFeedback(null)
+    setHoldingsResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const result = await postFormData<HoldingsResult>(
+        '/api/import/upload-holdings',
+        fd,
+      )
+      setHoldingsResult(result)
+      const dateStr = result.statementDate
+        ? `as of ${result.statementDate}`
+        : 'statement date unknown'
+      const counts = `${result.inserted} new, ${result.updated} updated, ${result.skippedUnknownAccount} skipped (unknown account)`
+      const errCount = result.errors.length
+      const title = `Holdings import complete — ${result.totalRows} row(s) ${dateStr}; ${counts}; ${result.accountsAffected} account(s) touched${errCount ? `, ${errCount} error(s)` : ''}.`
+      setHoldingsFeedback({
+        variant: errCount > 0 ? 'error' : result.skippedUnknownAccount > 0 ? 'warning' : 'success',
+        title,
+      })
+      if (input) input.value = ''
+      onCommitted()
+    } catch (e) {
+      setHoldingsFeedback({
+        variant: 'error',
+        title: e instanceof Error ? e.message : 'Holdings upload failed',
+      })
+    } finally {
+      setHoldingsUploading(false)
+    }
+  }
+
   async function onRunFolderImport() {
     try {
       setRunningFolderImport(true)
@@ -403,7 +475,7 @@ export function UploadCard({
     }
   }
 
-  if (bundleMode) {
+  if (mode === 'bundle') {
     return (
       <form
         className="card uploadCard transactionsPanel"
@@ -423,7 +495,7 @@ export function UploadCard({
             type="button"
             variant="secondary"
             onClick={() => {
-              setBundleMode(false)
+              setMode('standard')
               setBundleFeedback(null)
               setBundleResults(null)
             }}
@@ -507,6 +579,99 @@ export function UploadCard({
     )
   }
 
+  if (mode === 'holdings') {
+    return (
+      <form
+        className="card uploadCard transactionsPanel"
+        onSubmit={onHoldingsUpload}
+      >
+        <div className="transactionsPanelHeader">
+          <div>
+            <h2>Wealthsimple holdings (positions snapshot)</h2>
+            <p className="muted">
+              Drop the holdings/positions report exported from Wealthsimple
+              (single CSV, all accounts).  The statement date is read from the
+              trailing <code>“As of YYYY-MM-DD …”</code> line in the file;
+              each holding becomes a <code>HoldingSnapshot</code> row keyed by
+              the WS account ID.  Re-uploading the same date updates the
+              existing rows.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setMode('standard')
+              setHoldingsFeedback(null)
+              setHoldingsResult(null)
+            }}
+          >
+            Switch to standard upload
+          </Button>
+        </div>
+        <div className="formGrid transactionsFilterGrid">
+          <Label className="filePick">
+            Holdings report
+            <Input
+              ref={holdingsFileRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={() => {
+                setHoldingsFeedback(null)
+                setHoldingsResult(null)
+              }}
+            />
+          </Label>
+        </div>
+        <div className="row transactionsActionRow">
+          <Button type="submit" disabled={holdingsUploading}>
+            {holdingsUploading ? 'Importing holdings…' : 'Import holdings'}
+          </Button>
+        </div>
+        {holdingsFeedback && (
+          <Alert
+            className="mt-3"
+            variant={holdingsFeedback.variant}
+            title={holdingsFeedback.title}
+          />
+        )}
+        {holdingsResult && (
+          <div className="tableWrap">
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Statement date</TableHead>
+                  <TableHead>Total rows</TableHead>
+                  <TableHead>Inserted</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead>Skipped (unknown account)</TableHead>
+                  <TableHead>Accounts touched</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow>
+                  <TableCell>{holdingsResult.statementDate ?? '—'}</TableCell>
+                  <TableCell>{holdingsResult.totalRows}</TableCell>
+                  <TableCell>{holdingsResult.inserted}</TableCell>
+                  <TableCell>{holdingsResult.updated}</TableCell>
+                  <TableCell>{holdingsResult.skippedUnknownAccount}</TableCell>
+                  <TableCell>{holdingsResult.accountsAffected}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+            {holdingsResult.warnings.length > 0 && (
+              <ul className="parseErrorList" aria-label="Holdings import warnings">
+                {holdingsResult.warnings.slice(0, 8).map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </form>
+    )
+  }
+
   return (
     <form className="card uploadCard transactionsPanel" onSubmit={onUpload}>
       <div className="transactionsPanelHeader">
@@ -523,12 +688,23 @@ export function UploadCard({
             type="button"
             variant="secondary"
             onClick={() => {
-              setBundleMode(true)
+              setMode('bundle')
               setUploadFeedback(null)
               setPreviewData(null)
             }}
           >
             Wealthsimple bundle
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setMode('holdings')
+              setUploadFeedback(null)
+              setPreviewData(null)
+            }}
+          >
+            Wealthsimple holdings
           </Button>
           <Button
             type="button"

@@ -6,6 +6,7 @@ import {
   runImport,
   importCsvFile,
   importWsBundleFile,
+  importWsHoldingsFile,
   type BundleFileResult,
 } from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
@@ -51,6 +52,23 @@ const statementUpload = multer({
 const bundleUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 120 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.csv')) {
+      const e = new Error('Only .csv files are allowed') as Error & { status?: number };
+      e.status = 400;
+      cb(e);
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+// Wealthsimple holdings/positions report is always a single CSV (one report
+// covers all accounts).  Cap at 5 MB; tight `files: 1` so the route fails
+// loudly if the frontend ever tries to multi-attach by mistake.
+const holdingsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (!file.originalname.toLowerCase().endsWith('.csv')) {
       const e = new Error('Only .csv files are allowed') as Error & { status?: number };
@@ -427,6 +445,55 @@ router.post(
       });
 
       res.json({ results });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/upload-holdings',
+  importUploadLimiter,
+  (req, res, next) => {
+    holdingsUpload.single('file')(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'Missing file field "file"' });
+        return;
+      }
+      const { user, household } = currentAuth(req);
+      logImportEvent('holdings_started', {
+        fileName: req.file.originalname,
+        fileSizeBytes: req.file.size,
+      });
+
+      const result = await importWsHoldingsFile({
+        buffer: req.file.buffer,
+        fileName: req.file.originalname,
+        householdId: household.id,
+        userId: user.id,
+      });
+
+      logImportEvent('holdings_completed', {
+        fileName: req.file.originalname,
+        statementDate: result.statementDate,
+        totalRows: result.totalRows,
+        inserted: result.inserted,
+        updated: result.updated,
+        skippedUnknownAccount: result.skippedUnknownAccount,
+        accountsAffected: result.accountsAffected,
+        errors: result.errors.length,
+      });
+
+      res.json(result);
     } catch (e) {
       next(e);
     }
