@@ -22,8 +22,8 @@ const csvUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 20 },
   fileFilter: (_req, file, cb) => {
-    if (!file.originalname.toLowerCase().endsWith('.csv')) {
-      const e = new Error('Only .csv files are allowed') as Error & { status?: number };
+    if (!/\.(csv|pdf)$/i.test(file.originalname)) {
+      const e = new Error('Only .csv and .pdf files are allowed') as Error & { status?: number };
       e.status = 400;
       cb(e);
       return;
@@ -36,8 +36,8 @@ const statementUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 20 },
   fileFilter: (_req, file, cb) => {
-    if (!/\.(csv|ofx|qfx)$/i.test(file.originalname)) {
-      const e = new Error('Only .csv, .ofx, and .qfx files are allowed') as Error & { status?: number };
+    if (!/\.(csv|ofx|qfx|pdf)$/i.test(file.originalname)) {
+      const e = new Error('Only .csv, .ofx, .qfx, and .pdf files are allowed') as Error & { status?: number };
       e.status = 400;
       cb(e);
       return;
@@ -266,8 +266,8 @@ router.post(
           result && typeof result === 'object' ? result.profileInferred : undefined,
         inserted: result && typeof result === 'object' ? result.inserted : undefined,
         skipped:
-          result && typeof result === 'object' ? result.skipped : undefined,
-        reason: result && typeof result === 'object' ? result.reason : undefined,
+          result && typeof result === 'object' ? (result as Record<string, unknown>).skipped : undefined,
+        reason: result && typeof result === 'object' ? (result as Record<string, unknown>).reason : undefined,
       });
       res.json(result);
     } catch (e) {
