@@ -7,6 +7,10 @@ const PROCESSOR_PREFIXES: RegExp[] = [
   /^GOOGLE\s+\*\s*/i,
   /^DD\s*\*\s*/i,
   /^GH\s*\*\s*/i,
+  /^IC\s*\*\s*/i,
+  /^CTLP\s*\*\s*/i,
+  /^INTUIT\s*\*\s*/i,
+  /^PADDLE\.NET\s*\*\s*/i,
 ];
 
 const TRAILING_AMZN_MKTP_ID = /\*[A-Z0-9]{4,}$/;

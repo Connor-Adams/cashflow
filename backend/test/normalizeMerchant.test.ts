@@ -112,3 +112,20 @@ test('normalizeMerchant does not collapse non-duplicate tails', () => {
 test('normalizeMerchant duplicate-tail collapse is case-insensitive', () => {
   assert.equal(normalizeMerchant('SLAP BURGERS Guelph guelph'), 'SLAP BURGERS Guelph');
 });
+
+test('normalizeMerchant strips IC* (Instacart) prefix', () => {
+  assert.equal(normalizeMerchant('IC* INSTACART*SUBSCRIP HALIFAX'), 'INSTACART*SUBSCRIP HALIFAX');
+});
+
+test('normalizeMerchant strips CTLP* prefix', () => {
+  assert.equal(normalizeMerchant('CTLP*CS VENDING SOLUTI'), 'CS VENDING SOLUTI');
+});
+
+test('normalizeMerchant strips INTUIT * prefix', () => {
+  assert.equal(normalizeMerchant('INTUIT *QBOOKS ONLINE'), 'QBOOKS ONLINE');
+});
+
+test('normalizeMerchant strips PADDLE.NET* prefix', () => {
+  assert.equal(normalizeMerchant('PADDLE.NET* MTW LONDON'), 'MTW LONDON');
+  assert.equal(normalizeMerchant('PADDLE.NET* BTTRDISPLY LONDON'), 'BTTRDISPLY LONDON');
+});
