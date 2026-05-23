@@ -75,3 +75,108 @@ test('unknown: positive amount with no narrative cue', () => {
   });
   assert.equal(out[0].fields.txnType, 'unknown');
 });
+
+// === Wealthsimple narrative patterns ===
+// These were added when the bundle importer started routing the same
+// descriptions through the regular /upload path. Each test guards against
+// regression to the pre-PR-#59 behavior where every negative-amount WS row
+// defaulted to 'purchase' and bloated the dashboard totalSpend metric.
+
+test('transfer: pre-authorized debit (AFT_OUT narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Pre-authorized Debit to AMEX BILL PYMT',
+    merchantClean: 'Pre-authorized Debit to AMEX BILL PYMT',
+    amount: -2959.34,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: pre-authorized credit', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Pre-authorized Credit from EMPLOYER',
+    merchantClean: 'Pre-authorized Credit from EMPLOYER',
+    amount: 5000,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: cash sent (P2P_SENT narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Cash sent',
+    merchantClean: 'Cash sent',
+    amount: -2500,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: cash received (P2P_RECEIVED narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Cash received',
+    merchantClean: 'Cash received',
+    amount: 100,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: direct deposit (AFT_IN narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Direct deposit from ADAMS GREENE HO',
+    merchantClean: 'Direct deposit from ADAMS GREENE HO',
+    amount: 207.4,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('fee: subscription fee paid for period', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Subscription fee paid for period 2025-01-01 to 2025-01-31',
+    merchantClean: 'Subscription fee paid for period 2025-01-01 to 2025-01-31',
+    amount: -10,
+  });
+  assert.equal(out[0].fields.txnType, 'fee');
+});
+
+test('fee: staking reward fee', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Fee paid on DOT-Polkadot staking reward fee',
+    merchantClean: 'Fee paid on DOT-Polkadot staking reward fee',
+    amount: -0.05,
+  });
+  assert.equal(out[0].fields.txnType, 'fee');
+});
+
+test('investment: bought N shares (BUY narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: Bought 0.0666 shares (executed at 2025-04-04)',
+    merchantClean: 'XEQT - iShares Core Equity ETF Portfolio: Bought 0.0666 shares (executed at 2025-04-04)',
+    amount: -2500,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('investment: sold N shares (SELL narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: Sold 187.4063 shares at $40.02 per share (executed at 2025-12-31)',
+    merchantClean: 'XEQT - iShares Core Equity ETF Portfolio: Sold 187.4063 shares at $40.02 per share (executed at 2025-12-31)',
+    amount: 7500.51,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('dividend: cash dividend distribution (DIV narrative)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: Cash dividend distribution, received on 2026-01-05',
+    merchantClean: 'XEQT - iShares Core Equity ETF Portfolio: Cash dividend distribution, received on 2026-01-05',
+    amount: 146.47,
+  });
+  assert.equal(out[0].fields.txnType, 'dividend');
+});
+
+test('interest: stock lending monthly interest', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Stock lending monthly interest payment',
+    merchantClean: 'Stock lending monthly interest payment',
+    amount: 0.01,
+  });
+  assert.equal(out[0].fields.txnType, 'interest');
+});

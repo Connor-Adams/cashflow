@@ -11,6 +11,7 @@ import { saveStatementPreview } from './statementPreviewStore';
 import { extractPdfLines } from './pdf/extractLines';
 import { findPdfParser, registerBuiltInPdfParsers } from './pdf/registry';
 import { parseWsInvestRow, type WsRow } from './wealthsimpleInvestParse';
+import { wsTxCodeToTxnType } from './wealthsimpleTxnType';
 import type {
   NormalizedCashTransaction,
   NormalizedHoldingSnapshot,
@@ -507,7 +508,21 @@ export async function parseStatementFile(opts: {
           merchantClean: v.merchantClean,
           sourceReference: v.sourceReference,
         });
-        base.transactions.push({ ...v, sourceRowFingerprint: fp });
+        // Wealthsimple monthly statements carry an authoritative TX code in
+        // the `transaction` column (BUY, SELL, DIV, AFT_IN, AFT_OUT, CONT,
+        // P2P_SENT, P2P_RECEIVED, FEE, etc). Stamp the override here so the
+        // commit pipeline persists the correct txnType instead of letting
+        // the narrative regex default to 'purchase' for negative amounts.
+        // Codes we don't have a stable opinion on return null — those fall
+        // through to enrichment.
+        const overrideTxnType = wsMonthly
+          ? wsTxCodeToTxnType(String(row['transaction'] ?? row['Transaction'] ?? ''))
+          : null;
+        base.transactions.push({
+          ...v,
+          sourceRowFingerprint: fp,
+          ...(overrideTxnType ? { overrideTxnType } : {}),
+        });
         previewRows.push({
           rowIndex: index + 1,
           ok: true,
