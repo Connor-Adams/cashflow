@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { extractPdfLines } from '../src/import/pdf/extractLines';
-import { parseCibcCostcoHeader, parseCibcCostcoRow, inferYearForMonthDay } from '../src/import/pdf/cibcCostcoMastercard';
+import { parseCibcCostcoHeader, parseCibcCostcoRow, inferYearForMonthDay, cibcCostcoMastercardParser } from '../src/import/pdf/cibcCostcoMastercard';
 
 const fixturesDir = join(__dirname, 'fixtures', 'pdf');
 
@@ -132,4 +132,62 @@ test('parseCibcCostcoRow — interest row', () => {
   assert.equal(row.date, '2025-11-12');
   assert.equal(row.merchantRaw, 'REGULAR PURCHASES');
   assert.equal(row.amount, -0.07);
+});
+
+test('parser end-to-end — November 2025 statement (3 sub-sections present)', async () => {
+  const lines = await loadFixture('cibc-costco-2025-11-12.pdf');
+  const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(out.transactions.length, 3);
+
+  const byDate = [...out.transactions].sort((a, b) => a.date.localeCompare(b.date));
+  assert.equal(byDate[0].date, '2025-10-24');
+  assert.equal(byDate[0].amount, -3.15);
+  assert.ok(byDate[0].merchantRaw.includes('Google One'));
+
+  const payment = out.transactions.find((t) => t.merchantRaw.includes('PAYMENT THANK YOU'));
+  assert.ok(payment);
+  assert.equal(payment!.amount, 10);
+
+  const interest = out.transactions.find((t) => t.merchantRaw === 'REGULAR PURCHASES');
+  assert.ok(interest);
+  assert.equal(interest!.amount, -0.07);
+
+  assert.ok(out.transactions.every((t) => t.currency === 'CAD'));
+  assert.deepEqual(out.parseErrors, []);
+});
+
+test('parser end-to-end — December 2025 statement (payments empty, charges present)', async () => {
+  const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
+  const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(out.transactions.length, 5);
+  const total = out.transactions.reduce((s, t) => s + t.amount, 0);
+  assert.equal(Math.round(total * 100) / 100, -580.67);
+});
+
+test('parser end-to-end — January 2026 statement (rollover period, payment + 5 charges)', async () => {
+  const lines = await loadFixture('cibc-costco-2026-01-12.pdf');
+  const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(out.transactions.length, 6);
+
+  const payment = out.transactions.find((t) => t.merchantRaw.includes('PAYMENT THANK YOU'));
+  assert.equal(payment?.date, '2025-12-29');
+  assert.equal(payment?.amount, 577.04);
+
+  const renewal = out.transactions.find((t) => t.merchantRaw.includes('ANNUAL RENEWAL'));
+  assert.equal(renewal?.date, '2026-01-02');
+  assert.equal(renewal?.amount, -146.90);
+
+  const chargeSum = out.transactions
+    .filter((t) => t.amount < 0)
+    .reduce((s, t) => s + t.amount, 0);
+  assert.equal(Math.round(chargeSum * 100) / 100, -2278);
+});
+
+test('parser produces a deterministic merchantClean (uppercased, collapsed whitespace, no trailing province)', async () => {
+  const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
+  const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
+  const costco = out.transactions.find((t) => t.merchantRaw.includes('COSTCO WHOLESALE'));
+  assert.ok(costco);
+  assert.ok(!/\s{2,}/.test(costco!.merchantRaw));
+  assert.ok(typeof costco!.merchantClean === 'string' && costco!.merchantClean.length > 0);
 });

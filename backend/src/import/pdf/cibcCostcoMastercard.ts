@@ -1,4 +1,5 @@
-import type { PdfLine, PdfParser } from './types';
+import type { PdfLine, PdfParser, PdfParseResult } from './types';
+import { normalizeMerchant } from '../normalizeMerchant';
 
 const MONTHS: Record<string, number> = {
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
@@ -213,11 +214,114 @@ export function parseCibcCostcoRow(
   return { date, merchantRaw, amount };
 }
 
+const SECTION_HEADERS: Record<CibcCostcoSection, RegExp> = {
+  payments: /^Your payments$/,
+  interest: /^Your interest$/,
+  charges: /^Your new charges and credits$/,
+};
+
+const SECTION_TOTAL_PATTERNS: Record<CibcCostcoSection, RegExp> = {
+  payments: /^Total payments/i,
+  interest: /^Total interest/i,
+  charges: /^Total for /i,
+};
+
+const SECTION_SKIP_PATTERNS: RegExp[] = [
+  /^Trans\s*$/, /^Post\s*$/, /^date\b/, /^Description\b/, /^Amount\(\$\)/,
+  /^Spend Categories/, /^Annual interest rate/,
+  /^Card number 5160 X{4} X{4} \d{4}$/,
+  /^Ý Identifies transactions/, /^same rate\.$/,
+];
+
+function splitSections(lines: PdfLine[]): Record<CibcCostcoSection, PdfLine[]> {
+  const buckets: Record<CibcCostcoSection, PdfLine[]> = {
+    payments: [], interest: [], charges: [],
+  };
+  let current: CibcCostcoSection | null = null;
+  for (const line of lines) {
+    const trimmed = line.text.trim();
+
+    const startedHere = (Object.keys(SECTION_HEADERS) as CibcCostcoSection[])
+      .find((s) => SECTION_HEADERS[s].test(trimmed));
+    if (startedHere) { current = startedHere; continue; }
+
+    if (current) {
+      if (SECTION_TOTAL_PATTERNS[current].test(trimmed)) {
+        current = null;
+        continue;
+      }
+      if (SECTION_SKIP_PATTERNS.some((re) => re.test(trimmed))) continue;
+      if (/^[A-Z][a-z]{2}\s+\d{1,2}\s/.test(trimmed)) {
+        buckets[current].push(line);
+      }
+    }
+  }
+  return buckets;
+}
+
+function stripProvinceSuffix(s: string): string {
+  return s.replace(/\s+(?:AB|BC|MB|NB|NL|NS|NT|NU|ON|PE|QC|SK|YT)$/, '');
+}
+
 export const cibcCostcoMastercardParser: PdfParser = {
   id: 'cibc_costco_mastercard',
   label: 'CIBC Costco Mastercard',
   sniff: (lines) => lines.some((l) => l.text.includes('CIBC Costco Mastercard')),
-  parse: () => {
-    throw new Error('cibc_costco_mastercard parser not implemented yet');
+  parse: (lines, ctx) => {
+    const header = parseCibcCostcoHeader(lines);
+    const period: Period = { start: header.periodStart, end: header.periodEnd };
+    const sections = splitSections(lines);
+
+    const transactions: PdfParseResult['transactions'] = [];
+    const warnings: string[] = [];
+    const parseErrors: PdfParseResult['parseErrors'] = [];
+
+    const sectionTotals: Partial<Record<CibcCostcoSection, number>> = {};
+    for (const line of lines) {
+      const t = line.text.trim();
+      for (const sec of Object.keys(SECTION_TOTAL_PATTERNS) as CibcCostcoSection[]) {
+        if (SECTION_TOTAL_PATTERNS[sec].test(t)) {
+          const m = /\$?([\d,]+\.\d{2})\s*(CR)?$/.exec(t);
+          if (m) {
+            const v = Number(m[1].replace(/,/g, ''));
+            sectionTotals[sec] = m[2] ? -v : v;
+          }
+        }
+      }
+    }
+
+    (Object.keys(sections) as CibcCostcoSection[]).forEach((sec) => {
+      let parsedSum = 0;
+      for (let i = 0; i < sections[sec].length; i++) {
+        const line = sections[sec][i];
+        try {
+          const row = parseCibcCostcoRow(line.text, period, sec);
+          const merchantStripped = stripProvinceSuffix(row.merchantRaw).trim();
+          const merchantClean = normalizeMerchant(merchantStripped);
+          transactions.push({
+            date: row.date,
+            merchantRaw: row.merchantRaw,
+            merchantClean,
+            amount: row.amount,
+            currency: ctx.defaultCurrency,
+            sourceReference: null,
+          });
+          parsedSum += Math.abs(row.amount);
+        } catch (err) {
+          parseErrors.push({ rowIndex: i + 1, message: (err as Error).message });
+        }
+      }
+      const total = sectionTotals[sec];
+      if (total !== undefined) {
+        const diff = Math.abs(Math.abs(total) - parsedSum);
+        if (diff > 0.01) {
+          warnings.push(
+            `Section "${sec}" sum mismatch: parsed ${parsedSum.toFixed(2)} vs printed total ${total.toFixed(2)}`,
+          );
+        }
+      }
+    });
+
+    return { transactions, warnings, parseErrors };
   },
 };
