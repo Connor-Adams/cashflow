@@ -3,7 +3,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
@@ -19,7 +18,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
-import { StatCard } from '@/components/ui/stat-card'
+import { BentoTile } from '@/components/dashboard/BentoTile'
+import { HeroTile } from '@/components/dashboard/HeroTile'
+import { KpiStack } from '@/components/dashboard/KpiStack'
 import {
   Table,
   TableBody,
@@ -149,32 +150,37 @@ type AiInsightsResp = {
   insights: AiInsight[]
 }
 
+// Ordinal palette for the multi-currency line chart. Each entry resolves
+// against the active theme (Honey & Ink dual-mode tokens in index.css).
 const LINE_COLORS = [
-  'var(--primary)',
-  '#94a3b8',
-  '#f59e0b',
-  '#22c55e',
-  '#8b5cf6',
-  '#ec4899',
+  'var(--chart-line-1)',  // amber
+  'var(--chart-line-2)',  // jade
+  'var(--chart-line-3)',  // plum
+  'var(--chart-line-4)',  // rust
+  'var(--chart-line-5)',  // steel
+  'var(--chart-line-6)',  // mauve
 ]
 const DEFAULT_DASHBOARD_CURRENCY = 'CAD'
-const BUSINESS_COLOR = '#f59e0b'
-const PERSONAL_COLOR = '#22c55e'
 const CHART_TOOLTIP_STYLE = {
-  backgroundColor: 'rgba(11, 16, 22, 0.96)',
-  border: '1px solid rgba(119, 167, 255, 0.28)',
+  backgroundColor: 'var(--popover)',
+  border: '1px solid var(--border)',
   borderRadius: '14px',
-  boxShadow: '0 18px 40px rgba(0, 0, 0, 0.4)',
-  color: '#eef3f8',
+  boxShadow: 'var(--shadow)',
+  color: 'var(--popover-foreground)',
 }
 const CHART_TOOLTIP_LABEL_STYLE = {
-  color: '#eef3f8',
+  color: 'var(--popover-foreground)',
   fontWeight: 600,
   marginBottom: '0.35rem',
 }
 const CHART_TOOLTIP_ITEM_STYLE = {
-  color: '#eef3f8',
+  color: 'var(--popover-foreground)',
   padding: 0,
+}
+// Cursor highlight rendered behind the focused datum on hover. The default is
+// near-white which becomes invisible on a white card in light mode.
+const CHART_TOOLTIP_CURSOR = {
+  fill: 'color-mix(in oklch, var(--accent) 30%, transparent)',
 }
 
 function parseDateInput(value: string): Date | null {
@@ -409,7 +415,6 @@ export function DashboardPage() {
       {
         label: string
         tone: 'business' | 'personal'
-        fill: string
         totalSpend: number
         totalCredits: number
         netSpend: number
@@ -421,7 +426,6 @@ export function DashboardPage() {
       const existing = byFlag.get(key) ?? {
         label: key,
         tone: row.business ? 'business' : 'personal',
-        fill: row.business ? BUSINESS_COLOR : PERSONAL_COLOR,
         totalSpend: 0,
         totalCredits: 0,
         netSpend: 0,
@@ -439,7 +443,6 @@ export function DashboardPage() {
       businessReportData.find((row) => row.tone === 'business') ?? {
         label: 'Business',
         tone: 'business' as const,
-        fill: BUSINESS_COLOR,
         totalSpend: 0,
         totalCredits: 0,
         netSpend: 0,
@@ -448,7 +451,6 @@ export function DashboardPage() {
       businessReportData.find((row) => row.tone === 'personal') ?? {
         label: 'Personal',
         tone: 'personal' as const,
-        fill: PERSONAL_COLOR,
         totalSpend: 0,
         totalCredits: 0,
         netSpend: 0,
@@ -727,186 +729,175 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
-      <section className="dashboardStats" aria-busy={loading}>
-        <StatCard
-          label="Total spend"
-          value={summaryStats.spendLabel}
-          hint={`Charges only (absolute values). ${summaryStats.moneyHint}`}
-          delta={hasComparisonPeriod ? summaryStats.spendDeltaLabel : undefined}
-          metricKind="spend"
-        />
-        <StatCard
-          label="Refunds / credits"
-          value={summaryStats.creditsLabel}
-          hint="Positive amounts excluding payments and transfers."
-          delta={hasComparisonPeriod ? summaryStats.creditsDeltaLabel : undefined}
-          metricKind="gain"
-        />
-        <StatCard
-          label="Payments / transfers"
-          value={summaryStats.paymentsLabel}
-          hint="Card payments and transfer-like inflows, tracked separately."
-          delta={hasComparisonPeriod ? summaryStats.paymentsDeltaLabel : undefined}
-          metricKind="neutral"
-        />
-        <StatCard
-          label="Net spend"
-          value={summaryStats.netSpendLabel}
-          hint="Spend minus refunds/credits. Payments excluded."
-          delta={hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined}
-          metricKind="spend"
-        />
-        <StatCard
-          label="Transactions"
-          value={summaryStats.txCount}
-          hint="Rows in current filters"
-          delta={hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined}
-          metricKind="neutral"
-        />
-        <StatCard
-          label="Merchants"
-          value={summaryStats.merchantCount}
-          hint="Distinct merchants in the current filters"
-          metricKind="neutral"
-        />
-        <StatCard
-          label="Accounts"
-          value={summaryStats.accountCount}
-          hint="Accounts contributing activity in this view"
-          metricKind="neutral"
-        />
-      </section>
+      <div className="dashboardBento" aria-busy={loading}>
+        <BentoTile
+          span={8}
+          rows={2}
+          variant="hero"
+          aria-busy={loading}
+          aria-label="This period at a glance"
+        >
+          <HeroTile
+            netSpendLabel={summaryStats.netSpendLabel}
+            netSpendDelta={
+              hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined
+            }
+            subMetrics={[
+              {
+                label: 'Spend',
+                value: summaryStats.spendLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.spendDeltaLabel
+                  : undefined,
+                metricKind: 'spend',
+              },
+              {
+                label: 'Refunds / credits',
+                value: summaryStats.creditsLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.creditsDeltaLabel
+                  : undefined,
+                metricKind: 'gain',
+              },
+              {
+                label: 'Payments / transfers',
+                value: summaryStats.paymentsLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.paymentsDeltaLabel
+                  : undefined,
+                metricKind: 'neutral',
+              },
+            ]}
+            comparisonHint={summaryStats.comparisonHint}
+            moneyHint={summaryStats.moneyHint}
+            sparklineData={monthlyBreakdownData.map((m) => ({
+              month: m.month,
+              value: m.netSpend,
+            }))}
+          />
+        </BentoTile>
 
-      {aiInsights && (
-        <section className="card dashboardChartCard" aria-busy={loading}>
-          <h2>AI insights</h2>
-          <p className="muted">
-            Calculated from finalized {aiInsights.currency} transactions for{' '}
-            {aiInsights.period}; supporting transaction ids are shown for audit.
-          </p>
-          <div className="aiVisibilityList">
-            {aiInsights.insights.length === 0 ? (
-              <p className="emptyState">No AI insights for this period yet.</p>
-            ) : (
-              aiInsights.insights.map((insight) => (
-                <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
-                  <div className="aiVisibilityItemHeader">
-                    <strong>{insight.title}</strong>
-                    <span className="muted">{insight.severity}</span>
-                  </div>
-                  <p>{insight.summary}</p>
-                  <p className="muted">
-                    {insight.comparison} · {formatDashboardAmount(insight.amount)}
+        <BentoTile span={4} rows={2} aria-busy={loading} aria-label="Activity counts">
+          <KpiStack
+            items={[
+              {
+                label: 'Transactions',
+                value: summaryStats.txCount,
+                hint: 'Rows in current filters',
+                delta: hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined,
+                metricKind: 'neutral',
+              },
+              {
+                label: 'Merchants',
+                value: summaryStats.merchantCount,
+                hint: 'Distinct merchants',
+                metricKind: 'neutral',
+              },
+              {
+                label: 'Accounts',
+                value: summaryStats.accountCount,
+                hint: 'Contributing activity',
+                metricKind: 'neutral',
+              },
+            ]}
+          />
+        </BentoTile>
+
+        <BentoTile
+          span={6}
+          rows={2}
+          aria-busy={loading}
+          label="Business vs personal"
+          description="A direct split of current net spend so business charges do not get lost in the overall totals."
+          actions={
+            <div className="businessSpotlightTotals">
+              <p className="businessSpotlightTotalLabel">Combined net spend</p>
+              <p className="businessSpotlightTotalValue">
+                {formatDashboardAmount(businessSpotlight.totalNetSpend)}
+              </p>
+            </div>
+          }
+        >
+          <div className="businessSpotlightGrid">
+            {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
+              const share =
+                businessSpotlight.totalNetSpend > 0
+                  ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
+                  : 0
+              return (
+                <article
+                  key={row.label}
+                  className={`businessFocusCard businessFocusCard--${row.tone}`}
+                >
+                  <p className="businessFocusLabel">{row.label}</p>
+                  <p className="businessFocusValue">
+                    {formatDashboardAmount(row.netSpend)}
                   </p>
-                  {insight.supportingTransactionIds.length > 0 ? (
-                    <p className="muted">
-                      Transactions: #{insight.supportingTransactionIds.join(', #')}
-                    </p>
-                  ) : null}
-                  <p className="muted">{insight.suggestedAction}</p>
+                  <p className="businessFocusShare">
+                    {businessSpotlight.totalNetSpend > 0
+                      ? `${share.toFixed(0)}% of current net spend`
+                      : 'No net spend in current filters'}
+                  </p>
+                  <dl className="businessFocusMetrics">
+                    <div>
+                      <dt>Gross spend</dt>
+                      <dd>{formatDashboardAmount(row.totalSpend)}</dd>
+                    </div>
+                    <div>
+                      <dt>Credits</dt>
+                      <dd>{formatDashboardAmount(row.totalCredits)}</dd>
+                    </div>
+                  </dl>
                 </article>
-              ))
-            )}
+              )
+            })}
           </div>
-        </section>
-      )}
 
-      <section className="card dashboardBusinessSpotlight" aria-busy={loading}>
-        <div className="businessSpotlightHeader">
-          <div>
-            <h2>Business vs personal</h2>
-            <p className="muted">
-              A direct split of current net spend so business charges do not get lost
-              in the overall totals.
+          <div className="businessSharePanel">
+            <div className="businessShareLabels" aria-hidden="true">
+              <span>Business {businessSpotlight.businessShare.toFixed(0)}%</span>
+              <span>Personal {businessSpotlight.personalShare.toFixed(0)}%</span>
+            </div>
+            <div
+              className="businessShareBar"
+              role="img"
+              aria-label={`Business ${businessSpotlight.businessShare.toFixed(
+                0
+              )} percent, personal ${businessSpotlight.personalShare.toFixed(
+                0
+              )} percent of net spend`}
+            >
+              <span
+                className="businessShareFill businessShareFill--business"
+                style={{ width: `${businessSpotlight.businessShare}%` }}
+              />
+              <span
+                className="businessShareFill businessShareFill--personal"
+                style={{ width: `${businessSpotlight.personalShare}%` }}
+              />
+            </div>
+            <p className="muted businessShareCaption">
+              Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
+              Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
             </p>
           </div>
-          <div className="businessSpotlightTotals">
-            <p className="businessSpotlightTotalLabel">Combined net spend</p>
-            <p className="businessSpotlightTotalValue">
-              {formatDashboardAmount(businessSpotlight.totalNetSpend)}
-            </p>
-          </div>
-        </div>
+        </BentoTile>
 
-        <div className="businessSpotlightGrid">
-          {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
-            const share =
-              businessSpotlight.totalNetSpend > 0
-                ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
-                : 0
-            return (
-              <article
-                key={row.label}
-                className={`businessFocusCard businessFocusCard--${row.tone}`}
-              >
-                <p className="businessFocusLabel">{row.label}</p>
-                <p className="businessFocusValue">
-                  {formatDashboardAmount(row.netSpend)}
-                </p>
-                <p className="businessFocusShare">
-                  {businessSpotlight.totalNetSpend > 0
-                    ? `${share.toFixed(0)}% of current net spend`
-                    : 'No net spend in current filters'}
-                </p>
-                <dl className="businessFocusMetrics">
-                  <div>
-                    <dt>Gross spend</dt>
-                    <dd>{formatDashboardAmount(row.totalSpend)}</dd>
-                  </div>
-                  <div>
-                    <dt>Credits</dt>
-                    <dd>{formatDashboardAmount(row.totalCredits)}</dd>
-                  </div>
-                </dl>
-              </article>
-            )
-          })}
-        </div>
-
-        <div className="businessSharePanel">
-          <div className="businessShareLabels" aria-hidden="true">
-            <span>Business {businessSpotlight.businessShare.toFixed(0)}%</span>
-            <span>Personal {businessSpotlight.personalShare.toFixed(0)}%</span>
-          </div>
-          <div
-            className="businessShareBar"
-            role="img"
-            aria-label={`Business ${businessSpotlight.businessShare.toFixed(
-              0
-            )} percent, personal ${businessSpotlight.personalShare.toFixed(
-              0
-            )} percent of net spend`}
-          >
-            <span
-              className="businessShareFill businessShareFill--business"
-              style={{ width: `${businessSpotlight.businessShare}%` }}
-            />
-            <span
-              className="businessShareFill businessShareFill--personal"
-              style={{ width: `${businessSpotlight.personalShare}%` }}
-            />
-          </div>
-          <p className="muted businessShareCaption">
-            Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
-            Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
-          </p>
-        </div>
-      </section>
-
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Monthly breakdown</h2>
-        <p className="muted">
-          Gross spend, refunds/credits, and payments/transfers by month.
-        </p>
-        <div className="chartWrap">
+        <BentoTile
+          span={6}
+          rows={2}
+          aria-busy={loading}
+          label="Monthly flow"
+          description="Gross spend, refunds / credits, and payments / transfers by month."
+        >
           {monthlyBreakdownData.length === 0 ? (
             !loading ? (
               <p className="emptyState">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 280 : 320}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={monthlyBreakdownData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="month"
                   tick={narrowAxisTick}
@@ -923,6 +914,7 @@ export function DashboardPage() {
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -932,33 +924,27 @@ export function DashboardPage() {
                 <Legend
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={isNarrowViewport ? { fontSize: 11 } : undefined}
+                  wrapperStyle={{ fontSize: 11 }}
                 />
-                <Bar dataKey="totalSpend" name="Spend" fill="var(--primary)" />
-                <Bar dataKey="totalCredits" name="Refunds / credits" fill="#22c55e" />
+                <Bar dataKey="totalSpend" name="Spend" fill="var(--chart-spend)" />
+                <Bar dataKey="totalCredits" name="Refunds / credits" fill="var(--chart-credit)" />
                 <Bar
                   dataKey="totalPayments"
                   name="Payments / transfers"
-                  fill="#94a3b8"
+                  fill="var(--chart-payment)"
                 />
               </BarChart>
             </ResponsiveContainer>
           )}
-        </div>
-      </section>
+        </BentoTile>
 
-      <section
-        className="card dashboardChartCard"
-        aria-busy={loading}
-        aria-label="Net spend by category. Click a bar to view its transactions."
-      >
-        <h2>Net spend by category</h2>
-        <p className="muted">
-          Higher bar = more money out. Click a bar to open those transactions with the
-          current filters applied. Payments and transfers are excluded; refunds and
-          credits offset spend in the same category.
-        </p>
-        <div className="chartWrap">
+        <BentoTile
+          span={8}
+          rows={2}
+          aria-busy={loading}
+          label="Net spend by category"
+          description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
+        >
           {chartData.length === 0 ? (
             !loading ? (
               <div>
@@ -988,24 +974,21 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 260 : 320}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={chartData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="name"
                   tick={narrowAxisTick}
                   // Category-count-aware label handling: once there are more
                   // than 10 categories, default Recharts spacing overlaps even
                   // on wide viewports. Steepen the angle and give the axis
-                  // more vertical space so every label still renders (using
-                  // preserveStartEnd silently dropped every other label,
-                  // hiding big categories like Rent under the tallest bar).
-                  // Narrow viewport stacks the tick-font shrink on top.
+                  // more vertical space so every label still renders.
                   interval={0}
                   minTickGap={isNarrowViewport ? 12 : 5}
                   angle={hasManyCategories ? -45 : 0}
                   textAnchor={hasManyCategories ? 'end' : 'middle'}
-                  height={hasManyCategories ? 110 : undefined}
+                  height={hasManyCategories ? 90 : undefined}
                 />
                 <YAxis
                   tick={narrowAxisTick}
@@ -1016,6 +999,7 @@ export function DashboardPage() {
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -1026,13 +1010,10 @@ export function DashboardPage() {
                         }).format(v)
                   }}
                 />
-                {!isNarrowViewport && (
-                  <Legend verticalAlign="bottom" align="center" />
-                )}
                 <Bar
                   dataKey="total"
                   name="Net spend"
-                  fill="var(--primary)"
+                  fill="var(--chart-spend)"
                   cursor="pointer"
                   onClick={(entry) => {
                     // Recharts hands us the data row as the click payload. Guard
@@ -1048,88 +1029,83 @@ export function DashboardPage() {
               </BarChart>
             </ResponsiveContainer>
           )}
-        </div>
-        {chartData.length > 0 ? (
-          <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-            Jump to transactions:{' '}
-            {chartData.map((entry, index) => (
-              <span key={entry.name}>
-                {index > 0 ? ', ' : ''}
-                <Link
-                  to={`/transactions?${new URLSearchParams({
-                    category: entry.name,
-                    ...(currency ? { currency } : {}),
-                    ...(dateFrom ? { dateFrom } : {}),
-                    ...(dateTo ? { dateTo } : {}),
-                  }).toString()}`}
-                  className="text-sm font-semibold underline"
-                >
-                  {entry.name}
-                </Link>
-              </span>
-            ))}
-            .
-          </p>
-        ) : null}
-      </section>
+          {chartData.length > 0 ? (
+            <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
+              Jump to:{' '}
+              {chartData.slice(0, 8).map((entry, index) => (
+                <span key={entry.name}>
+                  {index > 0 ? ', ' : ''}
+                  <Link
+                    to={`/transactions?${new URLSearchParams({
+                      category: entry.name,
+                      ...(currency ? { currency } : {}),
+                      ...(dateFrom ? { dateFrom } : {}),
+                      ...(dateTo ? { dateTo } : {}),
+                    }).toString()}`}
+                    className="font-semibold underline"
+                  >
+                    {entry.name}
+                  </Link>
+                </span>
+              ))}
+              {chartData.length > 8 ? '…' : '.'}
+            </p>
+          ) : null}
+        </BentoTile>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
-        <h2>Net spend by business flag</h2>
-        <p className="muted">
-          Same split, charted directly with separate business and personal colors.
-        </p>
-        <div className="chartWrap">
-          {businessReportData.length === 0 ? (
-            !loading ? (
-              <p className="emptyState">No business breakdown data for these filters.</p>
-            ) : null
-          ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 240 : 280}>
-              <BarChart data={businessReportData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" tick={narrowAxisTick} />
-                <YAxis
-                  tick={narrowAxisTick}
-                  width={isNarrowViewport ? 44 : 60}
-                  tickFormatter={compactCurrencyTickFormatter}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  formatter={(value) => {
-                    const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
-                    return formatDashboardAmount(v)
-                  }}
-                />
-                {!isNarrowViewport && (
-                  <Legend verticalAlign="bottom" align="center" />
-                )}
-                <Bar dataKey="netSpend" name="Net spend">
-                  {businessReportData.map((entry) => (
-                    <Cell key={entry.label} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </section>
+        <BentoTile
+          span={4}
+          rows={2}
+          aria-busy={loading}
+          label="AI insights"
+          description={
+            aiInsights
+              ? `${aiInsights.currency} · ${aiInsights.period}`
+              : 'Awaiting fetch'
+          }
+        >
+          <div className="aiVisibilityList">
+            {!aiInsights ? (
+              <p className="emptyState">
+                {loading ? 'Loading insights…' : 'No insights available yet.'}
+              </p>
+            ) : aiInsights.insights.length === 0 ? (
+              <p className="emptyState">No AI insights for {aiInsights.period} yet.</p>
+            ) : (
+              aiInsights.insights.map((insight) => (
+                <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
+                  <div className="aiVisibilityItemHeader">
+                    <strong>{insight.title}</strong>
+                    <span className="muted">{insight.severity}</span>
+                  </div>
+                  <p>{insight.summary}</p>
+                  <p className="muted">
+                    {insight.comparison} · {formatDashboardAmount(insight.amount)}
+                  </p>
+                  {insight.supportingTransactionIds.length > 0 ? (
+                    <p className="muted">
+                      Transactions: #{insight.supportingTransactionIds.join(', #')}
+                    </p>
+                  ) : null}
+                  <p className="muted">{insight.suggestedAction}</p>
+                </article>
+              ))
+            )}
+          </div>
+        </BentoTile>
 
-      <section className="card dashboardChartCard">
-        <h2>Activity by month</h2>
-        <p className="muted">
-          One line per currency using signed monthly totals, excluding payments and
-          transfers.
-        </p>
-        <div className="chartWrap">
+        <BentoTile
+          span={12}
+          rows={2}
+          label="Activity by month"
+          description="One line per currency using signed monthly totals, excluding payments and transfers."
+        >
           {monthlyChartData.length === 0 ? (
             !loading ? <p className="muted">No transactions in this range.</p> : null
           ) : (
-            <ResponsiveContainer width="100%" height={isNarrowViewport ? 280 : 320}>
+            <ResponsiveContainer width="100%" height={260}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="month"
                   tick={narrowAxisTick}
@@ -1146,6 +1122,7 @@ export function DashboardPage() {
                   contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={CHART_TOOLTIP_LABEL_STYLE}
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value, name) => {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
@@ -1171,10 +1148,10 @@ export function DashboardPage() {
               </LineChart>
             </ResponsiveContainer>
           )}
-        </div>
-      </section>
+        </BentoTile>
+      </div>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
+      <section className="card dashboardTableCard" aria-busy={loading}>
         <h2>Category report</h2>
         <p className="muted">
           Top categories ranked by net spend for the current filters.
@@ -1217,7 +1194,7 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
+      <section className="card dashboardTableCard" aria-busy={loading}>
         <h2>Merchant report</h2>
         <p className="muted">
           Where the money is actually going, ranked by net spend with refunds,
@@ -1266,7 +1243,7 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
+      <section className="card dashboardTableCard" aria-busy={loading}>
         <h2>Account report</h2>
         <p className="muted">
           Which accounts are driving the totals, including payment volume and review
@@ -1313,7 +1290,7 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className="card dashboardChartCard" aria-busy={loading}>
+      <section className="card dashboardTableCard" aria-busy={loading}>
         <h2>Review queue</h2>
         <p className="muted">
           Recent flagged transactions from the current view so you can see what still
