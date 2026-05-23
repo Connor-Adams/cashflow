@@ -36,6 +36,9 @@ import {
   enrichmentAmazonLinkThreshold,
   enrichmentRefundWindowDays,
   enrichmentTransferWindowDays,
+  enrichmentAiEnabled,
+  enrichmentAiMaxMerchants,
+  enrichmentAiPerRowConcurrency,
 } from '../config/env';
 import {
   loadAmazonOrdersCache,
@@ -43,6 +46,13 @@ import {
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
+import { runAiBatchStage, type AiBatchCandidate } from './enrichment/aiBatchStage';
+import { mergeSignals } from './enrichment/computeReviewFlag';
+import { openaiJson } from '../ai/openaiJson';
+import { getOpenAiConfig } from '../config/openai';
+import { loadCategoryHints } from '../ai/suggestTransaction';
+import type { MerchantMemoryMatch } from '../ai/merchantMemory';
+import type { Signal } from './enrichment/types';
 
 /** Max row-level parse diagnostics returned on a single import response */
 export const PARSE_ERRORS_MAX = 50;
@@ -298,6 +308,21 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   let skippedDup = 0;
   let rowErrors = 0;
   const parseErrors: { rowIndex: number; message: string }[] = [];
+  // Stage 8 deferral: rows that completed phase 1 still flagged for review accumulate
+  // here, then a single AI batch (or per-row fallback) enhances them after commit.
+  type ColdRow = {
+    txnId: number;
+    signals: Signal[];
+    merchantKey: string;
+    merchantRaw: string;
+    merchantClean: string;
+    merchantCanonical: string | null;
+    amount: number;
+    date: string;
+    currency: string;
+    memory: MerchantMemoryMatch | null;
+  };
+  const coldRows: ColdRow[] = [];
 
   await sequelize.transaction(async (t) => {
     for (let i = 0; i < records.length; i++) {
@@ -416,6 +441,23 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
           );
         }
         inserted += 1;
+        if (enriched.fields.reviewFlag) {
+          const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
+          if (key.length > 0) {
+            coldRows.push({
+              txnId: txn.id,
+              signals: enriched.signals,
+              merchantKey: key,
+              merchantRaw: v.merchantRaw,
+              merchantClean: f.merchantClean,
+              merchantCanonical: f.merchantCanonical,
+              amount: v.amount,
+              date: v.date,
+              currency: v.currency,
+              memory,
+            });
+          }
+        }
       } catch (e) {
         if (isSequelizeUniqueLike(e)) {
           skippedDup += 1;
@@ -452,6 +494,12 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     );
   });
 
+  // === Phase 2: stage 8 ai-batch over cold rows ===
+  // Runs OUTSIDE the import transaction so OpenAI latency doesn't hold DB locks.
+  // Each enhancement is an independent update; partial enhancement is acceptable
+  // (cold rows still have phase-1 fields and review_flag=true).
+  const aiEnhanced = await maybeRunAiBatchOverColdRows(coldRows, opts.householdId ?? account.householdId ?? null);
+
   const out: Record<string, unknown> = {
     file: name,
     batchLabel: importBatch,
@@ -472,7 +520,143 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     out.warning =
       'Every row matched an existing transaction (duplicate) — nothing new to add.';
   }
+  if (aiEnhanced.attempted) {
+    out.aiBatch = {
+      coldRows: aiEnhanced.coldRowCount,
+      merchantsConsidered: aiEnhanced.merchantsConsidered,
+      enhanced: aiEnhanced.enhanced,
+      capped: aiEnhanced.capped,
+      usedBatch: aiEnhanced.usedBatch,
+      fellBackToPerRow: aiEnhanced.fellBackToPerRow,
+    };
+  }
   return out;
+}
+
+type AiBatchSummary = {
+  attempted: boolean;
+  coldRowCount: number;
+  merchantsConsidered: number;
+  enhanced: number;
+  capped: boolean;
+  usedBatch: boolean;
+  fellBackToPerRow: boolean;
+};
+
+async function maybeRunAiBatchOverColdRows(
+  coldRows: Array<{
+    txnId: number;
+    signals: Signal[];
+    merchantKey: string;
+    merchantRaw: string;
+    merchantClean: string;
+    merchantCanonical: string | null;
+    amount: number;
+    date: string;
+    currency: string;
+    memory: MerchantMemoryMatch | null;
+  }>,
+  householdId: number | null,
+): Promise<AiBatchSummary> {
+  const empty: AiBatchSummary = {
+    attempted: false,
+    coldRowCount: coldRows.length,
+    merchantsConsidered: 0,
+    enhanced: 0,
+    capped: false,
+    usedBatch: false,
+    fellBackToPerRow: false,
+  };
+  if (!enrichmentAiEnabled || getOpenAiConfig() == null || coldRows.length === 0) {
+    return empty;
+  }
+
+  // Group cold rows by merchantKey; pick the most recent (latest date) row as the sample.
+  const groups = new Map<string, typeof coldRows[number]>();
+  for (const c of coldRows) {
+    const existing = groups.get(c.merchantKey);
+    if (existing == null || c.date > existing.date) groups.set(c.merchantKey, c);
+  }
+
+  const candidates: AiBatchCandidate[] = [...groups.values()].map((c) => ({
+    merchantKey: c.merchantKey,
+    sampleMerchantRaw: c.merchantRaw,
+    sampleMerchantClean: c.merchantClean,
+    sampleMerchantCanonical: c.merchantCanonical,
+    sampleAmount: c.amount,
+    sampleDate: c.date,
+    sampleCurrency: c.currency,
+    similarPriors: [],
+    memoryMatch: c.memory
+      ? { category: c.memory.category, supportCount: c.memory.supportCount }
+      : null,
+  }));
+
+  const categoryHints = await loadCategoryHints(householdId);
+
+  const result = await runAiBatchStage({
+    candidates,
+    categoryHints,
+    maxMerchants: enrichmentAiMaxMerchants,
+    perRowConcurrency: enrichmentAiPerRowConcurrency,
+    openaiCaller: (msgs) => openaiJson(msgs),
+  });
+
+  let enhanced = 0;
+  // Apply each suggestion to every cold row sharing that merchantKey.
+  for (const c of coldRows) {
+    const sug = result.suggestions.get(c.merchantKey);
+    if (sug == null || sug.category == null) continue;
+    const aiSignal: Signal = {
+      source: 'ai',
+      confidence: sug.confidence,
+      fields: {
+        autoCategory: sug.category,
+        autoBusiness: sug.business,
+        autoSplitType: sug.splitType,
+        autoPctMe: sug.pctMe != null ? String(sug.pctMe) : null,
+        autoPctPartner: sug.pctPartner != null ? String(sug.pctPartner) : null,
+      },
+      ...(sug.rationale ? { rationale: sug.rationale } : {}),
+    };
+    const merged = mergeSignals([...c.signals, aiSignal]);
+    try {
+      await Transaction.update(
+        {
+          autoCategory: merged.fields.autoCategory,
+          autoBusiness: merged.fields.autoBusiness,
+          autoSplitType: merged.fields.autoSplitType,
+          autoPctMe: merged.fields.autoPctMe,
+          autoPctPartner: merged.fields.autoPctPartner,
+          autoSource: merged.fields.autoSource,
+          autoConfidence: merged.fields.autoConfidence,
+          reviewFlag: merged.fields.reviewFlag,
+        },
+        { where: { id: c.txnId } },
+      );
+      await TransactionSignal.create({
+        transactionId: c.txnId,
+        source: 'ai',
+        confidence: aiSignal.confidence,
+        fields: aiSignal.fields,
+        rationale: aiSignal.rationale ?? null,
+      });
+      enhanced += 1;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[enrichment] ai-batch post-update failed for txn ${c.txnId}`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  return {
+    attempted: true,
+    coldRowCount: coldRows.length,
+    merchantsConsidered: candidates.length,
+    enhanced,
+    capped: result.capped,
+    usedBatch: result.usedBatch,
+    fellBackToPerRow: result.fellBackToPerRow,
+  };
 }
 
 export async function runImport(options: {
