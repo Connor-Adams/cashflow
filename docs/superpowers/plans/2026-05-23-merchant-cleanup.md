@@ -900,46 +900,33 @@ git commit -m "fix(dashboard): group merchant summary by canonical when present"
 
 ---
 
-### Task 9: Run enrichment backfill (manual runbook, no code)
+### Task 9: Re-run enrichment backfill via the existing Settings UI
 
-After Tasks 1-8 land, existing transactions still have the OLD `merchantClean` and possibly null `merchantCanonical`. Re-run the enrichment pipeline against every transaction in the user's household so all the new logic applies retroactively.
+After Tasks 1-8 land, existing transactions still have the OLD `merchantClean` and possibly null `merchantCanonical`. The Settings page **already has a UI** for this: an "Enrichment maintenance" section that calls `POST /api/transactions/enrichment/backfill` with NDJSON streaming progress.
 
 **Files:**
-- No code changes. Uses existing `backend/src/import/runEnrichmentBackfill.ts`.
+- No code changes. UI: `frontend/src/pages/SettingsPage.tsx:1425-1552`. Endpoint: `backend/src/routes/transactions.ts:784-886`.
 
-- [ ] **Step 1: Build backend**
+- [ ] **Step 1: Open Settings → Enrichment maintenance**
 
-Run: `cd backend && yarn build`
-Expected: clean build, `dist/import/runEnrichmentBackfill.js` exists.
+In the running app, navigate to Settings. Find the "Enrichment maintenance" section.
 
-- [ ] **Step 2: Identify household id**
+- [ ] **Step 2: Dry run**
 
-Run something like (adjust to the actual setup):
-```bash
-cd backend && node -e "(async()=>{const{Household}=require('./dist/models');for(const h of await Household.findAll())console.log(h.id,h.name);process.exit()})()"
-```
+Click **Dry run**. The button streams per-row events (`{kind: "progress", merchantRaw, merchantClean, merchantCanonical, ...}`) followed by a summary (`{kind: "summary", processed, updated, ...}`). Eyeball the diff sample for sanity:
+- Are Amazon variants collapsing to `Amazon`?
+- Are DOORDASH* glued forms collapsing to `DoorDash`?
+- Are WS investment txns picking up `XEQT — Buy`, `DOT — Stake reward`, `Money transfer in`?
 
-Or just look it up via the app UI / DB. Note the household id.
+- [ ] **Step 3: Run backfill**
 
-- [ ] **Step 3: Dry-run backfill**
+If dry-run looks right, click **Run backfill**. Same stream + summary; this one writes.
 
-Run: `cd backend && node dist/import/runEnrichmentBackfill.js --household=<ID> --dry-run`
+The endpoint guards against concurrent runs (returns 409 if a backfill is already in flight for the household).
 
-Expected: prints a summary of N transactions to re-enrich and a sample of before/after diffs. Eyeball it — does it look right? Are Amazon variants collapsing? Are WS investment txns getting `XEQT — Buy` style canonicals?
+- [ ] **Step 4: Verify dashboard**
 
-- [ ] **Step 4: Real backfill**
-
-If dry-run looks correct, run for real:
-
-```bash
-cd backend && node dist/import/runEnrichmentBackfill.js --household=<ID>
-```
-
-Expected: writes new signals and updates `merchant_canonical`/`merchant_clean` on existing rows.
-
-- [ ] **Step 5: Manual verification**
-
-Open the dashboard merchant view in the app. Compare with the user's original data sample. Expected reductions:
+Open the Dashboard merchant view. Expected reductions:
 - `AMZN MKTP CA*XXXX`, `AMAZON.CA*XXXX`, `AMZN MKTP CA` → one `Amazon` row
 - `DOORDASHTHESAFFRONI`, `DOORDASHBARBURRITO`, `DOORDASHMCDONALDS`, `DOORDASHPOPEYESLOUI`, `DOORDASHMUCHOBURRIT` → one `DoorDash` row
 - `STARBUCKS`, `STARBUCKS 04747 GUELPH` → one `Starbucks` row
@@ -947,7 +934,7 @@ Open the dashboard merchant view in the app. Compare with the user's original da
 - All `0.XXX of DOT rewards earned` lines → one `DOT — Stake reward` row
 - `Money transfer into the account (executed at ...)` (many dates) → one `Money transfer in` row
 
-- [ ] **Step 6: No commit needed**
+- [ ] **Step 5: No commit needed**
 
 Backfill writes to the DB, not to the repo.
 
