@@ -2,17 +2,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { extractPdfLines } from '../src/import/pdf/extractLines';
 import { parseCibcCostcoHeader, parseCibcCostcoRow, inferYearForMonthDay, cibcCostcoMastercardParser } from '../src/import/pdf/cibcCostcoMastercard';
 
 const fixturesDir = join(__dirname, 'fixtures', 'pdf');
+const hasFixtures = existsSync(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
+const skipNoFixtures = hasFixtures ? undefined : 'PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
 
 async function loadFixture(name: string) {
   const buf = await readFile(join(fixturesDir, name));
   return extractPdfLines(buf);
 }
 
-test('parseCibcCostcoHeader — January 2026 statement', async () => {
+test('parseCibcCostcoHeader — January 2026 statement', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2026-01-12.pdf');
   const h = parseCibcCostcoHeader(lines);
   assert.equal(h.statementDate, '2026-01-12');
@@ -21,7 +24,7 @@ test('parseCibcCostcoHeader — January 2026 statement', async () => {
   assert.equal(h.accountLast4, '3114');
 });
 
-test('parseCibcCostcoHeader — December 2025 statement', async () => {
+test('parseCibcCostcoHeader — December 2025 statement', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
   const h = parseCibcCostcoHeader(lines);
   assert.equal(h.statementDate, '2025-12-12');
@@ -30,7 +33,7 @@ test('parseCibcCostcoHeader — December 2025 statement', async () => {
   assert.equal(h.accountLast4, '3114');
 });
 
-test('parseCibcCostcoHeader — November 2025 statement', async () => {
+test('parseCibcCostcoHeader — November 2025 statement', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2025-11-12.pdf');
   const h = parseCibcCostcoHeader(lines);
   assert.equal(h.statementDate, '2025-11-12');
@@ -134,7 +137,7 @@ test('parseCibcCostcoRow — interest row', () => {
   assert.equal(row.amount, -0.07);
 });
 
-test('parser end-to-end — November 2025 statement (3 sub-sections present)', async () => {
+test('parser end-to-end — November 2025 statement (3 sub-sections present)', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2025-11-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.equal(out.transactions.length, 3);
@@ -156,7 +159,7 @@ test('parser end-to-end — November 2025 statement (3 sub-sections present)', a
   assert.deepEqual(out.parseErrors, []);
 });
 
-test('parser end-to-end — December 2025 statement (payments empty, charges present)', async () => {
+test('parser end-to-end — December 2025 statement (payments empty, charges present)', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.equal(out.transactions.length, 5);
@@ -164,7 +167,7 @@ test('parser end-to-end — December 2025 statement (payments empty, charges pre
   assert.equal(Math.round(total * 100) / 100, -580.67);
 });
 
-test('parser end-to-end — January 2026 statement (rollover period, payment + 5 charges)', async () => {
+test('parser end-to-end — January 2026 statement (rollover period, payment + 5 charges)', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2026-01-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.equal(out.transactions.length, 6);
@@ -183,7 +186,7 @@ test('parser end-to-end — January 2026 statement (rollover period, payment + 5
   assert.equal(Math.round(chargeSum * 100) / 100, -2278);
 });
 
-test('parser produces a deterministic merchantClean (uppercased, collapsed whitespace, no trailing province)', async () => {
+test('parser produces a deterministic merchantClean (uppercased, collapsed whitespace, no trailing province)', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   const costco = out.transactions.find((t) => t.merchantRaw.includes('COSTCO WHOLESALE'));

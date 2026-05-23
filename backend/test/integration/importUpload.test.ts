@@ -14,6 +14,9 @@ let models: typeof import('../../src/models/index.js');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
 const dbPath = path.join(backendRoot, 'data', 'test-integration.sqlite');
+const fixturesDir = path.join(backendRoot, 'test', 'fixtures', 'pdf');
+const hasFixtures = fs.existsSync(path.join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
+const skipNoFixtures = hasFixtures ? undefined : 'PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
 const csvUploadDir = path.join(backendRoot, 'uploads', 'test-integration-csv');
 const receiptsUploadDir = path.join(backendRoot, 'uploads', 'test-integration-receipts');
 
@@ -851,7 +854,7 @@ test('enrichment: rule-matched row has confident auto fields and signals; cold r
   }
 });
 
-test('POST /api/import/upload: parses a CIBC Costco PDF statement end-to-end', async () => {
+test('POST /api/import/upload: parses a CIBC Costco PDF statement end-to-end', { skip: skipNoFixtures }, async () => {
   const acc = await authed.post('/api/accounts').send({
     name: 'CIBC Costco MC (pdf integration)',
     owner: 'me',
@@ -904,7 +907,7 @@ test('POST /api/import/upload: rejects an unknown-layout PDF with a clear error'
   assert.match(String(res.body.message ?? ''), /PDF|parser/i);
 });
 
-test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped (no double-insert)', async () => {
+test('POST /api/import/upload: re-uploading the same CIBC Costco PDF is deduped (no double-insert)', { skip: skipNoFixtures }, async () => {
   const acc = await authed.post('/api/accounts').send({
     name: 'CIBC Costco MC (dedup)',
     owner: 'me',

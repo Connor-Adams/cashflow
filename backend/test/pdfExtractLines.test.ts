@@ -2,11 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { extractPdfLines } from '../src/import/pdf/extractLines';
 
 const fixturesDir = join(__dirname, 'fixtures', 'pdf');
+const hasFixtures = existsSync(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
+const skipNoFixtures = hasFixtures ? undefined : 'PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
 
-test('extractPdfLines returns lines with page numbers and y-coords', async () => {
+test('extractPdfLines returns lines with page numbers and y-coords', { skip: skipNoFixtures }, async () => {
   const buf = await readFile(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
   const lines = await extractPdfLines(buf);
   assert.ok(lines.length > 50, `expected >50 lines, got ${lines.length}`);
@@ -14,7 +17,7 @@ test('extractPdfLines returns lines with page numbers and y-coords', async () =>
   assert.ok(lines.every((l) => typeof l.y === 'number' && typeof l.text === 'string'));
 });
 
-test('extractPdfLines reconstructs the CIBC Costco Mastercard title on page 1', async () => {
+test('extractPdfLines reconstructs the CIBC Costco Mastercard title on page 1', { skip: skipNoFixtures }, async () => {
   const buf = await readFile(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
   const lines = await extractPdfLines(buf);
   const page1 = lines.filter((l) => l.page === 1);
@@ -22,7 +25,7 @@ test('extractPdfLines reconstructs the CIBC Costco Mastercard title on page 1', 
   assert.ok(hasTitle, 'expected page 1 to contain "CIBC Costco Mastercard"');
 });
 
-test('extractPdfLines reconstructs a known transaction row with column gaps preserved', async () => {
+test('extractPdfLines reconstructs a known transaction row with column gaps preserved', { skip: skipNoFixtures }, async () => {
   const buf = await readFile(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
   const lines = await extractPdfLines(buf);
   // Dec 13 / Dec 15 / COSTCO WHOLESALE W1168 GUELPH ON / Retail and Grocery / 947.04

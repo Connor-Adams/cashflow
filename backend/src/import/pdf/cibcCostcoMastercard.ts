@@ -74,22 +74,28 @@ function findStatementDate(page1: PdfLine[]): string | null {
   return null;
 }
 
-function findPeriod(lines: PdfLine[]): { start: string; end: string } | null {
-  const page1 = lines.filter((l) => l.page === 1);
+function findPeriodFromHeader(page1: PdfLine[]): { start: string; end: string } | null {
   for (let i = 0; i < page1.length; i++) {
     if (!/statement period/i.test(page1[i].text)) continue;
     const found = parsePeriod(page1[i].text) || parsePeriod(page1[i + 1]?.text ?? '');
     if (found) return found;
   }
-  // Fallback: scan "Transactions from <DATE> to <DATE>" anywhere.
+  return null;
+}
+
+function findPeriodFromTransactionsHeader(lines: PdfLine[]): { start: string; end: string } | null {
   for (const l of lines) {
     const m = /Transactions from\s+(.+)/.exec(l.text);
-    if (m) {
-      const found = parsePeriod(m[1]);
-      if (found) return found;
-    }
+    if (!m) continue;
+    const found = parsePeriod(m[1]);
+    if (found) return found;
   }
   return null;
+}
+
+function findPeriod(lines: PdfLine[]): { start: string; end: string } | null {
+  return findPeriodFromHeader(lines.filter((l) => l.page === 1))
+    ?? findPeriodFromTransactionsHeader(lines);
 }
 
 function findAccountLast4(page1: PdfLine[]): string | null {
