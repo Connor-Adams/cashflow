@@ -1,0 +1,36 @@
+name: promote-to-production
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote-to-production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout released tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Fast-forward production to released tag
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          echo "Promoting $TAG to production"
+          if git fetch origin "refs/heads/production:refs/remotes/origin/production" 2>/dev/null; then
+            EXPECTED="$(git rev-parse refs/remotes/origin/production)"
+            git push origin "$TAG:refs/heads/production" \
+              --force-with-lease="refs/heads/production:$EXPECTED"
+          else
+            echo "production branch does not exist yet; creating it"
+            git push origin "$TAG:refs/heads/production"
+          fi
