@@ -700,12 +700,13 @@ export function DashboardPage() {
     dateFrom !== defaultRange.from ||
     dateTo !== defaultRange.to
 
-  // When the view is unbounded on both ends ("All time"), there is no prior
-  // window to compare against — the previous-period totals collapse to zero
-  // and any rendered delta is misleading (always "+ entire amount" in green).
-  // Suppress the delta prop in that case; StatCard handles `undefined` by not
-  // rendering the badge.
-  const hasComparisonPeriod = Boolean(dateFrom || dateTo)
+  // True only when a real previous window exists. `getPreviousRange` returns
+  // null whenever either bound is missing or the range is empty, so this
+  // tracks the actual fetch outcome rather than re-deriving from raw inputs.
+  // Single-bound filters (only dateFrom or only dateTo) previously slipped
+  // through `Boolean(dateFrom || dateTo)` and rendered fabricated deltas
+  // against $0 prior-period totals.
+  const hasComparisonPeriod = Boolean(previousRange)
 
   const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
   const formatDashboardAmount = (value: number): string =>
