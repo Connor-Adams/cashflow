@@ -11,8 +11,7 @@
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "test": "tsx --test test/*.test.ts",
     "test:integration": "tsx --test test/integration/*.test.ts",
-    "ai:eval": "tsx scripts/ai-eval.ts",
-    "probe:enrichment": "tsx scripts/probeEnrichmentGaps.ts"
+    "ai:eval": "tsx scripts/ai-eval.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1045.0",

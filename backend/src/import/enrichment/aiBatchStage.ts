@@ -153,11 +153,16 @@ function coerceBool(v: unknown): boolean | null {
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n));
 
-function coercePct(v: unknown): number | null {
-  if (typeof v === 'number') return Number.isFinite(v) ? clamp01(v) : null;
+function toFiniteNumber(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v !== 'string') return null;
   const n = Number(v);
-  return Number.isFinite(n) ? clamp01(n) : null;
+  return Number.isFinite(n) ? n : null;
+}
+
+function coercePct(v: unknown): number | null {
+  const n = toFiniteNumber(v);
+  return n == null ? null : clamp01(n);
 }
 
 function trimmedStr(v: unknown): string | null {
@@ -179,17 +184,24 @@ function parseSuggestion(j: Record<string, unknown> | undefined | null): AiBatch
   };
 }
 
+function collectParsedSuggestions(
+  raw: Record<string, unknown>,
+  candidates: AiBatchCandidate[],
+): Map<string, AiBatchSuggestion> {
+  const out = new Map<string, AiBatchSuggestion>();
+  for (const c of candidates) {
+    const sug = parseSuggestion(raw[c.merchantKey] as Record<string, unknown> | undefined);
+    if (sug != null) out.set(c.merchantKey, sug);
+  }
+  return out;
+}
+
 function parseBatchResults(
   raw: unknown,
   candidates: AiBatchCandidate[],
 ): Map<string, AiBatchSuggestion> | null {
   if (raw == null || typeof raw !== 'object') return null;
-  const out = new Map<string, AiBatchSuggestion>();
-  for (const c of candidates) {
-    const entry = (raw as Record<string, unknown>)[c.merchantKey];
-    const sug = parseSuggestion(entry as Record<string, unknown> | undefined);
-    if (sug != null) out.set(c.merchantKey, sug);
-  }
+  const out = collectParsedSuggestions(raw as Record<string, unknown>, candidates);
   return out.size > 0 ? out : null;
 }
 

@@ -46,7 +46,7 @@ import {
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
-import { runAiBatchStage, type AiBatchCandidate } from './enrichment/aiBatchStage';
+import { runAiBatchStage, type AiBatchCandidate, type AiBatchSuggestion } from './enrichment/aiBatchStage';
 import { mergeSignals } from './enrichment/computeReviewFlag';
 import { openaiJson } from '../ai/openaiJson';
 import { getOpenAiConfig } from '../config/openai';
@@ -621,24 +621,48 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal): Promise<boole
   }
 }
 
-async function maybeRunAiBatchOverColdRows(
-  coldRows: ColdRow[],
-  householdId: number | null,
-): Promise<AiBatchSummary> {
-  const empty: AiBatchSummary = {
+function emptyAiSummary(coldRowCount: number): AiBatchSummary {
+  return {
     attempted: false,
-    coldRowCount: coldRows.length,
+    coldRowCount,
     merchantsConsidered: 0,
     enhanced: 0,
     capped: false,
     usedBatch: false,
     fellBackToPerRow: false,
   };
-  if (!enrichmentAiEnabled || getOpenAiConfig() == null || coldRows.length === 0) return empty;
+}
+
+function aiBatchPossible(coldRows: ColdRow[]): boolean {
+  if (!enrichmentAiEnabled) return false;
+  if (coldRows.length === 0) return false;
+  return getOpenAiConfig() != null;
+}
+
+async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined): Promise<boolean> {
+  if (sug == null || sug.category == null) return false;
+  return persistAiEnhancement(c, aiSuggestionToSignal(sug));
+}
+
+async function applyAiSuggestionsToColdRows(
+  coldRows: ColdRow[],
+  suggestions: Map<string, AiBatchSuggestion>,
+): Promise<number> {
+  let enhanced = 0;
+  for (const c of coldRows) {
+    if (await tryEnhanceColdRow(c, suggestions.get(c.merchantKey))) enhanced += 1;
+  }
+  return enhanced;
+}
+
+async function maybeRunAiBatchOverColdRows(
+  coldRows: ColdRow[],
+  householdId: number | null,
+): Promise<AiBatchSummary> {
+  if (!aiBatchPossible(coldRows)) return emptyAiSummary(coldRows.length);
 
   const candidates = dedupeColdRowsByMerchantKey(coldRows).map(coldRowToCandidate);
   const categoryHints = await loadCategoryHints(householdId);
-
   const result = await runAiBatchStage({
     candidates,
     categoryHints,
@@ -646,13 +670,7 @@ async function maybeRunAiBatchOverColdRows(
     perRowConcurrency: enrichmentAiPerRowConcurrency,
     openaiCaller: (msgs) => openaiJson(msgs),
   });
-
-  let enhanced = 0;
-  for (const c of coldRows) {
-    const sug = result.suggestions.get(c.merchantKey);
-    if (sug == null || sug.category == null) continue;
-    if (await persistAiEnhancement(c, aiSuggestionToSignal(sug))) enhanced += 1;
-  }
+  const enhanced = await applyAiSuggestionsToColdRows(coldRows, result.suggestions);
 
   return {
     attempted: true,
