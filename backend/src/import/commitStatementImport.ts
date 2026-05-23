@@ -85,27 +85,36 @@ async function createInvestmentActivity(
   const security = row.security
     ? await findOrCreateSecurity(row.security, account.householdId, t)
     : null;
+  // SAVEPOINT around the INSERT: on Postgres, any query error inside an
+  // open transaction aborts the whole transaction and every subsequent
+  // query returns "current transaction is aborted". By nesting through
+  // sequelize.transaction({ transaction: t }, …) Sequelize emits a
+  // SAVEPOINT; if the inner block throws (e.g. unique violation we want
+  // to treat as a duplicate), only the savepoint rolls back and the
+  // outer transaction stays alive.
   try {
-    await InvestmentActivity.create(
-      {
-        accountId: account.id,
-        householdId: account.householdId,
-        securityId: security?.id ?? null,
-        activityType: row.activityType,
-        tradeDate: row.tradeDate,
-        settlementDate: row.settlementDate,
-        description: row.description,
-        quantity: row.quantity == null ? null : String(row.quantity),
-        price: row.price == null ? null : String(row.price),
-        amount: row.amount == null ? null : String(row.amount),
-        fees: row.fees == null ? null : String(row.fees),
-        currency: row.currency,
-        sourceReference: row.sourceReference,
-        sourceRowFingerprint: row.sourceRowFingerprint,
-        importBatch: preview.importBatch,
-      },
-      { transaction: t }
-    );
+    await sequelize.transaction({ transaction: t }, async (sp) => {
+      await InvestmentActivity.create(
+        {
+          accountId: account.id,
+          householdId: account.householdId,
+          securityId: security?.id ?? null,
+          activityType: row.activityType,
+          tradeDate: row.tradeDate,
+          settlementDate: row.settlementDate,
+          description: row.description,
+          quantity: row.quantity == null ? null : String(row.quantity),
+          price: row.price == null ? null : String(row.price),
+          amount: row.amount == null ? null : String(row.amount),
+          fees: row.fees == null ? null : String(row.fees),
+          currency: row.currency,
+          sourceReference: row.sourceReference,
+          sourceRowFingerprint: row.sourceRowFingerprint,
+          importBatch: preview.importBatch,
+        },
+        { transaction: sp }
+      );
+    });
     return 'inserted';
   } catch (e) {
     if (isUniqueLike(e)) return 'duplicate';
@@ -120,26 +129,31 @@ async function createHolding(
   t: SequelizeTransaction
 ): Promise<'inserted' | 'duplicate'> {
   const security = await findOrCreateSecurity(row.security, account.householdId, t);
+  // SAVEPOINT around the INSERT — same Postgres-safety rationale as
+  // createInvestmentActivity. Without this, a unique violation here
+  // would poison the surrounding bundle transaction.
   try {
-    await HoldingSnapshot.create(
-      {
-        accountId: account.id,
-        householdId: account.householdId,
-        securityId: security.id,
-        statementDate: row.statementDate,
-        quantity: String(row.quantity),
-        price: row.price == null ? null : String(row.price),
-        marketValue: row.marketValue == null ? null : String(row.marketValue),
-        costBasis: row.costBasis == null ? null : String(row.costBasis),
-        unrealizedGainLoss:
-          row.unrealizedGainLoss == null ? null : String(row.unrealizedGainLoss),
-        currency: row.currency,
-        sourceReference: row.sourceReference,
-        sourceRowFingerprint: row.sourceRowFingerprint,
-        importBatch: preview.importBatch,
-      },
-      { transaction: t }
-    );
+    await sequelize.transaction({ transaction: t }, async (sp) => {
+      await HoldingSnapshot.create(
+        {
+          accountId: account.id,
+          householdId: account.householdId,
+          securityId: security.id,
+          statementDate: row.statementDate,
+          quantity: String(row.quantity),
+          price: row.price == null ? null : String(row.price),
+          marketValue: row.marketValue == null ? null : String(row.marketValue),
+          costBasis: row.costBasis == null ? null : String(row.costBasis),
+          unrealizedGainLoss:
+            row.unrealizedGainLoss == null ? null : String(row.unrealizedGainLoss),
+          currency: row.currency,
+          sourceReference: row.sourceReference,
+          sourceRowFingerprint: row.sourceRowFingerprint,
+          importBatch: preview.importBatch,
+        },
+        { transaction: sp }
+      );
+    });
     return 'inserted';
   } catch (e) {
     if (isUniqueLike(e)) return 'duplicate';
@@ -295,20 +309,30 @@ export async function commitStatementImport(
         reviewedAt: null,
       });
       recomputeTransactionAmounts(txn);
+      // SAVEPOINT around the per-row insert + its signal sidecar. On
+      // Postgres, any unique-violation here would otherwise abort the
+      // outer transaction and every subsequent SELECT in this loop
+      // would fail with "current transaction is aborted, commands
+      // ignored until end of transaction block". Nesting through
+      // sequelize.transaction({ transaction: t }, …) emits a SAVEPOINT
+      // so the unique-violation rolls back only this row and the loop
+      // continues.
       try {
-        await txn.save({ transaction: t });
-        if (enriched.signals.length > 0) {
-          await TransactionSignal.bulkCreate(
-            enriched.signals.map((s) => ({
-              transactionId: txn.id,
-              source: s.source,
-              confidence: s.confidence,
-              fields: s.fields,
-              rationale: s.rationale ?? null,
-            })),
-            { transaction: t },
-          );
-        }
+        await sequelize.transaction({ transaction: t }, async (sp) => {
+          await txn.save({ transaction: sp });
+          if (enriched.signals.length > 0) {
+            await TransactionSignal.bulkCreate(
+              enriched.signals.map((s) => ({
+                transactionId: txn.id,
+                source: s.source,
+                confidence: s.confidence,
+                fields: s.fields,
+                rationale: s.rationale ?? null,
+              })),
+              { transaction: sp },
+            );
+          }
+        });
         insertedTransactions += 1;
       } catch (e) {
         if (isUniqueLike(e)) skippedDuplicates += 1;
