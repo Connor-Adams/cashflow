@@ -720,6 +720,33 @@
     color: var(--fg);
   }
 
+  /* Link-variant chip: label is a Link (drill into another page), the X
+   * clear lives beside it. Visual match to the all-button variant, but
+   * the chip becomes split-control. */
+  .transactionsFilterPill--link {
+    border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+    padding: 0;
+    overflow: hidden;
+  }
+  .transactionsFilterPill__label {
+    @apply px-3 py-1.5 no-underline;
+    color: var(--fg);
+  }
+  .transactionsFilterPill__label:hover {
+    color: var(--primary);
+    background: color-mix(in oklch, var(--primary) 8%, transparent);
+  }
+  .transactionsFilterPill__clear {
+    @apply inline-flex h-full items-center px-2 py-1.5 text-sm;
+    border-left: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  .transactionsFilterPill__clear:hover {
+    background: color-mix(in oklch, var(--destructive) 10%, transparent);
+    color: var(--destructive);
+  }
+
   .transactionsHelperCopy {
     @apply mb-0 mt-2;
   }

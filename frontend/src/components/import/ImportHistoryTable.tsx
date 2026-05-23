@@ -1,0 +1,125 @@
+import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { getJson } from '../../lib/api'
+
+export type ImportHistoryRow = {
+  id: number
+  fileName: string
+  batchLabel: string
+  status: string
+  rowCount: number | null
+  errorMessage: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+type ImportHistoryTableProps = {
+  /** Fires when the user clicks the action button on a history row. */
+  onRowClick: (batchLabel: string) => void
+  /** Bump this value (e.g. from an UploadCard `onCommitted` callback) to
+   *  trigger a re-fetch of `/api/import/history`. */
+  refreshKey?: number
+  /** Optional label override for the row action button. Defaults to
+   *  "Open batch". */
+  actionLabel?: string
+}
+
+/**
+ * Import history table extracted from `TransactionsPage`. Renders the last
+ * 50 import runs and emits the batch label via `onRowClick` so callers can
+ * either navigate to `/import/:batchId` or filter the transactions table
+ * by batch. Bump `refreshKey` after a successful upload to force a refetch.
+ */
+export function ImportHistoryTable({
+  onRowClick,
+  refreshKey = 0,
+  actionLabel = 'Open batch',
+}: ImportHistoryTableProps) {
+  const [importHistory, setImportHistory] = useState<ImportHistoryRow[]>([])
+
+  const refreshImportHistory = useCallback(() => {
+    void getJson<ImportHistoryRow[]>('/api/import/history')
+      .then(setImportHistory)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshImportHistory()
+  }, [refreshImportHistory, refreshKey])
+
+  return (
+    <section
+      className="card transactionsPanel transactionsHistoryCard"
+      aria-labelledby="import-history-heading"
+    >
+      <div className="transactionsPanelHeader">
+        <div>
+          <h2 id="import-history-heading">Recent imports</h2>
+          <p className="muted">
+            Last 50 runs. Click a row to drill into the batch.
+          </p>
+        </div>
+      </div>
+      <div className="tableWrap">
+        <Table className="table">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Started</TableHead>
+              <TableHead>File</TableHead>
+              <TableHead>Batch</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Rows</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {importHistory.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="muted pad">
+                  No import history yet.
+                </TableCell>
+              </TableRow>
+            ) : (
+              importHistory.map((h) => (
+                <TableRow key={h.id}>
+                  <TableCell>{h.startedAt.slice(0, 19).replace('T', ' ')}</TableCell>
+                  <TableCell title={h.fileName}>{h.fileName}</TableCell>
+                  <TableCell>{h.batchLabel}</TableCell>
+                  <TableCell>
+                    {h.status}
+                    {h.errorMessage ? (
+                      <span className="muted" title={h.errorMessage}>
+                        {' '}
+                        ({h.errorMessage.slice(0, 40)}
+                        {h.errorMessage.length > 40 ? '…' : ''})
+                      </span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>{h.rowCount ?? '—'}</TableCell>
+                  <TableCell>
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      onClick={() => onRowClick(h.batchLabel)}
+                    >
+                      {actionLabel}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  )
+}
