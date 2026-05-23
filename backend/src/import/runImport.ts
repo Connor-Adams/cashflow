@@ -111,6 +111,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   }
 
   // Delegate PDF files to parseStatementFile + commitStatementImport.
+  // Note: /api/import/upload calls importCsvFile directly (not parseStatementFile), so PDF
+  // delegation lives here rather than in the route handler or a separate entry point.
   const ext = path.extname(name).toLowerCase();
   if (ext === '.pdf') {
     const accountIdNum =
@@ -126,7 +128,26 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       householdId: opts.householdId,
     });
     if ('error' in parsed) {
-      return { file: name, error: parsed.error, inserted: 0, parseErrors: [] };
+      // Write an audit record so import history reflects the failure (mirrors CSV parse-failure path).
+      await ImportHistory.create({
+        fileName: name,
+        filePathSafe: name,
+        contentHash,
+        batchLabel: 'pdf-parse-error',
+        status: 'failed',
+        rowCount: 0,
+        errorMessage: parsed.error,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+        householdId: opts.householdId ?? null,
+        createdByUserId: opts.userId ?? null,
+      });
+      return {
+        file: name,
+        skipped: true,
+        reason: 'pdf_parse_error',
+        message: parsed.error,
+      };
     }
     const result = await commitStatementImport(parsed, opts.userId ?? null, opts.householdId ?? null);
     return result;

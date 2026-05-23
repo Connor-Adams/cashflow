@@ -897,7 +897,9 @@ test('POST /api/import/upload: rejects an unknown-layout PDF with a clear error'
       filename: 'unknown.pdf',
       contentType: 'application/pdf',
     });
-  // The route returns 200 with `error` populated when parseStatementFile rejects.
-  assert.ok(res.body.error || res.status >= 400, JSON.stringify({ status: res.status, body: res.body }));
-  if (res.body.error) assert.match(res.body.error, /PDF|parser/i);
+  // The route returns 200 with `skipped: true` + a reason/message when parseStatementFile rejects.
+  assert.equal(res.status, 200);
+  assert.equal(res.body.skipped, true, JSON.stringify({ status: res.status, body: res.body }));
+  assert.equal(res.body.reason, 'pdf_parse_error');
+  assert.match(String(res.body.message ?? ''), /PDF|parser/i);
 });

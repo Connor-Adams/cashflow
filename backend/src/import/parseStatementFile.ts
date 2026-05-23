@@ -438,8 +438,6 @@ export async function parseStatementFile(opts: {
     },
   };
 
-  registerBuiltInPdfParsers();
-
   if (ext === '.csv') {
     const parsed = parseCsvRecords(opts.buffer.toString('utf8'));
     if (!parsed.ok) return { ok: false, error: parsed.error };
@@ -528,6 +526,8 @@ export async function parseStatementFile(opts: {
   }
 
   if (ext === '.pdf') {
+    // Guard is idempotent — safe to call here so registration only runs for PDF uploads.
+    registerBuiltInPdfParsers();
     let lines;
     try {
       lines = await extractPdfLines(opts.buffer);
