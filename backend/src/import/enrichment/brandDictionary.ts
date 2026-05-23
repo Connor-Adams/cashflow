@@ -66,7 +66,7 @@ const SEED_BRANDS: BrandEntry[] = [
   { pattern: /\b(airalo)\b/i, canonical: 'Airalo' },
   { pattern: /\b(instacart|ic\s*\*\s*instacart)/i, canonical: 'Instacart' },
   { pattern: /\b(intuit|qbooks|quickbooks)\b/i, canonical: 'Intuit' },
-  { pattern: /\b(paddle\.net|paddle)/i, canonical: 'Paddle' },
+  { pattern: /\b(paddle\.net|paddle\s*\*)/i, canonical: 'Paddle' },
   { pattern: /\b(fedex)/i, canonical: 'FedEx' },
   { pattern: /\b(ups\s*\*|\bups\b)/i, canonical: 'UPS' },
 ];

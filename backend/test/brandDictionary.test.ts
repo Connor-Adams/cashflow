@@ -84,6 +84,11 @@ test('lookupSeedBrand handles new tech/subscription brands', () => {
   assert.equal(lookupSeedBrand('INSTACART'), 'Instacart');
   assert.equal(lookupSeedBrand('INTUIT QBOOKS'), 'Intuit');
   assert.equal(lookupSeedBrand('PADDLE.NET'), 'Paddle');
+  assert.equal(lookupSeedBrand('PADDLE.NET* MTW LONDON'), 'Paddle');
+  // Negative: bare 'paddle' (without .net or *) should NOT match — protects against
+  // PADDLEBOARD RENTAL and similar generic merchants.
+  assert.equal(lookupSeedBrand('PADDLEBOARD RENTAL'), null);
+  assert.equal(lookupSeedBrand('PADDLE TENNIS CLUB'), null);
   assert.equal(lookupSeedBrand('FEDEX'), 'FedEx');
   assert.equal(lookupSeedBrand('UPS'), 'UPS');
   assert.equal(lookupSeedBrand('UPS*'), 'UPS');
