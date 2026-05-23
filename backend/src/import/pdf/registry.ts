@@ -17,7 +17,7 @@ export function findPdfParser(lines: PdfLine[]): PdfParser | null {
 }
 
 export function listPdfParsers(): readonly PdfParser[] {
-  return parsers;
+  return [...parsers];
 }
 
 /** Test-only — wipe the registry and reset the built-ins guard. Production code never calls this. */
@@ -27,8 +27,9 @@ export function clearPdfParsersForTest(): void {
 }
 
 /**
- * Register built-in parsers. Called once at app boot from parseStatementFile
- * (lazy, via a one-shot guard) and from tests that need built-ins after a clear.
+ * Register the built-in PDF parsers. Idempotent via a one-shot guard.
+ * Tests can re-register after `clearPdfParsersForTest()`. Production code
+ * calls this once when the .pdf branch of `parseStatementFile` is invoked.
  */
 let builtInsRegistered = false;
 export function registerBuiltInPdfParsers(): void {
