@@ -15,6 +15,9 @@ concurrency:
 jobs:
   promote:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      REPO: ${{ github.repository }}
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -32,13 +35,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event.release.tag_name }}"
-          REPO="${{ github.repository }}"
           REPO_LC=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
 
-          # Tags can be lightweight (object.type=commit) or annotated (object.type=tag).
-          # Resolve to the underlying commit SHA.
-          REF=$(gh api "/repos/$REPO/git/ref/tags/$TAG")
+          REF=$(gh api "/repos/$REPO/git/ref/tags/$RELEASE_TAG")
           OBJ_TYPE=$(echo "$REF" | jq -r .object.type)
           OBJ_SHA=$(echo "$REF" | jq -r .object.sha)
           if [ "$OBJ_TYPE" = "tag" ]; then
@@ -48,27 +47,43 @@ jobs:
           fi
           SHA_SHORT=$(echo "$COMMIT_SHA" | cut -c1-7)
 
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "sha_short=$SHA_SHORT" >> "$GITHUB_OUTPUT"
           echo "backend=ghcr.io/${REPO_LC}-backend" >> "$GITHUB_OUTPUT"
           echo "frontend=ghcr.io/${REPO_LC}-frontend" >> "$GITHUB_OUTPUT"
-          echo "Released tag $TAG -> commit $COMMIT_SHA (short $SHA_SHORT)"
+          echo "Released tag $RELEASE_TAG -> commit $COMMIT_SHA (short $SHA_SHORT)"
+
+      - name: Verify source images exist for this commit
+        env:
+          BACKEND: ${{ steps.resolve.outputs.backend }}
+          FRONTEND: ${{ steps.resolve.outputs.frontend }}
+          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+        run: |
+          set -euo pipefail
+          echo "Inspecting source images at :sha-$SHA_SHORT"
+          docker buildx imagetools inspect "$BACKEND:sha-$SHA_SHORT" > /dev/null
+          docker buildx imagetools inspect "$FRONTEND:sha-$SHA_SHORT" > /dev/null
 
       - name: Re-tag backend image as release version and :production
+        env:
+          BACKEND: ${{ steps.resolve.outputs.backend }}
+          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
-            --tag "${{ steps.resolve.outputs.backend }}:${{ steps.resolve.outputs.tag }}" \
-            --tag "${{ steps.resolve.outputs.backend }}:production" \
-            "${{ steps.resolve.outputs.backend }}:sha-${{ steps.resolve.outputs.sha_short }}"
+            --tag "$BACKEND:$RELEASE_TAG" \
+            --tag "$BACKEND:production" \
+            "$BACKEND:sha-$SHA_SHORT"
 
       - name: Re-tag frontend image as release version and :production
+        env:
+          FRONTEND: ${{ steps.resolve.outputs.frontend }}
+          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
-            --tag "${{ steps.resolve.outputs.frontend }}:${{ steps.resolve.outputs.tag }}" \
-            --tag "${{ steps.resolve.outputs.frontend }}:production" \
-            "${{ steps.resolve.outputs.frontend }}:sha-${{ steps.resolve.outputs.sha_short }}"
+            --tag "$FRONTEND:$RELEASE_TAG" \
+            --tag "$FRONTEND:production" \
+            "$FRONTEND:sha-$SHA_SHORT"
 
       - name: Trigger Railway backend redeploy
         env:
