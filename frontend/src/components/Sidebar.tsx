@@ -14,6 +14,7 @@ import {
   Shield,
   Sun,
   Moon,
+  Upload,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ const navItems: NavItem[] = [
   { to: '/accounts', label: 'Accounts', icon: CreditCard },
   { to: '/review', label: 'Review', icon: ClipboardCheck },
   { to: '/transactions', label: 'Transactions', icon: ReceiptText },
+  { to: '/import', label: 'Import', icon: Upload },
   { to: '/portfolio', label: 'Portfolio', icon: LineChart },
   { to: '/amazon', label: 'Amazon', icon: PackageSearch },
   { to: '/recurring', label: 'Recurring', icon: Repeat },
