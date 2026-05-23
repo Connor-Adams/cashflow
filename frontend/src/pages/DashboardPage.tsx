@@ -21,12 +21,15 @@ import { PageHeader } from '@/components/ui/page-header'
 import { BentoTile } from '@/components/dashboard/BentoTile'
 import { HeroTile } from '@/components/dashboard/HeroTile'
 import { KpiStack } from '@/components/dashboard/KpiStack'
-import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
-import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
-import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
-import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { formatMoney } from '../lib/formatMoney'
-import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import { toDateInputValue } from '../lib/dateInput'
@@ -36,12 +39,7 @@ import {
   formatShortMonth,
   useIsNarrowViewport,
 } from '../lib/chartViewport'
-import type {
-  BudgetProgress,
-  BudgetProgressResponse,
-  RecurringItem,
-  RecurringResponse,
-} from '../types/api'
+import type { BudgetProgress, BudgetProgressResponse } from '../types/api'
 
 type Row = {
   currency: string
@@ -232,38 +230,6 @@ function getYearToDateRange(): { from: string; to: string } {
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
-/**
- * Fetch /api/recurring with the given currency filter. Returns the items
- * on success or an empty list on failure — never throws. Pulled out so
- * the useEffect that uses it stays small enough for the complexity gate.
- */
-async function fetchRecurringSafely(currency: string): Promise<RecurringItem[]> {
-  const qs = currency ? `?currency=${encodeURIComponent(currency)}` : ''
-  try {
-    const resp = await getJson<RecurringResponse>(`/api/recurring${qs}`)
-    return resp.items
-  } catch {
-    return []
-  }
-}
-
-/**
- * Build a `/transactions?…` URL with the dashboard's current
- * filter context layered on top of the caller's extra params.
- * Dedupes the bento drill-click handlers (top categories chart,
- * top merchants, top accounts) which all preserve the same context.
- */
-function transactionsUrl(
-  extra: Record<string, string>,
-  ctx: { currency: string; dateFrom: string; dateTo: string }
-): string {
-  const qs = new URLSearchParams(extra)
-  if (ctx.currency) qs.set('currency', ctx.currency)
-  if (ctx.dateFrom) qs.set('dateFrom', ctx.dateFrom)
-  if (ctx.dateTo) qs.set('dateTo', ctx.dateTo)
-  return `/transactions?${qs.toString()}`
-}
-
 export function DashboardPage() {
   const navigate = useNavigate()
   const isNarrowViewport = useIsNarrowViewport()
@@ -284,20 +250,9 @@ export function DashboardPage() {
   const [previousMetricsByCurrency, setPreviousMetricsByCurrency] = useState<
     CurrencyMetrics[]
   >([])
-  // Previous-period category rollups, used by the Top growers tile. The
-  // /api/summary/dashboard response already includes categoryReports for
-  // the previous-period fetch; before this it was discarded.
-  const [previousCategoryReports, setPreviousCategoryReports] = useState<
-    CategoryReportRow[]
-  >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
   const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
   const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
-  // Recurring charges, fetched separately so a /api/recurring failure
-  // never tanks the rest of the dashboard. Empty list on failure or
-  // initial load.
-  const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
-  const [recurringLoading, setRecurringLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -344,7 +299,6 @@ export function DashboardPage() {
           setData(d)
           setMonthly(m)
           setPreviousMetricsByCurrency(prev?.metricsByCurrency ?? [])
-          setPreviousCategoryReports(prev?.categoryReports ?? [])
           setAiInsights(insights)
         }
       } catch (e) {
@@ -392,22 +346,6 @@ export function DashboardPage() {
     })
   }, [budgetProgress])
 
-  // Recurring charges, fetched separately on currency change. Wrapped in
-  // try/catch so a failed fetch falls back to empty (same pattern as
-  // budgets above) — the Recurring tile self-handles empty/error states.
-  useEffect(() => {
-    let cancelled = false
-    setRecurringLoading(true)
-    void fetchRecurringSafely(currency).then((items) => {
-      if (cancelled) return
-      setRecurringItems(items)
-      setRecurringLoading(false)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [currency])
-
   const currencies = useMemo(() => {
     const s = new Set<string>()
     data?.byCategory.forEach((r) => s.add(r.currency))
@@ -443,12 +381,12 @@ export function DashboardPage() {
   const navigateToCategory = useCallback(
     (categoryName: string) => {
       if (!categoryName) return
-      navigate(
-        transactionsUrl(
-          { category: categoryName },
-          { currency, dateFrom, dateTo }
-        )
-      )
+      const qs = new URLSearchParams()
+      qs.set('category', categoryName)
+      if (currency) qs.set('currency', currency)
+      if (dateFrom) qs.set('dateFrom', dateFrom)
+      if (dateTo) qs.set('dateTo', dateTo)
+      navigate(`/transactions?${qs.toString()}`)
     },
     [navigate, currency, dateFrom, dateTo]
   )
@@ -571,15 +509,37 @@ export function DashboardPage() {
     }
   }, [businessReportData])
 
-  const merchantReportData = useMemo(
-    () => rankByNetSpend(data?.merchantSummaries ?? [], currency),
-    [data?.merchantSummaries, currency]
-  )
+  const categoryReportData = useMemo(() => {
+    const rows = data?.categoryReports ?? []
+    return rows
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) => b.netSpend - a.netSpend)
+  }, [data?.categoryReports, currency])
 
-  const accountReportData = useMemo(
-    () => rankByNetSpend(data?.accountSummaries ?? [], currency),
-    [data?.accountSummaries, currency]
-  )
+  const merchantReportData = useMemo(() => {
+    const rows = data?.merchantSummaries ?? []
+    return rows
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) =>
+        b.netSpend === a.netSpend
+          ? b.transactionCount - a.transactionCount
+          : b.netSpend - a.netSpend
+      )
+  }, [data?.merchantSummaries, currency])
+
+  const accountReportData = useMemo(() => {
+    const rows = data?.accountSummaries ?? []
+    return rows
+      .filter((row) => !currency || row.currency === currency)
+      .slice()
+      .sort((a, b) =>
+        b.netSpend === a.netSpend
+          ? b.transactionCount - a.transactionCount
+          : b.netSpend - a.netSpend
+      )
+  }, [data?.accountSummaries, currency])
 
   const reviewQueueData = useMemo(() => {
     const rows = data?.reviewQueue ?? []
@@ -737,65 +697,6 @@ export function DashboardPage() {
     if (typeof value !== 'string') return String(value)
     return isNarrowViewport ? formatShortMonth(value) : value
   }
-
-  // Column specs for the bento table-tiles. Defined inside the component
-  // so the render closures can reference `formatMoney` directly without
-  // tunneling it through the column spec.
-  const merchantColumns: TableTileColumn<MerchantSummaryRow>[] = [
-    { key: 'merchant', label: 'Merchant', render: (r) => r.merchant },
-    {
-      key: 'txns',
-      label: 'Txns',
-      align: 'right',
-      width: '3rem',
-      render: (r) => r.transactionCount,
-    },
-    {
-      key: 'net',
-      label: 'Net spend',
-      align: 'right',
-      render: (r) => formatMoney(r.netSpend, r.currency),
-    },
-  ]
-
-  const accountColumns: TableTileColumn<AccountSummaryRow>[] = [
-    {
-      key: 'account',
-      label: 'Account',
-      render: (r) => r.accountShortCode ?? r.accountName,
-    },
-    {
-      key: 'txns',
-      label: 'Txns',
-      align: 'right',
-      width: '3rem',
-      render: (r) => r.transactionCount,
-    },
-    {
-      key: 'net',
-      label: 'Net spend',
-      align: 'right',
-      render: (r) => formatMoney(r.netSpend, r.currency),
-    },
-  ]
-
-  const reviewColumns: TableTileColumn<ReviewQueueRow>[] = [
-    { key: 'date', label: 'Date', width: '6rem', render: (r) => r.date },
-    { key: 'merchant', label: 'Merchant', render: (r) => r.merchant },
-    { key: 'account', label: 'Account', render: (r) => r.accountName },
-    {
-      key: 'category',
-      label: 'Category',
-      render: (r) => r.category ?? '(uncategorized)',
-    },
-    {
-      key: 'amount',
-      label: 'Amount',
-      align: 'right',
-      width: '6rem',
-      render: (r) => formatMoney(r.amount, r.currency),
-    },
-  ]
 
   return (
     <div className="page">
@@ -1286,7 +1187,7 @@ export function DashboardPage() {
         </BentoTile>
 
         <BentoTile
-          span={6}
+          span={12}
           rows={2}
           label="Activity by month"
           description="One line per currency using signed monthly totals, excluding payments and transfers."
@@ -1294,7 +1195,7 @@ export function DashboardPage() {
           {monthlyChartData.length === 0 ? (
             !loading ? <p className="muted">No transactions in this range.</p> : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={260}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -1340,81 +1241,189 @@ export function DashboardPage() {
             </ResponsiveContainer>
           )}
         </BentoTile>
-
-        <TopGrowersTile
-          currentRows={data?.categoryReports ?? []}
-          previousRows={previousCategoryReports}
-          hasComparisonPeriod={hasComparisonPeriod}
-          currency={currency}
-          loading={loading}
-        />
-
-        <RecurringThisMonthTile
-          items={recurringItems}
-          loading={recurringLoading}
-        />
-
-        <CurrencyMixTile
-          metrics={data?.metricsByCurrency ?? []}
-          loading={loading}
-        />
-
-        <TableTile
-          span={6}
-          label="Top merchants"
-          description="Highest net spend in this view."
-          columns={merchantColumns}
-          rows={merchantReportData.slice(0, 6)}
-          rowKey={(r) => `${r.currency}:${r.merchant}`}
-          onRowClick={(r) =>
-            navigate(
-              transactionsUrl(
-                { merchant: r.merchant },
-                { currency, dateFrom, dateTo }
-              )
-            )
-          }
-          viewAllLabel="All merchants in Reports"
-          viewAllHref="/reports#merchants"
-          emptyLabel="No merchant activity in this view."
-          loading={loading}
-        />
-
-        <TableTile
-          span={6}
-          label="Top accounts"
-          description="Highest net spend in this view."
-          columns={accountColumns}
-          rows={accountReportData.slice(0, 6)}
-          rowKey={(r) => `${r.currency}:${r.accountId}`}
-          onRowClick={(r) =>
-            navigate(
-              transactionsUrl(
-                { account: String(r.accountId) },
-                { currency, dateFrom, dateTo }
-              )
-            )
-          }
-          viewAllLabel="All accounts in Reports"
-          viewAllHref="/reports#accounts"
-          emptyLabel="No account activity in this view."
-          loading={loading}
-        />
-
-        <TableTile
-          span={12}
-          label="Review queue"
-          description="Flagged transactions in this view, most recent first."
-          columns={reviewColumns}
-          rows={reviewQueueData.slice(0, 6)}
-          rowKey={(r) => String(r.id)}
-          onRowClick={() => navigate('/review')}
-          viewAllLabel="Open Review Inbox"
-          viewAllHref="/review"
-          emptyLabel="Nothing flagged in this view."
-          loading={loading}
-        />
       </div>
+
+      <section className="card dashboardTableCard" aria-busy={loading}>
+        <h2>Category report</h2>
+        <p className="muted">
+          Top categories ranked by net spend for the current filters.
+        </p>
+        <div className="tableWrap">
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Category</TableHead>
+                <TableHead>Spend</TableHead>
+                <TableHead>Refunds / credits</TableHead>
+                <TableHead>Net spend</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!loading && categoryReportData.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={currency ? 4 : 5}
+                    className="emptyStateCell"
+                  >
+                    <p className="emptyState">
+                      No category report data for these filters.
+                    </p>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {categoryReportData.slice(0, 12).map((row) => (
+                  <TableRow key={`${row.currency}:${row.category ?? 'uncategorized'}`}>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.category ?? '(uncategorized)'}</TableCell>
+                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
+
+      <section className="card dashboardTableCard" aria-busy={loading}>
+        <h2>Merchant report</h2>
+        <p className="muted">
+          Where the money is actually going, ranked by net spend with refunds,
+          payments, and review backlog shown beside it.
+        </p>
+        <div className="tableWrap">
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Merchant</TableHead>
+                <TableHead>Transactions</TableHead>
+                <TableHead>Spend</TableHead>
+                <TableHead>Refunds / credits</TableHead>
+                <TableHead>Payments</TableHead>
+                <TableHead>Net spend</TableHead>
+                <TableHead>Needs review</TableHead>
+                <TableHead>Last seen</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!loading && merchantReportData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={currency ? 8 : 9} className="emptyStateCell">
+                    <p className="emptyState">
+                      No merchant-level activity for these filters.
+                    </p>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {merchantReportData.slice(0, 12).map((row) => (
+                  <TableRow key={`${row.currency}:${row.merchant}`}>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.merchant}</TableCell>
+                    <TableCell>{row.transactionCount}</TableCell>
+                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalPayments, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
+                    <TableCell>{row.reviewCount}</TableCell>
+                    <TableCell>{row.lastDate}</TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
+
+      <section className="card dashboardTableCard" aria-busy={loading}>
+        <h2>Account report</h2>
+        <p className="muted">
+          Which accounts are driving the totals, including payment volume and review
+          backlog.
+        </p>
+        <div className="tableWrap">
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Account</TableHead>
+                <TableHead>Transactions</TableHead>
+                <TableHead>Spend</TableHead>
+                <TableHead>Refunds / credits</TableHead>
+                <TableHead>Payments</TableHead>
+                <TableHead>Net spend</TableHead>
+                <TableHead>Needs review</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!loading && accountReportData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={currency ? 7 : 8} className="emptyStateCell">
+                    <p className="emptyState">
+                      No account-level totals for these filters.
+                    </p>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {accountReportData.map((row) => (
+                  <TableRow key={`${row.currency}:${row.accountId}`}>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.accountShortCode ?? row.accountName}</TableCell>
+                    <TableCell>{row.transactionCount}</TableCell>
+                    <TableCell>{formatMoney(row.totalSpend, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalCredits, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.totalPayments, row.currency)}</TableCell>
+                    <TableCell>{formatMoney(row.netSpend, row.currency)}</TableCell>
+                    <TableCell>{row.reviewCount}</TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
+
+      <section className="card dashboardTableCard" aria-busy={loading}>
+        <h2>Review queue</h2>
+        <p className="muted">
+          Recent flagged transactions from the current view so you can see what still
+          needs cleanup.
+        </p>
+        <div className="tableWrap">
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                {!currency && <TableHead>Currency</TableHead>}
+                <TableHead>Merchant</TableHead>
+                <TableHead>Account</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Amount</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!loading && reviewQueueData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={currency ? 5 : 6} className="emptyStateCell">
+                    <p className="emptyState">
+                      No flagged transactions in the current filters.
+                    </p>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {reviewQueueData.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell>{row.date}</TableCell>
+                    {!currency && <TableCell>{row.currency}</TableCell>}
+                    <TableCell>{row.merchant}</TableCell>
+                    <TableCell>{row.accountName}</TableCell>
+                    <TableCell>{row.category ?? '(uncategorized)'}</TableCell>
+                    <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </div>
+      </section>
     </div>
   )
 }
