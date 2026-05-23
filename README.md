@@ -122,6 +122,45 @@ account, rules, and sample transactions are ensured without duplicating on
 later deploys. The auth screen exposes a **Continue with demo account** button
 backed by `POST /api/auth/demo-login`.
 
+## Releases
+
+Cashflow uses [release-please](https://github.com/googleapis/release-please) to
+manage versions from conventional commits, plus a `production` branch that
+Railway tracks for deployment.
+
+**To ship to production:**
+
+1. Make changes on a feature branch; merge to `main` via PR with a conventional
+   commit message (`feat:`, `fix:`, etc.). The prefix determines the next
+   version bump.
+2. `release-please` watches `main` and maintains an open release PR titled
+   "chore(main): release X.Y.Z" with the proposed version bump and updated
+   `CHANGELOG.md`.
+3. When you're ready to ship, merge the release PR. This creates a git tag, a
+   GitHub Release, and fast-forwards the `production` branch to the tagged
+   commit.
+4. Railway tracks `production` and deploys both backend and frontend services
+   on each push.
+
+`main` does not auto-deploy to prod. Only release-PR merges advance
+`production`.
+
+**Version bumps follow semver:**
+- `feat:` → minor bump
+- `fix:` / `perf:` / `deps:` → patch bump
+- `feat!:` or any commit body containing `BREAKING CHANGE:` → major bump
+- `docs:`, `chore:`, `refactor:`, `test:`, `build:`, `ci:` → no bump; shown in
+  CHANGELOG under hidden sections
+
+**Rollback:**
+
+```bash
+git push origin <older-tag>:refs/heads/production --force-with-lease
+```
+
+Must be done by an account in the production branch protection allowlist (or
+by anyone if protection isn't configured).
+
 ## Deploy
 
 See [docs/deploy-railway.md](docs/deploy-railway.md) for Railway service
