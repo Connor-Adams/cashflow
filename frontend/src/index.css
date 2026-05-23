@@ -3,77 +3,148 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ─────────────────────────────────────────────────────────────────────────
- * Honey & Ink — Cashflow brand tokens (single source of truth).
+ * Cashflow palette tokens (single source of truth).
  *
- * Anchors (constant across modes):
- *   amber  oklch(0.72 0.14 80)   — brand primary
- *   plum   oklch(0.32 0.08 350)  — accent (deep form)
- *   jade   oklch(0.62 0.11 155)  — positive / credit / gain
- *   rust   oklch(0.58 0.16 30)   — alert / destructive / spend
- *   ink    oklch(0.16 0.01 280)  — surface dark
- *   bone   oklch(0.97 0.005 90)  — surface light
- *
- * Light is the default :root so first paint (before ThemeProvider runs)
- * renders correctly. ThemeProvider toggles data-theme="dark|light".
+ * Light is the default :root so first paint renders correctly before
+ * ThemeProvider sets data-theme="dark|light".
  * ──────────────────────────────────────────────────────────────────────── */
 
 :root,
 :root[data-theme="light"] {
   --radius: 0.5rem;
 
+  /* Amber / Primary */
+  --amber-50: #FFF8E5;
+  --amber-100: #FCEBBC;
+  --amber-200: #F5D47A;
+  --amber-300: #EABD3D;
+  --amber-400: #E0A726;
+  --amber-500: #C78C13;
+  --amber-600: #9C6A0A;
+  --amber-700: #704B07;
+  --amber-800: #463005;
+  --amber-900: #221803;
+
+  /* Plum / Accent */
+  --plum-50: #FAEEF6;
+  --plum-100: #EFCFE2;
+  --plum-200: #DFA3C7;
+  --plum-300: #C66FA4;
+  --plum-400: #9E4C7A;
+  --plum-500: #7B385E;
+  --plum-600: #5B2B46;
+  --plum-700: #421F33;
+  --plum-800: #2B1422;
+  --plum-900: #160A12;
+
+  /* Jade / Success */
+  --jade-50: #EAF8F0;
+  --jade-100: #C9EBD8;
+  --jade-200: #98D8B5;
+  --jade-300: #67C391;
+  --jade-400: #3FA46D;
+  --jade-500: #2F8657;
+  --jade-600: #236843;
+  --jade-700: #184A30;
+  --jade-800: #0E2E1E;
+  --jade-900: #06150D;
+
+  /* Rust / Alert */
+  --rust-50: #FFF0EA;
+  --rust-100: #FFD4C5;
+  --rust-200: #F8A98D;
+  --rust-300: #EB7B56;
+  --rust-400: #C14E2A;
+  --rust-500: #A33D1F;
+  --rust-600: #7E2E17;
+  --rust-700: #5A2010;
+  --rust-800: #381309;
+  --rust-900: #1A0804;
+
+  /* Neutrals */
+  --bone: #FAF7F0;
+  --sand: #E8DED0;
+  --taupe: #B9AA98;
+  --stone: #776C61;
+  --charcoal: #302D34;
+  --ink: #121118;
+
+  /* Supporting colors */
+  --cream: #FFFDF7;
+  --champagne: #F3E2B8;
+  --brass: #B9852F;
+  --copper: #A95C36;
+  --fig: #3A1E32;
+  --moss: #667A4F;
+  --sage: #A9B79B;
+  --clay: #B56D4A;
+  --smoke: #D8D2C8;
+  --graphite: #24222A;
+
   /* Surfaces */
-  --background:       oklch(0.97 0.005 90);   /* bone */
-  --card:             oklch(1.00 0 0);         /* pure white tiles on bone */
-  --popover:          oklch(1.00 0 0);
-  --muted:            oklch(0.94 0.006 85);
+  --background: var(--bone);
+  --card: var(--cream);
+  --popover: var(--cream);
+  --muted: var(--sand);
 
   /* Text */
-  --foreground:       oklch(0.20 0.01 280);
-  --card-foreground:  var(--foreground);
+  --foreground: var(--ink);
+  --card-foreground: var(--foreground);
   --popover-foreground: var(--foreground);
-  --muted-foreground: oklch(0.45 0.015 80);
+  --muted-foreground: var(--stone);
 
   /* Brand */
-  --primary:                oklch(0.68 0.16 78);  /* amber, darker for weight on bone */
-  --primary-foreground:     oklch(0.20 0.01 280);
+  --primary: var(--amber-400);
+  --primary-hover: var(--amber-500);
+  --primary-foreground: var(--ink);
 
-  /* Accent (pale surface, deep text — mirrored in dark) */
-  --accent:                 oklch(0.92 0.04 350);
-  --accent-foreground:      oklch(0.32 0.08 350);
+  /* Accent */
+  --accent: var(--plum-50);
+  --accent-foreground: var(--plum-700);
 
   /* Semantic signals */
-  --positive:               oklch(0.52 0.13 155);
-  --positive-foreground:    oklch(0.97 0.005 90);
-  --destructive:            oklch(0.52 0.18 30);
-  --destructive-foreground: oklch(0.97 0.005 90);
+  --success: var(--jade-400);
+  --success-bg: var(--jade-50);
+  --success-foreground: var(--jade-700);
+  --warning: var(--rust-400);
+  --warning-bg: var(--rust-50);
+  --warning-foreground: var(--rust-700);
+  --danger: #B93A2E;
+  --danger-bg: #FCECEA;
+  --danger-foreground: var(--rust-700);
+  --positive: var(--jade-500);
+  --positive-foreground: var(--cream);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--cream);
 
   /* Borders / structural */
-  --secondary:              oklch(0.92 0.008 85);
-  --secondary-foreground:   var(--foreground);
-  --border:                 oklch(0.88 0.008 85);
-  --input:                  oklch(0.82 0.01 85);
-  --ring:                   oklch(0.68 0.16 78);
-  --shadow:                 0 8px 18px oklch(0.20 0.01 280 / 0.10);
+  --secondary: var(--plum-600);
+  --secondary-hover: var(--plum-700);
+  --secondary-foreground: var(--bone);
+  --border: var(--sand);
+  --input: var(--taupe);
+  --ring: var(--amber-500);
+  --shadow: 0 8px 18px rgb(18 17 24 / 0.10);
 
   /* Chart palette */
-  --chart-1: var(--primary);                  /* amber */
-  --chart-2: var(--positive);                 /* jade */
-  --chart-3: oklch(0.42 0.10 350);            /* plum, deep on bone */
-  --chart-4: var(--destructive);              /* rust */
-  --chart-5: oklch(0.55 0.02 250);            /* steel */
+  --chart-1: var(--amber-500);
+  --chart-2: var(--jade-500);
+  --chart-3: var(--plum-500);
+  --chart-4: var(--rust-500);
+  --chart-5: var(--stone);
 
-  --chart-spend:    var(--primary);
-  --chart-credit:   var(--positive);
-  --chart-payment:  oklch(0.55 0.02 250);     /* steel — visually inert */
-  --chart-business: oklch(0.42 0.10 350);     /* deep plum on bone */
+  --chart-spend: var(--amber-500);
+  --chart-credit: var(--jade-500);
+  --chart-payment: var(--stone);
+  --chart-business: var(--plum-600);
   --chart-personal: var(--positive);
 
   --chart-line-1: var(--primary);
   --chart-line-2: var(--positive);
   --chart-line-3: var(--chart-business);
   --chart-line-4: var(--destructive);
-  --chart-line-5: oklch(0.55 0.02 250);       /* steel */
-  --chart-line-6: oklch(0.45 0.10 320);       /* mauve */
+  --chart-line-5: var(--moss);
+  --chart-line-6: var(--clay);
 
   /* Legacy aliases — one migration cycle, then removed.
    * App.css component classes (.navLink.isActive, .brandMark, .superadminBadge,
@@ -87,53 +158,72 @@
   --accent-soft:   var(--accent);
   --accent-warm:   var(--primary);
   --accent-green:  var(--positive);
-  --danger:        var(--destructive);
 
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
   /* Surfaces */
-  --background:       oklch(0.16 0.01 280);   /* ink */
-  --card:             oklch(0.20 0.012 280);
-  --popover:          oklch(0.22 0.012 280);
-  --muted:            oklch(0.23 0.012 280);
+  --background: var(--ink);
+  --card: var(--graphite);
+  --popover: var(--charcoal);
+  --muted: var(--charcoal);
 
   /* Text */
-  --foreground:       oklch(0.96 0.005 90);   /* warm bone-white */
-  --card-foreground:  var(--foreground);
+  --foreground: var(--bone);
+  --card-foreground: var(--foreground);
   --popover-foreground: var(--foreground);
-  --muted-foreground: oklch(0.72 0.015 80);
+  --muted-foreground: var(--taupe);
 
   /* Brand */
-  --primary:                oklch(0.72 0.14 80);  /* amber */
-  --primary-foreground:     oklch(0.16 0.01 280);
+  --primary: var(--amber-300);
+  --primary-hover: var(--amber-400);
+  --primary-foreground: var(--ink);
 
-  /* Accent — deep plum surface, bone text (mirror of light) */
-  --accent:                 oklch(0.32 0.08 350);
-  --accent-foreground:      oklch(0.96 0.005 90);
+  /* Accent */
+  --accent: var(--plum-700);
+  --accent-foreground: var(--bone);
 
   /* Semantic signals */
-  --positive:               oklch(0.62 0.11 155);
-  --positive-foreground:    oklch(0.16 0.01 280);
-  --destructive:            oklch(0.58 0.16 30);
-  --destructive-foreground: oklch(0.96 0.005 90);
+  --success: var(--jade-300);
+  --success-bg: var(--jade-800);
+  --success-foreground: var(--jade-100);
+  --warning: var(--rust-300);
+  --warning-bg: var(--rust-800);
+  --warning-foreground: var(--rust-100);
+  --danger: var(--rust-300);
+  --danger-bg: var(--rust-800);
+  --danger-foreground: var(--rust-100);
+  --positive: var(--jade-300);
+  --positive-foreground: var(--ink);
+  --destructive: var(--rust-300);
+  --destructive-foreground: var(--ink);
 
   /* Borders / structural */
-  --secondary:              oklch(0.25 0.012 280);
-  --secondary-foreground:   var(--foreground);
-  --border:                 oklch(0.30 0.012 280);
-  --input:                  oklch(0.34 0.012 280);
-  --ring:                   oklch(0.72 0.14 80);
-  --shadow:                 0 14px 28px oklch(0 0 0 / 0.45);
+  --secondary: var(--plum-600);
+  --secondary-hover: var(--plum-500);
+  --secondary-foreground: var(--bone);
+  --border: var(--charcoal);
+  --input: var(--stone);
+  --ring: var(--amber-300);
+  --shadow: 0 14px 28px rgb(0 0 0 / 0.45);
 
   /* Chart palette overrides — values that don't auto-derive from above */
-  --chart-3: oklch(0.65 0.10 350);            /* lifted plum, readable on ink */
-  --chart-business: oklch(0.65 0.10 350);
-  --chart-payment:  oklch(0.65 0.02 250);     /* lifted steel */
-  --chart-line-3:   var(--chart-business);
-  --chart-line-5:   oklch(0.65 0.02 250);
-  --chart-line-6:   oklch(0.55 0.10 320);
+  --chart-1: var(--amber-300);
+  --chart-2: var(--jade-300);
+  --chart-3: var(--plum-300);
+  --chart-4: var(--rust-300);
+  --chart-5: var(--taupe);
+  --chart-spend: var(--amber-300);
+  --chart-credit: var(--jade-300);
+  --chart-payment: var(--taupe);
+  --chart-business: var(--plum-300);
+  --chart-line-1: var(--chart-spend);
+  --chart-line-2: var(--chart-credit);
+  --chart-line-3: var(--chart-business);
+  --chart-line-4: var(--chart-4);
+  --chart-line-5: var(--sage);
+  --chart-line-6: var(--clay);
 
   color-scheme: dark;
 }
