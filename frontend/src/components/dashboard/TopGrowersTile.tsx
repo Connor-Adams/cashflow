@@ -49,9 +49,32 @@ function indexByKey(
   return out
 }
 
+type NormalizedRow = {
+  currency: string
+  category: string
+  netSpend: number
+}
+
+/** Collapse `CategoryRow | undefined` to a fully-populated shape, using
+ *  the supplied fallbacks. Keeps `makeGrower` straight-line. */
+function normalize(
+  r: CategoryRow | undefined,
+  fallbackCurrency: string
+): NormalizedRow {
+  if (!r) {
+    return { currency: fallbackCurrency, category: UNCATEGORIZED, netSpend: 0 }
+  }
+  return {
+    currency: r.currency,
+    category: r.category ?? UNCATEGORIZED,
+    netSpend: r.netSpend,
+  }
+}
+
 /**
  * Build a GrowerRow for one (current?, previous?) pair. Either may be
- * undefined when the category exists only in one period.
+ * undefined when the category exists only in one period — `computeGrowers`
+ * guarantees at least one is defined.
  */
 function makeGrower(
   key: string,
@@ -59,16 +82,17 @@ function makeGrower(
   previous: CategoryRow | undefined,
   fallbackCurrency: string
 ): GrowerRow {
-  const currentVal = current?.netSpend ?? 0
-  const previousVal = previous?.netSpend ?? 0
+  const c = normalize(current, fallbackCurrency)
+  const p = normalize(previous, fallbackCurrency)
+  const nameSource = current ? c : p
   return {
     key,
-    category: current?.category ?? previous?.category ?? UNCATEGORIZED,
-    currency: current?.currency ?? previous?.currency ?? fallbackCurrency,
-    current: currentVal,
-    previous: previousVal,
-    delta: currentVal - previousVal,
-    isNew: !previous && Boolean(current),
+    category: nameSource.category,
+    currency: nameSource.currency,
+    current: c.netSpend,
+    previous: p.netSpend,
+    delta: c.netSpend - p.netSpend,
+    isNew: !previous,
   }
 }
 

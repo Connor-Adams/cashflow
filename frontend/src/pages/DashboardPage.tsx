@@ -246,6 +246,23 @@ async function fetchRecurringSafely(currency: string): Promise<RecurringItem[]> 
   }
 }
 
+/**
+ * Build a `/transactions?…` URL with the dashboard's current
+ * filter context layered on top of the caller's extra params.
+ * Dedupes the bento drill-click handlers (top categories chart,
+ * top merchants, top accounts) which all preserve the same context.
+ */
+function transactionsUrl(
+  extra: Record<string, string>,
+  ctx: { currency: string; dateFrom: string; dateTo: string }
+): string {
+  const qs = new URLSearchParams(extra)
+  if (ctx.currency) qs.set('currency', ctx.currency)
+  if (ctx.dateFrom) qs.set('dateFrom', ctx.dateFrom)
+  if (ctx.dateTo) qs.set('dateTo', ctx.dateTo)
+  return `/transactions?${qs.toString()}`
+}
+
 export function DashboardPage() {
   const navigate = useNavigate()
   const isNarrowViewport = useIsNarrowViewport()
@@ -425,12 +442,12 @@ export function DashboardPage() {
   const navigateToCategory = useCallback(
     (categoryName: string) => {
       if (!categoryName) return
-      const qs = new URLSearchParams()
-      qs.set('category', categoryName)
-      if (currency) qs.set('currency', currency)
-      if (dateFrom) qs.set('dateFrom', dateFrom)
-      if (dateTo) qs.set('dateTo', dateTo)
-      navigate(`/transactions?${qs.toString()}`)
+      navigate(
+        transactionsUrl(
+          { category: categoryName },
+          { currency, dateFrom, dateTo }
+        )
+      )
     },
     [navigate, currency, dateFrom, dateTo]
   )
@@ -1362,13 +1379,14 @@ export function DashboardPage() {
           columns={merchantColumns}
           rows={merchantReportData.slice(0, 6)}
           rowKey={(r) => `${r.currency}:${r.merchant}`}
-          onRowClick={(r) => {
-            const qs = new URLSearchParams({ merchant: r.merchant })
-            if (currency) qs.set('currency', currency)
-            if (dateFrom) qs.set('dateFrom', dateFrom)
-            if (dateTo) qs.set('dateTo', dateTo)
-            navigate(`/transactions?${qs.toString()}`)
-          }}
+          onRowClick={(r) =>
+            navigate(
+              transactionsUrl(
+                { merchant: r.merchant },
+                { currency, dateFrom, dateTo }
+              )
+            )
+          }
           viewAllLabel="All merchants in Reports"
           viewAllHref="/reports#merchants"
           emptyLabel="No merchant activity in this view."
@@ -1382,13 +1400,14 @@ export function DashboardPage() {
           columns={accountColumns}
           rows={accountReportData.slice(0, 6)}
           rowKey={(r) => `${r.currency}:${r.accountId}`}
-          onRowClick={(r) => {
-            const qs = new URLSearchParams({ account: String(r.accountId) })
-            if (currency) qs.set('currency', currency)
-            if (dateFrom) qs.set('dateFrom', dateFrom)
-            if (dateTo) qs.set('dateTo', dateTo)
-            navigate(`/transactions?${qs.toString()}`)
-          }}
+          onRowClick={(r) =>
+            navigate(
+              transactionsUrl(
+                { account: String(r.accountId) },
+                { currency, dateFrom, dateTo }
+              )
+            )
+          }
           viewAllLabel="All accounts in Reports"
           viewAllHref="/reports#accounts"
           emptyLabel="No account activity in this view."

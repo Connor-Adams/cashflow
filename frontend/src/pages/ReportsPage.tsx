@@ -96,6 +96,24 @@ type DashboardSummarySubset = {
 
 const DEFAULT_REPORTS_CURRENCY = 'CAD'
 
+/**
+ * Filter rows to the active currency (or pass-through when currency is
+ * empty) and sort by net spend desc, breaking ties on transaction count.
+ * Pulled out to dedupe the merchant + account filter/sort useMemos.
+ */
+function filterAndRankByNetSpend<
+  T extends { currency: string; netSpend: number; transactionCount: number },
+>(rows: T[], currency: string): T[] {
+  return rows
+    .filter((row) => !currency || row.currency === currency)
+    .slice()
+    .sort((a, b) =>
+      b.netSpend === a.netSpend
+        ? b.transactionCount - a.transactionCount
+        : b.netSpend - a.netSpend
+    )
+}
+
 function getRelativeDateRange(days: number): { from: string; to: string } {
   const to = new Date()
   const from = new Date(to)
@@ -226,27 +244,15 @@ export function ReportsPage() {
   // Merchant/account rollups filtered to the active currency (if set) and
   // sorted by net spend desc. Drives the comprehensive tables linked from
   // the Dashboard bento "View all" → /reports#merchants and #accounts.
-  const filteredMerchantSummaries = useMemo(() => {
-    return merchantSummaries
-      .filter((row) => !currency || row.currency === currency)
-      .slice()
-      .sort((a, b) =>
-        b.netSpend === a.netSpend
-          ? b.transactionCount - a.transactionCount
-          : b.netSpend - a.netSpend
-      )
-  }, [merchantSummaries, currency])
+  const filteredMerchantSummaries = useMemo(
+    () => filterAndRankByNetSpend(merchantSummaries, currency),
+    [merchantSummaries, currency]
+  )
 
-  const filteredAccountSummaries = useMemo(() => {
-    return accountSummaries
-      .filter((row) => !currency || row.currency === currency)
-      .slice()
-      .sort((a, b) =>
-        b.netSpend === a.netSpend
-          ? b.transactionCount - a.transactionCount
-          : b.netSpend - a.netSpend
-      )
-  }, [accountSummaries, currency])
+  const filteredAccountSummaries = useMemo(
+    () => filterAndRankByNetSpend(accountSummaries, currency),
+    [accountSummaries, currency]
+  )
 
   // Hash-anchor scroll on mount + on hash change. React Router does not
   // scroll-into-view on hash navigation by default, so handle it here.
