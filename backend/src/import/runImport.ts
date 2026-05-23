@@ -310,18 +310,6 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   const parseErrors: { rowIndex: number; message: string }[] = [];
   // Stage 8 deferral: rows that completed phase 1 still flagged for review accumulate
   // here, then a single AI batch (or per-row fallback) enhances them after commit.
-  type ColdRow = {
-    txnId: number;
-    signals: Signal[];
-    merchantKey: string;
-    merchantRaw: string;
-    merchantClean: string;
-    merchantCanonical: string | null;
-    amount: number;
-    date: string;
-    currency: string;
-    memory: MerchantMemoryMatch | null;
-  };
   const coldRows: ColdRow[] = [];
 
   await sequelize.transaction(async (t) => {
@@ -543,19 +531,98 @@ type AiBatchSummary = {
   fellBackToPerRow: boolean;
 };
 
+type ColdRow = {
+  txnId: number;
+  signals: Signal[];
+  merchantKey: string;
+  merchantRaw: string;
+  merchantClean: string;
+  merchantCanonical: string | null;
+  amount: number;
+  date: string;
+  currency: string;
+  memory: MerchantMemoryMatch | null;
+};
+
+function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
+  const groups = new Map<string, ColdRow>();
+  for (const c of coldRows) {
+    const existing = groups.get(c.merchantKey);
+    if (existing == null || c.date > existing.date) groups.set(c.merchantKey, c);
+  }
+  return [...groups.values()];
+}
+
+function coldRowToCandidate(c: ColdRow): AiBatchCandidate {
+  return {
+    merchantKey: c.merchantKey,
+    sampleMerchantRaw: c.merchantRaw,
+    sampleMerchantClean: c.merchantClean,
+    sampleMerchantCanonical: c.merchantCanonical,
+    sampleAmount: c.amount,
+    sampleDate: c.date,
+    sampleCurrency: c.currency,
+    similarPriors: [],
+    memoryMatch: c.memory ? { category: c.memory.category, supportCount: c.memory.supportCount } : null,
+  };
+}
+
+function aiSuggestionToSignal(sug: {
+  category: string | null;
+  business: boolean | null;
+  splitType: 'me' | 'partner' | 'shared' | null;
+  pctMe: number | null;
+  pctPartner: number | null;
+  confidence: 'high' | 'medium' | 'low';
+  rationale: string | null;
+}): Signal {
+  return {
+    source: 'ai',
+    confidence: sug.confidence,
+    fields: {
+      autoCategory: sug.category,
+      autoBusiness: sug.business,
+      autoSplitType: sug.splitType,
+      autoPctMe: sug.pctMe != null ? String(sug.pctMe) : null,
+      autoPctPartner: sug.pctPartner != null ? String(sug.pctPartner) : null,
+    },
+    ...(sug.rationale ? { rationale: sug.rationale } : {}),
+  };
+}
+
+async function persistAiEnhancement(c: ColdRow, aiSignal: Signal): Promise<boolean> {
+  const merged = mergeSignals([...c.signals, aiSignal]);
+  try {
+    await Transaction.update(
+      {
+        autoCategory: merged.fields.autoCategory,
+        autoBusiness: merged.fields.autoBusiness,
+        autoSplitType: merged.fields.autoSplitType,
+        autoPctMe: merged.fields.autoPctMe,
+        autoPctPartner: merged.fields.autoPctPartner,
+        autoSource: merged.fields.autoSource,
+        autoConfidence: merged.fields.autoConfidence,
+        reviewFlag: merged.fields.reviewFlag,
+      },
+      { where: { id: c.txnId } },
+    );
+    await TransactionSignal.create({
+      transactionId: c.txnId,
+      source: 'ai',
+      confidence: aiSignal.confidence,
+      fields: aiSignal.fields,
+      rationale: aiSignal.rationale ?? null,
+    });
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[enrichment] ai-batch post-update failed for txn ${c.txnId}`, err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 async function maybeRunAiBatchOverColdRows(
-  coldRows: Array<{
-    txnId: number;
-    signals: Signal[];
-    merchantKey: string;
-    merchantRaw: string;
-    merchantClean: string;
-    merchantCanonical: string | null;
-    amount: number;
-    date: string;
-    currency: string;
-    memory: MerchantMemoryMatch | null;
-  }>,
+  coldRows: ColdRow[],
   householdId: number | null,
 ): Promise<AiBatchSummary> {
   const empty: AiBatchSummary = {
@@ -567,31 +634,9 @@ async function maybeRunAiBatchOverColdRows(
     usedBatch: false,
     fellBackToPerRow: false,
   };
-  if (!enrichmentAiEnabled || getOpenAiConfig() == null || coldRows.length === 0) {
-    return empty;
-  }
+  if (!enrichmentAiEnabled || getOpenAiConfig() == null || coldRows.length === 0) return empty;
 
-  // Group cold rows by merchantKey; pick the most recent (latest date) row as the sample.
-  const groups = new Map<string, typeof coldRows[number]>();
-  for (const c of coldRows) {
-    const existing = groups.get(c.merchantKey);
-    if (existing == null || c.date > existing.date) groups.set(c.merchantKey, c);
-  }
-
-  const candidates: AiBatchCandidate[] = [...groups.values()].map((c) => ({
-    merchantKey: c.merchantKey,
-    sampleMerchantRaw: c.merchantRaw,
-    sampleMerchantClean: c.merchantClean,
-    sampleMerchantCanonical: c.merchantCanonical,
-    sampleAmount: c.amount,
-    sampleDate: c.date,
-    sampleCurrency: c.currency,
-    similarPriors: [],
-    memoryMatch: c.memory
-      ? { category: c.memory.category, supportCount: c.memory.supportCount }
-      : null,
-  }));
-
+  const candidates = dedupeColdRowsByMerchantKey(coldRows).map(coldRowToCandidate);
   const categoryHints = await loadCategoryHints(householdId);
 
   const result = await runAiBatchStage({
@@ -603,49 +648,10 @@ async function maybeRunAiBatchOverColdRows(
   });
 
   let enhanced = 0;
-  // Apply each suggestion to every cold row sharing that merchantKey.
   for (const c of coldRows) {
     const sug = result.suggestions.get(c.merchantKey);
     if (sug == null || sug.category == null) continue;
-    const aiSignal: Signal = {
-      source: 'ai',
-      confidence: sug.confidence,
-      fields: {
-        autoCategory: sug.category,
-        autoBusiness: sug.business,
-        autoSplitType: sug.splitType,
-        autoPctMe: sug.pctMe != null ? String(sug.pctMe) : null,
-        autoPctPartner: sug.pctPartner != null ? String(sug.pctPartner) : null,
-      },
-      ...(sug.rationale ? { rationale: sug.rationale } : {}),
-    };
-    const merged = mergeSignals([...c.signals, aiSignal]);
-    try {
-      await Transaction.update(
-        {
-          autoCategory: merged.fields.autoCategory,
-          autoBusiness: merged.fields.autoBusiness,
-          autoSplitType: merged.fields.autoSplitType,
-          autoPctMe: merged.fields.autoPctMe,
-          autoPctPartner: merged.fields.autoPctPartner,
-          autoSource: merged.fields.autoSource,
-          autoConfidence: merged.fields.autoConfidence,
-          reviewFlag: merged.fields.reviewFlag,
-        },
-        { where: { id: c.txnId } },
-      );
-      await TransactionSignal.create({
-        transactionId: c.txnId,
-        source: 'ai',
-        confidence: aiSignal.confidence,
-        fields: aiSignal.fields,
-        rationale: aiSignal.rationale ?? null,
-      });
-      enhanced += 1;
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(`[enrichment] ai-batch post-update failed for txn ${c.txnId}`, err instanceof Error ? err.message : err);
-    }
+    if (await persistAiEnhancement(c, aiSuggestionToSignal(sug))) enhanced += 1;
   }
 
   return {

@@ -153,11 +153,13 @@ export const enrichmentTransferWindowDays = parseIntEnv(
   2,
 );
 
+const TRUTHY = new Set(['true', '1', 'yes']);
+const FALSY = new Set(['false', '0', 'no']);
 function parseBoolEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name]?.trim().toLowerCase();
-  if (raw == null || raw === '') return fallback;
-  if (raw === 'true' || raw === '1' || raw === 'yes') return true;
-  if (raw === 'false' || raw === '0' || raw === 'no') return false;
+  if (!raw) return fallback;
+  if (TRUTHY.has(raw)) return true;
+  if (FALSY.has(raw)) return false;
   return fallback;
 }
 
