@@ -29,6 +29,8 @@ describe('EnrichmentStatRow', () => {
     render(wrap(<EnrichmentStatRow stats={STATS} />))
     expect(screen.getByText(/needs review/i)).toBeInTheDocument()
     expect(screen.getByText('2,341')).toBeInTheDocument()
+    const tile = screen.getByText(/needs review/i).closest('[data-slot="card"]')
+    expect(tile).toHaveClass('enrichWorkflowTile')
   })
 
   it('shows a CTA linking to /review when reviewFlagTrue > 0', () => {
@@ -37,10 +39,9 @@ describe('EnrichmentStatRow', () => {
     expect(cta).toHaveAttribute('href', '/review')
   })
 
-  it('shows the low-confidence percentage in the subtitle', () => {
+  it('shows the raw low-confidence count in the subtitle', () => {
     render(wrap(<EnrichmentStatRow stats={STATS} />))
-    // 1525 low / 2341 review = 65% (rounded)
-    expect(screen.getByText(/65% low-confidence/i)).toBeInTheDocument()
+    expect(screen.getByText(/1,525 low-confidence overall/i)).toBeInTheDocument()
   })
 
   it('renders 5 dashboard stat tiles with formatted counts', () => {

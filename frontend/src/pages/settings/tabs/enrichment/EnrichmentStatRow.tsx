@@ -9,10 +9,6 @@ type Props = {
 
 export function EnrichmentStatRow({ stats }: Props) {
   const totalPct = stats.total > 0 ? Math.round((stats.reviewFlagTrue / stats.total) * 100) : 0
-  const lowConfRows = stats.byConfidence['low'] ?? 0
-  const lowConfPct = stats.reviewFlagTrue > 0
-    ? Math.round((lowConfRows / stats.reviewFlagTrue) * 100)
-    : 0
 
   const cleared = stats.reviewFlagFalse.toLocaleString()
   const total = stats.total.toLocaleString()
@@ -26,7 +22,7 @@ export function EnrichmentStatRow({ stats }: Props) {
             {stats.reviewFlagTrue.toLocaleString()}{' '}
             <span className="enrichWorkflowTile__pct">{totalPct}%</span>
           </p>
-          <p className="enrichWorkflowTile__sub">{lowConfPct}% low-confidence</p>
+          <p className="enrichWorkflowTile__sub">{(stats.byConfidence['low'] ?? 0).toLocaleString()} low-confidence overall</p>
           <Link to="/review" className="enrichWorkflowTile__cta">
             Open review queue →
           </Link>
