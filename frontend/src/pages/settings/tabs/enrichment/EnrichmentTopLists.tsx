@@ -21,7 +21,7 @@ export function EnrichmentTopLists({ topRules, topMerchants }: Props) {
           <Link to="/rules" className="enrichListCard__manage">Manage rules →</Link>
         </div>
         {rules.length === 0 ? (
-          <p className="muted text-sm m-0">No rule matches recorded yet.</p>
+          <p className="muted mb-0">No rule matches recorded yet.</p>
         ) : (
           <div className="enrichListCard__rows">
             {rules.map((r) => (
@@ -49,7 +49,7 @@ export function EnrichmentTopLists({ topRules, topMerchants }: Props) {
           <h3 className="enrichListCard__title">Top canonical merchants</h3>
         </div>
         {merchants.length === 0 ? (
-          <p className="muted text-sm m-0">None yet. Run the backfill to populate.</p>
+          <p className="muted mb-0">None yet. Run the backfill to populate.</p>
         ) : (
           <div className="enrichListCard__rows">
             {merchants.map((m) => (
