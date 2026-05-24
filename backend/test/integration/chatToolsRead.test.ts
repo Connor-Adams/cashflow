@@ -59,6 +59,17 @@ async function seedHousehold(): Promise<{ householdId: number; accountId: number
   return { householdId: household.id, accountId: account.id };
 }
 
+async function seedUser(label: string): Promise<number> {
+  const user = await models.User.create({
+    email: `${label}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`,
+    displayName: label,
+    passwordHash: 'x',
+    passwordSalt: 'x',
+    passwordParams: 'x',
+  } as never);
+  return user.id;
+}
+
 async function seedTxn(
   accountId: number,
   householdId: number,
@@ -67,6 +78,11 @@ async function seedTxn(
   await models.Transaction.create({
     accountId,
     householdId,
+    // Default to shared visibility so the read tools' visibility scoping
+    // (mirrors visibleTransactionWhere) does not silently exclude seeds in
+    // tests that aren't specifically exercising visibility. Tests that need
+    // private rows override this.
+    visibility: 'shared',
     importBatch: 'seed',
     date: '2026-05-10',
     merchantRaw: 'COFFEE SHOP',
@@ -93,6 +109,7 @@ beforeEach(async () => {
   await models.Account.destroy({ where: {} });
   await models.HouseholdMember.destroy({ where: {} });
   await models.Household.destroy({ where: {} });
+  await models.User.destroy({ where: {} });
 });
 
 test('query_transactions returns matching rows + count and respects limit', async () => {
@@ -323,6 +340,113 @@ test('get_categories deduplicates between rules and transactions', async () => {
   if (!res.ok) return;
   const data = res.data as { categories: string[] };
   assert.deepEqual(data.categories, ['Dining', 'Groceries', 'Subscriptions']);
+});
+
+test('query_transactions excludes private rows from other household members', async () => {
+  const { householdId, accountId } = await seedHousehold();
+  const thisUserId = await seedUser('this-user');
+  const otherUserId = await seedUser('other-user');
+  // thisUser: one shared, one private
+  await seedTxn(accountId, householdId, {
+    visibility: 'shared',
+    createdByUserId: thisUserId,
+    merchantClean: 'OWN SHARED',
+    sourceRowFingerprint: 'vis-own-shared',
+  });
+  await seedTxn(accountId, householdId, {
+    visibility: 'private',
+    createdByUserId: thisUserId,
+    merchantClean: 'OWN PRIVATE',
+    sourceRowFingerprint: 'vis-own-private',
+  });
+  // otherUser: one private (should be hidden), one shared (should be visible)
+  await seedTxn(accountId, householdId, {
+    visibility: 'private',
+    createdByUserId: otherUserId,
+    merchantClean: 'OTHER PRIVATE',
+    sourceRowFingerprint: 'vis-other-private',
+  });
+  await seedTxn(accountId, householdId, {
+    visibility: 'shared',
+    createdByUserId: otherUserId,
+    merchantClean: 'OTHER SHARED',
+    sourceRowFingerprint: 'vis-other-shared',
+  });
+
+  const res = await dispatchTool(
+    'query_transactions',
+    JSON.stringify({ limit: 50 }),
+    { ...ctx, householdId, userId: thisUserId }
+  );
+  assert.equal(res.ok, true);
+  if (!res.ok) return;
+  const data = res.data as {
+    matched_count: number;
+    rows: Array<{ merchant_clean: string }>;
+  };
+  const names = data.rows.map((r) => r.merchant_clean).sort();
+  assert.deepEqual(names, ['OTHER SHARED', 'OWN PRIVATE', 'OWN SHARED']);
+  assert.equal(data.matched_count, 3);
+  assert.ok(!names.includes('OTHER PRIVATE'), 'other member private row leaked');
+});
+
+test('query_transactions is case-insensitive on merchant_pattern (SQLite Op.like; Postgres uses Op.iLike)', async () => {
+  const { householdId, accountId } = await seedHousehold();
+  await seedTxn(accountId, householdId, {
+    merchantClean: 'Whole Foods Market',
+    sourceRowFingerprint: 'ci-1',
+  });
+  const res = await dispatchTool(
+    'query_transactions',
+    JSON.stringify({ merchant_pattern: 'whole foods' }),
+    { ...ctx, householdId }
+  );
+  assert.equal(res.ok, true);
+  if (!res.ok) return;
+  const data = res.data as {
+    matched_count: number;
+    rows: Array<{ merchant_clean: string }>;
+  };
+  assert.equal(data.matched_count, 1);
+  assert.equal(data.rows[0].merchant_clean, 'Whole Foods Market');
+});
+
+test('get_summary scope=dashboard excludes private rows from other household members', async () => {
+  const { householdId, accountId } = await seedHousehold();
+  const thisUserId = await seedUser('sum-this');
+  const otherUserId = await seedUser('sum-other');
+  await seedTxn(accountId, householdId, {
+    visibility: 'shared',
+    createdByUserId: thisUserId,
+    amount: '10.00',
+    myShareAmount: '10.00',
+    sourceRowFingerprint: 'sum-own-shared',
+  });
+  await seedTxn(accountId, householdId, {
+    visibility: 'private',
+    createdByUserId: thisUserId,
+    amount: '20.00',
+    myShareAmount: '20.00',
+    sourceRowFingerprint: 'sum-own-private',
+  });
+  // Excluded: other member's private row
+  await seedTxn(accountId, householdId, {
+    visibility: 'private',
+    createdByUserId: otherUserId,
+    amount: '1000.00',
+    myShareAmount: '1000.00',
+    sourceRowFingerprint: 'sum-other-private',
+  });
+  const res = await dispatchTool(
+    'get_summary',
+    JSON.stringify({ scope: 'dashboard' }),
+    { ...ctx, householdId, userId: thisUserId }
+  );
+  assert.equal(res.ok, true);
+  if (!res.ok) return;
+  const d = res.data as Record<string, unknown>;
+  assert.equal(d.count, 2, 'only own-shared + own-private should count');
+  assert.equal(Number(d.total_amount), 30, 'other member private row must be excluded');
 });
 
 test('dispatchTool with unknown tool name returns error', async () => {

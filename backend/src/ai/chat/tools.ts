@@ -8,20 +8,22 @@ import { sequelize } from '../../db';
 import type { ChatToolDefinition } from './openaiClient';
 
 /**
- * Escape LIKE wildcards in user-supplied substrings. We use LIKE (not REGEXP)
- * because the sqlite3 npm package this repo uses does not register a REGEXP
- * function by default; LIKE works on both SQLite and Postgres without extra
- * setup. The tool's `merchant_pattern` field is documented as a case-insensitive
- * substring — if the LLM needs alternation it can call the tool multiple times
- * and union the results.
+ * Returns an Op that does a case-insensitive substring match across dialects.
+ * On Postgres we use Op.iLike (true case-insensitive). On SQLite the default
+ * Op.like is case-insensitive for ASCII, so it suffices. The caller is
+ * expected to wrap the substring in `%...%` themselves. The `merchant_pattern`
+ * tool argument is documented as a literal substring; we do NOT escape LIKE
+ * wildcards — Sequelize emits `LIKE '%x%'` without an `ESCAPE` clause, so any
+ * escaping would be a misleading no-op. If a caller embeds `%` or `_`, that
+ * is interpreted as part of their match expression.
  */
-function escapeLikePattern(s: string): string {
-  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+function caseInsensitiveLikeOp(): typeof Op.like | typeof Op.iLike {
+  return sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
 }
 
 export interface ToolContext {
   userId: number;
-  householdId: number | null;
+  householdId: number;
   threadId: number;
   messageId: number;
 }
@@ -111,23 +113,29 @@ registerTool('query_transactions', {
   },
   async execute(args, ctx) {
     const a = (args as Record<string, unknown>) ?? {};
-    const where: Record<string, unknown> = {};
-    if (ctx.householdId != null) where.householdId = ctx.householdId;
+    const filters: Record<string, unknown> = { householdId: ctx.householdId };
     if (typeof a.merchant_pattern === 'string')
-      where.merchantClean = { [Op.like]: `%${escapeLikePattern(a.merchant_pattern)}%` };
-    if (typeof a.category === 'string') where.finalCategory = a.category;
-    if (typeof a.currency === 'string') where.currency = a.currency;
-    if (typeof a.account_id === 'number') where.accountId = a.account_id;
-    if (typeof a.split_type === 'string') where.finalSplitType = a.split_type;
-    if (typeof a.review_flag === 'boolean') where.reviewFlag = a.review_flag;
+      filters.merchantClean = { [caseInsensitiveLikeOp()]: `%${a.merchant_pattern}%` };
+    if (typeof a.category === 'string') filters.finalCategory = a.category;
+    if (typeof a.currency === 'string') filters.currency = a.currency;
+    if (typeof a.account_id === 'number') filters.accountId = a.account_id;
+    if (typeof a.split_type === 'string') filters.finalSplitType = a.split_type;
+    if (typeof a.review_flag === 'boolean') filters.reviewFlag = a.review_flag;
     const dateRange: Record<string, unknown> = {};
     if (typeof a.date_from === 'string') dateRange[Op.gte as unknown as string] = a.date_from;
     if (typeof a.date_to === 'string') dateRange[Op.lte as unknown as string] = a.date_to;
-    if (Object.getOwnPropertySymbols(dateRange).length > 0) where.date = dateRange;
+    if (Object.getOwnPropertySymbols(dateRange).length > 0) filters.date = dateRange;
     const amountRange: Record<string, unknown> = {};
     if (typeof a.min_amount === 'number') amountRange[Op.gte as unknown as string] = a.min_amount;
     if (typeof a.max_amount === 'number') amountRange[Op.lte as unknown as string] = a.max_amount;
-    if (Object.getOwnPropertySymbols(amountRange).length > 0) where.amount = amountRange;
+    if (Object.getOwnPropertySymbols(amountRange).length > 0) filters.amount = amountRange;
+
+    // Mirror visibleTransactionWhere from src/auth/scope.ts: restrict to rows
+    // the user is allowed to see within their household.
+    const where = {
+      ...filters,
+      [Op.or]: [{ visibility: 'shared' }, { createdByUserId: ctx.userId }],
+    };
 
     const limit = Math.min(
       Math.max(typeof a.limit === 'number' ? Math.floor(a.limit) : 20, 1),
@@ -194,13 +202,18 @@ registerTool('get_summary', {
     if (typeof a.scope !== 'string') {
       return { ok: false, error: 'scope is required' };
     }
-    const where: Record<string, unknown> = {};
-    if (ctx.householdId != null) where.householdId = ctx.householdId;
-    if (typeof a.currency === 'string') where.currency = a.currency;
+    const filters: Record<string, unknown> = { householdId: ctx.householdId };
+    if (typeof a.currency === 'string') filters.currency = a.currency;
     const dateRange: Record<string, unknown> = {};
     if (typeof a.date_from === 'string') dateRange[Op.gte as unknown as string] = a.date_from;
     if (typeof a.date_to === 'string') dateRange[Op.lte as unknown as string] = a.date_to;
-    if (Object.getOwnPropertySymbols(dateRange).length > 0) where.date = dateRange;
+    if (Object.getOwnPropertySymbols(dateRange).length > 0) filters.date = dateRange;
+    // Mirror visibleTransactionWhere from src/auth/scope.ts: restrict to rows
+    // the user is allowed to see within their household.
+    const where = {
+      ...filters,
+      [Op.or]: [{ visibility: 'shared' }, { createdByUserId: ctx.userId }],
+    };
 
     if (a.scope === 'dashboard') {
       const [count, sumRow] = await Promise.all([
@@ -295,8 +308,7 @@ registerTool('get_rules', {
   },
   async execute(args, ctx) {
     const a = (args as Record<string, unknown>) ?? {};
-    const where: Record<string, unknown> = {};
-    if (ctx.householdId != null) where.householdId = ctx.householdId;
+    const where: Record<string, unknown> = { householdId: ctx.householdId };
     const all = await Rule.findAll({
       where,
       order: [
@@ -331,8 +343,7 @@ registerTool('get_contacts', {
     },
   },
   async execute(_args, ctx) {
-    const where: Record<string, unknown> = {};
-    if (ctx.householdId != null) where.householdId = ctx.householdId;
+    const where: Record<string, unknown> = { householdId: ctx.householdId };
     const rows = await Contact.findAll({ where, order: [['id', 'ASC']] });
     return {
       ok: true,
@@ -359,9 +370,9 @@ registerTool('get_categories', {
   },
   async execute(_args, ctx) {
     const tWhere: Record<string, unknown> = {
+      householdId: ctx.householdId,
       finalCategory: { [Op.ne]: null },
     };
-    if (ctx.householdId != null) tWhere.householdId = ctx.householdId;
     const txnRows = await Transaction.findAll({
       where: tWhere,
       attributes: [
@@ -370,9 +381,9 @@ registerTool('get_categories', {
       raw: true,
     });
     const rWhere: Record<string, unknown> = {
+      householdId: ctx.householdId,
       category: { [Op.ne]: null },
     };
-    if (ctx.householdId != null) rWhere.householdId = ctx.householdId;
     const ruleRows = await Rule.findAll({
       where: rWhere,
       attributes: [
