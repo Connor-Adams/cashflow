@@ -139,7 +139,7 @@ type MonthlyResp = {
 type AiInsight = {
   title: string
   summary: string
-  severity: 'info' | 'watch' | 'action'
+  severity: InsightSeverity
   metric: string
   amount: number
   comparison: string
@@ -1331,7 +1331,7 @@ export function DashboardPage() {
                   <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
                     <div className="aiVisibilityItemHeader">
                       <strong>{insight.title}</strong>
-                      <SeverityBadge severity={insight.severity as InsightSeverity} />
+                      <SeverityBadge severity={insight.severity} />
                     </div>
                     <p>{insight.summary}</p>
                     <p className="muted">
