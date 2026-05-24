@@ -2263,3 +2263,24 @@
   border-radius: 3px;
   font-size: 0.78rem;
 }
+
+.enrichTabRoot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.enrichChartsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.625rem;
+}
+
+@media (max-width: 760px) {
+  .enrichChartsGrid { grid-template-columns: 1fr; }
+}
+
+.enrichRefreshRow {
+  display: flex;
+  justify-content: flex-end;
+}
