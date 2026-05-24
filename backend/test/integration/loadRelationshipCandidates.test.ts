@@ -118,3 +118,48 @@ test('loadRelationshipCandidates(householdId=null) only returns matching-merchan
   const merchants = candidates.map((c) => c.merchantClean).sort();
   assert.deepEqual(merchants, ['AMAZON'], 'should only include the matching-merchant row inside the window');
 });
+
+test('loadRelationshipCandidates is case-insensitive on merchantClean (aligns with loadRecurringHistory)', async () => {
+  // normalizeMerchant preserves the input case, so historical rows can have
+  // mixed-case merchant_clean values. The sister function loadRecurringHistory
+  // already uses LOWER(...) = LOWER(...); this test locks in the same
+  // behaviour here so a refund matched against a lowercase historical row
+  // isn't silently dropped.
+  const user = await User.create({
+    email: 'rel-case@example.com',
+    displayName: 'Rel Case',
+    passwordHash: 'x',
+    passwordSalt: 'x',
+    passwordParams: '{}',
+  });
+  const account = await Account.create({
+    ownerUserId: user.id,
+    name: 'Case Acct',
+    owner: 'me',
+    householdId: null,
+  });
+  await Transaction.bulkCreate([
+    {
+      accountId: account.id,
+      householdId: null,
+      date: '2026-05-10',
+      amount: -42,
+      merchantRaw: 'tim hortons',
+      merchantClean: 'tim hortons',
+      currency: 'CAD',
+      importBatch: 'test-case-batch',
+      sourceRowFingerprint: 'fp-case-a',
+    },
+  ]);
+
+  const candidates = await loadRelationshipCandidates(
+    null,
+    [account.id],
+    'TIM HORTONS',
+    '2026-05-15',
+    60,
+  );
+
+  assert.equal(candidates.length, 1, 'lowercase historical row should match uppercase query');
+  assert.equal(candidates[0].merchantClean, 'tim hortons');
+});
