@@ -963,9 +963,9 @@ export function DashboardPage() {
                     className={`budgetPill budgetPill--${tone}`}
                   >
                     <header className="budgetPill__header">
-                      <strong className="budgetPill__label inline-flex items-center gap-1.5" title={label}>
+                      <strong className="budgetPill__label inline-flex items-center gap-1.5 min-w-0" title={label}>
                         <CategoryIcon name={item.category} />
-                        {label}
+                        <span className="truncate">{label}</span>
                       </strong>
                       <span className="budgetPill__pct">{percentRounded}%</span>
                     </header>
