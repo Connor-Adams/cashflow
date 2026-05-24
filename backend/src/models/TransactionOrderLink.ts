@@ -18,6 +18,7 @@ export class TransactionOrderLink extends Model<
   declare confidence: string;
   declare matchReason: string;
   declare status: CreationOptional<string>;
+  declare linkedAmount: string | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -35,6 +36,7 @@ export function initTransactionOrderLink(sequelize: Sequelize): typeof Transacti
       confidence: { type: DataTypes.DECIMAL(5, 2), allowNull: false },
       matchReason: { type: DataTypes.TEXT, field: 'match_reason', allowNull: false },
       status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'suggested' },
+      linkedAmount: { type: DataTypes.DECIMAL(14, 4), field: 'linked_amount', allowNull: true },
     } as ModelAttributes<TransactionOrderLink>,
     {
       sequelize,

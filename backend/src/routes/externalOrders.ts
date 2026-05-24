@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { sequelize, ExternalOrder, ExternalOrderItem } from '../models';
+import { sequelize, ExternalOrder, ExternalOrderItem, ExternalOrderTender } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { logger } from '../observability/logger';
 import {
@@ -9,6 +9,12 @@ import {
   type ExtractedReceiptOrder,
 } from '../ai/extractReceiptItems';
 import { parsePurchaseHistoryCsv } from '../import/parsePurchaseHistoryCsv';
+import { extractPdfLines } from '../import/pdf/extractLines';
+import {
+  findReceiptPdfParser,
+  registerBuiltInReceiptPdfParsers,
+} from '../import/pdf/receipts/registry';
+import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { importUploadLimiter } from './importRateLimit';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -18,6 +24,11 @@ const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
+});
+
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 16 * 1024 * 1024 },
 });
 
 async function persistExtractedOrder(
@@ -57,8 +68,8 @@ async function persistExtractedOrder(
         dedupeKey,
         orderDate: extracted.orderDate,
         shipmentDate: null,
-        subtotal: null,
-        tax: null,
+        subtotal: extracted.subtotal != null ? String(extracted.subtotal) : null,
+        tax: extracted.tax != null ? String(extracted.tax) : null,
         shipping: null,
         total: extracted.total != null ? String(extracted.total) : null,
         currency: extracted.currency ?? 'USD',
@@ -80,6 +91,18 @@ async function persistExtractedOrder(
           businessUsePercent: null,
           confidence: null,
           rawPayload: it as unknown,
+        })) as never[],
+        { transaction: t },
+      );
+    }
+    if (created && extracted.tenders.length > 0) {
+      await ExternalOrderTender.bulkCreate(
+        extracted.tenders.map((tender, idx) => ({
+          externalOrderId: order.id,
+          sequence: idx,
+          paymentLast4: tender.paymentLast4,
+          network: tender.network,
+          amount: String(tender.amount),
         })) as never[],
         { transaction: t },
       );
@@ -259,6 +282,88 @@ router.post(
         skippedDuplicates: duplicates,
         errors,
         columnMapping: parsed.columnMapping,
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * POST /api/external-orders/import-pdf
+ * multipart with field `file` (application/pdf)
+ * Routes the PDF through the receipt parser registry (currently Costco till
+ * receipts). Returns: { order, created, extracted, warnings, parserId }
+ */
+router.post(
+  '/import-pdf',
+  importUploadLimiter,
+  (req, res, next) => {
+    pdfUpload.single('file')(req as never, res as never, (err: unknown) => {
+      if (err) return next(err);
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const auth = currentAuth(req);
+      const file = (
+        req as unknown as { file?: { mimetype: string; buffer: Buffer; originalname: string } }
+      ).file;
+      if (!file) {
+        res.status(400).json({ error: 'file is required' });
+        return;
+      }
+      const mime = (file.mimetype || '').toLowerCase();
+      const looksLikePdf = mime === 'application/pdf' || /\.pdf$/i.test(file.originalname);
+      if (!looksLikePdf) {
+        res.status(400).json({ error: 'only application/pdf uploads are supported' });
+        return;
+      }
+
+      const lines = await extractPdfLines(file.buffer);
+      registerBuiltInReceiptPdfParsers();
+      const parser = findReceiptPdfParser(lines);
+      if (!parser) {
+        res.status(422).json({ error: 'no receipt parser matched this PDF' });
+        return;
+      }
+
+      const { extracted, warnings } = parser.parse(lines, { defaultCurrency: 'CAD' });
+
+      const { order, created } = await persistExtractedOrder(extracted, {
+        userId: auth.user.id,
+        householdId: auth.household.id,
+        source: `${parser.id}-pdf`,
+      });
+
+      const matchSummary = auth.household.id != null
+        ? await matchReceiptOrderToTransactions({
+            externalOrderId: order.id,
+            householdId: auth.household.id,
+          })
+        : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
+
+      logger.info('external_order_imported', {
+        source: `${parser.id}-pdf`,
+        orderId: order.id,
+        created,
+        vendor: extracted.vendor,
+        items: extracted.items.length,
+        tenders: extracted.tenders.length,
+        warnings: warnings.length,
+        linksCreated: matchSummary.created,
+        linksUpdated: matchSummary.updated,
+        householdId: auth.household.id,
+      });
+
+      res.json({
+        order: order.toJSON(),
+        created,
+        extracted,
+        warnings,
+        parserId: parser.id,
+        match: matchSummary,
       });
     } catch (e) {
       next(e);

@@ -15,16 +15,33 @@ export type ExtractedReceiptItem = {
   unitPrice: number | null;
   totalPrice: number | null;
   inferredCategory: string | null;
+  /** Vendor-specific product/SKU id (e.g., Costco item number). */
+  vendorItemId?: string | null;
+  /** Whether sales tax (HST/GST/etc.) applies. */
+  taxable?: boolean | null;
+};
+
+export type ExtractedReceiptTender = {
+  paymentLast4: string | null;
+  network: string | null;
+  amount: number;
 };
 
 export type ExtractedReceiptOrder = {
-  vendor: 'amazon' | 'apple' | 'google' | 'other';
+  vendor: 'amazon' | 'apple' | 'google' | 'costco' | 'other';
   vendorName: string | null;
   orderDate: string | null;
   orderId: string | null;
+  subtotal: number | null;
+  tax: number | null;
   total: number | null;
   currency: string | null;
   paymentLast4: string | null;
+  /**
+   * Optional split-tender breakdown. When present and non-empty, sum should equal `total`.
+   * When absent (or single-tender), `paymentLast4` carries the same info for the single payment.
+   */
+  tenders: ExtractedReceiptTender[];
   items: ExtractedReceiptItem[];
   notes: string | null;
 };
@@ -77,7 +94,7 @@ function parseString(v: unknown): string | null {
 }
 
 function parseVendor(v: unknown): ExtractedReceiptOrder['vendor'] {
-  if (v === 'amazon' || v === 'apple' || v === 'google') return v;
+  if (v === 'amazon' || v === 'apple' || v === 'google' || v === 'costco') return v;
   return 'other';
 }
 
@@ -108,9 +125,12 @@ export function parseExtractedReceipt(j: Record<string, unknown>): ExtractedRece
     vendorName: parseString(j.vendorName),
     orderDate: parseString(j.orderDate),
     orderId: parseString(j.orderId),
+    subtotal: parseNumber(j.subtotal),
+    tax: parseNumber(j.tax),
     total: parseNumber(j.total),
     currency: (parseString(j.currency) ?? '').toUpperCase().slice(0, 3) || null,
     paymentLast4: parseString(j.paymentLast4)?.replace(/\D/g, '').slice(-4) || null,
+    tenders: [],
     items: parseItems(j.items),
     notes: parseString(j.notes),
   };
@@ -125,9 +145,12 @@ export async function extractReceiptFromText(body: string): Promise<ExtractedRec
       vendorName: null,
       orderDate: null,
       orderId: null,
+      subtotal: null,
+      tax: null,
       total: null,
       currency: null,
       paymentLast4: null,
+      tenders: [],
       items: [],
       notes: null,
     };

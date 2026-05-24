@@ -164,6 +164,12 @@ type PurchaseHistoryCsvResult = {
   columnMapping: Record<string, string>
 }
 
+type ReceiptImportTender = {
+  paymentLast4: string | null
+  network: string | null
+  amount: number
+}
+
 type ReceiptImportResult = {
   order: { id: number; vendor: string; total: string | null; currency: string; orderDate: string | null }
   created: boolean
@@ -172,11 +178,23 @@ type ReceiptImportResult = {
     vendorName: string | null
     orderDate: string | null
     orderId: string | null
+    subtotal?: number | null
+    tax?: number | null
     total: number | null
     currency: string | null
     paymentLast4: string | null
+    tenders?: ReceiptImportTender[]
     items: ReceiptImportItem[]
     notes: string | null
+  }
+  /** Only populated by /import-pdf today. */
+  warnings?: string[]
+  parserId?: string
+  match?: {
+    created: number
+    updated: number
+    tendersProcessed: number
+    candidatesScanned: number
   }
 }
 
@@ -210,7 +228,7 @@ export function SettingsPage() {
   const [statsError, setStatsError] = useState<string | null>(null)
   const [statsLoading, setStatsLoading] = useState(false)
   const [receiptText, setReceiptText] = useState('')
-  const [receiptBusy, setReceiptBusy] = useState<'text' | 'image' | 'csv' | null>(null)
+  const [receiptBusy, setReceiptBusy] = useState<'text' | 'image' | 'csv' | 'pdf' | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const [receiptResult, setReceiptResult] = useState<ReceiptImportResult | null>(null)
   const [csvVendor, setCsvVendor] = useState<'apple' | 'google' | 'amazon' | 'other'>('apple')
@@ -592,6 +610,33 @@ export function SettingsPage() {
       setReceiptResult(r)
     } catch (e) {
       setReceiptError(e instanceof Error ? e.message : 'Image parse failed')
+    } finally {
+      setReceiptBusy(null)
+    }
+  }
+
+  async function parseReceiptPdf(file: File) {
+    if (receiptBusy) return
+    setReceiptBusy('pdf')
+    setReceiptError(null)
+    setReceiptResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const base = import.meta.env.VITE_API_BASE ?? ''
+      const res = await fetch(`${base}/api/external-orders/import-pdf`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText)
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+      const r = (await res.json()) as ReceiptImportResult
+      setReceiptResult(r)
+    } catch (e) {
+      setReceiptError(e instanceof Error ? e.message : 'PDF parse failed')
     } finally {
       setReceiptBusy(null)
     }
@@ -1316,6 +1361,29 @@ export function SettingsPage() {
               <Sparkles aria-hidden="true" />
               {receiptBusy === 'image' ? 'Parsing image…' : 'Or upload a receipt image'}
             </label>
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                cursor: 'pointer',
+                color: 'var(--accent, currentColor)',
+              }}
+            >
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                disabled={receiptBusy != null}
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void parseReceiptPdf(file)
+                  e.target.value = ''
+                }}
+              />
+              <Sparkles aria-hidden="true" />
+              {receiptBusy === 'pdf' ? 'Parsing PDF…' : 'Or upload a receipt PDF (Costco)'}
+            </label>
           </div>
           <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
             <div style={{ flex: 1, minWidth: '12rem' }}>
@@ -1398,6 +1466,36 @@ export function SettingsPage() {
                 {receiptResult.extracted.orderDate && ` · ${receiptResult.extracted.orderDate}`}
                 {receiptResult.extracted.total != null && ` · ${receiptResult.extracted.total} ${receiptResult.extracted.currency ?? ''}`}
               </div>
+              {receiptResult.extracted.tenders && receiptResult.extracted.tenders.length > 1 && (
+                <div className="muted" style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                  Split tender:{' '}
+                  {receiptResult.extracted.tenders
+                    .map((t) => `${t.network ?? 'card'}${t.paymentLast4 ? ` ••${t.paymentLast4}` : ''} ${t.amount}`)
+                    .join(' + ')}
+                </div>
+              )}
+              {receiptResult.match && (
+                <div className="muted" style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                  Auto-linked {receiptResult.match.created + receiptResult.match.updated} of{' '}
+                  {receiptResult.match.tendersProcessed} payment(s) to card transactions
+                  {receiptResult.match.candidatesScanned > 0
+                    ? ` (scanned ${receiptResult.match.candidatesScanned} candidates)`
+                    : ''}
+                  .
+                </div>
+              )}
+              {receiptResult.warnings && receiptResult.warnings.length > 0 && (
+                <details style={{ marginTop: '0.25rem' }}>
+                  <summary className="muted" style={{ cursor: 'pointer', fontSize: '0.85rem' }}>
+                    Parser warnings ({receiptResult.warnings.length})
+                  </summary>
+                  <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.1rem', fontSize: '0.85rem' }}>
+                    {receiptResult.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               {receiptResult.extracted.items.length > 0 && (
                 <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.1rem', fontSize: '0.85rem' }}>
                   {receiptResult.extracted.items.slice(0, 8).map((item, i) => (
