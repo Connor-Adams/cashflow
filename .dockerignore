@@ -22,7 +22,7 @@
 docs
 *.md
 
-**/data
+backend/data
 **/uploads
 
 .DS_Store
