@@ -5,11 +5,12 @@ import {
   Entity,
   FxRate,
   InvestmentActivity,
+  InstalmentPayment,
   Security,
   TaxSlip,
   Transaction,
 } from '../../models';
-import { D } from '../util/decimal';
+import { D, sumD } from '../util/decimal';
 import type {
   CapGainEvent,
   IncomeItem,
@@ -129,6 +130,12 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     nonCapLoss: D(cf.find((c) => c.kind === 'non_cap_loss')?.amount ?? 0),
     instalmentsPaid: D(cf.find((c) => c.kind === 'instalments_paid')?.amount ?? 0),
   };
+
+  // Override instalmentsPaid from InstalmentPayment ledger rows for this year
+  const instalments = await InstalmentPayment.findAll({ where: { entityId, year } });
+  if (instalments.length > 0) {
+    carryforwards.instalmentsPaid = sumD(instalments.map(p => D(p.amount as unknown as string)));
+  }
 
   return {
     year,
