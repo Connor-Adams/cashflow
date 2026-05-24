@@ -29,6 +29,41 @@ test('classifyPositiveFlow keeps refund-like rows as credits', () => {
   );
 });
 
+test('classifyPositiveFlow: refund keyword beats payment keyword when both present', () => {
+  // "PAYMENT REVERSAL" contains both /\bpayment\b/ and /\breversal\b/.
+  // The reversal signal is more specific (it explicitly means money flowing
+  // BACK to the cardholder) and must win.
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'PAYMENT REVERSAL ACH-12345' }),
+    'credit'
+  );
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'BILL PAYMENT REFUND' }),
+    'credit'
+  );
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'TRANSFER ADJUSTMENT' }),
+    'credit'
+  );
+});
+
+test('classifyPositiveFlow: payment keyword without refund signal still routes to payment', () => {
+  // Regression guard: the most common payment strings must not flip to credit
+  // after the precedence swap. None of these contain CREDIT_PATTERNS keywords.
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'AUTOPAY THANK YOU' }),
+    'payment'
+  );
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'PRE-AUTHORIZED PAYMENT' }),
+    'payment'
+  );
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'ACH ELECTRONIC PAYMENT' }),
+    'payment'
+  );
+});
+
 // classifyPositiveAmount is the authoritative router for positive-amount rows
 // in dashboard / monthly / insights aggregations. It uses txnType first
 // (set by the enricher with intent) and falls back to merchant-regex.

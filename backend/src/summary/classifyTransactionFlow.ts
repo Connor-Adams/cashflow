@@ -105,8 +105,11 @@ export function classifyPositiveFlow(input: {
     input.category,
   ]);
   if (!text) return 'credit';
-  if (PAYMENT_PATTERNS.some((re) => re.test(text))) return 'payment';
+  // Refund/reversal/credit signals are explicit user-money-back intent and
+  // override payment-substring matches like /\bpayment\b/. A row "PAYMENT
+  // REVERSAL" matches both pattern sets — the reversal must win.
   if (CREDIT_PATTERNS.some((re) => re.test(text))) return 'credit';
+  if (PAYMENT_PATTERNS.some((re) => re.test(text))) return 'payment';
   return 'credit';
 }
 
