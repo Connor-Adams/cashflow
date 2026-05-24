@@ -21,6 +21,7 @@ import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
+import { FxRate, initFxRate } from './FxRate';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
@@ -48,6 +49,7 @@ initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
+initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
@@ -195,6 +197,7 @@ export {
   InvestmentActivity,
   HoldingSnapshot,
   SecurityPrice,
+  FxRate,
   UserEmailIntegration,
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,

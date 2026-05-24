@@ -205,6 +205,14 @@ export function PortfolioPage() {
       )}
 
       <section className="transactionsStats" aria-busy={loading}>
+        {summary?.unifiedTotal != null && (
+          <StatCard
+            key="unified-cad"
+            label="Total (CAD)"
+            value={formatMoney(summary.unifiedTotal.marketValue, 'CAD')}
+            hint={`Converted from ${summary.unifiedTotal.ratesUsed.length} ${summary.unifiedTotal.ratesUsed.length === 1 ? 'currency' : 'currencies'} via BoC daily rates`}
+          />
+        )}
         {(summary?.totalsByCurrency ?? []).map((total) => (
           <StatCard
             key={total.currency}

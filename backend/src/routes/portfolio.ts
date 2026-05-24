@@ -11,6 +11,7 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import * as env from '../config/env';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
+import { ensureFxRate } from '../fx/bankOfCanada';
 
 const router = Router();
 const PRICE_CACHE_MS = 60 * 60 * 1000;
@@ -33,6 +34,51 @@ async function latestPricesBySecurity(securityIds: number[]) {
     if (!out.has(row.securityId)) out.set(row.securityId, row);
   }
   return out;
+}
+
+/**
+ * Convert per-currency market values to a single CAD total using the Bank of
+ * Canada daily rate. Returns null if any currency-to-CAD conversion fails so
+ * we never show a misleading partial total.
+ */
+async function buildUnifiedCadTotal(
+  perCurrency: Array<{ currency: string; marketValue: number }>,
+  asOfDate: string
+): Promise<{
+  baseCurrency: 'CAD';
+  marketValue: number;
+  ratesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }>;
+} | null> {
+  let total = 0;
+  const ratesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }> = [];
+
+  for (const row of perCurrency) {
+    if (row.currency === 'CAD') {
+      total += row.marketValue;
+      // No need to add a rate entry for identity conversion.
+      continue;
+    }
+    const fxResult = await ensureFxRate(row.currency, 'CAD', asOfDate);
+    if (!fxResult) {
+      // Hard failure on any currency — abort and return null.
+      console.warn(
+        `[portfolio] buildUnifiedCadTotal: no FX rate for ${row.currency}→CAD on ${asOfDate}`
+      );
+      return null;
+    }
+    total += row.marketValue * fxResult.rate;
+    // Deduplicate: only record each currency pair once.
+    if (!ratesUsed.some((r) => r.from === row.currency && r.to === 'CAD')) {
+      ratesUsed.push({
+        from: row.currency,
+        to: 'CAD',
+        rate: fxResult.rate,
+        ratedDate: fxResult.ratedDate,
+      });
+    }
+  }
+
+  return { baseCurrency: 'CAD', marketValue: total, ratesUsed };
 }
 
 /**
@@ -136,13 +182,19 @@ router.get('/', async (req, res, next) => {
         })
       : [];
 
+    const totalsByCurrency = [...totals.entries()].map(([currency, marketValue]) => ({
+      currency,
+      marketValue,
+    }));
+
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const unifiedTotal = await buildUnifiedCadTotal(totalsByCurrency, todayDate);
+
     res.json({
       accounts,
       holdings: holdingDtos,
-      totalsByCurrency: [...totals.entries()].map(([currency, marketValue]) => ({
-        currency,
-        marketValue,
-      })),
+      totalsByCurrency,
+      unifiedTotal,
       recentActivities: recentActivities.map((activity) => {
         const security = activity.get('security') as Security | undefined;
         return {
