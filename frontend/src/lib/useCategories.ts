@@ -8,11 +8,14 @@ let cache: Category[] | null = null
 let inflight: Promise<Category[]> | null = null
 const listeners = new Set<Listener>()
 
-export function _resetCategoriesCacheForTest(): void {
+export function resetCategoriesCache(): void {
   cache = null
   inflight = null
+  for (const l of listeners) l([])
   listeners.clear()
 }
+
+export const _resetCategoriesCacheForTest = resetCategoriesCache
 
 async function load(force = false): Promise<Category[]> {
   if (!force && cache) return cache

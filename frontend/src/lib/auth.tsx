@@ -9,6 +9,7 @@ import { getJson, postJson } from './api'
 import type { AuthUser } from '../types/api'
 import { AuthContext } from './authContext'
 import type { AuthState } from './authContext'
+import { resetCategoriesCache } from './useCategories'
 
 type AuthMeResponse = {
   user: AuthUser | null
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async logout() {
         await postJson<void>('/api/auth/logout')
+        resetCategoriesCache()
         setUser(null)
         await refresh()
       },
