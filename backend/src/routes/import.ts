@@ -21,7 +21,7 @@ import { logger } from '../observability/logger';
 
 const csvUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 20 },
+  limits: { fileSize: 15 * 1024 * 1024, files: 120 },
   fileFilter: (_req, file, cb) => {
     if (!/\.(csv|pdf)$/i.test(file.originalname)) {
       const e = new Error('Only .csv and .pdf files are allowed') as Error & { status?: number };
@@ -298,7 +298,7 @@ router.post(
   '/upload-many',
   importUploadLimiter,
   (req, res, next) => {
-    csvUpload.array('files', 20)(req as never, res as never, (err: unknown) => {
+    csvUpload.array('files', 120)(req as never, res as never, (err: unknown) => {
       if (err) {
         next(err);
         return;
