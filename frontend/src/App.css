@@ -873,11 +873,11 @@
   }
 
   .aiActionBanner {
-    grid-column: 1 / -1;
     background: var(--destructive, #fee2e2);
     color: var(--destructive-foreground, #7f1d1d);
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
+    margin-bottom: 0.75rem;
     font-size: 0.875rem;
   }
   .aiActionBanner a {
@@ -1433,9 +1433,10 @@
   .dashboardBento {
     @apply mb-4 grid;
     grid-template-columns: repeat(12, 1fr);
-    /* 160px × 2-row tile + 16px gap = 336px tile height; leaves ~240px for
-     * a chart body once header + padding are deducted. */
-    grid-auto-rows: 160px;
+    /* 160px floor per row; tracks grow to fit content so dense tiles
+     * (e.g. Business vs personal with split-cards + share bar) don't
+     * overflow their box. Other tiles in the same row stretch in lockstep. */
+    grid-auto-rows: minmax(160px, auto);
     gap: 16px;
   }
 

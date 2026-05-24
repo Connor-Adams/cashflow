@@ -919,13 +919,14 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
+      {hasActionSeverity ? (
+        <div className="aiActionBanner" role="status">
+          AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
+          <a href="#ai-insights-tile">Jump to insights</a>
+        </div>
+      ) : null}
+
       <div className="dashboardBento" aria-busy={loading}>
-        {hasActionSeverity ? (
-          <div className="aiActionBanner" role="status">
-            AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
-            <a href="#ai-insights-tile">Jump to insights</a>
-          </div>
-        ) : null}
         {budgetProgressSorted.length > 0 && (
           <BentoTile
             span={12}
