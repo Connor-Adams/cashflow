@@ -28,6 +28,9 @@ categories:
       - 'build'
       - 'ci'
       - 'documentation'
+  - title: 'Other Changes'
+    labels:
+      - '*'
 
 exclude-labels:
   - 'skip-changelog'
@@ -76,21 +79,12 @@ autolabeler:
     title:
       - '/^(\[codex\]\s+)?test(\(.+\))?:/'
   - label: 'build'
-    files:
-      - '.github/workflows/build-images.yml'
-      - 'Dockerfile'
-      - '**/Dockerfile'
     title:
       - '/^(\[codex\]\s+)?build(\(.+\))?:/'
   - label: 'ci'
-    files:
-      - '.github/workflows/**'
     title:
       - '/^(\[codex\]\s+)?ci(\(.+\))?:/'
   - label: 'documentation'
-    files:
-      - 'README.md'
-      - 'docs/**'
     title:
       - '/^(\[codex\]\s+)?docs(\(.+\))?:/'
   - label: 'breaking'
