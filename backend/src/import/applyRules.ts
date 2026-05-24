@@ -18,10 +18,15 @@ export interface RuleRow {
 
 export function findBestRule(
   rulesAll: RuleRow[],
-  merchantClean: string
+  merchantClean: string,
+  txnDate?: string
 ): { rule: RuleRow | null; ambiguous: boolean } {
   const candidates: RuleRow[] = [];
   for (const rule of rulesAll) {
+    if (txnDate != null) {
+      if (rule.effectiveFrom != null && txnDate < rule.effectiveFrom) continue;
+      if (rule.effectiveTo != null && txnDate >= rule.effectiveTo) continue;
+    }
     const pattern = rule.merchantPattern || '';
     let ok = false;
     if (rule.matchKind === 'regex') {
