@@ -1,4 +1,4 @@
-import { test, before } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../src/db';
 import {
@@ -8,7 +8,9 @@ import {
 import { D } from '../../src/tax/util/decimal';
 import { buildPersonalFacts } from '../../src/tax/builders/buildPersonalFacts';
 
-before(async () => {
+beforeEach(async () => {
+  // Re-sync per test — multiple tax test files race on shared SQLite when run in parallel;
+  // beforeEach guarantees this file owns the schema during each test body.
   await sequelize.sync({ force: true });
 });
 
