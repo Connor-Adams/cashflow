@@ -124,3 +124,70 @@ export function medicalCreditFederal(
   const eligible = maxZero(medicalExpenses.minus(threshold));
   return eligible.times(r.donationLowRate); // federal lowest rate = 15%
 }
+
+// ─── Phase 2 credits ──────────────────────────────────────────────────────────
+
+/**
+ * Federal Disability Tax Credit (DTC) for a person who is themselves eligible.
+ * Returns the credit VALUE (amount × 15% lowest rate) ready to subtract from federal tax.
+ */
+export function disabilityCreditFederal(eligible: boolean, r: RateTable): Decimal {
+  if (!eligible) return D('0');
+  return r.dtcBaseFederal.times(r.donationLowRate);
+}
+
+/**
+ * Federal caregiver credit for infirm adult dependants (L30450).
+ * Each dependent's eligible amount is reduced by the amount their net income exceeds the threshold.
+ * Returns the credit VALUE (total eligible amount × 15% lowest rate).
+ */
+export function caregiverCreditFederal(
+  dependents: Array<{ netIncome: Decimal; eligibleAmount: Decimal }>,
+  r: RateTable,
+): Decimal {
+  let total = D('0');
+  for (const d of dependents) {
+    const reducedFor = maxZero(d.netIncome.minus(r.caregiverThresholdFederal));
+    const eligible = maxZero(d.eligibleAmount.minus(reducedFor));
+    total = total.plus(eligible);
+  }
+  return total.times(r.donationLowRate);
+}
+
+/**
+ * Federal tuition tax credit (T2202).
+ * Returns the credit VALUE (tuitionFees × 15% lowest rate).
+ */
+export function tuitionCreditFederal(tuitionFees: Decimal, r: RateTable): Decimal {
+  return tuitionFees.times(r.donationLowRate);
+}
+
+/**
+ * Federal pension income amount credit (L31400).
+ * Eligible pension income capped at pensionIncomeAmountCap ($2,000).
+ * Returns the credit VALUE (eligible × 15% lowest rate).
+ */
+export function pensionIncomeCreditFederal(pensionIncome: Decimal, r: RateTable): Decimal {
+  const eligible = Decimal.min(pensionIncome, r.pensionIncomeAmountCap);
+  return eligible.times(r.donationLowRate);
+}
+
+/**
+ * Ontario pension income amount credit.
+ * Eligible pension income capped at pensionIncomeAmountCapOntario.
+ * Returns the credit VALUE (eligible × Ontario lowest rate).
+ */
+export function pensionIncomeCreditOntario(pensionIncome: Decimal, r: RateTable): Decimal {
+  const eligible = Decimal.min(pensionIncome, r.pensionIncomeAmountCapOntario);
+  return eligible.times(r.provincialBrackets[0].rate);
+}
+
+/**
+ * OAS clawback / social benefits repayment (L23500).
+ * 15% of net income above the OAS clawback threshold.
+ * This is added to total payable (increases tax owing).
+ */
+export function oasClawback(netIncomeBeforeAdjustments: Decimal, r: RateTable): Decimal {
+  const above = maxZero(netIncomeBeforeAdjustments.minus(r.oasClawbackThreshold));
+  return above.times(r.oasClawbackRate);
+}

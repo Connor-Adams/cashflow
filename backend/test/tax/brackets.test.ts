@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { D } from '../../src/tax/util/decimal';
-import { ratesFor, applyBrackets } from '../../src/tax/engine/brackets';
+import { ratesFor, applyBrackets, supportedYears } from '../../src/tax/engine/brackets';
 
 test('ratesFor returns 2024 table', () => {
   const r = ratesFor(2024);
@@ -11,6 +11,14 @@ test('ratesFor returns 2024 table', () => {
 
 test('ratesFor throws RateTableMissingError for unknown year', () => {
   assert.throws(() => ratesFor(2099), /RateTableMissingError/);
+});
+
+test('supportedYears returns sorted ascending list including 2024-2026', () => {
+  const years = supportedYears();
+  assert.deepEqual(years, [...years].sort((a, b) => a - b));
+  assert.ok(years.includes(2024));
+  assert.ok(years.includes(2025));
+  assert.ok(years.includes(2026));
 });
 
 test('applyBrackets at $0 = $0 tax', () => {

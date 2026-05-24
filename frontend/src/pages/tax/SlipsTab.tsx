@@ -1,47 +1,91 @@
 import { useState } from 'react';
 import { useTaxSlips, type SlipDto } from '../../hooks/useTaxSlips';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
+import { SLIP_FORMS, slipPreview } from './slips/registry';
 
-const YEAR = new Date().getUTCFullYear();
 const SLIP_TYPES: SlipDto['slipType'][] = ['T4', 'T5', 'T3', 'T4A', 'T5008'];
 
-export function SlipsTab() {
+type FormState = {
+  slipType: SlipDto['slipType'];
+  issuer: string;
+  boxValues: Record<string, number | string>;
+};
+
+export function SlipsTab({ year }: { year: number }) {
   const { entities } = useTaxEntities();
-  const { slips, create, error } = useTaxSlips(YEAR);
+  const { slips, create, error } = useTaxSlips(year);
   const personal = entities?.find((e) => e.kind === 'personal');
-  const [form, setForm] = useState({ slipType: 'T4' as SlipDto['slipType'], issuer: '', boxValues: '{}' });
+
+  const [form, setForm] = useState<FormState>({
+    slipType: 'T4',
+    issuer: '',
+    boxValues: {},
+  });
+
   if (!personal) return <p className="muted">No personal entity. Seed one first.</p>;
+
+  const SlipForm = SLIP_FORMS[form.slipType];
+
+  const handleBoxChange = (issuer: string, boxValues: Record<string, number | string>) => {
+    setForm((prev) => ({ ...prev, issuer, boxValues }));
+  };
+
+  const handleIssuerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm((prev) => ({ ...prev, issuer: e.target.value }));
+  };
+
+  const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setForm({
+      slipType: e.target.value as SlipDto['slipType'],
+      issuer: '',
+      boxValues: {},
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await create({
+      entityId: personal.id,
+      year,
+      slipType: form.slipType,
+      issuer: form.issuer,
+      boxValues: form.boxValues,
+    });
+    setForm({ slipType: 'T4', issuer: '', boxValues: {} });
+  };
+
   return (
     <div>
-      <h2>Tax slips ({YEAR})</h2>
+      <h2>Tax slips ({year})</h2>
       <ul>
-        {slips.map((s) => (
-          <li key={s.id}>
-            {s.slipType} — {s.issuer} — {JSON.stringify(s.boxValues)}
-          </li>
-        ))}
+        {slips.map((s) => {
+          const preview = slipPreview(s.slipType, s.boxValues);
+          return (
+            <li key={s.id}>
+              <strong>{s.slipType}</strong> — {s.issuer}
+              {preview && <span className="muted"> — {preview}</span>}
+            </li>
+          );
+        })}
       </ul>
-      <form onSubmit={async (e) => {
-        e.preventDefault();
-        let parsed: Record<string, number | string>;
-        try { parsed = JSON.parse(form.boxValues); }
-        catch { alert('boxValues must be valid JSON'); return; }
-        await create({
-          entityId: personal.id,
-          year: YEAR,
-          slipType: form.slipType,
-          issuer: form.issuer,
-          boxValues: parsed,
-        });
-        setForm({ slipType: 'T4', issuer: '', boxValues: '{}' });
-      }}>
-        <label>Type
-          <select value={form.slipType} onChange={(e) => setForm({ ...form, slipType: e.target.value as SlipDto['slipType'] })}>
-            {SLIP_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+      <form onSubmit={handleSubmit}>
+        <label>
+          Type
+          <select value={form.slipType} onChange={handleTypeChange}>
+            {SLIP_TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
           </select>
         </label>
-        <label>Issuer <input value={form.issuer} onChange={(e) => setForm({ ...form, issuer: e.target.value })} /></label>
-        <label>Box values (JSON) <textarea value={form.boxValues} onChange={(e) => setForm({ ...form, boxValues: e.target.value })} /></label>
+        <label>
+          Issuer
+          <input value={form.issuer} onChange={handleIssuerChange} />
+        </label>
+        <SlipForm
+          issuer={form.issuer}
+          onChange={handleBoxChange}
+          values={form.boxValues}
+        />
         <button type="submit">Add slip</button>
       </form>
       {error && <p className="error">{error}</p>}

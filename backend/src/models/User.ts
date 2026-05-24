@@ -19,6 +19,7 @@ export class User extends Model<
   declare passwordHash: string;
   declare passwordSalt: string;
   declare passwordParams: string;
+  declare dob: string | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -54,6 +55,7 @@ export function initUser(sequelize: Sequelize): typeof User {
         field: 'password_params',
         allowNull: false,
       },
+      dob: { type: DataTypes.STRING(10), allowNull: true },
     } as ModelAttributes<User>,
     {
       sequelize,

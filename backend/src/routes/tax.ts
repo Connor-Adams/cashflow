@@ -3,11 +3,16 @@ import { currentAuth } from '../auth/middleware';
 import { Entity, TaxReturn, TaxSlip, Carryforward, InstalmentPayment } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildT1 } from '../tax/engine/t1';
-import { ratesFor, RateTableMissingError } from '../tax/engine/brackets';
+import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/brackets';
 import { factsHash } from '../tax/util/factsHash';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 
 const router = Router();
+
+// GET /api/tax/years — list years the engine has rate tables for.
+router.get('/years', (_req, res) => {
+  res.json({ years: supportedYears() });
+});
 
 // GET /api/tax/entities — list all entities for the authenticated household.
 router.get('/entities', async (req, res, next) => {

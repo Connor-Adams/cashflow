@@ -4,6 +4,8 @@ import {
   isNonCategorical,
   isNonSpend,
 } from './classifyTransactionFlow';
+import { splitTxnByItems } from '../import/splitTxnByItems';
+import type { ItemAllocationContext } from './loadItemAllocations';
 
 /**
  * Transaction row shape consumed by the dashboard aggregator. Mirrors the
@@ -25,6 +27,7 @@ export type SummaryTxnRow = {
   amount: unknown;
   reviewFlag: boolean;
   txnType: string | null;
+  businessAmount?: string;
 };
 
 /** Account row shape consumed by the aggregator for type/short-code lookups. */
@@ -164,6 +167,7 @@ export type DashboardAggregates = {
 export function aggregateDashboard(
   rows: SummaryTxnRow[],
   accountById: Map<number, AccountRow>,
+  itemContext?: ItemAllocationContext,
 ): DashboardAggregates {
   const byCategory: DashboardAggregates['byCategory'] = new Map();
   const metricsByCurrency: DashboardAggregates['metricsByCurrency'] = new Map();
@@ -294,21 +298,47 @@ export function aggregateDashboard(
     if (isNonCategorical(row.txnType, account?.accountType)) {
       continue;
     }
-    const key = [
-      row.currency,
-      row.finalCategory ?? '',
-      row.finalBusiness ? '1' : '0',
-      row.finalSplitType,
-    ].join('\0');
-    const existing = byCategory.get(key) ?? {
-      currency: row.currency,
-      category: row.finalCategory,
-      finalBusiness: row.finalBusiness,
-      finalSplitType: row.finalSplitType,
-      sumAmount: 0,
-    };
-    existing.sumAmount += amount;
-    byCategory.set(key, existing);
+    const allocations = itemContext
+      ? splitTxnByItems({
+          txn: {
+            id: row.id,
+            amount: String(row.amount),
+            currency: row.currency,
+            finalCategory: row.finalCategory,
+            finalBusiness: row.finalBusiness,
+            finalSplitType: row.finalSplitType,
+            businessAmount: row.businessAmount ?? '0',
+          },
+          links: itemContext.linksByTxn.get(row.id) ?? [],
+          ordersById: itemContext.ordersById,
+          itemsByOrder: itemContext.itemsByOrder,
+        })
+      : [
+          {
+            category: row.finalCategory,
+            amount,
+            businessAmount: 0,
+            currency: row.currency,
+          },
+        ];
+
+    for (const alloc of allocations) {
+      const key = [
+        row.currency,
+        alloc.category ?? '',
+        row.finalBusiness ? '1' : '0',
+        row.finalSplitType,
+      ].join('\0');
+      const existing = byCategory.get(key) ?? {
+        currency: row.currency,
+        category: alloc.category,
+        finalBusiness: row.finalBusiness,
+        finalSplitType: row.finalSplitType,
+        sumAmount: 0,
+      };
+      existing.sumAmount += alloc.amount;
+      byCategory.set(key, existing);
+    }
 
     const monthlyKey = `${month}\0${currency}`;
     const monthly = monthlyByCurrency.get(monthlyKey) ?? {
@@ -335,26 +365,16 @@ export function aggregateDashboard(
       totalCredits: 0,
       netSpend: 0,
     };
-    const categoryKey = `${currency}\0${row.finalCategory ?? ''}`;
-    const category = categoryReports.get(categoryKey) ?? {
-      currency,
-      category: row.finalCategory,
-      totalSpend: 0,
-      totalCredits: 0,
-      netSpend: 0,
-    };
 
     if (amount < 0 && !nonSpend) {
       const spend = -amount;
       monthly.totalSpend += spend;
       split.totalSpend += spend;
       business.totalSpend += spend;
-      category.totalSpend += spend;
     } else if (amount > 0) {
       monthly.totalCredits += amount;
       split.totalCredits += amount;
       business.totalCredits += amount;
-      category.totalCredits += amount;
     }
     // Note: negative-amount non-spend rows (transfers, investment buys, etc)
     // contribute to neither side; they're tracked elsewhere (transaction
@@ -363,11 +383,27 @@ export function aggregateDashboard(
     monthly.netSpend = monthly.totalSpend - monthly.totalCredits;
     split.netSpend = split.totalSpend - split.totalCredits;
     business.netSpend = business.totalSpend - business.totalCredits;
-    category.netSpend = category.totalSpend - category.totalCredits;
     monthlyByCurrency.set(monthlyKey, monthly);
     netSpendBySplit.set(splitKey, split);
     netSpendByBusiness.set(businessKey, business);
-    categoryReports.set(categoryKey, category);
+
+    for (const alloc of allocations) {
+      const categoryKey = `${currency}\0${alloc.category ?? ''}`;
+      const category = categoryReports.get(categoryKey) ?? {
+        currency,
+        category: alloc.category,
+        totalSpend: 0,
+        totalCredits: 0,
+        netSpend: 0,
+      };
+      if (alloc.amount < 0 && !nonSpend) {
+        category.totalSpend += -alloc.amount;
+      } else if (alloc.amount > 0) {
+        category.totalCredits += alloc.amount;
+      }
+      category.netSpend = category.totalSpend - category.totalCredits;
+      categoryReports.set(categoryKey, category);
+    }
   }
 
   return {

@@ -79,8 +79,37 @@ export const RATES_2024: RateTable = {
   medicalThresholdCap: D('2759'),
   rrspAnnualLimit: D('31560'),
   fhsaLifetimeLimit: D('40000'),
+  // Disability Tax Credit — base amounts × 15% = credit value. 2024 CRA T2201.
+  dtcBaseFederal: D('9872'),
+  dtcSupplementFederal: D('5758'),   // under-18 supplement
+  dtcSupplementThreshold: D('3373'), // child care & attendant expense reduction threshold
+  dtcBaseOntario: D('9586'),
+  // Caregiver amount L30450 base (infirm adult dependant)
+  caregiverAmountFederalInfirmAdult: D('7999'),
+  caregiverThresholdFederal: D('18783'), // net income threshold for reduction
+  // Pension income amount
+  pensionIncomeAmountCap: D('2000'),
+  pensionIncomeAmountCapOntario: D('1641'),
+  // OAS clawback (social benefits repayment) L23500
+  oasClawbackThreshold: D('90997'),
+  oasClawbackRate: D('0.15'),
+  // FHSA annual deduction limit
+  fhsaAnnualLimit: D('8000'),
   sources: [
     { name: 'CRA T1-2024 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2024 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
   ],
+
+  // Phase 3 — Corp T2 (stable since 2019; verify before filing-grade use)
+  corpAbiSbdRateFederal: D('0.09'),
+  corpAbiSbdRateOntario: D('0.032'),
+  corpGeneralRateFederal: D('0.15'),
+  corpGeneralRateOntario: D('0.115'),
+  corpInvestmentRateFederal: D('0.387'),
+  corpInvestmentRateOntario: D('0.115'),
+  corpRefundableTaxOnAII: D('0.1067'),
+  corpSbdAnnualLimit: D('500000'),
+  corpAaiiGrindThreshold: D('50000'),
+  corpAaiiGrindRate: D('5'),
+  corpDividendRefundRate: D('0.3833'),
 };
