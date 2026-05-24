@@ -691,3 +691,5 @@ export type ClientLogPayload = {
   requestId?: string
   fields?: Record<string, unknown>
 }
+
+export * from './categoryIcons'
