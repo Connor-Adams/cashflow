@@ -136,6 +136,47 @@ test('INT: interest earned (no ticker)', () => {
   assert.equal(r.amount, 39.85);
 });
 
+test('FEE: crypto trading fee links to security, uses exec-at', () => {
+  const r = parseWsInvestRow(
+    row({
+      date: '2026-01-28',
+      transaction: 'FEE',
+      description:
+        'Trading fee for sale of 4.0000000000 XRP (executed at 2026-01-28), FX Rate: 1.3552',
+      amount: '-0.09',
+    }),
+    ACCOUNT_ID,
+    DEFAULT_CCY,
+  );
+  assert.ok(r);
+  assert.equal(r.activityType, 'fee');
+  assert.equal(r.tradeDate, '2026-01-28');
+  assert.equal(r.security?.symbol, 'XRP');
+  assert.equal(r.security?.assetType, 'cryptocurrency');
+  assert.equal(r.quantity, null);
+  assert.equal(r.amount, -0.09);
+});
+
+test('FEE: crypto staking-reward fee links to security by SYMBOL-Name', () => {
+  const r = parseWsInvestRow(
+    row({
+      date: '2024-11-01',
+      transaction: 'FEE',
+      description: 'Fee paid on DOT-Polkadot staking reward: 0.0007988466',
+      amount: '0',
+    }),
+    ACCOUNT_ID,
+    DEFAULT_CCY,
+  );
+  assert.ok(r);
+  assert.equal(r.activityType, 'fee');
+  assert.equal(r.tradeDate, '2024-11-01');
+  assert.equal(r.security?.symbol, 'DOT');
+  assert.equal(r.security?.name, 'Polkadot');
+  assert.equal(r.security?.assetType, 'cryptocurrency');
+  assert.equal(r.quantity, null);
+});
+
 test('FEE: subscription fee paid (no ticker)', () => {
   const r = parseWsInvestRow(
     row({
@@ -179,6 +220,64 @@ test('CRYPTORWD returns null', () => {
     DEFAULT_CCY,
   );
   assert.equal(r, null);
+});
+
+test('Crypto BUY: extracts symbol, qty, exec-at from "Purchase of N SYM" format', () => {
+  const r = parseWsInvestRow(
+    row({
+      date: '2024-10-22',
+      transaction: 'BUY',
+      description:
+        'Purchase of 0.0544286100 ETH (executed at 2024-10-23), FX Rate: 1.3877, Fee charged $3.94',
+      amount: '-200.0',
+    }),
+    ACCOUNT_ID,
+    DEFAULT_CCY,
+  );
+  assert.ok(r);
+  assert.equal(r.activityType, 'buy');
+  assert.equal(r.tradeDate, '2024-10-23');
+  assert.equal(r.security?.symbol, 'ETH');
+  assert.equal(r.security?.assetType, 'cryptocurrency');
+  assert.equal(r.quantity, 0.05442861);
+  assert.equal(r.amount, -200);
+});
+
+test('Crypto SELL: extracts symbol, qty, exec-at from "Sale of N SYM" format', () => {
+  const r = parseWsInvestRow(
+    row({
+      date: '2026-01-28',
+      transaction: 'SELL',
+      description: 'Sale of 4.0000000000 XRP (executed at 2026-01-28), FX Rate: 1.3552',
+      amount: '10.36',
+    }),
+    ACCOUNT_ID,
+    DEFAULT_CCY,
+  );
+  assert.ok(r);
+  assert.equal(r.activityType, 'sell');
+  assert.equal(r.tradeDate, '2026-01-28');
+  assert.equal(r.security?.symbol, 'XRP');
+  assert.equal(r.security?.assetType, 'cryptocurrency');
+  assert.equal(r.quantity, 4);
+  assert.equal(r.amount, 10.36);
+});
+
+test('Crypto BUY: large-quantity tokens parse without scientific notation', () => {
+  const r = parseWsInvestRow(
+    row({
+      date: '2024-12-13',
+      transaction: 'BUY',
+      description:
+        'Purchase of 1000000.0000000000 PEPE (executed at 2024-12-13), FX Rate: 1.4292, Fee charged $0.70',
+      amount: '-50.0',
+    }),
+    ACCOUNT_ID,
+    DEFAULT_CCY,
+  );
+  assert.ok(r);
+  assert.equal(r.security?.symbol, 'PEPE');
+  assert.equal(r.quantity, 1_000_000);
 });
 
 test('BUY with malformed description: falls back to row.date and null security', () => {
