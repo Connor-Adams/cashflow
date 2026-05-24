@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, master]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,6 +24,17 @@ jobs:
 
       - name: Install
         run: yarn install --frozen-lockfile
+
+      - name: Cache TS + vite build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            backend/dist/.tsbuildinfo
+            frontend/node_modules/.tmp
+            frontend/node_modules/.vite
+          key: ${{ runner.os }}-buildstate-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildstate-
 
       - name: CI
         run: yarn ci

@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: release-drafter-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update-release-draft:
