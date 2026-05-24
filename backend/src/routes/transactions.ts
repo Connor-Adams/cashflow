@@ -82,6 +82,14 @@ function buildTransactionFilterWhere(
     if (source.dateTo) dateCond[Op.lte] = String(source.dateTo);
     where.date = dateCond;
   }
+  if (typeof source.ids === 'string' && source.ids.length > 0) {
+    const ids = source.ids
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    // -1 matches nothing; auto-increment ids start at 1, so this returns empty when all entries are invalid.
+    where.id = ids.length === 0 ? -1 : ids;
+  }
   return where;
 }
 

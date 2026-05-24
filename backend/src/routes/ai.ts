@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { QueryTypes } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { AiSuggestion, Rule, Transaction } from '../models';
 import { sequelize } from '../models';
 import { getOpenAiConfig } from '../config/openai';
@@ -13,7 +13,7 @@ import {
   applyTransactionSuggestion,
   createTrackedSuggestion,
 } from '../ai/suggestionStore';
-import { findRuleProposals } from '../ai/ruleProposals';
+import { findRuleProposals, merchantPatternFor } from '../ai/ruleProposals';
 import { buildFinancialInsights } from '../ai/insights';
 import { auditTransactionsForMislabels } from '../ai/auditTransactions';
 import { aiSuggestLimiter } from './aiRateLimit';
@@ -246,6 +246,29 @@ router.post('/rule-proposals/:merchantPattern/approve', async (req, res, next) =
   }
 });
 
+router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) => {
+  try {
+    const raw = decodeURIComponent(req.params.merchantPattern);
+    const merchantPattern = merchantPatternFor(raw);
+    if (!merchantPattern) {
+      res.status(400).json({ error: 'merchantPattern is required' });
+      return;
+    }
+    const row = await createTrackedSuggestion({
+      req,
+      kind: 'rule_proposal',
+      inputSnapshot: { merchantPattern },
+      output: null,
+      status: 'rejected',
+      model: 'deterministic',
+      promptVersion: 'rule-proposal-dismiss-v1',
+    });
+    res.status(201).json({ ok: true, id: row.id });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/insights', async (req, res, next) => {
   try {
     const period = String(req.query.period || new Date().toISOString().slice(0, 7));
@@ -267,6 +290,22 @@ router.get('/insights', async (req, res, next) => {
       currency,
       hasExplicitRange ? { from: dateFrom, to: dateTo } : undefined,
     );
+
+    await AiSuggestion.update(
+      { status: 'superseded' },
+      {
+        where: {
+          ...aiSuggestionWhere(req),
+          kind: 'financial_insight',
+          status: 'suggested',
+          [Op.and]: [
+            sequelize.literal(`json_extract(input_snapshot, '$.period') = ${sequelize.escape(out.period)}`),
+            sequelize.literal(`json_extract(input_snapshot, '$.currency') = ${sequelize.escape(currency)}`),
+          ],
+        },
+      },
+    );
+
     await createTrackedSuggestion({
       req,
       kind: 'financial_insight',
@@ -366,4 +405,109 @@ router.get('/import-cleanup', async (req, res, next) => {
   }
 });
 
+type InboxItem = {
+  id: number;
+  kind: 'transaction_audit' | 'financial_insight' | 'rule_proposal';
+  createdAt: string;
+  transactionId: number | null;
+  summary: string;
+  severity: 'action' | 'watch' | 'info' | null;
+  confidence: 'high' | 'medium' | 'low' | null;
+  output: unknown;
+};
+
+function summarizeAudit(output: unknown): string {
+  const issues = (output as { issues?: unknown[] } | null)?.issues;
+  const count = Array.isArray(issues) ? issues.length : 0;
+  return count === 1 ? '1 issue found' : `${count} issues found`;
+}
+
+function summarizeInsight(output: unknown): { summary: string; severity: 'action' | 'watch' | 'info' | null } {
+  const arr = Array.isArray(output) ? (output as Array<{ title?: unknown; severity?: unknown }>) : [];
+  if (arr.length === 0) return { summary: 'No insights', severity: null };
+  const first = arr[0];
+  const title = typeof first?.title === 'string' ? first.title : 'Insight';
+  const sev = first?.severity === 'action' || first?.severity === 'watch' || first?.severity === 'info'
+    ? first.severity
+    : null;
+  const more = arr.length > 1 ? ` (+${arr.length - 1} more)` : '';
+  return { summary: `${title}${more}`, severity: sev };
+}
+
+router.get('/inbox', async (req, res, next) => {
+  try {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
+    const [rows, ruleProposals] = await Promise.all([
+      AiSuggestion.findAll({
+        where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
+        order: [['id', 'DESC']],
+        limit,
+      }),
+      findRuleProposals(isSuperadmin(req) ? null : currentAuth(req).household.id),
+    ]);
+    const persistedItems: InboxItem[] = rows.map((row) => {
+      if (row.kind === 'transaction_audit') {
+        return {
+          id: row.id,
+          kind: 'transaction_audit',
+          createdAt: row.createdAt.toISOString(),
+          transactionId: row.transactionId,
+          summary: summarizeAudit(row.output),
+          severity: null,
+          confidence: null,
+          output: row.output,
+        };
+      }
+      const { summary, severity } = summarizeInsight(row.output);
+      return {
+        id: row.id,
+        kind: 'financial_insight',
+        createdAt: row.createdAt.toISOString(),
+        transactionId: row.transactionId,
+        summary,
+        severity,
+        confidence: null,
+        output: row.output,
+      };
+    });
+    const proposalItems: InboxItem[] = ruleProposals.map((p, idx) => ({
+      id: -1 - idx,
+      kind: 'rule_proposal',
+      createdAt: new Date().toISOString(),
+      transactionId: null,
+      summary: `${p.merchantPattern} → ${p.category ?? '(no category)'} (×${p.supportCount})`,
+      severity: null,
+      confidence: null,
+      output: p,
+    }));
+    res.json({ items: [...persistedItems, ...proposalItems] });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/inbox/count', async (req, res, next) => {
+  try {
+    const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
+    const [auditCount, insightCount, ruleProposals] = await Promise.all([
+      AiSuggestion.count({ where: { ...where, kind: 'transaction_audit' } }),
+      AiSuggestion.count({ where: { ...where, kind: 'financial_insight' } }),
+      findRuleProposals(isSuperadmin(req) ? null : currentAuth(req).household.id),
+    ]);
+    const ruleProposalCount = ruleProposals.length;
+    res.json({
+      total: auditCount + insightCount + ruleProposalCount,
+      byKind: {
+        transaction_audit: auditCount,
+        financial_insight: insightCount,
+        rule_proposal: ruleProposalCount,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 export default router;
+

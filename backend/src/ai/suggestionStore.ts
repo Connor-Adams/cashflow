@@ -38,7 +38,7 @@ export async function createTrackedSuggestion(params: {
   latencyMs?: number | null;
   providerRequestId?: string | null;
   errorMessage?: string | null;
-  status?: 'suggested' | 'failed';
+  status?: 'suggested' | 'failed' | 'rejected';
 }): Promise<AiSuggestion> {
   const { user, household } = currentAuth(params.req);
   return AiSuggestion.create({
