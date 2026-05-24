@@ -113,7 +113,7 @@ const PATCHABLE_KEYS = [
   'ownershipContactId',
 ] as const;
 
-async function applyPatchBody(
+export async function applyPatchBody(
   req: import('express').Request,
   txn: InstanceType<typeof Transaction>,
   b: Record<string, unknown>
