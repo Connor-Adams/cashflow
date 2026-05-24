@@ -2,18 +2,17 @@ import { useState } from 'react';
 import { useTaxSlips, type SlipDto } from '../../hooks/useTaxSlips';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 
-const YEAR = new Date().getUTCFullYear();
 const SLIP_TYPES: SlipDto['slipType'][] = ['T4', 'T5', 'T3', 'T4A', 'T5008'];
 
-export function SlipsTab() {
+export function SlipsTab({ year }: { year: number }) {
   const { entities } = useTaxEntities();
-  const { slips, create, error } = useTaxSlips(YEAR);
+  const { slips, create, error } = useTaxSlips(year);
   const personal = entities?.find((e) => e.kind === 'personal');
   const [form, setForm] = useState({ slipType: 'T4' as SlipDto['slipType'], issuer: '', boxValues: '{}' });
   if (!personal) return <p className="muted">No personal entity. Seed one first.</p>;
   return (
     <div>
-      <h2>Tax slips ({YEAR})</h2>
+      <h2>Tax slips ({year})</h2>
       <ul>
         {slips.map((s) => (
           <li key={s.id}>
@@ -28,7 +27,7 @@ export function SlipsTab() {
         catch { alert('boxValues must be valid JSON'); return; }
         await create({
           entityId: personal.id,
-          year: YEAR,
+          year,
           slipType: form.slipType,
           issuer: form.issuer,
           boxValues: parsed,

@@ -95,6 +95,15 @@ test('GET /api/tax/entities with auth returns entities array', async () => {
   assert.ok(Array.isArray(res.body.entities), 'expected entities array');
 });
 
+test('GET /api/tax/years returns sorted supported years', async () => {
+  const res = await authedNoEntity.get('/api/tax/years');
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.ok(Array.isArray(res.body.years), 'expected years array');
+  assert.ok(res.body.years.length >= 3, 'expected at least 3 supported years');
+  const sorted = [...res.body.years].sort((a: number, b: number) => a - b);
+  assert.deepEqual(res.body.years, sorted, 'years should be sorted ascending');
+});
+
 // TODO: The cached-snapshot test requires seeding an Entity, Accounts, Transactions,
 // TaxSlips, and Carryforwards in a configuration that produces a stable factsHash.
 // The buildPersonalFacts builder also performs FX lookups for non-CAD transactions
