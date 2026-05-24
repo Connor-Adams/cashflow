@@ -29,6 +29,8 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
+import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
+import type { ReceiptWithItems } from '../../../shared/api-types'
 import {
   getJson,
   patchJson,
@@ -165,6 +167,7 @@ export function TransactionsPage() {
   const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
+  const [itemsDrawer, setItemsDrawer] = useState<{ txnId: number; receipts: ReceiptWithItems[] } | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
   const [bulkAiResults, setBulkAiResults] = useState<BulkAiResult[]>([])
   const [aiAuditBusy, setAiAuditBusy] = useState(false)
@@ -487,6 +490,24 @@ export function TransactionsPage() {
       setIdsFilter,
     ]
   )
+
+  async function openItemsDrawer(txnId: number) {
+    const receipts = await getJson<ReceiptWithItems[]>(`/api/transactions/${txnId}/receipts`)
+    setItemsDrawer({ txnId, receipts })
+  }
+
+  async function reloadItemsDrawer() {
+    if (!itemsDrawer) return
+    const receipts = await getJson<ReceiptWithItems[]>(
+      `/api/transactions/${itemsDrawer.txnId}/receipts`,
+    )
+    setItemsDrawer({ txnId: itemsDrawer.txnId, receipts })
+  }
+
+  async function onExtractReceipt(receiptId: number) {
+    await postJson(`/api/receipts/${receiptId}/analyze`, {})
+    await reloadItemsDrawer()
+  }
 
   async function onReceiptPicked(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -1397,6 +1418,7 @@ export function TransactionsPage() {
                       setAttachForTxnId(id)
                       receiptFileRef.current?.click()
                     }}
+                    onViewItems={(id) => void openItemsDrawer(id)}
                     onError={(msg) => setErr(msg)}
                     onOpenSignals={(id) => setSignalsDialogTxnId(id)}
                   />
@@ -1427,6 +1449,13 @@ export function TransactionsPage() {
           </Button>
         </div>
       </section>
+      <ReceiptItemsDrawer
+        open={itemsDrawer != null}
+        onClose={() => setItemsDrawer(null)}
+        receipts={itemsDrawer?.receipts ?? []}
+        categoryHints={categoryLabels}
+        onExtract={onExtractReceipt}
+      />
       <EnrichmentSignalsDialog
         transactionId={signalsDialogTxnId}
         transactionSummary={
@@ -1475,6 +1504,7 @@ function TransactionRow({
   onSave,
   aiEnabled,
   onAttachReceipt,
+  onViewItems,
   onError,
   onOpenSignals,
 }: {
@@ -1486,6 +1516,7 @@ function TransactionRow({
   onSave: (id: number, patch: Record<string, unknown>) => Promise<void>
   aiEnabled: boolean
   onAttachReceipt: (transactionId: number) => void
+  onViewItems: (transactionId: number) => void
   onError: (message: string) => void
   onOpenSignals: (id: number) => void
 }) {
@@ -1699,6 +1730,16 @@ function TransactionRow({
             <span className="txnReceiptCount">{t.receiptCount ?? 0}</span>
             <span>{(t.receiptCount ?? 0) > 0 ? 'Add receipt' : 'Attach receipt'}</span>
           </Button>
+          {(t.receiptCount ?? 0) > 0 && (
+            <button
+              type="button"
+              className="txnReceiptAction"
+              onClick={() => onViewItems(t.id)}
+              title="View receipt items"
+            >
+              View items
+            </button>
+          )}
           {t.receiptWarnings?.length ? (
             <span className="txnBadge txnBadge--review" title={t.receiptWarnings.join(', ')}>
               Receipt check
