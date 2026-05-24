@@ -190,9 +190,12 @@ export function parsePurchaseHistoryCsv(
               : null,
       orderDate: date,
       orderId: orderId ? String(orderId).trim() : null,
+      subtotal: null,
+      tax: null,
       total: totalNum,
       currency: (currency ?? opts.defaultCurrency ?? '').toUpperCase().slice(0, 3) || null,
       paymentLast4: last4 ? String(last4).replace(/\D/g, '').slice(-4) || null : null,
+      tenders: [],
       items: [
         {
           title: fullTitle.slice(0, 512),

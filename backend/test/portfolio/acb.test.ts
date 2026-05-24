@@ -14,7 +14,8 @@ function act(
   activityType: string,
   quantity: number | null,
   amount: number | null,
-  currency = 'CAD'
+  currency = 'CAD',
+  fees: number | null = null
 ): AcbActivity {
   return {
     id: nextId++,
@@ -23,6 +24,7 @@ function act(
     quantity,
     amount,
     currency,
+    fees,
   };
 }
 
@@ -285,4 +287,85 @@ test('DRIP into a closed position (qty 0) starts a fresh ACB', () => {
   // Realized from the SELL only.
   assert.equal(r.realizedEvents.length, 1);
   APPROX(r.realizedEvents[0].realizedGain, 200);
+});
+
+// ---------------------------------------------------------------------------
+// Fee / commission handling (CRA rules)
+// ---------------------------------------------------------------------------
+
+test('BUY with fees: fees are added to total cost and affect per-unit ACB', () => {
+  // 10 units, $1000 trade amount, $9.99 commission → total cost $1009.99
+  const r = computeAcb([act('2024-01-15', 'buy', 10, 1000, 'CAD', 9.99)]);
+  APPROX(r.finalState.totalCost, 1009.99);
+  APPROX(r.finalState.acbPerUnit, 1009.99 / 10);
+  assert.equal(r.finalState.quantity, 10);
+});
+
+test('SELL with fees: fees reduce net proceeds and therefore realized gain', () => {
+  // BUY 10 @ $100 each = $1000 total cost, no fees → ACB $100/unit
+  // SELL 10 @ $1300 gross, $9.99 commission → net proceeds $1290.01
+  // Realized gain = $1290.01 - $1000 = $290.01
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000, 'CAD', null),
+    act('2024-03-15', 'sell', 10, 1300, 'CAD', 9.99),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].proceeds, 1290.01);
+  APPROX(r.realizedEvents[0].costRemoved, 1000);
+  APPROX(r.realizedEvents[0].realizedGain, 290.01);
+  APPROX(r.realizedTotal, 290.01);
+});
+
+test('SELL with fees: costRemoved is unchanged by SELL fee (only ACB at sale time matters)', () => {
+  // BUY 20 @ $50 each ($1000 total, no fee) → ACB $50/unit
+  // SELL 10 @ $700 gross, $5 fee → net proceeds $695, cost removed 10*50=$500, gain $195
+  // Remaining 10 units still at ACB $50 each
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 20, 1000, 'CAD', null),
+    act('2024-03-15', 'sell', 10, 700, 'CAD', 5),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].proceeds, 695);
+  APPROX(r.realizedEvents[0].costRemoved, 500);
+  APPROX(r.realizedEvents[0].realizedGain, 195);
+  assert.equal(r.finalState.quantity, 10);
+  // Remaining position ACB per unit must not be contaminated by the sell fee
+  APPROX(r.finalState.acbPerUnit, 50);
+  APPROX(r.finalState.totalCost, 500);
+});
+
+test('multiple BUYs with varying fees: weighted-average ACB includes all fees', () => {
+  // BUY 10 @ $100 + $10 fee = $1010 cost
+  // BUY  5 @ $120/unit = $600 + $5 fee = $605 cost
+  // Total cost = $1615 for 15 units → ACB $1615/15 ≈ $107.6667/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000, 'CAD', 10),
+    act('2024-02-15', 'buy', 5, 600, 'CAD', 5),
+  ]);
+  assert.equal(r.finalState.quantity, 15);
+  APPROX(r.finalState.totalCost, 1615);
+  APPROX(r.finalState.acbPerUnit, 1615 / 15);
+});
+
+test('fees: null and fees: 0 are both treated as zero (no effect)', () => {
+  const rNull = computeAcb([act('2024-01-15', 'buy', 10, 1000, 'CAD', null)]);
+  const rZero = computeAcb([act('2024-01-15', 'buy', 10, 1000, 'CAD', 0)]);
+  APPROX(rNull.finalState.totalCost, 1000);
+  APPROX(rZero.finalState.totalCost, 1000);
+  APPROX(rNull.finalState.acbPerUnit, 100);
+  APPROX(rZero.finalState.acbPerUnit, 100);
+});
+
+test('fees are ignored on no-op activity types (dividend, fee-type, etc.)', () => {
+  // A "fee" activity type is a no-op in ACB; any fees field on it should not
+  // move the ACB or quantity.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000, 'CAD', 9),
+    act('2024-02-15', 'fee', null, 25, 'CAD', 2),
+  ]);
+  // Only one timeline entry (the BUY)
+  assert.equal(r.timeline.length, 1);
+  APPROX(r.finalState.totalCost, 1009);
+  APPROX(r.finalState.acbPerUnit, 1009 / 10);
+  assert.equal(r.finalState.quantity, 10);
 });
