@@ -3,6 +3,8 @@
  *
  * Canadian CRA-style weighted-average ACB:
  *  - BUY increases position; cost adds at trade amount.
+ *  - DRIP (`reinvestment`) is treated as BUY — new shares from a reinvested
+ *    dividend add to position and add to total cost.
  *  - SELL removes qty at the prevailing per-unit ACB (NOT FIFO);
  *    proceeds minus removed-cost = realized gain.
  *  - When the position closes (quantity drops to ~0) the per-unit ACB
@@ -183,11 +185,34 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'reinvestment') {
+      // DRIP: a cash dividend that was automatically reinvested by buying
+      // additional shares of the same security. CRA treats this identically
+      // to a BUY — the reinvested amount is added to total cost and the
+      // new shares are added to the position.
+      if (activity.quantity == null || activity.amount == null) {
+        warnings.push(
+          `REINVESTMENT activity ${activity.id} on ${activity.tradeDate} missing quantity or amount; ignored`
+        );
+        continue;
+      }
+      const qty = activity.quantity;
+      const cost = Math.abs(activity.amount);
+      const newQuantity = state.quantity + qty;
+      const newTotalCost = state.totalCost + cost;
+      const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
     }
-    // All other activity types (dividend, interest, fee, reinvestment,
-    // split, transfer, other) are intentionally ignored — they don't
-    // shift the weighted-average ACB. We do NOT filter them out of the
-    // input (the caller may still want to see them in their stream).
+    // All other activity types (dividend, interest, fee, split, transfer,
+    // other) are intentionally ignored — they don't shift the
+    // weighted-average ACB. We do NOT filter them out of the input (the
+    // caller may still want to see them in their stream).
   }
 
   return {

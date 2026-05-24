@@ -208,3 +208,81 @@ test('timeline records one entry per buy/sell, in chronological order', () => {
   assert.equal(r.timeline[1].asOf, '2024-03-15');
   assert.equal(r.timeline[2].asOf, '2024-04-15');
 });
+
+// ---------------------------------------------------------------------------
+// DRIP / reinvestment tests
+// ---------------------------------------------------------------------------
+
+test('DRIP after a BUY: per-unit ACB is correctly weighted', () => {
+  // BUY 10 @ $1000 total → ACB $100/unit
+  // DRIP 0.5 @ $52 total → new ACB = (1000+52)/10.5 ≈ 100.190476...
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', 0.5, 52),
+  ]);
+  assert.equal(r.finalState.quantity, 10.5);
+  APPROX(r.finalState.totalCost, 1052);
+  APPROX(r.finalState.acbPerUnit, 1052 / 10.5);
+  // Both events must appear in the timeline.
+  assert.equal(r.timeline.length, 2);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.warnings.length, 0);
+});
+
+test('DRIP with null quantity emits a warning and does not crash', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', null, 52),
+  ]);
+  assert.ok(r.warnings.some((w) => /missing quantity or amount/i.test(w)));
+  // Position unchanged — only the BUY in the timeline.
+  assert.equal(r.timeline.length, 1);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('DRIP with null amount emits a warning and does not crash', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', 0.5, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /missing quantity or amount/i.test(w)));
+  // Position unchanged — only the BUY in the timeline.
+  assert.equal(r.timeline.length, 1);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('SELL after DRIPs uses the post-DRIP per-unit ACB', () => {
+  // BUY 10 @ 1000 → ACB 100
+  // DRIP 0.5 @ 52 → ACB (1052/10.5) ≈ 100.190476
+  // SELL 5 shares → proceeds 520, cost removed 5 * (1052/10.5), gain = 520 - cost
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', 0.5, 52),
+    act('2024-03-15', 'sell', 5, 520),
+  ]);
+  const expectedAcb = 1052 / 10.5;
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, expectedAcb);
+  APPROX(r.realizedEvents[0].costRemoved, 5 * expectedAcb);
+  APPROX(r.realizedEvents[0].realizedGain, 520 - 5 * expectedAcb);
+  // Remaining: 5.5 shares at same per-unit ACB.
+  APPROX(r.finalState.quantity, 5.5);
+  APPROX(r.finalState.acbPerUnit, expectedAcb);
+});
+
+test('DRIP into a closed position (qty 0) starts a fresh ACB', () => {
+  // BUY 10 @ 1000, SELL 10 (close), then DRIP 0.5 @ 52.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'sell', 10, 1200), // close; ACB reset
+    act('2024-03-15', 'reinvestment', 0.5, 52), // fresh position
+  ]);
+  assert.equal(r.finalState.quantity, 0.5);
+  APPROX(r.finalState.totalCost, 52);
+  APPROX(r.finalState.acbPerUnit, 104);
+  // Realized from the SELL only.
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].realizedGain, 200);
+});
