@@ -11,6 +11,7 @@ import {
   TransactionSignal,
 } from '../models';
 import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
+import { findExistingForDedup } from './dedupExisting';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
@@ -330,6 +331,20 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         merchantRaw: v.merchantRaw,
         sourceReference: v.sourceReference,
       });
+
+      const dedup = await findExistingForDedup({
+        accountId: account.id,
+        date: v.date,
+        amount: v.amount,
+        currency: v.currency,
+        merchantRaw: v.merchantRaw,
+        sourceReference: v.sourceReference ?? null,
+        t,
+      });
+      if (dedup.kind !== 'no-match') {
+        skippedDup += 1;
+        continue;
+      }
 
       const memory = await findMerchantMemory(
         opts.householdId ?? account.householdId ?? null,

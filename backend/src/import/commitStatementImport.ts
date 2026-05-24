@@ -12,6 +12,7 @@ import {
 } from '../models';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
+import { findExistingForDedup } from './dedupExisting';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
 import {
@@ -232,6 +233,19 @@ export async function commitStatementImport(
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
+      const dedup = await findExistingForDedup({
+        accountId: account.id,
+        date: row.date,
+        amount: row.amount,
+        currency: row.currency,
+        merchantRaw: row.merchantRaw,
+        sourceReference: row.sourceReference ?? null,
+        t,
+      });
+      if (dedup.kind !== 'no-match') {
+        skippedDuplicates += 1;
+        continue;
+      }
       const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean, row.amount);
 
       const recurringHistory = await loadRecurringHistory(
