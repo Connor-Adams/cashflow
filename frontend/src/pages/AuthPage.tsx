@@ -49,7 +49,7 @@ export function AuthPage() {
     <main className="authShell">
       <Card className="authCard">
         <div className="brandLockup">
-          <div className="brandMark">CF</div>
+          <img src="/favicon-192x192.png" alt="" className="brandMark" />
           <div>
             <div className="brandEyebrow">Household ledger</div>
             <div className="brand">Cashflow</div>

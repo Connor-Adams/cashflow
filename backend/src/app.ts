@@ -23,6 +23,7 @@ import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
 import emailIntegrationsRouter from './routes/emailIntegrations';
 import portfolioRouter from './routes/portfolio';
+import taxRouter from './routes/tax';
 import captureRouter, { captureCors } from './routes/capture';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
@@ -80,6 +81,7 @@ app.use('/api/amazon', amazonRouter);
 app.use('/api/external-orders', externalOrdersRouter);
 app.use('/api/email', emailIntegrationsRouter);
 app.use('/api/portfolio', portfolioRouter);
+app.use('/api/tax', taxRouter);
 app.use('/api', receiptsRouter);
 
 type ErrorWithMetadata = {

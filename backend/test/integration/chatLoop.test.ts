@@ -195,12 +195,14 @@ test('runChatTurn: single tool call dispatches query_transactions, persists role
     visibility: 'shared',
     merchantClean: 'COFFEE A',
     sourceRowFingerprint: 'loop-tc-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(models, ctx.accountId, ctx.householdId, {
     createdByUserId: ctx.userId,
     visibility: 'shared',
     merchantClean: 'COFFEE B',
     sourceRowFingerprint: 'loop-tc-2',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const events = await collect(
@@ -288,6 +290,7 @@ test('runChatTurn: propose_* tool call yields proposal event with proposalId + p
     merchantClean: 'GROCER ONE',
     categoryOverride: null,
     sourceRowFingerprint: 'loop-prop-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const events = await collect(
@@ -358,6 +361,7 @@ test('runChatTurn: tool-call cap (CHAT_MAX_TOOL_CALLS_PER_TURN=2) — final call
     createdByUserId: ctx.userId,
     visibility: 'shared',
     sourceRowFingerprint: 'loop-cap-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   // Stub always returns a tool call when given tools. When called without
@@ -488,6 +492,7 @@ test('runChatTurn: forced-summarize round does not dispatch tools even if model 
     createdByUserId: ctx.userId,
     visibility: 'shared',
     sourceRowFingerprint: 'loop-forced-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const scripts: StreamEvent[][] = [

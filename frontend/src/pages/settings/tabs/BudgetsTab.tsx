@@ -8,6 +8,14 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../../../lib/api'
 import { formatMoney } from '../../../lib/formatMoney'
@@ -253,22 +261,22 @@ export function BudgetsTab() {
           />
         ) : (
           <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th>Currency</th>
-                  <th>Amount</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Currency</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead aria-label="Actions" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {sortedBudgets.map((budget) => {
                   const isEditing = budgetEditId === budget.id
                   if (isEditing) {
                     return (
-                      <tr key={budget.id}>
-                        <td colSpan={4}>
+                      <TableRow key={budget.id}>
+                        <TableCell colSpan={4}>
                           <form onSubmit={saveBudgetEdit}>
                             <div className="formGrid">
                               <Label htmlFor={`settings-budget-edit-category-${budget.id}`}>
@@ -340,16 +348,16 @@ export function BudgetsTab() {
                               </Button>
                             </div>
                           </form>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     )
                   }
                   return (
-                    <tr key={budget.id}>
-                      <td>{budget.category ?? 'Overall'}</td>
-                      <td>{budget.currency}</td>
-                      <td>{formatMoney(Number(budget.amount), budget.currency)}</td>
-                      <td>
+                    <TableRow key={budget.id}>
+                      <TableCell>{budget.category ?? 'Overall'}</TableCell>
+                      <TableCell>{budget.currency}</TableCell>
+                      <TableCell>{formatMoney(Number(budget.amount), budget.currency)}</TableCell>
+                      <TableCell>
                         <div className="row">
                           <Button
                             type="button"
@@ -370,12 +378,12 @@ export function BudgetsTab() {
                             Delete
                           </Button>
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
         <form onSubmit={createBudget}>

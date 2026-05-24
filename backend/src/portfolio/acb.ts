@@ -12,8 +12,18 @@
  *    The `proceeds` field on AcbRealizedEvent is the net (after-fee) figure.
  *  - When the position closes (quantity drops to ~0) the per-unit ACB
  *    resets to zero, so the next BUY starts a fresh cost base.
- *  - Other activity types (dividend, interest, fee, etc.) are recorded
- *    in the timeline as no-op events (they don't shift ACB or quantity).
+ *  - SPLIT (forward or reverse) preserves totalCost; quantity is
+ *    multiplied by `splitRatio` and per-unit ACB is recomputed.
+ *  - Return of capital (`return_of_capital`) reduces totalCost (and
+ *    per-unit ACB) without changing quantity. ROC that exceeds the cost
+ *    base produces an immediate capital gain (CRA s.53(2)(a)(ii)).
+ *  - `transfer_in` is buy-like (book cost added). `transfer_out` is
+ *    sell-like at current ACB but produces NO realized event — an
+ *    in-kind transfer is not a disposition under CRA rules. The
+ *    ambiguous bare `transfer` activityType (used for cash CONT-like
+ *    rows) stays a no-op.
+ *  - Other activity types (dividend, interest, fee, transfer, etc.) are
+ *    no-ops in the ACB walk.
  *
  * Currency: inferred from the first activity. A mixed-currency stream
  * emits a warning but math is still in the inferred currency. Callers
@@ -33,6 +43,12 @@ export type AcbActivity = {
   currency: string;
   /** Trade commission / brokerage fee, if any. Added to cost on BUY; subtracted from proceeds on SELL. */
   fees?: number | null;
+  /**
+   * Stock-split ratio. Required for `activityType === 'split'`. 2 means
+   * 2-for-1 (qty doubles, ACB/unit halves). 0.1 means 1-for-10 reverse
+   * split. Total cost is preserved across the split.
+   */
+  splitRatio?: number | null;
 };
 
 /** Position state recorded after each buy/sell event. */
@@ -213,11 +229,150 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'split') {
+      // Stock split (or reverse split). Per CRA, splits are non-taxable
+      // and preserve total cost — only quantity and per-unit ACB change.
+      // ratio > 1 is a forward split (e.g. 2 = 2-for-1); ratio < 1 is a
+      // reverse split (e.g. 0.1 = 1-for-10).
+      const ratio = activity.splitRatio;
+      if (ratio == null || ratio <= 0 || !Number.isFinite(ratio)) {
+        warnings.push(
+          `SPLIT activity ${activity.id} on ${activity.tradeDate} missing or invalid splitRatio; ignored`
+        );
+        continue;
+      }
+      if (state.quantity <= EPS) {
+        warnings.push(
+          `SPLIT activity ${activity.id} on ${activity.tradeDate} applied to zero position; ignored`
+        );
+        continue;
+      }
+      const newQuantity = state.quantity * ratio;
+      const newAcb = newQuantity > EPS ? state.totalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: state.totalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'return_of_capital') {
+      // Return of capital (ROC) reduces ACB without changing quantity.
+      // CRA s.53(2)(a)(ii): ROC distributions reduce the unit cost base;
+      // if ROC would push ACB below zero, the excess is a deemed
+      // immediate capital gain in the year it was paid.
+      if (activity.amount == null) {
+        warnings.push(
+          `ROC activity ${activity.id} on ${activity.tradeDate} missing amount; ignored`
+        );
+        continue;
+      }
+      const rocAmount = Math.abs(activity.amount);
+      const reduction = Math.min(rocAmount, state.totalCost);
+      const immediateGain = rocAmount - reduction;
+      const newTotalCost = state.totalCost - reduction;
+      const newAcb = state.quantity > EPS ? newTotalCost / state.quantity : 0;
+      if (immediateGain > EPS) {
+        realizedEvents.push({
+          activityId: activity.id,
+          tradeDate: activity.tradeDate,
+          qtySold: 0,
+          proceeds: immediateGain,
+          acbPerUnitAtSale: 0,
+          costRemoved: 0,
+          realizedGain: immediateGain,
+          currency: activity.currency || currency,
+        });
+        realizedTotal += immediateGain;
+        warnings.push(
+          `ROC activity ${activity.id} on ${activity.tradeDate}: ROC ($${rocAmount}) exceeds cost base ($${state.totalCost.toFixed(2)}); $${immediateGain.toFixed(2)} treated as immediate capital gain`
+        );
+      }
+      state = {
+        asOf: activity.tradeDate,
+        quantity: state.quantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'transfer_in') {
+      // In-kind transfer in (e.g. DTC delivery from another broker).
+      // Treated as a BUY at the supplied book cost — the receiving
+      // broker reports ACB on the transfer ticket. When amount is null
+      // we fall back to zero-cost (better than crashing) but emit a
+      // warning so the caller can manually correct it.
+      if (activity.quantity == null) {
+        warnings.push(
+          `TRANSFER_IN activity ${activity.id} on ${activity.tradeDate} missing quantity; ignored`
+        );
+        continue;
+      }
+      const qty = activity.quantity;
+      let cost: number;
+      if (activity.amount == null) {
+        warnings.push(
+          `TRANSFER_IN activity ${activity.id} on ${activity.tradeDate} missing amount; treated as zero-cost`
+        );
+        cost = 0;
+      } else {
+        cost = Math.abs(activity.amount);
+      }
+      const newQuantity = state.quantity + qty;
+      const newTotalCost = state.totalCost + cost;
+      const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'transfer_out') {
+      // In-kind transfer out (e.g. DTC delivery to another broker).
+      // CRA: this is NOT a disposition — beneficial ownership is
+      // preserved across the transfer. We remove quantity at the
+      // prevailing ACB but emit NO realized event.
+      if (activity.quantity == null) {
+        warnings.push(
+          `TRANSFER_OUT activity ${activity.id} on ${activity.tradeDate} missing quantity; ignored`
+        );
+        continue;
+      }
+      let qty = activity.quantity;
+      if (qty > state.quantity + EPS) {
+        warnings.push(
+          `TRANSFER_OUT activity ${activity.id} on ${activity.tradeDate}: qty ${qty} exceeds position ${state.quantity}; clamped`
+        );
+        qty = state.quantity;
+      }
+      const acbAtTransfer = state.acbPerUnit;
+      let newQuantity = state.quantity - qty;
+      let newTotalCost: number;
+      let newAcb: number;
+      if (newQuantity <= EPS) {
+        newQuantity = 0;
+        newTotalCost = 0;
+        newAcb = 0;
+        warnings.push(
+          `Position closed after activity ${activity.id} on ${activity.tradeDate}; ACB reset`
+        );
+      } else {
+        newAcb = acbAtTransfer;
+        newTotalCost = newQuantity * newAcb;
+      }
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
     }
-    // All other activity types (dividend, interest, fee, split, transfer,
-    // other) are intentionally ignored — they don't shift the
-    // weighted-average ACB. We do NOT filter them out of the input (the
-    // caller may still want to see them in their stream).
+    // All other activity types (dividend, interest, fee, ambiguous
+    // 'transfer' for cash CONT/withdrawals, other) are intentionally
+    // ignored — they don't shift the weighted-average ACB. We do NOT
+    // filter them out of the input (the caller may still want to see
+    // them in their stream).
   }
 
   return {

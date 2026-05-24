@@ -119,6 +119,7 @@ export async function seedTxn(
     amount: '5.00',
     currency: 'CAD',
     sourceRowFingerprint: `fp-${Math.random()}`,
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
     finalCategory: 'Dining',
     finalSplitType: 'me',
     finalBusiness: false,

@@ -65,11 +65,16 @@ export function wsTxCodeToTxnType(code: string | null | undefined): TxnType | nu
  *   - "Cash received"                       → transfer
  *   - "Direct deposit ..."                  → transfer
  *   - "EFT in" / "EFT out"                  → transfer
+ *   - "Contribution ..."                    → transfer  (CONT — Save→Investing rebalance)
+ *   - "Money transfer (to|out of) ..."      → transfer
+ *   - "Online bill payment for <CC> ..."    → payment   (CC statement payment from chequing)
  *   - "Subscription fee paid ..."           → fee
  *   - "Staking reward fee ..."              → fee
  *   - "Wealthsimple ... fee"                → fee
  *   - "Stock lending monthly interest"      → interest
+ *   - "Interest (received|earned|paid)"     → interest
  *   - "Cash dividend"                       → dividend
+ *   - "Giveaway received"                   → reward
  */
 export function inferWsTxnTypeFromNarrative(merchantRaw: string | null | undefined): TxnType | null {
   if (!merchantRaw) return null;
@@ -82,9 +87,14 @@ export function inferWsTxnTypeFromNarrative(merchantRaw: string | null | undefin
   if (/\bdirect\s+deposit\b/i.test(s)) return 'transfer';
   if (/\beft\s+(in|out)\b/i.test(s)) return 'transfer';
   if (/\baft\b/i.test(s)) return 'transfer';
+  if (/\bcontribution\b/i.test(s)) return 'transfer';
+  if (/\bmoney\s+transfer\b/i.test(s)) return 'transfer';
+  if (/\bonline\s+bill\s+payment\b/i.test(s)) return 'payment';
   if (/\bsubscription\s+fee\b/i.test(s)) return 'fee';
   if (/\bstaking\s+reward\s+fee\b/i.test(s)) return 'fee';
   if (/\bwealthsimple\b[^.]*\bfee\b/i.test(s)) return 'fee';
   if (/\bstock\s+lending\s+monthly\s+interest\b/i.test(s)) return 'interest';
+  if (/\binterest\s+(received|earned|paid)\b/i.test(s)) return 'interest';
+  if (/\bgiveaway\s+received\b/i.test(s)) return 'reward';
   return null;
 }

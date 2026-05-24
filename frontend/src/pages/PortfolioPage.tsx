@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
@@ -695,7 +695,7 @@ function DateRangeFilter({ dateFrom, dateTo, onFromChange, onToChange }: DateFil
   )
 }
 
-/* ---------------------- Income tab ---------------------- */
+/* ---------------------- Shared date-range data fetch ---------------------- */
 
 function buildDateQuery(dateFrom: string, dateTo: string): string {
   const params = new URLSearchParams()
@@ -705,52 +705,114 @@ function buildDateQuery(dateFrom: string, dateTo: string): string {
   return qs ? `?${qs}` : ''
 }
 
-function IncomePanel() {
+type DateRangeFetchState<T> = {
+  dateFrom: string
+  dateTo: string
+  setDateFrom: (v: string) => void
+  setDateTo: (v: string) => void
+  data: T | null
+  loading: boolean
+  err: string | null
+}
+
+function useDateRangeFetch<T>(endpoint: string, errorMessage: string): DateRangeFetchState<T> {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [data, setData] = useState<PortfolioIncome | null>(null)
+  const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
-  const fetchIncome = useCallback(async (from: string, to: string) => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const qs = buildDateQuery(from, to)
-      const res = await getJson<PortfolioIncome>(`/api/portfolio/income${qs}`)
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not load income')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const fetchData = useCallback(
+    async (from: string, to: string) => {
+      setLoading(true)
+      setErr(null)
+      try {
+        const qs = buildDateQuery(from, to)
+        const res = await getJson<T>(`${endpoint}${qs}`)
+        setData(res)
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : errorMessage)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [endpoint, errorMessage],
+  )
 
   useEffect(() => {
-    void fetchIncome(dateFrom, dateTo)
-  }, [fetchIncome, dateFrom, dateTo])
+    void fetchData(dateFrom, dateTo)
+  }, [fetchData, dateFrom, dateTo])
 
+  return { dateFrom, dateTo, setDateFrom, setDateTo, data, loading, err }
+}
+
+type DateRangePanelProps<T> = {
+  state: DateRangeFetchState<T>
+  isEmpty: (data: T) => boolean
+  emptyMessage: string
+  children: (data: T | null, loading: boolean) => ReactNode
+}
+
+function isPanelEmpty<T>(
+  loading: boolean,
+  data: T | null,
+  isEmpty: (data: T) => boolean,
+): boolean {
+  if (loading) return false
+  if (!data) return true
+  return isEmpty(data)
+}
+
+function DateRangePanel<T>({ state, isEmpty, emptyMessage, children }: DateRangePanelProps<T>) {
+  const { dateFrom, dateTo, setDateFrom, setDateTo, data, loading, err } = state
   if (err) return <p className="error">{err}</p>
-
-  if (!loading && (!data || (data.byMonth.length === 0 && data.totals.length === 0))) {
-    return (
-      <>
-        <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
-        <Card>
-          <p className="muted">
-            No dividend or interest activity yet. Import investment statements to populate
-            this view.
-          </p>
-        </Card>
-      </>
-    )
-  }
-
+  const filter = (
+    <DateRangeFilter
+      dateFrom={dateFrom}
+      dateTo={dateTo}
+      onFromChange={setDateFrom}
+      onToChange={setDateTo}
+    />
+  )
+  const body = isPanelEmpty(loading, data, isEmpty) ? (
+    <Card>
+      <p className="muted">{emptyMessage}</p>
+    </Card>
+  ) : (
+    children(data, loading)
+  )
   return (
     <>
-      <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+      {filter}
+      {body}
+    </>
+  )
+}
+
+/* ---------------------- Income tab ---------------------- */
+
+function IncomePanel() {
+  const state = useDateRangeFetch<PortfolioIncome>(
+    '/api/portfolio/income',
+    'Could not load income',
+  )
+  return (
+    <DateRangePanel
+      state={state}
+      isEmpty={(d) => d.byMonth.length === 0 && d.totals.length === 0}
+      emptyMessage="No dividend or interest activity yet. Import investment statements to populate this view."
+    >
+      {(data, loading) => <IncomeBody data={data} loading={loading} />}
+    </DateRangePanel>
+  )
+}
+
+function IncomeBody({ data, loading }: { data: PortfolioIncome | null; loading: boolean }) {
+  if (!data) return <section className="transactionsStats" aria-busy={loading} />
+  return (
+    <>
       <section className="transactionsStats" aria-busy={loading}>
-        {(data?.totals ?? []).map((row) => (
+        {data.totals.map((row) => (
           <StatCard
             key={row.currency}
             label={`${row.currency} total income`}
@@ -760,63 +822,93 @@ function IncomePanel() {
         ))}
       </section>
 
-      {data && <IncomeMonthlyChart data={data} />}
+      <IncomeMonthlyChart data={data} />
 
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>By security</h2>
-            <p className="muted">
-              Top securities by total income (dividends + interest).
-            </p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Currency</TableHead>
-                <TableHead>Dividend</TableHead>
-                <TableHead>Interest</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Events</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(data?.bySecurity ?? []).slice(0, 20).map((row) => (
-                <TableRow key={`${row.securityId ?? 'null'}|${row.currency}`}>
-                  <TableCell>
-                    {row.securityId != null && row.symbol ? (
-                      <Link
-                        to={`/portfolio/security/${row.securityId}`}
-                        className="text-foreground underline-offset-2 hover:underline"
-                      >
-                        {row.symbol}
-                      </Link>
-                    ) : (
-                      row.symbol ?? '—'
-                    )}
-                  </TableCell>
-                  <TableCell>{row.currency}</TableCell>
-                  <TableCell>{formatMoney(row.dividend, row.currency)}</TableCell>
-                  <TableCell>{formatMoney(row.interest, row.currency)}</TableCell>
-                  <TableCell>{formatMoney(row.total, row.currency)}</TableCell>
-                  <TableCell>{row.activityCount}</TableCell>
-                </TableRow>
-              ))}
-              {!loading && (data?.bySecurity.length ?? 0) === 0 && (
-                <EmptyTableRow
-                  colSpan={6}
-                  title="No income by security."
-                  description="Dividends and interest appear here once imported."
-                />
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <IncomeBySecurityTable rows={data.bySecurity} loading={loading} />
     </>
+  )
+}
+
+type IncomeBySecurityRowData = PortfolioIncome['bySecurity'][number]
+
+function IncomeBySecurityTable({
+  rows,
+  loading,
+}: {
+  rows: IncomeBySecurityRowData[]
+  loading: boolean
+}) {
+  const showEmpty = !loading && rows.length === 0
+  return (
+    <Card className="transactionsTableCard mt-4">
+      <div className="transactionsPanelHeader">
+        <div>
+          <h2>By security</h2>
+          <p className="muted">
+            Top securities by total income (dividends + interest).
+          </p>
+        </div>
+      </div>
+      <div className="transactionsTableWrap">
+        <Table className="table transactionsTable">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Currency</TableHead>
+              <TableHead>Dividend</TableHead>
+              <TableHead>Interest</TableHead>
+              <TableHead>Total</TableHead>
+              <TableHead>Events</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.slice(0, 20).map((row) => (
+              <IncomeBySecurityRow key={`${row.securityId ?? 'null'}|${row.currency}`} row={row} />
+            ))}
+            {showEmpty && (
+              <EmptyTableRow
+                colSpan={6}
+                title="No income by security."
+                description="Dividends and interest appear here once imported."
+              />
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  )
+}
+
+function IncomeBySecurityRow({ row }: { row: IncomeBySecurityRowData }) {
+  return (
+    <TableRow>
+      <TableCell>
+        <SymbolLink securityId={row.securityId} symbol={row.symbol} />
+      </TableCell>
+      <TableCell>{row.currency}</TableCell>
+      <TableCell>{formatMoney(row.dividend, row.currency)}</TableCell>
+      <TableCell>{formatMoney(row.interest, row.currency)}</TableCell>
+      <TableCell>{formatMoney(row.total, row.currency)}</TableCell>
+      <TableCell>{row.activityCount}</TableCell>
+    </TableRow>
+  )
+}
+
+function SymbolLink({
+  securityId,
+  symbol,
+}: {
+  securityId: number | null
+  symbol: string | null
+}) {
+  if (securityId == null || !symbol) return <>{symbol ?? '—'}</>
+  return (
+    <Link
+      to={`/portfolio/security/${securityId}`}
+      className="text-foreground underline-offset-2 hover:underline"
+    >
+      {symbol}
+    </Link>
   )
 }
 
@@ -895,157 +987,158 @@ function IncomeMonthlyChart({ data }: { data: PortfolioIncome }) {
 /* ---------------------- Realized tab ---------------------- */
 
 function RealizedPanel() {
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [data, setData] = useState<PortfolioRealized | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
+  const state = useDateRangeFetch<PortfolioRealized>(
+    '/api/portfolio/realized',
+    'Could not load realized P&L',
+  )
+  return (
+    <DateRangePanel
+      state={state}
+      isEmpty={(d) => d.events.length === 0}
+      emptyMessage="No realized SELL events yet. Realized gain/loss appears here after a sell activity is imported."
+    >
+      {(data, loading) => <RealizedBody data={data} loading={loading} />}
+    </DateRangePanel>
+  )
+}
 
-  const fetchRealized = useCallback(async (from: string, to: string) => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const qs = buildDateQuery(from, to)
-      const res = await getJson<PortfolioRealized>(`/api/portfolio/realized${qs}`)
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not load realized P&L')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+type RealizedEvent = PortfolioRealized['events'][number]
+type RealizedEventWithRunning = RealizedEvent & { runningTotal: number }
+type RealizedBySecurityRowData = PortfolioRealized['bySecurity'][number]
 
-  useEffect(() => {
-    void fetchRealized(dateFrom, dateTo)
-  }, [fetchRealized, dateFrom, dateTo])
-
-  if (err) return <p className="error">{err}</p>
-
-  if (!loading && (!data || data.events.length === 0)) {
-    return (
-      <>
-        <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
-        <Card>
-          <p className="muted">
-            No realized SELL events yet. Realized gain/loss appears here after a sell
-            activity is imported.
-          </p>
-        </Card>
-      </>
-    )
-  }
-
-  // Running cumulative realized gain per currency for the events table.
+function withRunningTotal(events: RealizedEvent[]): RealizedEventWithRunning[] {
   const runningByCurrency = new Map<string, number>()
-  const eventsWithRunning = (data?.events ?? []).map((ev) => {
+  return events.map((ev) => {
     const prev = runningByCurrency.get(ev.currency) ?? 0
     const next = prev + ev.realizedGain
     runningByCurrency.set(ev.currency, next)
     return { ...ev, runningTotal: next }
   })
+}
 
+function RealizedBody({
+  data,
+  loading,
+}: {
+  data: PortfolioRealized | null
+  loading: boolean
+}) {
+  if (!data) return <section className="transactionsStats" aria-busy={loading} />
+  const eventsWithRunning = withRunningTotal(data.events)
   return (
     <>
-      <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
-      <section className="transactionsStats" aria-busy={loading}>
-        {(data?.totals ?? []).map((row) => (
-          <StatCard
-            key={row.currency}
-            label={`${row.currency} realized to date`}
-            value={formatMoney(row.realizedGain, row.currency)}
-            hint={`${row.eventCount} sell event${row.eventCount === 1 ? '' : 's'}`}
-          />
-        ))}
-      </section>
-
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>By security</h2>
-            <p className="muted">Realized gain/loss aggregated per ticker.</p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Currency</TableHead>
-                <TableHead>Realized gain</TableHead>
-                <TableHead>Sells</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(data?.bySecurity ?? []).map((row) => (
-                <TableRow key={`${row.securityId}|${row.currency}`}>
-                  <TableCell>
-                    <Link
-                      to={`/portfolio/security/${row.securityId}`}
-                      className="text-foreground underline-offset-2 hover:underline"
-                    >
-                      {row.symbol}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{row.name ?? '—'}</TableCell>
-                  <TableCell>{row.currency}</TableCell>
-                  <TableCell>{formatMoney(row.realizedGain, row.currency)}</TableCell>
-                  <TableCell>{row.eventCount}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
-
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Events</h2>
-            <p className="muted">
-              Every SELL with the prevailing ACB-per-unit at the time of sale and the
-              running cumulative realized total.
-            </p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Qty sold</TableHead>
-                <TableHead>Proceeds</TableHead>
-                <TableHead>ACB / unit</TableHead>
-                <TableHead>Realized</TableHead>
-                <TableHead>Running</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {eventsWithRunning.map((ev) => (
-                <TableRow key={ev.activityId}>
-                  <TableCell>{ev.tradeDate}</TableCell>
-                  <TableCell>{ev.accountName}</TableCell>
-                  <TableCell>
-                    <Link
-                      to={`/portfolio/security/${ev.securityId}`}
-                      className="text-foreground underline-offset-2 hover:underline"
-                    >
-                      {ev.symbol}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{ev.qtySold}</TableCell>
-                  <TableCell>{formatMoney(ev.proceeds, ev.currency)}</TableCell>
-                  <TableCell>{formatMoney(ev.acbAtSale, ev.currency)}</TableCell>
-                  <TableCell>{formatMoney(ev.realizedGain, ev.currency)}</TableCell>
-                  <TableCell>{formatMoney(ev.runningTotal, ev.currency)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <RealizedTotalsSection totals={data.totals} loading={loading} />
+      <RealizedBySecurityTable rows={data.bySecurity} />
+      <RealizedEventsTable events={eventsWithRunning} />
     </>
   )
 }
+
+function RealizedTotalsSection({
+  totals,
+  loading,
+}: {
+  totals: PortfolioRealized['totals']
+  loading: boolean
+}) {
+  return (
+    <section className="transactionsStats" aria-busy={loading}>
+      {totals.map((row) => (
+        <StatCard
+          key={row.currency}
+          label={`${row.currency} realized to date`}
+          value={formatMoney(row.realizedGain, row.currency)}
+          hint={`${row.eventCount} sell event${row.eventCount === 1 ? '' : 's'}`}
+        />
+      ))}
+    </section>
+  )
+}
+
+function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }) {
+  return (
+    <Card className="transactionsTableCard mt-4">
+      <div className="transactionsPanelHeader">
+        <div>
+          <h2>By security</h2>
+          <p className="muted">Realized gain/loss aggregated per ticker.</p>
+        </div>
+      </div>
+      <div className="transactionsTableWrap">
+        <Table className="table transactionsTable">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Currency</TableHead>
+              <TableHead>Realized gain</TableHead>
+              <TableHead>Sells</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={`${row.securityId}|${row.currency}`}>
+                <TableCell>
+                  <SymbolLink securityId={row.securityId} symbol={row.symbol} />
+                </TableCell>
+                <TableCell>{row.name ?? '—'}</TableCell>
+                <TableCell>{row.currency}</TableCell>
+                <TableCell>{formatMoney(row.realizedGain, row.currency)}</TableCell>
+                <TableCell>{row.eventCount}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  )
+}
+
+function RealizedEventsTable({ events }: { events: RealizedEventWithRunning[] }) {
+  return (
+    <Card className="transactionsTableCard mt-4">
+      <div className="transactionsPanelHeader">
+        <div>
+          <h2>Events</h2>
+          <p className="muted">
+            Every SELL with the prevailing ACB-per-unit at the time of sale and the
+            running cumulative realized total.
+          </p>
+        </div>
+      </div>
+      <div className="transactionsTableWrap">
+        <Table className="table transactionsTable">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Account</TableHead>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Qty sold</TableHead>
+              <TableHead>Proceeds</TableHead>
+              <TableHead>ACB / unit</TableHead>
+              <TableHead>Realized</TableHead>
+              <TableHead>Running</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {events.map((ev) => (
+              <TableRow key={ev.activityId}>
+                <TableCell>{ev.tradeDate}</TableCell>
+                <TableCell>{ev.accountName}</TableCell>
+                <TableCell>
+                  <SymbolLink securityId={ev.securityId} symbol={ev.symbol} />
+                </TableCell>
+                <TableCell>{ev.qtySold}</TableCell>
+                <TableCell>{formatMoney(ev.proceeds, ev.currency)}</TableCell>
+                <TableCell>{formatMoney(ev.acbAtSale, ev.currency)}</TableCell>
+                <TableCell>{formatMoney(ev.realizedGain, ev.currency)}</TableCell>
+                <TableCell>{formatMoney(ev.runningTotal, ev.currency)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  )
+}
+

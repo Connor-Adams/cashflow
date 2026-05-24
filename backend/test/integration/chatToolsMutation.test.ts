@@ -56,6 +56,7 @@ test('propose_transaction_edit creates pending ChatProposal with before/after pr
     merchantClean: 'BLUE BOTTLE',
     categoryOverride: null,
     sourceRowFingerprint: 'pte-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const res = await dispatchTool(
@@ -106,6 +107,7 @@ test('propose_transaction_edit rejects non-whitelisted patch field (auto_categor
   const ctx = await makeCtx();
   const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
     sourceRowFingerprint: 'pte-w-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'propose_transaction_edit',
@@ -127,6 +129,7 @@ test('propose_transaction_edit rejects empty patch', async () => {
   const ctx = await makeCtx();
   const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
     sourceRowFingerprint: 'pte-empty-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'propose_transaction_edit',
@@ -146,6 +149,7 @@ test('propose_transaction_edit does not see cross-member private rows', async ()
     createdByUserId: otherUserId,
     merchantClean: 'OTHER PRIVATE',
     sourceRowFingerprint: 'pte-private-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'propose_transaction_edit',
@@ -167,6 +171,7 @@ test('propose_bulk_patch returns matched_count + sample (≤10) and persists pro
       merchantClean: `COFFEE ${i}`,
       categoryOverride: null,
       sourceRowFingerprint: `pbp-${i}`,
+      sourceIdentityFingerprint: `sid-${Math.random()}`,
       date: `2026-05-${10 + i}`,
     });
   }
@@ -203,6 +208,7 @@ test('propose_bulk_patch caps sample at 10 even when more match', async () => {
     await seedTxn(models, ctx.accountId, ctx.householdId, {
       merchantClean: `TIM HORTONS ${i}`,
       sourceRowFingerprint: `pbp-cap-${i}`,
+      sourceIdentityFingerprint: `sid-${Math.random()}`,
       date: `2026-05-${10 + (i % 20)}`,
     });
   }
@@ -231,6 +237,7 @@ test('propose_bulk_patch returns filter_too_broad when matched_count > limit', a
     await seedTxn(models, ctx.accountId, ctx.householdId, {
       merchantClean: `STARBUCKS ${i}`,
       sourceRowFingerprint: `pbp-too-${i}`,
+      sourceIdentityFingerprint: `sid-${Math.random()}`,
       date: `2026-05-${10 + i}`,
     });
   }
@@ -256,6 +263,7 @@ test('propose_bulk_patch rejects non-whitelisted patch field', async () => {
   await seedTxn(models, ctx.accountId, ctx.householdId, {
     merchantClean: 'STORE',
     sourceRowFingerprint: 'pbp-w-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'propose_bulk_patch',
@@ -276,15 +284,18 @@ test('propose_rule_create creates pending proposal with rule_preview + would_aff
   await seedTxn(models, ctx.accountId, ctx.householdId, {
     merchantClean: 'NETFLIX SUB',
     sourceRowFingerprint: 'prc-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(models, ctx.accountId, ctx.householdId, {
     merchantClean: 'NETFLIX RENEW',
     sourceRowFingerprint: 'prc-2',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   // Non-matching row.
   await seedTxn(models, ctx.accountId, ctx.householdId, {
     merchantClean: 'AMAZON',
     sourceRowFingerprint: 'prc-3',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'propose_rule_create',
@@ -334,6 +345,7 @@ test('propose_rule_update creates pending proposal with before/after + would_aff
   await seedTxn(models, ctx.accountId, ctx.householdId, {
     merchantClean: 'COSTCO WHOLESALE',
     sourceRowFingerprint: 'pru-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'propose_rule_update',

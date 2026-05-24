@@ -190,6 +190,7 @@ async function seedMatchingTxn(
     amount: '20.00',
     currency: 'CAD',
     sourceRowFingerprint: fp,
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
     finalCategory: 'Uncategorized',
     finalSplitType: 'shared',
     finalBusiness: false,

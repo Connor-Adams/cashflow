@@ -13,8 +13,8 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import crypto from 'crypto';
 import request from 'supertest';
+import { seedHousehold } from '../helpers/seedHousehold.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
@@ -26,51 +26,6 @@ let primaryContactId: number;
 
 let otherAgent: ReturnType<typeof request.agent>;
 let otherContactId: number;
-
-type SeededHousehold = {
-  token: string;
-  contactId: number;
-  householdId: number;
-  userId: number;
-};
-
-async function seedHousehold(
-  emailPrefix: string,
-  contactName: string
-): Promise<SeededHousehold> {
-  const models = await import('../../src/models');
-  const { hashPassword, hashToken } = await import('../../src/auth/password.js');
-  const password = await hashPassword('password123');
-  const user = await models.User.create({
-    email: `${emailPrefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`,
-    displayName: emailPrefix,
-    globalRole: 'user',
-    passwordHash: password.hash,
-    passwordSalt: password.salt,
-    passwordParams: password.params,
-  });
-  const household = await models.Household.create({
-    name: `${emailPrefix} household`,
-  });
-  await models.HouseholdMember.create({
-    householdId: household.id,
-    userId: user.id,
-    role: 'owner',
-  });
-  const contact = await models.Contact.create({
-    householdId: household.id,
-    name: contactName,
-    notes: null,
-  });
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
-  await models.Session.create({
-    userId: user.id,
-    tokenHash: hashToken(token),
-    expiresAt,
-  });
-  return { token, contactId: contact.id, householdId: household.id, userId: user.id };
-}
 
 before(async () => {
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);

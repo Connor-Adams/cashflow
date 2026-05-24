@@ -1,4 +1,5 @@
 import path from 'path';
+import { Op } from 'sequelize';
 import { Account, HoldingSnapshot, InvestmentActivity, Transaction } from '../models';
 import * as env from '../config/env';
 import { parseCsvRecords } from './csvParse';
@@ -69,11 +70,19 @@ function normalizeActivityType(raw: unknown): NormalizedInvestmentActivity['acti
   const text = String(raw ?? '').toLowerCase();
   if (/\bbuy|bought|purchase/.test(text)) return 'buy';
   if (/\bsell|sold|redemption/.test(text)) return 'sell';
+  // ROC must precede generic "distribution" since it commonly appears as
+  // "return of capital distribution" or "ROC".
+  if (/return.of.capital|roc\b/.test(text)) return 'return_of_capital';
   if (/dividend|distribution/.test(text)) return 'dividend';
   if (/interest/.test(text)) return 'interest';
   if (/fee|commission/.test(text)) return 'fee';
   if (/reinvest/.test(text)) return 'reinvestment';
   if (/split/.test(text)) return 'split';
+  // Specific in-kind security transfer flavours must precede the generic
+  // 'transfer' branch (which still catches ambiguous cash CONT / withdraw
+  // lines and stays a no-op).
+  if (/transfer.?in|received.*transfer|deposit.*in.kind/.test(text)) return 'transfer_in';
+  if (/transfer.?out|delivered.*transfer|withdraw.*in.kind/.test(text)) return 'transfer_out';
   if (/transfer|deposit|withdraw/.test(text)) return 'transfer';
   return 'other';
 }
@@ -357,14 +366,43 @@ function parseOfx(
 }
 
 async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): Promise<void> {
-  const [txns, acts, holds] = await Promise.all([
-    Transaction.findAll({
-      where: {
-        accountId: preview.accountId,
-        sourceRowFingerprint: preview.transactions.map((r) => r.sourceRowFingerprint),
-      },
-      attributes: ['sourceRowFingerprint'],
-    }),
+  const txnKeys = preview.transactions.map((r) => ({
+    date: r.date,
+    amount: String(r.amount),
+    currency: r.currency,
+    merchantRaw: r.merchantRaw,
+  }));
+  const existingTxns = txnKeys.length
+    ? await Transaction.findAll({
+        where: {
+          accountId: preview.accountId,
+          [Op.or]: txnKeys,
+        },
+        attributes: ['date', 'amount', 'currency', 'merchantRaw', 'sourceReference'],
+      })
+    : [];
+  const txnIndex = new Map<string, Array<string | null>>();
+  for (const e of existingTxns) {
+    const k = `${e.date}|${String(e.amount)}|${e.currency}|${e.merchantRaw}`;
+    const list = txnIndex.get(k) ?? [];
+    list.push(e.sourceReference ?? null);
+    txnIndex.set(k, list);
+  }
+  preview.transactions.forEach((r) => {
+    const key = `${r.date}|${String(r.amount)}|${r.currency}|${r.merchantRaw}`;
+    const existingRefs = txnIndex.get(key);
+    if (!existingRefs || existingRefs.length === 0) {
+      r.duplicate = false;
+      return;
+    }
+    const newRef = r.sourceReference == null || r.sourceReference === '' ? null : r.sourceReference;
+    if (existingRefs.some((er) => er === newRef)) { r.duplicate = true; return; }
+    if (newRef == null && existingRefs.some((er) => er != null)) { r.duplicate = true; return; }
+    if (newRef != null && existingRefs.some((er) => er == null)) { r.duplicate = true; return; }
+    r.duplicate = false;
+  });
+
+  const [acts, holds] = await Promise.all([
     InvestmentActivity.findAll({
       where: {
         accountId: preview.accountId,
@@ -380,12 +418,8 @@ async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): 
       attributes: ['sourceRowFingerprint'],
     }),
   ]);
-  const txnSet = new Set(txns.map((r) => r.sourceRowFingerprint));
   const actSet = new Set(acts.map((r) => r.sourceRowFingerprint));
   const holdSet = new Set(holds.map((r) => r.sourceRowFingerprint));
-  preview.transactions.forEach((r) => {
-    r.duplicate = txnSet.has(r.sourceRowFingerprint);
-  });
   preview.investmentActivities.forEach((r) => {
     r.duplicate = actSet.has(r.sourceRowFingerprint);
   });
@@ -647,11 +681,39 @@ export async function parseStatementFile(opts: {
         sourceReference: v.sourceReference,
       }),
     }));
+    // Investment-statement parsers (RBC RDSP, etc) emit activities + holdings
+    // alongside cash transactions. Apply the same fingerprinting that the CSV
+    // path uses so dedup is consistent across import sources.
+    const investmentActivities: NormalizedInvestmentActivity[] = (out.investmentActivities ?? []).map((a) => ({
+      ...a,
+      sourceRowFingerprint: stableFingerprint({
+        kind: 'investment_activity',
+        accountId: account.id,
+        tradeDate: a.tradeDate,
+        type: a.activityType,
+        symbol: a.security?.symbol ?? null,
+        quantity: a.quantity,
+        amount: a.amount,
+      }),
+    }));
+    const holdings: NormalizedHoldingSnapshot[] = (out.holdings ?? []).map((h) => ({
+      ...h,
+      sourceRowFingerprint: stableFingerprint({
+        kind: 'holding',
+        accountId: account.id,
+        statementDate: h.statementDate,
+        symbol: h.security.symbol,
+        quantity: h.quantity,
+        marketValue: h.marketValue,
+      }),
+    }));
     const preview = {
       ...base,
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
       transactions,
+      investmentActivities,
+      holdings,
       warnings: out.warnings,
       parseErrors: out.parseErrors,
       rowErrors: out.parseErrors.length,

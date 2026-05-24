@@ -90,6 +90,7 @@ async function seedTxn(
     amount: '5.00',
     currency: 'CAD',
     sourceRowFingerprint: `fp-${Math.random()}`,
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
     finalCategory: 'Dining',
     finalSplitType: 'me',
     finalBusiness: false,
@@ -118,6 +119,7 @@ test('query_transactions returns matching rows + count and respects limit', asyn
     await seedTxn(accountId, householdId, {
       merchantClean: `STORE ${i}`,
       sourceRowFingerprint: `q-${i}`,
+      sourceIdentityFingerprint: `sid-${Math.random()}`,
       date: `2026-05-${10 + i}`,
     });
   }
@@ -139,16 +141,19 @@ test('query_transactions honors date_from, date_to, and merchant_pattern', async
     merchantClean: 'STARBUCKS CAFE',
     date: '2026-01-15',
     sourceRowFingerprint: 'sb-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(accountId, householdId, {
     merchantClean: 'STARBUCKS DOWNTOWN',
     date: '2026-03-15',
     sourceRowFingerprint: 'sb-2',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(accountId, householdId, {
     merchantClean: 'TIM HORTONS',
     date: '2026-03-15',
     sourceRowFingerprint: 'th-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const res = await dispatchTool(
@@ -176,12 +181,14 @@ test('get_summary scope=dashboard returns count and totals', async () => {
     amount: '10.00',
     myShareAmount: '10.00',
     sourceRowFingerprint: 'd-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(accountId, householdId, {
     amount: '20.00',
     myShareAmount: '15.00',
     partnerShareAmount: '5.00',
     sourceRowFingerprint: 'd-2',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'get_summary',
@@ -303,10 +310,12 @@ test('get_categories deduplicates between rules and transactions', async () => {
   await seedTxn(accountId, householdId, {
     finalCategory: 'Dining',
     sourceRowFingerprint: 'c-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(accountId, householdId, {
     finalCategory: 'Groceries',
     sourceRowFingerprint: 'c-2',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await models.Rule.create({
     merchantPattern: 'X',
@@ -352,6 +361,7 @@ test('get_categories excludes categories from cross-member private transactions'
     createdByUserId: thisUserId,
     finalCategory: 'Groceries',
     sourceRowFingerprint: 'cat-own-shared',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   // otherUser: private row with finalCategory='Secret' (must NOT appear)
   await seedTxn(accountId, householdId, {
@@ -359,6 +369,7 @@ test('get_categories excludes categories from cross-member private transactions'
     createdByUserId: otherUserId,
     finalCategory: 'Secret',
     sourceRowFingerprint: 'cat-other-private',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const res = await dispatchTool('get_categories', '{}', {
@@ -386,12 +397,14 @@ test('query_transactions excludes private rows from other household members', as
     createdByUserId: thisUserId,
     merchantClean: 'OWN SHARED',
     sourceRowFingerprint: 'vis-own-shared',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(accountId, householdId, {
     visibility: 'private',
     createdByUserId: thisUserId,
     merchantClean: 'OWN PRIVATE',
     sourceRowFingerprint: 'vis-own-private',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   // otherUser: one private (should be hidden), one shared (should be visible)
   await seedTxn(accountId, householdId, {
@@ -399,12 +412,14 @@ test('query_transactions excludes private rows from other household members', as
     createdByUserId: otherUserId,
     merchantClean: 'OTHER PRIVATE',
     sourceRowFingerprint: 'vis-other-private',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(accountId, householdId, {
     visibility: 'shared',
     createdByUserId: otherUserId,
     merchantClean: 'OTHER SHARED',
     sourceRowFingerprint: 'vis-other-shared',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const res = await dispatchTool(
@@ -429,6 +444,7 @@ test('query_transactions is case-insensitive on merchant_pattern (SQLite Op.like
   await seedTxn(accountId, householdId, {
     merchantClean: 'Whole Foods Market',
     sourceRowFingerprint: 'ci-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'query_transactions',
@@ -455,6 +471,7 @@ test('get_summary scope=dashboard excludes private rows from other household mem
     amount: '10.00',
     myShareAmount: '10.00',
     sourceRowFingerprint: 'sum-own-shared',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   await seedTxn(accountId, householdId, {
     visibility: 'private',
@@ -462,6 +479,7 @@ test('get_summary scope=dashboard excludes private rows from other household mem
     amount: '20.00',
     myShareAmount: '20.00',
     sourceRowFingerprint: 'sum-own-private',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   // Excluded: other member's private row
   await seedTxn(accountId, householdId, {
@@ -470,6 +488,7 @@ test('get_summary scope=dashboard excludes private rows from other household mem
     amount: '1000.00',
     myShareAmount: '1000.00',
     sourceRowFingerprint: 'sum-other-private',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const res = await dispatchTool(
     'get_summary',

@@ -150,6 +150,8 @@ export function TransactionsPage() {
   const [bulkSplit, setBulkSplit] = useState('')
   const [bulkPctMe, setBulkPctMe] = useState('')
   const [bulkPctPartner, setBulkPctPartner] = useState('')
+  // intentionally plain useState — ids filter is one-shot from URL, not session-persisted
+  const [idsFilter, setIdsFilter] = useState('')
   const [bulkMarkReviewed, setBulkMarkReviewed] = useState(false)
   const [bulkApplying, setBulkApplying] = useState(false)
   const [bulkAllApplying, setBulkAllApplying] = useState(false)
@@ -188,13 +190,15 @@ export function TransactionsPage() {
     const urlDateTo = searchParams.get('dateTo')
     const urlImportBatch = searchParams.get('importBatch')
     const urlReviewFlag = searchParams.get('reviewFlag')
+    const urlIds = searchParams.get('ids')
     const hasAny =
       urlCategory != null ||
       urlCurrency != null ||
       urlDateFrom != null ||
       urlDateTo != null ||
       urlImportBatch != null ||
-      urlReviewFlag != null
+      urlReviewFlag != null ||
+      urlIds != null
     if (!hasAny) return
     if (urlCategory != null) setCategoryFilter(urlCategory)
     if (urlCurrency != null) setCurrency(urlCurrency.toUpperCase().slice(0, 3))
@@ -202,6 +206,7 @@ export function TransactionsPage() {
     if (urlDateTo != null) setDateTo(urlDateTo)
     if (urlImportBatch != null) setBatchFilter(urlImportBatch)
     if (urlReviewFlag != null) setReviewOnly(urlReviewFlag === 'true')
+    if (urlIds != null) setIdsFilter(urlIds.trim())
     setPage(1)
     setSearchParams({}, { replace: true })
   }, [
@@ -213,6 +218,7 @@ export function TransactionsPage() {
     setDateTo,
     setBatchFilter,
     setReviewOnly,
+    setIdsFilter,
   ])
 
   useEffect(() => {
@@ -242,6 +248,7 @@ export function TransactionsPage() {
         page: String(page),
         pageSize: '25',
       })
+      if (idsFilter && idsFilter.trim()) qs.set('ids', idsFilter.trim())
       if (reviewOnly) qs.set('reviewFlag', 'true')
       if (currency) qs.set('currency', currency)
       if (categoryFilter.trim()) qs.set('category', categoryFilter.trim())
@@ -263,7 +270,7 @@ export function TransactionsPage() {
         setLoading(false)
       }
     }
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter])
 
   useEffect(() => {
     void load()
@@ -271,14 +278,14 @@ export function TransactionsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter])
+  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter])
 
   useEffect(() => {
     setSelectedIds(new Set())
     setBulkAiResults([])
     setAiAuditResults([])
     setAiAuditMessage(null)
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter])
 
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
@@ -445,6 +452,16 @@ export function TransactionsPage() {
               href: `/import/${encodeURIComponent(batchFilter.trim())}`,
             }
           : null,
+        idsFilter.trim()
+          ? {
+              key: 'ids',
+              label: `IDs: ${idsFilter.trim().length > 40 ? idsFilter.trim().slice(0, 40) + '…' : idsFilter.trim()}`,
+              clear: () => {
+                setPage(1)
+                setIdsFilter('')
+              },
+            }
+          : null,
       ].filter(Boolean) as Array<{
         key: string
         label: string
@@ -460,12 +477,14 @@ export function TransactionsPage() {
       dateFrom,
       dateTo,
       batchFilter,
+      idsFilter,
       setReviewOnly,
       setCurrency,
       setCategoryFilter,
       setDateFrom,
       setDateTo,
       setBatchFilter,
+      setIdsFilter,
     ]
   )
 
@@ -942,6 +961,7 @@ export function TransactionsPage() {
                 setDateFrom('')
                 setDateTo('')
                 setBatchFilter('')
+                setIdsFilter('')
               }}
             >
               Clear filters

@@ -199,6 +199,7 @@ async function seedTxnInHousehold(
     amount: '5.00',
     currency: 'CAD',
     sourceRowFingerprint: `fp-${Math.random().toString(16).slice(2)}`,
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
     finalCategory: 'Dining',
     finalSplitType: 'me',
     finalBusiness: false,

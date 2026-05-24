@@ -25,6 +25,9 @@ import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
+import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
+import { useInsightsSeen } from '@/hooks/useInsightsSeen'
+import { useAuth } from '@/lib/useAuth'
 import { formatMoney } from '../lib/formatMoney'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
@@ -138,7 +141,7 @@ type MonthlyResp = {
 type AiInsight = {
   title: string
   summary: string
-  severity: 'info' | 'watch' | 'action'
+  severity: InsightSeverity
   metric: string
   amount: number
   comparison: string
@@ -300,6 +303,17 @@ export function DashboardPage() {
   const [recurringLoading, setRecurringLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+
+  const auth = useAuth()
+  const userIdForSeen = String(auth.user?.id ?? 'anon')
+  const { isSeen, markSeen } = useInsightsSeen(userIdForSeen)
+  const sortedInsights = aiInsights
+    ? [...aiInsights.insights].sort((a, b) => {
+        const order: Record<string, number> = { action: 0, watch: 1, info: 2 }
+        return (order[a.severity] ?? 3) - (order[b.severity] ?? 3)
+      })
+    : []
+  const hasActionSeverity = sortedInsights.some((i) => i.severity === 'action')
 
   const summaryQs = useMemo(
     () => summaryQueryString({ currency, dateFrom, dateTo }),
@@ -834,9 +848,10 @@ export function DashboardPage() {
         </Alert>
       ) : null}
 
-      <Card className="dashboardFilters">
+      <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
         <CardContent className="p-0">
           <FilterBar
+            className="gap-2"
             currency={currency}
             onCurrencyChange={setCurrency}
             availableCurrencies={currencies}
@@ -904,6 +919,13 @@ export function DashboardPage() {
           />
         </CardContent>
       </Card>
+
+      {hasActionSeverity ? (
+        <div className="aiActionBanner" role="status">
+          AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
+          <a href="#ai-insights-tile">Jump to insights</a>
+        </div>
+      ) : null}
 
       <div className="dashboardBento" aria-busy={loading}>
         {budgetProgressSorted.length > 0 && (
@@ -1307,10 +1329,11 @@ export function DashboardPage() {
         </BentoTile>
 
         <BentoTile
-          span={4}
+          span={hasActionSeverity ? 6 : 4}
           rows={2}
           aria-busy={loading}
           label="AI insights"
+          id="ai-insights-tile"
           description={
             aiInsights
               ? `${aiInsights.currency} · ${aiInsights.period}`
@@ -1325,24 +1348,46 @@ export function DashboardPage() {
             ) : aiInsights.insights.length === 0 ? (
               <p className="emptyState">No AI insights for {aiInsights.period} yet.</p>
             ) : (
-              aiInsights.insights.map((insight) => (
-                <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
-                  <div className="aiVisibilityItemHeader">
-                    <strong>{insight.title}</strong>
-                    <span className="muted">{insight.severity}</span>
-                  </div>
-                  <p>{insight.summary}</p>
-                  <p className="muted">
-                    {insight.comparison} · {formatDashboardAmount(insight.amount)}
-                  </p>
-                  {insight.supportingTransactionIds.length > 0 ? (
+              sortedInsights.map((insight) => {
+                const unread = !isSeen(aiInsights.period, insight.metric, insight.title)
+                return (
+                  <article
+                    key={`${insight.metric}-${insight.title}`}
+                    className={`aiVisibilityItem${unread ? ' is-unread' : ''}`}
+                    onClick={() => markSeen(aiInsights.period, insight.metric, insight.title)}
+                  >
+                    <div className="aiVisibilityItemHeader">
+                      {unread ? <span className="unreadDot" aria-label="New" /> : null}
+                      <strong>{insight.title}</strong>
+                      <SeverityBadge severity={insight.severity} />
+                    </div>
+                    <p>{insight.summary}</p>
                     <p className="muted">
-                      Transactions: #{insight.supportingTransactionIds.join(', #')}
+                      {insight.comparison} · {formatDashboardAmount(insight.amount)}
                     </p>
-                  ) : null}
-                  <p className="muted">{insight.suggestedAction}</p>
-                </article>
-              ))
+                    {insight.supportingTransactionIds.length > 0 ? (
+                      <p className="muted aiVisibilitySupportingIds">
+                        Transactions:{' '}
+                        {insight.supportingTransactionIds.map((id, idx) => (
+                          <span key={`${id}-${idx}`}>
+                            {idx > 0 ? ', ' : null}
+                            <Link to={`/transactions?ids=${id}`}>#{id}</Link>
+                          </span>
+                        ))}
+                      </p>
+                    ) : null}
+                    <p className="muted">{insight.suggestedAction}</p>
+                    {insight.supportingTransactionIds.length > 0 ? (
+                      <Link
+                        to={`/transactions?ids=${insight.supportingTransactionIds.join(',')}`}
+                        className="aiVisibilityAction"
+                      >
+                        Open these transactions
+                      </Link>
+                    ) : null}
+                  </article>
+                )
+              })
             )}
           </div>
         </BentoTile>

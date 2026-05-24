@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import type { WhereOptions } from 'sequelize';
+import type { Transaction as SqlTransaction, WhereOptions } from 'sequelize';
 import { AiSuggestion, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
@@ -38,27 +38,31 @@ export async function createTrackedSuggestion(params: {
   latencyMs?: number | null;
   providerRequestId?: string | null;
   errorMessage?: string | null;
-  status?: 'suggested' | 'failed';
+  status?: 'suggested' | 'failed' | 'rejected';
+  transaction?: SqlTransaction;
 }): Promise<AiSuggestion> {
   const { user, household } = currentAuth(params.req);
-  return AiSuggestion.create({
-    householdId: household.id,
-    userId: user.id,
-    transactionId: params.transactionId ?? null,
-    receiptId: params.receiptId ?? null,
-    kind: params.kind,
-    status: params.status ?? 'suggested',
-    inputSnapshot: params.inputSnapshot,
-    output: params.output,
-    finalSnapshot: null,
-    model: params.model ?? null,
-    promptVersion: params.promptVersion ?? null,
-    temperature:
-      params.temperature == null ? null : String(params.temperature),
-    latencyMs: params.latencyMs ?? null,
-    providerRequestId: params.providerRequestId ?? null,
-    errorMessage: params.errorMessage ?? null,
-  });
+  return AiSuggestion.create(
+    {
+      householdId: household.id,
+      userId: user.id,
+      transactionId: params.transactionId ?? null,
+      receiptId: params.receiptId ?? null,
+      kind: params.kind,
+      status: params.status ?? 'suggested',
+      inputSnapshot: params.inputSnapshot,
+      output: params.output,
+      finalSnapshot: null,
+      model: params.model ?? null,
+      promptVersion: params.promptVersion ?? null,
+      temperature:
+        params.temperature == null ? null : String(params.temperature),
+      latencyMs: params.latencyMs ?? null,
+      providerRequestId: params.providerRequestId ?? null,
+      errorMessage: params.errorMessage ?? null,
+    },
+    { transaction: params.transaction },
+  );
 }
 
 export function aiSuggestionWhere(req: Request): WhereOptions {

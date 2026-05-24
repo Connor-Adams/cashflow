@@ -30,6 +30,11 @@ import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailInteg
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
+import { Entity, initEntity } from './Entity';
+import { TaxCategory, initTaxCategory } from './TaxCategory';
+import { TaxSlip, initTaxSlip } from './TaxSlip';
+import { Carryforward, initCarryforward } from './Carryforward';
+import { TaxReturn, initTaxReturn } from './TaxReturn';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -62,6 +67,11 @@ initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
+initEntity(sequelize);
+initTaxCategory(sequelize);
+initTaxSlip(sequelize);
+initCarryforward(sequelize);
+initTaxReturn(sequelize);
 
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
@@ -222,4 +232,9 @@ export {
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,
+  Entity,
+  TaxCategory,
+  TaxSlip,
+  Carryforward,
+  TaxReturn,
 };

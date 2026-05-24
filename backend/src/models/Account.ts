@@ -8,6 +8,14 @@ import {
   CreationOptional,
 } from 'sequelize';
 
+export type AccountTaxStatus =
+  | 'registered_rrsp'
+  | 'registered_tfsa'
+  | 'registered_fhsa'
+  | 'registered_rrif'
+  | 'non_registered'
+  | 'n_a';
+
 export class Account extends Model<
   InferAttributes<Account>,
   InferCreationAttributes<Account>
@@ -21,6 +29,8 @@ export class Account extends Model<
   declare accountType: CreationOptional<string>;
   declare shortCode: string | null;
   declare defaultCurrency: string | null;
+  declare entityId: number | null;
+  declare taxStatus: CreationOptional<string>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -69,6 +79,17 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         type: DataTypes.STRING(3),
         field: 'default_currency',
         allowNull: true,
+      },
+      entityId: {
+        type: DataTypes.INTEGER,
+        field: 'entity_id',
+        allowNull: true,
+      },
+      taxStatus: {
+        type: DataTypes.STRING(32),
+        field: 'tax_status',
+        allowNull: false,
+        defaultValue: 'n_a',
       },
     } as ModelAttributes<Account>,
     {

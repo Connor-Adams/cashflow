@@ -56,6 +56,14 @@ const generic_amex: CsvProfile = {
     'Amount (GBP)',
   ],
   currencyHeaders: ['Currency', 'Currency Code', 'Txn Currency'],
+  // Amex CSVs include a `Reference Number` column populated for cleared
+  // transactions (e.g. AT26053000600001…). The column is blank while a
+  // transaction is in the ~30-day pending window, then flips to the
+  // assigned reference on re-download. Mapping it here surfaces it on the
+  // Transaction row; dedup keys off `sourceIdentityFingerprint` (which
+  // excludes sourceReference) so the NULL→populated flip no longer breaks
+  // re-imports.
+  referenceHeaders: ['Reference Number', 'Reference'],
   dateFormat: 'MM/dd/yyyy',
   // Amex exports commonly use positive charges and negative credits/payments.
   // Invert sign so charges become negative and credits/payments become positive.
@@ -230,6 +238,24 @@ const national_bank: CsvProfile = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Wealthsimple monthly statement CSVs (Cash, Save, Save for Business, TFSA,
+ * FHSA, Corporate Investing). Header layout:
+ *   date,transaction,description,amount,balance,currency
+ * The `amount` column is already signed: negative = outflow, positive = inflow
+ * (interest received, deposits, dividends). Use passthrough so positive
+ * narratives like "Interest received"/"Interest earned" stay positive even
+ * when the generic narrative-direction patterns don't match.
+ */
+const wealthsimple_cash: CsvProfile = {
+  dateHeaders: ['date', 'Date'],
+  merchantHeaders: ['description', 'Description'],
+  amountHeaders: ['amount', 'Amount'],
+  currencyHeaders: ['currency', 'Currency'],
+  dateFormat: 'yyyy-MM-dd',
+  amountConvention: 'passthrough',
+};
+
 /** Column names are matched case-insensitively against CSV headers. */
 export const profiles: Record<string, CsvProfile> = {
   // Generic fallbacks
@@ -289,6 +315,7 @@ export const profiles: Record<string, CsvProfile> = {
   },
   generic_amex,
   amex: generic_amex,
+  wealthsimple_cash,
   // Canadian banks
   rbc,
   td_credit_card,
@@ -319,6 +346,10 @@ const profileHints: Record<string, { label: string; hint: string }> = {
   amex: {
     label: 'Amex',
     hint: 'Same as generic_amex.',
+  },
+  wealthsimple_cash: {
+    label: 'Wealthsimple — Cash & Investing',
+    hint: 'Monthly statement CSV (date,transaction,description,amount,balance,currency). Amount pre-signed — positive = inflow.',
   },
   rbc: {
     label: 'RBC',

@@ -5,7 +5,7 @@ import {
   rawNetForRow,
   type RawPartnerRow,
   type SettlementSummary,
-} from '../src/routes/summary';
+} from '../src/summary/partnerMath';
 
 function makeRow(over: Partial<RawPartnerRow> = {}): RawPartnerRow {
   return {

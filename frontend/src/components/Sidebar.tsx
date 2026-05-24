@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   BarChart3,
   BookOpenCheck,
+  Calculator,
   PackageSearch,
   CreditCard,
   ClipboardCheck,
@@ -12,6 +13,7 @@ import {
   Repeat,
   Settings,
   Shield,
+  Sparkles,
   Sun,
   Moon,
   Upload,
@@ -20,6 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
+import { useAiInboxCount } from '@/hooks/useAiInboxCount'
 import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
 
 type NavItem = {
@@ -39,7 +42,10 @@ const navItems: NavItem[] = [
   { to: '/amazon', label: 'Amazon', icon: PackageSearch },
   { to: '/recurring', label: 'Recurring', icon: Repeat },
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
+  { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
+  { to: '/tax', label: 'Tax', icon: Calculator },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
@@ -78,7 +84,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 function SidebarBrand() {
   return (
     <div className="sidebar__brand">
-      <div className="brandMark">CF</div>
+      <img src="/favicon-192x192.png" alt="" className="brandMark" />
       <div>
         <div className="brandEyebrow">Household ledger</div>
         <div className="brand">Cashflow</div>
@@ -94,10 +100,16 @@ function SidebarNavList({
   items: NavItem[]
   onItemClick: () => void
 }) {
+  const { count: aiInboxCount } = useAiInboxCount()
   return (
     <nav className="sidebar__nav" aria-label="Main">
       {items.map((item) => (
-        <SidebarNavLink key={item.to} item={item} onClick={onItemClick} />
+        <SidebarNavLink
+          key={item.to}
+          item={item}
+          onClick={onItemClick}
+          badgeCount={item.to === '/ai/inbox' ? aiInboxCount : 0}
+        />
       ))}
     </nav>
   )
@@ -106,9 +118,11 @@ function SidebarNavList({
 function SidebarNavLink({
   item,
   onClick,
+  badgeCount,
 }: {
   item: NavItem
   onClick: () => void
+  badgeCount: number
 }) {
   const Icon = item.icon
   return (
@@ -120,6 +134,11 @@ function SidebarNavLink({
     >
       <Icon aria-hidden="true" />
       <span>{item.label}</span>
+      {badgeCount > 0 ? (
+        <Badge variant="secondary" className="sidebar__navBadge">
+          {badgeCount}
+        </Badge>
+      ) : null}
     </NavLink>
   )
 }

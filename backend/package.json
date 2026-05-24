@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "test": "tsx --test test/*.test.ts test/portfolio/*.test.ts test/fx/*.test.ts test/chat/*.test.ts",
+    "test": "tsx --test test/*.test.ts test/portfolio/*.test.ts test/fx/*.test.ts test/chat/*.test.ts test/tax/*.test.ts",
     "test:integration": "tsx --test test/integration/*.test.ts",
     "ai:eval": "tsx scripts/ai-eval.ts"
   },
@@ -19,6 +19,7 @@
     "cors": "^2.8.5",
     "csv-parse": "^5.6.0",
     "date-fns": "^4.1.0",
+    "decimal.js": "^10.4.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^8.3.2",

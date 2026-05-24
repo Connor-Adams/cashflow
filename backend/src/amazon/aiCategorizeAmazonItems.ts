@@ -23,6 +23,18 @@ export type AmazonItemCategorizationResult = {
   promptVersion: string;
 };
 
+/**
+ * Injectable OpenAI caller so tests can stub the network without monkey-patching
+ * fetch. Matches the pattern used by `runAiBatchStage` (enrichment/aiBatchStage.ts).
+ */
+export type AmazonOpenAiCaller = (
+  messages: Parameters<typeof openaiJsonWithMeta>[0],
+  options: Parameters<typeof openaiJsonWithMeta>[1],
+) => Promise<OpenAiJsonResult>;
+
+const defaultAmazonOpenAiCaller: AmazonOpenAiCaller = (messages, options) =>
+  openaiJsonWithMeta(messages, options);
+
 type AmazonItemContext = {
   itemId: number;
   orderId: number;
@@ -189,12 +201,16 @@ export function parseAmazonItemCategorySuggestions(
     .filter((row): row is AmazonItemCategorySuggestion => row != null);
 }
 
-export async function categorizeAmazonItemsWithAi(args: {
-  householdId: number;
-  orderId?: number | null;
-  itemIds?: number[];
-  limit?: number;
-}): Promise<AmazonItemCategorizationResult> {
+export async function categorizeAmazonItemsWithAi(
+  args: {
+    householdId: number;
+    orderId?: number | null;
+    itemIds?: number[];
+    limit?: number;
+  },
+  opts?: { openaiCaller?: AmazonOpenAiCaller },
+): Promise<AmazonItemCategorizationResult> {
+  const call = opts?.openaiCaller ?? defaultAmazonOpenAiCaller;
   const orderWhere: Record<string, unknown> = {
     householdId: args.householdId,
     vendor: 'amazon',
@@ -261,7 +277,7 @@ export async function categorizeAmazonItemsWithAi(args: {
   const metas: OpenAiJsonResult[] = [];
   const suggestions: AmazonItemCategorySuggestion[] = [];
   for (const batch of batches) {
-    const meta = await openaiJsonWithMeta(
+    const meta = await call(
     [
       {
         role: 'system',

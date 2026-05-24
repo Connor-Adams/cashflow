@@ -69,6 +69,7 @@ test('applyProposal applies transaction_edit, marks applied, writes role=tool me
     categoryOverride: null,
     notes: null,
     sourceRowFingerprint: 'ape-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const built = await proposals.buildTransactionEditPreview(
     txnId,
@@ -112,6 +113,7 @@ test('applyProposal twice on same proposal returns not_pending second time', asy
   const ctx = await makeCtx();
   const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
     sourceRowFingerprint: 'ape-2x-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const built = await proposals.buildTransactionEditPreview(
     txnId,
@@ -134,6 +136,7 @@ test('applyProposal returns expired and marks status=expired when past expiresAt
   const ctx = await makeCtx();
   const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
     sourceRowFingerprint: 'ape-exp-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const built = await proposals.buildTransactionEditPreview(
     txnId,
@@ -170,6 +173,7 @@ test('applyProposal bulk_patch updates all matching rows + writes role=tool mess
         merchantClean: `WHOLE FOODS ${i}`,
         categoryOverride: null,
         sourceRowFingerprint: `apbp-${i}`,
+        sourceIdentityFingerprint: `sid-${Math.random()}`,
         date: `2026-05-${10 + i}`,
       })
     );
@@ -212,6 +216,7 @@ test('applyProposal bulk_patch returns count_drifted when matched set grows past
     await seedTxn(models, ctx.accountId, ctx.householdId, {
       merchantClean: `LOBLAWS ${i}`,
       sourceRowFingerprint: `apbp-d-${i}`,
+      sourceIdentityFingerprint: `sid-${Math.random()}`,
       date: `2026-05-${10 + i}`,
     });
   }
@@ -228,6 +233,7 @@ test('applyProposal bulk_patch returns count_drifted when matched set grows past
     await seedTxn(models, ctx.accountId, ctx.householdId, {
       merchantClean: `LOBLAWS LATE ${i}`,
       sourceRowFingerprint: `apbp-d-late-${i}`,
+      sourceIdentityFingerprint: `sid-${Math.random()}`,
       date: `2026-06-${10 + i}`,
     });
   }
@@ -325,6 +331,7 @@ test('applyProposal returns not_found when proposal is in a different thread', a
   // Build a proposal in thread A.
   const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
     sourceRowFingerprint: 'ape-other-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const built = await proposals.buildTransactionEditPreview(
     txnId,
@@ -366,6 +373,7 @@ test('applyProposal transaction_edit recomputes finals and share columns', async
     myShareAmount: '-5.00',
     partnerShareAmount: '-5.00',
     sourceRowFingerprint: 'ape-recompute-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
 
   const built = await proposals.buildTransactionEditPreview(
@@ -405,6 +413,7 @@ test('applyProposal bulk_patch recomputes finals and share columns', async () =>
         myShareAmount: '-8.00',
         partnerShareAmount: '0',
         sourceRowFingerprint: `apbp-recompute-${i}`,
+        sourceIdentityFingerprint: `sid-${Math.random()}`,
         date: `2026-05-${20 + i}`,
       })
     );
@@ -502,6 +511,7 @@ test('applyProposal does not downgrade applied status to expired when expiresAt 
   const ctx = await makeCtx();
   const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
     sourceRowFingerprint: 'ape-i1-1',
+    sourceIdentityFingerprint: `sid-${Math.random()}`,
   });
   const built = await proposals.buildTransactionEditPreview(
     txnId,

@@ -23,6 +23,8 @@ import { ImportsTab } from './pages/settings/tabs/ImportsTab'
 import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
 import { ContactsTab } from './pages/settings/tabs/ContactsTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
+import { TaxPage } from './pages/TaxPage'
+import { AiInboxPage } from './pages/AiInboxPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
@@ -50,6 +52,7 @@ function AppRoutes() {
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="tax" element={<TaxPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
             <Route element={<SettingsTabLayout />}>
@@ -62,6 +65,7 @@ function AppRoutes() {
             <Route path="contacts" element={<ContactsTab />} />
             <Route path="budgets" element={<BudgetsTab />} />
           </Route>
+          <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
