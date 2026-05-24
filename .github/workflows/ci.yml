@@ -26,7 +26,12 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Archive node_modules
-        run: tar -cf node_modules.tar node_modules backend/node_modules frontend/node_modules shared/node_modules
+        run: |
+          paths=(node_modules)
+          for ws in backend frontend shared; do
+            [ -d "$ws/node_modules" ] && paths+=("$ws/node_modules")
+          done
+          tar -cf node_modules.tar "${paths[@]}"
 
       - name: Upload node_modules artifact
         uses: actions/upload-artifact@v4
