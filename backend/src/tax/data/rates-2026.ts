@@ -89,9 +89,9 @@ export const RATES_2026: RateTable = {
   donationHighRateFederal: D('0.29'),
   donationLowRateOntario: D('0.0505'),
   donationHighRateOntario: D('0.1116'),
-  // Medical threshold cap: 2025 cap × 1.027 ≈ 2,913
+  // Medical threshold cap: 2025 cap (2837) × 1.027 = 2913.59 → round to 2914
   medicalThresholdPercent: D('0.03'),
-  medicalThresholdCap: D('2913'),
+  medicalThresholdCap: D('2914'),
   sources: [
     { name: 'CRA 2026 indexation announcement (projected)', url: 'https://www.canada.ca/en/revenue-agency/news/newsroom/tax-tips/tax-tips-2025.html' },
     { name: 'ON Min of Finance 2026 personal income tax rates (TBD)', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
