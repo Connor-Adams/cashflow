@@ -78,6 +78,11 @@ function normalizeActivityType(raw: unknown): NormalizedInvestmentActivity['acti
   if (/fee|commission/.test(text)) return 'fee';
   if (/reinvest/.test(text)) return 'reinvestment';
   if (/split/.test(text)) return 'split';
+  // Specific in-kind security transfer flavours must precede the generic
+  // 'transfer' branch (which still catches ambiguous cash CONT / withdraw
+  // lines and stays a no-op).
+  if (/transfer.?in|received.*transfer|deposit.*in.kind/.test(text)) return 'transfer_in';
+  if (/transfer.?out|delivered.*transfer|withdraw.*in.kind/.test(text)) return 'transfer_out';
   if (/transfer|deposit|withdraw/.test(text)) return 'transfer';
   return 'other';
 }

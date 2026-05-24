@@ -562,3 +562,95 @@ test('SELL after a ROC uses the reduced post-ROC ACB', () => {
   APPROX(r.finalState.quantity, 5);
   APPROX(r.finalState.acbPerUnit, 80);
 });
+
+// ---------------------------------------------------------------------------
+// Transfer in / transfer out tests
+// ---------------------------------------------------------------------------
+
+test('transfer_in into an empty position seeds qty + cost from book cost', () => {
+  // TRANSFER_IN 10 @ $850 book → qty 10, totalCost $850, ACB $85/unit
+  const r = computeAcb([act('2024-01-15', 'transfer_in', 10, 850)]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 850);
+  APPROX(r.finalState.acbPerUnit, 85);
+  assert.equal(r.timeline.length, 1);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('transfer_in onto an existing position blends weighted-average ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // TRANSFER_IN 5 @ $400 book → totalCost $1400, qty 15, ACB ≈ $93.33/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_in', 5, 400),
+  ]);
+  assert.equal(r.finalState.quantity, 15);
+  APPROX(r.finalState.totalCost, 1400);
+  APPROX(r.finalState.acbPerUnit, 1400 / 15);
+});
+
+test('transfer_in with null amount falls back to zero-cost and warns', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_in', 5, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /TRANSFER_IN.*missing amount/i.test(w)));
+  // qty grew, cost did not.
+  assert.equal(r.finalState.quantity, 15);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 1000 / 15);
+});
+
+test('transfer_out removes qty at current ACB without producing a realized event', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // TRANSFER_OUT 4 → qty 6, totalCost preserved per-unit at $100
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_out', 4, null),
+  ]);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.realizedTotal, 0);
+  APPROX(r.finalState.quantity, 6);
+  APPROX(r.finalState.acbPerUnit, 100);
+  APPROX(r.finalState.totalCost, 600);
+});
+
+test('transfer_out that closes the position resets ACB and emits no realized event', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_out', 10, null),
+  ]);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.finalState.quantity, 0);
+  APPROX(r.finalState.totalCost, 0);
+  APPROX(r.finalState.acbPerUnit, 0);
+  assert.ok(r.warnings.some((w) => /Position closed/i.test(w)));
+});
+
+test('transfer_out exceeding position is clamped and warns', () => {
+  // BUY 5, TRANSFER_OUT 8 → clamped to 5, position closes, no realized event
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 5, 500),
+    act('2024-06-15', 'transfer_out', 8, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /TRANSFER_OUT.*exceeds position/i.test(w)));
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.finalState.quantity, 0);
+});
+
+test('SELL after a transfer_in uses the blended ACB', () => {
+  // BUY 10 @ $1000 → ACB $100
+  // TRANSFER_IN 10 @ $500 book → qty 20, totalCost $1500, ACB $75
+  // SELL 5 @ $400 → costRemoved 5*75=$375, gain $25
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-03-15', 'transfer_in', 10, 500),
+    act('2024-06-15', 'sell', 5, 400),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, 75);
+  APPROX(r.realizedEvents[0].costRemoved, 375);
+  APPROX(r.realizedEvents[0].realizedGain, 25);
+  APPROX(r.finalState.quantity, 15);
+  APPROX(r.finalState.acbPerUnit, 75);
+});

@@ -17,6 +17,11 @@
  *  - Return of capital (`return_of_capital`) reduces totalCost (and
  *    per-unit ACB) without changing quantity. ROC that exceeds the cost
  *    base produces an immediate capital gain (CRA s.53(2)(a)(ii)).
+ *  - `transfer_in` is buy-like (book cost added). `transfer_out` is
+ *    sell-like at current ACB but produces NO realized event — an
+ *    in-kind transfer is not a disposition under CRA rules. The
+ *    ambiguous bare `transfer` activityType (used for cash CONT-like
+ *    rows) stays a no-op.
  *  - Other activity types (dividend, interest, fee, transfer, etc.) are
  *    no-ops in the ACB walk.
  *
@@ -286,6 +291,78 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
       state = {
         asOf: activity.tradeDate,
         quantity: state.quantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'transfer_in') {
+      // In-kind transfer in (e.g. DTC delivery from another broker).
+      // Treated as a BUY at the supplied book cost — the receiving
+      // broker reports ACB on the transfer ticket. When amount is null
+      // we fall back to zero-cost (better than crashing) but emit a
+      // warning so the caller can manually correct it.
+      if (activity.quantity == null) {
+        warnings.push(
+          `TRANSFER_IN activity ${activity.id} on ${activity.tradeDate} missing quantity; ignored`
+        );
+        continue;
+      }
+      const qty = activity.quantity;
+      let cost: number;
+      if (activity.amount == null) {
+        warnings.push(
+          `TRANSFER_IN activity ${activity.id} on ${activity.tradeDate} missing amount; treated as zero-cost`
+        );
+        cost = 0;
+      } else {
+        cost = Math.abs(activity.amount);
+      }
+      const newQuantity = state.quantity + qty;
+      const newTotalCost = state.totalCost + cost;
+      const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'transfer_out') {
+      // In-kind transfer out (e.g. DTC delivery to another broker).
+      // CRA: this is NOT a disposition — beneficial ownership is
+      // preserved across the transfer. We remove quantity at the
+      // prevailing ACB but emit NO realized event.
+      if (activity.quantity == null) {
+        warnings.push(
+          `TRANSFER_OUT activity ${activity.id} on ${activity.tradeDate} missing quantity; ignored`
+        );
+        continue;
+      }
+      let qty = activity.quantity;
+      if (qty > state.quantity + EPS) {
+        warnings.push(
+          `TRANSFER_OUT activity ${activity.id} on ${activity.tradeDate}: qty ${qty} exceeds position ${state.quantity}; clamped`
+        );
+        qty = state.quantity;
+      }
+      const acbAtTransfer = state.acbPerUnit;
+      let newQuantity = state.quantity - qty;
+      let newTotalCost: number;
+      let newAcb: number;
+      if (newQuantity <= EPS) {
+        newQuantity = 0;
+        newTotalCost = 0;
+        newAcb = 0;
+        warnings.push(
+          `Position closed after activity ${activity.id} on ${activity.tradeDate}; ACB reset`
+        );
+      } else {
+        newAcb = acbAtTransfer;
+        newTotalCost = newQuantity * newAcb;
+      }
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
         totalCost: newTotalCost,
         acbPerUnit: newAcb,
       };

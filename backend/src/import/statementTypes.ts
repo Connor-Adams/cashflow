@@ -43,6 +43,8 @@ export type NormalizedInvestmentActivity = {
     | 'reinvestment'
     | 'split'
     | 'return_of_capital'
+    | 'transfer_in'
+    | 'transfer_out'
     | 'cash_movement'
     | 'other';
   tradeDate: string;
