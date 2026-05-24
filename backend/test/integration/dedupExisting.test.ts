@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication
 /**
  * Integration tests for stable-identity pre-insert dedup
  * (the fix for re-importing the same Amex statement after Amex populates
