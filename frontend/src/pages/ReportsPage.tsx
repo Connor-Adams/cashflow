@@ -14,11 +14,20 @@ import {
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   NativeSelect,
   NativeSelectOption,
 } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { buildCsv, downloadCsv } from '../lib/csv'
 import { toDateInputValue } from '../lib/dateInput'
@@ -621,25 +630,25 @@ export function ReportsPage() {
             </ul>
           )}
           <div className="tableWrap" aria-busy={loading}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Currency</th>
-                  <th>Ownership</th>
-                  <th>My share</th>
-                  <th>Partner share</th>
-                  <th>Net</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Currency</TableHead>
+                  <TableHead>Ownership</TableHead>
+                  <TableHead>My share</TableHead>
+                  <TableHead>Partner share</TableHead>
+                  <TableHead>Net</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <tr>
-                    <td colSpan={5} className="emptyStateCell">
+                  <TableRow>
+                    <TableCell colSpan={5} className="emptyStateCell">
                       <p className="emptyState">
                         No partner-split data for these filters. Import transactions or widen the date range.
                       </p>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )}
                 {partner?.byCurrency.map((r) => {
                   let netInner
@@ -679,21 +688,21 @@ export function ReportsPage() {
                     </span>
                   )
                   return (
-                    <tr key={`${r.currency}-${r.ownershipType ?? 'legacy'}-${r.ownershipContactId ?? 'none'}`}>
-                      <td>{r.currency}</td>
-                      <td>
+                    <TableRow key={`${r.currency}-${r.ownershipType ?? 'legacy'}-${r.ownershipContactId ?? 'none'}`}>
+                      <TableCell>{r.currency}</TableCell>
+                      <TableCell>
                         {r.ownershipType === 'contact'
                           ? r.contactName ?? 'Contact'
                           : r.ownershipType ?? 'legacy split'}
-                      </td>
-                      <td>{formatMoney(r.sumMy, r.currency)}</td>
-                      <td>{formatMoney(r.sumPartner, r.currency)}</td>
-                      <td>{netCell}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{formatMoney(r.sumMy, r.currency)}</TableCell>
+                      <TableCell>{formatMoney(r.sumPartner, r.currency)}</TableCell>
+                      <TableCell>{netCell}</TableCell>
+                    </TableRow>
                   )
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </section>
 
@@ -720,31 +729,31 @@ export function ReportsPage() {
             </Button>
           </div>
           <div className="tableWrap" aria-busy={loading}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Currency</th>
-                  <th>Business amount</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Currency</TableHead>
+                  <TableHead>Business amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(business?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <tr>
-                    <td colSpan={2} className="emptyStateCell">
+                  <TableRow>
+                    <TableCell colSpan={2} className="emptyStateCell">
                       <p className="emptyState">
                         No business-tagged amounts for these filters.
                       </p>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )}
                 {business?.byCurrency.map((r) => (
-                  <tr key={r.currency}>
-                    <td>{r.currency}</td>
-                    <td>{formatMoney(r.sumBusiness, r.currency)}</td>
-                  </tr>
+                  <TableRow key={r.currency}>
+                    <TableCell>{r.currency}</TableCell>
+                    <TableCell>{formatMoney(r.sumBusiness, r.currency)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </section>
       </div>
@@ -760,38 +769,38 @@ export function ReportsPage() {
         </div>
         {settlementsErr && <span className="error">{settlementsErr}</span>}
         <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Contact</th>
-                <th>Direction</th>
-                <th>Amount</th>
-                <th>Notes</th>
-                <th aria-label="Actions"></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Contact</TableHead>
+                <TableHead>Direction</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Notes</TableHead>
+                <TableHead aria-label="Actions"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {recentSettlements.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="emptyStateCell">
+                <TableRow>
+                  <TableCell colSpan={6} className="emptyStateCell">
                     <p className="emptyState">
                       No settlements yet. Click "Record settlement" above when money changes hands.
                     </p>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               )}
               {recentSettlements.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.settledDate}</td>
-                  <td>{row.contactName ?? 'Unknown'}</td>
-                  <td>
+                <TableRow key={row.id}>
+                  <TableCell>{row.settledDate}</TableCell>
+                  <TableCell>{row.contactName ?? 'Unknown'}</TableCell>
+                  <TableCell>
                     <Badge variant={directionBadgeVariant(row.direction)}>
                       {directionLabel(row.direction)}
                     </Badge>
-                  </td>
-                  <td>{formatMoney(Number(row.amount), row.currency)}</td>
-                  <td
+                  </TableCell>
+                  <TableCell>{formatMoney(Number(row.amount), row.currency)}</TableCell>
+                  <TableCell
                     className="muted"
                     style={{
                       maxWidth: '14rem',
@@ -802,8 +811,8 @@ export function ReportsPage() {
                     title={row.notes ?? undefined}
                   >
                     {row.notes ?? ''}
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     <Button
                       type="button"
                       size="sm"
@@ -813,11 +822,11 @@ export function ReportsPage() {
                       <Trash2 aria-hidden="true" />
                       Delete
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
 
@@ -992,12 +1001,11 @@ export function ReportsPage() {
               </Label>
               <Label htmlFor="settlement-notes">
                 Notes
-                <textarea
+                <Textarea
                   id="settlement-notes"
                   rows={3}
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
-                  className="min-h-9 w-full rounded-md border border-input bg-background/70 px-3 py-1 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 />
               </Label>
               {formError && <span className="error">{formError}</span>}
@@ -1067,28 +1075,28 @@ function RankedReportSection<R>({
         </div>
       </div>
       <div className="tableWrap">
-        <table className="table">
-          <thead>
-            <tr>
-              {showCurrencyColumn && <th>Currency</th>}
+        <Table className="table">
+          <TableHeader>
+            <TableRow>
+              {showCurrencyColumn && <TableHead>Currency</TableHead>}
               {headers.map((h) => (
-                <th key={h}>{h}</th>
+                <TableHead key={h}>{h}</TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {!loading && rows.length === 0 && (
-              <tr>
-                <td colSpan={totalColumns} className="emptyStateCell">
+              <TableRow>
+                <TableCell colSpan={totalColumns} className="emptyStateCell">
                   <p className="emptyState">{emptyMessage}</p>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
             {rows.map((row) => (
-              <tr key={rowKey(row)}>{renderRow(row)}</tr>
+              <TableRow key={rowKey(row)}>{renderRow(row)}</TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </section>
   )

@@ -84,7 +84,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 function SidebarBrand() {
   return (
     <div className="sidebar__brand">
-      <img src="/favicon-128x128.png" alt="" className="brandMark" />
+      <img src="/favicon-192x192.png" alt="" className="brandMark" />
       <div>
         <div className="brandEyebrow">Household ledger</div>
         <div className="brand">Cashflow</div>

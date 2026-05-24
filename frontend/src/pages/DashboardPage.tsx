@@ -848,9 +848,10 @@ export function DashboardPage() {
         </Alert>
       ) : null}
 
-      <Card className="dashboardFilters">
+      <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
         <CardContent className="p-0">
           <FilterBar
+            className="gap-2"
             currency={currency}
             onCurrencyChange={setCurrency}
             availableCurrencies={currencies}
@@ -919,13 +920,14 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
+      {hasActionSeverity ? (
+        <div className="aiActionBanner" role="status">
+          AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
+          <a href="#ai-insights-tile">Jump to insights</a>
+        </div>
+      ) : null}
+
       <div className="dashboardBento" aria-busy={loading}>
-        {hasActionSeverity ? (
-          <div className="aiActionBanner" role="status">
-            AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
-            <a href="#ai-insights-tile">Jump to insights</a>
-          </div>
-        ) : null}
         {budgetProgressSorted.length > 0 && (
           <BentoTile
             span={12}

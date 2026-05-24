@@ -34,3 +34,15 @@ test('extractPdfLines reconstructs a known transaction row with column gaps pres
   );
   assert.ok(row, 'expected to find the Dec 13 / 947.04 Costco row reconstructed on one line');
 });
+
+// Regression: the RBC bundle flow extracts lines once for the header, then
+// re-extracts inside parseStatementFile. pdfjs detaches the input ArrayBuffer,
+// so a shared view would leave the caller's Buffer unusable on the second
+// pass ("Cannot perform Construct on a detached ArrayBuffer").
+test('extractPdfLines can be called twice on the same Buffer', { skip: skipNoFixtures }, async () => {
+  const buf = await readFile(join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
+  const first = await extractPdfLines(buf);
+  const second = await extractPdfLines(buf);
+  assert.equal(first.length, second.length, 'second extraction must return same line count');
+  assert.equal(buf.byteLength > 0, true, 'caller Buffer must still be readable');
+});

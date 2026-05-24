@@ -227,6 +227,7 @@ test('matcher matches amount + nearby date and rejects wrong amount/date', () =>
     amount: '-42.00',
     currency: 'CAD',
     sourceRowFingerprint: 'fp',
+    sourceIdentityFingerprint: 'identity-fp',
   } as never);
   const good = ExternalOrder.build({
     id: 1,

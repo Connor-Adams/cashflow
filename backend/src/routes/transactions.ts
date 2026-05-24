@@ -3,6 +3,7 @@ import { Op, QueryTypes } from 'sequelize';
 import { Transaction, Account, Contact, sequelize } from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
+import { computeReceiptWarnings } from '../util/receiptWarnings';
 import {
   loadCategoryHints,
   suggestTransactionFields,
@@ -57,7 +58,7 @@ export function enforceBulkPatchCap(
  * in one place ensures the bulk-patch-filter endpoint operates on exactly
  * the same set the user sees in the table.
  */
-function buildTransactionFilterWhere(
+export function buildTransactionFilterWhere(
   req: import('express').Request,
   source: Record<string, unknown>
 ): Record<string, unknown> {
@@ -112,7 +113,7 @@ const PATCHABLE_KEYS = [
   'ownershipContactId',
 ] as const;
 
-async function applyPatchBody(
+export async function applyPatchBody(
   req: import('express').Request,
   txn: InstanceType<typeof Transaction>,
   b: Record<string, unknown>
@@ -463,35 +464,8 @@ router.get('/', async (req, res, next) => {
         if (receiptWarningMap[row.transactionId]) continue;
         const txn = txnById.get(row.transactionId);
         if (!txn || !row.extractedNote) continue;
-        try {
-          const extracted = JSON.parse(row.extractedNote) as {
-            total?: unknown;
-            currency?: unknown;
-            date?: unknown;
-          };
-          const warnings: string[] = [];
-          const receiptTotal = Number(extracted.total);
-          const txnAmountAbs = Math.abs(Number(txn.amount));
-          if (
-            Number.isFinite(receiptTotal) &&
-            Number.isFinite(txnAmountAbs) &&
-            Math.abs(receiptTotal - txnAmountAbs) > 0.02
-          ) {
-            warnings.push('receipt total differs');
-          }
-          if (
-            typeof extracted.currency === 'string' &&
-            extracted.currency.toUpperCase() !== txn.currency
-          ) {
-            warnings.push('receipt currency differs');
-          }
-          if (typeof extracted.date === 'string' && extracted.date !== txn.date) {
-            warnings.push('receipt date differs');
-          }
-          if (warnings.length) receiptWarningMap[row.transactionId] = warnings;
-        } catch {
-          receiptWarningMap[row.transactionId] = ['receipt extract could not be read'];
-        }
+        const warnings = computeReceiptWarnings(row.extractedNote, txn);
+        if (warnings.length) receiptWarningMap[row.transactionId] = warnings;
       }
     }
 

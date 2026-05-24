@@ -14,6 +14,14 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { deleteReq, getJson, patchJson, postFormData, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 
@@ -424,27 +432,27 @@ export function AmazonPage() {
       <section className="card">
         <h2>Recent Imported Orders</h2>
         <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr><th>Order</th><th>Date</th><th>Total</th><th>Categories</th><th>Items</th><th></th></tr>
-            </thead>
-            <tbody>
+          <Table className="table">
+            <TableHeader>
+              <TableRow><TableHead>Order</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Categories</TableHead><TableHead>Items</TableHead><TableHead></TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
               {orders.map((order) => (
-                <tr key={order.id}>
-                  <td>{order.vendorOrderId ?? `#${order.id}`}</td>
-                  <td>{order.orderDate ?? order.shipmentDate ?? '—'}</td>
-                  <td>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</td>
-                  <td>{categoryPreview(order)}</td>
-                  <td>{itemPreview(order)}</td>
-                  <td>
+                <TableRow key={order.id}>
+                  <TableCell>{order.vendorOrderId ?? `#${order.id}`}</TableCell>
+                  <TableCell>{order.orderDate ?? order.shipmentDate ?? '—'}</TableCell>
+                  <TableCell>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</TableCell>
+                  <TableCell>{categoryPreview(order)}</TableCell>
+                  <TableCell>{itemPreview(order)}</TableCell>
+                  <TableCell>
                     <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedOrderId(order.id)}>
                       View/Edit
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
 
@@ -473,21 +481,21 @@ export function AmazonPage() {
             </Button>
           </div>
           <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr><th>Title</th><th>Category</th><th>Business %</th><th>Amount</th><th>Confidence</th></tr>
-              </thead>
-              <tbody>
+            <Table className="table">
+              <TableHeader>
+                <TableRow><TableHead>Title</TableHead><TableHead>Category</TableHead><TableHead>Business %</TableHead><TableHead>Amount</TableHead><TableHead>Confidence</TableHead></TableRow>
+              </TableHeader>
+              <TableBody>
                 {(selectedOrder.items ?? []).map((item) => (
-                  <tr key={item.id}>
-                    <td>
+                  <TableRow key={item.id}>
+                    <TableCell>
                       <Input
                         aria-label="Item title"
                         value={item.title}
                         onChange={(event) => void updateItem(item, { title: event.target.value })}
                       />
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <NativeSelect
                         aria-label="Item category"
                         value={item.inferredCategory ?? 'Uncategorized'}
@@ -497,8 +505,8 @@ export function AmazonPage() {
                           <NativeSelectOption key={cat} value={cat}>{cat}</NativeSelectOption>
                         ))}
                       </NativeSelect>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <Input
                         aria-label="Business use percent"
                         type="number"
@@ -507,8 +515,8 @@ export function AmazonPage() {
                         value={item.businessUsePercent ?? ''}
                         onChange={(event) => void updateItem(item, { businessUsePercent: event.target.value })}
                       />
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <Input
                         aria-label="Item total price"
                         type="number"
@@ -516,8 +524,8 @@ export function AmazonPage() {
                         value={item.totalPrice ?? ''}
                         onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
                       />
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       {(() => {
                         if (item.confidence == null || item.confidence === '') return '—'
                         const pct = Math.round(Number(item.confidence))
@@ -528,11 +536,11 @@ export function AmazonPage() {
                           </span>
                         )
                       })()}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </section>
       )}

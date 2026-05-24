@@ -92,6 +92,7 @@ async function createTransaction(
     notes: null,
     sourceReference: null,
     sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
     appliedRuleId: null,
     autoCategory: null,
     categoryOverride: null,

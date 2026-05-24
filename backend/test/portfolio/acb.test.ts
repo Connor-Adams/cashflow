@@ -369,3 +369,288 @@ test('fees are ignored on no-op activity types (dividend, fee-type, etc.)', () =
   APPROX(r.finalState.acbPerUnit, 1009 / 10);
   assert.equal(r.finalState.quantity, 10);
 });
+
+// ---------------------------------------------------------------------------
+// Stock split tests
+// ---------------------------------------------------------------------------
+
+function splitAct(tradeDate: string, splitRatio: number | null): AcbActivity {
+  return {
+    id: nextId++,
+    tradeDate,
+    activityType: 'split',
+    quantity: null,
+    amount: null,
+    currency: 'CAD',
+    fees: null,
+    splitRatio,
+  };
+}
+
+test('2-for-1 split doubles quantity, halves per-unit ACB, preserves total cost', () => {
+  // BUY 10 @ $1000 → ACB $100/unit, totalCost $1000
+  // SPLIT 2-for-1 → qty 20, ACB $50/unit, totalCost $1000 (unchanged)
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', 2),
+  ]);
+  assert.equal(r.finalState.quantity, 20);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 50);
+  // Two timeline entries (BUY + SPLIT).
+  assert.equal(r.timeline.length, 2);
+  assert.equal(r.warnings.length, 0);
+});
+
+test('1-for-10 reverse split reduces quantity, raises per-unit ACB', () => {
+  // BUY 100 @ $1000 → ACB $10/unit
+  // REVERSE 1-for-10 (ratio 0.1) → qty 10, ACB $100/unit, totalCost $1000
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 100, 1000),
+    splitAct('2024-06-15', 0.1),
+  ]);
+  APPROX(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 100);
+  assert.equal(r.timeline.length, 2);
+});
+
+test('SELL after a split uses the post-split per-unit ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // SPLIT 2-for-1 → qty 20, ACB $50/unit
+  // SELL 5 @ $300 gross → cost removed 5*50=$250, gain $50
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', 2),
+    act('2024-09-15', 'sell', 5, 300),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, 50);
+  APPROX(r.realizedEvents[0].costRemoved, 250);
+  APPROX(r.realizedEvents[0].realizedGain, 50);
+  APPROX(r.finalState.quantity, 15);
+  APPROX(r.finalState.acbPerUnit, 50);
+});
+
+test('split on a zero (closed) position emits a warning and is ignored', () => {
+  // BUY 10 @ 1000, SELL 10 (close), then SPLIT 2:1
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-03-15', 'sell', 10, 1200), // close
+    splitAct('2024-06-15', 2),
+  ]);
+  assert.ok(r.warnings.some((w) => /SPLIT.*zero position/i.test(w)));
+  // Position remains closed; split was a no-op.
+  assert.equal(r.finalState.quantity, 0);
+  assert.equal(r.finalState.totalCost, 0);
+});
+
+test('split with null splitRatio emits a warning and is ignored', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', null),
+  ]);
+  assert.ok(r.warnings.some((w) => /missing or invalid splitRatio/i.test(w)));
+  // Position unchanged.
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('3-for-1 mid-stream split produces correctly blended weighted-average ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit, totalCost $1000
+  // SPLIT 3-for-1 → qty 30, ACB $33.333/unit, totalCost $1000
+  // BUY 10 @ $500 → totalCost $1500, qty 40, ACB $37.5/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', 3),
+    act('2024-09-15', 'buy', 10, 500),
+  ]);
+  APPROX(r.finalState.quantity, 40);
+  APPROX(r.finalState.totalCost, 1500);
+  APPROX(r.finalState.acbPerUnit, 37.5);
+});
+
+// ---------------------------------------------------------------------------
+// Return of capital (ROC) tests
+// ---------------------------------------------------------------------------
+
+test('ROC reduces total cost without changing quantity', () => {
+  // BUY 10 @ $1000 → ACB $100/unit, totalCost $1000
+  // ROC $50 → totalCost $950, qty 10, ACB $95/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, 50),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 950);
+  APPROX(r.finalState.acbPerUnit, 95);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.timeline.length, 2);
+});
+
+test('multiple ROC events accumulate (each reduces cost)', () => {
+  // BUY 10 @ $1000 → totalCost $1000
+  // ROC $40 → totalCost $960
+  // ROC $60 → totalCost $900, ACB $90/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-04-15', 'return_of_capital', null, 40),
+    act('2024-07-15', 'return_of_capital', null, 60),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 900);
+  APPROX(r.finalState.acbPerUnit, 90);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('ROC equal to total cost zeroes the ACB without producing a gain', () => {
+  // BUY 10 @ $1000 → totalCost $1000
+  // ROC $1000 → totalCost $0, ACB $0
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, 1000),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 0);
+  APPROX(r.finalState.acbPerUnit, 0);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('ROC exceeding total cost emits a qtySold=0 realized event for the excess', () => {
+  // BUY 10 @ $1000 → totalCost $1000
+  // ROC $1200 → totalCost $0, $200 immediate capital gain
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, 1200),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 0);
+  APPROX(r.finalState.acbPerUnit, 0);
+  assert.equal(r.realizedEvents.length, 1);
+  assert.equal(r.realizedEvents[0].qtySold, 0);
+  APPROX(r.realizedEvents[0].realizedGain, 200);
+  APPROX(r.realizedEvents[0].proceeds, 200);
+  APPROX(r.realizedTotal, 200);
+  assert.ok(r.warnings.some((w) => /exceeds cost base/i.test(w)));
+});
+
+test('ROC with null amount emits a warning and does not crash', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /ROC.*missing amount/i.test(w)));
+  // Position unchanged.
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('SELL after a ROC uses the reduced post-ROC ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // ROC $200 → totalCost $800, ACB $80/unit
+  // SELL 5 @ $600 → costRemoved 5*80=$400, gain $200
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-04-15', 'return_of_capital', null, 200),
+    act('2024-07-15', 'sell', 5, 600),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, 80);
+  APPROX(r.realizedEvents[0].costRemoved, 400);
+  APPROX(r.realizedEvents[0].realizedGain, 200);
+  APPROX(r.finalState.quantity, 5);
+  APPROX(r.finalState.acbPerUnit, 80);
+});
+
+// ---------------------------------------------------------------------------
+// Transfer in / transfer out tests
+// ---------------------------------------------------------------------------
+
+test('transfer_in into an empty position seeds qty + cost from book cost', () => {
+  // TRANSFER_IN 10 @ $850 book → qty 10, totalCost $850, ACB $85/unit
+  const r = computeAcb([act('2024-01-15', 'transfer_in', 10, 850)]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 850);
+  APPROX(r.finalState.acbPerUnit, 85);
+  assert.equal(r.timeline.length, 1);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('transfer_in onto an existing position blends weighted-average ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // TRANSFER_IN 5 @ $400 book → totalCost $1400, qty 15, ACB ≈ $93.33/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_in', 5, 400),
+  ]);
+  assert.equal(r.finalState.quantity, 15);
+  APPROX(r.finalState.totalCost, 1400);
+  APPROX(r.finalState.acbPerUnit, 1400 / 15);
+});
+
+test('transfer_in with null amount falls back to zero-cost and warns', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_in', 5, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /TRANSFER_IN.*missing amount/i.test(w)));
+  // qty grew, cost did not.
+  assert.equal(r.finalState.quantity, 15);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 1000 / 15);
+});
+
+test('transfer_out removes qty at current ACB without producing a realized event', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // TRANSFER_OUT 4 → qty 6, totalCost preserved per-unit at $100
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_out', 4, null),
+  ]);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.realizedTotal, 0);
+  APPROX(r.finalState.quantity, 6);
+  APPROX(r.finalState.acbPerUnit, 100);
+  APPROX(r.finalState.totalCost, 600);
+});
+
+test('transfer_out that closes the position resets ACB and emits no realized event', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'transfer_out', 10, null),
+  ]);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.finalState.quantity, 0);
+  APPROX(r.finalState.totalCost, 0);
+  APPROX(r.finalState.acbPerUnit, 0);
+  assert.ok(r.warnings.some((w) => /Position closed/i.test(w)));
+});
+
+test('transfer_out exceeding position is clamped and warns', () => {
+  // BUY 5, TRANSFER_OUT 8 → clamped to 5, position closes, no realized event
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 5, 500),
+    act('2024-06-15', 'transfer_out', 8, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /TRANSFER_OUT.*exceeds position/i.test(w)));
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.finalState.quantity, 0);
+});
+
+test('SELL after a transfer_in uses the blended ACB', () => {
+  // BUY 10 @ $1000 → ACB $100
+  // TRANSFER_IN 10 @ $500 book → qty 20, totalCost $1500, ACB $75
+  // SELL 5 @ $400 → costRemoved 5*75=$375, gain $25
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-03-15', 'transfer_in', 10, 500),
+    act('2024-06-15', 'sell', 5, 400),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, 75);
+  APPROX(r.realizedEvents[0].costRemoved, 375);
+  APPROX(r.realizedEvents[0].realizedGain, 25);
+  APPROX(r.finalState.quantity, 15);
+  APPROX(r.finalState.acbPerUnit, 75);
+});

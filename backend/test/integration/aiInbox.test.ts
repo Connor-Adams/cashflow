@@ -230,6 +230,7 @@ test('GET /api/ai/inbox includes rule_proposal items computed from transactions'
       merchantRaw: 'INBOX SHOP', merchantClean: 'INBOX SHOP',
       importBatch: 'inbox-test',
       sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
       amount: -10,
       finalCategory: 'Groceries', finalBusiness: false, finalSplitType: 'me',
       reviewedAt: new Date(),
@@ -273,6 +274,7 @@ test('GET /api/ai/inbox/count includes non-dismissed rule proposals', async () =
       merchantRaw: 'COUNT ME', merchantClean: 'COUNT ME',
       importBatch: 'inbox-test-2',
       sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
       amount: -8,
       finalCategory: 'Coffee', finalBusiness: false, finalSplitType: 'me',
       reviewedAt: new Date(),
@@ -295,6 +297,7 @@ test('POST /api/ai/rule-proposals dismiss normalizes multi-space patterns', asyn
       merchantRaw: 'SPACE  HOG', merchantClean: 'SPACE  HOG',
       importBatch: 'spaces-test',
       sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
       amount: -5,
       finalCategory: 'Misc', finalBusiness: false, finalSplitType: 'me',
       reviewedAt: new Date(),
@@ -354,6 +357,83 @@ test('POST /api/ai/insights does not supersede rows for a different period', asy
   assert.equal(stillSuggestedFeb.length, 1, 'Feb row was not superseded by Mar refresh');
 });
 
+test('GET /api/ai/inbox hides transaction_audit rows with zero issues', async () => {
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  const empty = await AiSuggestion.create({
+    householdId, userId: null, kind: 'transaction_audit', status: 'suggested',
+    inputSnapshot: {}, output: { issues: [] },
+  } as never);
+  const r = await authed.get('/api/ai/inbox');
+  const ids = (r.body.items as Array<{ id: number }>).map((i) => i.id);
+  assert.ok(!ids.includes(empty.id), 'empty audit row must not appear in inbox');
+});
+
+test('GET /api/ai/inbox/count excludes transaction_audit rows with zero issues', async () => {
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  const before = await authed.get('/api/ai/inbox/count');
+  const beforeAudit = before.body.byKind.transaction_audit;
+  await AiSuggestion.create({
+    householdId, userId: null, kind: 'transaction_audit', status: 'suggested',
+    inputSnapshot: {}, output: { issues: [] },
+  } as never);
+  const after = await authed.get('/api/ai/inbox/count');
+  assert.equal(after.body.byKind.transaction_audit, beforeAudit, 'empty audit must not bump count');
+});
+
+test('GET /api/ai/inbox lazy-supersedes financial_insight duplicates per (period, currency)', async () => {
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  const dupes = await Promise.all([
+    AiSuggestion.create({
+      householdId, userId: null, kind: 'financial_insight', status: 'suggested',
+      inputSnapshot: { period: '2026-09', currency: 'CAD' },
+      output: [{ title: 'Dup A' }],
+    } as never),
+    AiSuggestion.create({
+      householdId, userId: null, kind: 'financial_insight', status: 'suggested',
+      inputSnapshot: { period: '2026-09', currency: 'CAD' },
+      output: [{ title: 'Dup B' }],
+    } as never),
+    AiSuggestion.create({
+      householdId, userId: null, kind: 'financial_insight', status: 'suggested',
+      inputSnapshot: { period: '2026-09', currency: 'CAD' },
+      output: [{ title: 'Dup C' }],
+    } as never),
+  ]);
+
+  await authed.get('/api/ai/inbox');
+
+  const refreshed = await AiSuggestion.findAll({
+    where: { id: dupes.map((d) => d.id) },
+    order: [['id', 'ASC']],
+  });
+  assert.equal(refreshed[0].status, 'superseded', 'oldest dupe is superseded');
+  assert.equal(refreshed[1].status, 'superseded', 'middle dupe is superseded');
+  assert.equal(refreshed[2].status, 'suggested', 'newest dupe is kept');
+});
+
+test('GET /api/ai/inbox summarizes financial_insight with severity breakdown', async () => {
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  await AiSuggestion.create({
+    householdId, userId: null, kind: 'financial_insight', status: 'suggested',
+    inputSnapshot: { period: '2026-10', currency: 'CAD' },
+    output: [
+      { title: 'Top thing', severity: 'action' },
+      { title: 'Second', severity: 'action' },
+      { title: 'Third', severity: 'watch' },
+      { title: 'Fourth', severity: 'info' },
+    ],
+  } as never);
+  const r = await authed.get('/api/ai/inbox');
+  const items = r.body.items as Array<{ summary: string; severity: string | null }>;
+  const it = items.find((i) => i.summary.startsWith('Top thing'));
+  assert.ok(it, 'inserted insight must appear in inbox');
+  assert.match(it.summary, /2 action/);
+  assert.match(it.summary, /1 watch/);
+  assert.match(it.summary, /1 info/);
+  assert.doesNotMatch(it.summary, /\+\d+ more/, 'should no longer use "+N more" suffix');
+  assert.equal(it.severity, 'action', 'top-row severity is the highest across the array');
+});
+
 test('GET /api/transactions?ids=1,2 filters to listed ids', async () => {
   const { Transaction, Account } = await import('../../src/models/index.js');
   const crypto = await import('crypto');
@@ -364,18 +444,21 @@ test('GET /api/transactions?ids=1,2 filters to listed ids', async () => {
     householdId, accountId: account.id, currency: 'CAD',
     date: '2026-05-01', merchantRaw: 'A', merchantClean: 'A',
     importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
     amount: -1, finalCategory: 'X', finalBusiness: false, finalSplitType: 'me',
   } as never);
   const b = await Transaction.create({
     householdId, accountId: account.id, currency: 'CAD',
     date: '2026-05-02', merchantRaw: 'B', merchantClean: 'B',
     importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
     amount: -2, finalCategory: 'Y', finalBusiness: false, finalSplitType: 'me',
   } as never);
   await Transaction.create({
     householdId, accountId: account.id, currency: 'CAD',
     date: '2026-05-03', merchantRaw: 'C', merchantClean: 'C',
     importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
     amount: -3, finalCategory: 'Z', finalBusiness: false, finalSplitType: 'me',
   } as never);
 
