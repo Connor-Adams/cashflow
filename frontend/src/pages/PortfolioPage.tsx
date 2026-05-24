@@ -753,6 +753,16 @@ type DateRangePanelProps<T> = {
   children: (data: T | null, loading: boolean) => ReactNode
 }
 
+function isPanelEmpty<T>(
+  loading: boolean,
+  data: T | null,
+  isEmpty: (data: T) => boolean,
+): boolean {
+  if (loading) return false
+  if (!data) return true
+  return isEmpty(data)
+}
+
 function DateRangePanel<T>({ state, isEmpty, emptyMessage, children }: DateRangePanelProps<T>) {
   const { dateFrom, dateTo, setDateFrom, setDateTo, data, loading, err } = state
   if (err) return <p className="error">{err}</p>
@@ -764,20 +774,17 @@ function DateRangePanel<T>({ state, isEmpty, emptyMessage, children }: DateRange
       onToChange={setDateTo}
     />
   )
-  if (!loading && (!data || isEmpty(data))) {
-    return (
-      <>
-        {filter}
-        <Card>
-          <p className="muted">{emptyMessage}</p>
-        </Card>
-      </>
-    )
-  }
+  const body = isPanelEmpty(loading, data, isEmpty) ? (
+    <Card>
+      <p className="muted">{emptyMessage}</p>
+    </Card>
+  ) : (
+    children(data, loading)
+  )
   return (
     <>
       {filter}
-      {children(data, loading)}
+      {body}
     </>
   )
 }
@@ -801,10 +808,12 @@ function IncomePanel() {
 }
 
 function IncomeBody({ data, loading }: { data: PortfolioIncome | null; loading: boolean }) {
+  const totals = data?.totals ?? []
+  const bySecurity = data?.bySecurity ?? []
   return (
     <>
       <section className="transactionsStats" aria-busy={loading}>
-        {(data?.totals ?? []).map((row) => (
+        {totals.map((row) => (
           <StatCard
             key={row.currency}
             label={`${row.currency} total income`}
@@ -816,61 +825,91 @@ function IncomeBody({ data, loading }: { data: PortfolioIncome | null; loading: 
 
       {data && <IncomeMonthlyChart data={data} />}
 
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>By security</h2>
-            <p className="muted">
-              Top securities by total income (dividends + interest).
-            </p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Currency</TableHead>
-                <TableHead>Dividend</TableHead>
-                <TableHead>Interest</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Events</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(data?.bySecurity ?? []).slice(0, 20).map((row) => (
-                <TableRow key={`${row.securityId ?? 'null'}|${row.currency}`}>
-                  <TableCell>
-                    {row.securityId != null && row.symbol ? (
-                      <Link
-                        to={`/portfolio/security/${row.securityId}`}
-                        className="text-foreground underline-offset-2 hover:underline"
-                      >
-                        {row.symbol}
-                      </Link>
-                    ) : (
-                      row.symbol ?? '—'
-                    )}
-                  </TableCell>
-                  <TableCell>{row.currency}</TableCell>
-                  <TableCell>{formatMoney(row.dividend, row.currency)}</TableCell>
-                  <TableCell>{formatMoney(row.interest, row.currency)}</TableCell>
-                  <TableCell>{formatMoney(row.total, row.currency)}</TableCell>
-                  <TableCell>{row.activityCount}</TableCell>
-                </TableRow>
-              ))}
-              {!loading && (data?.bySecurity.length ?? 0) === 0 && (
-                <EmptyTableRow
-                  colSpan={6}
-                  title="No income by security."
-                  description="Dividends and interest appear here once imported."
-                />
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <IncomeBySecurityTable rows={bySecurity} loading={loading} />
     </>
+  )
+}
+
+type IncomeBySecurityRowData = PortfolioIncome['bySecurity'][number]
+
+function IncomeBySecurityTable({
+  rows,
+  loading,
+}: {
+  rows: IncomeBySecurityRowData[]
+  loading: boolean
+}) {
+  const showEmpty = !loading && rows.length === 0
+  return (
+    <Card className="transactionsTableCard mt-4">
+      <div className="transactionsPanelHeader">
+        <div>
+          <h2>By security</h2>
+          <p className="muted">
+            Top securities by total income (dividends + interest).
+          </p>
+        </div>
+      </div>
+      <div className="transactionsTableWrap">
+        <Table className="table transactionsTable">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Currency</TableHead>
+              <TableHead>Dividend</TableHead>
+              <TableHead>Interest</TableHead>
+              <TableHead>Total</TableHead>
+              <TableHead>Events</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.slice(0, 20).map((row) => (
+              <IncomeBySecurityRow key={`${row.securityId ?? 'null'}|${row.currency}`} row={row} />
+            ))}
+            {showEmpty && (
+              <EmptyTableRow
+                colSpan={6}
+                title="No income by security."
+                description="Dividends and interest appear here once imported."
+              />
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  )
+}
+
+function IncomeBySecurityRow({ row }: { row: IncomeBySecurityRowData }) {
+  return (
+    <TableRow>
+      <TableCell>
+        <SymbolLink securityId={row.securityId ?? null} symbol={row.symbol ?? null} />
+      </TableCell>
+      <TableCell>{row.currency}</TableCell>
+      <TableCell>{formatMoney(row.dividend, row.currency)}</TableCell>
+      <TableCell>{formatMoney(row.interest, row.currency)}</TableCell>
+      <TableCell>{formatMoney(row.total, row.currency)}</TableCell>
+      <TableCell>{row.activityCount}</TableCell>
+    </TableRow>
+  )
+}
+
+function SymbolLink({
+  securityId,
+  symbol,
+}: {
+  securityId: number | null
+  symbol: string | null
+}) {
+  if (securityId == null || !symbol) return <>{symbol ?? '—'}</>
+  return (
+    <Link
+      to={`/portfolio/security/${securityId}`}
+      className="text-foreground underline-offset-2 hover:underline"
+    >
+      {symbol}
+    </Link>
   )
 }
 
@@ -964,6 +1003,20 @@ function RealizedPanel() {
   )
 }
 
+type RealizedEvent = PortfolioRealized['events'][number]
+type RealizedEventWithRunning = RealizedEvent & { runningTotal: number }
+type RealizedBySecurityRowData = PortfolioRealized['bySecurity'][number]
+
+function withRunningTotal(events: RealizedEvent[]): RealizedEventWithRunning[] {
+  const runningByCurrency = new Map<string, number>()
+  return events.map((ev) => {
+    const prev = runningByCurrency.get(ev.currency) ?? 0
+    const next = prev + ev.realizedGain
+    runningByCurrency.set(ev.currency, next)
+    return { ...ev, runningTotal: next }
+  })
+}
+
 function RealizedBody({
   data,
   loading,
@@ -971,19 +1024,14 @@ function RealizedBody({
   data: PortfolioRealized | null
   loading: boolean
 }) {
-  // Running cumulative realized gain per currency for the events table.
-  const runningByCurrency = new Map<string, number>()
-  const eventsWithRunning = (data?.events ?? []).map((ev) => {
-    const prev = runningByCurrency.get(ev.currency) ?? 0
-    const next = prev + ev.realizedGain
-    runningByCurrency.set(ev.currency, next)
-    return { ...ev, runningTotal: next }
-  })
+  const totals = data?.totals ?? []
+  const bySecurity = data?.bySecurity ?? []
+  const eventsWithRunning = withRunningTotal(data?.events ?? [])
 
   return (
     <>
       <section className="transactionsStats" aria-busy={loading}>
-        {(data?.totals ?? []).map((row) => (
+        {totals.map((row) => (
           <StatCard
             key={row.currency}
             label={`${row.currency} realized to date`}
@@ -993,94 +1041,96 @@ function RealizedBody({
         ))}
       </section>
 
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>By security</h2>
-            <p className="muted">Realized gain/loss aggregated per ticker.</p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Currency</TableHead>
-                <TableHead>Realized gain</TableHead>
-                <TableHead>Sells</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(data?.bySecurity ?? []).map((row) => (
-                <TableRow key={`${row.securityId}|${row.currency}`}>
-                  <TableCell>
-                    <Link
-                      to={`/portfolio/security/${row.securityId}`}
-                      className="text-foreground underline-offset-2 hover:underline"
-                    >
-                      {row.symbol}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{row.name ?? '—'}</TableCell>
-                  <TableCell>{row.currency}</TableCell>
-                  <TableCell>{formatMoney(row.realizedGain, row.currency)}</TableCell>
-                  <TableCell>{row.eventCount}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
-
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Events</h2>
-            <p className="muted">
-              Every SELL with the prevailing ACB-per-unit at the time of sale and the
-              running cumulative realized total.
-            </p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Qty sold</TableHead>
-                <TableHead>Proceeds</TableHead>
-                <TableHead>ACB / unit</TableHead>
-                <TableHead>Realized</TableHead>
-                <TableHead>Running</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {eventsWithRunning.map((ev) => (
-                <TableRow key={ev.activityId}>
-                  <TableCell>{ev.tradeDate}</TableCell>
-                  <TableCell>{ev.accountName}</TableCell>
-                  <TableCell>
-                    <Link
-                      to={`/portfolio/security/${ev.securityId}`}
-                      className="text-foreground underline-offset-2 hover:underline"
-                    >
-                      {ev.symbol}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{ev.qtySold}</TableCell>
-                  <TableCell>{formatMoney(ev.proceeds, ev.currency)}</TableCell>
-                  <TableCell>{formatMoney(ev.acbAtSale, ev.currency)}</TableCell>
-                  <TableCell>{formatMoney(ev.realizedGain, ev.currency)}</TableCell>
-                  <TableCell>{formatMoney(ev.runningTotal, ev.currency)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <RealizedBySecurityTable rows={bySecurity} />
+      <RealizedEventsTable events={eventsWithRunning} />
     </>
   )
 }
+
+function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }) {
+  return (
+    <Card className="transactionsTableCard mt-4">
+      <div className="transactionsPanelHeader">
+        <div>
+          <h2>By security</h2>
+          <p className="muted">Realized gain/loss aggregated per ticker.</p>
+        </div>
+      </div>
+      <div className="transactionsTableWrap">
+        <Table className="table transactionsTable">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Currency</TableHead>
+              <TableHead>Realized gain</TableHead>
+              <TableHead>Sells</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={`${row.securityId}|${row.currency}`}>
+                <TableCell>
+                  <SymbolLink securityId={row.securityId} symbol={row.symbol} />
+                </TableCell>
+                <TableCell>{row.name ?? '—'}</TableCell>
+                <TableCell>{row.currency}</TableCell>
+                <TableCell>{formatMoney(row.realizedGain, row.currency)}</TableCell>
+                <TableCell>{row.eventCount}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  )
+}
+
+function RealizedEventsTable({ events }: { events: RealizedEventWithRunning[] }) {
+  return (
+    <Card className="transactionsTableCard mt-4">
+      <div className="transactionsPanelHeader">
+        <div>
+          <h2>Events</h2>
+          <p className="muted">
+            Every SELL with the prevailing ACB-per-unit at the time of sale and the
+            running cumulative realized total.
+          </p>
+        </div>
+      </div>
+      <div className="transactionsTableWrap">
+        <Table className="table transactionsTable">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Account</TableHead>
+              <TableHead>Symbol</TableHead>
+              <TableHead>Qty sold</TableHead>
+              <TableHead>Proceeds</TableHead>
+              <TableHead>ACB / unit</TableHead>
+              <TableHead>Realized</TableHead>
+              <TableHead>Running</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {events.map((ev) => (
+              <TableRow key={ev.activityId}>
+                <TableCell>{ev.tradeDate}</TableCell>
+                <TableCell>{ev.accountName}</TableCell>
+                <TableCell>
+                  <SymbolLink securityId={ev.securityId} symbol={ev.symbol} />
+                </TableCell>
+                <TableCell>{ev.qtySold}</TableCell>
+                <TableCell>{formatMoney(ev.proceeds, ev.currency)}</TableCell>
+                <TableCell>{formatMoney(ev.acbAtSale, ev.currency)}</TableCell>
+                <TableCell>{formatMoney(ev.realizedGain, ev.currency)}</TableCell>
+                <TableCell>{formatMoney(ev.runningTotal, ev.currency)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  )
+}
+
