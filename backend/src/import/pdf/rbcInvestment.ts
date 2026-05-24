@@ -32,6 +32,29 @@ const FUND_HEADING_RE = /^(.+?)\s+\(([A-Z]{3,4}\d{3,5})\)$/;
 const ISO_DATE_RE = /^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{4})\b/; // "Dec 23 2025"
 const MONEY_TOKEN_RE = /^-?[\d,]+\.\d{2,8}$/; // unit prices can have many decimals
 
+/**
+ * Yield trimmed lines inside the section between the first match of
+ * `sectionRe` and the first subsequent match of `endRe` (or end of input).
+ * Used by all three body parsers (holdings, activity, savings deposit) to
+ * avoid duplicating the "scan until section, then break on end marker" loop.
+ */
+function* iterSection(
+  lines: PdfLine[],
+  sectionRe: RegExp,
+  endRe: RegExp,
+): Generator<{ line: PdfLine; text: string }> {
+  let inSection = false;
+  for (const l of lines) {
+    const text = l.text.trim();
+    if (!inSection) {
+      if (sectionRe.test(text)) inSection = true;
+      continue;
+    }
+    if (endRe.test(text)) return;
+    yield { line: l, text };
+  }
+}
+
 function isProductTfsa(lines: PdfLine[]): boolean {
   return lines.some((l) => /Tax-Free Savings Account/i.test(l.text));
 }
@@ -116,17 +139,13 @@ function parseInvestmentDetails(
 ): Omit<NormalizedHoldingSnapshot, 'sourceRowFingerprint'>[] {
   const holdings: Omit<NormalizedHoldingSnapshot, 'sourceRowFingerprint'>[] = [];
 
-  let inSection = false;
   let pendingFund: { name: string; symbol: string } | null = null;
 
-  for (const l of lines) {
-    const text = l.text.trim();
-    if (/Your investment details with Royal Mutual Funds Inc\./i.test(text)) {
-      inSection = true;
-      continue;
-    }
-    if (!inSection) continue;
-    if (/Your investment activity with Royal Mutual Funds Inc\./i.test(text)) break;
+  for (const { text } of iterSection(
+    lines,
+    /Your investment details with Royal Mutual Funds Inc\./i,
+    /Your investment activity with Royal Mutual Funds Inc\./i,
+  )) {
     if (/Total\s*\$/i.test(text)) {
       pendingFund = null;
       continue;
@@ -197,20 +216,14 @@ function parseInvestmentActivity(
 ): Omit<NormalizedInvestmentActivity, 'sourceRowFingerprint'>[] {
   const activities: Omit<NormalizedInvestmentActivity, 'sourceRowFingerprint'>[] = [];
 
-  let inSection = false;
   let currentFund: { name: string; symbol: string } | null = null;
   let pendingNumerics: number[] = [];
 
-  for (const l of lines) {
-    const text = l.text.trim();
-    if (/Your investment activity with Royal Mutual Funds Inc\./i.test(text)) {
-      inSection = true;
-      continue;
-    }
-    if (!inSection) continue;
-    // End markers: next major section or page footer.
-    if (/How to reach us|Information about your account|News you can use/i.test(text)) break;
-
+  for (const { text } of iterSection(
+    lines,
+    /Your investment activity with Royal Mutual Funds Inc\./i,
+    /How to reach us|Information about your account|News you can use/i,
+  )) {
     const fundHeading = FUND_HEADING_RE.exec(text);
     if (fundHeading) {
       currentFund = { name: fundHeading[1].trim(), symbol: fundHeading[2].trim() };
@@ -307,15 +320,11 @@ function parseSavingsDeposit(
 ): PdfParseResult['transactions'] {
   void periodEnd;
   const txns: PdfParseResult['transactions'] = [];
-  let inSection = false;
-  for (const l of lines) {
-    const text = l.text.trim();
-    if (/Your savings deposit activity/i.test(text)) {
-      inSection = true;
-      continue;
-    }
-    if (!inSection) continue;
-    if (/Your investment activity|Information about your account/i.test(text)) break;
+  for (const { line: l, text } of iterSection(
+    lines,
+    /Your savings deposit activity/i,
+    /Your investment activity|Information about your account/i,
+  )) {
     if (/^Opening Balance|^Closing Balance|^RBC Savings Deposit|^Transaction\b/i.test(text)) continue;
     // Real txn rows would look like "Dec 23 2025  Description  100.00  …" — none in our samples.
     const dateMatch = ISO_DATE_RE.exec(text);
