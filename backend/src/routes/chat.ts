@@ -6,6 +6,8 @@ import { runChatTurn } from '../ai/chat/loop';
 import { defaultCurrency } from '../config/env';
 import { writeSseHeaders, writeSseEvent } from '../ai/chat/sse';
 import { applyProposal } from '../ai/chat/proposals';
+import { perThreadMessageLimiter } from './chatRateLimit';
+import { isUserOverBudget } from '../ai/chat/tokenBudget';
 
 const router = Router();
 
@@ -150,7 +152,7 @@ router.delete('/threads/:id', async (req, res, next) => {
 });
 
 // POST /api/chat/threads/:id/messages — stream a chat turn via SSE
-router.post('/threads/:id/messages', async (req, res, next) => {
+router.post('/threads/:id/messages', perThreadMessageLimiter, async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
     const id = parseId(req.params.id);
@@ -170,7 +172,16 @@ router.post('/threads/:id/messages', async (req, res, next) => {
     }
     const userMessage = b.message.trim().slice(0, 20_000);
 
-    // Per-thread rate limit + per-day token budget come in Task 14.
+    // Per-day per-user token budget (Task 14). Hard 429 when exceeded.
+    const budget = await isUserOverBudget(user.id);
+    if (budget.over) {
+      res.status(429).json({
+        error: 'daily_token_budget_exceeded',
+        used: budget.used,
+        budget: budget.budget,
+      });
+      return;
+    }
 
     // Build prompt context
     const contacts = await Contact.findAll({
