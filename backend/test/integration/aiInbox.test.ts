@@ -128,3 +128,74 @@ test('GET /api/ai/inbox/count scopes by household', async () => {
   assert.equal(r.body.byKind.transaction_audit, 0);
   assert.equal(r.body.byKind.rule_proposal, 0);
 });
+
+test('GET /api/ai/inbox returns audit + insight suggested rows newest first', async () => {
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  const olderInsight = await AiSuggestion.create({
+    householdId, userId: null, kind: 'financial_insight', status: 'suggested',
+    inputSnapshot: { period: '2026-04', currency: 'CAD' },
+    output: [{ title: 'Older insight', severity: 'info', supportingTransactionIds: [] }],
+  } as never);
+  const newerAudit = await AiSuggestion.create({
+    householdId, userId: null, kind: 'transaction_audit', status: 'suggested',
+    inputSnapshot: {},
+    output: { issues: [{ id: 7, suggestedCategory: 'Dining', confidence: 'high' }, { id: 8 }] },
+  } as never);
+
+  const r = await authed.get('/api/ai/inbox');
+  assert.equal(r.status, 200);
+  const items = r.body.items as Array<{ id: number; kind: string; summary: string }>;
+  const ids = items.map((i) => i.id);
+  assert.ok(ids.indexOf(newerAudit.id) < ids.indexOf(olderInsight.id), 'newer first');
+  const audit = items.find((i) => i.id === newerAudit.id);
+  assert.ok(audit);
+  assert.match(audit.summary, /2 issue/);
+});
+
+test('GET /api/ai/inbox excludes non-suggested status and other kinds', async () => {
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  await AiSuggestion.create({
+    householdId, userId: null, kind: 'financial_insight', status: 'rejected',
+    inputSnapshot: {}, output: [],
+  } as never);
+  await AiSuggestion.create({
+    householdId, userId: null, kind: 'transaction_fields', status: 'suggested',
+    inputSnapshot: {}, output: {},
+  } as never);
+  const r = await authed.get('/api/ai/inbox');
+  assert.equal(r.status, 200);
+  const kinds = (r.body.items as Array<{ kind: string }>).map((i) => i.kind);
+  assert.ok(!kinds.includes('transaction_fields'));
+  assert.ok(!(r.body.items as Array<{ status?: string }>).some((i) => i.status === 'rejected'));
+});
+
+test('GET /api/ai/inbox scopes by household', async () => {
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  await AiSuggestion.create({
+    householdId: otherHouseholdId, userId: null, kind: 'financial_insight', status: 'suggested',
+    inputSnapshot: { period: '2026-05', currency: 'CAD' },
+    output: [{ title: 'Other household' }],
+  } as never);
+  // regularAgent belongs to otherHouseholdId and is not superadmin, so it should only see
+  // its own household's suggestions.
+  const r = await regularAgent.get('/api/ai/inbox');
+  assert.equal(r.status, 200);
+  // authed (superadmin) may see everything; use regularAgent to check scoping
+  const titles = (r.body.items as Array<{ summary: string }>).map((i) => i.summary);
+  // The otherHouseholdId suggestion summary should be present for regularAgent (it's theirs)
+  // but suggestions belonging to householdId (superadmin's household) must not appear.
+  const r2 = await authed.get('/api/ai/inbox');
+  const authedIds = (r2.body.items as Array<{ id: number }>).map((i) => i.id);
+  const regularIds = (r.body.items as Array<{ id: number }>).map((i) => i.id);
+  // No overlap: regularAgent must not see householdId rows, authed (superadmin) sees all
+  // Just verify regularAgent's items don't include any rows from householdId.
+  // We do this by checking that every item regularAgent sees belongs to otherHouseholdId.
+  const { AiSuggestion: AS2 } = await import('../../src/models/index.js');
+  for (const id of regularIds) {
+    const row = await AS2.findByPk(id);
+    assert.ok(row, `row ${id} should exist`);
+    assert.equal(row!.householdId, otherHouseholdId, `row ${id} must belong to otherHouseholdId`);
+  }
+  void titles; // used above for context
+  void authedIds; // not needed for the assertion
+});

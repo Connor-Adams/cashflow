@@ -366,6 +366,75 @@ router.get('/import-cleanup', async (req, res, next) => {
   }
 });
 
+type InboxItem = {
+  id: number;
+  kind: 'transaction_audit' | 'financial_insight' | 'rule_proposal';
+  createdAt: string;
+  transactionId: number | null;
+  summary: string;
+  severity: 'action' | 'watch' | 'info' | null;
+  confidence: 'high' | 'medium' | 'low' | null;
+  output: unknown;
+};
+
+function summarizeAudit(output: unknown): string {
+  const issues = (output as { issues?: unknown[] } | null)?.issues;
+  const count = Array.isArray(issues) ? issues.length : 0;
+  return count === 1 ? '1 issue found' : `${count} issues found`;
+}
+
+function summarizeInsight(output: unknown): { summary: string; severity: 'action' | 'watch' | 'info' | null } {
+  const arr = Array.isArray(output) ? (output as Array<{ title?: unknown; severity?: unknown }>) : [];
+  if (arr.length === 0) return { summary: 'No insights', severity: null };
+  const first = arr[0];
+  const title = typeof first?.title === 'string' ? first.title : 'Insight';
+  const sev = first?.severity === 'action' || first?.severity === 'watch' || first?.severity === 'info'
+    ? first.severity
+    : null;
+  const more = arr.length > 1 ? ` (+${arr.length - 1} more)` : '';
+  return { summary: `${title}${more}`, severity: sev };
+}
+
+router.get('/inbox', async (req, res, next) => {
+  try {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
+    const rows = await AiSuggestion.findAll({
+      where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
+      order: [['id', 'DESC']],
+      limit,
+    });
+    const items: InboxItem[] = rows.map((row) => {
+      if (row.kind === 'transaction_audit') {
+        return {
+          id: row.id,
+          kind: 'transaction_audit',
+          createdAt: row.createdAt.toISOString(),
+          transactionId: row.transactionId,
+          summary: summarizeAudit(row.output),
+          severity: null,
+          confidence: null,
+          output: row.output,
+        };
+      }
+      const { summary, severity } = summarizeInsight(row.output);
+      return {
+        id: row.id,
+        kind: 'financial_insight',
+        createdAt: row.createdAt.toISOString(),
+        transactionId: row.transactionId,
+        summary,
+        severity,
+        confidence: null,
+        output: row.output,
+      };
+    });
+    res.json({ items });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/inbox/count', async (req, res, next) => {
   try {
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
