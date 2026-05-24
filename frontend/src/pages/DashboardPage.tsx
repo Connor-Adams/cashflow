@@ -848,9 +848,10 @@ export function DashboardPage() {
         </Alert>
       ) : null}
 
-      <Card className="dashboardFilters">
+      <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
         <CardContent className="p-0">
           <FilterBar
+            className="gap-2"
             currency={currency}
             onCurrencyChange={setCurrency}
             availableCurrencies={currencies}

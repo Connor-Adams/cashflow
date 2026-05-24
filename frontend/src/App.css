@@ -385,28 +385,17 @@
   }
 
   .dashboardFilters {
-    @apply mt-2 inline-block max-w-full rounded-lg border p-2 sm:p-3;
-    /* Shrink-wrap to content so the filter strip reads as a toolbar
-     * instead of a full-width panel. max-w-full keeps it from blowing
-     * past the page container on narrow viewports. */
-    width: fit-content;
+    @apply mt-3 rounded-lg border p-3 sm:p-4;
     border-color: color-mix(in srgb, var(--border) 86%, white 4%);
     background: color-mix(in srgb, var(--bg2) 64%, transparent);
   }
 
-  /* Tighten the inner stack: FilterBar's `grid gap-3` provides the
-   * separation between rows. Extra mb-3/mt-3 on .quickFilters was
-   * double-spacing and bulking the whole filter strip. */
-  .dashboardFilters [data-slot='filter-bar'] {
-    @apply gap-2;
-  }
-
   .quickFilters {
-    @apply m-0 flex flex-wrap gap-2;
+    @apply mb-3 mt-3 flex flex-wrap gap-2;
   }
 
   .quickFilterButton {
-    @apply min-h-7 rounded-md px-2.5 py-1 text-[0.7rem] font-bold uppercase tracking-normal;
+    @apply min-h-8 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 62%, transparent);
     color: var(--muted-foreground);
