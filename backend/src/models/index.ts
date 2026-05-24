@@ -27,6 +27,7 @@ import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailInteg
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
+import { Entity, initEntity } from './Entity';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -56,6 +57,7 @@ initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
+initEntity(sequelize);
 
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
@@ -213,4 +215,5 @@ export {
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,
+  Entity,
 };
