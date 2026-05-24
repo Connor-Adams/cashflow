@@ -342,6 +342,40 @@ test('get_categories deduplicates between rules and transactions', async () => {
   assert.deepEqual(data.categories, ['Dining', 'Groceries', 'Subscriptions']);
 });
 
+test('get_categories excludes categories from cross-member private transactions', async () => {
+  const { householdId, accountId } = await seedHousehold();
+  const thisUserId = await seedUser('cat-this');
+  const otherUserId = await seedUser('cat-other');
+  // thisUser: shared row with finalCategory='Groceries' (should appear)
+  await seedTxn(accountId, householdId, {
+    visibility: 'shared',
+    createdByUserId: thisUserId,
+    finalCategory: 'Groceries',
+    sourceRowFingerprint: 'cat-own-shared',
+  });
+  // otherUser: private row with finalCategory='Secret' (must NOT appear)
+  await seedTxn(accountId, householdId, {
+    visibility: 'private',
+    createdByUserId: otherUserId,
+    finalCategory: 'Secret',
+    sourceRowFingerprint: 'cat-other-private',
+  });
+
+  const res = await dispatchTool('get_categories', '{}', {
+    ...ctx,
+    householdId,
+    userId: thisUserId,
+  });
+  assert.equal(res.ok, true);
+  if (!res.ok) return;
+  const categories = (res.data as { categories: string[] }).categories;
+  assert.ok(categories.includes('Groceries'));
+  assert.ok(
+    !categories.includes('Secret'),
+    `Should not see other-user's private category, got: ${categories.join(',')}`
+  );
+});
+
 test('query_transactions excludes private rows from other household members', async () => {
   const { householdId, accountId } = await seedHousehold();
   const thisUserId = await seedUser('this-user');

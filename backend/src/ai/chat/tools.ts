@@ -363,9 +363,13 @@ registerTool('get_categories', {
     },
   },
   async execute(_args, ctx) {
+    // Mirror visibleTransactionWhere from src/auth/scope.ts: restrict to rows
+    // the user is allowed to see within their household. Otherwise this leaks
+    // category names from other household members' private transactions.
     const tWhere: Record<string, unknown> = {
       householdId: ctx.householdId,
       finalCategory: { [Op.ne]: null },
+      [Op.or]: [{ visibility: 'shared' }, { createdByUserId: ctx.userId }],
     };
     const txnRows = await Transaction.findAll({
       where: tWhere,
