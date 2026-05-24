@@ -1,5 +1,6 @@
 'use strict';
-// fallow-ignore-file unused-file -- loaded at runtime by sequelize-cli, never imported
+// Loaded at runtime by sequelize-cli, never imported.
+// fallow-ignore-file unused-file
 
 module.exports = {
   async up(queryInterface, Sequelize) {

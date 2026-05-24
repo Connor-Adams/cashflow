@@ -615,7 +615,8 @@ export function SettingsPage() {
     }
   }
 
-  // fallow-ignore-next-line complexity -- standard fetch/try-catch with state transitions, mirrors parseReceiptImage
+  // Standard fetch/try-catch with state transitions, mirrors parseReceiptImage.
+  // fallow-ignore-next-line complexity
   async function parseReceiptPdf(file: File) {
     if (receiptBusy) return
     setReceiptBusy('pdf')

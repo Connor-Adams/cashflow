@@ -161,7 +161,8 @@ export function looksLikeNameFragment(line: string): boolean {
   return !STRUCTURAL_LINE_PATTERNS.some((re) => re.test(t));
 }
 
-// fallow-ignore-next-line complexity -- exercised by R1 (FRANKS/SAUCE) and R2 (DEPOSIT/VL) parser tests
+// Exercised by R1 (FRANKS/SAUCE) and R2 (DEPOSIT/VL) parser tests.
+// fallow-ignore-next-line complexity
 function resolveWrappedName(texts: string[], rowIndex: number, midName: string): string {
   if (midName) return midName;
   const parts: string[] = [];
@@ -172,7 +173,8 @@ function resolveWrappedName(texts: string[], rowIndex: number, midName: string):
   return parts.join(' ');
 }
 
-// fallow-ignore-next-line complexity -- linear item-row walk with wrap detection; covered by R1/R2 parser tests
+// Linear item-row walk with wrap detection; covered by R1/R2 parser tests.
+// fallow-ignore-next-line complexity
 function parseItems(texts: string[], startIdx: number, endIdx: number): ExtractedReceiptItem[] {
   const items: ExtractedReceiptItem[] = [];
   for (let i = startIdx; i < endIdx; i++) {
@@ -211,7 +213,8 @@ type TotalsBlock = {
   totalIdx: number;
 };
 
-// fallow-ignore-next-line complexity -- one-pass scanner for SUBTOTAL/TAX/TOTAL; covered by R1/R2 parser tests
+// One-pass scanner for SUBTOTAL/TAX/TOTAL; covered by R1/R2 parser tests.
+// fallow-ignore-next-line complexity
 function findTotals(texts: string[]): TotalsBlock {
   let subtotal: number | null = null;
   let tax: number | null = null;
@@ -249,7 +252,8 @@ function findItemsStart(texts: string[]): number {
   return -1;
 }
 
-// fallow-ignore-next-line complexity -- tender-block scanner with blacklist guard; covered by parseCostcoTenders + R2 tests
+// Tender-block scanner with blacklist guard; covered by parseCostcoTenders + R2 tests.
+// fallow-ignore-next-line complexity
 export function parseCostcoTenders(texts: string[], totalIdx: number): {
   cards: string[];
   tenderRows: { name: string; amount: number; index: number }[];
@@ -309,7 +313,8 @@ function buildVendorName(header: WarehouseHeader): string {
   return `Costco ${cleaned}${numSuffix}`;
 }
 
-// fallow-ignore-next-line complexity -- linear missing-field check
+// Linear missing-field check.
+// fallow-ignore-next-line complexity
 function collectMissingHeaderWarnings(
   header: WarehouseHeader,
   footer: Footer | null,
@@ -337,14 +342,16 @@ function checkTendersSum(tenders: ExtractedReceiptTender[], total: number | null
   return `tenders sum (${sum.toFixed(2)}) does not equal TOTAL (${total.toFixed(2)})`;
 }
 
-// fallow-ignore-next-line complexity -- null-guard chain
+// Null-guard chain.
+// fallow-ignore-next-line complexity
 function checkSubtotalPlusTax(totals: TotalsBlock): string | null {
   if (totals.subtotal == null || totals.tax == null || totals.total == null) return null;
   if (near(totals.subtotal + totals.tax, totals.total)) return null;
   return `subtotal + tax (${(totals.subtotal + totals.tax).toFixed(2)}) does not equal TOTAL (${totals.total.toFixed(2)})`;
 }
 
-// fallow-ignore-next-line complexity -- composes section parsers + validation; covered by R1/R2 parser tests
+// Composes section parsers + validation; covered by R1/R2 parser tests.
+// fallow-ignore-next-line complexity
 function parse(lines: PdfLine[], ctx: ReceiptPdfParseContext): ReceiptPdfParseResult {
   const texts = lines.map((l) => l.text);
 
