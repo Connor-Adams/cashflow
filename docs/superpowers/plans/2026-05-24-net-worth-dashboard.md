@@ -52,8 +52,10 @@
 
 ## Conventions used in this plan
 
-- Backend tests run with `yarn workspace backend test path/to/file --run`. The `--run` flag prevents Vitest watch mode in CI.
-- Frontend tests run with `yarn workspace frontend test path/to/file --run`.
+- **Backend tests use `node:test` (not vitest).** Imports: `import { test, before, after } from 'node:test'; import assert from 'node:assert/strict';`. There is no `describe`/`it`/`expect`/`vi.mock`. Single test per call: `test('name', () => { assert.equal(...) })`. Per-file run: `cd backend && yarn run -s tsx --test test/foo.test.ts`. Whole suite: `yarn workspace cashflow-backend test`.
+- **Integration / route tests** (anything that boots the Express app) follow the pattern in `backend/test/integration/portfolioUnifiedTotal.test.ts` and `backend/test/tax/routes.test.ts`: a per-test sqlite file under `backend/data/test-*.sqlite`, `execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], ...)` in `before()`, then `await import('../../src/app.js')`. Auth cookie via `request.agent(app).jar.setCookie(...)`. Reusable seeders live in `backend/test/integration/portfolioFixtures.ts` (`seedHousehold`, `seedAccount`, `seedSecurity`, `seedHolding`).
+- **No module mocking** for backend. Pure helpers that depend on `ensureFxRate` take an `fxLookup` parameter (DI); tests pass a stub. Tests that go through `ensureFxRate` end-to-end pre-seed `FxRate` rows in the test sqlite — `ensureFxRate` returns the cached row without hitting the network.
+- Frontend tests use **vitest** (already configured in `frontend/vitest.config.ts`). Per-file run: `yarn workspace frontend test path/to/file --run`. Whole suite: `yarn workspace frontend test`.
 - All money math uses native `number` for now (matches existing portfolio/summary code). Switch to `decimal.js` only if a test reveals rounding pain — out of scope here.
 - Commit messages follow Conventional Commits — `feat(networth):`, `test(networth):`, etc. — matching recent repo history (`feat(tax):`, etc.).
 - No `Co-Authored-By` trailer on any commit (per user CLAUDE.md).
@@ -124,14 +126,14 @@ openingBalanceDate: {
 
 - [ ] **Step 3: Run migration locally to verify it applies**
 
-Run: `yarn workspace backend run db:migrate`
+Run: `yarn workspace cashflow-backend run db:migrate`
 Expected: prints `== 20260524000001-account-opening-balance: migrating =======` and `== ... migrated`.
 
-If `db:migrate` is not the exact script name, run `yarn workspace backend run` to list available scripts and pick the migration runner. Document the exact script discovered.
+If `db:migrate` is not the exact script name, run `yarn workspace cashflow-backend run` to list available scripts and pick the migration runner. Document the exact script discovered.
 
 - [ ] **Step 4: Run existing Account tests to confirm no regression**
 
-Run: `yarn workspace backend test backend/test/applyRules.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/applyRules.test.ts --run`
 Expected: PASS (this test loads Account via Sequelize associations and would surface init errors).
 
 - [ ] **Step 5: Commit**
@@ -186,7 +188,7 @@ describe('accountKind', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace backend test backend/test/accountKind.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/accountKind.test.ts --run`
 Expected: FAIL with module-not-found for `../src/networth/accountKind`.
 
 - [ ] **Step 3: Implement `accountKind`**
@@ -210,7 +212,7 @@ export function accountKind(accountType: string): AccountKind {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace backend test backend/test/accountKind.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/accountKind.test.ts --run`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 5: Commit**
@@ -311,7 +313,7 @@ describe('balanceAtDate', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace backend test backend/test/balanceAtDate.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/balanceAtDate.test.ts --run`
 Expected: FAIL with module-not-found.
 
 - [ ] **Step 3: Implement `balanceAtDate`**
@@ -355,7 +357,7 @@ export async function balanceAtDate(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace backend test backend/test/balanceAtDate.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/balanceAtDate.test.ts --run`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Commit**
@@ -485,7 +487,7 @@ describe('portfolioMarketValueAt', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace backend test backend/test/portfolioMarketValueAt.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/portfolioMarketValueAt.test.ts --run`
 Expected: FAIL with module-not-found.
 
 - [ ] **Step 3: Implement `portfolioMarketValueAt`**
@@ -584,7 +586,7 @@ export async function portfolioMarketValueAt(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace backend test backend/test/portfolioMarketValueAt.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/portfolioMarketValueAt.test.ts --run`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Commit**
@@ -655,7 +657,7 @@ describe('unifyToCad', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace backend test backend/test/unifyToCad.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/unifyToCad.test.ts --run`
 Expected: FAIL with module-not-found.
 
 - [ ] **Step 3: Implement `unifyToCad`**
@@ -718,7 +720,7 @@ export async function unifyToCad(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace backend test backend/test/unifyToCad.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/unifyToCad.test.ts --run`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 5: Commit**
@@ -831,7 +833,7 @@ describe('buildNetWorthAt', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `yarn workspace backend test backend/test/networthAggregate.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/networthAggregate.test.ts --run`
 Expected: FAIL with module-not-found.
 
 - [ ] **Step 3: Implement `buildNetWorthAt`**
@@ -943,7 +945,7 @@ export async function buildNetWorthAt(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `yarn workspace backend test backend/test/networthAggregate.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/networthAggregate.test.ts --run`
 Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
@@ -1016,7 +1018,7 @@ describe('buildSeries', () => {
 
 - [ ] **Step 2: Run tests to verify failure**
 
-Run: `yarn workspace backend test backend/test/networthAggregate.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/networthAggregate.test.ts --run`
 Expected: FAIL — `buildSeries`, `monthEndDatesInRange`, `daysInRange` not exported.
 
 - [ ] **Step 3: Add `buildSeries` and helpers to aggregate.ts**
@@ -1099,7 +1101,7 @@ The month-end loop above is fiddly; simplify if a cleaner approach occurs to you
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `yarn workspace backend test backend/test/networthAggregate.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/networthAggregate.test.ts --run`
 Expected: PASS, all tests (previous 5 + 4 new).
 
 - [ ] **Step 5: Commit**
@@ -1254,7 +1256,7 @@ Note: `loginAsUser` is assumed to be an existing test helper that returns `{ age
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `yarn workspace backend test backend/test/netWorthRoutes.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/netWorthRoutes.test.ts --run`
 Expected: FAIL — 404 on every route (router not mounted).
 
 - [ ] **Step 3: Implement the router**
@@ -1393,12 +1395,12 @@ app.use('/api/net-worth', netWorthRouter);
 
 - [ ] **Step 5: Run route tests to verify they pass**
 
-Run: `yarn workspace backend test backend/test/netWorthRoutes.test.ts --run`
+Run: `yarn workspace cashflow-backend test backend/test/netWorthRoutes.test.ts --run`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 6: Run typecheck and existing test suite to catch regressions**
 
-Run: `yarn workspace backend run typecheck && yarn workspace backend test --run`
+Run: `yarn workspace cashflow-backend run typecheck && yarn workspace cashflow-backend test --run`
 Expected: typecheck passes, all backend tests green.
 
 - [ ] **Step 7: Commit**
@@ -1755,7 +1757,7 @@ Run: `grep -n "import" frontend/src/pages/PortfolioPage.tsx | head -40`
 
 Find the chart import (likely from `recharts` or a wrapper in `frontend/src/components/`). Note the component name and props shape (data array, dataKey for x and y, etc.). This is the chart to reuse in `NetWorthPage` and `NetWorthTile`.
 
-If PortfolioPage uses only a donut chart and there is no existing line/area chart in the codebase: add `recharts` as a frontend dep (it's already widely used for these layouts) by running `yarn workspace frontend add recharts` and use `<AreaChart>` from `recharts`.
+`recharts` is already a frontend dependency (see `frontend/package.json`); use `<AreaChart>` from it without adding the package.
 
 Document the choice here before continuing.
 
@@ -2058,8 +2060,8 @@ git commit -m "feat(networth): add opening-balance editor to NetWorthPage"
 Run in parallel (separate terminals or `&&` chain):
 
 ```bash
-yarn workspace backend run typecheck
-yarn workspace backend test --run
+yarn workspace cashflow-backend run typecheck
+yarn workspace cashflow-backend test --run
 yarn workspace frontend run typecheck
 yarn workspace frontend run lint
 yarn workspace frontend test --run
