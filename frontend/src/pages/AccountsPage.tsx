@@ -27,6 +27,7 @@ const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
   { value: 'savings', label: 'Savings' },
   { value: 'credit_card', label: 'Credit card' },
   { value: 'investment', label: 'Investment' },
+  { value: 'loan', label: 'Loan / line of credit' },
   { value: 'cash', label: 'Cash' },
   { value: 'other', label: 'Other' },
 ]

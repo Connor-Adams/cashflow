@@ -902,6 +902,178 @@ export async function importWsBundleFile(opts: {
   };
 }
 
+// ─── RBC PDF bundle import ──────────────────────────────────────────────────
+
+/** Per-file result emitted by `importRbcBundleFile`. */
+export type RbcBundleFileResult = {
+  file: string;
+  accountSuffix: string | null;
+  productLabel: string | null;
+  accountId: number | null;
+  accountName: string | null;
+  accountCreated: boolean;
+  inserted: number;
+  insertedTransactions: number;
+  insertedInvestmentActivities: number;
+  insertedHoldings: number;
+  skippedDuplicates: number;
+  rowErrors: number;
+  parseErrors: { rowIndex: number; message: string }[];
+  warnings: string[];
+  error?: string;
+};
+
+type RbcAccountTemplate = {
+  name: string;
+  accountType: 'checking' | 'savings' | 'credit_card' | 'investment' | 'loan';
+};
+
+/**
+ * Maps the productLabel emitted by an RBC PDF parser's `header.productLabel`
+ * to the auto-create defaults (account name + accountType). PDF body is
+ * authoritative — filename hints (e.g. "Chequing-4660" which is actually an
+ * eSavings) are ignored at this step.
+ */
+const RBC_ACCOUNT_TEMPLATES: Record<string, RbcAccountTemplate> = {
+  'RBC Day to Day Banking': { name: 'RBC Day to Day Banking', accountType: 'checking' },
+  'RBC Day to Day Savings': { name: 'RBC Day to Day Savings', accountType: 'savings' },
+  'RBC High Interest eSavings': { name: 'RBC High Interest eSavings', accountType: 'savings' },
+  'Find & Save': { name: 'RBC NOMI Find & Save', accountType: 'savings' },
+  'Signature RBC Rewards Visa': { name: 'RBC Avion Visa', accountType: 'credit_card' },
+  'RBC Avion Visa': { name: 'RBC Avion Visa', accountType: 'credit_card' },
+  'RBC Visa': { name: 'RBC Visa', accountType: 'credit_card' },
+  'Royal Credit Line': { name: 'RBC Royal Credit Line', accountType: 'loan' },
+  'Tax-Free Savings Account': { name: 'RBC TFSA', accountType: 'investment' },
+  'Registered Disability Savings Plan': { name: 'RBC RDSP', accountType: 'investment' },
+};
+
+function emptyRbcBundleResult(file: string, error: string): RbcBundleFileResult {
+  return {
+    file,
+    accountSuffix: null,
+    productLabel: null,
+    accountId: null,
+    accountName: null,
+    accountCreated: false,
+    inserted: 0,
+    insertedTransactions: 0,
+    insertedInvestmentActivities: 0,
+    insertedHoldings: 0,
+    skippedDuplicates: 0,
+    rowErrors: 0,
+    parseErrors: [],
+    warnings: [],
+    error,
+  };
+}
+
+/**
+ * Import a single RBC PDF statement from a bundle upload.
+ *
+ * Pipeline:
+ *   1. Extract PDF lines once, find the matching parser via sniff.
+ *   2. Parse to get `header` (accountSuffix, productLabel, accountType, period).
+ *   3. `Account.findOrCreate` keyed on `(householdId, shortCode=accountSuffix)`.
+ *      The productLabel determines name + accountType from `RBC_ACCOUNT_TEMPLATES`.
+ *   4. Run the standard parseStatementFile → commitStatementImport pipeline so
+ *      fingerprinting / dedup / enrichment matches single-file uploads.
+ */
+export async function importRbcBundleFile(opts: {
+  buffer: Buffer;
+  fileName: string;
+  householdId: number;
+  userId: number;
+}): Promise<RbcBundleFileResult> {
+  const file = path.basename(opts.fileName || 'statement.pdf').replace(/[\\/]/g, '');
+
+  // Lazy-require to dodge the same circular-init concern as registry.ts.
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { extractPdfLines } = require('./pdf/extractLines');
+  const { findPdfParser, registerBuiltInPdfParsers } = require('./pdf/registry');
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  registerBuiltInPdfParsers();
+
+  let lines;
+  try {
+    lines = await extractPdfLines(opts.buffer);
+  } catch (err) {
+    return emptyRbcBundleResult(file, `Could not read PDF: ${(err as Error).message}`);
+  }
+
+  const parser = findPdfParser(lines);
+  if (!parser) {
+    return emptyRbcBundleResult(file, 'No PDF parser matched this RBC statement layout');
+  }
+  let parseOut;
+  try {
+    parseOut = parser.parse(lines, { defaultCurrency: 'CAD' });
+  } catch (err) {
+    return emptyRbcBundleResult(file, `Parser ${parser.id} threw: ${(err as Error).message}`);
+  }
+  if (!parseOut.header) {
+    return emptyRbcBundleResult(file, `Parser ${parser.id} produced no header for account match`);
+  }
+  const header = parseOut.header;
+  const template =
+    RBC_ACCOUNT_TEMPLATES[header.productLabel] ?? {
+      name: header.productLabel,
+      accountType: header.accountType,
+    };
+
+  const [account, accountCreated] = await Account.findOrCreate({
+    where: { householdId: opts.householdId, shortCode: header.accountSuffix },
+    defaults: {
+      householdId: opts.householdId,
+      name: template.name,
+      accountType: template.accountType,
+      owner: 'me',
+      visibility: 'private',
+      defaultCurrency: 'CAD',
+      ownerUserId: opts.userId,
+      shortCode: header.accountSuffix,
+    },
+  });
+
+  const preview = await parseStatementFile({
+    buffer: opts.buffer,
+    fileName: file,
+    accountId: account.id,
+    householdId: opts.householdId,
+  });
+  if ('error' in preview) {
+    return {
+      ...emptyRbcBundleResult(file, preview.error),
+      accountSuffix: header.accountSuffix,
+      productLabel: header.productLabel,
+      accountId: account.id,
+      accountName: account.name,
+      accountCreated,
+    };
+  }
+
+  const commit = await commitStatementImport(preview, opts.userId, opts.householdId);
+
+  return {
+    file,
+    accountSuffix: header.accountSuffix,
+    productLabel: header.productLabel,
+    accountId: account.id,
+    accountName: account.name,
+    accountCreated,
+    inserted:
+      commit.insertedTransactions +
+      commit.insertedInvestmentActivities +
+      commit.insertedHoldings,
+    insertedTransactions: commit.insertedTransactions,
+    insertedInvestmentActivities: commit.insertedInvestmentActivities,
+    insertedHoldings: commit.insertedHoldings,
+    skippedDuplicates: commit.skippedDuplicates,
+    rowErrors: commit.rowErrors,
+    parseErrors: commit.parseErrors,
+    warnings: commit.warnings,
+  };
+}
+
 // ─── Wealthsimple holdings import ───────────────────────────────────────────
 
 /** Summary returned by `importWsHoldingsFile`. */
