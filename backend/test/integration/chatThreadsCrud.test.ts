@@ -152,6 +152,34 @@ test("GET /api/chat/threads/:id returns 404 for another user's thread", async ()
   assert.equal(res.status, 404);
 });
 
+test("PATCH /api/chat/threads/:id returns 404 for another user's thread", async () => {
+  const created = await agent
+    .post('/api/chat/threads')
+    .send({ title: 'user1 patch target' });
+  assert.equal(created.status, 201);
+  const id = created.body.id as number;
+
+  const res = await agent2
+    .patch(`/api/chat/threads/${id}`)
+    .send({ title: 'hacked' });
+  assert.equal(res.status, 404);
+});
+
+test("DELETE /api/chat/threads/:id returns 404 for another user's thread", async () => {
+  const created = await agent
+    .post('/api/chat/threads')
+    .send({ title: 'user1 delete target' });
+  assert.equal(created.status, 201);
+  const id = created.body.id as number;
+
+  const res = await agent2.delete(`/api/chat/threads/${id}`);
+  assert.equal(res.status, 404);
+
+  // Verify still exists for owner
+  const own = await agent.get(`/api/chat/threads/${id}`);
+  assert.equal(own.status, 200);
+});
+
 test('PATCH /api/chat/threads/:id with { title } renames; second GET reflects', async () => {
   const created = await agent.post('/api/chat/threads').send({ title: 'old name' });
   assert.equal(created.status, 201);
