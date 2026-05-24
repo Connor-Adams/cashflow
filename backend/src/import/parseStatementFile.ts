@@ -1,4 +1,5 @@
 import path from 'path';
+import { Op } from 'sequelize';
 import { Account, HoldingSnapshot, InvestmentActivity, Transaction } from '../models';
 import * as env from '../config/env';
 import { parseCsvRecords } from './csvParse';
@@ -357,14 +358,43 @@ function parseOfx(
 }
 
 async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): Promise<void> {
-  const [txns, acts, holds] = await Promise.all([
-    Transaction.findAll({
-      where: {
-        accountId: preview.accountId,
-        sourceRowFingerprint: preview.transactions.map((r) => r.sourceRowFingerprint),
-      },
-      attributes: ['sourceRowFingerprint'],
-    }),
+  const txnKeys = preview.transactions.map((r) => ({
+    date: r.date,
+    amount: String(r.amount),
+    currency: r.currency,
+    merchantRaw: r.merchantRaw,
+  }));
+  const existingTxns = txnKeys.length
+    ? await Transaction.findAll({
+        where: {
+          accountId: preview.accountId,
+          [Op.or]: txnKeys,
+        },
+        attributes: ['date', 'amount', 'currency', 'merchantRaw', 'sourceReference'],
+      })
+    : [];
+  const txnIndex = new Map<string, Array<string | null>>();
+  for (const e of existingTxns) {
+    const k = `${e.date}|${String(e.amount)}|${e.currency}|${e.merchantRaw}`;
+    const list = txnIndex.get(k) ?? [];
+    list.push(e.sourceReference ?? null);
+    txnIndex.set(k, list);
+  }
+  preview.transactions.forEach((r) => {
+    const key = `${r.date}|${String(r.amount)}|${r.currency}|${r.merchantRaw}`;
+    const existingRefs = txnIndex.get(key);
+    if (!existingRefs || existingRefs.length === 0) {
+      r.duplicate = false;
+      return;
+    }
+    const newRef = r.sourceReference == null || r.sourceReference === '' ? null : r.sourceReference;
+    if (existingRefs.some((er) => er === newRef)) { r.duplicate = true; return; }
+    if (newRef == null && existingRefs.some((er) => er != null)) { r.duplicate = true; return; }
+    if (newRef != null && existingRefs.some((er) => er == null)) { r.duplicate = true; return; }
+    r.duplicate = false;
+  });
+
+  const [acts, holds] = await Promise.all([
     InvestmentActivity.findAll({
       where: {
         accountId: preview.accountId,
@@ -380,12 +410,8 @@ async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): 
       attributes: ['sourceRowFingerprint'],
     }),
   ]);
-  const txnSet = new Set(txns.map((r) => r.sourceRowFingerprint));
   const actSet = new Set(acts.map((r) => r.sourceRowFingerprint));
   const holdSet = new Set(holds.map((r) => r.sourceRowFingerprint));
-  preview.transactions.forEach((r) => {
-    r.duplicate = txnSet.has(r.sourceRowFingerprint);
-  });
   preview.investmentActivities.forEach((r) => {
     r.duplicate = actSet.has(r.sourceRowFingerprint);
   });
