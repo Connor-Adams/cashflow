@@ -168,8 +168,17 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, cppEmployee, eiEmployee]);
   push('L43500', 'Total payable', totalPayable);
 
+  // Tax deducted at source: sum T4 box 22 across all T4 slips.
+  const taxDeductedAtSource = sumD(t4s.map((s) => s.boxes['box22'] ?? D('0')));
+  push('L43700', 'Total income tax deducted', taxDeductedAtSource,
+    t4s.map((s) => ({ source: `Slip T4 #${s.slipId} box 22`, amount: s.boxes['box22'] ?? D('0') })),
+    'sum(T4.box22)');
+
   const instalmentsPaid = facts.carryforwards.instalmentsPaid;
-  const refundOrOwing = totalPayable.minus(instalmentsPaid);
+  const totalCredits = taxDeductedAtSource.plus(instalmentsPaid);
+  push('L48200', 'Total credits (tax deducted + instalments)', totalCredits);
+
+  const refundOrOwing = totalPayable.minus(totalCredits);
   push('L48500', refundOrOwing.greaterThan(0) ? 'Balance owing' : 'Refund', refundOrOwing);
 
   return {
