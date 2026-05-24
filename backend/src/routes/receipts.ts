@@ -294,7 +294,11 @@ router.patch('/external-order-items/:id', async (req, res, next) => {
     }
     if (Object.prototype.hasOwnProperty.call(body, 'businessUseOverride')) {
       const v = body.businessUseOverride;
-      if (v === null) patch.businessUseOverride = null;
+      if (v === null || v === '') patch.businessUseOverride = null;
+      else if (typeof v !== 'number' && typeof v !== 'string') {
+        res.status(400).json({ error: 'businessUseOverride must be number, string, or null' });
+        return;
+      }
       else {
         const n = Number(v);
         if (!Number.isFinite(n) || n < 0 || n > 100) {
