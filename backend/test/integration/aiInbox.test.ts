@@ -281,3 +281,35 @@ test('GET /api/ai/inbox/count includes non-dismissed rule proposals', async () =
   const r = await authed.get('/api/ai/inbox/count');
   assert.ok(r.body.byKind.rule_proposal >= 1);
 });
+
+test('POST /api/ai/rule-proposals dismiss normalizes multi-space patterns', async () => {
+  const { Transaction, Account } = await import('../../src/models/index.js');
+  const crypto = await import('crypto');
+  const account = await Account.create({
+    householdId, name: 'Spaces Acct', owner: 'me', defaultCurrency: 'CAD',
+  } as never);
+  for (let i = 0; i < 3; i += 1) {
+    await Transaction.create({
+      householdId, accountId: account.id, currency: 'CAD',
+      date: `2026-05-2${i}`,
+      merchantRaw: 'SPACE  HOG', merchantClean: 'SPACE  HOG',
+      importBatch: 'spaces-test',
+      sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      amount: -5,
+      finalCategory: 'Misc', finalBusiness: false, finalSplitType: 'me',
+      reviewedAt: new Date(),
+    } as never);
+  }
+  const before = await authed.get('/api/ai/inbox');
+  const beforeProposals = (before.body.items as Array<{ kind: string; summary: string }>)
+    .filter((i) => i.kind === 'rule_proposal' && i.summary.includes('SPACE HOG'));
+  assert.ok(beforeProposals.length >= 1, 'proposal should appear with collapsed-whitespace pattern');
+
+  const dismissRes = await authed.post('/api/ai/rule-proposals/SPACE%20%20HOG/dismiss');
+  assert.equal(dismissRes.status, 201);
+
+  const after = await authed.get('/api/ai/inbox');
+  const afterProposals = (after.body.items as Array<{ kind: string; summary: string }>)
+    .filter((i) => i.kind === 'rule_proposal' && i.summary.includes('SPACE HOG'));
+  assert.equal(afterProposals.length, 0, 'multi-space dismiss should exclude collapsed-space proposal');
+});

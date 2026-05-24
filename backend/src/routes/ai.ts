@@ -13,7 +13,7 @@ import {
   applyTransactionSuggestion,
   createTrackedSuggestion,
 } from '../ai/suggestionStore';
-import { findRuleProposals } from '../ai/ruleProposals';
+import { findRuleProposals, merchantPatternFor } from '../ai/ruleProposals';
 import { buildFinancialInsights } from '../ai/insights';
 import { auditTransactionsForMislabels } from '../ai/auditTransactions';
 import { aiSuggestLimiter } from './aiRateLimit';
@@ -248,7 +248,8 @@ router.post('/rule-proposals/:merchantPattern/approve', async (req, res, next) =
 
 router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) => {
   try {
-    const merchantPattern = decodeURIComponent(req.params.merchantPattern).trim();
+    const raw = decodeURIComponent(req.params.merchantPattern);
+    const merchantPattern = merchantPatternFor(raw);
     if (!merchantPattern) {
       res.status(400).json({ error: 'merchantPattern is required' });
       return;
@@ -258,11 +259,10 @@ router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) =
       kind: 'rule_proposal',
       inputSnapshot: { merchantPattern },
       output: null,
-      status: 'suggested',
+      status: 'rejected',
       model: 'deterministic',
       promptVersion: 'rule-proposal-dismiss-v1',
     });
-    await row.update({ status: 'rejected' });
     res.status(201).json({ ok: true, id: row.id });
   } catch (e) {
     next(e);

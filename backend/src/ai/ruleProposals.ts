@@ -31,7 +31,7 @@ type RuleProposalRow = {
   exampleids?: string;
 };
 
-function merchantPatternFor(value: string): string {
+export function merchantPatternFor(value: string): string {
   return value.trim().replace(/\s+/g, ' ').slice(0, 120);
 }
 
@@ -101,7 +101,7 @@ export async function findRuleProposals(householdId: number | null): Promise<Rul
   );
   const rejected = new Set(
     dismissed
-      .map((r) => (r.pattern || '').trim().toLowerCase())
+      .map((r) => merchantPatternFor(r.pattern || '').toLowerCase())
       .filter((p) => p.length > 0),
   );
   return rows
