@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getJson } from '@/lib/api';
 
 export type TaxLineDto = {
   code: string;
@@ -23,11 +24,7 @@ export function useTaxReturn(year: number) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/tax/personal/${year}/return`, { credentials: 'include' })
-      .then(async (r) => {
-        if (!r.ok) throw new Error((await r.json()).message ?? r.statusText);
-        return r.json();
-      })
+    getJson<TaxReturnDto>(`/api/tax/personal/${year}/return`)
       .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
       .catch((e) => { if (!cancelled) { setError(String(e?.message ?? e)); setLoading(false); } });
     return () => { cancelled = true; };

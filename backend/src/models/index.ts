@@ -13,6 +13,9 @@ import { Contact, initContact } from './Contact';
 import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
 import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
+import { ChatThread, initChatThread } from './ChatThread';
+import { ChatMessage, initChatMessage } from './ChatMessage';
+import { ChatProposal, initChatProposal } from './ChatProposal';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
@@ -47,6 +50,9 @@ initTransaction(sequelize);
 initImportHistory(sequelize);
 initReceipt(sequelize);
 initAiSuggestion(sequelize);
+initChatThread(sequelize);
+initChatMessage(sequelize);
+initChatProposal(sequelize);
 initExternalOrder(sequelize);
 initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
@@ -66,6 +72,9 @@ initTaxCategory(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
+
+Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
+Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
@@ -217,6 +226,9 @@ export {
   ImportHistory,
   Receipt,
   AiSuggestion,
+  ChatThread,
+  ChatMessage,
+  ChatProposal,
   ExternalOrder,
   ExternalOrderItem,
   ExternalOrderTender,

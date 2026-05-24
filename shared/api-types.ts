@@ -583,6 +583,104 @@ export type ReceiptWithItems = {
   items: ExternalOrderItemView[];
 };
 
+/**
+ * Response shape for GET /api/ai/status. `openai` reflects whether the
+ * server has an OpenAI key configured (and the caller is not a demo user).
+ * `chat` is the UI-facing flag for chat availability; it now mirrors
+ * `openai` (chat is always-on whenever a provider is configured) but is
+ * kept as a separate field for backward compatibility with existing
+ * callers.
+ */
+export type AiStatus = {
+  openai: boolean
+  chat: boolean
+}
+
+/** A persisted chat thread row (GET /api/chat/threads, /:id). */
+export type ChatThread = {
+  id: number
+  userId: number
+  title: string | null
+  archivedAt: string | null
+  lastMessageAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ChatMessageRole = 'user' | 'assistant' | 'tool'
+
+/** Shape of an entry in `toolCalls` JSON column on assistant messages. */
+export type ChatStoredToolCall = {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+/** A persisted chat message row (GET /api/chat/threads/:id). */
+export type ChatMessage = {
+  id: number
+  threadId: number
+  role: ChatMessageRole
+  contentText: string | null
+  toolCalls: ChatStoredToolCall[] | null
+  toolCallId: string | null
+  toolName: string | null
+  model: string | null
+  promptTokens: number | null
+  completionTokens: number | null
+  latencyMs: number | null
+  providerRequestId: string | null
+  createdAt: string
+}
+
+export type ChatProposalKind =
+  | 'transaction_edit'
+  | 'bulk_patch'
+  | 'rule_create'
+  | 'rule_update'
+  | 'rule_delete'
+
+export type ChatProposalStatus = 'pending' | 'applied' | 'rejected' | 'expired'
+
+/** A persisted chat proposal row (GET /api/chat/threads/:id, SSE proposal events). */
+export type ChatProposal = {
+  id: number
+  threadId: number
+  messageId: number
+  kind: ChatProposalKind
+  payload: Record<string, unknown>
+  preview: Record<string, unknown>
+  status: ChatProposalStatus
+  expiresAt: string
+  appliedAt: string | null
+  appliedResult: Record<string, unknown> | null
+  createdAt: string
+}
+
+/** Response shape for GET /api/chat/threads/:id. */
+export type ChatThreadDetail = {
+  thread: ChatThread
+  messages: ChatMessage[]
+  proposals: ChatProposal[]
+}
+
+/**
+ * SSE event union streamed by POST /api/chat/threads/:id/messages.
+ * Frontend hook decodes each `event:` + `data:` pair into one of these.
+ */
+export type ChatStreamEvent =
+  | { type: 'assistant_token'; text: string }
+  | { type: 'tool_call_start'; toolName: string; argsPreview: string }
+  | { type: 'tool_call_result'; toolName: string; ok: boolean; preview: unknown }
+  | {
+      type: 'proposal'
+      proposalId: number
+      kind: ChatProposalKind
+      preview: Record<string, unknown>
+    }
+  | { type: 'assistant_done'; messageId: number }
+  | { type: 'error'; message: string; code?: string }
+
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export type ClientLogPayload = {

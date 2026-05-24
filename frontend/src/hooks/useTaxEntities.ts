@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getJson } from '@/lib/api';
 
 export type TaxEntity = {
   id: number;
@@ -13,10 +14,9 @@ export function useTaxEntities() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/tax/entities', { credentials: 'include' })
-      .then((r) => r.json())
+    getJson<{ entities: TaxEntity[] }>('/api/tax/entities')
       .then((d) => { if (!cancelled) setEntities(d.entities); })
-      .catch((e) => { if (!cancelled) setError(String(e)); });
+      .catch((e) => { if (!cancelled) setError(String(e?.message ?? e)); });
     return () => { cancelled = true; };
   }, []);
   return { entities, error };

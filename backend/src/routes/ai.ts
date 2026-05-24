@@ -22,8 +22,13 @@ import { jsonExtractText } from '../util/dialectSql';
 const router = Router();
 
 router.get('/status', (req, res) => {
+  const openai = !isDemoUserRequest(req) && getOpenAiConfig() != null;
   res.json({
-    openai: !isDemoUserRequest(req) && getOpenAiConfig() != null,
+    openai,
+    // UI-facing "chat is available" — chat is always-on whenever an OpenAI
+    // key is configured (chat is useless without the provider). Demo users
+    // get the same false they get for `openai`.
+    chat: openai,
   });
 });
 
