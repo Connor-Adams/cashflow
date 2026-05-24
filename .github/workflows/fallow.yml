@@ -8,6 +8,10 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: fallow-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-latest
@@ -21,3 +25,4 @@ jobs:
           command: audit
           comment: true
           annotations: false
+          fail_on_issues: false

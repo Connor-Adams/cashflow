@@ -9,7 +9,7 @@ export function rowFingerprint(payload: {
   date: string;
   amount: number;
   currency: string;
-  merchantClean: string;
+  merchantRaw: string;
   sourceReference: string | null;
 }): string {
   const data = {
@@ -17,7 +17,7 @@ export function rowFingerprint(payload: {
     date: payload.date,
     amount: String(payload.amount),
     currency: String(payload.currency || '').toUpperCase(),
-    merchantClean: String(payload.merchantClean || ''),
+    merchantRaw: String(payload.merchantRaw || ''),
     sourceReference: payload.sourceReference || null,
   };
   return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');

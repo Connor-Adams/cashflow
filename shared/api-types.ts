@@ -156,6 +156,8 @@ export type Rule = {
   splitType: string
   pctMe: string | null
   pctPartner: string | null
+  effectiveFrom: string | null
+  effectiveTo: string | null
   usageCount?: number
 }
 
@@ -288,6 +290,12 @@ export type PortfolioSummary = {
   accounts: Account[]
   holdings: HoldingSnapshot[]
   totalsByCurrency: Array<{ currency: string; marketValue: number }>
+  /** CAD-equivalent unified total via Bank of Canada daily rates. Null when any FX lookup fails. */
+  unifiedTotal: {
+    baseCurrency: 'CAD'
+    marketValue: number
+    ratesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }>
+  } | null
   recentActivities: InvestmentActivity[]
   quoteProvider: string
   quoteConfigured: boolean

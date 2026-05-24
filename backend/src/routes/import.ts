@@ -21,7 +21,7 @@ import { logger } from '../observability/logger';
 
 const csvUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 20 },
+  limits: { fileSize: 15 * 1024 * 1024, files: 120 },
   fileFilter: (_req, file, cb) => {
     if (!/\.(csv|pdf)$/i.test(file.originalname)) {
       const e = new Error('Only .csv and .pdf files are allowed') as Error & { status?: number };
@@ -298,7 +298,7 @@ router.post(
   '/upload-many',
   importUploadLimiter,
   (req, res, next) => {
-    csvUpload.array('files', 20)(req as never, res as never, (err: unknown) => {
+    csvUpload.array('files', 120)(req as never, res as never, (err: unknown) => {
       if (err) {
         next(err);
         return;
@@ -338,18 +338,36 @@ router.post(
         totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
 
-      const results = [];
+      // Per-file try/catch so a single throw (DB constraint, parser
+      // crash, etc.) never kills the whole batch response. Every file
+      // gets a result row; the frontend's per-file table depends on
+      // the full results array for partial-failure visibility.
+      const results: unknown[] = [];
       for (const file of files) {
-        const result = await importCsvFile({
-          buffer: file.buffer,
-          fileName: file.originalname,
-          accountId,
-          batchLabel,
-          profileId,
-          householdId: household.id,
-          userId: user.id,
-        });
-        results.push(result);
+        try {
+          const result = await importCsvFile({
+            buffer: file.buffer,
+            fileName: file.originalname,
+            accountId,
+            batchLabel,
+            profileId,
+            householdId: household.id,
+            userId: user.id,
+          });
+          results.push(result);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          logImportEvent('multi_upload_file_failed', {
+            file: file.originalname,
+            error: message,
+          });
+          results.push({
+            file: file.originalname,
+            skipped: true,
+            reason: 'error',
+            error: message,
+          });
+        }
       }
 
       logImportEvent('multi_upload_completed', {

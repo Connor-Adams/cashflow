@@ -212,7 +212,7 @@ export async function buildTransactionSuggestionContext(
     ),
     findMerchantMemory(householdId, txn.merchantClean, num(txn.amount)),
   ]);
-  const matching = findBestRule(rules, txn.merchantClean);
+  const matching = findBestRule(rules, txn.merchantClean, txn.date);
   const similarTransactions = priorRows
     .map((row) => {
       const merchant = normalizeForSimilarity(row.merchantClean);

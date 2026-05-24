@@ -28,6 +28,9 @@ categories:
       - 'build'
       - 'ci'
       - 'documentation'
+  - title: 'Other Changes'
+    labels:
+      - '*'
 
 exclude-labels:
   - 'skip-changelog'
@@ -53,37 +56,40 @@ version-resolver:
 autolabeler:
   - label: 'feature'
     title:
-      - '/^feat(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?feat(\(.+\))?:/'
   - label: 'fix'
+    branch:
+      - '/^codex\/fix-.+/'
+      - '/^fix\/.+/'
     title:
-      - '/^fix(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?fix(\(.+\))?:/'
   - label: 'performance'
     title:
-      - '/^perf(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?perf(\(.+\))?:/'
   - label: 'dependencies'
     title:
-      - '/^deps(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?deps(\(.+\))?:/'
   - label: 'chore'
     title:
-      - '/^chore(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?chore(\(.+\))?:/'
   - label: 'refactor'
     title:
-      - '/^refactor(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?refactor(\(.+\))?:/'
   - label: 'test'
     title:
-      - '/^test(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?test(\(.+\))?:/'
   - label: 'build'
     title:
-      - '/^build(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?build(\(.+\))?:/'
   - label: 'ci'
     title:
-      - '/^ci(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?ci(\(.+\))?:/'
   - label: 'documentation'
     title:
-      - '/^docs(\(.+\))?:/'
+      - '/^(\[codex\]\s+)?docs(\(.+\))?:/'
   - label: 'breaking'
     title:
-      - '/^[a-z]+(\(.+\))?!:/'
+      - '/^(\[codex\]\s+)?[a-z]+(\(.+\))?!:/'
 
 change-template: '- $TITLE (#$NUMBER) by @$AUTHOR'
 change-title-escapes: '\<*_&'

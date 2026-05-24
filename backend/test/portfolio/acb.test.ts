@@ -14,7 +14,8 @@ function act(
   activityType: string,
   quantity: number | null,
   amount: number | null,
-  currency = 'CAD'
+  currency = 'CAD',
+  fees: number | null = null
 ): AcbActivity {
   return {
     id: nextId++,
@@ -23,6 +24,7 @@ function act(
     quantity,
     amount,
     currency,
+    fees,
   };
 }
 
@@ -207,4 +209,163 @@ test('timeline records one entry per buy/sell, in chronological order', () => {
   assert.equal(r.timeline[0].asOf, '2024-01-15');
   assert.equal(r.timeline[1].asOf, '2024-03-15');
   assert.equal(r.timeline[2].asOf, '2024-04-15');
+});
+
+// ---------------------------------------------------------------------------
+// DRIP / reinvestment tests
+// ---------------------------------------------------------------------------
+
+test('DRIP after a BUY: per-unit ACB is correctly weighted', () => {
+  // BUY 10 @ $1000 total → ACB $100/unit
+  // DRIP 0.5 @ $52 total → new ACB = (1000+52)/10.5 ≈ 100.190476...
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', 0.5, 52),
+  ]);
+  assert.equal(r.finalState.quantity, 10.5);
+  APPROX(r.finalState.totalCost, 1052);
+  APPROX(r.finalState.acbPerUnit, 1052 / 10.5);
+  // Both events must appear in the timeline.
+  assert.equal(r.timeline.length, 2);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.warnings.length, 0);
+});
+
+test('DRIP with null quantity emits a warning and does not crash', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', null, 52),
+  ]);
+  assert.ok(r.warnings.some((w) => /missing quantity or amount/i.test(w)));
+  // Position unchanged — only the BUY in the timeline.
+  assert.equal(r.timeline.length, 1);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('DRIP with null amount emits a warning and does not crash', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', 0.5, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /missing quantity or amount/i.test(w)));
+  // Position unchanged — only the BUY in the timeline.
+  assert.equal(r.timeline.length, 1);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('SELL after DRIPs uses the post-DRIP per-unit ACB', () => {
+  // BUY 10 @ 1000 → ACB 100
+  // DRIP 0.5 @ 52 → ACB (1052/10.5) ≈ 100.190476
+  // SELL 5 shares → proceeds 520, cost removed 5 * (1052/10.5), gain = 520 - cost
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'reinvestment', 0.5, 52),
+    act('2024-03-15', 'sell', 5, 520),
+  ]);
+  const expectedAcb = 1052 / 10.5;
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, expectedAcb);
+  APPROX(r.realizedEvents[0].costRemoved, 5 * expectedAcb);
+  APPROX(r.realizedEvents[0].realizedGain, 520 - 5 * expectedAcb);
+  // Remaining: 5.5 shares at same per-unit ACB.
+  APPROX(r.finalState.quantity, 5.5);
+  APPROX(r.finalState.acbPerUnit, expectedAcb);
+});
+
+test('DRIP into a closed position (qty 0) starts a fresh ACB', () => {
+  // BUY 10 @ 1000, SELL 10 (close), then DRIP 0.5 @ 52.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-02-15', 'sell', 10, 1200), // close; ACB reset
+    act('2024-03-15', 'reinvestment', 0.5, 52), // fresh position
+  ]);
+  assert.equal(r.finalState.quantity, 0.5);
+  APPROX(r.finalState.totalCost, 52);
+  APPROX(r.finalState.acbPerUnit, 104);
+  // Realized from the SELL only.
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].realizedGain, 200);
+});
+
+// ---------------------------------------------------------------------------
+// Fee / commission handling (CRA rules)
+// ---------------------------------------------------------------------------
+
+test('BUY with fees: fees are added to total cost and affect per-unit ACB', () => {
+  // 10 units, $1000 trade amount, $9.99 commission → total cost $1009.99
+  const r = computeAcb([act('2024-01-15', 'buy', 10, 1000, 'CAD', 9.99)]);
+  APPROX(r.finalState.totalCost, 1009.99);
+  APPROX(r.finalState.acbPerUnit, 1009.99 / 10);
+  assert.equal(r.finalState.quantity, 10);
+});
+
+test('SELL with fees: fees reduce net proceeds and therefore realized gain', () => {
+  // BUY 10 @ $100 each = $1000 total cost, no fees → ACB $100/unit
+  // SELL 10 @ $1300 gross, $9.99 commission → net proceeds $1290.01
+  // Realized gain = $1290.01 - $1000 = $290.01
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000, 'CAD', null),
+    act('2024-03-15', 'sell', 10, 1300, 'CAD', 9.99),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].proceeds, 1290.01);
+  APPROX(r.realizedEvents[0].costRemoved, 1000);
+  APPROX(r.realizedEvents[0].realizedGain, 290.01);
+  APPROX(r.realizedTotal, 290.01);
+});
+
+test('SELL with fees: costRemoved is unchanged by SELL fee (only ACB at sale time matters)', () => {
+  // BUY 20 @ $50 each ($1000 total, no fee) → ACB $50/unit
+  // SELL 10 @ $700 gross, $5 fee → net proceeds $695, cost removed 10*50=$500, gain $195
+  // Remaining 10 units still at ACB $50 each
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 20, 1000, 'CAD', null),
+    act('2024-03-15', 'sell', 10, 700, 'CAD', 5),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].proceeds, 695);
+  APPROX(r.realizedEvents[0].costRemoved, 500);
+  APPROX(r.realizedEvents[0].realizedGain, 195);
+  assert.equal(r.finalState.quantity, 10);
+  // Remaining position ACB per unit must not be contaminated by the sell fee
+  APPROX(r.finalState.acbPerUnit, 50);
+  APPROX(r.finalState.totalCost, 500);
+});
+
+test('multiple BUYs with varying fees: weighted-average ACB includes all fees', () => {
+  // BUY 10 @ $100 + $10 fee = $1010 cost
+  // BUY  5 @ $120/unit = $600 + $5 fee = $605 cost
+  // Total cost = $1615 for 15 units → ACB $1615/15 ≈ $107.6667/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000, 'CAD', 10),
+    act('2024-02-15', 'buy', 5, 600, 'CAD', 5),
+  ]);
+  assert.equal(r.finalState.quantity, 15);
+  APPROX(r.finalState.totalCost, 1615);
+  APPROX(r.finalState.acbPerUnit, 1615 / 15);
+});
+
+test('fees: null and fees: 0 are both treated as zero (no effect)', () => {
+  const rNull = computeAcb([act('2024-01-15', 'buy', 10, 1000, 'CAD', null)]);
+  const rZero = computeAcb([act('2024-01-15', 'buy', 10, 1000, 'CAD', 0)]);
+  APPROX(rNull.finalState.totalCost, 1000);
+  APPROX(rZero.finalState.totalCost, 1000);
+  APPROX(rNull.finalState.acbPerUnit, 100);
+  APPROX(rZero.finalState.acbPerUnit, 100);
+});
+
+test('fees are ignored on no-op activity types (dividend, fee-type, etc.)', () => {
+  // A "fee" activity type is a no-op in ACB; any fees field on it should not
+  // move the ACB or quantity.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000, 'CAD', 9),
+    act('2024-02-15', 'fee', null, 25, 'CAD', 2),
+  ]);
+  // Only one timeline entry (the BUY)
+  assert.equal(r.timeline.length, 1);
+  APPROX(r.finalState.totalCost, 1009);
+  APPROX(r.finalState.acbPerUnit, 1009 / 10);
+  assert.equal(r.finalState.quantity, 10);
 });

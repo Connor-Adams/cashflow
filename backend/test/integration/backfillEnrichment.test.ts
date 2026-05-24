@@ -94,7 +94,7 @@ async function createTxn(opts: {
       date: opts.date ?? '2026-04-15',
       amount: opts.amount,
       currency: 'CAD',
-      merchantClean: opts.merchantClean,
+      merchantRaw: opts.merchantRaw,
       sourceReference: '',
     }),
     txnType: 'purchase',

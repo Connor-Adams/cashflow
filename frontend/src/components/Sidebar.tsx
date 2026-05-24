@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useAiInboxCount } from '@/hooks/useAiInboxCount'
+import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
 
 type NavItem = {
   to: string
@@ -162,6 +163,31 @@ function SidebarFooter() {
         <LogOut aria-hidden="true" />
         Log out
       </Button>
+      <SidebarVersion />
+    </div>
+  )
+}
+
+function SidebarVersion() {
+  const backend = useBackendVersion()
+  const backendVersion =
+    backend.status === 'ok' ? backend.version : backend.status === 'loading' ? '…' : '?'
+  const drift = backend.status === 'ok' && backend.version !== FRONTEND_VERSION
+  return (
+    <div className="sidebar__version" data-drift={drift} aria-label="Build versions">
+      <span className="sidebar__versionRow">
+        <span className="sidebar__versionLabel">fe</span>
+        <span className="sidebar__versionValue">{FRONTEND_VERSION}</span>
+      </span>
+      <span className="sidebar__versionRow">
+        <span className="sidebar__versionLabel">be</span>
+        <span className="sidebar__versionValue">{backendVersion}</span>
+      </span>
+      {drift && (
+        <span className="sidebar__versionDrift" role="status">
+          versions differ
+        </span>
+      )}
     </div>
   )
 }

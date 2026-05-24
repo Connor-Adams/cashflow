@@ -243,7 +243,7 @@ export async function seedDemoData(): Promise<void> {
             date,
             amount: row.amount,
             currency: 'CAD',
-            merchantClean: row.merchant,
+            merchantRaw: row.merchant,
             sourceReference,
           }),
           appliedRuleId: null,

@@ -101,6 +101,7 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
   signals.push(...safeStage('apply-rule', () => runApplyRuleStage({
     merchantClean,
     rules: input.rules,
+    txnDate: input.raw.date,
   }), []));
 
   // Stage 5: merchant-memory

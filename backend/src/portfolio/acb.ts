@@ -2,9 +2,14 @@
  * Pure adjusted cost base (ACB) engine for a single security.
  *
  * Canadian CRA-style weighted-average ACB:
- *  - BUY increases position; cost adds at trade amount.
+ *  - BUY increases position; cost adds at trade amount PLUS any commission/fee
+ *    on the trade (CRA requires fees to be included in the cost base).
+ *  - DRIP (`reinvestment`) is treated as BUY — new shares from a reinvested
+ *    dividend add to position and add to total cost.
  *  - SELL removes qty at the prevailing per-unit ACB (NOT FIFO);
- *    proceeds minus removed-cost = realized gain.
+ *    net proceeds (gross proceeds MINUS the sell commission/fee) minus
+ *    removed-cost = realized gain. Sell fees reduce the gain, not the ACB.
+ *    The `proceeds` field on AcbRealizedEvent is the net (after-fee) figure.
  *  - When the position closes (quantity drops to ~0) the per-unit ACB
  *    resets to zero, so the next BUY starts a fresh cost base.
  *  - Other activity types (dividend, interest, fee, etc.) are recorded
@@ -26,6 +31,8 @@ export type AcbActivity = {
   quantity: number | null;
   amount: number | null;
   currency: string;
+  /** Trade commission / brokerage fee, if any. Added to cost on BUY; subtracted from proceeds on SELL. */
+  fees?: number | null;
 };
 
 /** Position state recorded after each buy/sell event. */
@@ -119,7 +126,7 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         continue;
       }
       const qty = activity.quantity;
-      const cost = Math.abs(activity.amount);
+      const cost = Math.abs(activity.amount) + Math.abs(activity.fees ?? 0);
       const newQuantity = state.quantity + qty;
       const newTotalCost = state.totalCost + cost;
       const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
@@ -144,7 +151,7 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         );
         qtySold = state.quantity;
       }
-      const proceeds = Math.abs(activity.amount);
+      const proceeds = Math.abs(activity.amount) - Math.abs(activity.fees ?? 0);
       const acbAtSale = state.acbPerUnit;
       const costRemoved = qtySold * acbAtSale;
       const realizedGain = proceeds - costRemoved;
@@ -183,11 +190,34 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'reinvestment') {
+      // DRIP: a cash dividend that was automatically reinvested by buying
+      // additional shares of the same security. CRA treats this identically
+      // to a BUY — the reinvested amount is added to total cost and the
+      // new shares are added to the position.
+      if (activity.quantity == null || activity.amount == null) {
+        warnings.push(
+          `REINVESTMENT activity ${activity.id} on ${activity.tradeDate} missing quantity or amount; ignored`
+        );
+        continue;
+      }
+      const qty = activity.quantity;
+      const cost = Math.abs(activity.amount);
+      const newQuantity = state.quantity + qty;
+      const newTotalCost = state.totalCost + cost;
+      const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
     }
-    // All other activity types (dividend, interest, fee, reinvestment,
-    // split, transfer, other) are intentionally ignored — they don't
-    // shift the weighted-average ACB. We do NOT filter them out of the
-    // input (the caller may still want to see them in their stream).
+    // All other activity types (dividend, interest, fee, split, transfer,
+    // other) are intentionally ignored — they don't shift the
+    // weighted-average ACB. We do NOT filter them out of the input (the
+    // caller may still want to see them in their stream).
   }
 
   return {

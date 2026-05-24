@@ -1,6 +1,7 @@
 {
   "name": "cashflow",
   "private": true,
+  "license": "UNLICENSED",
   "packageManager": "yarn@1.22.22",
   "workspaces": [
     "backend",

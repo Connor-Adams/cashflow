@@ -70,9 +70,12 @@ export function parseGoogleReceipt(body: string): ExtractedReceiptOrder | null {
     vendorName: 'Google',
     orderDate,
     orderId,
+    subtotal: null,
+    tax: null,
     total,
     currency: null,
     paymentLast4: last4,
+    tenders: [],
     items,
     notes: null,
   };

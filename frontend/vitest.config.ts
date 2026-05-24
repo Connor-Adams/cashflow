@@ -23,9 +23,10 @@ export default defineConfig({
         url: 'http://localhost',
       },
     },
-    // vitest's populateGlobal does not forward Window.prototype getters (like
-    // localStorage) to the test global. vitest.setup.ts manually binds them.
-    setupFiles: ['./vitest.setup.ts'],
+    globals: true,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // vitest.setup.ts binds jsdom localStorage on globalThis (Node 26 workaround).
+    // test-setup.ts wires @testing-library/jest-dom matchers.
+    setupFiles: ['./vitest.setup.ts', './src/test-setup.ts'],
   },
 })

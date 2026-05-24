@@ -482,9 +482,12 @@ export function DashboardPage() {
       lookup.get(p.month)!.set(p.currency, p.sumAmount)
     }
     return months.map((month) => {
-      const row: Record<string, string | number> = { month }
+      // null (vs 0) so Recharts treats missing (month, currency) pairs as
+      // gaps rather than "$0 spent" — paired with connectNulls={false} on
+      // the Line element below.
+      const row: Record<string, string | number | null> = { month }
       for (const c of monthlyLineKeys) {
-        row[c] = lookup.get(month)?.get(c) ?? 0
+        row[c] = lookup.get(month)?.get(c) ?? null
       }
       return row
     })
@@ -714,12 +717,13 @@ export function DashboardPage() {
     dateFrom !== defaultRange.from ||
     dateTo !== defaultRange.to
 
-  // When the view is unbounded on both ends ("All time"), there is no prior
-  // window to compare against — the previous-period totals collapse to zero
-  // and any rendered delta is misleading (always "+ entire amount" in green).
-  // Suppress the delta prop in that case; StatCard handles `undefined` by not
-  // rendering the badge.
-  const hasComparisonPeriod = Boolean(dateFrom || dateTo)
+  // True only when a real previous window exists. `getPreviousRange` returns
+  // null whenever either bound is missing or the range is empty, so this
+  // tracks the actual fetch outcome rather than re-deriving from raw inputs.
+  // Single-bound filters (only dateFrom or only dateTo) previously slipped
+  // through `Boolean(dateFrom || dateTo)` and rendered fabricated deltas
+  // against $0 prior-period totals.
+  const hasComparisonPeriod = Boolean(previousRange)
 
   const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
   const formatDashboardAmount = (value: number): string =>
@@ -1418,8 +1422,15 @@ export function DashboardPage() {
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                   cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value, name) => {
+                    // Recharts passes the raw dataset value through; with
+                    // connectNulls={false} on the Line, missing-data points
+                    // are literally null in the row. Suppress those tooltip
+                    // entries entirely — Number(null) is 0, which would
+                    // re-introduce the false "$0.00" the chart-line fix
+                    // was meant to eliminate.
+                    if (value == null) return null
                     const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
+                    if (!Number.isFinite(v)) return null
                     return formatMoney(v, String(name))
                   }}
                 />
@@ -1437,6 +1448,7 @@ export function DashboardPage() {
                     stroke={LINE_COLORS[i % LINE_COLORS.length]}
                     dot={false}
                     strokeWidth={2}
+                    connectNulls={false}
                   />
                 ))}
               </LineChart>

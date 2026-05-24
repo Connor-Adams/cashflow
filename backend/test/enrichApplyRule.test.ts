@@ -20,6 +20,7 @@ test('emits rule signal with high confidence on unambiguous match', () => {
   const signals = runApplyRuleStage({
     merchantClean: 'NETFLIX',
     rules: [rule({ id: 7, merchantPattern: 'NETFLIX', category: 'Subscriptions', isBusiness: false, splitType: 'shared', pctMe: '0.5', pctPartner: '0.5' })],
+    txnDate: '2026-01-01',
   });
   assert.equal(signals.length, 1);
   assert.equal(signals[0].source, 'rule');
@@ -33,6 +34,7 @@ test('emits no signal when no rules match', () => {
   const signals = runApplyRuleStage({
     merchantClean: 'UNKNOWN MERCHANT',
     rules: [rule({ id: 1, merchantPattern: 'NETFLIX' })],
+    txnDate: '2026-01-01',
   });
   assert.equal(signals.length, 0);
 });
@@ -44,6 +46,7 @@ test('emits no signal when rule match is ambiguous', () => {
       rule({ id: 1, merchantPattern: 'COFFEE', priority: 5 }),
       rule({ id: 2, merchantPattern: 'COFFEE', priority: 5 }),
     ],
+    txnDate: '2026-01-01',
   });
   assert.equal(signals.length, 0);
 });

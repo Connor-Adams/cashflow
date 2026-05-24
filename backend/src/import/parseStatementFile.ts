@@ -238,7 +238,7 @@ function parseOfx(
         date,
         amount,
         currency: defaultCurr,
-        merchantClean,
+        merchantRaw,
         sourceReference: tag(block, 'FITID'),
       }),
     });
@@ -505,7 +505,7 @@ export async function parseStatementFile(opts: {
           date: v.date,
           amount: v.amount,
           currency: v.currency,
-          merchantClean: v.merchantClean,
+          merchantRaw: v.merchantRaw,
           sourceReference: v.sourceReference,
         });
         // Wealthsimple monthly statements carry an authoritative TX code in
@@ -643,7 +643,7 @@ export async function parseStatementFile(opts: {
         date: v.date,
         amount: v.amount,
         currency: v.currency,
-        merchantClean: v.merchantClean,
+        merchantRaw: v.merchantRaw,
         sourceReference: v.sourceReference,
       }),
     }));
