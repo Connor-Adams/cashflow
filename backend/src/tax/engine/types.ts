@@ -39,6 +39,65 @@ export type PersonalCarryforwards = {
   instalmentsPaid: Decimal;
 };
 
+export type CorpFiscalYear = {
+  startDate: string;   // 'YYYY-MM-DD'
+  endDate: string;     // 'YYYY-MM-DD'
+};
+
+export type CorpDividendPaid = {
+  source: string;
+  date: string;
+  amount: Decimal;
+  kind: 'eligible' | 'non_eligible';
+};
+
+export type CorpCarryforwards = {
+  grip: Decimal;          // General Rate Income Pool balance start of year
+  cda: Decimal;           // Capital Dividend Account balance start of year
+  erdtoh: Decimal;        // Eligible Refundable Dividend Tax On Hand start of year
+  nerdtoh: Decimal;       // Non-Eligible RDTOH start of year
+  nonCapLoss: Decimal;
+  netCapitalLoss: Decimal;
+};
+
+export type CorpTaxYearFacts = {
+  fiscalYear: CorpFiscalYear;
+  jurisdiction: 'CA-ON';
+  activeBusinessIncome: IncomeItem[];   // revenue - expenses, net
+  investmentIncome: {
+    interest: IncomeItem[];
+    eligibleDividends: IncomeItem[];
+    nonEligibleDividends: IncomeItem[];
+    rentNet: IncomeItem[];
+  };
+  capitalGainEvents: CapGainEvent[];
+  dividendsPaid: CorpDividendPaid[];
+  salaryPaid: Decimal;                  // T4 box 14 from corp to owner
+  carryforwards: CorpCarryforwards;
+};
+
+export type CorpTaxReturn = {
+  fiscalYear: CorpFiscalYear;
+  lines: TaxLine[];
+  totals: {
+    activeBusinessIncome: Decimal;
+    sbdEligibleIncome: Decimal;   // post-AAII grind
+    generalRateIncome: Decimal;
+    aii: Decimal;                  // adjusted aggregate investment income
+    taxableIncome: Decimal;
+    federalTax: Decimal;
+    provincialTax: Decimal;
+    refundableTaxOnAii: Decimal;
+    dividendRefund: Decimal;
+    netTaxPayable: Decimal;
+    gripEnding: Decimal;
+    cdaEnding: Decimal;
+    erdtohEnding: Decimal;
+    nerdtohEnding: Decimal;
+  };
+  warnings: string[];
+};
+
 export type TaxYearFacts = {
   year: number;
   jurisdiction: 'CA-ON';
@@ -135,4 +194,17 @@ export type RateTable = {
   medicalThresholdPercent: Decimal;
   medicalThresholdCap: Decimal;
   sources: { name: string; url: string }[];
+
+  // Phase 3 — Corp T2
+  corpAbiSbdRateFederal: Decimal;       // 9% federal SBD rate
+  corpAbiSbdRateOntario: Decimal;       // 3.2% ON SBD rate
+  corpGeneralRateFederal: Decimal;      // 15% federal general
+  corpGeneralRateOntario: Decimal;      // 11.5% ON general
+  corpInvestmentRateFederal: Decimal;   // 38.67% federal investment (incl. refundable)
+  corpInvestmentRateOntario: Decimal;   // 11.5% ON
+  corpRefundableTaxOnAII: Decimal;      // 10.67% refundable portion of investment income tax
+  corpSbdAnnualLimit: Decimal;          // $500,000
+  corpAaiiGrindThreshold: Decimal;      // $50,000
+  corpAaiiGrindRate: Decimal;           // $5 SBD lost per $1 AAII above threshold
+  corpDividendRefundRate: Decimal;      // 38.33% (RDTOH refund cap per dividend $)
 };
