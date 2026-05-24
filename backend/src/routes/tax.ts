@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
-import { Entity, TaxReturn, TaxSlip, Carryforward } from '../models';
+import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
+import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
+import { buildT2 } from '../tax/engine/t2';
 import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/brackets';
 import { factsHash } from '../tax/util/factsHash';
+import type { CorpFiscalYear } from '../tax/engine/types';
 
 const router = Router();
 
@@ -189,6 +192,152 @@ router.get('/slips', async (req, res, next) => {
     const rows = await TaxSlip.findAll({ where });
     res.json({ slips: rows });
   } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Corp routes
+// ---------------------------------------------------------------------------
+
+// GET /api/tax/corp/shareholder-loans — list shareholder loan entries for the corp entity.
+// NOTE: this route must appear BEFORE /corp/:fiscalYear/return to avoid Express treating
+// "shareholder-loans" as a :fiscalYear param.
+router.get('/corp/shareholder-loans', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
+    if (!entity) {
+      res.json({ shareholderLoans: [] });
+      return;
+    }
+    const rows = await ShareholderLoan.findAll({
+      where: { entityId: entity.id },
+      order: [['date', 'DESC']],
+    });
+    res.json({ shareholderLoans: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tax/corp/shareholder-loans — create a shareholder loan entry.
+router.post('/corp/shareholder-loans', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const { entityId, date, kind, amount, description } = (req.body ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const entity = await Entity.findOne({
+      where: { id: entityId as number, householdId: household.id, kind: 'corp' },
+    });
+    if (!entity) {
+      res.status(404).json({ error: 'entity_not_found' });
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const row = await (ShareholderLoan.create as any)({
+      entityId: entity.id,
+      date,
+      kind,
+      amount,
+      description: description ?? null,
+    });
+    res.status(201).json({ shareholderLoan: row });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/tax/corp/:fiscalYear/return — compute (or return cached) T2 for the corp entity.
+// fiscalYear param: 'YYYY' (calendar year) or 'YYYY-MM-DD/YYYY-MM-DD'
+router.get('/corp/:fiscalYear/return', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const rawParam = req.params.fiscalYear;
+
+    let fiscalYear: CorpFiscalYear;
+    if (rawParam.includes('/')) {
+      const parts = rawParam.split('/');
+      if (parts.length !== 2) {
+        res.status(400).json({ error: 'invalid_fiscal_year', message: 'Use YYYY or YYYY-MM-DD/YYYY-MM-DD.' });
+        return;
+      }
+      fiscalYear = { startDate: parts[0], endDate: parts[1] };
+    } else {
+      const year = Number(rawParam);
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+        res.status(400).json({ error: 'invalid_fiscal_year', message: 'Year must be between 2000 and 2100.' });
+        return;
+      }
+      fiscalYear = { startDate: `${year}-01-01`, endDate: `${year}-12-31` };
+    }
+
+    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
+    if (!entity) {
+      res.status(404).json({
+        error: 'no_corp_entity',
+        message: 'No Corp entity for this household. POST /api/tax/entities to create one.',
+      });
+      return;
+    }
+
+    const facts = await buildCorpFacts(entity.id, fiscalYear);
+    const hash = factsHash(serializeFacts(facts));
+
+    const snapshotYear = Number(fiscalYear.startDate.slice(0, 4));
+    const cached = await TaxReturn.findOne({ where: { entityId: entity.id, year: snapshotYear } });
+    if (cached && cached.factsHash === hash) {
+      res.json({
+        cached: true,
+        computedAt: cached.computedAt,
+        lines: cached.lines,
+        totals: cached.totals,
+        warnings: cached.warnings,
+      });
+      return;
+    }
+
+    const rateTable = ratesFor(snapshotYear);
+    const ret = buildT2(facts, rateTable);
+    const lines = serializeLines(ret.lines);
+    const totals = serializeTotals(ret.totals);
+    const computedAt = new Date();
+
+    if (cached) {
+      await cached.update({
+        factsHash: hash,
+        computedAt,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        lines: lines as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        totals: totals as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        warnings: ret.warnings as any,
+      });
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (TaxReturn.create as any)({
+        entityId: entity.id,
+        year: snapshotYear,
+        factsHash: hash,
+        computedAt,
+        lines,
+        totals,
+        warnings: ret.warnings,
+      });
+    }
+
+    res.json({ cached: false, computedAt, lines, totals, warnings: ret.warnings });
+  } catch (err) {
+    if (err instanceof RateTableMissingError) {
+      res.status(409).json({
+        error: 'rate_table_missing',
+        message: (err as Error).message,
+      });
+      return;
+    }
     next(err);
   }
 });
