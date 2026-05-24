@@ -26,6 +26,8 @@ import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMont
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
+import { useInsightsSeen } from '@/hooks/useInsightsSeen'
+import { useAuth } from '@/lib/useAuth'
 import { formatMoney } from '../lib/formatMoney'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
@@ -301,6 +303,17 @@ export function DashboardPage() {
   const [recurringLoading, setRecurringLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+
+  const auth = useAuth()
+  const userIdForSeen = String(auth.user?.id ?? 'anon')
+  const { isSeen, markSeen } = useInsightsSeen(userIdForSeen)
+  const sortedInsights = aiInsights
+    ? [...aiInsights.insights].sort((a, b) => {
+        const order: Record<string, number> = { action: 0, watch: 1, info: 2 }
+        return (order[a.severity] ?? 3) - (order[b.severity] ?? 3)
+      })
+    : []
+  const hasActionSeverity = sortedInsights.some((i) => i.severity === 'action')
 
   const summaryQs = useMemo(
     () => summaryQueryString({ currency, dateFrom, dateTo }),
@@ -903,6 +916,12 @@ export function DashboardPage() {
       </Card>
 
       <div className="dashboardBento" aria-busy={loading}>
+        {hasActionSeverity ? (
+          <div className="aiActionBanner" role="status">
+            AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
+            <a href="#ai-insights-tile">Jump to insights</a>
+          </div>
+        ) : null}
         {budgetProgressSorted.length > 0 && (
           <BentoTile
             span={12}
@@ -1304,10 +1323,11 @@ export function DashboardPage() {
         </BentoTile>
 
         <BentoTile
-          span={4}
+          span={hasActionSeverity ? 6 : 4}
           rows={2}
           aria-busy={loading}
           label="AI insights"
+          id="ai-insights-tile"
           description={
             aiInsights
               ? `${aiInsights.currency} · ${aiInsights.period}`
@@ -1322,14 +1342,16 @@ export function DashboardPage() {
             ) : aiInsights.insights.length === 0 ? (
               <p className="emptyState">No AI insights for {aiInsights.period} yet.</p>
             ) : (
-              [...aiInsights.insights]
-                .sort((a, b) => {
-                  const order: Record<string, number> = { action: 0, watch: 1, info: 2 }
-                  return (order[a.severity] ?? 3) - (order[b.severity] ?? 3)
-                })
-                .map((insight) => (
-                  <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
+              sortedInsights.map((insight) => {
+                const unread = !isSeen(aiInsights.period, insight.metric, insight.title)
+                return (
+                  <article
+                    key={`${insight.metric}-${insight.title}`}
+                    className={`aiVisibilityItem${unread ? ' is-unread' : ''}`}
+                    onClick={() => markSeen(aiInsights.period, insight.metric, insight.title)}
+                  >
                     <div className="aiVisibilityItemHeader">
+                      {unread ? <span className="unreadDot" aria-label="New" /> : null}
                       <strong>{insight.title}</strong>
                       <SeverityBadge severity={insight.severity} />
                     </div>
@@ -1341,7 +1363,7 @@ export function DashboardPage() {
                       <p className="muted aiVisibilitySupportingIds">
                         Transactions:{' '}
                         {insight.supportingTransactionIds.map((id, idx) => (
-                          <span key={id}>
+                          <span key={`${id}-${idx}`}>
                             {idx > 0 ? ', ' : null}
                             <Link to={`/transactions?ids=${id}`}>#{id}</Link>
                           </span>
@@ -1358,7 +1380,8 @@ export function DashboardPage() {
                       </Link>
                     ) : null}
                   </article>
-                ))
+                )
+              })
             )}
           </div>
         </BentoTile>

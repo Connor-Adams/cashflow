@@ -15,6 +15,17 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    environmentOptions: {
+      jsdom: {
+        // jsdom v26 requires a non-opaque origin for localStorage / sessionStorage to
+        // be available. The default vitest URL is already http://localhost:3000 but we
+        // set it explicitly here for clarity.
+        url: 'http://localhost',
+      },
+    },
+    // vitest's populateGlobal does not forward Window.prototype getters (like
+    // localStorage) to the test global. vitest.setup.ts manually binds them.
+    setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },
 })

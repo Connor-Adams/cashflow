@@ -861,6 +861,32 @@
     @apply mb-0 mt-1 leading-5;
   }
 
+  .aiActionBanner {
+    background: var(--destructive, #fee2e2);
+    color: var(--destructive-foreground, #7f1d1d);
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.875rem;
+  }
+  .aiActionBanner a {
+    color: inherit;
+    text-decoration: underline;
+  }
+  .aiVisibilityItem.is-unread {
+    border-left: 3px solid var(--brand, #f59e0b);
+    padding-left: 0.5rem;
+  }
+  .unreadDot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--brand, #f59e0b);
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+
   .transactionsTableCard {
     @apply mb-0;
   }
