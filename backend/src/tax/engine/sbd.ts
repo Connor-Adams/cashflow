@@ -1,4 +1,4 @@
-import { D, Decimal, maxZero } from '../util/decimal';
+import { Decimal, maxZero } from '../util/decimal';
 import type { RateTable } from './types';
 
 /**

@@ -1,4 +1,4 @@
-import { D, Decimal, sumD, maxZero } from '../util/decimal';
+import { Decimal, sumD, maxZero } from '../util/decimal';
 import type { CorpTaxYearFacts, RateTable } from './types';
 
 /**

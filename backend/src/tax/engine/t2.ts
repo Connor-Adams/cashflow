@@ -1,4 +1,4 @@
-import { D, Decimal, sumD, maxZero } from '../util/decimal';
+import { Decimal, sumD, maxZero } from '../util/decimal';
 import type { CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
 import { computeAaii } from './aaii';
 import { sbdEligibleIncome } from './sbd';
