@@ -103,7 +103,14 @@ async function extractPageLines(page: any, pageNum: number): Promise<PdfLine[]> 
 export async function extractPdfLines(buffer: Buffer): Promise<PdfLine[]> {
   // The "legacy" build avoids the Web Worker; required in Node.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const data = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  // pdfjs.getDocument takes ownership of the typed array and detaches its
+  // underlying ArrayBuffer when parsing completes. Copy the bytes into a
+  // fresh ArrayBuffer so the caller's Buffer stays usable for a second pass
+  // (the RBC bundle flow extracts lines for the header, then re-extracts
+  // inside parseStatementFile) and so other multer files sharing a pooled
+  // ArrayBuffer are not collateral-detached.
+  const data = new Uint8Array(buffer.byteLength);
+  data.set(buffer);
   const doc = await pdfjs.getDocument({ data, useSystemFonts: true, disableFontFace: true }).promise;
   try {
     const out: PdfLine[] = [];
