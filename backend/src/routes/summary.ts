@@ -8,6 +8,7 @@ import {
   type AccountRow,
   type SummaryTxnRow,
 } from '../summary/aggregateDashboard';
+import { loadItemAllocationContext } from '../summary/loadItemAllocations';
 import {
   aggregateMonthly,
   type MonthlyTxnRow,
@@ -54,6 +55,7 @@ router.get('/dashboard', async (req, res, next) => {
           'merchantClean',
           'merchantCanonical',
           'amount',
+          'businessAmount',
           'reviewFlag',
           'txnType',
         ],
@@ -70,9 +72,11 @@ router.get('/dashboard', async (req, res, next) => {
       (accounts as unknown as AccountRow[]).map((account) => [account.id, account])
     );
 
+    const itemContext = await loadItemAllocationContext(rows.map((r) => (r as unknown as SummaryTxnRow).id));
     const aggregates = aggregateDashboard(
       rows as unknown as SummaryTxnRow[],
       accountById,
+      itemContext,
     );
 
     res.json({
