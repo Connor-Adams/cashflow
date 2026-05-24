@@ -346,6 +346,191 @@ test('applyProposal returns not_found when proposal is in a different thread', a
   assert.equal(res.code, 'not_found');
 });
 
+test('applyProposal transaction_edit recomputes finals and share columns', async () => {
+  // Seed a txn whose finalCategory was driven by autoCategory (no override).
+  // After applying an edit that sets categoryOverride, finalCategory must
+  // reflect the override — proves recomputeTransactionAmounts ran.
+  const ctx = await makeCtx();
+  const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
+    merchantClean: 'STARBUCKS',
+    amount: '-10.00',
+    autoCategory: 'AutoCat',
+    categoryOverride: null,
+    finalCategory: 'AutoCat',
+    autoSplitType: 'shared',
+    autoPctMe: '0.5',
+    autoPctPartner: '0.5',
+    finalSplitType: 'shared',
+    finalPctMe: '0.5',
+    finalPctPartner: '0.5',
+    myShareAmount: '-5.00',
+    partnerShareAmount: '-5.00',
+    sourceRowFingerprint: 'ape-recompute-1',
+  });
+
+  const built = await proposals.buildTransactionEditPreview(
+    txnId,
+    { category_override: 'NewCat' },
+    ctx
+  );
+  assert.ok('proposal_id' in built);
+  if (!('proposal_id' in built)) return;
+
+  const res = await proposals.applyProposal(built.proposal_id, ctx);
+  assert.equal(res.ok, true);
+
+  const txn = await models.Transaction.findByPk(txnId);
+  assert.ok(txn);
+  // Override column took the patch value.
+  assert.equal(txn!.categoryOverride, 'NewCat');
+  // Final column reflects the override (would have stayed 'AutoCat' without
+  // the recompute call). This is the load-bearing assertion for C2.
+  assert.equal(txn!.finalCategory, 'NewCat');
+});
+
+test('applyProposal bulk_patch recomputes finals and share columns', async () => {
+  // Mirror of the transaction_edit recompute test, for the bulk path.
+  const ctx = await makeCtx();
+  const ids: number[] = [];
+  for (let i = 0; i < 2; i++) {
+    ids.push(
+      await seedTxn(models, ctx.accountId, ctx.householdId, {
+        merchantClean: `STARBUCKS ${i}`,
+        amount: '-8.00',
+        autoCategory: 'AutoBulkCat',
+        categoryOverride: null,
+        finalCategory: 'AutoBulkCat',
+        autoSplitType: 'me',
+        finalSplitType: 'me',
+        myShareAmount: '-8.00',
+        partnerShareAmount: '0',
+        sourceRowFingerprint: `apbp-recompute-${i}`,
+        date: `2026-05-${20 + i}`,
+      })
+    );
+  }
+
+  const built = await proposals.buildBulkPatchPreview(
+    { merchant_pattern: 'starbucks' },
+    { category_override: 'NewBulkCat' },
+    ctx
+  );
+  assert.ok('proposal_id' in built);
+  if (!('proposal_id' in built)) return;
+
+  const res = await proposals.applyProposal(built.proposal_id, ctx);
+  assert.equal(res.ok, true);
+
+  const after = await models.Transaction.findAll({ where: { id: ids } });
+  assert.equal(after.length, 2);
+  for (const row of after) {
+    assert.equal(row.categoryOverride, 'NewBulkCat');
+    assert.equal(row.finalCategory, 'NewBulkCat');
+  }
+});
+
+test('buildRuleUpdatePreview rejects non-whitelisted patch keys', async () => {
+  // C1: a patch that tries to forge household_id, id, or createdByUserId
+  // must be rejected at proposal-build time. No proposal row is created.
+  const ctx = await makeCtx();
+  const ruleId = await seedRule(models, ctx.householdId, {
+    merchantPattern: 'OG',
+    category: 'Original',
+  });
+
+  for (const badKey of ['household_id', 'id', 'created_by_user_id']) {
+    const res = await proposals.buildRuleUpdatePreview(
+      ruleId,
+      { [badKey]: 999, category: 'Tries' },
+      ctx
+    );
+    assert.ok('error' in res, `expected error for key ${badKey}`);
+    if (!('error' in res)) return;
+    assert.match(res.error, /not in the rule patch whitelist/);
+    assert.match(res.error, new RegExp(badKey));
+  }
+
+  // No proposal should have been persisted.
+  const proposalCount = await models.ChatProposal.count();
+  assert.equal(proposalCount, 0);
+
+  // And the rule itself must be untouched.
+  const rule = await models.Rule.findByPk(ruleId);
+  assert.equal(rule!.category, 'Original');
+});
+
+test('applyRuleUpdate defense-in-depth rejects bad patch persisted on the proposal row', async () => {
+  // Defense-in-depth: even if a bad patch somehow lands in the payload
+  // (manual DB edit, older buggy code path), applyProposal must throw rather
+  // than write a forged field. We tamper with the payload after the preview
+  // is built to simulate this.
+  const ctx = await makeCtx();
+  const ruleId = await seedRule(models, ctx.householdId, {
+    merchantPattern: 'DEFENSE',
+    category: 'Old',
+  });
+  const built = await proposals.buildRuleUpdatePreview(
+    ruleId,
+    { category: 'New' },
+    ctx
+  );
+  assert.ok('proposal_id' in built);
+  if (!('proposal_id' in built)) return;
+
+  // Inject a non-whitelisted key directly into the persisted payload.
+  await models.ChatProposal.update(
+    {
+      payload: { rule_id: ruleId, patch: { household_id: 999, category: 'New' } },
+    },
+    { where: { id: built.proposal_id } }
+  );
+
+  await assert.rejects(
+    () => proposals.applyProposal(built.proposal_id, ctx),
+    /rule patch validation failed/
+  );
+
+  // The rule must NOT have been mutated.
+  const rule = await models.Rule.findByPk(ruleId);
+  assert.equal(rule!.category, 'Old');
+  assert.equal(rule!.householdId, ctx.householdId);
+});
+
+test('applyProposal does not downgrade applied status to expired when expiresAt is past', async () => {
+  // I1: regression test. An already-applied proposal whose expiresAt is in
+  // the past must stay 'applied' and return not_pending — NOT 'expired'.
+  const ctx = await makeCtx();
+  const txnId = await seedTxn(models, ctx.accountId, ctx.householdId, {
+    sourceRowFingerprint: 'ape-i1-1',
+  });
+  const built = await proposals.buildTransactionEditPreview(
+    txnId,
+    { notes: 'first apply' },
+    ctx
+  );
+  assert.ok('proposal_id' in built);
+  if (!('proposal_id' in built)) return;
+
+  const first = await proposals.applyProposal(built.proposal_id, ctx);
+  assert.equal(first.ok, true);
+
+  // Now rewind expiresAt to the past.
+  await models.ChatProposal.update(
+    { expiresAt: new Date(Date.now() - 60_000) },
+    { where: { id: built.proposal_id } }
+  );
+
+  // Second call should be not_pending (because status is 'applied'), NOT
+  // 'expired'. And the persisted status must stay 'applied'.
+  const second = await proposals.applyProposal(built.proposal_id, ctx);
+  assert.equal(second.ok, false);
+  if (second.ok) return;
+  assert.equal(second.code, 'not_pending');
+
+  const proposal = await models.ChatProposal.findByPk(built.proposal_id);
+  assert.equal(proposal!.status, 'applied');
+});
+
 test('applyProposal applied result contains discriminated kind in message contentText', async () => {
   const ctx = await makeCtx();
   const ruleId = await seedRule(models, ctx.householdId, {

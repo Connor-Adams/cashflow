@@ -24,6 +24,7 @@ import type { ChatProposalStatus } from '../../models/ChatProposal';
 import { sequelize } from '../../db';
 import { getChatConfig } from '../../config/chat';
 import { caseInsensitiveLikeOp } from './_common';
+import { recomputeTransactionAmounts } from '../../import/calculateShares';
 
 const PATCH_WHITELIST = new Set([
   'split_override',
@@ -44,6 +45,69 @@ const PATCH_FIELD_MAP: Record<string, string> = {
   notes: 'notes',
   review_flag: 'reviewFlag',
 };
+
+/**
+ * Whitelist of rule fields the LLM may patch via propose_rule_update.
+ * Mirrors the explicit allowlist in routes/rules.ts PATCH /:id (the
+ * authoritative route) so the chat path can't escalate by setting
+ * household_id, id, created_by_user_id, or other forged columns.
+ *
+ * Keys are snake_case as emitted by the LLM; PATCH_RULE_FIELD_MAP
+ * translates to camelCase Sequelize attributes.
+ */
+const RULE_PATCH_WHITELIST = new Set([
+  'merchant_pattern',
+  'match_kind',
+  'priority',
+  'category',
+  'is_business',
+  'split_type',
+  'pct_me',
+  'pct_partner',
+  'effective_from',
+  'effective_to',
+]);
+
+const RULE_PATCH_FIELD_MAP: Record<string, string> = {
+  merchant_pattern: 'merchantPattern',
+  match_kind: 'matchKind',
+  priority: 'priority',
+  category: 'category',
+  is_business: 'isBusiness',
+  split_type: 'splitType',
+  pct_me: 'pctMe',
+  pct_partner: 'pctPartner',
+  effective_from: 'effectiveFrom',
+  effective_to: 'effectiveTo',
+};
+
+type RuleWhitelistOk = { ok: true; value: Record<string, unknown> };
+type RuleWhitelistErr = { ok: false; error: string };
+
+function whitelistRulePatch(
+  patch: unknown
+): RuleWhitelistOk | RuleWhitelistErr {
+  if (patch == null || typeof patch !== 'object') {
+    return { ok: false, error: 'patch must be an object' };
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
+    if (!RULE_PATCH_WHITELIST.has(k)) {
+      return {
+        ok: false,
+        error: `field "${k}" is not in the rule patch whitelist`,
+      };
+    }
+    out[k] = v;
+  }
+  if (Object.keys(out).length === 0) {
+    return {
+      ok: false,
+      error: 'patch must include at least one whitelisted field',
+    };
+  }
+  return { ok: true, value: out };
+}
 
 /**
  * Maximum rows a single `propose_bulk_patch` may target. Settable via the
@@ -290,14 +354,20 @@ export async function buildRuleUpdatePreview(
   patch: Record<string, unknown>,
   ctx: ProposalContext
 ): Promise<BuildReturn> {
+  const cleaned = whitelistRulePatch(patch);
+  if (!cleaned.ok) return { error: cleaned.error };
   const where: Record<string, unknown> = { id: ruleId, householdId: ctx.householdId };
   const rule = await Rule.findOne({ where });
   if (!rule) return { error: `rule ${ruleId} not visible to user` };
   const before = rule.toJSON();
-  const after = { ...before, ...patch } as Record<string, unknown>;
-  const mergedPattern = String(
-    (after.merchantPattern ?? after.merchant_pattern) ?? ''
-  );
+  // Build the "after" preview using camelCase field names so it diffs cleanly
+  // against `before` (which is already in camelCase from rule.toJSON()).
+  const after = { ...before } as Record<string, unknown>;
+  for (const [snake, value] of Object.entries(cleaned.value)) {
+    const camel = RULE_PATCH_FIELD_MAP[snake];
+    if (camel) after[camel] = value;
+  }
+  const mergedPattern = String(after.merchantPattern ?? '');
   const txWhere: Record<string, unknown> = {
     householdId: ctx.householdId,
     [Op.or]: visibilityOr(ctx),
@@ -311,7 +381,7 @@ export async function buildRuleUpdatePreview(
     threadId: ctx.threadId,
     messageId: ctx.messageId,
     kind: 'rule_update',
-    payload: { rule_id: ruleId, patch },
+    payload: { rule_id: ruleId, patch: cleaned.value },
     preview,
     status: 'pending',
     expiresAt: expiresAt(),
@@ -363,9 +433,15 @@ export async function applyProposal(
   ctx: ProposalContext
 ): Promise<ApplyResult | ApplyError> {
   return sequelize.transaction(async (t) => {
+    // Row-level lock on the proposal so two concurrent applies serialize.
+    // Without this, both txns read status='pending', both apply, and we end
+    // up with duplicate role=tool messages (and possibly double-mutation for
+    // non-idempotent kinds). SQLite implicitly serializes via WAL, but
+    // Postgres needs the explicit FOR UPDATE.
     const proposal = await ChatProposal.findOne({
       where: { id: proposalId, threadId: ctx.threadId },
       transaction: t,
+      lock: t.LOCK.UPDATE,
     });
     if (!proposal) {
       return {
@@ -374,11 +450,18 @@ export async function applyProposal(
         message: 'proposal not found in this thread',
       };
     }
-    if (proposal.status === 'expired' || proposal.expiresAt.getTime() < Date.now()) {
-      if (proposal.status !== 'expired') {
-        proposal.set('status', 'expired');
-        await proposal.save({ transaction: t });
-      }
+    // Only `pending` proposals may be auto-expired. An already-`applied` or
+    // `rejected` proposal whose expiresAt is in the past must NOT be rewritten
+    // to `expired` — that would silently downgrade a successful apply.
+    if (
+      proposal.status === 'pending' &&
+      proposal.expiresAt.getTime() < Date.now()
+    ) {
+      proposal.set('status', 'expired');
+      await proposal.save({ transaction: t });
+      return { ok: false as const, code: 'expired', message: 'proposal expired' };
+    }
+    if (proposal.status === 'expired') {
       return { ok: false as const, code: 'expired', message: 'proposal expired' };
     }
     if (proposal.status !== 'pending') {
@@ -464,6 +547,10 @@ async function applyTransactionEdit(
   const txn = await Transaction.findOne({ where, transaction: t });
   if (!txn) throw new Error(`transaction ${payload.transaction_id} disappeared`);
   applyPatchToTxn(txn, payload.patch);
+  // Override columns drive finals: recompute final_* + *_share_amount so
+  // get_summary and the UI reflect the edit immediately. Without this the
+  // row's categoryOverride changes but finalCategory stays stale.
+  recomputeTransactionAmounts(txn);
   await txn.save({ transaction: t });
   return { updated_id: payload.transaction_id };
 }
@@ -505,6 +592,9 @@ async function applyBulkPatch(
   const matched = await Transaction.findAll({ where, transaction: t });
   for (const txn of matched) {
     applyPatchToTxn(txn, payload.patch);
+    // Same reason as applyTransactionEdit: keep finals + share columns in
+    // sync with the override columns we just mutated.
+    recomputeTransactionAmounts(txn);
     await txn.save({ transaction: t });
   }
   return { updated_count: matched.length, ids: matched.map((m) => m.id) };
@@ -547,16 +637,22 @@ async function applyRuleUpdate(
     rule_id: number;
     patch: Record<string, unknown>;
   };
+  // Defense-in-depth: even though buildRuleUpdatePreview rejects unknown keys,
+  // re-validate before mutating the row in case a malformed payload was ever
+  // persisted (e.g. older proposals from a buggy build, manual DB edit).
+  const cleaned = whitelistRulePatch(payload.patch);
+  if (!cleaned.ok) {
+    throw new Error(`rule patch validation failed: ${cleaned.error}`);
+  }
   const where: Record<string, unknown> = {
     id: payload.rule_id,
     householdId: ctx.householdId,
   };
   const rule = await Rule.findOne({ where, transaction: t });
   if (!rule) throw new Error(`rule ${payload.rule_id} disappeared`);
-  for (const [k, v] of Object.entries(payload.patch)) {
-    // Convert snake_case keys from the LLM to the model's camelCase fields.
-    const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-    rule.set(camel as keyof Rule['_attributes'], v as never);
+  for (const [snake, value] of Object.entries(cleaned.value)) {
+    const camel = RULE_PATCH_FIELD_MAP[snake];
+    if (camel) rule.set(camel as keyof Rule['_attributes'], value as never);
   }
   await rule.save({ transaction: t });
   return { rule_id: payload.rule_id };
