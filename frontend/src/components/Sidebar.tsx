@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   BarChart3,
@@ -9,6 +10,7 @@ import {
   LineChart,
   LayoutDashboard,
   LogOut,
+  MessageSquare,
   ReceiptText,
   Repeat,
   Settings,
@@ -23,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useAiInboxCount } from '@/hooks/useAiInboxCount'
+import { useAiStatus } from '@/hooks/useAiStatus'
 import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
 
 type NavItem = {
@@ -43,6 +46,7 @@ const navItems: NavItem[] = [
   { to: '/recurring', label: 'Recurring', icon: Repeat },
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
+  { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },
@@ -68,6 +72,16 @@ type SidebarProps = {
  * sidebar pinned in the grid.
  */
 export function Sidebar({ open, onClose }: SidebarProps) {
+  const aiStatus = useAiStatus()
+  // Hide chat nav until status loads (avoids a flash) and when OpenAI is
+  // not configured (chat is useless without a provider). Status is fetched
+  // once on mount; on error it resolves to `{ openai: false }` so we fail
+  // closed and hide the nav entry rather than leading users to a broken page.
+  const filteredItems = useMemo(() => {
+    if (aiStatus?.openai === true) return navItems
+    return navItems.filter((i) => i.to !== '/chat')
+  }, [aiStatus])
+
   return (
     <aside
       className="sidebar"
@@ -75,7 +89,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       aria-label="Primary navigation"
     >
       <SidebarBrand />
-      <SidebarNavList items={navItems} onItemClick={onClose} />
+      <SidebarNavList items={filteredItems} onItemClick={onClose} />
       <SidebarFooter />
     </aside>
   )

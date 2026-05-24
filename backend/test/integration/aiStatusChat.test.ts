@@ -1,13 +1,11 @@
 /**
- * Integration test (PR2 Task 15): GET /api/ai/status reports both `openai`
- * and `chat` flags. `chat` is true only when BOTH OPENAI_API_KEY is set AND
- * CHAT_ENABLED=true.
+ * Integration test: GET /api/ai/status reports both `openai` and `chat` flags.
+ * `chat` is always-on whenever OPENAI_API_KEY is set — the feature flag was
+ * removed in favour of always-on chat (the only reason chat would be
+ * unavailable is no provider, which `openai=false` already conveys).
  *
- * Both `getOpenAiConfig` and `getChatConfig` read process.env on each call,
- * so we can flip env vars between assertions in a single test run without
- * re-importing the app. The `/api/ai/status` endpoint sits on the always-
- * mounted `ai` router, so the `CHAT_ENABLED` import-time gate on the chat
- * router itself is not relevant here.
+ * `getOpenAiConfig` reads process.env on each call, so we can flip env vars
+ * between assertions in a single test run without re-importing the app.
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +24,7 @@ let app: import('express').Express;
 let agent: ReturnType<typeof request.agent>;
 
 // Snapshot the env vars we mutate so we can restore them in `after`.
-const ENV_KEYS = ['OPENAI_API_KEY', 'CHAT_ENABLED'] as const;
+const ENV_KEYS = ['OPENAI_API_KEY'] as const;
 const originalEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
 before(async () => {
@@ -39,7 +37,6 @@ before(async () => {
   process.env.NODE_ENV = 'test';
   // Start clean — flags get set per-test below.
   delete process.env.OPENAI_API_KEY;
-  delete process.env.CHAT_ENABLED;
 
   execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
     cwd: backendRoot,
@@ -102,34 +99,15 @@ after(() => {
   }
 });
 
-test('GET /api/ai/status with neither flag set: openai=false, chat=false', async () => {
+test('GET /api/ai/status without OPENAI_API_KEY: openai=false, chat=false', async () => {
   delete process.env.OPENAI_API_KEY;
-  delete process.env.CHAT_ENABLED;
   const res = await agent.get('/api/ai/status');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, { openai: false, chat: false });
 });
 
-test('GET /api/ai/status with only OPENAI_API_KEY: openai=true, chat=false', async () => {
+test('GET /api/ai/status with OPENAI_API_KEY: openai=true, chat=true (chat is always-on)', async () => {
   process.env.OPENAI_API_KEY = 'sk-test-key';
-  delete process.env.CHAT_ENABLED;
-  const res = await agent.get('/api/ai/status');
-  assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { openai: true, chat: false });
-});
-
-test('GET /api/ai/status with only CHAT_ENABLED: openai=false, chat=false', async () => {
-  // chat must require BOTH flags — CHAT_ENABLED alone is not enough.
-  delete process.env.OPENAI_API_KEY;
-  process.env.CHAT_ENABLED = 'true';
-  const res = await agent.get('/api/ai/status');
-  assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { openai: false, chat: false });
-});
-
-test('GET /api/ai/status with both flags set: openai=true, chat=true', async () => {
-  process.env.OPENAI_API_KEY = 'sk-test-key';
-  process.env.CHAT_ENABLED = 'true';
   const res = await agent.get('/api/ai/status');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, { openai: true, chat: true });

@@ -3,7 +3,6 @@ import { Op, QueryTypes, Transaction as SqlTransaction } from 'sequelize';
 import { AiSuggestion, Rule, Transaction } from '../models';
 import { sequelize } from '../models';
 import { getOpenAiConfig } from '../config/openai';
-import { getChatConfig } from '../config/chat';
 import { isDemoUserRequest } from '../demo/aiAccess';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { currentAuth } from '../auth/middleware';
@@ -26,10 +25,10 @@ router.get('/status', (req, res) => {
   const openai = !isDemoUserRequest(req) && getOpenAiConfig() != null;
   res.json({
     openai,
-    // UI-facing "chat is enabled" — requires both the feature flag AND an
-    // OpenAI key (chat is useless without the provider configured). Demo
-    // users get the same false they get for `openai`.
-    chat: openai && getChatConfig().enabled,
+    // UI-facing "chat is available" — chat is always-on whenever an OpenAI
+    // key is configured (chat is useless without the provider). Demo users
+    // get the same false they get for `openai`.
+    chat: openai,
   });
 });
 

@@ -3,7 +3,6 @@
  * tests can manipulate process.env freely.
  */
 export interface ChatConfig {
-  enabled: boolean;
   /** OpenAI model for chat turns. Falls back to OPENAI_MODEL, then gpt-4o-mini. */
   model: string;
   /** Per-user per-day token budget. Hard stop when exceeded. */
@@ -29,7 +28,6 @@ function numEnv(name: string, fallback: number): number {
 
 export function getChatConfig(): ChatConfig {
   return {
-    enabled: process.env.CHAT_ENABLED === 'true',
     model:
       process.env.CHAT_MODEL?.trim() ||
       process.env.OPENAI_MODEL?.trim() ||

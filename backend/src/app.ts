@@ -12,7 +12,6 @@ import summaryRouter from './routes/summary';
 import recurringRouter from './routes/recurring';
 import aiRouter from './routes/ai';
 import chatRouter from './routes/chat';
-import { getChatConfig } from './config/chat';
 import receiptsRouter from './routes/receipts';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
@@ -74,9 +73,7 @@ app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/ai', aiRouter);
-if (getChatConfig().enabled) {
-  app.use('/api/chat', chatRouter);
-}
+app.use('/api/chat', chatRouter);
 app.use('/api/amazon', amazonRouter);
 app.use('/api/external-orders', externalOrdersRouter);
 app.use('/api/email', emailIntegrationsRouter);

@@ -9,11 +9,6 @@
  *
  * Supertest collects the full response body as text; SSE blocks are parsed
  * locally (split on \n\n) since supertest doesn't expose a streaming API.
- *
- * Why CHAT_ENABLED must be set BEFORE importing src/app.js: the chat router
- * gate (src/app.ts) reads the env var at module-load time and never registers
- * the router if it's not 'true'. Each *.test.ts runs in its own tsx process,
- * so this env-var precondition is isolated from other test files.
  */
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,9 +40,6 @@ before(async () => {
 
   process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
-  // MUST be set before importing src/app — the chat router gate is read at
-  // module-load time.
-  process.env.CHAT_ENABLED = 'true';
 
   execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
     cwd: backendRoot,
