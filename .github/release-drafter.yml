@@ -42,7 +42,6 @@ version-resolver:
       - 'major'
   minor:
     labels:
-      - 'feature'
       - 'minor'
   patch:
     labels:
