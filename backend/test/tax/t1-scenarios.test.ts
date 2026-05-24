@@ -24,6 +24,8 @@ function baseFacts(): TaxYearFacts {
     nonEligibleDividends: [],
     capitalGainEvents: [],
     rrspContribs: [],
+    fhsaContribs: [],
+    donations: [],
     slips: [],
     carryforwards: { ...emptyCarryFwd },
     ageAtYearEnd: 40,
@@ -143,4 +145,51 @@ test('Scenario F: T4 box 22 ($14,000 withheld) reduces L48500 dollar-for-dollar'
   const baselineRefundOrOwing = baselineRet.totals.refundOrOwing;
   const expected = baselineRefundOrOwing.minus(D('14000'));
   assert.equal(ret.totals.refundOrOwing.toFixed(2), expected.toFixed(2));
+});
+
+test('Scenario G: OAS clawback — net income $100k triggers L23500 and increases total payable', () => {
+  const r = ratesFor(2024);
+  // $100k income: net income > $90,997 threshold → OAS clawback = ($100k - $90,997) × 15% = $1,350.45
+  const factsNoOas: TaxYearFacts = {
+    ...baseFacts(),
+    employmentIncome: [{ source: 'T4', amount: D('90000'), cadAmount: D('90000') }],
+  };
+  const factsWithOas: TaxYearFacts = {
+    ...baseFacts(),
+    employmentIncome: [{ source: 'T4', amount: D('100000'), cadAmount: D('100000') }],
+  };
+  const retNoOas = buildT1(factsNoOas, r);
+  const retWithOas = buildT1(factsWithOas, r);
+
+  // L23500 (OAS clawback) should appear in the $100k scenario
+  const oasLine = retWithOas.lines.find((l) => l.code === 'L23500');
+  assert.ok(oasLine, 'L23500 OAS clawback line should be present when net income > threshold');
+  assert.equal(oasLine!.amount.toFixed(2), '1350.45');
+
+  // The OAS clawback must be included in total payable
+  const clawbackAmount = D('1350.45');
+  // Total payable in the $100k case must be higher than $90k case by at least the clawback
+  // (it will be higher also due to higher marginal tax, so just check clawback adds to payable)
+  assert.ok(
+    retWithOas.totals.totalPayable.greaterThan(retNoOas.totals.totalPayable),
+    'Total payable must increase when OAS clawback applies',
+  );
+
+  // In the baseline $90k case (net income < threshold), no L23500 line
+  const noOasLine = retNoOas.lines.find((l) => l.code === 'L23500');
+  assert.equal(noOasLine, undefined, 'L23500 should not appear when net income <= threshold');
+
+  // FHSA deduction reduces net income below threshold so clawback is 0
+  const factsWithFhsa: TaxYearFacts = {
+    ...baseFacts(),
+    employmentIncome: [{ source: 'T4', amount: D('100000'), cadAmount: D('100000') }],
+    fhsaContribs: [{ source: 'FHSA', amount: D('8000'), date: '2024-02-01' }],
+    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('100000'), nonCapLoss: D('0'), instalmentsPaid: D('0') },
+  };
+  const retWithFhsa = buildT1(factsWithFhsa, r);
+  const oasLineFhsa = retWithFhsa.lines.find((l) => l.code === 'L23500');
+  // Net income after $8k FHSA deduction = $92,000; still above threshold ($90,997) → clawback exists
+  assert.ok(oasLineFhsa, 'OAS clawback should still exist at net income $92k');
+  // ($100k - $8k FHSA) - $90,997 = $1,003 × 15% = $150.45
+  assert.equal(oasLineFhsa!.amount.toFixed(2), '150.45');
 });

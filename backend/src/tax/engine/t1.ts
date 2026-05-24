@@ -13,8 +13,15 @@ import {
   ageCreditOntario,
   employmentAmountFederalApplied,
   cppEiCreditAmount,
+  donationCreditFederal,
+  donationCreditOntario,
+  disabilityCreditFederal,
+  caregiverCreditFederal,
+  tuitionCreditFederal,
+  pensionIncomeCreditFederal,
+  pensionIncomeCreditOntario,
+  oasClawback,
 } from './credits';
-// donationCreditFederal, donationCreditOntario, medicalCreditFederal imported in Phase 2 when data sources exist.
 
 export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const warnings: string[] = [];
@@ -94,9 +101,22 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     facts.rrspContribs.map((c) => ({ source: c.source, amount: c.amount })),
     `min(contribs, rrspRoom=${facts.carryforwards.rrspRoom.toFixed(2)})`);
 
+  // FHSA deduction L20805 — capped at annual limit ($8,000)
+  const fhsa = Decimal.min(sumD(facts.fhsaContribs.map((c) => c.amount)), r.fhsaAnnualLimit);
+  push('L20805', 'FHSA deduction', fhsa,
+    facts.fhsaContribs.map((c) => ({ source: c.source, amount: c.amount })),
+    `min(fhsaContribs, fhsaAnnualLimit=${r.fhsaAnnualLimit.toFixed(2)})`);
+
   // Net income L23600
-  const netIncome = maxZero(totalIncome.minus(rrsp));
+  const netIncome = maxZero(totalIncome.minus(rrsp).minus(fhsa));
   push('L23600', 'Net income', netIncome);
+
+  // OAS clawback / social benefits repayment L23500 — computed on net income before adjustments
+  const oasRepayment = oasClawback(netIncome, r);
+  if (oasRepayment.greaterThan(0)) {
+    push('L23500', 'Social benefits repayment (OAS clawback)', oasRepayment, [],
+      `15% × max(0, netIncome − ${r.oasClawbackThreshold.toFixed(2)})`);
+  }
 
   // Taxable income L26000 (apply non-cap loss carryforward)
   const nonCapLossApplied = Decimal.min(netIncome, facts.carryforwards.nonCapLoss);
@@ -121,9 +141,20 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const fedCreditAmountsTotal = sumD([bpaFedAmt, spousalFedAmt, ageFedAmt, employmentFedAmt, cppEiCreditEligible]);
   const fedNonRefundableLowRatePart = fedCreditAmountsTotal.times(r.donationLowRate);
 
-  // Donations (already a tax-credit value, not an amount × rate)
-  // For Phase 1 we don't have a donations data source — set to 0 unless user enters via slip later.
-  const donationsFedCredit = D('0');
+  // Donations — wire to actual donations facts
+  const totalDonations = sumD(facts.donations.map((i) => i.cadAmount));
+  const donationsFedCredit = donationCreditFederal(totalDonations, taxableIncome, r);
+
+  // Phase 2 credits — each returns a credit VALUE (already × rate); subtract dollar-for-dollar
+  const dtcSelfFedCredit = disabilityCreditFederal(
+    facts.disabilityCredit?.selfEligible ?? false, r,
+  );
+  const caregiverFedCredit = caregiverCreditFederal(
+    (facts.caregiverDependents ?? []).map((d) => ({ netIncome: d.netIncome, eligibleAmount: d.eligibleAmount })),
+    r,
+  );
+  const tuitionFedCredit = tuitionCreditFederal(facts.tuitionFees ?? D('0'), r);
+  const pensionFedCredit = pensionIncomeCreditFederal(facts.pensionIncome ?? D('0'), r);
 
   // Federal DTC (reduces federal tax dollar-for-dollar in credit-value form)
   const fedDtcEligible = dtcFederal(eligibleGrossed, 'eligible', r);
@@ -133,6 +164,10 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     federalTaxBeforeCredits
       .minus(fedNonRefundableLowRatePart)
       .minus(donationsFedCredit)
+      .minus(dtcSelfFedCredit)
+      .minus(caregiverFedCredit)
+      .minus(tuitionFedCredit)
+      .minus(pensionFedCredit)
       .minus(fedDtcEligible)
       .minus(fedDtcNonEligible)
   );
@@ -143,6 +178,11 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       { source: 'Age × low rate', amount: ageFedAmt.times(r.donationLowRate) },
       { source: 'Employment amount × low rate', amount: employmentFedAmt.times(r.donationLowRate) },
       { source: 'CPP+EI × low rate', amount: cppEiCreditEligible.times(r.donationLowRate) },
+      { source: 'Donations credit', amount: donationsFedCredit },
+      { source: 'Disability credit (self)', amount: dtcSelfFedCredit },
+      { source: 'Caregiver credit', amount: caregiverFedCredit },
+      { source: 'Tuition credit', amount: tuitionFedCredit },
+      { source: 'Pension income credit', amount: pensionFedCredit },
       { source: 'DTC eligible', amount: fedDtcEligible },
       { source: 'DTC non-eligible', amount: fedDtcNonEligible },
     ]);
@@ -153,9 +193,18 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const spousalOnAmt = facts.spouse ? spousalCreditOntario(facts.spouse.netIncome, r) : D('0');
   const ageOnAmt = ageCreditOntario(facts.ageAtYearEnd, netIncome, r);
   const onCreditTotal = sumD([bpaOnAmt, spousalOnAmt, ageOnAmt, cppEiCreditEligible]).times(r.provincialBrackets[0].rate);
+  const onDonationsCredit = donationCreditOntario(totalDonations, taxableIncome, r);
+  const onPensionCredit = pensionIncomeCreditOntario(facts.pensionIncome ?? D('0'), r);
   const onDtcEligible = dtcOntario(eligibleGrossed, 'eligible', r);
   const onDtcNonEligible = dtcOntario(nonElGrossed, 'non_eligible', r);
-  const onTax = maxZero(onTaxBeforeCredits.minus(onCreditTotal).minus(onDtcEligible).minus(onDtcNonEligible));
+  const onTax = maxZero(
+    onTaxBeforeCredits
+      .minus(onCreditTotal)
+      .minus(onDonationsCredit)
+      .minus(onPensionCredit)
+      .minus(onDtcEligible)
+      .minus(onDtcNonEligible),
+  );
   push('L42800', 'Net Ontario tax', onTax);
 
   // ON surtax + Ontario Health Premium (use rate table arrays)
@@ -165,7 +214,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   push('L42802', 'Ontario Health Premium', ohp);
 
   // Totals
-  const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, cppEmployee, eiEmployee]);
+  const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, cppEmployee, eiEmployee, oasRepayment]);
   push('L43500', 'Total payable', totalPayable);
 
   // Tax deducted at source: sum T4 box 22 across all T4 slips.
