@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
@@ -87,9 +88,13 @@ export function RecurringPage() {
 
       {err && <p className="error" role="alert">{err}</p>}
 
-      <section className="card">
+      <CollapsibleCard
+        id="recurring-merchants"
+        title="Recurring merchants"
+        description={`Detected charges that repeat within the last ${windowDays} days.`}
+      >
         <div className="tableWrap" aria-busy={loading}>
-          <Table>
+          <Table className="table">
             <TableHeader>
               <TableRow>
                 <TableHead>Merchant</TableHead>
@@ -132,7 +137,7 @@ export function RecurringPage() {
             </TableBody>
           </Table>
         </div>
-      </section>
+      </CollapsibleCard>
     </div>
   )
 }

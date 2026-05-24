@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildCsv, escapeCsvField } from '../../lib/csv'
 import { Alert } from './alert'
+import { CollapsibleCard } from './collapsible-card'
 import {
   Dialog,
   DialogBody,
@@ -798,5 +799,136 @@ describe('csv helpers', () => {
     const csv = buildCsv(['Ownership'], [['Smith, John'], ['Solo']])
     expect(csv).toContain('"Smith, John"')
     expect(csv).toContain('Solo')
+  })
+})
+
+describe('CollapsibleCard primitive', () => {
+  it('renders open by default with title, description, body, and ChevronDown', () => {
+    const html = renderToStaticMarkup(
+      <CollapsibleCard title="Merchants" description="All merchants here.">
+        <p>body content</p>
+      </CollapsibleCard>
+    )
+    expect(html).toContain('data-slot="collapsible-card"')
+    expect(html).toContain('data-state="open"')
+    expect(html).toContain('Merchants')
+    expect(html).toContain('All merchants here.')
+    expect(html).toContain('body content')
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('Collapse Merchants')
+    // lucide ChevronDown has a unique path; check on the svg class wrapper present
+    expect(html).toContain('lucide-chevron-down')
+  })
+
+  it('renders closed without body and uses ChevronRight when defaultOpen=false', () => {
+    const html = renderToStaticMarkup(
+      <CollapsibleCard title="Accounts" defaultOpen={false}>
+        <p>hidden body</p>
+      </CollapsibleCard>
+    )
+    expect(html).toContain('data-state="closed"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('Expand Accounts')
+    expect(html).not.toContain('hidden body')
+    expect(html).toContain('lucide-chevron-right')
+  })
+
+  it('renders an actions slot in the header', () => {
+    const html = renderToStaticMarkup(
+      <CollapsibleCard
+        title="Settlements"
+        actions={<button type="button">Record settlement</button>}
+      >
+        body
+      </CollapsibleCard>
+    )
+    expect(html).toContain('data-slot="collapsible-card-actions"')
+    expect(html).toContain('Record settlement')
+  })
+
+  describe('interactive', () => {
+    let harness: Harness
+
+    beforeEach(() => {
+      harness = createHarness()
+    })
+
+    afterEach(async () => {
+      await harness.unmount()
+    })
+
+    it('toggles open and closed when chevron button is clicked', async () => {
+      await harness.render(
+        <CollapsibleCard title="Merchants">
+          <p>row 1</p>
+        </CollapsibleCard>
+      )
+      const section = harness.container.querySelector(
+        '[data-slot="collapsible-card"]'
+      ) as HTMLElement
+      const toggle = harness.container.querySelector(
+        '[data-slot="collapsible-card-toggle"]'
+      ) as HTMLButtonElement
+      expect(section.getAttribute('data-state')).toBe('open')
+      expect(harness.container.textContent).toContain('row 1')
+
+      await act(async () => {
+        dispatchClick(toggle)
+      })
+      expect(section.getAttribute('data-state')).toBe('closed')
+      expect(harness.container.textContent).not.toContain('row 1')
+
+      await act(async () => {
+        dispatchClick(toggle)
+      })
+      expect(section.getAttribute('data-state')).toBe('open')
+      expect(harness.container.textContent).toContain('row 1')
+    })
+
+    it('toggles when title area is clicked', async () => {
+      await harness.render(
+        <CollapsibleCard title="Merchants">
+          <p>row body</p>
+        </CollapsibleCard>
+      )
+      const section = harness.container.querySelector(
+        '[data-slot="collapsible-card"]'
+      ) as HTMLElement
+      const h2 = harness.container.querySelector('h2') as HTMLElement
+      expect(section.getAttribute('data-state')).toBe('open')
+      await act(async () => {
+        dispatchClick(h2)
+      })
+      expect(section.getAttribute('data-state')).toBe('closed')
+    })
+
+    it('does NOT toggle when a click originates inside the actions slot', async () => {
+      const onAction = vi.fn()
+      await harness.render(
+        <CollapsibleCard
+          title="Settlements"
+          actions={
+            <button type="button" data-testid="record" onClick={onAction}>
+              Record settlement
+            </button>
+          }
+        >
+          <p>body</p>
+        </CollapsibleCard>
+      )
+      const section = harness.container.querySelector(
+        '[data-slot="collapsible-card"]'
+      ) as HTMLElement
+      const actionBtn = harness.container.querySelector(
+        '[data-testid="record"]'
+      ) as HTMLButtonElement
+      expect(section.getAttribute('data-state')).toBe('open')
+
+      await act(async () => {
+        dispatchClick(actionBtn)
+      })
+      expect(onAction).toHaveBeenCalledTimes(1)
+      expect(section.getAttribute('data-state')).toBe('open')
+    })
   })
 })

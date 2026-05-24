@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Download, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import {
   Dialog,
   DialogBody,
@@ -564,13 +565,13 @@ export function ReportsPage() {
       </section>
 
       <div className="reportsGrid">
-        <section className="card reportsTableCard">
-          <div className="reportsCardHeader">
-            <div>
-              <h2>Partner split totals</h2>
-              <p className="muted">How much of the selected spend belongs to each person.</p>
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <CollapsibleCard
+          id="partner-split"
+          className="reportsTableCard"
+          title="Partner split totals"
+          description="How much of the selected spend belongs to each person."
+          actions={
+            <>
               <Button
                 type="button"
                 size="sm"
@@ -601,8 +602,9 @@ export function ReportsPage() {
                 <Plus aria-hidden="true" />
                 Record settlement
               </Button>
-            </div>
-          </div>
+            </>
+          }
+        >
           {showPartnerRollup && (
             <ul className="partnerNetRollup" style={{ listStyle: 'none', padding: 0, margin: '0 0 0.75rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
               {partnerNetByCurrency.map(([cur, total]) => {
@@ -704,14 +706,14 @@ export function ReportsPage() {
               </TableBody>
             </Table>
           </div>
-        </section>
+        </CollapsibleCard>
 
-        <section className="card reportsTableCard">
-          <div className="reportsCardHeader">
-            <div>
-              <h2>Business expenses</h2>
-              <p className="muted">Transactions marked business, grouped by currency.</p>
-            </div>
+        <CollapsibleCard
+          id="business-expenses"
+          className="reportsTableCard"
+          title="Business expenses"
+          description="Transactions marked business, grouped by currency."
+          actions={
             <Button
               type="button"
               size="sm"
@@ -727,7 +729,8 @@ export function ReportsPage() {
               <Download aria-hidden="true" />
               Export CSV
             </Button>
-          </div>
+          }
+        >
           <div className="tableWrap" aria-busy={loading}>
             <Table className="table">
               <TableHeader>
@@ -755,18 +758,15 @@ export function ReportsPage() {
               </TableBody>
             </Table>
           </div>
-        </section>
+        </CollapsibleCard>
       </div>
 
-      <section className="card reportsTableCard mb-4">
-        <div className="reportsCardHeader">
-          <div>
-            <h2>Recent settlements</h2>
-            <p className="muted">
-              Manual records of money paid between you and a contact. Applied to the net partner balance above.
-            </p>
-          </div>
-        </div>
+      <CollapsibleCard
+        id="settlements"
+        className="reportsTableCard"
+        title="Recent settlements"
+        description="Manual records of money paid between you and a contact. Applied to the net partner balance above."
+      >
         {settlementsErr && <span className="error">{settlementsErr}</span>}
         <div className="tableWrap">
           <Table className="table">
@@ -828,7 +828,7 @@ export function ReportsPage() {
             </TableBody>
           </Table>
         </div>
-      </section>
+      </CollapsibleCard>
 
       <RankedReportSection
         id="merchants"
@@ -1067,13 +1067,12 @@ function RankedReportSection<R>({
 }: RankedReportSectionProps<R>) {
   const totalColumns = (showCurrencyColumn ? 1 : 0) + headers.length
   return (
-    <section id={id} className="card reportsTableCard mb-4">
-      <div className="reportsCardHeader">
-        <div>
-          <h2>{title}</h2>
-          <p className="muted">{description}</p>
-        </div>
-      </div>
+    <CollapsibleCard
+      id={id}
+      title={title}
+      description={description}
+      toggleLabel={title}
+    >
       <div className="tableWrap">
         <Table className="table">
           <TableHeader>
@@ -1098,6 +1097,6 @@ function RankedReportSection<R>({
           </TableBody>
         </Table>
       </div>
-    </section>
+    </CollapsibleCard>
   )
 }

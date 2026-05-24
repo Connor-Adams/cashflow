@@ -4,6 +4,7 @@ import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -350,16 +351,13 @@ export function AccountsPage() {
         </p>
       )}
 
-      <Card className="accountsTableCard">
-        <div className="accountsCardHeader">
-          <div>
-            <h2>Your accounts</h2>
-            <p className="muted">
-              Edit the basics here without cramming action buttons into the currency field.
-            </p>
-          </div>
-          <Badge variant="secondary">{accountCount} total</Badge>
-        </div>
+      <CollapsibleCard
+        id="your-accounts"
+        className="accountsTableCard"
+        title="Your accounts"
+        description="Edit the basics here without cramming action buttons into the currency field."
+        actions={<Badge variant="secondary">{accountCount} total</Badge>}
+      >
         <div className="tableWrap">
           <Table className="table">
             <TableHeader>
@@ -510,7 +508,7 @@ export function AccountsPage() {
             </p>
           )}
         </div>
-      </Card>
+      </CollapsibleCard>
     </div>
     {confirm.dialog}
     </>
