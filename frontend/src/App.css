@@ -1948,6 +1948,7 @@
   }
 }
 
+<<<<<<< HEAD
 .ruleRow.isFocused td {
   animation: ruleFocusFlash 2s ease-out 1;
   background-color: color-mix(in srgb, var(--primary) 14%, transparent);
@@ -2003,5 +2004,89 @@
 }
 
 .enrichBackfillFeed__cleared {
+  color: var(--success);
+}
+
+.enrichStatGrid {
+  display: grid;
+  grid-template-columns: 1.6fr repeat(5, 1fr);
+  gap: 0.625rem;
+  margin-bottom: 0.875rem;
+}
+
+@media (max-width: 960px) {
+  .enrichStatGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 520px) {
+  .enrichStatGrid { grid-template-columns: 1fr; }
+}
+
+.enrichWorkflowTile {
+  background: var(--warning-bg);
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  color: var(--warning-foreground);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.enrichWorkflowTile--empty {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.enrichWorkflowTile__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--warning-foreground);
+  opacity: 0.85;
+  margin: 0;
+}
+
+.enrichWorkflowTile__value {
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--warning-foreground);
+  margin: 0.125rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.enrichWorkflowTile__pct {
+  font-size: 0.8rem;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+.enrichWorkflowTile__sub {
+  font-size: 0.78rem;
+  color: var(--warning-foreground);
+  opacity: 0.85;
+  margin: 0.25rem 0 0;
+}
+
+.enrichWorkflowTile__cta {
+  display: inline-block;
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 6px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: 1px solid var(--primary-hover);
+  text-decoration: none;
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.enrichWorkflowTile__cta:hover {
+  background: var(--primary-hover);
+}
+
+.enrichStatCleared .statValue {
   color: var(--success);
 }
