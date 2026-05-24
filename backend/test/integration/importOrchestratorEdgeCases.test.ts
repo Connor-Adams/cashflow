@@ -22,6 +22,7 @@ const dbPath = path.join(backendRoot, 'data', 'test-orchestrator-edge.sqlite');
 let models: typeof import('../../src/models/index.js');
 let importCsvFile: typeof import('../../src/import/runImport.js').importCsvFile;
 let rowFingerprint: typeof import('../../src/import/fingerprint.js').rowFingerprint;
+let stableIdentityFingerprint: typeof import('../../src/import/fingerprint.js').stableIdentityFingerprint;
 let normalizeAmazonOrder: typeof import('../../src/amazon/normalizeAmazonOrder.js').normalizeAmazonOrder;
 let importAmazonReportCsv: typeof import('../../src/amazon/importAmazonOrders.js').importAmazonReportCsv;
 let categorizeAmazonItemsWithAi: typeof import('../../src/amazon/aiCategorizeAmazonItems.js').categorizeAmazonItemsWithAi;
@@ -44,6 +45,7 @@ before(async () => {
   importCsvFile = (await import('../../src/import/runImport.js')).importCsvFile;
   isSequelizeUniqueLike = (await import('../../src/import/runImport.js')).isSequelizeUniqueLike;
   rowFingerprint = (await import('../../src/import/fingerprint.js')).rowFingerprint;
+  stableIdentityFingerprint = (await import('../../src/import/fingerprint.js')).stableIdentityFingerprint;
   normalizeAmazonOrder = (await import('../../src/amazon/normalizeAmazonOrder.js')).normalizeAmazonOrder;
   importAmazonReportCsv = (await import('../../src/amazon/importAmazonOrders.js')).importAmazonReportCsv;
   const aiModule = await import('../../src/amazon/aiCategorizeAmazonItems.js');
@@ -110,6 +112,13 @@ async function seedTransaction(opts: {
     notes: null,
     sourceReference: opts.sourceReference,
     sourceRowFingerprint: fp,
+    sourceIdentityFingerprint: stableIdentityFingerprint({
+      accountId: opts.accountId,
+      date: opts.date,
+      amount: opts.amount,
+      currency: 'CAD',
+      merchantRaw: opts.merchantRaw,
+    }),
     txnType: 'purchase',
     reviewFlag: false,
     isRecurring: false,
@@ -244,6 +253,13 @@ test('SAVEPOINT: per-row unique-violation rolls back only the row; outer transac
         notes: null,
         sourceReference: null,
         sourceRowFingerprint: baseFp,
+        sourceIdentityFingerprint: stableIdentityFingerprint({
+          accountId: acc.id,
+          date: '2026-07-01',
+          amount: -1,
+          currency: 'CAD',
+          merchantRaw: 'A',
+        }),
         txnType: 'purchase',
         reviewFlag: false,
         isRecurring: false,
@@ -271,6 +287,13 @@ test('SAVEPOINT: per-row unique-violation rolls back only the row; outer transac
             notes: null,
             sourceReference: null,
             sourceRowFingerprint: baseFp, // duplicate fingerprint
+            sourceIdentityFingerprint: stableIdentityFingerprint({
+              accountId: acc.id,
+              date: '2026-07-01',
+              amount: -1,
+              currency: 'CAD',
+              merchantRaw: 'A',
+            }),
             txnType: 'purchase',
             reviewFlag: false,
             isRecurring: false,
@@ -313,6 +336,13 @@ test('SAVEPOINT: per-row unique-violation rolls back only the row; outer transac
         notes: null,
         sourceReference: null,
         sourceRowFingerprint: row3Fp,
+        sourceIdentityFingerprint: stableIdentityFingerprint({
+          accountId: acc.id,
+          date: '2026-07-02',
+          amount: -2,
+          currency: 'CAD',
+          merchantRaw: 'B',
+        }),
         txnType: 'purchase',
         reviewFlag: false,
         isRecurring: false,
