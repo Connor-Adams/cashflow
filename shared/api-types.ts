@@ -135,6 +135,15 @@ export type Contact = {
   notes: string | null
 }
 
+export type Category = {
+  id: number
+  householdId: number
+  name: string
+  icon: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export type AuthUser = {
   id: number
   email: string
