@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build:
+  install:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,16 +25,163 @@ jobs:
       - name: Install
         run: yarn install --frozen-lockfile
 
-      - name: Cache TS + vite build state
+      - name: Archive node_modules
+        run: tar -cf node_modules.tar node_modules backend/node_modules frontend/node_modules shared/node_modules
+
+      - name: Upload node_modules artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node_modules
+          path: node_modules.tar
+          retention-days: 1
+          if-no-files-found: error
+
+  workflow-tests:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Run workflow tests
+        run: yarn test:workflows
+
+  backend-test:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Run backend unit tests
+        run: yarn workspace cashflow-backend run test
+
+  backend-test-integration:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Run backend integration tests
+        run: yarn workspace cashflow-backend run test:integration
+
+  backend-build:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Cache TS build state
+        uses: actions/cache@v4
+        with:
+          path: backend/dist/.tsbuildinfo
+          key: ${{ runner.os }}-backend-tsbuild-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-backend-tsbuild-
+
+      - name: Build backend
+        run: yarn workspace cashflow-backend run build
+
+  frontend-test:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Run frontend tests
+        run: yarn workspace frontend run test
+
+  frontend-build:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Cache vite build state
         uses: actions/cache@v4
         with:
           path: |
-            backend/dist/.tsbuildinfo
             frontend/node_modules/.tmp
             frontend/node_modules/.vite
-          key: ${{ runner.os }}-buildstate-${{ github.sha }}
+          key: ${{ runner.os }}-frontend-vite-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-buildstate-
+            ${{ runner.os }}-frontend-vite-
 
-      - name: CI
-        run: yarn ci
+      - name: Build frontend
+        run: yarn workspace frontend run build
