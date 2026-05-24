@@ -5,7 +5,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
-import { rowFingerprint } from '../../src/import/fingerprint';
+import { rowFingerprint, stableIdentityFingerprint } from '../../src/import/fingerprint';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
@@ -71,6 +71,13 @@ async function createTxn(merchant: string, amount: number, date = '2026-05-05') 
       currency: 'CAD',
       merchantRaw: merchant,
       sourceReference: '',
+    }),
+    sourceIdentityFingerprint: stableIdentityFingerprint({
+      accountId: acc.id,
+      date,
+      amount,
+      currency: 'CAD',
+      merchantRaw: merchant,
     }),
   } as never);
 }

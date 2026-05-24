@@ -10,7 +10,12 @@ import {
   ImportHistory,
   TransactionSignal,
 } from '../models';
-import { hashContent, rowFingerprint, stableFingerprint } from './fingerprint';
+import {
+  hashContent,
+  rowFingerprint,
+  stableFingerprint,
+  stableIdentityFingerprint,
+} from './fingerprint';
 import { findExistingForDedup } from './dedupExisting';
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
@@ -331,13 +336,17 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         merchantRaw: v.merchantRaw,
         sourceReference: v.sourceReference,
       });
-
-      const dedup = await findExistingForDedup({
+      const identityFp = stableIdentityFingerprint({
         accountId: account.id,
         date: v.date,
         amount: v.amount,
         currency: v.currency,
         merchantRaw: v.merchantRaw,
+      });
+
+      const dedup = await findExistingForDedup({
+        accountId: account.id,
+        sourceIdentityFingerprint: identityFp,
         sourceReference: v.sourceReference ?? null,
         t,
       });
@@ -408,6 +417,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         notes: f.notes,
         sourceReference: v.sourceReference,
         sourceRowFingerprint: fp,
+        sourceIdentityFingerprint: identityFp,
         appliedRuleId: f.appliedRuleId,
         autoCategory: f.autoCategory,
         autoBusiness: f.autoBusiness,

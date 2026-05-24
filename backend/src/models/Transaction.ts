@@ -29,6 +29,7 @@ export class Transaction extends Model<
   declare notes: string | null;
   declare sourceReference: string | null;
   declare sourceRowFingerprint: string;
+  declare sourceIdentityFingerprint: string;
   declare appliedRuleId: number | null;
 
   declare merchantCanonical: string | null;
@@ -134,6 +135,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       sourceRowFingerprint: {
         type: DataTypes.STRING(128),
         field: 'source_row_fingerprint',
+        allowNull: false,
+      },
+      sourceIdentityFingerprint: {
+        type: DataTypes.STRING(128),
+        field: 'source_identity_fingerprint',
         allowNull: false,
       },
       appliedRuleId: {
