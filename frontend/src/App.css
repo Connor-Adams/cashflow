@@ -1948,7 +1948,6 @@
   }
 }
 
-<<<<<<< HEAD
 .ruleRow.isFocused td {
   animation: ruleFocusFlash 2s ease-out 1;
   background-color: color-mix(in srgb, var(--primary) 14%, transparent);
@@ -2089,4 +2088,66 @@
 
 .enrichStatCleared .statValue {
   color: var(--success);
+}
+
+.enrichChartCard__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.75rem;
+}
+
+.enrichChartCard__title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.enrichAdminPill--amber {
+  background: color-mix(in srgb, var(--primary) 24%, transparent);
+  color: var(--primary-foreground);
+}
+
+.enrichConfidenceBar {
+  display: flex;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.625rem;
+  background: var(--muted);
+}
+
+.enrichConfidenceBar__seg {
+  height: 100%;
+  min-width: 0;
+}
+
+.enrichConfidenceLegend {
+  display: flex;
+  gap: 0.875rem;
+  flex-wrap: wrap;
+  font-size: 0.74rem;
+  color: var(--muted-foreground);
+}
+
+.enrichConfidenceLegend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.enrichConfidenceLegend__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.enrichConfidenceLegend__label {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.enrichConfidenceLegend__count {
+  font-variant-numeric: tabular-nums;
 }
