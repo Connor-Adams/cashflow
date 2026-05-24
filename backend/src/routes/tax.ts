@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
-import { Entity, TaxReturn, TaxSlip, Carryforward } from '../models';
+import { Entity, TaxReturn, TaxSlip, Carryforward, InstalmentPayment } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildT1 } from '../tax/engine/t1';
 import { ratesFor, RateTableMissingError } from '../tax/engine/brackets';
 import { factsHash } from '../tax/util/factsHash';
+import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 
 const router = Router();
 
@@ -80,6 +81,16 @@ router.get('/personal/:year/return', async (req, res, next) => {
         totals,
         warnings: ret.warnings,
       });
+    }
+
+    // Optional ?roll=true: after snapshot, auto-roll carryforwards for this year
+    if (req.query.roll === 'true') {
+      try {
+        await rollPersonalCarryforwards(entity.id, year, ret, facts, ratesFor(year));
+      } catch {
+        // Roll failure is non-fatal; include a warning but still return the return
+        ret.warnings.push('carryforward_roll_failed');
+      }
     }
 
     res.json({ cached: false, computedAt, lines, totals, warnings: ret.warnings });
@@ -164,6 +175,155 @@ router.post('/slips', async (req, res, next) => {
       boxValues,
     });
     res.status(201).json({ slip });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tax/personal/:year/roll-forward — explicit carryforward roll for year N.
+router.post('/personal/:year/roll-forward', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
+      return;
+    }
+
+    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    if (!entity) {
+      res.status(404).json({
+        error: 'no_personal_entity',
+        message: 'No Personal entity for this household.',
+      });
+      return;
+    }
+
+    const facts = await buildPersonalFacts(entity.id, year);
+    let rates;
+    try {
+      rates = ratesFor(year);
+    } catch (err) {
+      if (err instanceof RateTableMissingError) {
+        res.status(409).json({ error: 'rate_table_missing', message: (err as Error).message });
+        return;
+      }
+      throw err;
+    }
+
+    // Build a minimal synthetic TaxReturn for roll — we only need the return shell
+    const ret = buildT1(facts, rates);
+    const result = await rollPersonalCarryforwards(entity.id, year, ret, facts, rates);
+
+    res.status(200).json({
+      rolled: true,
+      year,
+      written: result.written.map(w => ({ kind: w.kind, amount: w.amount.toFixed(4) })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/tax/personal/years?from=YYYY&to=YYYY — multi-year compare.
+router.get('/personal/years', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const fromYear = req.query.from ? Number(req.query.from) : new Date().getFullYear() - 2;
+    const toYear = req.query.to ? Number(req.query.to) : new Date().getFullYear();
+
+    if (!Number.isInteger(fromYear) || !Number.isInteger(toYear) || fromYear > toYear) {
+      res.status(400).json({ error: 'invalid_range', message: 'from and to must be integers with from <= to.' });
+      return;
+    }
+
+    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    if (!entity) {
+      res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
+      return;
+    }
+
+    const snapshots = await TaxReturn.findAll({
+      where: { entityId: entity.id },
+      order: [['year', 'ASC']],
+    });
+
+    const years = snapshots
+      .filter(s => s.year >= fromYear && s.year <= toYear)
+      .map(s => ({
+        year: s.year,
+        computedAt: s.computedAt,
+        totals: s.totals,
+        warnings: s.warnings,
+      }));
+
+    res.json({ years });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/tax/personal/:year/instalments — list instalment payments for the year.
+router.get('/personal/:year/instalments', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
+      return;
+    }
+
+    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    if (!entity) {
+      res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
+      return;
+    }
+
+    const payments = await InstalmentPayment.findAll({
+      where: { entityId: entity.id, year },
+      order: [['paidOn', 'ASC']],
+    });
+
+    res.json({ instalments: payments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tax/personal/:year/instalments — record a new instalment payment.
+router.post('/personal/:year/instalments', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
+      return;
+    }
+
+    const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    if (!entity) {
+      res.status(404).json({ error: 'no_personal_entity', message: 'No Personal entity for this household.' });
+      return;
+    }
+
+    const { quarter, amount, paidOn, notes } = (req.body ?? {}) as Record<string, unknown>;
+
+    if (!amount || !paidOn) {
+      res.status(400).json({ error: 'missing_fields', message: 'amount and paidOn are required.' });
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payment = await (InstalmentPayment.create as any)({
+      entityId: entity.id,
+      year,
+      quarter: quarter != null ? Number(quarter) : null,
+      amount: String(amount),
+      paidOn: String(paidOn),
+      notes: notes != null ? String(notes) : null,
+    });
+
+    res.status(201).json({ instalment: payment });
   } catch (err) {
     next(err);
   }
