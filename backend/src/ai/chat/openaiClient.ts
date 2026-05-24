@@ -89,10 +89,10 @@ export async function* streamChat(args: StreamChatArgs): AsyncGenerator<StreamEv
   const decoder = new TextDecoder();
   const reader = res.body.getReader();
   let buf = '';
+  let doneEmitted = false;
+  let lastFinishReason: string | null = null;
 
   try {
-    // Loop: pull chunks, split on \n\n, parse each SSE event.
-    // OpenAI's SSE events look like:  data: {...}\n\n   or   data: [DONE]\n\n
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -104,7 +104,7 @@ export async function* streamChat(args: StreamChatArgs): AsyncGenerator<StreamEv
         if (!raw.startsWith('data:')) continue;
         const payload = raw.slice(5).trim();
         if (payload === '[DONE]') {
-          yield { type: 'done', finishReason: null };
+          if (!doneEmitted) yield { type: 'done', finishReason: lastFinishReason };
           return;
         }
         let parsed: Record<string, unknown>;
@@ -113,9 +113,21 @@ export async function* streamChat(args: StreamChatArgs): AsyncGenerator<StreamEv
         } catch {
           continue; // skip malformed chunk
         }
-        yield* extractEvents(parsed);
+        for (const ev of extractEvents(parsed)) {
+          if (ev.type === 'done') {
+            if (doneEmitted) continue;
+            doneEmitted = true;
+            lastFinishReason = ev.finishReason;
+          }
+          yield ev;
+        }
       }
     }
+  } catch (e) {
+    yield {
+      type: 'error',
+      message: e instanceof Error ? e.message : String(e),
+    };
   } finally {
     reader.releaseLock();
   }

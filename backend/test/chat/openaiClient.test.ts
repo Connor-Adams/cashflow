@@ -182,3 +182,65 @@ test('streamChat handles chunks split across read() boundaries', async () => {
   const texts = events.filter((e) => e.type === 'text_delta').map((e: any) => e.text);
   assert.deepEqual(texts, ['hello']);
 });
+
+test('streamChat skips malformed JSON chunks silently', async () => {
+  const enc = new TextEncoder();
+  // Mix of a malformed chunk and a valid one — parser must skip the bad one.
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(enc.encode('data: not-json\n\n'));
+      c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'));
+      c.enqueue(enc.encode('data: [DONE]\n\n'));
+      c.close();
+    },
+  });
+  const events = await collect(
+    streamChat({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      fetchImpl: stubFetch(body),
+    })
+  );
+  const texts = events.filter((e) => e.type === 'text_delta').map((e: any) => e.text);
+  assert.deepEqual(texts, ['ok']);
+  const errors = events.filter((e) => e.type === 'error');
+  assert.equal(errors.length, 0);
+});
+
+test('streamChat deduplicates done events (finish_reason chunk + [DONE])', async () => {
+  const body = sseBody([
+    { choices: [{ delta: { content: 'hi' } }] },
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    '[DONE]',
+  ]);
+  const events = await collect(
+    streamChat({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      fetchImpl: stubFetch(body),
+    })
+  );
+  const dones = events.filter((e) => e.type === 'done');
+  assert.equal(dones.length, 1);
+  assert.equal((dones[0] as any).finishReason, 'stop');
+});
+
+test('streamChat yields error event when underlying stream errors mid-read', async () => {
+  const enc = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+      c.error(new Error('upstream connection terminated'));
+    },
+  });
+  const events = await collect(
+    streamChat({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      fetchImpl: stubFetch(body),
+    })
+  );
+  const errors = events.filter((e) => e.type === 'error') as any[];
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /terminated|connection/i);
+});
