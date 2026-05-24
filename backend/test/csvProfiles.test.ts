@@ -8,10 +8,17 @@ test('listImportProfiles returns distinct profile definitions', () => {
   const ids = list.map((x) => x.id);
   assert.ok(ids.includes('generic_simple'));
   assert.ok(ids.includes('generic_amex'));
+  assert.ok(ids.includes('wealthsimple_cash'));
   assert.ok(
     !ids.includes('amex'),
     'duplicate amex ref should be omitted in favor of generic_amex'
   );
+});
+
+test('wealthsimple_cash profile uses passthrough sign convention', () => {
+  const p = profiles.wealthsimple_cash;
+  assert.ok(p, 'wealthsimple_cash profile missing');
+  assert.equal(p.amountConvention, 'passthrough');
 });
 
 test('listImportProfiles entries reference existing profile ids', () => {

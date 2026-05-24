@@ -83,3 +83,68 @@ test('mapCsvRow falls back to type when Visa details are blank', () => {
   assert.equal(r.value.merchantClean, 'Monthly fee');
   assert.equal(r.value.amount, -10);
 });
+
+test('mapCsvRow keeps WS "Interest received" positive under wealthsimple_cash', () => {
+  const row = {
+    date: '2025-04-30',
+    transaction: 'INT',
+    description: 'Interest received',
+    amount: '0.13',
+    balance: '102.45',
+    currency: 'CAD',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'wealthsimple_cash', 'CAD');
+  assert.ok(!('error' in r));
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 0.13);
+  assert.equal(r.value.merchantRaw, 'Interest received');
+});
+
+test('mapCsvRow keeps WS "Interest earned" positive under wealthsimple_cash', () => {
+  const row = {
+    date: '2025-04-30',
+    transaction: 'INT',
+    description: 'Interest earned',
+    amount: '58.05',
+    balance: '5800.00',
+    currency: 'CAD',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'wealthsimple_cash', 'CAD');
+  assert.ok(!('error' in r));
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 58.05);
+});
+
+test('mapCsvRow keeps WS purchase rows negative under wealthsimple_cash', () => {
+  const row = {
+    date: '2025-04-15',
+    transaction: 'SPEND',
+    description: 'STARBUCKS COFFEE',
+    amount: '-4.75',
+    balance: '500.00',
+    currency: 'CAD',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'wealthsimple_cash', 'CAD');
+  assert.ok(!('error' in r));
+  if ('error' in r) return;
+  assert.equal(r.value.amount, -4.75);
+});
+
+test('mapCsvRow keeps WS cash dividend positive under wealthsimple_cash', () => {
+  const row = {
+    date: '2025-04-30',
+    transaction: 'DIV',
+    description: 'Cash dividend',
+    amount: '12.40',
+    balance: '512.40',
+    currency: 'CAD',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'wealthsimple_cash', 'CAD');
+  assert.ok(!('error' in r));
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 12.4);
+});

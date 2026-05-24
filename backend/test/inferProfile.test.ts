@@ -32,6 +32,14 @@ test('inferProfileId falls back to headers when rows empty', () => {
   assert.equal(inferProfileId(headers, [], 'CAD'), 'generic_amex');
 });
 
+test('inferProfileId picks wealthsimple_cash for WS monthly headers', () => {
+  const headers = ['date', 'transaction', 'description', 'amount', 'balance', 'currency'];
+  const rows = [
+    { date: '2025-04-30', transaction: 'INT', description: 'Interest received', amount: '0.13', balance: '102.45', currency: 'CAD' },
+  ];
+  assert.equal(inferProfileId(headers, rows, 'CAD'), 'wealthsimple_cash');
+});
+
 test('inferProfileId picks generic_simple for Visa snake_case CSV', () => {
   const headers = [
     'transaction_date',

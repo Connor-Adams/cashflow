@@ -25,6 +25,19 @@ function hasAny(hs: Set<string>, ...terms: string[]): boolean {
   return terms.some((t) => hs.has(t));
 }
 
+/**
+ * Wealthsimple monthly CSVs (Cash, Save, TFSA, FHSA, Corporate Investing) all
+ * share the same header layout. Headers are case-insensitive and we tolerate
+ * either lower- or title-case from WS exports.
+ */
+function detectWealthsimpleCash(headers: string[]): string | null {
+  const hs = headerSet(headers);
+  if (hasAll(hs, 'date', 'transaction', 'description', 'amount', 'balance', 'currency')) {
+    return 'wealthsimple_cash';
+  }
+  return null;
+}
+
 function detectCanadianBank(headers: string[]): string | null {
   const hs = headerSet(headers);
 
@@ -99,6 +112,12 @@ export function inferProfileId(
   sampleRows: Record<string, string>[],
   defaultCurrency: string,
 ): string {
+  // Wealthsimple's monthly layout is unique (balance column + transaction code
+  // column) — check it before bank patterns to keep its passthrough sign
+  // convention rather than letting generic_simple flip credits.
+  const ws = detectWealthsimpleCash(headers);
+  if (ws) return ws;
+
   // Canadian bank detection takes priority — header patterns are highly specific.
   const bank = detectCanadianBank(headers);
   if (bank) return bank;

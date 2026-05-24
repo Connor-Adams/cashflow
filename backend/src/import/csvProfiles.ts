@@ -238,6 +238,24 @@ const national_bank: CsvProfile = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Wealthsimple monthly statement CSVs (Cash, Save, Save for Business, TFSA,
+ * FHSA, Corporate Investing). Header layout:
+ *   date,transaction,description,amount,balance,currency
+ * The `amount` column is already signed: negative = outflow, positive = inflow
+ * (interest received, deposits, dividends). Use passthrough so positive
+ * narratives like "Interest received"/"Interest earned" stay positive even
+ * when the generic narrative-direction patterns don't match.
+ */
+const wealthsimple_cash: CsvProfile = {
+  dateHeaders: ['date', 'Date'],
+  merchantHeaders: ['description', 'Description'],
+  amountHeaders: ['amount', 'Amount'],
+  currencyHeaders: ['currency', 'Currency'],
+  dateFormat: 'yyyy-MM-dd',
+  amountConvention: 'passthrough',
+};
+
 /** Column names are matched case-insensitively against CSV headers. */
 export const profiles: Record<string, CsvProfile> = {
   // Generic fallbacks
@@ -297,6 +315,7 @@ export const profiles: Record<string, CsvProfile> = {
   },
   generic_amex,
   amex: generic_amex,
+  wealthsimple_cash,
   // Canadian banks
   rbc,
   td_credit_card,
@@ -327,6 +346,10 @@ const profileHints: Record<string, { label: string; hint: string }> = {
   amex: {
     label: 'Amex',
     hint: 'Same as generic_amex.',
+  },
+  wealthsimple_cash: {
+    label: 'Wealthsimple — Cash & Investing',
+    hint: 'Monthly statement CSV (date,transaction,description,amount,balance,currency). Amount pre-signed — positive = inflow.',
   },
   rbc: {
     label: 'RBC',
