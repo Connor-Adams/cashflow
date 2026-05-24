@@ -492,16 +492,20 @@ export function TransactionsPage() {
   )
 
   async function openItemsDrawer(txnId: number) {
-    const receipts = await getJson<ReceiptWithItems[]>(`/api/transactions/${txnId}/receipts`)
-    setItemsDrawer({ txnId, receipts })
+    setErr(null)
+    try {
+      const receipts = await getJson<ReceiptWithItems[]>(`/api/transactions/${txnId}/receipts`)
+      setItemsDrawer({ txnId, receipts })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load receipt items')
+    }
   }
 
   async function reloadItemsDrawer() {
     if (!itemsDrawer) return
-    const receipts = await getJson<ReceiptWithItems[]>(
-      `/api/transactions/${itemsDrawer.txnId}/receipts`,
-    )
-    setItemsDrawer({ txnId: itemsDrawer.txnId, receipts })
+    const txnId = itemsDrawer.txnId
+    const receipts = await getJson<ReceiptWithItems[]>(`/api/transactions/${txnId}/receipts`)
+    setItemsDrawer(current => current ? { txnId, receipts } : null)
   }
 
   async function onExtractReceipt(receiptId: number) {
