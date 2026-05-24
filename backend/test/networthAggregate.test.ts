@@ -132,3 +132,44 @@ test('buildNetWorthAt: includes portfolio market value as asset', async () => {
   assert.equal(result.assetsTotal, 1000); // 10 × 100
   assert.equal(result.total, 1000);
 });
+
+test('monthEndDatesInRange: returns last day of each month in range, inclusive', () => {
+  assert.deepEqual(
+    agg.monthEndDatesInRange('2026-01-15', '2026-03-10'),
+    ['2026-01-31', '2026-02-28']
+  );
+});
+
+test('monthEndDatesInRange: includes the to-date month-end when to is exactly month-end', () => {
+  assert.deepEqual(
+    agg.monthEndDatesInRange('2026-01-01', '2026-03-31'),
+    ['2026-01-31', '2026-02-28', '2026-03-31']
+  );
+});
+
+test('daysInRange: returns every date inclusive', () => {
+  assert.deepEqual(
+    agg.daysInRange('2026-01-30', '2026-02-02'),
+    ['2026-01-30', '2026-01-31', '2026-02-01', '2026-02-02']
+  );
+});
+
+test('buildSeries: emits one point per monthly bucket with expected totals', async () => {
+  const acc = await seedAcc({ accountType: 'checking', opening: 1000 });
+  await seedTxn(acc.id, '2026-01-15', 100);
+  await seedTxn(acc.id, '2026-02-15', -50);
+  const result = await agg.buildSeries('2026-01-01', '2026-02-28', 'monthly', [acc.id], stubFx);
+  assert.deepEqual(result.points, [
+    { date: '2026-01-31', total: 1100, assetsTotal: 1100, liabilitiesTotal: 0 },
+    { date: '2026-02-28', total: 1050, assetsTotal: 1050, liabilitiesTotal: 0 },
+  ]);
+  assert.equal(result.partial, false);
+});
+
+test('buildSeries: marks partial=true when any bucket has FX gaps', async () => {
+  const acc = await seedAcc({ accountType: 'checking', defaultCurrency: 'CAD', opening: 100 });
+  await seedTxn(acc.id, '2026-01-15', 10, 'EUR');
+  const result = await agg.buildSeries('2026-01-01', '2026-02-28', 'monthly', [acc.id], stubFx);
+  assert.equal(result.partial, true);
+  assert.ok(result.gaps.length > 0);
+});

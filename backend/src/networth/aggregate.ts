@@ -111,3 +111,73 @@ export async function buildNetWorthAt(
     gaps,
   };
 }
+
+export type SeriesPoint = {
+  date: string;
+  total: number;
+  assetsTotal: number;
+  liabilitiesTotal: number;
+};
+
+export type NetWorthSeries = {
+  baseCurrency: 'CAD';
+  granularity: 'monthly' | 'daily';
+  points: SeriesPoint[];
+  partial: boolean;
+  gaps: NetWorthGap[];
+};
+
+export function monthEndDatesInRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  // First month-end on/after `from`
+  let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
+  while (cursor <= end) {
+    out.push(cursor.toISOString().slice(0, 10));
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 2, 0));
+  }
+  return out;
+}
+
+export function daysInRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cursor <= end) {
+    out.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
+export async function buildSeries(
+  from: string,
+  to: string,
+  granularity: 'monthly' | 'daily',
+  accountIds: number[],
+  fxLookup?: FxLookup
+): Promise<NetWorthSeries> {
+  const buckets = granularity === 'monthly'
+    ? monthEndDatesInRange(from, to)
+    : daysInRange(from, to);
+  const points: SeriesPoint[] = [];
+  const gaps: NetWorthGap[] = [];
+  for (const date of buckets) {
+    const snap = await buildNetWorthAt(date, accountIds, fxLookup);
+    points.push({
+      date,
+      total: snap.total,
+      assetsTotal: snap.assetsTotal,
+      liabilitiesTotal: snap.liabilitiesTotal,
+    });
+    gaps.push(...snap.gaps);
+  }
+  return {
+    baseCurrency: 'CAD',
+    granularity,
+    points,
+    partial: gaps.length > 0,
+    gaps,
+  };
+}
