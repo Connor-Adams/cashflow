@@ -17,6 +17,13 @@ function parseEffectiveDate(
   if (typeof raw !== 'string' || !DATE_ONLY_RE.test(raw)) {
     return { ok: false, error: 'must be YYYY-MM-DD or null' };
   }
+  // Round-trip through Date to reject calendar-invalid values like
+  // 2026-13-01 or 2026-02-30 — the regex alone allows these because
+  // SQLite stores DATEONLY as TEXT and won't reject them at insert.
+  const parsed = new Date(`${raw}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
+    return { ok: false, error: 'must be a valid calendar date (YYYY-MM-DD)' };
+  }
   return { ok: true, value: raw };
 }
 

@@ -547,6 +547,17 @@ export type PortfolioSecurityDetail = {
   latestPrice: PortfolioLatestPrice | null
 }
 
+/**
+ * Response shape for GET /api/ai/status. `openai` reflects whether the
+ * server has an OpenAI key configured (and the caller is not a demo user).
+ * `chat` is the UI-facing flag: true only when BOTH the chat feature flag
+ * is enabled AND OpenAI is available.
+ */
+export type AiStatus = {
+  openai: boolean
+  chat: boolean
+}
+
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export type ClientLogPayload = {

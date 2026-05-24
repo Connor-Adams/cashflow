@@ -136,3 +136,36 @@ test('PATCH /api/rules/:id can clear effectiveFrom by passing null', async () =>
   assert.equal(patched.body.effectiveFrom, null);
   assert.equal(patched.body.effectiveTo, '2026-11-30');
 });
+
+test('POST /api/rules rejects calendar-invalid effectiveFrom (2026-13-01)', async () => {
+  const res = await agent
+    .post('/api/rules')
+    .send({ merchantPattern: 'X', effectiveFrom: '2026-13-01' });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /effectiveFrom/);
+  assert.match(res.body.error, /valid calendar date/);
+});
+
+test('POST /api/rules rejects calendar-invalid effectiveTo (2026-02-30)', async () => {
+  const res = await agent
+    .post('/api/rules')
+    .send({ merchantPattern: 'X', effectiveTo: '2026-02-30' });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /effectiveTo/);
+  assert.match(res.body.error, /valid calendar date/);
+});
+
+test('PATCH /api/rules/:id rejects effectiveTo that crosses existing effectiveFrom', async () => {
+  const created = await agent.post('/api/rules').send({
+    merchantPattern: 'GROCER',
+    effectiveFrom: '2026-06-01',
+  });
+  assert.equal(created.status, 201);
+  const id = created.body.id;
+
+  const patched = await agent
+    .patch(`/api/rules/${id}`)
+    .send({ effectiveTo: '2026-05-01' });
+  assert.equal(patched.status, 400);
+  assert.match(patched.body.error, /effectiveFrom must be < effectiveTo/);
+});
