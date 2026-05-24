@@ -59,3 +59,39 @@ test('throws clearly when key is missing or short', () => {
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
   __resetKeyCacheForTests();
 });
+
+test('decryptSecret rejects a truncated auth tag (fewer than 16 bytes)', () => {
+  const enc = encryptSecret('sensitive');
+  const buf = Buffer.from(enc, 'base64');
+  const version = buf.subarray(0, 1);
+  const iv = buf.subarray(1, 13);
+  const shortTag = buf.subarray(13, 21);
+  const ciphertext = buf.subarray(29);
+  const truncated = Buffer.concat([version, iv, shortTag, ciphertext]).toString('base64');
+  assert.throws(() => decryptSecret(truncated));
+});
+
+test('decryptSecret rejects a forged auth tag (bit flipped in tag region)', () => {
+  const enc = encryptSecret('sensitive');
+  const buf = Buffer.from(enc, 'base64');
+  buf[13] ^= 0x01;
+  assert.throws(() => decryptSecret(buf.toString('base64')));
+});
+
+test('decryptSecret rejects ciphertext encrypted under a different key', () => {
+  process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = 'a'.repeat(64);
+  __resetKeyCacheForTests();
+  const enc = encryptSecret('secret');
+  process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = 'b'.repeat(64);
+  __resetKeyCacheForTests();
+  assert.throws(() => decryptSecret(enc));
+  process.env.EMAIL_INTEGRATION_ENCRYPTION_KEY = '0123456789abcdef'.repeat(4);
+  __resetKeyCacheForTests();
+});
+
+test('decryptSecret rejects ciphertext with a corrupted IV', () => {
+  const enc = encryptSecret('secret');
+  const buf = Buffer.from(enc, 'base64');
+  buf[1] ^= 0x01;
+  assert.throws(() => decryptSecret(buf.toString('base64')));
+});
