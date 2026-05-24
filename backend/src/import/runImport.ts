@@ -72,7 +72,7 @@ export function appendParseError(
   bucket.push({ rowIndex, message });
 }
 
-function isSequelizeUniqueLike(e: unknown): boolean {
+export function isSequelizeUniqueLike(e: unknown): boolean {
   return (
     e !== null &&
     typeof e === 'object' &&
@@ -124,6 +124,13 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     },
   });
   const priorRows = prior?.rowCount;
+  // TODO(import-all-dups-rerun): re-importing a file whose first run dedup'd
+  // every row (priorRows === 0) falls through to a full re-parse and writes a
+  // SECOND ImportHistory row for the same contentHash. The dup detection on
+  // individual rows still works, so no transactions are double-inserted —
+  // but the audit log accumulates noise. Fix: short-circuit when prior exists
+  // regardless of rowCount, or treat (status='success', rowCount=0) as
+  // "already imported, nothing to do" and update prior.updatedAt instead.
   if (prior != null && priorRows != null && priorRows > 0) {
     return {
       file: name,
@@ -174,6 +181,13 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         message: parsed.error,
       };
     }
+    // TODO(import-pdf-audit-gap): commitStatementImport is called without a
+    // try/catch — if it throws (e.g., DB error, constraint violation, transient
+    // failure), the function unwinds and NO ImportHistory record is written.
+    // The CSV path writes a 'failed' ImportHistory for parser errors; the PDF
+    // path only writes one for parser errors (above) but not commit-time
+    // failures. Fix: wrap in try/catch and write a 'failed' ImportHistory with
+    // batchLabel='pdf-commit-error' on throw, mirroring the parse-error path.
     const result = await commitStatementImport(parsed, opts.userId ?? null, opts.householdId ?? null);
     return result;
   }
@@ -578,7 +592,7 @@ type ColdRow = {
   memory: MerchantMemoryMatch | null;
 };
 
-function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
+export function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
   const groups = new Map<string, ColdRow>();
   for (const c of coldRows) {
     const existing = groups.get(c.merchantKey);
@@ -601,7 +615,7 @@ function coldRowToCandidate(c: ColdRow): AiBatchCandidate {
   };
 }
 
-function aiSuggestionToSignal(sug: {
+export function aiSuggestionToSignal(sug: {
   category: string | null;
   business: boolean | null;
   splitType: 'me' | 'partner' | 'shared' | null;
