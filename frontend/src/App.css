@@ -144,6 +144,20 @@
   }
   .sidebar__userName { @apply truncate; }
 
+  .sidebar__version {
+    @apply flex flex-col gap-0.5 px-2 pt-2 text-xs;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  }
+  .sidebar__version[data-drift='true'] {
+    color: var(--destructive, #b45309);
+  }
+  .sidebar__versionRow { @apply flex items-baseline gap-2; }
+  .sidebar__versionLabel { @apply uppercase tracking-wider opacity-70; min-width: 1.5rem; }
+  .sidebar__versionValue { @apply truncate; }
+  .sidebar__versionDrift { @apply mt-1 uppercase tracking-wider; font-size: 0.65rem; }
+
   /* ─── Brand pieces (sidebar reuses; kept stable) ─────────────────── */
 
   .brandLockup {
