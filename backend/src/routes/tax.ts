@@ -397,4 +397,64 @@ function serializeTotals(totals: Record<string, { toFixed: (n: number) => string
   );
 }
 
+// POST /api/tax/corp/:fiscalYear/roll-forward
+// Triggers rollCorpCarryforwards from the most recent snapshot for the fiscal year.
+router.post('/corp/:fiscalYear/roll-forward', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const householdId = household.id;
+    const entity = await Entity.findOne({ where: { householdId, kind: 'corp' } });
+    if (!entity) {
+      res.status(404).json({ error: 'no_corp_entity' });
+      return;
+    }
+    // Parse fiscalYear param: 'YYYY' or 'YYYY-MM-DD/YYYY-MM-DD'
+    const fy = String(req.params.fiscalYear);
+    const yearStr = fy.includes('/') ? fy.split('/')[1].slice(0, 4) : fy;
+    const asOfYear = Number(yearStr);
+    if (!Number.isInteger(asOfYear) || asOfYear < 2000 || asOfYear > 2100) {
+      res.status(400).json({ error: 'invalid_fiscal_year' });
+      return;
+    }
+    // Look up the snapshot
+    const snapshot = await TaxReturn.findOne({ where: { entityId: entity.id, year: asOfYear } });
+    if (!snapshot) {
+      res.status(404).json({
+        error: 'no_snapshot',
+        message: 'Compute corp return first via GET /api/tax/corp/:fiscalYear/return',
+      });
+      return;
+    }
+    // Reconstruct minimal CorpTaxReturn from snapshot.totals (stored as Decimal toFixed(2) strings)
+    const totals = snapshot.totals as Record<string, string>;
+    const { D } = await import('../tax/util/decimal');
+    const corpRet = {
+      fiscalYear: { startDate: `${asOfYear}-01-01`, endDate: `${asOfYear}-12-31` },
+      lines: [],
+      totals: {
+        activeBusinessIncome: D(totals.activeBusinessIncome ?? '0'),
+        sbdEligibleIncome: D(totals.sbdEligibleIncome ?? '0'),
+        generalRateIncome: D(totals.generalRateIncome ?? '0'),
+        aii: D(totals.aii ?? '0'),
+        taxableIncome: D(totals.taxableIncome ?? '0'),
+        federalTax: D(totals.federalTax ?? '0'),
+        provincialTax: D(totals.provincialTax ?? '0'),
+        refundableTaxOnAii: D(totals.refundableTaxOnAii ?? '0'),
+        dividendRefund: D(totals.dividendRefund ?? '0'),
+        netTaxPayable: D(totals.netTaxPayable ?? '0'),
+        gripEnding: D(totals.gripEnding ?? '0'),
+        cdaEnding: D(totals.cdaEnding ?? '0'),
+        erdtohEnding: D(totals.erdtohEnding ?? '0'),
+        nerdtohEnding: D(totals.nerdtohEnding ?? '0'),
+      },
+      warnings: [],
+    };
+    const { rollCorpCarryforwards } = await import('../tax/services/rollCorpCarryforwards');
+    const result = await rollCorpCarryforwards(entity.id, asOfYear, corpRet as any);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
