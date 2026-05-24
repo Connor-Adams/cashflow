@@ -1338,11 +1338,25 @@ export function DashboardPage() {
                       {insight.comparison} · {formatDashboardAmount(insight.amount)}
                     </p>
                     {insight.supportingTransactionIds.length > 0 ? (
-                      <p className="muted">
-                        Transactions: #{insight.supportingTransactionIds.join(', #')}
+                      <p className="muted aiVisibilitySupportingIds">
+                        Transactions:{' '}
+                        {insight.supportingTransactionIds.map((id, idx) => (
+                          <span key={id}>
+                            {idx > 0 ? ', ' : null}
+                            <Link to={`/transactions?ids=${id}`}>#{id}</Link>
+                          </span>
+                        ))}
                       </p>
                     ) : null}
                     <p className="muted">{insight.suggestedAction}</p>
+                    {insight.supportingTransactionIds.length > 0 ? (
+                      <Link
+                        to={`/transactions?ids=${insight.supportingTransactionIds.join(',')}`}
+                        className="aiVisibilityAction"
+                      >
+                        Open these transactions
+                      </Link>
+                    ) : null}
                   </article>
                 ))
             )}
