@@ -3,8 +3,10 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Transaction, Receipt } from '../models';
-import { analyzeReceiptFileTracked } from '../ai/receiptVision';
-import { createTrackedSuggestion } from '../ai/suggestionStore';
+import { extractReceiptFromImage } from '../ai/extractReceiptItems';
+import { persistExtractedOrder } from './externalOrders';
+import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { currentAuth } from '../auth/middleware';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { visibleTransactionWhere } from '../auth/scope';
@@ -218,24 +220,31 @@ router.post(
         res.status(404).json({ error: 'Not found' });
         return;
       }
-      const tracked = await analyzeReceiptFileTracked(row);
-      const extracted = tracked.extract;
-      const note = JSON.stringify(extracted);
-      await row.update({ extractedNote: note });
-      await createTrackedSuggestion({
-        req,
-        transactionId: txn.id,
-        receiptId: row.id,
-        kind: 'receipt_extract',
-        inputSnapshot: tracked.inputSnapshot,
-        output: extracted,
-        model: tracked.meta.model,
-        promptVersion: 'receipt-extract-v1',
-        temperature: tracked.meta.temperature,
-        latencyMs: tracked.meta.latencyMs,
-        providerRequestId: tracked.meta.providerRequestId,
+      const buf = await readReceiptObject(row.storedFilename);
+      const mime = row.mimeType.toLowerCase();
+      if (!mime.startsWith('image/')) {
+        res.status(400).json({ error: 'Vision analysis supports image receipts only' });
+        return;
+      }
+      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+      const extracted = await extractReceiptFromImage(dataUrl);
+      const auth = currentAuth(req);
+      const { order } = await persistExtractedOrder(extracted, {
+        userId: auth.user.id,
+        householdId: auth.household.id,
+        source: 'receipt-analyze',
       });
-      res.json({ extracted, receiptId: row.id });
+      await row.update({
+        externalOrderId: order.id,
+        extractedNote: JSON.stringify(extracted),
+      });
+      if (auth.household.id != null) {
+        await matchReceiptOrderToTransactions({
+          externalOrderId: order.id,
+          householdId: auth.household.id,
+        });
+      }
+      res.json({ receipt: row.toJSON(), order: order.toJSON(), extracted });
     } catch (e) {
       next(e);
     }
