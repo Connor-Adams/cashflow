@@ -184,8 +184,9 @@ redeploy.
 
 **Rollback:**
 
-Re-tag an older `:vX.Y.Z` image as `:production`, then trigger the Railway
-hooks. From a workstation with `docker buildx`:
+Re-tag an older `:vX.Y.Z` image as `:production`, then trigger Railway
+redeploys. From a workstation with `docker buildx` and the Railway CLI
+linked to the project:
 
 ```bash
 TAG=v0.1.4
@@ -195,9 +196,8 @@ IMG_FE=ghcr.io/connor-adams/cashflow-frontend
 docker buildx imagetools create --tag $IMG_BE:production $IMG_BE:$TAG
 docker buildx imagetools create --tag $IMG_FE:production $IMG_FE:$TAG
 
-# With Railway CLI linked + authed:
-railway redeploy --service 20be1e3f-0c3e-4624-a286-276c0704487a -y
-railway redeploy --service bd2f774d-4e3c-460c-8e3d-2b0211763bfd -y
+railway redeploy --service 42977748-ab5c-4552-a206-faf86d353e5b -y
+railway redeploy --service e0dc05b7-3961-4d4f-aea9-bed3810ea2f5 -y
 ```
 
 A dedicated `workflow_dispatch` rollback workflow would be cleaner but is
