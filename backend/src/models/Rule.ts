@@ -24,6 +24,10 @@ export class Rule extends Model<
   /** Stored as DECIMAL; may be string when read from SQLite */
   declare pctMe: string | null;
   declare pctPartner: string | null;
+  /** Inclusive lower bound on Transaction.date; null = "always". */
+  declare effectiveFrom: string | null;
+  /** Exclusive upper bound on Transaction.date; null = "forever". */
+  declare effectiveTo: string | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -75,6 +79,16 @@ export function initRule(sequelize: Sequelize): typeof Rule {
       pctPartner: {
         type: DataTypes.DECIMAL(5, 4),
         field: 'pct_partner',
+        allowNull: true,
+      },
+      effectiveFrom: {
+        type: DataTypes.DATEONLY,
+        field: 'effective_from',
+        allowNull: true,
+      },
+      effectiveTo: {
+        type: DataTypes.DATEONLY,
+        field: 'effective_to',
         allowNull: true,
       },
     } as ModelAttributes<Rule>,
