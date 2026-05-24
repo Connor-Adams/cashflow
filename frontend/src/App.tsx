@@ -15,6 +15,7 @@ import { TransactionsPage } from './pages/TransactionsPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { AiInboxPage } from './pages/AiInboxPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
@@ -43,6 +44,7 @@ function AppRoutes() {
           <Route path="rules" element={<RulesPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
