@@ -6,6 +6,7 @@ beforeEach(() => {
   for (const k of Object.keys(process.env)) {
     if (k.startsWith('CHAT_')) delete process.env[k];
   }
+  delete process.env.OPENAI_MODEL;
 });
 
 test('getChatConfig disabled by default', () => {
