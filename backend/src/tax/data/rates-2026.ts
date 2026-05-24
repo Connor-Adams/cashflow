@@ -98,4 +98,17 @@ export const RATES_2026: RateTable = {
     { name: 'CRA 2026 indexation announcement (projected)', url: 'https://www.canada.ca/en/revenue-agency/news/newsroom/tax-tips/tax-tips-2025.html' },
     { name: 'ON Min of Finance 2026 personal income tax rates (TBD)', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
   ],
+
+  // Phase 3 — Corp T2 (stable since 2019; verify before filing-grade use)
+  corpAbiSbdRateFederal: D('0.09'),
+  corpAbiSbdRateOntario: D('0.032'),
+  corpGeneralRateFederal: D('0.15'),
+  corpGeneralRateOntario: D('0.115'),
+  corpInvestmentRateFederal: D('0.387'),
+  corpInvestmentRateOntario: D('0.115'),
+  corpRefundableTaxOnAII: D('0.1067'),
+  corpSbdAnnualLimit: D('500000'),
+  corpAaiiGrindThreshold: D('50000'),
+  corpAaiiGrindRate: D('5'),
+  corpDividendRefundRate: D('0.3833'),
 };
