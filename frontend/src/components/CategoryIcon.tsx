@@ -15,7 +15,7 @@ import {
   HandCoins, TrendingUp, TrendingDown,
   type LucideIcon,
 } from 'lucide-react'
-import type { CategoryIconName } from '@cashflow/shared'
+import { isCategoryIconName, type CategoryIconName } from '@cashflow/shared'
 import { useCategories } from '../lib/useCategories'
 
 export const CATEGORY_ICON_COMPONENTS: Record<CategoryIconName, LucideIcon> = {
@@ -44,11 +44,8 @@ export function CategoryIcon({ name, size = 16, className }: Props) {
   const { byName } = useCategories()
   if (!name) return null
   const cat = byName(name)
-  const iconName = cat?.icon as CategoryIconName | null | undefined
-  const Icon =
-    iconName != null && iconName in CATEGORY_ICON_COMPONENTS
-      ? CATEGORY_ICON_COMPONENTS[iconName]
-      : Tag
+  const iconName = isCategoryIconName(cat?.icon) ? cat.icon : null
+  const Icon = iconName ? CATEGORY_ICON_COMPONENTS[iconName] : Tag
   return (
     <Icon
       size={size}
