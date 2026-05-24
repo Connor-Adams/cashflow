@@ -203,6 +203,12 @@ test('analyze: persists ExternalOrder + items and links receipt and transaction'
   assert.ok(receipt, 'receipt should exist');
   assert.ok(receipt!.externalOrderId != null, 'receipt.externalOrderId should be set');
 
+  // DB: Receipt has extractedNote with expected shape.
+  const reloaded = await models.Receipt.findByPk(receiptId);
+  assert.ok(reloaded!.extractedNote, 'receipt.extractedNote should be set');
+  const extractedData = JSON.parse(reloaded!.extractedNote!);
+  assert.equal(extractedData.vendor, 'costco', 'extracted order vendor should be costco');
+
   // DB: ExternalOrder total matches.
   const order = await models.ExternalOrder.findByPk(receipt!.externalOrderId!);
   assert.ok(order, 'ExternalOrder should exist');
@@ -215,6 +221,7 @@ test('analyze: persists ExternalOrder + items and links receipt and transaction'
   // DB: At least one TransactionOrderLink for the order (matcher should have linked the Costco txn).
   const links = await models.TransactionOrderLink.findAll({ where: { externalOrderId: order!.id } });
   assert.ok(links.length >= 1, `should have at least 1 TransactionOrderLink, got ${links.length}`);
+  assert.equal(links[0].transactionId, txn.id, 'matched link should reference the correct transaction');
 });
 
 // ---------------------------------------------------------------------------
@@ -324,7 +331,11 @@ test('analyze: returns 503 when OPENAI_API_KEY is not set', async () => {
   try {
     analyzeRes = await agentA.post(`/api/receipts/${receiptId}/analyze`);
   } finally {
-    process.env.OPENAI_API_KEY = savedKey;
+    if (savedKey !== undefined) {
+      process.env.OPENAI_API_KEY = savedKey;
+    } else {
+      delete process.env.OPENAI_API_KEY;
+    }
   }
 
   assert.equal(analyzeRes.status, 503, `expected 503, got ${analyzeRes.status}: ${JSON.stringify(analyzeRes.body)}`);
