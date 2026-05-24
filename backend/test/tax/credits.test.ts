@@ -8,6 +8,12 @@ import {
   ageCreditFederal,
   donationCreditFederal,
   basicPersonalAmountOntarioApplied,
+  disabilityCreditFederal,
+  caregiverCreditFederal,
+  tuitionCreditFederal,
+  pensionIncomeCreditFederal,
+  pensionIncomeCreditOntario,
+  oasClawback,
   spousalCreditOntario,
   ageCreditOntario,
   donationCreditOntario,
@@ -169,4 +175,106 @@ test('medical credit: expenses below threshold = $0', () => {
   const r = ratesFor(2024);
   // 3% × $30k = $900; expenses $500 < $900 → $0 credit
   assert.equal(medicalCreditFederal(D('500'), D('30000'), r).toFixed(2), '0.00');
+});
+
+// ─── Phase 2: Disability Tax Credit ───────────────────────────────────────────
+
+test('disabilityCreditFederal: eligible = dtcBaseFederal × 15%', () => {
+  const r = ratesFor(2024);
+  // 2024: $9,872 × 15% = $1,480.80
+  const expected = r.dtcBaseFederal.times(r.donationLowRate);
+  assert.equal(disabilityCreditFederal(true, r).toFixed(2), expected.toFixed(2));
+  assert.equal(disabilityCreditFederal(true, r).toFixed(2), '1480.80');
+});
+
+test('disabilityCreditFederal: not eligible = $0', () => {
+  const r = ratesFor(2024);
+  assert.equal(disabilityCreditFederal(false, r).toFixed(2), '0.00');
+});
+
+// ─── Phase 2: Caregiver Credit ────────────────────────────────────────────────
+
+test('caregiverCreditFederal: dependent with net income below threshold = full eligible', () => {
+  const r = ratesFor(2024);
+  // Threshold $18,783; dependent earns $10,000 → no reduction
+  // Eligible amount = $7,999; credit = $7,999 × 15% = $1,199.85
+  const result = caregiverCreditFederal(
+    [{ netIncome: D('10000'), eligibleAmount: r.caregiverAmountFederalInfirmAdult }],
+    r,
+  );
+  assert.equal(result.toFixed(2), r.caregiverAmountFederalInfirmAdult.times(r.donationLowRate).toFixed(2));
+});
+
+test('caregiverCreditFederal: dependent net income reduces credit', () => {
+  const r = ratesFor(2024);
+  // Threshold $18,783; dependent earns $20,000 → reduction = 20000 - 18783 = 1217
+  // Eligible = max(0, 7999 - 1217) = 6782; credit = 6782 × 15% = $1,017.30
+  const result = caregiverCreditFederal(
+    [{ netIncome: D('20000'), eligibleAmount: r.caregiverAmountFederalInfirmAdult }],
+    r,
+  );
+  const expectedEligible = r.caregiverAmountFederalInfirmAdult.minus(D('20000').minus(r.caregiverThresholdFederal));
+  assert.equal(result.toFixed(2), expectedEligible.times(r.donationLowRate).toFixed(2));
+});
+
+test('caregiverCreditFederal: no dependents = $0', () => {
+  const r = ratesFor(2024);
+  assert.equal(caregiverCreditFederal([], r).toFixed(2), '0.00');
+});
+
+// ─── Phase 2: Tuition Credit ──────────────────────────────────────────────────
+
+test('tuitionCreditFederal: $5,000 tuition × 15% = $750', () => {
+  const r = ratesFor(2024);
+  assert.equal(tuitionCreditFederal(D('5000'), r).toFixed(2), '750.00');
+});
+
+test('tuitionCreditFederal: $0 tuition = $0 credit', () => {
+  const r = ratesFor(2024);
+  assert.equal(tuitionCreditFederal(D('0'), r).toFixed(2), '0.00');
+});
+
+// ─── Phase 2: Pension Income Credit ──────────────────────────────────────────
+
+test('pensionIncomeCreditFederal: pension $1,500 under cap = $1,500 × 15% = $225', () => {
+  const r = ratesFor(2024);
+  assert.equal(pensionIncomeCreditFederal(D('1500'), r).toFixed(2), '225.00');
+});
+
+test('pensionIncomeCreditFederal: pension $3,000 capped at $2,000 cap = $2,000 × 15% = $300', () => {
+  const r = ratesFor(2024);
+  assert.equal(pensionIncomeCreditFederal(D('3000'), r).toFixed(2), '300.00');
+});
+
+test('pensionIncomeCreditOntario: pension $1,000 under cap → $1,000 × ON lowest rate', () => {
+  const r = ratesFor(2024);
+  const expected = D('1000').times(r.provincialBrackets[0].rate);
+  assert.equal(pensionIncomeCreditOntario(D('1000'), r).toFixed(4), expected.toFixed(4));
+});
+
+test('pensionIncomeCreditOntario: pension $2,000 capped at $1,641 → $1,641 × ON lowest rate', () => {
+  const r = ratesFor(2024);
+  const expected = r.pensionIncomeAmountCapOntario.times(r.provincialBrackets[0].rate);
+  assert.equal(pensionIncomeCreditOntario(D('2000'), r).toFixed(4), expected.toFixed(4));
+});
+
+// ─── Phase 2: OAS Clawback ────────────────────────────────────────────────────
+
+test('oasClawback: net income below threshold = $0', () => {
+  const r = ratesFor(2024);
+  // Threshold $90,997; income $80,000 → no clawback
+  assert.equal(oasClawback(D('80000'), r).toFixed(2), '0.00');
+});
+
+test('oasClawback: net income exactly at threshold = $0', () => {
+  const r = ratesFor(2024);
+  assert.equal(oasClawback(r.oasClawbackThreshold, r).toFixed(2), '0.00');
+});
+
+test('oasClawback: net income $100,000 → ($100,000 - $90,997) × 15% = $1,350.45', () => {
+  const r = ratesFor(2024);
+  const expected = D('100000').minus(r.oasClawbackThreshold).times(r.oasClawbackRate);
+  assert.equal(oasClawback(D('100000'), r).toFixed(2), expected.toFixed(2));
+  // Verify: $9,003 × 15% = $1,350.45
+  assert.equal(oasClawback(D('100000'), r).toFixed(2), '1350.45');
 });

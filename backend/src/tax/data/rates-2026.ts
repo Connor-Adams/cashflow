@@ -94,6 +94,22 @@ export const RATES_2026: RateTable = {
   // Medical threshold cap: 2025 cap (2837) × 1.027 = 2913.59 → round to 2914
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2914'),
+  // Disability Tax Credit — PROJECTED: 2025 values × 1.027 (2.7% federal indexation)
+  dtcBaseFederal: D('10412'),          // 10138 × 1.027 ≈ 10412 — PROJECTED
+  dtcSupplementFederal: D('6075'),     // 5916 × 1.027 ≈ 6076; rnd 6075 — PROJECTED
+  dtcSupplementThreshold: D('3558'),   // 3464 × 1.027 ≈ 3558 — PROJECTED
+  dtcBaseOntario: D('9852'),           // 2025 value reused — ON 2026 indexation not yet published; MUST update
+  // Caregiver amount — PROJECTED
+  caregiverAmountFederalInfirmAdult: D('8437'),  // 8215 × 1.027 ≈ 8437 — PROJECTED
+  caregiverThresholdFederal: D('19811'),          // 19290 × 1.027 ≈ 19811 — PROJECTED
+  // Pension income amount — PROJECTED
+  pensionIncomeAmountCap: D('2000'),              // fixed statutory amount, not indexed
+  pensionIncomeAmountCapOntario: D('1686'),       // 2025 value reused — PROJECTED
+  // OAS clawback threshold — PROJECTED
+  oasClawbackThreshold: D('95977'),               // 93454 × 1.027 ≈ 95977 — PROJECTED
+  oasClawbackRate: D('0.15'),
+  // FHSA annual deduction limit (fixed at $8,000 — not indexed)
+  fhsaAnnualLimit: D('8000'),
   sources: [
     { name: 'CRA 2026 indexation announcement (projected)', url: 'https://www.canada.ca/en/revenue-agency/news/newsroom/tax-tips/tax-tips-2025.html' },
     { name: 'ON Min of Finance 2026 personal income tax rates (TBD)', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },

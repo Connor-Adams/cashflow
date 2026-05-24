@@ -52,6 +52,12 @@ export type TaxYearFacts = {
   rrspContribs: RrspContrib[];
   slips: SlipFact[];
   carryforwards: PersonalCarryforwards;
+  donations: IncomeItem[];
+  fhsaContribs: RrspContrib[]; // reuse shape
+  disabilityCredit?: { selfEligible: boolean; transferredFromDependent?: Decimal };
+  caregiverDependents?: Array<{ name: string; netIncome: Decimal; eligibleAmount: Decimal }>;
+  tuitionFees?: Decimal;
+  pensionIncome?: Decimal; // sum of L11500 + L11600 pension lines, before 65 vs 65+ split
   spouse?: {
     netIncome: Decimal;
   };
@@ -134,5 +140,16 @@ export type RateTable = {
   donationHighRateOntario: Decimal;
   medicalThresholdPercent: Decimal;
   medicalThresholdCap: Decimal;
+  dtcBaseFederal: Decimal;            // 2024: $9,872
+  dtcSupplementFederal: Decimal;      // for under-18 dependents: $5,758 (2024)
+  dtcSupplementThreshold: Decimal;    // child care exp threshold ($3,373 in 2024)
+  dtcBaseOntario: Decimal;            // 2024: $9,586
+  caregiverAmountFederalInfirmAdult: Decimal; // L30450 base
+  caregiverThresholdFederal: Decimal;          // reduction threshold ($18,783 in 2024)
+  pensionIncomeAmountCap: Decimal;             // $2,000 federal
+  pensionIncomeAmountCapOntario: Decimal;      // $1,641 ON 2024
+  oasClawbackThreshold: Decimal;               // $90,997 (2024)
+  oasClawbackRate: Decimal;                    // 0.15
+  fhsaAnnualLimit: Decimal;                    // $8,000
   sources: { name: string; url: string }[];
 };
