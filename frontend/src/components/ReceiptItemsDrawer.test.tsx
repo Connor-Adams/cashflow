@@ -143,8 +143,58 @@ describe('ReceiptItemsDrawer', () => {
           (c[1] as RequestInit)?.method === 'PATCH',
       )
       expect(patchCall).toBeDefined()
-      const body = JSON.parse((c1 => c1)(patchCall![1] as RequestInit).body as string)
+      const body = JSON.parse((patchCall![1] as RequestInit).body as string)
       expect(body).toHaveProperty('categoryOverride', 'Electronics')
+    })
+  })
+
+  it('PATCHes businessUseOverride when business % input changes and blurs', async () => {
+    const fetchMock = makeFetchOk()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const receiptWithNullBusiness: ReceiptWithItems = {
+      ...RECEIPT_WITH_ORDER,
+      items: [
+        {
+          id: 101,
+          externalOrderId: 99,
+          title: 'Eggs',
+          quantity: 1,
+          unitPrice: '9.00',
+          totalPrice: '9.00',
+          inferredCategory: 'Groceries',
+          categoryOverride: null,
+          businessUsePercent: null,
+          businessUseOverride: null,
+        },
+      ],
+    }
+
+    render(
+      <ReceiptItemsDrawer
+        open={true}
+        onClose={vi.fn()}
+        receipts={[receiptWithNullBusiness]}
+        categoryHints={CATEGORY_HINTS}
+        onExtract={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByRole('spinbutton')
+    fireEvent.change(input, { target: { value: '50' } })
+    fireEvent.blur(input)
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls
+      const patchCall = calls.find(
+        (c) =>
+          typeof c[0] === 'string' &&
+          c[0].includes('/api/external-order-items/101') &&
+          (c[1] as RequestInit)?.method === 'PATCH',
+      )
+      expect(patchCall).toBeDefined()
+      const body = JSON.parse((patchCall![1] as RequestInit).body as string)
+      expect(body).toHaveProperty('businessUseOverride', 50)
     })
   })
 

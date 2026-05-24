@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { patchJson } from '../lib/api'
 import type { ReceiptWithItems, ExternalOrderItemView } from '../../../shared/api-types'
 
@@ -19,22 +19,41 @@ function ItemRow({ item, categoryHints }: ItemRowProps) {
   const initialCategory = item.categoryOverride ?? item.inferredCategory ?? ''
   const initialBusiness = item.businessUseOverride ?? item.businessUsePercent ?? ''
 
-  const [category, setCategory] = useState(initialCategory)
-  const [business, setBusiness] = useState(initialBusiness)
+  const lastSavedCategoryRef = useRef<string>(initialCategory)
+  const lastSavedBusinessRef = useRef<string | number>(initialBusiness)
+
+  const [category, setCategory] = useState<string>(initialCategory)
+  const [business, setBusiness] = useState<string | number>(initialBusiness)
+  const [categoryError, setCategoryError] = useState<string | null>(null)
+  const [businessError, setBusinessError] = useState<string | null>(null)
 
   async function handleCategoryBlur() {
-    if (category === initialCategory) return
-    await patchJson(`/api/external-order-items/${item.id}`, {
-      categoryOverride: category === '' ? null : category,
-    })
+    if (category === lastSavedCategoryRef.current) return
+    setCategoryError(null)
+    try {
+      await patchJson(`/api/external-order-items/${item.id}`, {
+        categoryOverride: category === '' ? null : category,
+      })
+      lastSavedCategoryRef.current = category
+    } catch (e) {
+      setCategory(lastSavedCategoryRef.current)
+      setCategoryError(e instanceof Error ? e.message : 'Save failed')
+    }
   }
 
   async function handleBusinessBlur() {
-    if (business === initialBusiness) return
+    if (business === lastSavedBusinessRef.current) return
+    setBusinessError(null)
     const val = business === '' ? null : Number(business)
-    await patchJson(`/api/external-order-items/${item.id}`, {
-      businessUseOverride: val,
-    })
+    try {
+      await patchJson(`/api/external-order-items/${item.id}`, {
+        businessUseOverride: val,
+      })
+      lastSavedBusinessRef.current = business
+    } catch (e) {
+      setBusiness(lastSavedBusinessRef.current)
+      setBusinessError(e instanceof Error ? e.message : 'Save failed')
+    }
   }
 
   return (
@@ -55,6 +74,7 @@ function ItemRow({ item, categoryHints }: ItemRowProps) {
             </option>
           ))}
         </select>
+        {categoryError && <span role="alert">{categoryError}</span>}
       </td>
       <td>
         <input
@@ -65,6 +85,7 @@ function ItemRow({ item, categoryHints }: ItemRowProps) {
           onChange={(e) => setBusiness(e.target.value)}
           onBlur={() => void handleBusinessBlur()}
         />
+        {businessError && <span role="alert">{businessError}</span>}
       </td>
     </tr>
   )
@@ -179,9 +200,9 @@ export default function ReceiptItemsDrawer({
   if (!open) return null
 
   return (
-    <div className="receiptItemsDrawer" role="dialog" aria-modal="true">
+    <div className="receiptItemsDrawer" role="dialog" aria-modal="true" aria-labelledby="receipt-items-drawer-title">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0 }}>Receipt Items</h2>
+        <h2 id="receipt-items-drawer-title" style={{ margin: 0 }}>Receipt Items</h2>
         <button type="button" onClick={onClose}>
           Close
         </button>
