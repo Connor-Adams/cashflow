@@ -31,12 +31,6 @@ categories:
 
 exclude-labels:
   - 'skip-changelog'
-  - 'documentation'
-  - 'ci'
-  - 'build'
-  - 'chore'
-  - 'refactor'
-  - 'test'
 
 version-resolver:
   major:
