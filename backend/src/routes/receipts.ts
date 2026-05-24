@@ -2,7 +2,8 @@ import { Router } from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
-import { Transaction, Receipt } from '../models';
+import { Op } from 'sequelize';
+import { Transaction, Receipt, ExternalOrderItem, TransactionOrderLink } from '../models';
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
@@ -250,5 +251,64 @@ router.post(
     }
   },
 );
+
+router.patch('/external-order-items/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (Number.isNaN(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const item = await ExternalOrderItem.findByPk(id);
+    if (!item) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const links = await TransactionOrderLink.findAll({
+      where: { externalOrderId: item.externalOrderId },
+    });
+    if (links.length === 0) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: {
+        id: { [Op.in]: links.map((l) => l.transactionId) },
+        ...visibleTransactionWhere(req),
+      },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const patch: { categoryOverride?: string | null; businessUseOverride?: string | null } = {};
+    if (Object.prototype.hasOwnProperty.call(body, 'categoryOverride')) {
+      const v = body.categoryOverride;
+      if (v === null || v === '') patch.categoryOverride = null;
+      else if (typeof v === 'string') patch.categoryOverride = v;
+      else {
+        res.status(400).json({ error: 'categoryOverride must be string or null' });
+        return;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'businessUseOverride')) {
+      const v = body.businessUseOverride;
+      if (v === null) patch.businessUseOverride = null;
+      else {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          res.status(400).json({ error: 'businessUseOverride must be in [0,100]' });
+          return;
+        }
+        patch.businessUseOverride = String(n);
+      }
+    }
+    await item.update(patch);
+    res.json(item.toJSON());
+  } catch (e) {
+    next(e);
+  }
+});
 
 export default router;
