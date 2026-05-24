@@ -150,6 +150,7 @@ export function TransactionsPage() {
   const [bulkSplit, setBulkSplit] = useState('')
   const [bulkPctMe, setBulkPctMe] = useState('')
   const [bulkPctPartner, setBulkPctPartner] = useState('')
+  // intentionally plain useState — ids filter is one-shot from URL, not session-persisted
   const [idsFilter, setIdsFilter] = useState('')
   const [bulkMarkReviewed, setBulkMarkReviewed] = useState(false)
   const [bulkApplying, setBulkApplying] = useState(false)
@@ -451,6 +452,16 @@ export function TransactionsPage() {
               href: `/import/${encodeURIComponent(batchFilter.trim())}`,
             }
           : null,
+        idsFilter.trim()
+          ? {
+              key: 'ids',
+              label: `IDs: ${idsFilter.trim().length > 40 ? idsFilter.trim().slice(0, 40) + '…' : idsFilter.trim()}`,
+              clear: () => {
+                setPage(1)
+                setIdsFilter('')
+              },
+            }
+          : null,
       ].filter(Boolean) as Array<{
         key: string
         label: string
@@ -466,12 +477,14 @@ export function TransactionsPage() {
       dateFrom,
       dateTo,
       batchFilter,
+      idsFilter,
       setReviewOnly,
       setCurrency,
       setCategoryFilter,
       setDateFrom,
       setDateTo,
       setBatchFilter,
+      setIdsFilter,
     ]
   )
 
@@ -948,6 +961,7 @@ export function TransactionsPage() {
                 setDateFrom('')
                 setDateTo('')
                 setBatchFilter('')
+                setIdsFilter('')
               }}
             >
               Clear filters
