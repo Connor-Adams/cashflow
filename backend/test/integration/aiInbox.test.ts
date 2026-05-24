@@ -149,24 +149,41 @@ test('GET /api/ai/inbox returns audit + insight suggested rows newest first', as
   assert.ok(ids.indexOf(newerAudit.id) < ids.indexOf(olderInsight.id), 'newer first');
   const audit = items.find((i) => i.id === newerAudit.id);
   assert.ok(audit);
+  assert.equal(audit.kind, 'transaction_audit');
   assert.match(audit.summary, /2 issue/);
 });
 
 test('GET /api/ai/inbox excludes non-suggested status and other kinds', async () => {
   const { AiSuggestion } = await import('../../src/models/index.js');
-  await AiSuggestion.create({
+  const beforeR = await authed.get('/api/ai/inbox');
+  assert.equal(beforeR.status, 200);
+  const beforeIds = new Set((beforeR.body.items as Array<{ id: number }>).map((i) => i.id));
+
+  const rejected = await AiSuggestion.create({
     householdId, userId: null, kind: 'financial_insight', status: 'rejected',
     inputSnapshot: {}, output: [],
   } as never);
-  await AiSuggestion.create({
+  const wrongKind = await AiSuggestion.create({
     householdId, userId: null, kind: 'transaction_fields', status: 'suggested',
     inputSnapshot: {}, output: {},
   } as never);
+
   const r = await authed.get('/api/ai/inbox');
   assert.equal(r.status, 200);
+  const ids = (r.body.items as Array<{ id: number }>).map((i) => i.id);
   const kinds = (r.body.items as Array<{ kind: string }>).map((i) => i.kind);
+
+  // These two noise rows must not appear in the response
+  assert.ok(!ids.includes(rejected.id), 'rejected row must be excluded');
+  assert.ok(!ids.includes(wrongKind.id), 'wrong-kind row must be excluded');
+
+  // No new transaction_fields entries should have appeared
   assert.ok(!kinds.includes('transaction_fields'));
-  assert.ok(!(r.body.items as Array<{ status?: string }>).some((i) => i.status === 'rejected'));
+
+  // The response must still contain all the previously-visible items
+  for (const id of beforeIds) {
+    assert.ok(ids.includes(id), `previously-visible item ${id} must still be present`);
+  }
 });
 
 test('GET /api/ai/inbox scopes by household', async () => {
