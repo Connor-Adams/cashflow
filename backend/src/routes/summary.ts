@@ -21,7 +21,7 @@ import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '..
 
 const router = Router();
 
-function dateWhere(req: Request) {
+export function dateWhere(req: Request) {
   const w: Record<string, unknown> = { ...visibleTransactionWhere(req) };
   if (req.query.dateFrom || req.query.dateTo) {
     const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
