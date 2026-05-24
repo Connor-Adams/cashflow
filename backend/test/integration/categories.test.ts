@@ -137,6 +137,15 @@ test('PATCH /api/categories/:id rejects unknown icon name', async () => {
   assert.equal(res.status, 400);
 });
 
+test('PATCH /api/categories/:id 400s when icon field missing', async () => {
+  const row = await seedCategory(primaryHouseholdId, 'NoBody');
+  const res = await primaryAgent
+    .patch(`/api/categories/${row.id}`)
+    .send({});
+  assert.equal(res.status, 400);
+  assert.match(res.body.error ?? '', /icon field required/);
+});
+
 test('PATCH /api/categories/:id 404s for another household', async () => {
   const otherRow = await seedCategory(otherHouseholdId, 'Forbidden');
   const res = await primaryAgent
