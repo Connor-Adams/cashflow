@@ -2188,3 +2188,78 @@
   color: var(--foreground);
   font-variant-numeric: tabular-nums;
 }
+
+.enrichListsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.625rem;
+  margin-bottom: 0.875rem;
+}
+
+@media (max-width: 760px) {
+  .enrichListsGrid { grid-template-columns: 1fr; }
+}
+
+.enrichListCard__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.625rem;
+}
+
+.enrichListCard__title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.enrichListCard__manage {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.enrichListCard__manage:hover {
+  text-decoration: underline;
+}
+
+.enrichListCard__rows {
+  font-size: 0.82rem;
+}
+
+.enrichListRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.625rem;
+  padding: 0.5rem 0;
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+}
+
+.enrichListRow:last-child { border-bottom: 0; }
+
+.enrichListRow--twoCol { grid-template-columns: 1fr auto; }
+
+.enrichListRow__primary { color: var(--foreground); min-width: 0; }
+
+.enrichListRow__count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.enrichListRow__action {
+  font-size: 0.75rem;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.enrichListRow__action:hover { text-decoration: underline; }
+
+.enrichInlineCode {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  color: var(--primary-foreground);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.78rem;
+}
