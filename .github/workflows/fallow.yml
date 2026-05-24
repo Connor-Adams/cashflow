@@ -14,15 +14,23 @@ concurrency:
 
 jobs:
   audit:
+    name: PR code intelligence
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: fallow-rs/fallow@v2
+      - name: Run Fallow audit
+        uses: fallow-rs/fallow@v2
         with:
           command: audit
           comment: true
+          review-comments: true
+          review-guidance: true
           annotations: false
+          diff-filter: added
+          max-comments: 25
           fail-on-issues: false
