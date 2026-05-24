@@ -87,9 +87,7 @@ const TAB_ITEMS: TabItem[] = [
 export function PortfolioPage() {
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
   const [allocation, setAllocation] = useState<PortfolioAllocation | null>(null)
-  const [income, setIncome] = useState<PortfolioIncome | null>(null)
   const [bySec, setBySec] = useState<PortfolioBySecurity | null>(null)
-  const [realized, setRealized] = useState<PortfolioRealized | null>(null)
 
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -104,19 +102,15 @@ export function PortfolioPage() {
     setLoading(true)
     setErr(null)
     try {
-      const [summaryRes, allocRes, incomeRes, bySecRes, realizedRes] =
+      const [summaryRes, allocRes, bySecRes] =
         await Promise.all([
           getJson<PortfolioSummary>('/api/portfolio'),
           getJson<PortfolioAllocation>('/api/portfolio/allocation'),
-          getJson<PortfolioIncome>('/api/portfolio/income'),
           getJson<PortfolioBySecurity>('/api/portfolio/by-security'),
-          getJson<PortfolioRealized>('/api/portfolio/realized'),
         ])
       setSummary(summaryRes)
       setAllocation(allocRes)
-      setIncome(incomeRes)
       setBySec(bySecRes)
-      setRealized(realizedRes)
       const fetchedAts = summaryRes.holdings
         .map((h) => h.latestPrice?.fetchedAt)
         .filter((v): v is string => typeof v === 'string')
@@ -243,11 +237,11 @@ export function PortfolioPage() {
       </TabPanel>
 
       <TabPanel value="income" active={activeTab}>
-        <IncomePanel data={income} />
+        <IncomePanel />
       </TabPanel>
 
       <TabPanel value="realized" active={activeTab}>
-        <RealizedPanel data={realized} />
+        <RealizedPanel />
       </TabPanel>
     </div>
   )
@@ -573,6 +567,16 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
                   <TableCell>{row.percentage.toFixed(1)}%</TableCell>
                 </TableRow>
               ))}
+              {data!.bySecurity.slice(0, 20).map((row) => (
+                <TableRow key={`security|${row.securityId}|${row.currency}`}>
+                  <TableCell>Security</TableCell>
+                  <TableCell>
+                    {row.symbol} ({row.currency})
+                  </TableCell>
+                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
+                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
+                </TableRow>
+              ))}
               {data!.byAccount.map((row) => (
                 <TableRow key={`account|${row.accountId}|${row.currency}`}>
                   <TableCell>Account</TableCell>
@@ -649,24 +653,96 @@ function AllocationDonut({ title, slices }: { title: string; slices: DonutSlice[
   )
 }
 
+/* ---------------------- Shared date-filter UI ---------------------- */
+
+type DateFilterProps = {
+  dateFrom: string
+  dateTo: string
+  onFromChange: (v: string) => void
+  onToChange: (v: string) => void
+}
+
+function DateRangeFilter({ dateFrom, dateTo, onFromChange, onToChange }: DateFilterProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-4">
+      <label className="flex items-center gap-1 text-sm">
+        <span className="text-muted-foreground">From</span>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => onFromChange(e.target.value)}
+          className="border border-border bg-card rounded-md px-2 py-1 text-sm"
+        />
+      </label>
+      <label className="flex items-center gap-1 text-sm">
+        <span className="text-muted-foreground">To</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => onToChange(e.target.value)}
+          className="border border-border bg-card rounded-md px-2 py-1 text-sm"
+        />
+      </label>
+    </div>
+  )
+}
+
 /* ---------------------- Income tab ---------------------- */
 
-function IncomePanel({ data }: { data: PortfolioIncome | null }) {
-  if (!data || (data.byMonth.length === 0 && data.totals.length === 0)) {
+function buildDateQuery(dateFrom: string, dateTo: string): string {
+  const params = new URLSearchParams()
+  if (dateFrom) params.set('dateFrom', dateFrom)
+  if (dateTo) params.set('dateTo', dateTo)
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
+function IncomePanel() {
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [data, setData] = useState<PortfolioIncome | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+
+  const fetchIncome = useCallback(async (from: string, to: string) => {
+    setLoading(true)
+    setErr(null)
+    try {
+      const qs = buildDateQuery(from, to)
+      const res = await getJson<PortfolioIncome>(`/api/portfolio/income${qs}`)
+      setData(res)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not load income')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchIncome(dateFrom, dateTo)
+  }, [fetchIncome, dateFrom, dateTo])
+
+  if (err) return <p className="error">{err}</p>
+
+  if (!loading && (!data || (data.byMonth.length === 0 && data.totals.length === 0))) {
     return (
-      <Card>
-        <p className="muted">
-          No dividend or interest activity yet. Import investment statements to populate
-          this view.
-        </p>
-      </Card>
+      <>
+        <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <Card>
+          <p className="muted">
+            No dividend or interest activity yet. Import investment statements to populate
+            this view.
+          </p>
+        </Card>
+      </>
     )
   }
 
   return (
     <>
-      <section className="transactionsStats">
-        {data.totals.map((row) => (
+      <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+      <section className="transactionsStats" aria-busy={loading}>
+        {(data?.totals ?? []).map((row) => (
           <StatCard
             key={row.currency}
             label={`${row.currency} total income`}
@@ -676,7 +752,7 @@ function IncomePanel({ data }: { data: PortfolioIncome | null }) {
         ))}
       </section>
 
-      <IncomeMonthlyChart data={data} />
+      {data && <IncomeMonthlyChart data={data} />}
 
       <Card className="transactionsTableCard mt-4">
         <div className="transactionsPanelHeader">
@@ -700,7 +776,7 @@ function IncomePanel({ data }: { data: PortfolioIncome | null }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.bySecurity.slice(0, 20).map((row) => (
+              {(data?.bySecurity ?? []).slice(0, 20).map((row) => (
                 <TableRow key={`${row.securityId ?? 'null'}|${row.currency}`}>
                   <TableCell>
                     {row.securityId != null && row.symbol ? (
@@ -721,7 +797,7 @@ function IncomePanel({ data }: { data: PortfolioIncome | null }) {
                   <TableCell>{row.activityCount}</TableCell>
                 </TableRow>
               ))}
-              {data.bySecurity.length === 0 && (
+              {!loading && (data?.bySecurity.length ?? 0) === 0 && (
                 <EmptyTableRow
                   colSpan={6}
                   title="No income by security."
@@ -810,21 +886,50 @@ function IncomeMonthlyChart({ data }: { data: PortfolioIncome }) {
 
 /* ---------------------- Realized tab ---------------------- */
 
-function RealizedPanel({ data }: { data: PortfolioRealized | null }) {
-  if (!data || data.events.length === 0) {
+function RealizedPanel() {
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [data, setData] = useState<PortfolioRealized | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+
+  const fetchRealized = useCallback(async (from: string, to: string) => {
+    setLoading(true)
+    setErr(null)
+    try {
+      const qs = buildDateQuery(from, to)
+      const res = await getJson<PortfolioRealized>(`/api/portfolio/realized${qs}`)
+      setData(res)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not load realized P&L')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchRealized(dateFrom, dateTo)
+  }, [fetchRealized, dateFrom, dateTo])
+
+  if (err) return <p className="error">{err}</p>
+
+  if (!loading && (!data || data.events.length === 0)) {
     return (
-      <Card>
-        <p className="muted">
-          No realized SELL events yet. Realized gain/loss appears here after a sell
-          activity is imported.
-        </p>
-      </Card>
+      <>
+        <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <Card>
+          <p className="muted">
+            No realized SELL events yet. Realized gain/loss appears here after a sell
+            activity is imported.
+          </p>
+        </Card>
+      </>
     )
   }
 
   // Running cumulative realized gain per currency for the events table.
   const runningByCurrency = new Map<string, number>()
-  const eventsWithRunning = data.events.map((ev) => {
+  const eventsWithRunning = (data?.events ?? []).map((ev) => {
     const prev = runningByCurrency.get(ev.currency) ?? 0
     const next = prev + ev.realizedGain
     runningByCurrency.set(ev.currency, next)
@@ -833,8 +938,9 @@ function RealizedPanel({ data }: { data: PortfolioRealized | null }) {
 
   return (
     <>
-      <section className="transactionsStats">
-        {data.totals.map((row) => (
+      <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+      <section className="transactionsStats" aria-busy={loading}>
+        {(data?.totals ?? []).map((row) => (
           <StatCard
             key={row.currency}
             label={`${row.currency} realized to date`}
@@ -863,7 +969,7 @@ function RealizedPanel({ data }: { data: PortfolioRealized | null }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.bySecurity.map((row) => (
+              {(data?.bySecurity ?? []).map((row) => (
                 <TableRow key={`${row.securityId}|${row.currency}`}>
                   <TableCell>
                     <Link
