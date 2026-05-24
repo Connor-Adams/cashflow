@@ -23,6 +23,7 @@ const dbPath = path.join(backendRoot, 'data', 'test-receipts-with-items.sqlite')
 
 let app: import('express').Express;
 let agentA: ReturnType<typeof request.agent>;
+let agentB: ReturnType<typeof request.agent>;
 let householdAId: number;
 let userAId: number;
 let accountAId: number;
@@ -59,6 +60,11 @@ before(async () => {
   userAId = a.userId;
   agentA = request.agent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
+
+  // Seed household B.
+  const b = await seedHousehold('ReceiptsWithItemsB', 'B Partner');
+  agentB = request.agent(app);
+  agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 
   // Create an account for household A.
   const acct = await models.Account.create({
@@ -288,4 +294,19 @@ test('GET receipts: multiple receipts — only one with order has items', async 
   assert.ok(Array.isArray(withOrder.items), 'items should be array');
   assert.equal(withOrder.items.length, 1, 'receipt with order should have 1 item');
   assert.equal(withOrder.items[0].title, 'Milk');
+});
+
+// ---------------------------------------------------------------------------
+// Test 4: Cross-household access returns 404
+// ---------------------------------------------------------------------------
+
+test('GET receipts: cross-household access returns 404', async () => {
+  // Seed a transaction + receipt in household A.
+  const txnId = await seedTransaction();
+  await seedReceiptNoOrder(txnId);
+
+  // agentB belongs to household B — txn is in household A.
+  const res = await agentB.get(`/api/transactions/${txnId}/receipts`);
+
+  assert.equal(res.status, 404, `expected 404 from cross-household access, got ${res.status}: ${JSON.stringify(res.body)}`);
 });

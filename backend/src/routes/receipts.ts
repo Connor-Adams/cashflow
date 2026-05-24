@@ -118,7 +118,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
     const orderIds = receipts.map((r) => r.externalOrderId).filter((x): x is number => x != null);
     const [orders, items] = await Promise.all([
       orderIds.length
-        ? ExternalOrder.findAll({ where: { id: { [Op.in]: orderIds } } })
+        ? ExternalOrder.findAll({ where: { id: { [Op.in]: orderIds }, householdId: txn.householdId } })
         : Promise.resolve([] as InstanceType<typeof ExternalOrder>[]),
       orderIds.length
         ? ExternalOrderItem.findAll({ where: { externalOrderId: { [Op.in]: orderIds } } })
