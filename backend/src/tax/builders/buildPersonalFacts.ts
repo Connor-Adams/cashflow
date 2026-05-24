@@ -6,12 +6,13 @@ import {
   FxRate,
   HouseholdMember,
   InvestmentActivity,
+  InstalmentPayment,
   Security,
   TaxSlip,
   Transaction,
   User,
 } from '../../models';
-import { D } from '../util/decimal';
+import { D, sumD } from '../util/decimal';
 import type {
   CapGainEvent,
   IncomeItem,
@@ -149,7 +150,13 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     instalmentsPaid: D(cf.find((c) => c.kind === 'instalments_paid')?.amount ?? 0),
   };
 
-  // Age at year end — load User via HouseholdMember; fall back to 0 if no DOB
+  // Phase 4: override instalmentsPaid from InstalmentPayment ledger rows for this year
+  const instalments = await InstalmentPayment.findAll({ where: { entityId, year } });
+  if (instalments.length > 0) {
+    carryforwards.instalmentsPaid = sumD(instalments.map((p) => D(p.amount as unknown as string)));
+  }
+
+  // Phase 2: age at year end — load User via HouseholdMember; fall back to 0 if no DOB
   let ageAtYearEnd = 0;
   const membership = await HouseholdMember.findOne({ where: { householdId: entity.householdId } });
   if (membership) {

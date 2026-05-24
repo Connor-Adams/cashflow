@@ -94,6 +94,9 @@ export const RATES_2026: RateTable = {
   // Medical threshold cap: 2025 cap (2837) × 1.027 = 2913.59 → round to 2914
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2914'),
+  // 2026 projected RRSP limit: $33,367 (2025 $32,490 × 1.027 ≈ 33,367). Verify when CRA announces.
+  rrspAnnualLimit: D('33367'),
+  fhsaLifetimeLimit: D('40000'),
   // Disability Tax Credit — PROJECTED: 2025 values × 1.027 (2.7% federal indexation)
   dtcBaseFederal: D('10412'),          // 10138 × 1.027 ≈ 10412 — PROJECTED
   dtcSupplementFederal: D('6075'),     // 5916 × 1.027 ≈ 6076; rnd 6075 — PROJECTED
