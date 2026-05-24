@@ -77,6 +77,8 @@ export const RATES_2024: RateTable = {
   donationHighRateOntario: D('0.1116'),
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2759'),
+  rrspAnnualLimit: D('31560'),
+  fhsaLifetimeLimit: D('40000'),
   // Disability Tax Credit — base amounts × 15% = credit value. 2024 CRA T2201.
   dtcBaseFederal: D('9872'),
   dtcSupplementFederal: D('5758'),   // under-18 supplement

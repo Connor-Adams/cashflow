@@ -199,6 +199,8 @@ export type RateTable = {
   donationHighRateOntario: Decimal;
   medicalThresholdPercent: Decimal;
   medicalThresholdCap: Decimal;
+  rrspAnnualLimit: Decimal;
+  fhsaLifetimeLimit: Decimal;
   dtcBaseFederal: Decimal;            // 2024: $9,872
   dtcSupplementFederal: Decimal;      // for under-18 dependents: $5,758 (2024)
   dtcSupplementThreshold: Decimal;    // child care exp threshold ($3,373 in 2024)

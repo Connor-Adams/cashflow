@@ -10,6 +10,7 @@ import { Household, initHousehold } from './Household';
 import { HouseholdMember, initHouseholdMember } from './HouseholdMember';
 import { HouseholdInvite, initHouseholdInvite } from './HouseholdInvite';
 import { Contact, initContact } from './Contact';
+import { Category, initCategory } from './Category';
 import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
 import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
@@ -36,6 +37,7 @@ import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
 import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
+import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -43,6 +45,7 @@ initHousehold(sequelize);
 initHouseholdMember(sequelize);
 initHouseholdInvite(sequelize);
 initContact(sequelize);
+initCategory(sequelize);
 initPartnerSettlement(sequelize);
 initBudgetTarget(sequelize);
 initAccount(sequelize);
@@ -74,6 +77,7 @@ initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
 initShareholderLoan(sequelize);
+initInstalmentPayment(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -127,6 +131,8 @@ HouseholdMember.belongsTo(Household, { foreignKey: 'household_id', as: 'househol
 HouseholdMember.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Contact, { foreignKey: 'household_id', as: 'contacts' });
 Contact.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Household.hasMany(Category, { foreignKey: 'household_id', as: 'categories' });
+Category.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Transaction.belongsTo(Contact, { foreignKey: 'ownership_contact_id', as: 'ownershipContact' });
 Household.hasMany(PartnerSettlement, {
   foreignKey: 'household_id',
@@ -220,6 +226,7 @@ export {
   HouseholdMember,
   HouseholdInvite,
   Contact,
+  Category,
   PartnerSettlement,
   BudgetTarget,
   Account,
@@ -251,4 +258,5 @@ export {
   Carryforward,
   TaxReturn,
   ShareholderLoan,
+  InstalmentPayment,
 };

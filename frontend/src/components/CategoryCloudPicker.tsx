@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { CategoryIcon } from './CategoryIcon'
 
 function arrangeOptionsBySpace(options: string[]): string[] {
   const byLength = [...options].sort((a, b) => {
@@ -107,7 +108,10 @@ export function CategoryCloudPicker({
                 setOpen(false)
               }}
             >
-              {option}
+              <span className="inline-flex items-center gap-1.5">
+                <CategoryIcon name={option} />
+                {option}
+              </span>
             </button>
           ))}
         </div>

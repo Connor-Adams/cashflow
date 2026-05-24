@@ -23,6 +23,7 @@ import { ImportsTab } from './pages/settings/tabs/ImportsTab'
 import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
 import { ContactsTab } from './pages/settings/tabs/ContactsTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
+import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { ChatPage } from './pages/ChatPage'
@@ -65,6 +66,7 @@ function AppRoutes() {
             <Route path="enrichment" element={<EnrichmentTab />} />
             <Route path="contacts" element={<ContactsTab />} />
             <Route path="budgets" element={<BudgetsTab />} />
+            <Route path="categories" element={<CategoriesTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="chat" element={<ChatPage />} />

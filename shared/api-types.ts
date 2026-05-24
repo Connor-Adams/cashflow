@@ -135,6 +135,15 @@ export type Contact = {
   notes: string | null
 }
 
+export type Category = {
+  id: number
+  householdId: number
+  name: string
+  icon: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export type AuthUser = {
   id: number
   email: string
@@ -691,3 +700,5 @@ export type ClientLogPayload = {
   requestId?: string
   fields?: Record<string, unknown>
 }
+
+export * from './categoryIcons'
