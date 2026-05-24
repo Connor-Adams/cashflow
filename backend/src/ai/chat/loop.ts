@@ -73,7 +73,10 @@ export async function* runChatTurn(
   args: RunChatTurnArgs
 ): AsyncGenerator<LoopEvent> {
   const cfg = getChatConfig();
-  const stream = streamChatOverride ?? args.streamChatImpl ?? streamChat;
+  // Precedence matches the docstring above: per-call `args.streamChatImpl`
+  // wins over the module-level test override so a stale override from a
+  // prior test can't silently shadow an explicit per-call stub.
+  const stream = args.streamChatImpl ?? streamChatOverride ?? streamChat;
 
   // 1. Persist the user message
   await ChatMessage.create({
@@ -183,6 +186,16 @@ export async function* runChatTurn(
       tool_calls: storedToolCalls ?? undefined,
     });
 
+    if (!useTools) {
+      // Final summarize round — must NOT dispatch tools even if the model
+      // returned them (rare but possible). The assistant message is already
+      // persisted above; just terminate. Without this guard, side-effecting
+      // `propose_*` tools would fire and yield a `proposal` event with no
+      // accompanying summary text, leaving the user with a bare proposal card.
+      yield { type: 'assistant_done', messageId: assistantMsg.id };
+      return;
+    }
+
     if (!storedToolCalls || storedToolCalls.length === 0) {
       yield { type: 'assistant_done', messageId: assistantMsg.id };
       return;
@@ -248,15 +261,6 @@ export async function* runChatTurn(
         content: toolContent,
         tool_call_id: tc.id,
       });
-    }
-
-    if (!useTools) {
-      // We ran the forced summarize-only iteration but it still asked for
-      // tools (which we ignored by not registering any). Stop now so we
-      // don't loop forever — emit assistant_done with the most recent
-      // assistant message we managed to persist.
-      yield { type: 'assistant_done', messageId: assistantMsg.id };
-      return;
     }
   }
   // Defensive: should never reach here — the `step <= max` loop always

@@ -28,6 +28,7 @@ import {
 } from './chat/_helpers';
 
 import type { StreamEvent } from '../../src/ai/chat/openaiClient';
+import type { LoopEvent } from '../../src/ai/chat/loop';
 
 let models: Awaited<ReturnType<typeof setupChatTestDb>>['models'];
 let dbPath: string;
@@ -473,4 +474,128 @@ test('runChatTurn: stream error on first call yields error LoopEvent and does no
   assert.equal(rows.length, 1, 'only the user message persisted');
   assert.equal(rows[0].role, 'user');
   assert.equal(rows[0].contentText, 'will fail');
+});
+
+test('runChatTurn: forced-summarize round does not dispatch tools even if model returns tool_calls', async () => {
+  // Set max=1 so round 0 uses tools and round 1 is the forced summarize round.
+  // The stub returns a propose_bulk_patch on BOTH rounds; round 1's tool call
+  // must NOT be dispatched (no second proposal row, no second proposal event).
+  process.env.CHAT_MAX_TOOL_CALLS_PER_TURN = '1';
+  const ctx = await seedThread('forced-summarize-no-dispatch');
+  // Seed one row the bulk_patch filter (empty {}) will match so the first
+  // round's dispatch can actually create a proposal.
+  await seedTxn(models, ctx.accountId, ctx.householdId, {
+    createdByUserId: ctx.userId,
+    visibility: 'shared',
+    sourceRowFingerprint: 'loop-forced-1',
+  });
+
+  const scripts: StreamEvent[][] = [
+    // Round 0: model asks for propose_bulk_patch (this one DOES dispatch).
+    [
+      {
+        type: 'tool_call_delta',
+        index: 0,
+        id: 'call_1',
+        name: 'propose_bulk_patch',
+      },
+      {
+        type: 'tool_call_delta',
+        index: 0,
+        argumentsDelta:
+          '{"filter":{},"patch":{"split_override":"shared"}}',
+      },
+      { type: 'done', finishReason: 'tool_calls' },
+    ],
+    // Round 1 (forced summarize): model misbehaves and returns ANOTHER tool
+    // call despite tools: undefined. The loop MUST ignore it.
+    [
+      {
+        type: 'tool_call_delta',
+        index: 0,
+        id: 'call_2',
+        name: 'propose_bulk_patch',
+      },
+      {
+        type: 'tool_call_delta',
+        index: 0,
+        argumentsDelta: '{"filter":{},"patch":{"split_override":"me"}}',
+      },
+      { type: 'done', finishReason: 'tool_calls' },
+    ],
+  ];
+
+  const events: LoopEvent[] = [];
+  for await (const ev of runChatTurn({
+    thread: ctx.thread,
+    userMessage: 'hi',
+    userId: ctx.userId,
+    householdId: ctx.householdId,
+    promptContext: {
+      todayIso: '2026-05-24',
+      defaultCurrency: 'CAD',
+      contacts: [],
+    },
+    streamChatImpl: makeStubStream(scripts),
+  })) {
+    events.push(ev);
+  }
+
+  // Exactly one proposal event from round 0's dispatch; round 1's tool call
+  // is ignored.
+  const proposals = events.filter((e) => e.type === 'proposal');
+  assert.equal(
+    proposals.length,
+    1,
+    'only round 0 propose should dispatch (round 1 tool call ignored)'
+  );
+
+  // Only one ChatProposal row created (not two).
+  const proposalRows = await models.ChatProposal.findAll({
+    where: { threadId: ctx.threadId },
+  });
+  assert.equal(
+    proposalRows.length,
+    1,
+    'forced-summarize round must not create a second proposal'
+  );
+
+  // Only one tool_call_start / tool_call_result pair (from round 0).
+  assert.equal(
+    events.filter((e) => e.type === 'tool_call_start').length,
+    1,
+    'no tool_call_start emitted for the forced-summarize round'
+  );
+  assert.equal(
+    events.filter((e) => e.type === 'tool_call_result').length,
+    1,
+    'no tool_call_result emitted for the forced-summarize round'
+  );
+
+  // Loop terminates with assistant_done (not error).
+  assert.equal(events.at(-1)?.type, 'assistant_done');
+  assert.ok(events.every((e) => e.type !== 'error'), 'no error events');
+
+  // The round-1 assistant message IS persisted (with its tool_calls for
+  // audit), but no role=tool row follows it.
+  const rows = await models.ChatMessage.findAll({
+    where: { threadId: ctx.threadId },
+    order: [['id', 'ASC']],
+  });
+  // user, assistant(tool_call call_1), tool(call_1), assistant(call_2 — not dispatched)
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0].role, 'user');
+  assert.equal(rows[1].role, 'assistant');
+  assert.equal(
+    (rows[1].toolCalls as Array<{ id: string }>)[0].id,
+    'call_1'
+  );
+  assert.equal(rows[2].role, 'tool');
+  assert.equal(rows[2].toolCallId, 'call_1');
+  assert.equal(rows[3].role, 'assistant');
+  assert.ok(rows[3].toolCalls, 'round 1 toolCalls persisted for audit');
+  assert.equal(
+    (rows[3].toolCalls as Array<{ id: string }>)[0].id,
+    'call_2'
+  );
 });
