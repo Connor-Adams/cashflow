@@ -25,6 +25,7 @@ import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
+import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { formatMoney } from '../lib/formatMoney'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
@@ -1321,24 +1322,29 @@ export function DashboardPage() {
             ) : aiInsights.insights.length === 0 ? (
               <p className="emptyState">No AI insights for {aiInsights.period} yet.</p>
             ) : (
-              aiInsights.insights.map((insight) => (
-                <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
-                  <div className="aiVisibilityItemHeader">
-                    <strong>{insight.title}</strong>
-                    <span className="muted">{insight.severity}</span>
-                  </div>
-                  <p>{insight.summary}</p>
-                  <p className="muted">
-                    {insight.comparison} · {formatDashboardAmount(insight.amount)}
-                  </p>
-                  {insight.supportingTransactionIds.length > 0 ? (
+              [...aiInsights.insights]
+                .sort((a, b) => {
+                  const order: Record<string, number> = { action: 0, watch: 1, info: 2 }
+                  return (order[a.severity] ?? 3) - (order[b.severity] ?? 3)
+                })
+                .map((insight) => (
+                  <article key={`${insight.metric}-${insight.title}`} className="aiVisibilityItem">
+                    <div className="aiVisibilityItemHeader">
+                      <strong>{insight.title}</strong>
+                      <SeverityBadge severity={insight.severity as InsightSeverity} />
+                    </div>
+                    <p>{insight.summary}</p>
                     <p className="muted">
-                      Transactions: #{insight.supportingTransactionIds.join(', #')}
+                      {insight.comparison} · {formatDashboardAmount(insight.amount)}
                     </p>
-                  ) : null}
-                  <p className="muted">{insight.suggestedAction}</p>
-                </article>
-              ))
+                    {insight.supportingTransactionIds.length > 0 ? (
+                      <p className="muted">
+                        Transactions: #{insight.supportingTransactionIds.join(', #')}
+                      </p>
+                    ) : null}
+                    <p className="muted">{insight.suggestedAction}</p>
+                  </article>
+                ))
             )}
           </div>
         </BentoTile>
