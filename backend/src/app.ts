@@ -3,6 +3,7 @@ import cors from 'cors';
 import * as env from './config/env';
 
 import healthRouter from './routes/health';
+import versionRouter from './routes/version';
 import accountsRouter from './routes/accounts';
 import transactionsRouter from './routes/transactions';
 import rulesRouter from './routes/rules';
@@ -55,6 +56,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(attachAuth);
 
 app.use('/api/health', healthRouter);
+app.use('/api/version', versionRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);

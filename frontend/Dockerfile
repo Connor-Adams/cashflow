@@ -18,6 +18,9 @@ COPY shared/ ./shared/
 ARG VITE_API_BASE
 ENV VITE_API_BASE=$VITE_API_BASE
 
+ARG APP_VERSION=dev
+ENV VITE_APP_VERSION=$APP_VERSION
+
 RUN yarn workspace frontend build
 
 FROM nginx:alpine AS runner

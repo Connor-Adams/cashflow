@@ -30,6 +30,8 @@ COPY --from=builder /app/yarn.lock ./
 
 WORKDIR /app/backend
 
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 ENV NODE_ENV=production
 
 EXPOSE 3001
