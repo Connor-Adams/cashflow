@@ -137,12 +137,13 @@ Response shape:
 
 Implementation:
 - File: `backend/src/routes/ai.ts` (extends existing router).
-- Query: `AiSuggestion.findAll({ where: { ...aiSuggestionWhere(req), status: 'suggested', kind: { [Op.in]: kinds } }, order: [['id','DESC']], limit, ... })`.
-- `summary` is computed per-kind in the route via small per-kind helpers:
-  - `transaction_audit`: `${currentCategory} → ${suggestedCategory} (${confidence})` from `output`
-  - `financial_insight`: `${title}` from `output`
-  - `rule_proposal`: `${merchantPattern} → ${suggestedCategory}` from `output`
-- Counts are computed in the same query (separate `findAll` aggregation, or in-memory from a single fetch limited to a sane upper bound — pick during plan based on dataset size).
+- Two persisted streams: `AiSuggestion.findAll({ where: { ...aiSuggestionWhere(req), status: 'suggested', kind: { [Op.in]: ['transaction_audit', 'financial_insight'] } }, order: [['id','DESC']], limit, ... })`.
+- One computed stream: `findRuleProposals(householdId)` returns proposals on demand from `transactions`. Projected into inbox item shape.
+- Counts: derived from `items.length` grouped by kind (cheap; the inbox is bounded by `limit`).
+- `summary` is computed per-kind by small renderer helpers:
+  - `transaction_audit`: `Audit found ${output.issues.length} issue(s)` (the row is an audit-run aggregate; one inbox item per run, not per issue)
+  - `financial_insight`: `${output[0].title}` plus a count if `output.length > 1`
+  - `rule_proposal`: `${merchantPattern} → ${category} (×${supportCount})`
 
 #### `GET /api/ai/inbox/count`
 
@@ -158,22 +159,34 @@ Open question to resolve in plan phase: do `transaction_audit` and `rule_proposa
 
 ### Frontend
 
-#### Nav badge
+#### Nav (sidebar nav item, not top bar)
 
-- Location: top-right of the existing nav, beside the user menu (confirm during plan; reuse existing `Nav.tsx` or whatever the actual file is).
-- Component: `<AiInboxBadge />` in `frontend/src/components/ai/AiInboxBadge.tsx`.
-- Behavior: on mount, fetch `/api/ai/inbox/count`. Re-fetch on `window` focus and every 5 minutes. Click → `useNavigate('/ai/inbox')`.
-- Always visible (even when count is 0) — an icon-only "AI" affordance, with a count chip overlay when > 0. Always-visible matters because the inbox is also where the user reviews dismissed / superseded history if we add filters later; if the badge vanishes at 0, the user loses the entry point.
+The app has a left-rail `Sidebar` at [frontend/src/components/Sidebar.tsx](frontend/src/components/Sidebar.tsx); there is no top nav. Add an "AI Inbox" item to `navItems`, with a count badge using the existing `<Badge>` component (variant `secondary` for non-zero; hidden when zero).
+
+The count is supplied by a small `useAiInboxCount` hook (`frontend/src/hooks/useAiInboxCount.ts`):
+- Fetches `/api/ai/inbox/count` on mount.
+- Refetches on `window` focus and every 5 minutes.
+- Returns `{ count: number, loading: boolean }`.
+- Returns 0 + silent failure on fetch error (badge invisible on error; don't show stale).
+
+The nav item is always present, even at count=0 — the inbox is the entry point for the AI surface; users need a path in even when nothing is pending.
 
 #### `/ai/inbox` page
 
-- File: `frontend/src/pages/AiInboxPage.tsx`. Add route in the existing router.
-- Layout: page title "AI Inbox" + total count, segmented tabs (All / Audit / Insights / Rules) that filter the list client-side, then a vertical list of `<AiInboxItem>` rows.
-- `<AiInboxItem>`: kind-specific renderer using a small switch:
-  - `transaction_audit`: shows current vs suggested category/business; "Apply" calls existing `POST /api/ai/suggestions/:id/apply`, "Dismiss" calls existing `POST /api/ai/suggestions/:id/reject`. Optimistically remove from list on success.
-  - `financial_insight`: shows summary + comparison; "Open transactions" links to `/transactions?ids=...` (same as Part A); "Dismiss" calls reject endpoint.
-  - `rule_proposal`: shows pattern → category; "Approve" calls existing `POST /api/ai/rule-proposals/:merchantPattern/approve`; "Dismiss" calls reject.
+- File: `frontend/src/pages/AiInboxPage.tsx`. Add route in `App.tsx` as `<Route path="ai/inbox" element={<AiInboxPage />} />`.
+- Layout: page header ("AI Inbox") + total count, segmented tabs (All / Audit / Insights / Rules) filtering client-side, then a vertical list of `<AiInboxItem>` rows.
+- `<AiInboxItem>` is a kind-discriminated renderer:
+  - `transaction_audit`: shows audit-run summary ("N issues found, M high confidence"). Actions: **"Open in Transactions"** (Link to `/transactions?ids=<csv of output.issues[].id>` — reuses the `?ids=` feature from Part A; the existing TransactionsPage audit dialog handles per-issue apply); **"Dismiss"** (POST `/api/ai/suggestions/:id/reject` — existing endpoint, works for any kind).
+  - `financial_insight`: shows the first insight's title + comparison line. Actions: **"Open transactions"** (Link to `/transactions?ids=...` from `output.supportingTransactionIds`); **"Dismiss"** (same reject endpoint).
+  - `rule_proposal`: shows pattern → category with support count. Actions: **"Approve"** (POST `/api/ai/rule-proposals/:merchantPattern/approve` — existing); **"Dismiss"** (POST `/api/ai/rule-proposals/:merchantPattern/dismiss` — NEW; creates an `AiSuggestion` row with `kind='rule_proposal'`, `status='rejected'`, `inputSnapshot={ merchantPattern }`).
+- Approval/dismissal optimistically removes the item from the list. On failure the item is restored at its original index with an inline error.
 - Empty state: friendly message, link back to Dashboard.
+
+#### Rule-proposal dismissal persistence
+
+Since rule proposals are computed each request, dismissal needs durable storage. Add:
+- New endpoint: `POST /api/ai/rule-proposals/:merchantPattern/dismiss` — creates `AiSuggestion{ kind: 'rule_proposal', status: 'rejected', inputSnapshot: { merchantPattern } }`.
+- `findRuleProposals` extended to filter out patterns that appear in any `AiSuggestion` with `kind='rule_proposal'` AND `status='rejected'` for the same household. Mirror the existing exclusion against `Rule.merchantPattern`.
 
 #### No new "unread" tracking on the inbox page itself
 Items naturally leave the list when their status changes from `suggested`. That's the unread semantic — no localStorage needed for the inbox.
@@ -196,11 +209,13 @@ App shell mount
 
 AiInboxPage mount
   → fetch /api/ai/inbox?limit=50
-  → render segmented list
-  → user clicks Apply / Dismiss / Approve
-    → existing endpoint mutates AiSuggestion.status
-    → optimistically remove item from list
-    → next badge poll picks up reduced count
+  → render segmented list (3 streams)
+  → user actions per kind:
+    transaction_audit → "Open in Transactions" (navigate) | "Dismiss" (reject endpoint)
+    financial_insight → "Open transactions" (navigate)    | "Dismiss" (reject endpoint)
+    rule_proposal     → "Approve" (existing endpoint)     | "Dismiss" (new dismiss endpoint)
+  → on success: optimistically remove item; next badge poll reflects reduced count
+  → on failure: restore item at original index + show inline error
 ```
 
 ---
@@ -236,12 +251,15 @@ AiInboxPage mount
 
 ---
 
-## Open questions to resolve in the implementation plan
+## Resolved during plan-phase exploration
 
-1. **`inputSnapshot` shape for insights**: does it already include `currency` + `period`? If not, decide between adding fields to the JSON vs new dedicated columns.
-2. **Nav placement**: which existing component file mounts the nav/header? The badge needs a host.
-3. **`ids=` filter on TransactionsPage**: confirm no conflict with existing query params. Decide ordering vs other filters (this spec says: ids overrides other filters).
-4. **Color tokens**: which existing CSS vars map to `action`/`watch`/`info` severities? Reuse Honey/Ink palette tokens, don't invent new ones.
+1. **`inputSnapshot` for insights**: already includes `{ period, currency }` (verified at [routes/ai.ts:273](backend/src/routes/ai.ts:273)). Supersede pass uses `JSON_EXTRACT` via `sequelize.literal` against this JSON (codebase already uses `sequelize.fn`/`sequelize.literal` patterns elsewhere).
+2. **Nav placement**: app uses a left-rail `Sidebar` ([frontend/src/components/Sidebar.tsx](frontend/src/components/Sidebar.tsx)) with `navItems` array. Badge becomes a new nav item with `<Badge>` overlay.
+3. **`ids=` filter on TransactionsPage**: existing query params (category/currency/dateFrom/dateTo/importBatch/reviewFlag) read in [TransactionsPage.tsx:185-190](frontend/src/pages/TransactionsPage.tsx:185). `ids` is additive — when present, the request includes it AND other filters; the backend `/api/transactions` endpoint must accept and filter on it.
+4. **Color tokens**: reuse existing `<Badge>` variants — `destructive` (action), `secondary` (watch), `outline` (info). No new variants needed.
+5. **`rule_proposal` rows are NOT persisted today** (`findRuleProposals` computes from SQL on every call). Inbox endpoint must call `findRuleProposals` for that stream. Dismissal persists as a stub `AiSuggestion` row.
+6. **`transaction_audit` rows are aggregates** (`output.issues` is an array). Inbox shows one item per audit run; the existing per-issue apply UX in TransactionsPage handles drill-down.
+7. **`/api/ai/suggestions/:id/apply` only handles `kind='transaction_fields'`** ([suggestionStore.ts:100](backend/src/ai/suggestionStore.ts:100)). Inbox does not offer in-place apply for audit/insight; users navigate into context to act.
 
 ---
 
