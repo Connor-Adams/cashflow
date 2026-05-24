@@ -27,6 +27,7 @@ test('builds facts from seeded data', async () => {
     finalCategory: 'employment_income',
     merchantRaw: 'EMPLOYER', merchantClean: 'EMPLOYER',
     importBatch: 'test-seed', sourceRowFingerprint: 'fp-t17-001',
+    sourceIdentityFingerprint: 'sif-t17-001',
   } as never);
   const facts = await buildPersonalFacts(entity.id, 2024);
   assert.equal(facts.year, 2024);
