@@ -127,120 +127,123 @@ export function EnrichmentBackfillCard({ onComplete }: Props) {
   }
 
   return (
-    <Card className="enrichBackfillCard">
-      <div className="flex items-baseline justify-between gap-3 mb-2">
-        <div>
-          <h2 className="text-base font-semibold m-0">Backfill enrichment</h2>
-          <p className="muted text-sm mt-1 mb-0">
-            Re-runs the import enrichment pipeline against every transaction in your household. Override fields and
-            already-reviewed rows are never touched.
-          </p>
-        </div>
-        <span className="enrichAdminPill">Admin action</span>
-      </div>
-      <div className="flex flex-wrap items-center gap-3 mt-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={backfillClearReview}
-            onChange={(e) => setBackfillClearReview(e.target.checked)}
-            disabled={backfillRunning != null}
-          />
-          Clear review flag on rows the pipeline can now confidently categorise
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={backfillReviewOnly}
-            onChange={(e) => setBackfillReviewOnly(e.target.checked)}
-            disabled={backfillRunning != null}
-          />
-          Only re-process rows currently in review
-        </label>
-        <Label htmlFor="settings-backfill-limit" className="text-sm m-0">
-          <span className="sr-only">Row limit</span>
-          <Input
-            id="settings-backfill-limit"
-            type="number"
-            min={1}
-            placeholder="all rows"
-            value={backfillLimit}
-            onChange={(e) => setBackfillLimit(e.target.value)}
-            disabled={backfillRunning != null}
-            className="w-32"
-          />
-        </Label>
-        <div className="ml-auto flex gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={backfillRunning != null}
-            onClick={() => void runBackfill('dry')}
-          >
-            <Sparkles aria-hidden="true" />
-            {backfillRunning === 'dry' ? 'Running dry run…' : 'Dry run'}
-          </Button>
-          <Button
-            type="button"
-            disabled={backfillRunning != null}
-            onClick={() => void runBackfill('real')}
-          >
-            <Sparkles aria-hidden="true" />
-            {backfillRunning === 'real' ? 'Running backfill…' : 'Run backfill'}
-          </Button>
-        </div>
-      </div>
-      {backfillError && (
-        <span className="error mt-2 block" role="alert">
-          {backfillError}
-        </span>
-      )}
-      {(backfillRunning || backfillLive || backfillSummary) && (
-        <div className="mt-3">
-          {backfillSummary ? (
-            <p>
-              <strong>
-                {backfillSummary.dryRun ? 'Dry run — no changes written.' : 'Backfill complete.'}
-              </strong>{' '}
-              Processed {backfillSummary.processed}, updated {backfillSummary.updated}, review flag cleared on{' '}
-              {backfillSummary.reviewFlagCleared}, signals written {backfillSummary.signalsWritten}, skipped{' '}
-              {backfillSummary.skipped} ({(backfillSummary.durationMs / 1000).toFixed(1)}s).
+    <>
+      <Card>
+        <div className="flex items-baseline justify-between gap-3 mb-2">
+          <div>
+            <h2 className="text-base font-semibold m-0">Backfill enrichment</h2>
+            <p className="muted text-sm mt-1 mb-0">
+              Re-runs the import enrichment pipeline against every transaction in your household. Override fields and
+              already-reviewed rows are never touched.
             </p>
-          ) : backfillLive ? (
-            <p className="muted">
-              Streaming… processed {backfillLive.processed}, cleared {backfillLive.cleared}, skipped{' '}
-              {backfillLive.skipped}
-            </p>
-          ) : null}
-          {backfillErrors.length > 0 && (
-            <details className="mt-1">
-              <summary className="error">{backfillErrors.length} row(s) failed</summary>
-              <ul className="text-xs mt-1">
-                {backfillErrors.slice(0, 20).map((e, i) => (
-                  <li key={i}>txn {e.txnId ?? '?'}: {e.message}</li>
+          </div>
+          <span className="enrichAdminPill">Admin action</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 mt-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={backfillClearReview}
+              onChange={(e) => setBackfillClearReview(e.target.checked)}
+              disabled={backfillRunning != null}
+            />
+            Clear review flag on rows the pipeline can now confidently categorise
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={backfillReviewOnly}
+              onChange={(e) => setBackfillReviewOnly(e.target.checked)}
+              disabled={backfillRunning != null}
+            />
+            Only re-process rows currently in review
+          </label>
+          <Label htmlFor="settings-backfill-limit" className="text-sm m-0">
+            <span className="sr-only">Row limit</span>
+            <Input
+              id="settings-backfill-limit"
+              type="number"
+              min={1}
+              placeholder="all rows"
+              value={backfillLimit}
+              onChange={(e) => setBackfillLimit(e.target.value)}
+              disabled={backfillRunning != null}
+              className="w-32"
+            />
+          </Label>
+          <div className="ml-auto flex gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={backfillRunning != null}
+              onClick={() => void runBackfill('dry')}
+            >
+              <Sparkles aria-hidden="true" />
+              {backfillRunning === 'dry' ? 'Running dry run…' : 'Dry run'}
+            </Button>
+            <Button
+              type="button"
+              disabled={backfillRunning != null}
+              onClick={() => void runBackfill('real')}
+            >
+              <Sparkles aria-hidden="true" />
+              {backfillRunning === 'real' ? 'Running backfill…' : 'Run backfill'}
+            </Button>
+          </div>
+        </div>
+        {backfillError && (
+          <span className="error mt-2 block" role="alert">
+            {backfillError}
+          </span>
+        )}
+        {(backfillRunning || backfillLive || backfillSummary) && (
+          <div className="mt-3">
+            {backfillSummary ? (
+              <p>
+                <strong>
+                  {backfillSummary.dryRun ? 'Dry run — no changes written.' : 'Backfill complete.'}
+                </strong>{' '}
+                Processed {backfillSummary.processed}, updated {backfillSummary.updated}, review flag cleared on{' '}
+                {backfillSummary.reviewFlagCleared}, signals written {backfillSummary.signalsWritten}, skipped{' '}
+                {backfillSummary.skipped} ({(backfillSummary.durationMs / 1000).toFixed(1)}s).
+              </p>
+            ) : backfillLive ? (
+              <p className="muted">
+                Streaming… processed {backfillLive.processed}, cleared {backfillLive.cleared}, skipped{' '}
+                {backfillLive.skipped}
+              </p>
+            ) : null}
+            {backfillErrors.length > 0 && (
+              <details className="mt-1">
+                <summary className="error">{backfillErrors.length} row(s) failed</summary>
+                <ul className="text-xs mt-1">
+                  {backfillErrors.slice(0, 20).map((e, i) => (
+                    <li key={i}>txn {e.txnId ?? '?'}: {e.message}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {backfillFeed.length > 0 && (
+              <div className="enrichBackfillFeed" role="log" aria-live="polite">
+                {backfillFeed.map((row) => (
+                  <div key={row.txnId} className="enrichBackfillFeed__row">
+                    <span className="muted enrichBackfillFeed__id">#{row.txnId}</span>
+                    <span className="enrichBackfillFeed__raw">{row.merchantRaw}</span>
+                    <span>
+                      → <strong>{row.merchantCanonical ?? row.merchantClean}</strong>
+                    </span>
+                    <span className="muted enrichBackfillFeed__src">
+                      {row.autoSource ?? '—'}/{row.autoConfidence ?? '—'}
+                    </span>
+                    {row.reviewFlagCleared && <span className="enrichBackfillFeed__cleared">✓ cleared</span>}
+                  </div>
                 ))}
-              </ul>
-            </details>
-          )}
-          {backfillFeed.length > 0 && (
-            <div className="enrichBackfillFeed" role="log" aria-live="polite">
-              {backfillFeed.map((row) => (
-                <div key={row.txnId} className="enrichBackfillFeed__row">
-                  <span className="muted enrichBackfillFeed__id">#{row.txnId}</span>
-                  <span className="enrichBackfillFeed__raw">{row.merchantRaw}</span>
-                  <span>
-                    → <strong>{row.merchantCanonical ?? row.merchantClean}</strong>
-                  </span>
-                  <span className="muted enrichBackfillFeed__src">
-                    {row.autoSource ?? '—'}/{row.autoConfidence ?? '—'}
-                  </span>
-                  {row.reviewFlagCleared && <span className="enrichBackfillFeed__cleared">✓ cleared</span>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </Card>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+      {confirm.dialog}
+    </>
   )
 }
