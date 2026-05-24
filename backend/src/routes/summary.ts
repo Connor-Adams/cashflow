@@ -4,14 +4,14 @@ import { Op } from 'sequelize';
 import { Account, Contact, PartnerSettlement, Transaction, sequelize } from '../models';
 import { num } from '../util/numbers';
 import {
-  classifyPositiveAmount,
-  isNonCategorical,
-} from '../summary/classifyTransactionFlow';
-import {
   aggregateDashboard,
   type AccountRow,
   type SummaryTxnRow,
 } from '../summary/aggregateDashboard';
+import {
+  aggregateMonthly,
+  type MonthlyTxnRow,
+} from '../summary/aggregateMonthly';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 
 const router = Router();
@@ -366,51 +366,9 @@ router.get('/monthly', async (req, res, next) => {
       ]),
     );
 
-    const points = new Map<string, { month: string; currency: string; sumAmount: number }>();
-    for (const row of rows as unknown as {
-      accountId: number;
-      date: string;
-      currency: string;
-      merchantRaw: string | null;
-      merchantClean: string | null;
-      finalCategory: string | null;
-      amount: unknown;
-      txnType: string | null;
-    }[]) {
-      const amount = num(row.amount);
-      if (amount == null) continue;
-      const accountType = accountTypeById.get(row.accountId);
-      if (
-        amount > 0 &&
-        classifyPositiveAmount({
-          txnType: row.txnType,
-          accountType,
-          merchantRaw: row.merchantRaw,
-          merchantClean: row.merchantClean,
-          category: row.finalCategory,
-        }) === 'payment'
-      ) {
-        continue;
-      }
-      // /monthly aggregates signed amounts into a single "activity"
-      // curve, so refunds/rewards stay IN (they net against month spend
-      // for the same category in the UI). We only drop transfers and
-      // investment / dividend flows that don't belong to any category.
-      if (isNonCategorical(row.txnType, accountType)) {
-        continue;
-      }
-      const month = String(row.date).slice(0, 7);
-      const key = `${month}\0${row.currency}`;
-      const existing = points.get(key) ?? {
-        month,
-        currency: row.currency,
-        sumAmount: 0,
-      };
-      existing.sumAmount += amount;
-      points.set(key, existing);
-    }
+    const points = aggregateMonthly(rows as unknown as MonthlyTxnRow[], accountTypeById);
     res.json({
-      points: Array.from(points.values()).sort((a, b) =>
+      points: points.sort((a, b) =>
         a.month === b.month
           ? a.currency.localeCompare(b.currency)
           : a.month.localeCompare(b.month)
