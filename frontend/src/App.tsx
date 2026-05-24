@@ -25,6 +25,7 @@ import { ContactsTab } from './pages/settings/tabs/ContactsTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
+import { ChatPage } from './pages/ChatPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
@@ -66,6 +67,7 @@ function AppRoutes() {
             <Route path="budgets" element={<BudgetsTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
+          <Route path="chat" element={<ChatPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
