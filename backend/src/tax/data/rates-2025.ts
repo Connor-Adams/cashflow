@@ -1,4 +1,6 @@
-// VERIFIED 2026-05-24 — encoded from model knowledge; engineer must cross-check against CRA T1-2025 / T1-2026 rate sheets before filing.
+// ENCODED 2026-05-24 — from model recall of 2025 CRA + ON Finance values. NOT
+// cross-checked against live CRA T1-2025 rate sheet. Engineer MUST verify every
+// constant before filing-grade use.
 import { D } from '../util/decimal';
 import type { RateTable } from '../engine/types';
 

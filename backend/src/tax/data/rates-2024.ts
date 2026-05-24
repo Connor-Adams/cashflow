@@ -1,4 +1,6 @@
-// VERIFIED 2026-05-24 — values from plan; not cross-checked against live CRA URLs
+// ENCODED 2026-05-24 — from plan recall. NOT cross-checked against CRA T1-2024
+// federal rate schedule or ON Min of Finance 2024 rate card. Engineer MUST
+// verify every constant against the URLs in `sources` below before filing-grade use.
 import { D } from '../util/decimal';
 import type { RateTable } from '../engine/types';
 
