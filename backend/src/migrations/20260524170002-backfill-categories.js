@@ -17,12 +17,15 @@ module.exports = {
       FROM (
         SELECT household_id, final_category AS category FROM transactions
          WHERE final_category IS NOT NULL AND TRIM(final_category) <> ''
+           AND household_id IS NOT NULL
         UNION
         SELECT household_id, category FROM rules
          WHERE category IS NOT NULL AND TRIM(category) <> ''
+           AND household_id IS NOT NULL
         UNION
         SELECT household_id, category FROM budget_targets
          WHERE category IS NOT NULL AND TRIM(category) <> ''
+           AND household_id IS NOT NULL
       ) AS src
       WHERE NOT EXISTS (
         SELECT 1 FROM categories c
