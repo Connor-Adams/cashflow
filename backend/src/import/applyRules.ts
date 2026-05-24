@@ -10,14 +10,23 @@ export interface RuleRow {
   splitType: string;
   pctMe: string | null;
   pctPartner: string | null;
+  /** Inclusive lower bound on Transaction.date (YYYY-MM-DD); null = "always". */
+  effectiveFrom: string | null;
+  /** Exclusive upper bound on Transaction.date (YYYY-MM-DD); null = "forever". */
+  effectiveTo: string | null;
 }
 
 export function findBestRule(
   rulesAll: RuleRow[],
-  merchantClean: string
+  merchantClean: string,
+  txnDate?: string
 ): { rule: RuleRow | null; ambiguous: boolean } {
   const candidates: RuleRow[] = [];
   for (const rule of rulesAll) {
+    if (txnDate != null) {
+      if (rule.effectiveFrom != null && txnDate < rule.effectiveFrom) continue;
+      if (rule.effectiveTo != null && txnDate >= rule.effectiveTo) continue;
+    }
     const pattern = rule.merchantPattern || '';
     let ok = false;
     if (rule.matchKind === 'regex') {

@@ -4,10 +4,12 @@ import type { Signal } from './types';
 export interface ApplyRuleInput {
   merchantClean: string;
   rules: RuleRow[];
+  /** YYYY-MM-DD; used to filter rules by effective_from/effective_to. */
+  txnDate: string;
 }
 
 export function runApplyRuleStage(input: ApplyRuleInput): Signal[] {
-  const { rule, ambiguous } = findBestRule(input.rules, input.merchantClean);
+  const { rule, ambiguous } = findBestRule(input.rules, input.merchantClean, input.txnDate);
   if (!rule || ambiguous) return [];
 
   const auto = applyRuleToAuto(rule);

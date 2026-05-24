@@ -3,6 +3,23 @@ import { Rule, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parses an `effective_from` / `effective_to` body field.
+ * Returns `{ ok: true, value }` for null, undefined, or a valid YYYY-MM-DD
+ * string. Returns `{ ok: false, error }` otherwise.
+ */
+function parseEffectiveDate(
+  raw: unknown
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, value: null };
+  if (typeof raw !== 'string' || !DATE_ONLY_RE.test(raw)) {
+    return { ok: false, error: 'must be YYYY-MM-DD or null' };
+  }
+  return { ok: true, value: raw };
+}
+
 const router = Router();
 
 router.get('/', async (req, res, next) => {
@@ -35,6 +52,24 @@ router.post('/', async (req, res, next) => {
       res.status(400).json({ error: 'merchantPattern is required' });
       return;
     }
+    const fromParsed = parseEffectiveDate(b.effectiveFrom);
+    if (!fromParsed.ok) {
+      res.status(400).json({ error: `effectiveFrom ${fromParsed.error}` });
+      return;
+    }
+    const toParsed = parseEffectiveDate(b.effectiveTo);
+    if (!toParsed.ok) {
+      res.status(400).json({ error: `effectiveTo ${toParsed.error}` });
+      return;
+    }
+    if (
+      fromParsed.value != null &&
+      toParsed.value != null &&
+      fromParsed.value >= toParsed.value
+    ) {
+      res.status(400).json({ error: 'effectiveFrom must be < effectiveTo' });
+      return;
+    }
     const row = await Rule.create({
       merchantPattern: String(b.merchantPattern),
       householdId: household.id,
@@ -46,6 +81,8 @@ router.post('/', async (req, res, next) => {
       splitType: (b.splitType as string) || 'me',
       pctMe: b.pctMe != null ? String(b.pctMe) : null,
       pctPartner: b.pctPartner != null ? String(b.pctPartner) : null,
+      effectiveFrom: fromParsed.value,
+      effectiveTo: toParsed.value,
     });
     res.status(201).json(row);
   } catch (e) {
@@ -62,6 +99,29 @@ router.patch('/:id', async (req, res, next) => {
       return;
     }
     const b = (req.body || {}) as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(b, 'effectiveFrom')) {
+      const p = parseEffectiveDate(b.effectiveFrom);
+      if (!p.ok) {
+        res.status(400).json({ error: `effectiveFrom ${p.error}` });
+        return;
+      }
+      row.set('effectiveFrom', p.value);
+    }
+    if (Object.prototype.hasOwnProperty.call(b, 'effectiveTo')) {
+      const p = parseEffectiveDate(b.effectiveTo);
+      if (!p.ok) {
+        res.status(400).json({ error: `effectiveTo ${p.error}` });
+        return;
+      }
+      row.set('effectiveTo', p.value);
+    }
+    // Post-condition check using the post-set values:
+    const newFrom = row.get('effectiveFrom') as string | null;
+    const newTo = row.get('effectiveTo') as string | null;
+    if (newFrom != null && newTo != null && newFrom >= newTo) {
+      res.status(400).json({ error: 'effectiveFrom must be < effectiveTo' });
+      return;
+    }
     const fields = [
       'merchantPattern',
       'matchKind',
