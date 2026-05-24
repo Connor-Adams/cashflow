@@ -157,6 +157,7 @@ test('post-capture backfill enriches a matching transaction', async () => {
     notes: null,
     sourceReference: null,
     sourceRowFingerprint: 'capture-test-fp-1',
+    sourceIdentityFingerprint: 'capture-test-identity-1',
     txnType: 'purchase',
     reviewFlag: true,
     isRecurring: false,

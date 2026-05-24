@@ -70,11 +70,19 @@ function normalizeActivityType(raw: unknown): NormalizedInvestmentActivity['acti
   const text = String(raw ?? '').toLowerCase();
   if (/\bbuy|bought|purchase/.test(text)) return 'buy';
   if (/\bsell|sold|redemption/.test(text)) return 'sell';
+  // ROC must precede generic "distribution" since it commonly appears as
+  // "return of capital distribution" or "ROC".
+  if (/return.of.capital|roc\b/.test(text)) return 'return_of_capital';
   if (/dividend|distribution/.test(text)) return 'dividend';
   if (/interest/.test(text)) return 'interest';
   if (/fee|commission/.test(text)) return 'fee';
   if (/reinvest/.test(text)) return 'reinvestment';
   if (/split/.test(text)) return 'split';
+  // Specific in-kind security transfer flavours must precede the generic
+  // 'transfer' branch (which still catches ambiguous cash CONT / withdraw
+  // lines and stays a no-op).
+  if (/transfer.?in|received.*transfer|deposit.*in.kind/.test(text)) return 'transfer_in';
+  if (/transfer.?out|delivered.*transfer|withdraw.*in.kind/.test(text)) return 'transfer_out';
   if (/transfer|deposit|withdraw/.test(text)) return 'transfer';
   return 'other';
 }
@@ -673,11 +681,39 @@ export async function parseStatementFile(opts: {
         sourceReference: v.sourceReference,
       }),
     }));
+    // Investment-statement parsers (RBC RDSP, etc) emit activities + holdings
+    // alongside cash transactions. Apply the same fingerprinting that the CSV
+    // path uses so dedup is consistent across import sources.
+    const investmentActivities: NormalizedInvestmentActivity[] = (out.investmentActivities ?? []).map((a) => ({
+      ...a,
+      sourceRowFingerprint: stableFingerprint({
+        kind: 'investment_activity',
+        accountId: account.id,
+        tradeDate: a.tradeDate,
+        type: a.activityType,
+        symbol: a.security?.symbol ?? null,
+        quantity: a.quantity,
+        amount: a.amount,
+      }),
+    }));
+    const holdings: NormalizedHoldingSnapshot[] = (out.holdings ?? []).map((h) => ({
+      ...h,
+      sourceRowFingerprint: stableFingerprint({
+        kind: 'holding',
+        accountId: account.id,
+        statementDate: h.statementDate,
+        symbol: h.security.symbol,
+        quantity: h.quantity,
+        marketValue: h.marketValue,
+      }),
+    }));
     const preview = {
       ...base,
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
       transactions,
+      investmentActivities,
+      holdings,
       warnings: out.warnings,
       parseErrors: out.parseErrors,
       rowErrors: out.parseErrors.length,

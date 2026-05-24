@@ -3,6 +3,14 @@ import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { deleteReq, getJson, postJson } from '../lib/api'
@@ -254,36 +262,36 @@ export function RulesPage() {
             <span className="transactionsPanelBadge">{proposals.length} proposals</span>
           </div>
           <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Pattern</th>
-                  <th>Category</th>
-                  <th>Biz</th>
-                  <th>Split</th>
-                  <th>Support</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Pattern</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Biz</TableHead>
+                  <TableHead>Split</TableHead>
+                  <TableHead>Support</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {proposals.map((p) => (
-                  <tr key={`${p.merchantPattern}-${p.category}-${p.splitType}`}>
-                    <td>{p.merchantPattern}</td>
-                    <td>{p.category ?? '—'}</td>
-                    <td>{p.isBusiness ? 'yes' : ''}</td>
-                    <td>{p.splitType}</td>
-                    <td>
+                  <TableRow key={`${p.merchantPattern}-${p.category}-${p.splitType}`}>
+                    <TableCell>{p.merchantPattern}</TableCell>
+                    <TableCell>{p.category ?? '—'}</TableCell>
+                    <TableCell>{p.isBusiness ? 'yes' : ''}</TableCell>
+                    <TableCell>{p.splitType}</TableCell>
+                    <TableCell>
                       {p.supportCount} rows #{p.exampleTransactionIds.join(', #')}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <button type="button" onClick={() => void approveProposal(p)}>
                         Approve
                       </button>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </section>
       )}
@@ -299,53 +307,53 @@ export function RulesPage() {
           <span className="transactionsPanelBadge">{rules.length} rules</span>
         </div>
         <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Pattern</th>
-                <th>Match</th>
-                <th>Pri</th>
-                <th>Category</th>
-                <th>Biz</th>
-                <th>Split</th>
-                <th>Usage</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pattern</TableHead>
+                <TableHead>Match</TableHead>
+                <TableHead>Pri</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Biz</TableHead>
+                <TableHead>Split</TableHead>
+                <TableHead>Usage</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rules.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="emptyStateCell">
+                <TableRow>
+                  <TableCell colSpan={8} className="emptyStateCell">
                     <p>No rules yet. Add a pattern above to start automating imports.</p>
                     <p className="muted">
                       Rules set default category, business flag, and split for matching merchants on import.
                     </p>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : (
                 rules.map((r) => (
-                  <tr
+                  <TableRow
                     key={r.id}
                     ref={r.id === focusedId ? focusedRowRef : undefined}
                     className={r.id === focusedId ? 'ruleRow isFocused' : 'ruleRow'}
                   >
-                    <td>{r.merchantPattern}</td>
-                    <td>{r.matchKind}</td>
-                    <td>{r.priority}</td>
-                    <td>{r.category ?? '—'}</td>
-                    <td>{r.isBusiness ? 'yes' : ''}</td>
-                    <td>{r.splitType}</td>
-                    <td>{r.usageCount ?? 0}</td>
-                    <td>
+                    <TableCell>{r.merchantPattern}</TableCell>
+                    <TableCell>{r.matchKind}</TableCell>
+                    <TableCell>{r.priority}</TableCell>
+                    <TableCell>{r.category ?? '—'}</TableCell>
+                    <TableCell>{r.isBusiness ? 'yes' : ''}</TableCell>
+                    <TableCell>{r.splitType}</TableCell>
+                    <TableCell>{r.usageCount ?? 0}</TableCell>
+                    <TableCell>
                       <button type="button" onClick={() => void remove(r)}>
                         Delete
                       </button>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
     </div>

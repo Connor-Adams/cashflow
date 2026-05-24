@@ -82,6 +82,7 @@ test('loadRelationshipCandidates(householdId=null) only returns matching-merchan
       currency: 'USD',
       importBatch: 'test-batch',
       sourceRowFingerprint: 'fp-a',
+      sourceIdentityFingerprint: 'id-a',
     },
     {
       accountId: account.id,
@@ -93,6 +94,7 @@ test('loadRelationshipCandidates(householdId=null) only returns matching-merchan
       currency: 'USD',
       importBatch: 'test-batch',
       sourceRowFingerprint: 'fp-b',
+      sourceIdentityFingerprint: 'id-b',
     },
     {
       accountId: account.id,
@@ -104,6 +106,7 @@ test('loadRelationshipCandidates(householdId=null) only returns matching-merchan
       currency: 'USD',
       importBatch: 'test-batch',
       sourceRowFingerprint: 'fp-c',
+      sourceIdentityFingerprint: 'id-c',
     },
   ]);
 
@@ -149,6 +152,7 @@ test('loadRelationshipCandidates is case-insensitive on merchantClean (aligns wi
       currency: 'CAD',
       importBatch: 'test-case-batch',
       sourceRowFingerprint: 'fp-case-a',
+      sourceIdentityFingerprint: 'id-case-a',
     },
   ]);
 

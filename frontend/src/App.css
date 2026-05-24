@@ -165,8 +165,7 @@
   }
 
   .brandMark {
-    @apply block h-10 w-10 shrink-0 rounded-lg object-cover;
-    box-shadow: 0 10px 20px color-mix(in oklch, var(--primary) 22%, transparent);
+    @apply block h-10 w-10 shrink-0;
   }
 
   .brandEyebrow {
@@ -959,6 +958,44 @@
     margin-top: 0.5rem;
   }
 
+  .aiInboxTabCount {
+    @apply ml-1 tabular-nums text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .aiInboxExpandToggle {
+    @apply ml-2 text-xs font-medium underline-offset-2;
+    background: transparent;
+    color: var(--muted-foreground);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .aiInboxExpandToggle:hover {
+    color: var(--foreground);
+    text-decoration: underline;
+  }
+
+  .aiInboxItemDetails {
+    @apply flex flex-col gap-1 mt-2 pl-3;
+    list-style: none;
+    border-left: 2px solid var(--border);
+  }
+
+  .aiInboxItemDetail {
+    @apply text-sm leading-5;
+  }
+
+  .aiInboxItemDetailLink {
+    @apply ml-2 text-xs;
+    color: var(--primary);
+  }
+
+  .aiInboxItemDetailLink:hover {
+    text-decoration: underline;
+  }
+
   /* ─── Sidebar nav badge (count chip at end of NavLink) ────────────── */
 
   .sidebar__navBadge {
@@ -1200,10 +1237,8 @@
   }
 
   .businessSpotlightTotals {
-    @apply rounded-lg border px-4 py-3;
-    min-width: 220px;
-    border-color: color-mix(in srgb, var(--border) 70%, white 10%);
-    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    @apply text-right;
+    min-width: 0;
   }
 
   .businessSpotlightTotalLabel {
@@ -1212,7 +1247,8 @@
   }
 
   .businessSpotlightTotalValue {
-    @apply mt-1 text-2xl font-semibold tracking-tight;
+    @apply mt-0.5 text-lg font-semibold tracking-tight tabular-nums;
+    color: var(--foreground);
   }
 
   .businessSpotlightGrid {
@@ -1397,9 +1433,10 @@
   .dashboardBento {
     @apply mb-4 grid;
     grid-template-columns: repeat(12, 1fr);
-    /* 160px × 2-row tile + 16px gap = 336px tile height; leaves ~240px for
-     * a chart body once header + padding are deducted. */
-    grid-auto-rows: 160px;
+    /* 160px floor per row; tracks grow to fit content so dense tiles
+     * (e.g. Business vs personal with split-cards + share bar) don't
+     * overflow their box. Other tiles in the same row stretch in lockstep. */
+    grid-auto-rows: minmax(160px, auto);
     gap: 16px;
   }
 

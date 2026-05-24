@@ -11,7 +11,7 @@ import {
 } from '../models';
 import { hashPassword } from '../auth/password';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
-import { rowFingerprint } from '../import/fingerprint';
+import { rowFingerprint, stableIdentityFingerprint } from '../import/fingerprint';
 import { logger } from '../observability/logger';
 
 export const DEMO_EMAIL = process.env.DEMO_ACCOUNT_EMAIL?.trim().toLowerCase() || 'dev@cashflow.local';
@@ -245,6 +245,13 @@ export async function seedDemoData(): Promise<void> {
             currency: 'CAD',
             merchantRaw: row.merchant,
             sourceReference,
+          }),
+          sourceIdentityFingerprint: stableIdentityFingerprint({
+            accountId: account.id,
+            date,
+            amount: row.amount,
+            currency: 'CAD',
+            merchantRaw: row.merchant,
           }),
           appliedRuleId: null,
           autoCategory: row.category,

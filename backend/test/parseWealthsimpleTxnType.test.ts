@@ -147,6 +147,51 @@ test('narrative: "Stock lending monthly interest payment" → interest', () => {
   );
 });
 
+test('narrative: "Contribution (executed at 2025-07-08)" → transfer', () => {
+  assert.equal(
+    inferWsTxnTypeFromNarrative('Contribution (executed at 2025-07-08)'),
+    'transfer',
+  );
+});
+
+test('narrative: "Money transfer out of the account ..." → transfer', () => {
+  assert.equal(
+    inferWsTxnTypeFromNarrative('Money transfer out of the account (executed at 2025-07-16)'),
+    'transfer',
+  );
+});
+
+test('narrative: "Money transfer to the account ..." → transfer', () => {
+  assert.equal(
+    inferWsTxnTypeFromNarrative('Money transfer to the account (executed at 2025-08-01)'),
+    'transfer',
+  );
+});
+
+test('narrative: "Online bill payment for CIBC MASTERCARD ..." → payment', () => {
+  assert.equal(
+    inferWsTxnTypeFromNarrative(
+      'Online bill payment for CIBC MASTERCARD, account ∙∙∙∙3114 (executed at 2025-10-02)',
+    ),
+    'payment',
+  );
+});
+
+test('narrative: "Interest received (executed at ...)" → interest', () => {
+  assert.equal(
+    inferWsTxnTypeFromNarrative('Interest received (executed at 2025-08-01)'),
+    'interest',
+  );
+});
+
+test('narrative: "Interest earned" → interest', () => {
+  assert.equal(inferWsTxnTypeFromNarrative('Interest earned'), 'interest');
+});
+
+test('narrative: "Giveaway received" → reward', () => {
+  assert.equal(inferWsTxnTypeFromNarrative('Giveaway received'), 'reward');
+});
+
 test('narrative: unrelated description → null', () => {
   assert.equal(inferWsTxnTypeFromNarrative('STARBUCKS COFFEE 1234'), null);
 });

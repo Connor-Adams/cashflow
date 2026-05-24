@@ -13,6 +13,7 @@ import {
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { findExistingForDedup } from './dedupExisting';
+import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
 import {
@@ -233,12 +234,16 @@ export async function commitStatementImport(
 
   await sequelize.transaction(async (t) => {
     for (const row of preview.transactions) {
-      const dedup = await findExistingForDedup({
+      const identityFp = stableIdentityFingerprint({
         accountId: account.id,
         date: row.date,
         amount: row.amount,
         currency: row.currency,
         merchantRaw: row.merchantRaw,
+      });
+      const dedup = await findExistingForDedup({
+        accountId: account.id,
+        sourceIdentityFingerprint: identityFp,
         sourceReference: row.sourceReference ?? null,
         t,
       });
@@ -312,6 +317,7 @@ export async function commitStatementImport(
         notes: f.notes,
         sourceReference: row.sourceReference ?? null,
         sourceRowFingerprint: row.sourceRowFingerprint,
+        sourceIdentityFingerprint: identityFp,
         appliedRuleId: f.appliedRuleId,
         autoCategory: f.autoCategory,
         autoBusiness: overrideBusiness ? true : f.autoBusiness,
