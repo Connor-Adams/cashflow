@@ -69,7 +69,7 @@ async function createTxn(merchant: string, amount: number, date = '2026-05-05') 
       date,
       amount,
       currency: 'CAD',
-      merchantClean: merchant,
+      merchantRaw: merchant,
       sourceReference: '',
     }),
   } as never);
