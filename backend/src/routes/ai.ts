@@ -246,6 +246,29 @@ router.post('/rule-proposals/:merchantPattern/approve', async (req, res, next) =
   }
 });
 
+router.post('/rule-proposals/:merchantPattern/dismiss', async (req, res, next) => {
+  try {
+    const merchantPattern = decodeURIComponent(req.params.merchantPattern).trim();
+    if (!merchantPattern) {
+      res.status(400).json({ error: 'merchantPattern is required' });
+      return;
+    }
+    const row = await createTrackedSuggestion({
+      req,
+      kind: 'rule_proposal',
+      inputSnapshot: { merchantPattern },
+      output: null,
+      status: 'suggested',
+      model: 'deterministic',
+      promptVersion: 'rule-proposal-dismiss-v1',
+    });
+    await row.update({ status: 'rejected' });
+    res.status(201).json({ ok: true, id: row.id });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/insights', async (req, res, next) => {
   try {
     const period = String(req.query.period || new Date().toISOString().slice(0, 7));
@@ -399,12 +422,15 @@ router.get('/inbox', async (req, res, next) => {
   try {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
-    const rows = await AiSuggestion.findAll({
-      where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
-      order: [['id', 'DESC']],
-      limit,
-    });
-    const items: InboxItem[] = rows.map((row) => {
+    const [rows, ruleProposals] = await Promise.all([
+      AiSuggestion.findAll({
+        where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
+        order: [['id', 'DESC']],
+        limit,
+      }),
+      findRuleProposals(isSuperadmin(req) ? null : currentAuth(req).household.id),
+    ]);
+    const persistedItems: InboxItem[] = rows.map((row) => {
       if (row.kind === 'transaction_audit') {
         return {
           id: row.id,
@@ -429,7 +455,17 @@ router.get('/inbox', async (req, res, next) => {
         output: row.output,
       };
     });
-    res.json({ items });
+    const proposalItems: InboxItem[] = ruleProposals.map((p, idx) => ({
+      id: -1 - idx,
+      kind: 'rule_proposal',
+      createdAt: new Date().toISOString(),
+      transactionId: null,
+      summary: `${p.merchantPattern} → ${p.category ?? '(no category)'} (×${p.supportCount})`,
+      severity: null,
+      confidence: null,
+      output: p,
+    }));
+    res.json({ items: [...persistedItems, ...proposalItems] });
   } catch (e) {
     next(e);
   }

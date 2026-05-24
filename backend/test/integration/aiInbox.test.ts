@@ -42,7 +42,7 @@ before(async () => {
     password: 'password123',
   });
   assert.equal(register.status, 201);
-  householdId = register.body.user.householdId as number;
+  householdId = (register.body.user.household?.id ?? register.body.user.householdId) as number;
 
   // Create a second household + non-superadmin user via model layer so we can test
   // household scoping independently of the superadmin user.
@@ -215,4 +215,69 @@ test('GET /api/ai/inbox scopes by household', async () => {
   }
   void titles; // used above for context
   void authedIds; // not needed for the assertion
+});
+
+test('GET /api/ai/inbox includes rule_proposal items computed from transactions', async () => {
+  const { Transaction, Account } = await import('../../src/models/index.js');
+  const crypto = await import('crypto');
+  const account = await Account.create({
+    householdId, name: 'Inbox Test', owner: 'me', defaultCurrency: 'CAD',
+  } as never);
+  for (let i = 0; i < 3; i += 1) {
+    await Transaction.create({
+      householdId, accountId: account.id, currency: 'CAD',
+      date: `2026-05-0${i + 1}`,
+      merchantRaw: 'INBOX SHOP', merchantClean: 'INBOX SHOP',
+      importBatch: 'inbox-test',
+      sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      amount: -10,
+      finalCategory: 'Groceries', finalBusiness: false, finalSplitType: 'me',
+      reviewedAt: new Date(),
+    } as never);
+  }
+  const r = await authed.get('/api/ai/inbox');
+  const ruleItems = (r.body.items as Array<{ kind: string; summary: string }>)
+    .filter((i) => i.kind === 'rule_proposal');
+  assert.ok(ruleItems.length >= 1);
+  assert.match(ruleItems[0].summary, /INBOX SHOP/);
+});
+
+test('POST /api/ai/rule-proposals/:pattern/dismiss persists rejection', async () => {
+  const r = await authed.post('/api/ai/rule-proposals/INBOX%20SHOP/dismiss');
+  assert.equal(r.status, 201);
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  const stored = await AiSuggestion.findOne({
+    where: { householdId, kind: 'rule_proposal', status: 'rejected' },
+  });
+  assert.ok(stored);
+  assert.deepEqual(stored.inputSnapshot, { merchantPattern: 'INBOX SHOP' });
+});
+
+test('GET /api/ai/inbox excludes dismissed rule proposals', async () => {
+  const r = await authed.get('/api/ai/inbox');
+  const ruleItems = (r.body.items as Array<{ kind: string; summary: string }>)
+    .filter((i) => i.kind === 'rule_proposal');
+  assert.ok(!ruleItems.some((i) => i.summary.includes('INBOX SHOP')));
+});
+
+test('GET /api/ai/inbox/count includes non-dismissed rule proposals', async () => {
+  const { Transaction, Account } = await import('../../src/models/index.js');
+  const crypto = await import('crypto');
+  const account = await Account.create({
+    householdId, name: 'Inbox Test 2', owner: 'me', defaultCurrency: 'CAD',
+  } as never);
+  for (let i = 0; i < 3; i += 1) {
+    await Transaction.create({
+      householdId, accountId: account.id, currency: 'CAD',
+      date: `2026-05-1${i}`,
+      merchantRaw: 'COUNT ME', merchantClean: 'COUNT ME',
+      importBatch: 'inbox-test-2',
+      sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      amount: -8,
+      finalCategory: 'Coffee', finalBusiness: false, finalSplitType: 'me',
+      reviewedAt: new Date(),
+    } as never);
+  }
+  const r = await authed.get('/api/ai/inbox/count');
+  assert.ok(r.body.byKind.rule_proposal >= 1);
 });

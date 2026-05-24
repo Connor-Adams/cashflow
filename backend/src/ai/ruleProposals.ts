@@ -81,15 +81,31 @@ export async function findRuleProposals(householdId: number | null): Promise<Rul
      LIMIT 20`,
     { replacements: [householdId, householdId], type: QueryTypes.SELECT },
   );
-  const existingRules = await Rule.findAll({
-    where: householdId == null ? undefined : { householdId },
-    attributes: ['merchantPattern'],
-    raw: true,
-  });
+  const [existingRules, dismissed] = await Promise.all([
+    Rule.findAll({
+      where: householdId == null ? undefined : { householdId },
+      attributes: ['merchantPattern'],
+      raw: true,
+    }),
+    sequelize.query<{ pattern: string }>(
+      `SELECT json_extract(input_snapshot, '$.merchantPattern') AS pattern
+         FROM ai_suggestions
+        WHERE kind = 'rule_proposal'
+          AND status = 'rejected'
+          AND (? IS NULL OR household_id = ?)`,
+      { replacements: [householdId, householdId], type: QueryTypes.SELECT },
+    ),
+  ]);
   const existing = new Set(
     existingRules.map((r) => String(r.merchantPattern).trim().toLowerCase()),
   );
+  const rejected = new Set(
+    dismissed
+      .map((r) => (r.pattern || '').trim().toLowerCase())
+      .filter((p) => p.length > 0),
+  );
   return rows
     .map(ruleProposalFromRow)
-    .filter((p) => !existing.has(p.merchantPattern.toLowerCase()));
+    .filter((p) => !existing.has(p.merchantPattern.toLowerCase()))
+    .filter((p) => !rejected.has(p.merchantPattern.toLowerCase()));
 }
