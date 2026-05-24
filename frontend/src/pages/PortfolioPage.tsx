@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
@@ -695,7 +695,7 @@ function DateRangeFilter({ dateFrom, dateTo, onFromChange, onToChange }: DateFil
   )
 }
 
-/* ---------------------- Income tab ---------------------- */
+/* ---------------------- Shared date-range data fetch ---------------------- */
 
 function buildDateQuery(dateFrom: string, dateTo: string): string {
   const params = new URLSearchParams()
@@ -705,50 +705,104 @@ function buildDateQuery(dateFrom: string, dateTo: string): string {
   return qs ? `?${qs}` : ''
 }
 
-function IncomePanel() {
+type DateRangeFetchState<T> = {
+  dateFrom: string
+  dateTo: string
+  setDateFrom: (v: string) => void
+  setDateTo: (v: string) => void
+  data: T | null
+  loading: boolean
+  err: string | null
+}
+
+function useDateRangeFetch<T>(endpoint: string, errorMessage: string): DateRangeFetchState<T> {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [data, setData] = useState<PortfolioIncome | null>(null)
+  const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
-  const fetchIncome = useCallback(async (from: string, to: string) => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const qs = buildDateQuery(from, to)
-      const res = await getJson<PortfolioIncome>(`/api/portfolio/income${qs}`)
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not load income')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const fetchData = useCallback(
+    async (from: string, to: string) => {
+      setLoading(true)
+      setErr(null)
+      try {
+        const qs = buildDateQuery(from, to)
+        const res = await getJson<T>(`${endpoint}${qs}`)
+        setData(res)
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : errorMessage)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [endpoint, errorMessage],
+  )
 
   useEffect(() => {
-    void fetchIncome(dateFrom, dateTo)
-  }, [fetchIncome, dateFrom, dateTo])
+    void fetchData(dateFrom, dateTo)
+  }, [fetchData, dateFrom, dateTo])
 
+  return { dateFrom, dateTo, setDateFrom, setDateTo, data, loading, err }
+}
+
+type DateRangePanelProps<T> = {
+  state: DateRangeFetchState<T>
+  isEmpty: (data: T) => boolean
+  emptyMessage: string
+  children: (data: T | null, loading: boolean) => ReactNode
+}
+
+function DateRangePanel<T>({ state, isEmpty, emptyMessage, children }: DateRangePanelProps<T>) {
+  const { dateFrom, dateTo, setDateFrom, setDateTo, data, loading, err } = state
   if (err) return <p className="error">{err}</p>
-
-  if (!loading && (!data || (data.byMonth.length === 0 && data.totals.length === 0))) {
+  const filter = (
+    <DateRangeFilter
+      dateFrom={dateFrom}
+      dateTo={dateTo}
+      onFromChange={setDateFrom}
+      onToChange={setDateTo}
+    />
+  )
+  if (!loading && (!data || isEmpty(data))) {
     return (
       <>
-        <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        {filter}
         <Card>
-          <p className="muted">
-            No dividend or interest activity yet. Import investment statements to populate
-            this view.
-          </p>
+          <p className="muted">{emptyMessage}</p>
         </Card>
       </>
     )
   }
-
   return (
     <>
-      <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+      {filter}
+      {children(data, loading)}
+    </>
+  )
+}
+
+/* ---------------------- Income tab ---------------------- */
+
+function IncomePanel() {
+  const state = useDateRangeFetch<PortfolioIncome>(
+    '/api/portfolio/income',
+    'Could not load income',
+  )
+  return (
+    <DateRangePanel
+      state={state}
+      isEmpty={(d) => d.byMonth.length === 0 && d.totals.length === 0}
+      emptyMessage="No dividend or interest activity yet. Import investment statements to populate this view."
+    >
+      {(data, loading) => <IncomeBody data={data} loading={loading} />}
+    </DateRangePanel>
+  )
+}
+
+function IncomeBody({ data, loading }: { data: PortfolioIncome | null; loading: boolean }) {
+  return (
+    <>
       <section className="transactionsStats" aria-busy={loading}>
         {(data?.totals ?? []).map((row) => (
           <StatCard
@@ -895,46 +949,28 @@ function IncomeMonthlyChart({ data }: { data: PortfolioIncome }) {
 /* ---------------------- Realized tab ---------------------- */
 
 function RealizedPanel() {
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [data, setData] = useState<PortfolioRealized | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
+  const state = useDateRangeFetch<PortfolioRealized>(
+    '/api/portfolio/realized',
+    'Could not load realized P&L',
+  )
+  return (
+    <DateRangePanel
+      state={state}
+      isEmpty={(d) => d.events.length === 0}
+      emptyMessage="No realized SELL events yet. Realized gain/loss appears here after a sell activity is imported."
+    >
+      {(data, loading) => <RealizedBody data={data} loading={loading} />}
+    </DateRangePanel>
+  )
+}
 
-  const fetchRealized = useCallback(async (from: string, to: string) => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const qs = buildDateQuery(from, to)
-      const res = await getJson<PortfolioRealized>(`/api/portfolio/realized${qs}`)
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not load realized P&L')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void fetchRealized(dateFrom, dateTo)
-  }, [fetchRealized, dateFrom, dateTo])
-
-  if (err) return <p className="error">{err}</p>
-
-  if (!loading && (!data || data.events.length === 0)) {
-    return (
-      <>
-        <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
-        <Card>
-          <p className="muted">
-            No realized SELL events yet. Realized gain/loss appears here after a sell
-            activity is imported.
-          </p>
-        </Card>
-      </>
-    )
-  }
-
+function RealizedBody({
+  data,
+  loading,
+}: {
+  data: PortfolioRealized | null
+  loading: boolean
+}) {
   // Running cumulative realized gain per currency for the events table.
   const runningByCurrency = new Map<string, number>()
   const eventsWithRunning = (data?.events ?? []).map((ev) => {
@@ -946,7 +982,6 @@ function RealizedPanel() {
 
   return (
     <>
-      <DateRangeFilter dateFrom={dateFrom} dateTo={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
       <section className="transactionsStats" aria-busy={loading}>
         {(data?.totals ?? []).map((row) => (
           <StatCard
