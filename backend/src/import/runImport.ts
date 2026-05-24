@@ -638,7 +638,7 @@ export function aiSuggestionToSignal(sug: {
   };
 }
 
-async function persistAiEnhancement(c: ColdRow, aiSignal: Signal): Promise<boolean> {
+async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
   const merged = mergeSignals([...c.signals, aiSignal]);
   try {
     await Transaction.update(
@@ -661,6 +661,10 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal): Promise<boole
       fields: aiSignal.fields,
       rationale: aiSignal.rationale ?? null,
     });
+    if (householdId != null) {
+      const { ensureCategory } = await import('../util/ensureCategory');
+      await ensureCategory(householdId, merged.fields.autoCategory);
+    }
     return true;
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -687,18 +691,19 @@ function aiBatchPossible(coldRows: ColdRow[]): boolean {
   return getOpenAiConfig() != null;
 }
 
-async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined): Promise<boolean> {
+async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined, householdId: number | null): Promise<boolean> {
   if (sug == null || sug.category == null) return false;
-  return persistAiEnhancement(c, aiSuggestionToSignal(sug));
+  return persistAiEnhancement(c, aiSuggestionToSignal(sug), householdId);
 }
 
 async function applyAiSuggestionsToColdRows(
   coldRows: ColdRow[],
   suggestions: Map<string, AiBatchSuggestion>,
+  householdId: number | null,
 ): Promise<number> {
   let enhanced = 0;
   for (const c of coldRows) {
-    if (await tryEnhanceColdRow(c, suggestions.get(c.merchantKey))) enhanced += 1;
+    if (await tryEnhanceColdRow(c, suggestions.get(c.merchantKey), householdId)) enhanced += 1;
   }
   return enhanced;
 }
@@ -718,7 +723,7 @@ async function maybeRunAiBatchOverColdRows(
     perRowConcurrency: enrichmentAiPerRowConcurrency,
     openaiCaller: (msgs) => openaiJson(msgs),
   });
-  const enhanced = await applyAiSuggestionsToColdRows(coldRows, result.suggestions);
+  const enhanced = await applyAiSuggestionsToColdRows(coldRows, result.suggestions, householdId);
 
   return {
     attempted: true,

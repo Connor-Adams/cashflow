@@ -10,6 +10,7 @@ import { Household, initHousehold } from './Household';
 import { HouseholdMember, initHouseholdMember } from './HouseholdMember';
 import { HouseholdInvite, initHouseholdInvite } from './HouseholdInvite';
 import { Contact, initContact } from './Contact';
+import { Category, initCategory } from './Category';
 import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
 import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
@@ -42,6 +43,7 @@ initHousehold(sequelize);
 initHouseholdMember(sequelize);
 initHouseholdInvite(sequelize);
 initContact(sequelize);
+initCategory(sequelize);
 initPartnerSettlement(sequelize);
 initBudgetTarget(sequelize);
 initAccount(sequelize);
@@ -125,6 +127,8 @@ HouseholdMember.belongsTo(Household, { foreignKey: 'household_id', as: 'househol
 HouseholdMember.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Contact, { foreignKey: 'household_id', as: 'contacts' });
 Contact.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Household.hasMany(Category, { foreignKey: 'household_id', as: 'categories' });
+Category.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Transaction.belongsTo(Contact, { foreignKey: 'ownership_contact_id', as: 'ownershipContact' });
 Household.hasMany(PartnerSettlement, {
   foreignKey: 'household_id',
@@ -218,6 +222,7 @@ export {
   HouseholdMember,
   HouseholdInvite,
   Contact,
+  Category,
   PartnerSettlement,
   BudgetTarget,
   Account,

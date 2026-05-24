@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Trash2 } from 'lucide-react'
+import { CategoryIcon } from '../../../components/CategoryIcon'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
@@ -354,7 +355,12 @@ export function BudgetsTab() {
                   }
                   return (
                     <TableRow key={budget.id}>
-                      <TableCell>{budget.category ?? 'Overall'}</TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1.5">
+                          <CategoryIcon name={budget.category} />
+                          {budget.category ?? 'Overall'}
+                        </span>
+                      </TableCell>
                       <TableCell>{budget.currency}</TableCell>
                       <TableCell>{formatMoney(Number(budget.amount), budget.currency)}</TableCell>
                       <TableCell>

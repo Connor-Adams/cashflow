@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { CategoryIcon } from '../components/CategoryIcon'
 import { getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import {
@@ -628,7 +629,12 @@ export function ReviewInboxPage() {
                       </span>
                     </TableCell>
                     <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
-                    <TableCell>{row.finalCategory ?? 'Uncategorized'}</TableCell>
+                    <TableCell>
+                      <span className="inline-flex items-center gap-1.5">
+                        <CategoryIcon name={row.finalCategory} />
+                        {row.finalCategory ?? 'Uncategorized'}
+                      </span>
+                    </TableCell>
                     <TableCell>{row.finalSplitType}</TableCell>
                     <TableCell>{row.finalBusiness ? 'Yes' : 'No'}</TableCell>
                     <TableCell>{row.importBatch}</TableCell>

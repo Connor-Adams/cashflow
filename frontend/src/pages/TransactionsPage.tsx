@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { CategoryIcon } from '../components/CategoryIcon'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
 import type { ReceiptWithItems } from '../../../shared/api-types'
@@ -1629,16 +1630,19 @@ function TransactionRow({
         </div>
       </TableCell>
       <TableCell>
-        <CategoryCloudPicker
-          className="txnCategoryCell"
-          inputClassName="txnCategoryInput"
-          cloudClassName="txnCategoryPickerCloud"
-          itemClassName="txnCategoryPickerItem"
-          value={cat}
-          onChange={setCat}
-          options={categoryOptions}
-          placeholder={t.finalCategory ?? ''}
-        />
+        <span className="inline-flex items-center gap-1.5">
+          <CategoryIcon name={t.finalCategory} />
+          <CategoryCloudPicker
+            className="txnCategoryCell"
+            inputClassName="txnCategoryInput"
+            cloudClassName="txnCategoryPickerCloud"
+            itemClassName="txnCategoryPickerItem"
+            value={cat}
+            onChange={setCat}
+            options={categoryOptions}
+            placeholder={t.finalCategory ?? ''}
+          />
+        </span>
       </TableCell>
       <TableCell>
         <NativeSelect

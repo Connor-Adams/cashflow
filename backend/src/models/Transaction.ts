@@ -308,5 +308,16 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       timestamps: true,
     }
   );
+  Transaction.addHook('afterSave', async (instance: Transaction, options) => {
+    if (instance.householdId == null) return;
+    try {
+      const { ensureCategory } = await import('../util/ensureCategory');
+      await ensureCategory(instance.householdId, instance.finalCategory, {
+        transaction: options.transaction,
+      });
+    } catch (e) {
+      console.warn('[ensureCategory] Transaction hook failed', e);
+    }
+  });
   return Transaction;
 }
