@@ -17,6 +17,7 @@ import { findRuleProposals, merchantPatternFor } from '../ai/ruleProposals';
 import { buildFinancialInsights } from '../ai/insights';
 import { auditTransactionsForMislabels } from '../ai/auditTransactions';
 import { aiSuggestLimiter } from './aiRateLimit';
+import { jsonExtractText } from '../util/dialectSql';
 
 const router = Router();
 
@@ -299,8 +300,8 @@ router.get('/insights', async (req, res, next) => {
           kind: 'financial_insight',
           status: 'suggested',
           [Op.and]: [
-            sequelize.literal(`json_extract(input_snapshot, '$.period') = ${sequelize.escape(out.period)}`),
-            sequelize.literal(`json_extract(input_snapshot, '$.currency') = ${sequelize.escape(currency)}`),
+            sequelize.literal(`${jsonExtractText('input_snapshot', 'period')} = ${sequelize.escape(out.period)}`),
+            sequelize.literal(`${jsonExtractText('input_snapshot', 'currency')} = ${sequelize.escape(currency)}`),
           ],
         },
       },

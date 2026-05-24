@@ -1,6 +1,7 @@
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../models';
 import { Rule } from '../models/Rule';
+import { groupConcat, jsonExtractText } from '../util/dialectSql';
 
 export type RuleProposal = {
   merchantPattern: string;
@@ -69,7 +70,7 @@ export async function findRuleProposals(householdId: number | null): Promise<Rul
             final_pct_me AS "pctMe",
             final_pct_partner AS "pctPartner",
             COUNT(*) AS "supportCount",
-            GROUP_CONCAT(id) AS "exampleIds"
+            ${groupConcat('id')} AS "exampleIds"
      FROM transactions
      WHERE (? IS NULL OR household_id = ?)
        AND reviewed_at IS NOT NULL
@@ -88,7 +89,7 @@ export async function findRuleProposals(householdId: number | null): Promise<Rul
       raw: true,
     }),
     sequelize.query<{ pattern: string }>(
-      `SELECT json_extract(input_snapshot, '$.merchantPattern') AS pattern
+      `SELECT ${jsonExtractText('input_snapshot', 'merchantPattern')} AS pattern
          FROM ai_suggestions
         WHERE kind = 'rule_proposal'
           AND status = 'rejected'
