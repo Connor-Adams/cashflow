@@ -77,6 +77,8 @@ export const RATES_2024: RateTable = {
   donationHighRateOntario: D('0.1116'),
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2759'),
+  rrspAnnualLimit: D('31560'),
+  fhsaLifetimeLimit: D('40000'),
   sources: [
     { name: 'CRA T1-2024 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2024 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },

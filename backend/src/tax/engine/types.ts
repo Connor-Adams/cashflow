@@ -134,5 +134,7 @@ export type RateTable = {
   donationHighRateOntario: Decimal;
   medicalThresholdPercent: Decimal;
   medicalThresholdCap: Decimal;
+  rrspAnnualLimit: Decimal;
+  fhsaLifetimeLimit: Decimal;
   sources: { name: string; url: string }[];
 };

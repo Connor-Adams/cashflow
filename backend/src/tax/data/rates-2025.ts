@@ -79,6 +79,8 @@ export const RATES_2025: RateTable = {
   donationHighRateOntario: D('0.1116'),
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2837'),
+  rrspAnnualLimit: D('32490'),
+  fhsaLifetimeLimit: D('40000'),
   sources: [
     { name: 'CRA T1-2025 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2025 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },

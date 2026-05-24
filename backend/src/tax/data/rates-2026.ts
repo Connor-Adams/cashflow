@@ -94,6 +94,9 @@ export const RATES_2026: RateTable = {
   // Medical threshold cap: 2025 cap (2837) × 1.027 = 2913.59 → round to 2914
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2914'),
+  // 2026 projected RRSP limit: $33,367 (2025 $32,490 × 1.027 ≈ 33,367). Verify when CRA announces.
+  rrspAnnualLimit: D('33367'),
+  fhsaLifetimeLimit: D('40000'),
   sources: [
     { name: 'CRA 2026 indexation announcement (projected)', url: 'https://www.canada.ca/en/revenue-agency/news/newsroom/tax-tips/tax-tips-2025.html' },
     { name: 'ON Min of Finance 2026 personal income tax rates (TBD)', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
