@@ -1948,7 +1948,6 @@
   }
 }
 
-<<<<<<< HEAD
 .ruleRow.isFocused td {
   animation: ruleFocusFlash 2s ease-out 1;
   background-color: color-mix(in srgb, var(--primary) 14%, transparent);
