@@ -1379,8 +1379,15 @@ export function DashboardPage() {
                   itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                   cursor={CHART_TOOLTIP_CURSOR}
                   formatter={(value, name) => {
+                    // Recharts passes the raw dataset value through; with
+                    // connectNulls={false} on the Line, missing-data points
+                    // are literally null in the row. Suppress those tooltip
+                    // entries entirely — Number(null) is 0, which would
+                    // re-introduce the false "$0.00" the chart-line fix
+                    // was meant to eliminate.
+                    if (value == null) return null
                     const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
+                    if (!Number.isFinite(v)) return null
                     return formatMoney(v, String(name))
                   }}
                 />
