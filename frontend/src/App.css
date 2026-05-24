@@ -1947,3 +1947,13 @@
     overflow-x: auto;
   }
 }
+
+.ruleRow.isFocused td {
+  animation: ruleFocusFlash 2s ease-out 1;
+  background-color: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+@keyframes ruleFocusFlash {
+  0%   { background-color: color-mix(in srgb, var(--primary) 32%, transparent); }
+  100% { background-color: color-mix(in srgb, var(--primary) 14%, transparent); }
+}

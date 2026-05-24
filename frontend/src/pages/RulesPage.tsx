@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
 import { useToast } from '@/components/ui/toast'
@@ -25,6 +26,21 @@ type RuleProposal = {
 
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([])
+  const [searchParams] = useSearchParams()
+  const focusedId = (() => {
+    const raw = searchParams.get('focus')
+    if (raw == null) return null
+    const n = Number(raw)
+    return Number.isInteger(n) && n > 0 ? n : null
+  })()
+  const focusedRowRef = useRef<HTMLTableRowElement | null>(null)
+
+  useEffect(() => {
+    if (focusedId == null) return
+    if (rules.length === 0) return
+    focusedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [focusedId, rules.length])
+
   const [proposals, setProposals] = useState<RuleProposal[]>([])
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
@@ -308,7 +324,11 @@ export function RulesPage() {
                 </tr>
               ) : (
                 rules.map((r) => (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    ref={r.id === focusedId ? focusedRowRef : undefined}
+                    className={r.id === focusedId ? 'ruleRow isFocused' : 'ruleRow'}
+                  >
                     <td>{r.merchantPattern}</td>
                     <td>{r.matchKind}</td>
                     <td>{r.priority}</td>
