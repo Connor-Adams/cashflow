@@ -268,6 +268,7 @@ export function ImportsTab() {
 
   return (
     <>
+      {confirm.dialog}
       {/* ── Import receipts ─────────────────────────────────────────────── */}
       <Card className="accountsFormCard">
         <div className="accountsCardHeader">
