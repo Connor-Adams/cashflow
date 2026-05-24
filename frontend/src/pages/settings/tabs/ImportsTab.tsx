@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { useConfirm } from '@/components/ui/dialog'
 import { postJson } from '../../../lib/api'
 import {
@@ -283,23 +284,13 @@ export function ImportsTab() {
         <div className="formGrid" style={{ gap: '0.75rem' }}>
           <label htmlFor="settings-receipt-text">
             Paste receipt email body
-            <textarea
+            <Textarea
               id="settings-receipt-text"
               value={receiptText}
               onChange={(e) => setReceiptText(e.target.value)}
               disabled={receiptBusy != null}
               rows={6}
               placeholder="Paste the full email body, including header lines like 'Order ID' and item lines…"
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                fontFamily: 'inherit',
-                fontSize: '0.85rem',
-                background: 'var(--bg)',
-                color: 'var(--fg)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md, 6px)',
-              }}
             />
           </label>
           <div className="row" style={{ gap: '0.5rem' }}>
@@ -550,32 +541,24 @@ export function ImportsTab() {
         )}
         {captureBookmarklets && (
           <div className="row" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
-            <a
-              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
-              style={{
-                backgroundColor: 'var(--bg2)',
-                color: 'var(--fg)',
-                borderColor: 'var(--border)',
-              }}
-              href={captureBookmarklets.amazon}
-              draggable
-              onClick={(e) => e.preventDefault()}
-            >
-              ↗ Capture Amazon orders
-            </a>
-            <a
-              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
-              style={{
-                backgroundColor: 'var(--bg2)',
-                color: 'var(--fg)',
-                borderColor: 'var(--border)',
-              }}
-              href={captureBookmarklets.apple}
-              draggable
-              onClick={(e) => e.preventDefault()}
-            >
-              ↗ Capture Apple purchases
-            </a>
+            <Button asChild variant="secondary">
+              <a
+                href={captureBookmarklets.amazon}
+                draggable
+                onClick={(e) => e.preventDefault()}
+              >
+                ↗ Capture Amazon orders
+              </a>
+            </Button>
+            <Button asChild variant="secondary">
+              <a
+                href={captureBookmarklets.apple}
+                draggable
+                onClick={(e) => e.preventDefault()}
+              >
+                ↗ Capture Apple purchases
+              </a>
+            </Button>
           </div>
         )}
         {captureToken && !captureBookmarklets && (
