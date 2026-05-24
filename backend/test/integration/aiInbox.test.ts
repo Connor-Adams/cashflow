@@ -313,3 +313,43 @@ test('POST /api/ai/rule-proposals dismiss normalizes multi-space patterns', asyn
     .filter((i) => i.kind === 'rule_proposal' && i.summary.includes('SPACE HOG'));
   assert.equal(afterProposals.length, 0, 'multi-space dismiss should exclude collapsed-space proposal');
 });
+
+test('POST /api/ai/insights supersedes prior suggested rows for same period+currency', async () => {
+  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
+  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
+  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
+
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  const suggested = await AiSuggestion.findAll({
+    where: { householdId, kind: 'financial_insight', status: 'suggested' },
+  });
+  const for2026_03_CAD = suggested.filter((row) => {
+    const snap = row.inputSnapshot as { period?: string; currency?: string };
+    return snap?.period === '2026-03' && snap?.currency === 'CAD';
+  });
+  assert.equal(for2026_03_CAD.length, 1, 'exactly one suggested row per (period, currency)');
+
+  const superseded = await AiSuggestion.findAll({
+    where: { householdId, kind: 'financial_insight', status: 'superseded' },
+  });
+  const supersededFor2026_03 = superseded.filter((row) => {
+    const snap = row.inputSnapshot as { period?: string; currency?: string };
+    return snap?.period === '2026-03' && snap?.currency === 'CAD';
+  });
+  assert.equal(supersededFor2026_03.length, 2, 'two superseded rows from earlier loads');
+});
+
+test('POST /api/ai/insights does not supersede rows for a different period', async () => {
+  await authed.get('/api/ai/insights?period=2026-02&currency=CAD');
+  await authed.get('/api/ai/insights?period=2026-03&currency=CAD');
+
+  const { AiSuggestion } = await import('../../src/models/index.js');
+  const feb = await AiSuggestion.findAll({
+    where: { householdId, kind: 'financial_insight', status: 'suggested' },
+  });
+  const stillSuggestedFeb = feb.filter((row) => {
+    const snap = row.inputSnapshot as { period?: string };
+    return snap?.period === '2026-02';
+  });
+  assert.equal(stillSuggestedFeb.length, 1, 'Feb row was not superseded by Mar refresh');
+});

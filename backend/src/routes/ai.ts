@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { QueryTypes } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { AiSuggestion, Rule, Transaction } from '../models';
 import { sequelize } from '../models';
 import { getOpenAiConfig } from '../config/openai';
@@ -290,6 +290,22 @@ router.get('/insights', async (req, res, next) => {
       currency,
       hasExplicitRange ? { from: dateFrom, to: dateTo } : undefined,
     );
+
+    await AiSuggestion.update(
+      { status: 'superseded' },
+      {
+        where: {
+          ...aiSuggestionWhere(req),
+          kind: 'financial_insight',
+          status: 'suggested',
+          [Op.and]: [
+            sequelize.literal(`json_extract(input_snapshot, '$.period') = ${sequelize.escape(out.period)}`),
+            sequelize.literal(`json_extract(input_snapshot, '$.currency') = ${sequelize.escape(currency)}`),
+          ],
+        },
+      },
+    );
+
     await createTrackedSuggestion({
       req,
       kind: 'financial_insight',
