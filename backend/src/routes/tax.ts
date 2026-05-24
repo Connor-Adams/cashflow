@@ -2,10 +2,14 @@ import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
 import { Entity, TaxReturn, TaxSlip, Carryforward, InstalmentPayment } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
+import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
 import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/brackets';
 import { factsHash } from '../tax/util/factsHash';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
+import { runScenario } from '../tax/engine/scenario';
+import { D } from '../tax/util/decimal';
+import type { ScenarioInput } from '../tax/engine/types';
 
 const router = Router();
 
@@ -349,6 +353,72 @@ router.get('/slips', async (req, res, next) => {
     const rows = await TaxSlip.findAll({ where });
     res.json({ slips: rows });
   } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tax/scenarios
+// Body: { year, ownerComp: { salary, eligibleDividends, nonEligibleDividends } }
+// Loads personal + corp Entity from household, builds base facts via builders,
+// runs scenario, returns ScenarioResult.
+router.post('/scenarios', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const { year, ownerComp } = req.body ?? {};
+    if (!Number.isInteger(year)) {
+      res.status(400).json({ error: 'year_required' });
+      return;
+    }
+    if (!ownerComp || typeof ownerComp !== 'object') {
+      res.status(400).json({ error: 'ownerComp_required' });
+      return;
+    }
+
+    const personal = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const corp = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
+    if (!personal || !corp) {
+      res.status(404).json({ error: 'entities_required', message: 'Both personal and corp entities must exist' });
+      return;
+    }
+
+    const personalFacts = await buildPersonalFacts(personal.id, year);
+    const corpFacts = await buildCorpFacts(corp.id, { startDate: `${year}-01-01`, endDate: `${year}-12-31` });
+
+    const input: ScenarioInput = {
+      year,
+      jurisdiction: 'CA-ON',
+      personalFactsBase: {
+        ...personalFacts,
+        employmentIncomeBase: personalFacts.employmentIncome,
+        eligibleDividendsBase: personalFacts.eligibleDividends,
+        nonEligibleDividendsBase: personalFacts.nonEligibleDividends,
+      },
+      corpFactsBase: corpFacts,
+      ownerComp: {
+        salary: D(ownerComp.salary ?? 0),
+        eligibleDividends: D(ownerComp.eligibleDividends ?? 0),
+        nonEligibleDividends: D(ownerComp.nonEligibleDividends ?? 0),
+      },
+    };
+
+    const result = runScenario(input, ratesFor(year));
+
+    // Serialize Decimals
+    const serialized = JSON.parse(JSON.stringify(result, (_k, v) =>
+      v && typeof v === 'object' && (v as { constructor?: { name?: string } }).constructor?.name === 'Decimal'
+        ? (v as { toFixed: (n: number) => string }).toFixed(2)
+        : v
+    ));
+
+    res.json(serialized);
+  } catch (err) {
+    if (err instanceof RateTableMissingError) {
+      res.status(409).json({
+        error: 'rate_table_missing',
+        message: (err as Error).message,
+      });
+      return;
+    }
     next(err);
   }
 });
