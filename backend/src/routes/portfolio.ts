@@ -679,7 +679,7 @@ async function runAcbForSells(
   const allActivities = await InvestmentActivity.findAll({
     where: {
       [Op.or]: conditions,
-      activityType: ['buy', 'sell', 'reinvestment'],
+      activityType: ['buy', 'sell', 'reinvestment', 'split'],
     },
     include: [{ model: Security, as: 'security' }],
     order: [
@@ -711,6 +711,7 @@ async function runAcbForSells(
       amount: n(r.amount),
       currency: r.currency,
       fees: n(r.fees),
+      splitRatio: n(r.splitRatio),
     }));
     const acb = computeAcb(acbInput);
     // Filter realized events by date range, if requested.
@@ -922,6 +923,7 @@ router.get('/security/:id', async (req, res, next) => {
         amount: n(r.amount),
         currency: r.currency,
         fees: n(r.fees),
+        splitRatio: n(r.splitRatio),
       }));
       const acb = computeAcb(acbInput);
 

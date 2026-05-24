@@ -12,8 +12,10 @@
  *    The `proceeds` field on AcbRealizedEvent is the net (after-fee) figure.
  *  - When the position closes (quantity drops to ~0) the per-unit ACB
  *    resets to zero, so the next BUY starts a fresh cost base.
- *  - Other activity types (dividend, interest, fee, etc.) are recorded
- *    in the timeline as no-op events (they don't shift ACB or quantity).
+ *  - SPLIT (forward or reverse) preserves totalCost; quantity is
+ *    multiplied by `splitRatio` and per-unit ACB is recomputed.
+ *  - Other activity types (dividend, interest, fee, transfer, etc.) are
+ *    no-ops in the ACB walk.
  *
  * Currency: inferred from the first activity. A mixed-currency stream
  * emits a warning but math is still in the inferred currency. Callers
@@ -33,6 +35,12 @@ export type AcbActivity = {
   currency: string;
   /** Trade commission / brokerage fee, if any. Added to cost on BUY; subtracted from proceeds on SELL. */
   fees?: number | null;
+  /**
+   * Stock-split ratio. Required for `activityType === 'split'`. 2 means
+   * 2-for-1 (qty doubles, ACB/unit halves). 0.1 means 1-for-10 reverse
+   * split. Total cost is preserved across the split.
+   */
+  splitRatio?: number | null;
 };
 
 /** Position state recorded after each buy/sell event. */
@@ -213,11 +221,39 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'split') {
+      // Stock split (or reverse split). Per CRA, splits are non-taxable
+      // and preserve total cost — only quantity and per-unit ACB change.
+      // ratio > 1 is a forward split (e.g. 2 = 2-for-1); ratio < 1 is a
+      // reverse split (e.g. 0.1 = 1-for-10).
+      const ratio = activity.splitRatio;
+      if (ratio == null || ratio <= 0 || !Number.isFinite(ratio)) {
+        warnings.push(
+          `SPLIT activity ${activity.id} on ${activity.tradeDate} missing or invalid splitRatio; ignored`
+        );
+        continue;
+      }
+      if (state.quantity <= EPS) {
+        warnings.push(
+          `SPLIT activity ${activity.id} on ${activity.tradeDate} applied to zero position; ignored`
+        );
+        continue;
+      }
+      const newQuantity = state.quantity * ratio;
+      const newAcb = newQuantity > EPS ? state.totalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: state.totalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
     }
-    // All other activity types (dividend, interest, fee, split, transfer,
-    // other) are intentionally ignored — they don't shift the
-    // weighted-average ACB. We do NOT filter them out of the input (the
-    // caller may still want to see them in their stream).
+    // All other activity types (dividend, interest, fee, ambiguous
+    // 'transfer' for cash CONT/withdrawals, other) are intentionally
+    // ignored — they don't shift the weighted-average ACB. We do NOT
+    // filter them out of the input (the caller may still want to see
+    // them in their stream).
   }
 
   return {

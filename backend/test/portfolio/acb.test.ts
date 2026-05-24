@@ -369,3 +369,103 @@ test('fees are ignored on no-op activity types (dividend, fee-type, etc.)', () =
   APPROX(r.finalState.acbPerUnit, 1009 / 10);
   assert.equal(r.finalState.quantity, 10);
 });
+
+// ---------------------------------------------------------------------------
+// Stock split tests
+// ---------------------------------------------------------------------------
+
+function splitAct(tradeDate: string, splitRatio: number | null): AcbActivity {
+  return {
+    id: nextId++,
+    tradeDate,
+    activityType: 'split',
+    quantity: null,
+    amount: null,
+    currency: 'CAD',
+    fees: null,
+    splitRatio,
+  };
+}
+
+test('2-for-1 split doubles quantity, halves per-unit ACB, preserves total cost', () => {
+  // BUY 10 @ $1000 → ACB $100/unit, totalCost $1000
+  // SPLIT 2-for-1 → qty 20, ACB $50/unit, totalCost $1000 (unchanged)
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', 2),
+  ]);
+  assert.equal(r.finalState.quantity, 20);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 50);
+  // Two timeline entries (BUY + SPLIT).
+  assert.equal(r.timeline.length, 2);
+  assert.equal(r.warnings.length, 0);
+});
+
+test('1-for-10 reverse split reduces quantity, raises per-unit ACB', () => {
+  // BUY 100 @ $1000 → ACB $10/unit
+  // REVERSE 1-for-10 (ratio 0.1) → qty 10, ACB $100/unit, totalCost $1000
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 100, 1000),
+    splitAct('2024-06-15', 0.1),
+  ]);
+  APPROX(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 100);
+  assert.equal(r.timeline.length, 2);
+});
+
+test('SELL after a split uses the post-split per-unit ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // SPLIT 2-for-1 → qty 20, ACB $50/unit
+  // SELL 5 @ $300 gross → cost removed 5*50=$250, gain $50
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', 2),
+    act('2024-09-15', 'sell', 5, 300),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, 50);
+  APPROX(r.realizedEvents[0].costRemoved, 250);
+  APPROX(r.realizedEvents[0].realizedGain, 50);
+  APPROX(r.finalState.quantity, 15);
+  APPROX(r.finalState.acbPerUnit, 50);
+});
+
+test('split on a zero (closed) position emits a warning and is ignored', () => {
+  // BUY 10 @ 1000, SELL 10 (close), then SPLIT 2:1
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-03-15', 'sell', 10, 1200), // close
+    splitAct('2024-06-15', 2),
+  ]);
+  assert.ok(r.warnings.some((w) => /SPLIT.*zero position/i.test(w)));
+  // Position remains closed; split was a no-op.
+  assert.equal(r.finalState.quantity, 0);
+  assert.equal(r.finalState.totalCost, 0);
+});
+
+test('split with null splitRatio emits a warning and is ignored', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', null),
+  ]);
+  assert.ok(r.warnings.some((w) => /missing or invalid splitRatio/i.test(w)));
+  // Position unchanged.
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('3-for-1 mid-stream split produces correctly blended weighted-average ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit, totalCost $1000
+  // SPLIT 3-for-1 → qty 30, ACB $33.333/unit, totalCost $1000
+  // BUY 10 @ $500 → totalCost $1500, qty 40, ACB $37.5/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    splitAct('2024-06-15', 3),
+    act('2024-09-15', 'buy', 10, 500),
+  ]);
+  APPROX(r.finalState.quantity, 40);
+  APPROX(r.finalState.totalCost, 1500);
+  APPROX(r.finalState.acbPerUnit, 37.5);
+});

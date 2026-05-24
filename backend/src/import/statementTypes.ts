@@ -52,6 +52,12 @@ export type NormalizedInvestmentActivity = {
   price: number | null;
   amount: number | null;
   fees: number | null;
+  /**
+   * Stock-split ratio. Only populated when `activityType === 'split'`.
+   * 2 means 2-for-1 (qty doubles, ACB/unit halves). 0.1 means 1-for-10
+   * reverse split. Always positive.
+   */
+  splitRatio?: number | null;
   currency: string;
   sourceReference: string | null;
   sourceRowFingerprint: string;
