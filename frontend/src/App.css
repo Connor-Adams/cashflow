@@ -1948,6 +1948,7 @@
   }
 }
 
+<<<<<<< HEAD
 .ruleRow.isFocused td {
   animation: ruleFocusFlash 2s ease-out 1;
   background-color: color-mix(in srgb, var(--primary) 14%, transparent);
@@ -2149,5 +2150,42 @@
 }
 
 .enrichConfidenceLegend__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.enrichSourceList {
+  display: grid;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.enrichSourceBar {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.enrichSourceBar__label {
+  width: 3.5rem;
+  text-align: right;
+  color: var(--muted-foreground);
+}
+
+.enrichSourceBar__track {
+  flex: 1;
+  background: var(--muted);
+  height: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.enrichSourceBar__fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.enrichSourceBar__count {
+  width: 6rem;
+  color: var(--foreground);
   font-variant-numeric: tabular-nums;
 }
