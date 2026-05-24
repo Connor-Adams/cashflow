@@ -385,17 +385,24 @@
   }
 
   .dashboardFilters {
-    @apply mt-3 rounded-lg border p-3 sm:p-4;
+    @apply mt-2 rounded-lg border p-2 sm:p-3;
     border-color: color-mix(in srgb, var(--border) 86%, white 4%);
     background: color-mix(in srgb, var(--bg2) 64%, transparent);
   }
 
+  /* Tighten the inner stack: FilterBar's `grid gap-3` provides the
+   * separation between rows. Extra mb-3/mt-3 on .quickFilters was
+   * double-spacing and bulking the whole filter strip. */
+  .dashboardFilters [data-slot='filter-bar'] {
+    @apply gap-2;
+  }
+
   .quickFilters {
-    @apply mb-3 mt-3 flex flex-wrap gap-2;
+    @apply m-0 flex flex-wrap gap-2;
   }
 
   .quickFilterButton {
-    @apply min-h-8 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-normal;
+    @apply min-h-7 rounded-md px-2.5 py-1 text-[0.7rem] font-bold uppercase tracking-normal;
     border-color: color-mix(in srgb, var(--border) 86%, white 6%);
     background: color-mix(in srgb, var(--bg3) 62%, transparent);
     color: var(--muted-foreground);
