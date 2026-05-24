@@ -53,7 +53,7 @@ function requireUploadedFile(req: import('express').Request, res: import('expres
   return file;
 }
 
-async function persistExtractedOrder(
+export async function persistExtractedOrder(
   extracted: ExtractedReceiptOrder,
   opts: { userId: number | null; householdId: number | null; source: string },
 ): Promise<{ order: ExternalOrder; created: boolean }> {

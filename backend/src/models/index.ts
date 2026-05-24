@@ -151,6 +151,14 @@ Rule.hasMany(Transaction, {
 Transaction.belongsTo(Rule, { foreignKey: 'applied_rule_id', as: 'appliedRule' });
 Transaction.hasMany(Receipt, { foreignKey: 'transaction_id', as: 'receipts' });
 Receipt.belongsTo(Transaction, { foreignKey: 'transaction_id', as: 'transaction' });
+Receipt.belongsTo(ExternalOrder, {
+  as: 'externalOrder',
+  foreignKey: 'externalOrderId',
+});
+ExternalOrder.hasMany(Receipt, {
+  as: 'receipts',
+  foreignKey: 'externalOrderId',
+});
 Transaction.hasMany(AiSuggestion, {
   foreignKey: 'transaction_id',
   as: 'aiSuggestions',

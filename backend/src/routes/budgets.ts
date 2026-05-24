@@ -9,6 +9,8 @@ import { Transaction } from '../models';
 import { num } from '../util/numbers';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import { splitTxnByItems } from '../import/splitTxnByItems';
+import { loadItemAllocationContext, type ItemAllocationContext } from '../summary/loadItemAllocations';
 
 const router = Router();
 
@@ -213,7 +215,15 @@ export function currentMonthBounds(
   return { periodStart: fmt(startDate), periodEnd: fmt(endDate) };
 }
 
-type SpendRow = { currency: string; finalCategory: string | null; amount: unknown };
+type SpendRow = {
+  id: number;
+  currency: string;
+  finalCategory: string | null;
+  finalBusiness: boolean;
+  finalSplitType: string;
+  amount: unknown;
+  businessAmount: string;
+};
 
 /**
  * Aggregate raw transaction rows into spend per (currency, category).
@@ -227,7 +237,8 @@ type SpendRow = { currency: string; finalCategory: string | null; amount: unknow
  * Pure helper exported so the route's correctness can be tested without a DB.
  */
 export function aggregateSpendByCategory(
-  rows: SpendRow[]
+  rows: SpendRow[],
+  itemContext?: ItemAllocationContext,
 ): Map<string, { currency: string; category: string | null; spent: number }> {
   const out = new Map<
     string,
@@ -236,15 +247,41 @@ export function aggregateSpendByCategory(
   for (const row of rows) {
     const amount = num(row.amount);
     if (amount == null || amount >= 0) continue;
-    const spend = -amount;
-    const key = `${row.currency}\0${row.finalCategory ?? ''}`;
-    const existing = out.get(key) ?? {
-      currency: row.currency,
-      category: row.finalCategory,
-      spent: 0,
-    };
-    existing.spent += spend;
-    out.set(key, existing);
+    const allocations = itemContext
+      ? splitTxnByItems({
+          txn: {
+            id: row.id,
+            amount: String(row.amount),
+            currency: row.currency,
+            finalCategory: row.finalCategory,
+            finalBusiness: row.finalBusiness,
+            finalSplitType: row.finalSplitType,
+            businessAmount: row.businessAmount,
+          },
+          links: itemContext.linksByTxn.get(row.id) ?? [],
+          ordersById: itemContext.ordersById,
+          itemsByOrder: itemContext.itemsByOrder,
+        })
+      : [
+          {
+            category: row.finalCategory,
+            amount,
+            businessAmount: 0,
+            currency: row.currency,
+          },
+        ];
+    for (const alloc of allocations) {
+      if (alloc.amount >= 0) continue;
+      const spend = -alloc.amount;
+      const key = `${alloc.currency}\0${alloc.category ?? ''}`;
+      const existing = out.get(key) ?? {
+        currency: alloc.currency,
+        category: alloc.category,
+        spent: 0,
+      };
+      existing.spent += spend;
+      out.set(key, existing);
+    }
   }
   return out;
 }
@@ -349,12 +386,14 @@ router.get('/progress', async (req, res, next) => {
         ? []
         : await Transaction.findAll({
             where: txWhere,
-            attributes: ['currency', 'finalCategory', 'amount'],
+            attributes: ['id', 'currency', 'finalCategory', 'finalBusiness', 'finalSplitType', 'amount', 'businessAmount'],
             raw: true,
           });
 
+    const itemContext = await loadItemAllocationContext(rows.map((r) => (r as unknown as SpendRow).id));
     const spendByCategory = aggregateSpendByCategory(
-      rows as unknown as SpendRow[]
+      rows as unknown as SpendRow[],
+      itemContext,
     );
     const items = computeBudgetProgress(
       budgets.map((b) => ({

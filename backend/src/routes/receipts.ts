@@ -2,9 +2,12 @@ import { Router } from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
-import { Transaction, Receipt } from '../models';
-import { analyzeReceiptFileTracked } from '../ai/receiptVision';
-import { createTrackedSuggestion } from '../ai/suggestionStore';
+import { Op } from 'sequelize';
+import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink } from '../models';
+import { extractReceiptFromImage } from '../ai/extractReceiptItems';
+import { persistExtractedOrder } from './externalOrders';
+import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { currentAuth } from '../auth/middleware';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import { visibleTransactionWhere } from '../auth/scope';
@@ -108,20 +111,66 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       res.status(404).json({ error: 'Transaction not found' });
       return;
     }
-    const rows = await Receipt.findAll({
+    const receipts = await Receipt.findAll({
       where: { transactionId: tid },
       order: [['createdAt', 'DESC']],
-      attributes: [
-        'id',
-        'transactionId',
-        'originalName',
-        'mimeType',
-        'sizeBytes',
-        'extractedNote',
-        'createdAt',
-      ],
     });
-    res.json(rows);
+    const orderIds = receipts.map((r) => r.externalOrderId).filter((x): x is number => x != null);
+    const [orders, items] = await Promise.all([
+      orderIds.length
+        ? ExternalOrder.findAll({ where: { id: { [Op.in]: orderIds }, householdId: txn.householdId } })
+        : Promise.resolve([] as InstanceType<typeof ExternalOrder>[]),
+      orderIds.length
+        ? ExternalOrderItem.findAll({ where: { externalOrderId: { [Op.in]: orderIds } } })
+        : Promise.resolve([] as InstanceType<typeof ExternalOrderItem>[]),
+    ]);
+    const ordersById = new Map(orders.map((o) => [o.id, o]));
+    const itemsByOrder = new Map<number, typeof items>();
+    for (const it of items) {
+      const list = itemsByOrder.get(it.externalOrderId) ?? [];
+      list.push(it);
+      itemsByOrder.set(it.externalOrderId, list);
+    }
+    res.json(
+      receipts.map((r) => {
+        const order = r.externalOrderId != null ? ordersById.get(r.externalOrderId) : null;
+        return {
+          id: r.id,
+          transactionId: r.transactionId,
+          originalName: r.originalName,
+          mimeType: r.mimeType,
+          sizeBytes: r.sizeBytes,
+          extractedNote: r.extractedNote,
+          createdAt: r.createdAt,
+          externalOrderId: r.externalOrderId,
+          order: order
+            ? {
+                id: order.id,
+                vendor: order.vendor,
+                subtotal: order.subtotal,
+                tax: order.tax,
+                shipping: order.shipping,
+                total: order.total,
+                currency: order.currency,
+              }
+            : null,
+          items: (r.externalOrderId != null ? (itemsByOrder.get(r.externalOrderId) ?? []) : []).map(
+            (it) => ({
+              id: it.id,
+              externalOrderId: it.externalOrderId,
+              title: it.title,
+              quantity: it.quantity,
+              unitPrice: it.unitPrice,
+              totalPrice: it.totalPrice,
+              inferredCategory: it.inferredCategory,
+              categoryOverride: it.categoryOverride,
+              businessUsePercent: it.businessUsePercent,
+              businessUseOverride: it.businessUseOverride,
+            }),
+          ),
+        };
+      }),
+    );
   } catch (e) {
     next(e);
   }
@@ -218,28 +267,104 @@ router.post(
         res.status(404).json({ error: 'Not found' });
         return;
       }
-      const tracked = await analyzeReceiptFileTracked(row);
-      const extracted = tracked.extract;
-      const note = JSON.stringify(extracted);
-      await row.update({ extractedNote: note });
-      await createTrackedSuggestion({
-        req,
-        transactionId: txn.id,
-        receiptId: row.id,
-        kind: 'receipt_extract',
-        inputSnapshot: tracked.inputSnapshot,
-        output: extracted,
-        model: tracked.meta.model,
-        promptVersion: 'receipt-extract-v1',
-        temperature: tracked.meta.temperature,
-        latencyMs: tracked.meta.latencyMs,
-        providerRequestId: tracked.meta.providerRequestId,
+      const buf = await readReceiptObject(row.storedFilename);
+      const mime = row.mimeType.toLowerCase();
+      if (!mime.startsWith('image/')) {
+        res.status(400).json({ error: 'Vision analysis supports image receipts only' });
+        return;
+      }
+      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+      const extracted = await extractReceiptFromImage(dataUrl);
+      const auth = currentAuth(req);
+      const { order } = await persistExtractedOrder(extracted, {
+        userId: auth.user.id,
+        householdId: auth.household.id,
+        source: 'receipt-analyze',
       });
-      res.json({ extracted, receiptId: row.id });
+      const previousExternalOrderId = row.externalOrderId;
+      await row.update({
+        externalOrderId: order.id,
+        extractedNote: JSON.stringify(extracted),
+      });
+      if (previousExternalOrderId != null && previousExternalOrderId !== order.id) {
+        await TransactionOrderLink.destroy({
+          where: { externalOrderId: previousExternalOrderId, status: 'suggested' },
+        });
+      }
+      if (auth.household.id != null) {
+        await matchReceiptOrderToTransactions({
+          externalOrderId: order.id,
+          householdId: auth.household.id,
+        });
+      }
+      res.json({ receipt: row.toJSON(), order: order.toJSON(), extracted });
     } catch (e) {
       next(e);
     }
   },
 );
+
+router.patch('/external-order-items/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (Number.isNaN(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const item = await ExternalOrderItem.findByPk(id);
+    if (!item) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const links = await TransactionOrderLink.findAll({
+      where: { externalOrderId: item.externalOrderId },
+    });
+    if (links.length === 0) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: {
+        id: { [Op.in]: links.map((l) => l.transactionId) },
+        ...visibleTransactionWhere(req),
+      },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const patch: { categoryOverride?: string | null; businessUseOverride?: string | null } = {};
+    if (Object.prototype.hasOwnProperty.call(body, 'categoryOverride')) {
+      const v = body.categoryOverride;
+      if (v === null || v === '') patch.categoryOverride = null;
+      else if (typeof v === 'string') patch.categoryOverride = v;
+      else {
+        res.status(400).json({ error: 'categoryOverride must be string or null' });
+        return;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'businessUseOverride')) {
+      const v = body.businessUseOverride;
+      if (v === null || v === '') patch.businessUseOverride = null;
+      else if (typeof v !== 'number' && typeof v !== 'string') {
+        res.status(400).json({ error: 'businessUseOverride must be number, string, or null' });
+        return;
+      }
+      else {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          res.status(400).json({ error: 'businessUseOverride must be in [0,100]' });
+          return;
+        }
+        patch.businessUseOverride = String(n);
+      }
+    }
+    await item.update(patch);
+    res.json(item.toJSON());
+  } catch (e) {
+    next(e);
+  }
+});
 
 export default router;

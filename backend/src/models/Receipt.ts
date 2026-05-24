@@ -19,6 +19,7 @@ export class Receipt extends Model<
   declare mimeType: string;
   declare sizeBytes: number;
   declare extractedNote: string | null;
+  declare externalOrderId: number | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -59,6 +60,11 @@ export function initReceipt(sequelize: Sequelize): typeof Receipt {
       extractedNote: {
         type: DataTypes.TEXT,
         field: 'extracted_note',
+        allowNull: true,
+      },
+      externalOrderId: {
+        type: DataTypes.INTEGER,
+        field: 'external_order_id',
         allowNull: true,
       },
     } as ModelAttributes<Receipt>,
