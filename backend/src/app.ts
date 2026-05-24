@@ -13,6 +13,7 @@ import recurringRouter from './routes/recurring';
 import aiRouter from './routes/ai';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
+import itemsRouter from './routes/items';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import settlementsRouter from './routes/settlements';
@@ -80,6 +81,7 @@ app.use('/api/email', emailIntegrationsRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/tax', taxRouter);
 app.use('/api', receiptsRouter);
+app.use('/api', itemsRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
