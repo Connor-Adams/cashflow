@@ -959,6 +959,44 @@
     margin-top: 0.5rem;
   }
 
+  .aiInboxTabCount {
+    @apply ml-1 tabular-nums text-xs;
+    color: var(--muted-foreground);
+  }
+
+  .aiInboxExpandToggle {
+    @apply ml-2 text-xs font-medium underline-offset-2;
+    background: transparent;
+    color: var(--muted-foreground);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .aiInboxExpandToggle:hover {
+    color: var(--foreground);
+    text-decoration: underline;
+  }
+
+  .aiInboxItemDetails {
+    @apply flex flex-col gap-1 mt-2 pl-3;
+    list-style: none;
+    border-left: 2px solid var(--border);
+  }
+
+  .aiInboxItemDetail {
+    @apply text-sm leading-5;
+  }
+
+  .aiInboxItemDetailLink {
+    @apply ml-2 text-xs;
+    color: var(--primary);
+  }
+
+  .aiInboxItemDetailLink:hover {
+    text-decoration: underline;
+  }
+
   /* ─── Sidebar nav badge (count chip at end of NavLink) ────────────── */
 
   .sidebar__navBadge {
