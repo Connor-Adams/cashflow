@@ -7,7 +7,9 @@ import {
   importCsvFile,
   importWsBundleFile,
   importWsHoldingsFile,
+  importRbcBundleFile,
   type BundleFileResult,
+  type RbcBundleFileResult,
 } from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
@@ -55,6 +57,22 @@ const bundleUpload = multer({
   fileFilter: (_req, file, cb) => {
     if (!file.originalname.toLowerCase().endsWith('.csv')) {
       const e = new Error('Only .csv files are allowed') as Error & { status?: number };
+      e.status = 400;
+      cb(e);
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+// RBC PDF bundle drop. PDF-only, mirror Wealthsimple bundle limits (20 files,
+// 15 MB each — matches statementUpload).
+const rbcBundleUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 20 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.pdf')) {
+      const e = new Error('Only .pdf files are allowed') as Error & { status?: number };
       e.status = 400;
       cb(e);
       return;
@@ -457,6 +475,82 @@ router.post(
       const accountsCreated = results.filter((r) => r.accountCreated).length;
       const filesImported = results.filter((r) => !r.error).length;
       logImportEvent('bundle_completed', {
+        fileCount: files.length,
+        filesImported,
+        accountsCreated,
+      });
+
+      res.json({ results });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/upload-rbc-bundle',
+  importUploadLimiter,
+  (req, res, next) => {
+    rbcBundleUpload.array('files', 20)(req as never, res as never, (err: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (files.length === 0) {
+        res.status(400).json({ error: 'Missing files field "files"' });
+        return;
+      }
+      const { user, household } = currentAuth(req);
+      logImportEvent('rbc_bundle_started', {
+        fileCount: files.length,
+        totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
+      });
+
+      const results: RbcBundleFileResult[] = [];
+      for (const file of files) {
+        try {
+          const result = await importRbcBundleFile({
+            buffer: file.buffer,
+            fileName: file.originalname,
+            householdId: household.id,
+            userId: user.id,
+          });
+          results.push(result);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          logImportEvent('rbc_bundle_file_failed', {
+            file: file.originalname,
+            error: message,
+          });
+          results.push({
+            file: file.originalname,
+            accountSuffix: null,
+            productLabel: null,
+            accountId: null,
+            accountName: null,
+            accountCreated: false,
+            inserted: 0,
+            insertedTransactions: 0,
+            insertedInvestmentActivities: 0,
+            insertedHoldings: 0,
+            skippedDuplicates: 0,
+            rowErrors: 0,
+            parseErrors: [],
+            warnings: [],
+            error: message,
+          });
+        }
+      }
+
+      const accountsCreated = results.filter((r) => r.accountCreated).length;
+      const filesImported = results.filter((r) => !r.error).length;
+      logImportEvent('rbc_bundle_completed', {
         fileCount: files.length,
         filesImported,
         accountsCreated,
