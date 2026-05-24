@@ -4,7 +4,7 @@ import type { PdfLine } from '../src/import/pdf/types';
 import { parseRbcPersonalBankingHeader } from '../src/import/pdf/rbcPersonalBanking';
 import { parseRbcVisaHeader } from '../src/import/pdf/rbcVisa';
 import { parseRbcCreditLineHeader } from '../src/import/pdf/rbcCreditLine';
-import { parseRbcInvestmentHeader } from '../src/import/pdf/rbcInvestment';
+import { parseRbcInvestmentHeader, rbcInvestmentParser } from '../src/import/pdf/rbcInvestment';
 
 function mk(text: string, page = 1, y = 0): PdfLine {
   return { page, y, text };
@@ -106,13 +106,65 @@ test('parseRbcInvestmentHeader handles TFSA', () => {
   assert.equal(header.periodEnd, '2025-12-31');
 });
 
-test('parseRbcInvestmentHeader handles RDSP', () => {
+test('rbcInvestmentParser extracts RDSP holdings + activity from split y-bucket rows', () => {
+  // Reproduces the real pdfjs output for an RDSP statement: numeric columns
+  // sit on the line ABOVE the date+label row (y-gap < Y_TOLERANCE+1), so the
+  // parser must cache pending numerics and attach them to the next date row.
   const lines: PdfLine[] = [
-    mk('Your investment statement'),
-    mk('October 1, 2025 to December 31, 2025'),
+    mk(' October 1, 2025 to December 31, 2025'),
+    mk(' Registered Disability Savings Plan            Your account number   Your branch'),
+    mk(' 468184346   1005 SPEERS RD'),
+    mk(' Your investment statement'),
+    // Holdings section
+    mk(' Your investment details with Royal Mutual Funds Inc.'),
+    mk(' Your unit      Units you own     Unit price on             Value on       Book Cost'),
+    mk(' Balanced Funds'),
+    mk(' RBC Select Growth Portfolio - Sr. A (RBF459)'),
+    mk(' 34.4738   2,299.066   42.8452   98,503.94   79,257.45'),
+    mk(' Total   $98,503.94   $79,257.45'),
+    // Activity section: numerics on the line above each date label
+    mk(' Your investment activity with Royal Mutual Funds Inc.'),
+    mk(' RBC Select Growth Portfolio - Sr. A (RBF459)'),
+    mk('44.2080   2,189.222   96,781.13'),
+    mk(' Opening Balance'),
+    mk('2,189.222'),
+    mk(' Dec 23 2025   Income Record Date Holdings'),
+    mk('4,717.78   42.9500   109.844   2,299.066   98,744.88'),
+    mk(' Dec 23 2025   Income Reinvested'),
+    mk('0.0000   0.000'),
+    mk(' ( 2.1550000 per Unit )'),
+    mk('42.8452   2,299.066   98,503.94'),
+    mk(' Dec 31 2025   Closing Balance'),
+  ];
+  const res = rbcInvestmentParser.parse(lines, { defaultCurrency: 'CAD' });
+
+  assert.equal(res.header.accountSuffix, '4346');
+  assert.equal(res.holdings.length, 1);
+  assert.equal(res.holdings[0].security.symbol, 'RBF459');
+  assert.equal(res.holdings[0].quantity, 2299.066);
+  assert.equal(res.holdings[0].price, 42.8452);
+  assert.equal(res.holdings[0].marketValue, 98503.94);
+  assert.equal(res.holdings[0].costBasis, 79257.45);
+
+  // Opening/Closing balance and Income Record Date Holdings rows MUST be skipped;
+  // only the real "Income Reinvested" activity emits.
+  assert.equal(res.investmentActivities.length, 1);
+  const act = res.investmentActivities[0];
+  assert.equal(act.activityType, 'reinvestment');
+  assert.equal(act.tradeDate, '2025-12-23');
+  assert.equal(act.amount, 4717.78);
+  assert.equal(act.price, 42.95);
+  assert.equal(act.quantity, 109.844);
+});
+
+test('parseRbcInvestmentHeader handles RDSP with two-line account header', () => {
+  // Real RDSP statements split "Your account number" label and the digits
+  // across two PDF lines (column layout next to "Your branch").
+  const lines: PdfLine[] = [
+    mk(' October 1, 2025 to December 31, 2025'),
+    mk(' Registered Disability Savings Plan            Your account number   Your branch'),
+    mk(' 468184346   1005 SPEERS RD'),
     mk('Royal Mutual Funds Inc.'),
-    mk('Registered Disability Savings Plan'),
-    mk('Your account number  468184346'),
   ];
   const header = parseRbcInvestmentHeader(lines);
   assert.equal(header.accountSuffix, '4346');
