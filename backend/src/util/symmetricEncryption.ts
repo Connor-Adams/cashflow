@@ -40,7 +40,7 @@ function getKey(): Buffer {
 export function encryptSecret(plaintext: string): string {
   const key = getKey();
   const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   const envelope = Buffer.concat([Buffer.from([VERSION_BYTE]), iv, tag, enc]);
@@ -59,7 +59,7 @@ export function decryptSecret(envelopeBase64: string): string {
   const iv = envelope.subarray(1, 1 + IV_LEN);
   const tag = envelope.subarray(1 + IV_LEN, 1 + IV_LEN + TAG_LEN);
   const cipher = envelope.subarray(1 + IV_LEN + TAG_LEN);
-  const decipher = createDecipheriv('aes-256-gcm', getKey(), iv);
+  const decipher = createDecipheriv('aes-256-gcm', getKey(), iv, { authTagLength: 16 });
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(cipher), decipher.final()]).toString('utf8');
 }
