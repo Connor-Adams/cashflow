@@ -57,6 +57,13 @@ export function initCarryforward(sequelize: Sequelize): typeof Carryforward {
       tableName: 'carryforwards',
       underscored: true,
       timestamps: true,
+      indexes: [
+        {
+          name: 'carryforwards_entity_kind_year',
+          unique: true,
+          fields: ['entity_id', 'kind', 'as_of_year'],
+        },
+      ],
     }
   );
   return Carryforward;

@@ -31,7 +31,8 @@ test('builds facts from seeded data', async () => {
   const facts = await buildPersonalFacts(entity.id, 2024);
   assert.equal(facts.year, 2024);
   assert.equal(facts.jurisdiction, 'CA-ON');
-  assert.ok(facts.employmentIncome.length >= 0);
+  assert.equal(facts.employmentIncome.length, 1, 'seeded employment txn should appear');
+  assert.equal(facts.employmentIncome[0].cadAmount.toFixed(2), '5000.00');
 });
 
 test('USD interest converted to CAD via FxRate', async () => {
