@@ -14,6 +14,9 @@
  *    resets to zero, so the next BUY starts a fresh cost base.
  *  - SPLIT (forward or reverse) preserves totalCost; quantity is
  *    multiplied by `splitRatio` and per-unit ACB is recomputed.
+ *  - Return of capital (`return_of_capital`) reduces totalCost (and
+ *    per-unit ACB) without changing quantity. ROC that exceeds the cost
+ *    base produces an immediate capital gain (CRA s.53(2)(a)(ii)).
  *  - Other activity types (dividend, interest, fee, transfer, etc.) are
  *    no-ops in the ACB walk.
  *
@@ -245,6 +248,45 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         asOf: activity.tradeDate,
         quantity: newQuantity,
         totalCost: state.totalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'return_of_capital') {
+      // Return of capital (ROC) reduces ACB without changing quantity.
+      // CRA s.53(2)(a)(ii): ROC distributions reduce the unit cost base;
+      // if ROC would push ACB below zero, the excess is a deemed
+      // immediate capital gain in the year it was paid.
+      if (activity.amount == null) {
+        warnings.push(
+          `ROC activity ${activity.id} on ${activity.tradeDate} missing amount; ignored`
+        );
+        continue;
+      }
+      const rocAmount = Math.abs(activity.amount);
+      const reduction = Math.min(rocAmount, state.totalCost);
+      const immediateGain = rocAmount - reduction;
+      const newTotalCost = state.totalCost - reduction;
+      const newAcb = state.quantity > EPS ? newTotalCost / state.quantity : 0;
+      if (immediateGain > EPS) {
+        realizedEvents.push({
+          activityId: activity.id,
+          tradeDate: activity.tradeDate,
+          qtySold: 0,
+          proceeds: immediateGain,
+          acbPerUnitAtSale: 0,
+          costRemoved: 0,
+          realizedGain: immediateGain,
+          currency: activity.currency || currency,
+        });
+        realizedTotal += immediateGain;
+        warnings.push(
+          `ROC activity ${activity.id} on ${activity.tradeDate}: ROC ($${rocAmount}) exceeds cost base ($${state.totalCost.toFixed(2)}); $${immediateGain.toFixed(2)} treated as immediate capital gain`
+        );
+      }
+      state = {
+        asOf: activity.tradeDate,
+        quantity: state.quantity,
+        totalCost: newTotalCost,
         acbPerUnit: newAcb,
       };
       timeline.push(state);

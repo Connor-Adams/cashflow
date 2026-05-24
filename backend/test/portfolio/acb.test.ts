@@ -469,3 +469,96 @@ test('3-for-1 mid-stream split produces correctly blended weighted-average ACB',
   APPROX(r.finalState.totalCost, 1500);
   APPROX(r.finalState.acbPerUnit, 37.5);
 });
+
+// ---------------------------------------------------------------------------
+// Return of capital (ROC) tests
+// ---------------------------------------------------------------------------
+
+test('ROC reduces total cost without changing quantity', () => {
+  // BUY 10 @ $1000 → ACB $100/unit, totalCost $1000
+  // ROC $50 → totalCost $950, qty 10, ACB $95/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, 50),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 950);
+  APPROX(r.finalState.acbPerUnit, 95);
+  assert.equal(r.realizedEvents.length, 0);
+  assert.equal(r.timeline.length, 2);
+});
+
+test('multiple ROC events accumulate (each reduces cost)', () => {
+  // BUY 10 @ $1000 → totalCost $1000
+  // ROC $40 → totalCost $960
+  // ROC $60 → totalCost $900, ACB $90/unit
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-04-15', 'return_of_capital', null, 40),
+    act('2024-07-15', 'return_of_capital', null, 60),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 900);
+  APPROX(r.finalState.acbPerUnit, 90);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('ROC equal to total cost zeroes the ACB without producing a gain', () => {
+  // BUY 10 @ $1000 → totalCost $1000
+  // ROC $1000 → totalCost $0, ACB $0
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, 1000),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 0);
+  APPROX(r.finalState.acbPerUnit, 0);
+  assert.equal(r.realizedEvents.length, 0);
+});
+
+test('ROC exceeding total cost emits a qtySold=0 realized event for the excess', () => {
+  // BUY 10 @ $1000 → totalCost $1000
+  // ROC $1200 → totalCost $0, $200 immediate capital gain
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, 1200),
+  ]);
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 0);
+  APPROX(r.finalState.acbPerUnit, 0);
+  assert.equal(r.realizedEvents.length, 1);
+  assert.equal(r.realizedEvents[0].qtySold, 0);
+  APPROX(r.realizedEvents[0].realizedGain, 200);
+  APPROX(r.realizedEvents[0].proceeds, 200);
+  APPROX(r.realizedTotal, 200);
+  assert.ok(r.warnings.some((w) => /exceeds cost base/i.test(w)));
+});
+
+test('ROC with null amount emits a warning and does not crash', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-06-15', 'return_of_capital', null, null),
+  ]);
+  assert.ok(r.warnings.some((w) => /ROC.*missing amount/i.test(w)));
+  // Position unchanged.
+  assert.equal(r.finalState.quantity, 10);
+  APPROX(r.finalState.totalCost, 1000);
+  APPROX(r.finalState.acbPerUnit, 100);
+});
+
+test('SELL after a ROC uses the reduced post-ROC ACB', () => {
+  // BUY 10 @ $1000 → ACB $100/unit
+  // ROC $200 → totalCost $800, ACB $80/unit
+  // SELL 5 @ $600 → costRemoved 5*80=$400, gain $200
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 10, 1000),
+    act('2024-04-15', 'return_of_capital', null, 200),
+    act('2024-07-15', 'sell', 5, 600),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].acbPerUnitAtSale, 80);
+  APPROX(r.realizedEvents[0].costRemoved, 400);
+  APPROX(r.realizedEvents[0].realizedGain, 200);
+  APPROX(r.finalState.quantity, 5);
+  APPROX(r.finalState.acbPerUnit, 80);
+});

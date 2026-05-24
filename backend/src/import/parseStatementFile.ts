@@ -70,6 +70,9 @@ function normalizeActivityType(raw: unknown): NormalizedInvestmentActivity['acti
   const text = String(raw ?? '').toLowerCase();
   if (/\bbuy|bought|purchase/.test(text)) return 'buy';
   if (/\bsell|sold|redemption/.test(text)) return 'sell';
+  // ROC must precede generic "distribution" since it commonly appears as
+  // "return of capital distribution" or "ROC".
+  if (/return.of.capital|roc\b/.test(text)) return 'return_of_capital';
   if (/dividend|distribution/.test(text)) return 'dividend';
   if (/interest/.test(text)) return 'interest';
   if (/fee|commission/.test(text)) return 'fee';

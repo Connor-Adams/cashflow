@@ -679,7 +679,7 @@ async function runAcbForSells(
   const allActivities = await InvestmentActivity.findAll({
     where: {
       [Op.or]: conditions,
-      activityType: ['buy', 'sell', 'reinvestment', 'split'],
+      activityType: ['buy', 'sell', 'reinvestment', 'split', 'return_of_capital'],
     },
     include: [{ model: Security, as: 'security' }],
     order: [
