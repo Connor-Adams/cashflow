@@ -11,6 +11,7 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import * as env from '../config/env';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
+import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
 
 const router = Router();
@@ -721,7 +722,10 @@ async function runAcbForSells(
       fees: n(r.fees),
       splitRatio: n(r.splitRatio),
     }));
-    const acb = computeAcb(acbInput);
+    const { normalized, warnings: fxWarnings } =
+      await normalizeActivitiesToCad(acbInput);
+    const acb = computeAcb(normalized);
+    acb.warnings.push(...fxWarnings);
     // Filter realized events by date range, if requested.
     if (dateFrom || dateTo) {
       acb.realizedEvents = acb.realizedEvents.filter((e) => {
@@ -933,7 +937,10 @@ router.get('/security/:id', async (req, res, next) => {
         fees: n(r.fees),
         splitRatio: n(r.splitRatio),
       }));
-      const acb = computeAcb(acbInput);
+      const { normalized, warnings: fxWarnings } =
+        await normalizeActivitiesToCad(acbInput);
+      const acb = computeAcb(normalized);
+      acb.warnings.push(...fxWarnings);
 
       const currentQuantity = latestHolding ? n(latestHolding.quantity) ?? 0 : 0;
       const { marketValue: currentMarketValue, currency: holdingCurrency } = latestHolding
@@ -958,6 +965,8 @@ router.get('/security/:id', async (req, res, next) => {
       combinedQty += currentQuantity;
       combinedMv += currentMarketValue;
       combinedCost += currentCostBasis;
+      // TODO(acb-fx-followup): combinedRealized naively sums across currencies;
+      // mixed-currency positions need per-currency rollup. Out of scope here.
       combinedRealized += acb.realizedTotal;
       if (holdingCurrency) combinedCurrency = holdingCurrency;
       for (const r of acts) {
