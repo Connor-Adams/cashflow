@@ -143,6 +143,7 @@ export function EnrichmentTab() {
 
   return (
     <>
+      {confirm.dialog}
       <Card className="accountsFormCard">
         <div className="accountsCardHeader">
           <div>
