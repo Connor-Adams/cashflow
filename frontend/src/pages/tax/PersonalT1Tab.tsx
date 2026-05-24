@@ -1,17 +1,15 @@
 import { useState } from 'react';
 import { useTaxReturn, type TaxLineDto } from '../../hooks/useTaxReturn';
 
-const YEAR = new Date().getUTCFullYear();
-
-export function PersonalT1Tab() {
-  const { data, error, loading } = useTaxReturn(YEAR);
+export function PersonalT1Tab({ year }: { year: number }) {
+  const { data, error, loading } = useTaxReturn(year);
   const [expanded, setExpanded] = useState<string | null>(null);
   if (loading) return <p className="muted">Computing…</p>;
   if (error) return <p className="error">Error: {error}</p>;
   if (!data) return null;
   return (
     <div>
-      <h2>Personal T1 — {YEAR}</h2>
+      <h2>Personal T1 — {year}</h2>
       <table>
         <thead>
           <tr><th>Line</th><th>Label</th><th>Amount</th></tr>

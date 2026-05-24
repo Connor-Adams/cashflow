@@ -25,6 +25,10 @@ export function ratesFor(year: number): RateTable {
   return t;
 }
 
+export function supportedYears(): number[] {
+  return Object.keys(TABLES).map(Number).sort((a, b) => a - b);
+}
+
 export function applyBrackets(taxableIncome: Decimal, brackets: Bracket[]): Decimal {
   let remaining = taxableIncome;
   let lowerBound = D('0');

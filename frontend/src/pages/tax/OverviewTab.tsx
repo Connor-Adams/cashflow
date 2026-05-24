@@ -1,15 +1,13 @@
 import { useTaxReturn } from '../../hooks/useTaxReturn';
 
-const YEAR = new Date().getUTCFullYear();
-
-export function OverviewTab() {
-  const { data, error, loading } = useTaxReturn(YEAR);
+export function OverviewTab({ year }: { year: number }) {
+  const { data, error, loading } = useTaxReturn(year);
   if (loading) return <p className="muted">Computing…</p>;
   if (error) return <p className="error">Error: {error}</p>;
   if (!data) return null;
   return (
     <div>
-      <h2>Year {YEAR} — Estimated total payable</h2>
+      <h2>Year {year} — Estimated total payable</h2>
       <p className="big-number">${data.totals.totalPayable}</p>
       <ul>
         <li>Federal tax: ${data.totals.federalTax}</li>
