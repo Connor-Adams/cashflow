@@ -1,4 +1,4 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, PdfTextSpan } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { MONTHS_SHORT, parseLongDate, parseMoney, toIso, type Period } from './dateHelpers';
 import type { NormalizedHoldingSnapshot, NormalizedInvestmentActivity } from '../statementTypes';
@@ -11,7 +11,9 @@ import type { NormalizedHoldingSnapshot, NormalizedInvestmentActivity } from '..
  * Layout markers:
  *   Title:        "Your investment statement"
  *   Period:       "January 1, 2025 to December 31, 2025"
- *   Account:      "Your account number  435516430"  (number, no dash)
+ *   Account:      "Your account number  435516430" (TFSA: label + digits on
+ *                 same line), OR label on one line and "468184346  ..." on the
+ *                 next (RDSP: label sits next to "Your branch" in a header row).
  *   Product:      "Tax-Free Savings Account" OR "Registered Disability Savings Plan"
  *
  * RDSP emits 3 array types:
@@ -23,6 +25,8 @@ import type { NormalizedHoldingSnapshot, NormalizedInvestmentActivity } from '..
  */
 
 const ACCOUNT_RE = /Your account number\s+(\d{7,12})/;
+const ACCOUNT_LABEL_RE = /Your account number/i;
+const ACCOUNT_DIGITS_RE = /^\s*(\d{7,12})\b/;
 const PERIOD_HEADER_RE = /^([A-Z][a-z]+\s+\d{1,2},\s+\d{4})\s+to\s+([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/;
 const FUND_HEADING_RE = /^(.+?)\s+\(([A-Z]{3,4}\d{3,5})\)$/;
 const ISO_DATE_RE = /^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{4})\b/; // "Dec 23 2025"
@@ -40,11 +44,21 @@ export function parseRbcInvestmentHeader(lines: PdfLine[]): PdfStatementHeader {
   const page1 = lines.filter((l) => l.page === 1);
 
   let accountNumber: string | null = null;
-  for (const l of page1) {
-    const m = ACCOUNT_RE.exec(l.text);
-    if (m) {
-      accountNumber = m[1];
+  for (let i = 0; i < page1.length; i++) {
+    const sameLine = ACCOUNT_RE.exec(page1[i].text);
+    if (sameLine) {
+      accountNumber = sameLine[1];
       break;
+    }
+    // RDSP layout: label "Your account number" sits on one line, the digits
+    // appear on the next line (e.g. "468184346   1005 SPEERS RD").
+    if (ACCOUNT_LABEL_RE.test(page1[i].text)) {
+      const next = page1[i + 1];
+      const nextMatch = next && ACCOUNT_DIGITS_RE.exec(next.text);
+      if (nextMatch) {
+        accountNumber = nextMatch[1];
+        break;
+      }
     }
   }
   if (!accountNumber) {
@@ -123,13 +137,13 @@ function parseInvestmentDetails(
       continue;
     }
     if (!pendingFund) continue;
-    // Numeric row: collect money tokens left-to-right.
-    const items = l.items ?? [];
-    const tokens: PdfTextSpan[] = items.length > 0
-      ? items.filter((it) => MONEY_TOKEN_RE.test(it.str))
-      : text.split(/\s{2,}/).filter((t) => MONEY_TOKEN_RE.test(t)).map((t, i) => ({ x: i * 100, width: 0, str: t }));
-    if (tokens.length < 4) continue;
-    const values = tokens.map((t) => parseMoney(t.str));
+    // Numeric row: collect money tokens left-to-right. We split by whitespace on
+    // the line text rather than by pdfjs `items` because pdfjs sometimes glues
+    // a whole row of numbers into a single positioned item (string includes the
+    // spaces), which would never match MONEY_TOKEN_RE.
+    const tokenStrs = text.split(/\s+/).filter((t) => MONEY_TOKEN_RE.test(t));
+    if (tokenStrs.length < 4) continue;
+    const values = tokenStrs.map(parseMoney);
     // Columns (per the RBC RDSP example):
     //   [book cost/unit] [units] [unit price] [value] [book cost total]
     const [_bcPerUnit, units, unitPrice, marketValue, bookCostTotal] = values;
@@ -162,13 +176,20 @@ function parseInvestmentDetails(
 
 /**
  * Extract investment activities from "Your investment activity with Royal
- * Mutual Funds Inc." section. Each fund subsection lists per-date rows like:
+ * Mutual Funds Inc." section.
  *
- *   "Dec 23 2025  Income Reinvested  4,717.78  42.9500  109.844  2,299.066  98,744.88"
- *   "(2.1550000 per Unit)  0.0000  0.000"
+ * Layout note: pdfjs splits each visual row into two y-buckets — the numeric
+ * columns sit on the line just above the "Dec 23 2025  Income Reinvested" date
+ * label (gap is ~1.1 user-space units, above our Y_TOLERANCE). So we cache the
+ * most recent numeric-only line as `pendingNumerics` and attach it to the next
+ * date row.
  *
- * Skipped row labels: Opening Balance, Closing Balance, Income Record Date Holdings,
- * "(<per-unit-detail>)".
+ *   numerics:  "4,717.78  42.9500  109.844  2,299.066  98,744.88"   (line above)
+ *   date row:  " Dec 23 2025   Income Reinvested"                   (line below)
+ *
+ * Skipped row labels (consume pendingNumerics so it doesn't bleed into the
+ * next real activity): Opening Balance, Closing Balance, Income Record Date
+ * Holdings, "(<per-unit-detail>)".
  */
 function parseInvestmentActivity(
   lines: PdfLine[],
@@ -178,6 +199,7 @@ function parseInvestmentActivity(
 
   let inSection = false;
   let currentFund: { name: string; symbol: string } | null = null;
+  let pendingNumerics: number[] = [];
 
   for (const l of lines) {
     const text = l.text.trim();
@@ -192,50 +214,71 @@ function parseInvestmentActivity(
     const fundHeading = FUND_HEADING_RE.exec(text);
     if (fundHeading) {
       currentFund = { name: fundHeading[1].trim(), symbol: fundHeading[2].trim() };
+      pendingNumerics = [];
       continue;
     }
     if (!currentFund) continue;
 
-    if (/^Opening Balance|^Closing Balance|Income Record Date Holdings/i.test(text)) continue;
-    if (/^\(.*per Unit\)/i.test(text)) continue;
+    // Drop ^ anchor on Opening/Closing Balance because they sometimes appear
+    // alone ("Opening Balance") and sometimes prefixed with a date
+    // ("Mar 31 2025  Closing Balance") — both must be skipped.
+    if (/Opening Balance|Closing Balance|Income Record Date Holdings/i.test(text)) {
+      pendingNumerics = [];
+      continue;
+    }
+    if (/^\(.*per Unit\)/i.test(text)) {
+      pendingNumerics = [];
+      continue;
+    }
 
     const dateMatch = ISO_DATE_RE.exec(text);
-    if (!dateMatch) continue;
-    const tradeDate = parseShortDate(text);
-    if (!tradeDate) continue;
+    if (dateMatch) {
+      const tradeDate = parseShortDate(text);
+      if (!tradeDate) {
+        pendingNumerics = [];
+        continue;
+      }
+      const afterDate = text.replace(ISO_DATE_RE, '').trim();
+      const inlineMoney = afterDate.split(/\s+/).filter((t) => MONEY_TOKEN_RE.test(t)).map(parseMoney);
+      const moneyCols = inlineMoney.length > 0 ? inlineMoney : pendingNumerics;
+      pendingNumerics = [];
 
-    // Remove the leading date token + transaction label, then collect money cols.
-    const afterDate = text.replace(ISO_DATE_RE, '').trim();
-    const labelMatch = /^([A-Za-z][A-Za-z\s/]+?)\s+(-?[\d,]+\.\d{2,8}|$)/.exec(afterDate);
-    const txLabel = labelMatch ? labelMatch[1].trim() : afterDate.split(/\s{2,}/)[0];
-    const moneyCols = (l.items ?? [])
-      .filter((it) => MONEY_TOKEN_RE.test(it.str))
-      .map((it) => parseMoney(it.str));
-    const fallbackTokens = moneyCols.length === 0
-      ? afterDate.split(/\s+/).filter((t) => MONEY_TOKEN_RE.test(t)).map(parseMoney)
-      : moneyCols;
-    // Columns per RBC: amount, unit_price, units, total_units, total_value
-    const [amount, unitPrice, units] = fallbackTokens;
-    if (amount == null) continue;
+      const labelMatch = /^([A-Za-z][A-Za-z\s/]+?)\s+(-?[\d,]+\.\d{2,8}|$)/.exec(afterDate);
+      const txLabel = labelMatch ? labelMatch[1].trim() : afterDate.split(/\s{2,}/)[0];
 
-    activities.push({
-      activityType: classifyActivityType(txLabel),
-      tradeDate,
-      settlementDate: null,
-      description: `${txLabel} — ${currentFund.name}`,
-      security: {
-        symbol: currentFund.symbol,
-        name: currentFund.name,
-        assetType: 'mutual_fund',
+      // Columns per RBC: amount, unit_price, units, total_units, total_value
+      const [amount, unitPrice, units] = moneyCols;
+      if (amount == null) continue;
+
+      activities.push({
+        activityType: classifyActivityType(txLabel),
+        tradeDate,
+        settlementDate: null,
+        description: `${txLabel} — ${currentFund.name}`,
+        security: {
+          symbol: currentFund.symbol,
+          name: currentFund.name,
+          assetType: 'mutual_fund',
+          currency: defaultCurrency,
+        },
+        quantity: Number.isFinite(units) ? units : null,
+        price: Number.isFinite(unitPrice) ? unitPrice : null,
+        amount: Number.isFinite(amount) ? amount : null,
+        fees: null,
         currency: defaultCurrency,
-      },
-      quantity: Number.isFinite(units) ? units : null,
-      price: Number.isFinite(unitPrice) ? unitPrice : null,
-      amount: Number.isFinite(amount) ? amount : null,
-      fees: null,
-      currency: defaultCurrency,
-      sourceReference: null,
-    });
+        sourceReference: null,
+      });
+      continue;
+    }
+
+    // Numeric-only line: cache for the date row that follows on the next y-bucket.
+    const parts = text.split(/\s+/).filter((t) => t.length > 0);
+    const numericTokens = parts.filter((t) => MONEY_TOKEN_RE.test(t));
+    if (parts.length > 0 && numericTokens.length === parts.length) {
+      pendingNumerics = numericTokens.map(parseMoney);
+    } else {
+      pendingNumerics = [];
+    }
   }
 
   return activities;
