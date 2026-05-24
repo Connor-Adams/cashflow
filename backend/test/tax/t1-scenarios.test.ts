@@ -94,3 +94,53 @@ test('Scenario E: T4 box 14 of $82k beats computed $79.5k, warning emitted', () 
   assert.ok(ret.warnings.length > 0);
   assert.ok(ret.warnings[0].includes('T4 box 14'));
 });
+
+test('Scenario F: T4 box 22 ($14,000 withheld) reduces L48500 dollar-for-dollar', () => {
+  // Baseline: $80k employment via T4 slip, no withholding.
+  const baseline: TaxYearFacts = {
+    ...baseFacts(),
+    employmentIncome: [{ source: 'T4', amount: D('80000'), cadAmount: D('80000') }],
+    slips: [
+      {
+        slipId: 1,
+        slipType: 'T4',
+        issuer: 'Acme',
+        boxes: { box14: D('80000') },
+      },
+    ],
+  };
+  const baselineRet = buildT1(baseline, ratesFor(2024));
+
+  // Same facts, but T4 box 22 reports $14,000 tax withheld at source.
+  const withWithholding: TaxYearFacts = {
+    ...baseFacts(),
+    employmentIncome: [{ source: 'T4', amount: D('80000'), cadAmount: D('80000') }],
+    slips: [
+      {
+        slipId: 1,
+        slipType: 'T4',
+        issuer: 'Acme',
+        boxes: { box14: D('80000'), box22: D('14000') },
+      },
+    ],
+  };
+  const ret = buildT1(withWithholding, ratesFor(2024));
+
+  // L43700 reports source deductions = 14000.
+  assert.equal(ret.lines.find((l) => l.code === 'L43700')?.amount.toFixed(2), '14000.00');
+
+  // L48200 (total credits) = withholding + instalments (0) = 14000.
+  assert.equal(ret.lines.find((l) => l.code === 'L48200')?.amount.toFixed(2), '14000.00');
+
+  // Total payable unchanged by withholding (tax owed before payments).
+  assert.equal(
+    ret.totals.totalPayable.toFixed(2),
+    baselineRet.totals.totalPayable.toFixed(2),
+    'withholding must not change total payable'
+  );
+
+  // L48500 reduced by exactly $14,000 vs baseline.
+  const baselineRefundOrOwing = baselineRet.totals.refundOrOwing;
+  const expected = baselineRefundOrOwing.minus(D('14000'));
+  assert.equal(ret.totals.refundOrOwing.toFixed(2), expected.toFixed(2));
+});
