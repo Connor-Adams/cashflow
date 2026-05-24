@@ -134,9 +134,12 @@ export function parseAmazonReceiptEmail(body: string): ExtractedReceiptOrder | n
     vendorName: 'Amazon',
     orderDate,
     orderId,
+    subtotal: null,
+    tax: null,
     total,
     currency: null,
     paymentLast4: last4,
+    tenders: [],
     items,
     notes: notesParts.length > 0 ? notesParts.join(' · ') : null,
   };

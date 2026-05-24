@@ -15,6 +15,7 @@ import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
+import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
 import { Security, initSecurity } from './Security';
@@ -42,6 +43,7 @@ initReceipt(sequelize);
 initAiSuggestion(sequelize);
 initExternalOrder(sequelize);
 initExternalOrderItem(sequelize);
+initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
 initSecurity(sequelize);
@@ -146,6 +148,14 @@ ExternalOrderItem.belongsTo(ExternalOrder, {
   foreignKey: 'external_order_id',
   as: 'order',
 });
+ExternalOrder.hasMany(ExternalOrderTender, {
+  foreignKey: 'external_order_id',
+  as: 'tenders',
+});
+ExternalOrderTender.belongsTo(ExternalOrder, {
+  foreignKey: 'external_order_id',
+  as: 'order',
+});
 Transaction.hasMany(TransactionOrderLink, {
   foreignKey: 'transaction_id',
   as: 'orderLinks',
@@ -189,6 +199,7 @@ export {
   AiSuggestion,
   ExternalOrder,
   ExternalOrderItem,
+  ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
   Security,
