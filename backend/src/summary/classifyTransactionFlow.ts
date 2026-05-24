@@ -23,7 +23,6 @@ const CREDIT_PATTERNS = [
   /\bstatement credit\b/,
   /\breward\b/,
   /\bcash ?back\b/,
-  /\bcredit\b/,
   /\badjustment\b/,
   /\breimbursement\b/,
 ];
