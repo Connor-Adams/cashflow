@@ -658,6 +658,7 @@ async function runAcbForSells(
       quantity: n(r.quantity),
       amount: n(r.amount),
       currency: r.currency,
+      fees: n(r.fees),
     }));
     const acb = computeAcb(acbInput);
     // Filter realized events by date range, if requested.
@@ -868,6 +869,7 @@ router.get('/security/:id', async (req, res, next) => {
         quantity: n(r.quantity),
         amount: n(r.amount),
         currency: r.currency,
+        fees: n(r.fees),
       }));
       const acb = computeAcb(acbInput);
 
