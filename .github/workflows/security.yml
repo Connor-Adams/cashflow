@@ -25,8 +25,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -47,8 +45,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: Review dependency changes
         uses: actions/dependency-review-action@v4
