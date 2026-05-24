@@ -10,6 +10,7 @@ export type {
   AuthUser,
   BySecurityAccountBreakdown,
   BySecurityRow,
+  Category,
   Contact,
   EnrichmentBackfillProgress,
   EnrichmentSignal,
