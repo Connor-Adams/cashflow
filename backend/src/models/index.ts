@@ -73,6 +73,9 @@ initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
 
+Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
+Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
   as: 'processedEmailMessages',

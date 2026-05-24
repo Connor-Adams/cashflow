@@ -30,7 +30,7 @@ export class Account extends Model<
   declare shortCode: string | null;
   declare defaultCurrency: string | null;
   declare entityId: number | null;
-  declare taxStatus: CreationOptional<string>;
+  declare taxStatus: CreationOptional<AccountTaxStatus>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }

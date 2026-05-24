@@ -150,7 +150,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
 async function toCad(amount: import('../util/decimal').Decimal, currency: string, date: string) {
   if (currency === 'CAD') return amount;
   const rate = await FxRate.findOne({
-    where: { fromCurrency: currency, toCurrency: 'CAD' },
+    where: { fromCurrency: currency, toCurrency: 'CAD', ratedDate: { [Op.lte]: date } },
     order: [['ratedDate', 'DESC']],
   });
   if (!rate) throw new Error(`FX rate missing for ${currency}→CAD on/before ${date}`);

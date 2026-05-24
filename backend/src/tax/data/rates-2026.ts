@@ -42,6 +42,8 @@ export const RATES_2026: RateTable = {
   ageAmountFederalThreshold: D('46751'),
   // ON age amount threshold: 2025 value — update when ON publishes 2026
   ageAmountOntarioThreshold: D('44323'),
+  ageAmountFederalClawbackRate: D('0.15'),
+  ageAmountOntarioClawbackRate: D('0.15'),
   // Employment amount federal: 2025 × 1.027 ≈ 1,511
   employmentAmountFederal: D('1511'),
   dividendGrossUpEligible: D('0.38'),

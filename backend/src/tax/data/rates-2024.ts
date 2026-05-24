@@ -32,6 +32,8 @@ export const RATES_2024: RateTable = {
   ageAmountAge: 65,
   ageAmountFederalThreshold: D('44325'),
   ageAmountOntarioThreshold: D('43127'),
+  ageAmountFederalClawbackRate: D('0.15'),
+  ageAmountOntarioClawbackRate: D('0.15'),
   employmentAmountFederal: D('1433'),
   dividendGrossUpEligible: D('0.38'),
   dividendGrossUpNonEligible: D('0.15'),
