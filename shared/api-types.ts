@@ -701,4 +701,4 @@ export type ClientLogPayload = {
   fields?: Record<string, unknown>
 }
 
-export * from './categoryIcons'
+export * from './categoryIcons.ts'
