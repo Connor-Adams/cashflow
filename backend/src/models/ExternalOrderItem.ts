@@ -21,6 +21,8 @@ export class ExternalOrderItem extends Model<
   declare inferredCategory: string | null;
   declare businessUsePercent: string | null;
   declare confidence: string | null;
+  declare categoryOverride: string | null;
+  declare businessUseOverride: string | null;
   declare rawPayload: unknown | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
@@ -50,6 +52,16 @@ export function initExternalOrderItem(sequelize: Sequelize): typeof ExternalOrde
         allowNull: true,
       },
       confidence: { type: DataTypes.DECIMAL(5, 2), allowNull: true },
+      categoryOverride: {
+        type: DataTypes.STRING(128),
+        field: 'category_override',
+        allowNull: true,
+      },
+      businessUseOverride: {
+        type: DataTypes.DECIMAL(5, 2),
+        field: 'business_use_override',
+        allowNull: true,
+      },
       rawPayload: { type: DataTypes.JSON, field: 'raw_payload', allowNull: true },
     } as ModelAttributes<ExternalOrderItem>,
     {
