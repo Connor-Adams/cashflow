@@ -20,7 +20,7 @@ import {
 const MATCH_CONFIDENCE_THRESHOLD = 70;
 const DATE_WINDOW_DAYS = 7;
 
-type CandidatePayment = {
+export type CandidatePayment = {
   paymentLast4: string | null;
   amount: number;
   /** null when the synthesized single payment is used (no tenders rows). */
@@ -67,57 +67,51 @@ export type ReceiptMatchScore = {
   matchReason: string;
 };
 
+type Component = { points: number; reason: string | null };
+
+function scoreAmountComponent(txnAmount: number, payAmount: number): Component {
+  const diff = Math.abs(Math.abs(txnAmount) - Math.abs(payAmount));
+  if (diff <= 0.5) return { points: 50, reason: `amount within $0.50 (${diff.toFixed(2)})` };
+  if (diff <= 2) return { points: 35, reason: `amount within $2.00 (${diff.toFixed(2)})` };
+  return { points: -25, reason: `amount mismatch over $2.00 (${diff.toFixed(2)})` };
+}
+
+function scoreDateComponent(txnDate: string, orderDate: string | null): Component {
+  if (!orderDate) return { points: 0, reason: null };
+  const gap = daysBetween(txnDate, orderDate);
+  if (gap >= 0 && gap <= 5) return { points: 25, reason: `txn ${gap} day(s) after receipt` };
+  if (Math.abs(gap) <= 2) return { points: 15, reason: `txn ${gap} day(s) from receipt` };
+  if (Math.abs(gap) > 10) return { points: -15, reason: `date gap over 10 days (${Math.abs(gap)} days)` };
+  return { points: 0, reason: null };
+}
+
+function scoreVendorComponent(order: ExternalOrder, txn: Transaction): Component {
+  return txnMatchesVendor(order.vendor, txn)
+    ? { points: 15, reason: `merchant matches ${order.vendor}` }
+    : { points: 0, reason: null };
+}
+
+function scoreLast4Component(payment: CandidatePayment, txn: Transaction): Component {
+  if (!payment.paymentLast4) return { points: 0, reason: null };
+  const txnLast4 = last4FromText(`${txn.notes || ''} ${txn.sourceReference || ''}`);
+  return txnLast4 && txnLast4 === payment.paymentLast4
+    ? { points: 20, reason: `payment last4 matches (${payment.paymentLast4})` }
+    : { points: 0, reason: null };
+}
+
 export function scoreReceiptMatch(
   txn: Transaction,
   order: ExternalOrder,
   payment: CandidatePayment,
 ): ReceiptMatchScore {
-  let score = 0;
-  const reasons: string[] = [];
-
-  const txnAmount = Math.abs(Number(txn.amount));
-  const payAmount = Math.abs(payment.amount);
-  const diff = Math.abs(txnAmount - payAmount);
-  if (diff <= 0.5) {
-    score += 50;
-    reasons.push(`amount within $0.50 (${diff.toFixed(2)})`);
-  } else if (diff <= 2) {
-    score += 35;
-    reasons.push(`amount within $2.00 (${diff.toFixed(2)})`);
-  } else {
-    score -= 25;
-    reasons.push(`amount mismatch over $2.00 (${diff.toFixed(2)})`);
-  }
-
-  if (order.orderDate) {
-    const gap = daysBetween(txn.date, order.orderDate);
-    if (gap >= 0 && gap <= 5) {
-      score += 25;
-      reasons.push(`txn ${gap} day(s) after receipt`);
-    } else if (Math.abs(gap) <= 2) {
-      // negative gap (txn before receipt date) — POS lag can put txn date
-      // a day earlier than the printed receipt date in some banks
-      score += 15;
-      reasons.push(`txn ${gap} day(s) from receipt`);
-    } else if (Math.abs(gap) > 10) {
-      score -= 15;
-      reasons.push(`date gap over 10 days (${Math.abs(gap)} days)`);
-    }
-  }
-
-  if (txnMatchesVendor(order.vendor, txn)) {
-    score += 15;
-    reasons.push(`merchant matches ${order.vendor}`);
-  }
-
-  if (payment.paymentLast4) {
-    const txnLast4 = last4FromText(`${txn.notes || ''} ${txn.sourceReference || ''}`);
-    if (txnLast4 && txnLast4 === payment.paymentLast4) {
-      score += 20;
-      reasons.push(`payment last4 matches (${payment.paymentLast4})`);
-    }
-  }
-
+  const components = [
+    scoreAmountComponent(Number(txn.amount), payment.amount),
+    scoreDateComponent(txn.date, order.orderDate),
+    scoreVendorComponent(order, txn),
+    scoreLast4Component(payment, txn),
+  ];
+  const score = components.reduce((a, c) => a + c.points, 0);
+  const reasons = components.map((c) => c.reason).filter((r): r is string => r != null);
   return {
     confidence: Math.max(0, Math.min(100, score)),
     matchReason: reasons.join('; ') || `candidate ${order.vendor} order`,

@@ -7,7 +7,9 @@ import { extractPdfLines } from '../src/import/pdf/extractLines';
 import {
   costcoTillReceiptParser,
   buildCostcoOrderId,
+  classifyNetwork,
   findCostcoFooter,
+  looksLikeNameFragment,
   parseCostcoTenders,
 } from '../src/import/pdf/receipts/costcoTillReceipt';
 
@@ -62,6 +64,39 @@ test('parseCostcoTenders pairs cards to tenders by order, leaves extras null', (
       { name: 'COSTCO MASTERCARD', amount: 1100.0 },
     ],
   );
+});
+
+test('classifyNetwork prefers more-specific Costco MC over generic Mastercard', () => {
+  assert.equal(classifyNetwork('COSTCO MASTERCARD'), 'costco-mastercard');
+  assert.equal(classifyNetwork('MASTER CARD'), 'mastercard');
+  assert.equal(classifyNetwork('MASTERCARD'), 'mastercard');
+  assert.equal(classifyNetwork('VISA DEBIT'), 'visa');
+  assert.equal(classifyNetwork('AMERICAN EXPRESS'), 'amex');
+  assert.equal(classifyNetwork('AMEX'), 'amex');
+  assert.equal(classifyNetwork('DEBIT'), 'debit');
+  assert.equal(classifyNetwork('CASH'), 'cash');
+  assert.equal(classifyNetwork('Unknown'), null);
+});
+
+test('looksLikeNameFragment treats blank/structural lines as non-fragments', () => {
+  assert.equal(looksLikeNameFragment(''), false);
+  assert.equal(looksLikeNameFragment('   '), false);
+  assert.equal(looksLikeNameFragment('SUBTOTAL   100.00'), false);
+  assert.equal(looksLikeNameFragment('TAX   12.50'), false);
+  assert.equal(looksLikeNameFragment('****   TOTAL   112.50'), false);
+  assert.equal(looksLikeNameFragment('Member'), false);
+  assert.equal(looksLikeNameFragment('Items Sold: 9'), false);
+  assert.equal(looksLikeNameFragment('CHANGE   0'), false);
+  assert.equal(looksLikeNameFragment('GUELPH #1168'), false);
+  assert.equal(looksLikeNameFragment('123456789012'), false); // barcode/member
+  assert.equal(looksLikeNameFragment('42'), false);          // bare small number
+});
+
+test('looksLikeNameFragment treats plain alpha text as a wrap fragment', () => {
+  assert.equal(looksLikeNameFragment('FRANKS'), true);
+  assert.equal(looksLikeNameFragment('SAUCE'), true);
+  assert.equal(looksLikeNameFragment('DEPOSIT'), true);
+  assert.equal(looksLikeNameFragment('VL/1945087'), true);
 });
 
 test('costcoTillReceiptParser.sniff matches a Costco receipt and rejects unrelated PDFs', () => {

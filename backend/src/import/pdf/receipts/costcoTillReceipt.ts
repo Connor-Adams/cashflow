@@ -86,15 +86,18 @@ export function findCostcoFooter(texts: string[]): Footer | null {
   return null;
 }
 
-function classifyNetwork(name: string): string | null {
-  const n = name.toUpperCase();
-  if (n.includes('COSTCO') && n.includes('MASTERCARD')) return 'costco-mastercard';
-  if (n.includes('MASTER CARD') || n.includes('MASTERCARD')) return 'mastercard';
-  if (n.includes('VISA')) return 'visa';
-  if (n.includes('AMERICAN EXPRESS') || n.includes('AMEX')) return 'amex';
-  if (n.includes('DEBIT')) return 'debit';
-  if (n.includes('CASH')) return 'cash';
-  return null;
+const NETWORK_MATCHERS: Array<{ test: (n: string) => boolean; name: string }> = [
+  { test: (n) => n.includes('COSTCO') && n.includes('MASTERCARD'), name: 'costco-mastercard' },
+  { test: (n) => n.includes('MASTER CARD') || n.includes('MASTERCARD'), name: 'mastercard' },
+  { test: (n) => n.includes('VISA'), name: 'visa' },
+  { test: (n) => n.includes('AMERICAN EXPRESS') || n.includes('AMEX'), name: 'amex' },
+  { test: (n) => n.includes('DEBIT'), name: 'debit' },
+  { test: (n) => n.includes('CASH'), name: 'cash' },
+];
+
+export function classifyNetwork(name: string): string | null {
+  const upper = name.toUpperCase();
+  return NETWORK_MATCHERS.find((m) => m.test(upper))?.name ?? null;
 }
 
 type ParsedItemRow = {
@@ -120,38 +123,42 @@ function parseItemRow(line: string, index: number): ParsedItemRow | null {
   };
 }
 
+/** Patterns that mark a line as structural (totals, tender, header, footer chrome). */
+const STRUCTURAL_LINE_PATTERNS: RegExp[] = [
+  ITEM_LINE,
+  SUBTOTAL_LINE,
+  TAX_LINE,
+  TOTAL_LINE,
+  TENDER_ROW,
+  CARD_MASK,
+  FOOTER_DATE_LINE,
+  WAREHOUSE_HEADER,
+  /^Member$/i,
+  /^\d{10,}$/, // member number, barcode
+  /^\d{1,3}$/, // bare small numbers (item-id leftovers)
+  /Items Sold:/i,
+  /INSTANT SAVINGS/i,
+  /\(A\) HST/i,
+  /TOTAL TAX/i,
+  /^CHANGE\b/,
+  /^AMOUNT:/i,
+  /^APPROVED/i,
+  /^CHIP$/i,
+  /^read$/i,
+  /^P\d\b/,
+  /^whse:/i,
+  /H=HST|GST\/HST|QST/i,
+  /Thank You|Please Come Again/i,
+];
+
 /**
  * Decide whether `line` is a plausible fragment of a wrapped item name.
  * Structural lines (totals, tender rows, header) must NOT be pulled into a name.
  */
-function looksLikeNameFragment(line: string): boolean {
+export function looksLikeNameFragment(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
-  if (ITEM_LINE.test(t)) return false;
-  if (SUBTOTAL_LINE.test(t)) return false;
-  if (TAX_LINE.test(t)) return false;
-  if (TOTAL_LINE.test(t)) return false;
-  if (TENDER_ROW.test(t)) return false;
-  if (CARD_MASK.test(t)) return false;
-  if (FOOTER_DATE_LINE.test(t)) return false;
-  if (WAREHOUSE_HEADER.test(t)) return false;
-  if (/^Member$/i.test(t)) return false;
-  if (/^\d{10,}$/.test(t)) return false; // member number, barcode
-  if (/^\d{1,3}$/.test(t)) return false; // bare small numbers (item-id leftovers)
-  if (/Items Sold:/i.test(t)) return false;
-  if (/INSTANT SAVINGS/i.test(t)) return false;
-  if (/\(A\) HST/i.test(t)) return false;
-  if (/TOTAL TAX/i.test(t)) return false;
-  if (/^CHANGE\b/.test(t)) return false;
-  if (/^AMOUNT:/i.test(t)) return false;
-  if (/^APPROVED/i.test(t)) return false;
-  if (/^CHIP$/i.test(t)) return false;
-  if (/^read$/i.test(t)) return false;
-  if (/^P\d\b/.test(t)) return false;
-  if (/^whse:/i.test(t)) return false;
-  if (/H=HST|GST\/HST|QST/i.test(t)) return false;
-  if (/Thank You|Please Come Again/i.test(t)) return false;
-  return true;
+  return !STRUCTURAL_LINE_PATTERNS.some((re) => re.test(t));
 }
 
 function resolveWrappedName(texts: string[], rowIndex: number, midName: string): string {
@@ -282,68 +289,75 @@ function near(a: number | null, b: number | null): boolean {
   return Math.abs(a - b) <= CENT_TOLERANCE;
 }
 
+type WarehouseHeader = { name: string | null; number: string | null };
+
+function parseWarehouseHeader(texts: string[]): WarehouseHeader {
+  const idx = findIndex(texts, (t) => WAREHOUSE_HEADER.test(t));
+  if (idx < 0) return { name: null, number: null };
+  const m = texts[idx].trim().match(WAREHOUSE_HEADER)!;
+  return { name: m[1], number: m[2] };
+}
+
+function buildVendorName(header: WarehouseHeader): string {
+  if (!header.name) return 'Costco';
+  const cleaned = header.name.replace(/\s+/g, ' ').trim();
+  const numSuffix = header.number ? ` #${header.number}` : '';
+  return `Costco ${cleaned}${numSuffix}`;
+}
+
+function collectMissingHeaderWarnings(
+  header: WarehouseHeader,
+  footer: Footer | null,
+  totals: TotalsBlock,
+): string[] {
+  const out: string[] = [];
+  if (!header.name) out.push('warehouse header not found');
+  if (!footer) out.push('receipt footer (date/time/whse/trm/trn/opt) not found');
+  if (totals.total == null) out.push('TOTAL line not found');
+  if (totals.subtotal == null) out.push('SUBTOTAL line not found');
+  return out;
+}
+
+function checkItemsSum(items: ExtractedReceiptItem[], subtotal: number | null): string | null {
+  if (subtotal == null) return null;
+  const sum = items.reduce((acc, it) => acc + (it.totalPrice ?? 0), 0);
+  if (Math.abs(sum - subtotal) <= CENT_TOLERANCE) return null;
+  return `items sum (${sum.toFixed(2)}) does not equal SUBTOTAL (${subtotal.toFixed(2)})`;
+}
+
+function checkTendersSum(tenders: ExtractedReceiptTender[], total: number | null): string | null {
+  if (tenders.length === 0 || total == null) return null;
+  const sum = tenders.reduce((a, t) => a + t.amount, 0);
+  if (near(sum, total)) return null;
+  return `tenders sum (${sum.toFixed(2)}) does not equal TOTAL (${total.toFixed(2)})`;
+}
+
+function checkSubtotalPlusTax(totals: TotalsBlock): string | null {
+  if (totals.subtotal == null || totals.tax == null || totals.total == null) return null;
+  if (near(totals.subtotal + totals.tax, totals.total)) return null;
+  return `subtotal + tax (${(totals.subtotal + totals.tax).toFixed(2)}) does not equal TOTAL (${totals.total.toFixed(2)})`;
+}
+
 function parse(lines: PdfLine[], ctx: ReceiptPdfParseContext): ReceiptPdfParseResult {
   const texts = lines.map((l) => l.text);
-  const warnings: string[] = [];
 
-  // Header — warehouse name + number
-  const headerIdx = findIndex(texts, (t) => WAREHOUSE_HEADER.test(t));
-  let warehouseName: string | null = null;
-  let warehouseNumber: string | null = null;
-  if (headerIdx >= 0) {
-    const m = texts[headerIdx].trim().match(WAREHOUSE_HEADER)!;
-    warehouseName = m[1];
-    warehouseNumber = m[2];
-  } else {
-    warnings.push('warehouse header not found');
-  }
-
-  // Footer — date/time/whse/trm/trn/opt
+  const header = parseWarehouseHeader(texts);
   const footer = findCostcoFooter(texts);
-  if (!footer) {
-    warnings.push('receipt footer (date/time/whse/trm/trn/opt) not found');
-  }
-
-  // Totals
   const totals = findTotals(texts);
-  if (totals.total == null) warnings.push('TOTAL line not found');
-  if (totals.subtotal == null) warnings.push('SUBTOTAL line not found');
 
-  // Items
   const itemStart = findItemsStart(texts);
   const itemEnd = totals.subtotalIdx >= 0 ? totals.subtotalIdx : texts.length;
   const items = itemStart >= 0 ? parseItems(texts, itemStart, itemEnd) : [];
 
-  // Reconcile items → subtotal
-  const itemsSum = items.reduce((acc, it) => acc + (it.totalPrice ?? 0), 0);
-  if (totals.subtotal != null && Math.abs(itemsSum - totals.subtotal) > CENT_TOLERANCE) {
-    warnings.push(
-      `items sum (${itemsSum.toFixed(2)}) does not equal SUBTOTAL (${totals.subtotal.toFixed(2)})`,
-    );
-  }
-
-  // Tenders
   const { cards, tenderRows } = parseCostcoTenders(texts, totals.totalIdx);
   const tenders = buildTenders(cards, tenderRows);
 
-  // Reconcile tenders → total
-  if (tenders.length > 0 && totals.total != null) {
-    const tendersSum = tenders.reduce((a, t) => a + t.amount, 0);
-    if (!near(tendersSum, totals.total)) {
-      warnings.push(
-        `tenders sum (${tendersSum.toFixed(2)}) does not equal TOTAL (${totals.total.toFixed(2)})`,
-      );
-    }
-  }
-
-  // Reconcile subtotal + tax → total
-  if (totals.subtotal != null && totals.tax != null && totals.total != null) {
-    if (!near(totals.subtotal + totals.tax, totals.total)) {
-      warnings.push(
-        `subtotal + tax (${(totals.subtotal + totals.tax).toFixed(2)}) does not equal TOTAL (${totals.total.toFixed(2)})`,
-      );
-    }
-  }
+  const warnings = [
+    ...collectMissingHeaderWarnings(header, footer, totals),
+    checkItemsSum(items, totals.subtotal),
+    checkTendersSum(tenders, totals.total),
+    checkSubtotalPlusTax(totals),
+  ].filter((w): w is string => w != null);
 
   const orderId = footer
     ? buildCostcoOrderId(footer.whse, footer.trm, footer.trn, footer.opt, footer.orderDate.replaceAll('-', ''), footer.hhmm)
@@ -353,13 +367,9 @@ function parse(lines: PdfLine[], ctx: ReceiptPdfParseContext): ReceiptPdfParseRe
   // For split-tender receipts, leave paymentLast4 null and rely on the tenders array.
   const singleLast4 = tenders.length === 1 ? tenders[0].paymentLast4 : null;
 
-  const vendorName = warehouseName
-    ? `Costco ${warehouseName.replace(/\s+/g, ' ').trim()}${warehouseNumber ? ` #${warehouseNumber}` : ''}`
-    : 'Costco';
-
   const extracted: ExtractedReceiptOrder = {
     vendor: 'costco',
-    vendorName,
+    vendorName: buildVendorName(header),
     orderDate: footer?.orderDate ?? null,
     orderId,
     subtotal: totals.subtotal,
