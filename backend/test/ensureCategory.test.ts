@@ -1,7 +1,26 @@
-import { test, beforeEach } from 'node:test';
+import { before, beforeEach, after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Category, Household } from '../src/models';
-import { ensureCategory } from '../src/util/ensureCategory';
+
+process.env.DATABASE_PATH = ':memory:';
+
+let sequelize: import('sequelize').Sequelize;
+let Category: typeof import('../src/models/Category').Category;
+let Household: typeof import('../src/models/Household').Household;
+let ensureCategory: typeof import('../src/util/ensureCategory').ensureCategory;
+
+before(async () => {
+  const models = await import('../src/models');
+  sequelize = models.sequelize;
+  Category = models.Category;
+  Household = models.Household;
+  const util = await import('../src/util/ensureCategory');
+  ensureCategory = util.ensureCategory;
+  await sequelize.sync({ force: true });
+});
+
+after(async () => {
+  await sequelize.close();
+});
 
 beforeEach(async () => {
   await Category.destroy({ where: {}, truncate: true });
