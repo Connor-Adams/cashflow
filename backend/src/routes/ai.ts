@@ -366,4 +366,27 @@ router.get('/import-cleanup', async (req, res, next) => {
   }
 });
 
+router.get('/inbox/count', async (req, res, next) => {
+  try {
+    const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
+    const [auditCount, insightCount, ruleProposals] = await Promise.all([
+      AiSuggestion.count({ where: { ...where, kind: 'transaction_audit' } }),
+      AiSuggestion.count({ where: { ...where, kind: 'financial_insight' } }),
+      findRuleProposals(isSuperadmin(req) ? null : currentAuth(req).household.id),
+    ]);
+    const ruleProposalCount = ruleProposals.length;
+    res.json({
+      total: auditCount + insightCount + ruleProposalCount,
+      byKind: {
+        transaction_audit: auditCount,
+        financial_insight: insightCount,
+        rule_proposal: ruleProposalCount,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 export default router;
+
