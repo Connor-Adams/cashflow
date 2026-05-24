@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Op } from 'sequelize';
-import { Transaction, Receipt, ExternalOrderItem, TransactionOrderLink } from '../models';
+import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink } from '../models';
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
@@ -111,20 +111,66 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       res.status(404).json({ error: 'Transaction not found' });
       return;
     }
-    const rows = await Receipt.findAll({
+    const receipts = await Receipt.findAll({
       where: { transactionId: tid },
       order: [['createdAt', 'DESC']],
-      attributes: [
-        'id',
-        'transactionId',
-        'originalName',
-        'mimeType',
-        'sizeBytes',
-        'extractedNote',
-        'createdAt',
-      ],
     });
-    res.json(rows);
+    const orderIds = receipts.map((r) => r.externalOrderId).filter((x): x is number => x != null);
+    const [orders, items] = await Promise.all([
+      orderIds.length
+        ? ExternalOrder.findAll({ where: { id: { [Op.in]: orderIds } } })
+        : Promise.resolve([] as InstanceType<typeof ExternalOrder>[]),
+      orderIds.length
+        ? ExternalOrderItem.findAll({ where: { externalOrderId: { [Op.in]: orderIds } } })
+        : Promise.resolve([] as InstanceType<typeof ExternalOrderItem>[]),
+    ]);
+    const ordersById = new Map(orders.map((o) => [o.id, o]));
+    const itemsByOrder = new Map<number, typeof items>();
+    for (const it of items) {
+      const list = itemsByOrder.get(it.externalOrderId) ?? [];
+      list.push(it);
+      itemsByOrder.set(it.externalOrderId, list);
+    }
+    res.json(
+      receipts.map((r) => {
+        const order = r.externalOrderId != null ? ordersById.get(r.externalOrderId) : null;
+        return {
+          id: r.id,
+          transactionId: r.transactionId,
+          originalName: r.originalName,
+          mimeType: r.mimeType,
+          sizeBytes: r.sizeBytes,
+          extractedNote: r.extractedNote,
+          createdAt: r.createdAt,
+          externalOrderId: r.externalOrderId,
+          order: order
+            ? {
+                id: order.id,
+                vendor: order.vendor,
+                subtotal: order.subtotal,
+                tax: order.tax,
+                shipping: order.shipping,
+                total: order.total,
+                currency: order.currency,
+              }
+            : null,
+          items: (r.externalOrderId != null ? (itemsByOrder.get(r.externalOrderId) ?? []) : []).map(
+            (it) => ({
+              id: it.id,
+              externalOrderId: it.externalOrderId,
+              title: it.title,
+              quantity: it.quantity,
+              unitPrice: it.unitPrice,
+              totalPrice: it.totalPrice,
+              inferredCategory: it.inferredCategory,
+              categoryOverride: it.categoryOverride,
+              businessUsePercent: it.businessUsePercent,
+              businessUseOverride: it.businessUseOverride,
+            }),
+          ),
+        };
+      }),
+    );
   } catch (e) {
     next(e);
   }

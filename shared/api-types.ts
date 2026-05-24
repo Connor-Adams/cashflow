@@ -547,6 +547,42 @@ export type PortfolioSecurityDetail = {
   latestPrice: PortfolioLatestPrice | null
 }
 
+export type ExternalOrderItemView = {
+  id: number;
+  externalOrderId: number;
+  title: string;
+  quantity: number;
+  unitPrice: string | null;
+  totalPrice: string | null;
+  inferredCategory: string | null;
+  categoryOverride: string | null;
+  businessUsePercent: string | null;
+  businessUseOverride: string | null;
+};
+
+export type ExternalOrderView = {
+  id: number;
+  vendor: string;
+  subtotal: string | null;
+  tax: string | null;
+  shipping: string | null;
+  total: string | null;
+  currency: string;
+};
+
+export type ReceiptWithItems = {
+  id: number;
+  transactionId: number;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  extractedNote: string | null;
+  createdAt: string;
+  externalOrderId: number | null;
+  order: ExternalOrderView | null;
+  items: ExternalOrderItemView[];
+};
+
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export type ClientLogPayload = {
