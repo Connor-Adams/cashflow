@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { getJson, postJson } from '@/lib/api';
 
 export type SlipDto = {
   id: number;
@@ -13,20 +14,17 @@ export function useTaxSlips(year?: number) {
   const [slips, setSlips] = useState<SlipDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    const url = year ? `/api/tax/slips?year=${year}` : '/api/tax/slips';
-    const r = await fetch(url, { credentials: 'include' });
-    if (!r.ok) { setError(r.statusText); return; }
-    setSlips((await r.json()).slips);
+    const path = year ? `/api/tax/slips?year=${year}` : '/api/tax/slips';
+    try {
+      const d = await getJson<{ slips: SlipDto[] }>(path);
+      setSlips(d.slips);
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    }
   }, [year]);
   useEffect(() => { load(); }, [load]);
   const create = useCallback(async (input: Omit<SlipDto, 'id'>) => {
-    const r = await fetch('/api/tax/slips', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    if (!r.ok) throw new Error(r.statusText);
+    await postJson('/api/tax/slips', input);
     await load();
   }, [load]);
   return { slips, error, create, refresh: load };
