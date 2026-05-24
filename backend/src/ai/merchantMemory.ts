@@ -1,5 +1,6 @@
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../models';
+import { groupConcat } from '../util/dialectSql';
 
 export type MerchantMemoryMatch = {
   merchantClean: string;
@@ -62,7 +63,7 @@ async function queryMemory(opts: {
             final_pct_me AS "pctMe",
             final_pct_partner AS "pctPartner",
             COUNT(*) AS "supportCount",
-            GROUP_CONCAT(id) AS "exampleIds",
+            ${groupConcat('id')} AS "exampleIds",
             MAX(reviewed_at) AS "lastReviewedAt"
      FROM transactions
      WHERE (? IS NULL OR household_id = ?)
