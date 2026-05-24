@@ -101,3 +101,37 @@ test('BudgetTarget afterSave: ensures category', async () => {
   const rows = await Category.findAll({ where: { householdId: hh.id } });
   assert.deepEqual(rows.map((r) => r.name), ['Rent']);
 });
+
+test('Transaction afterSave: no-op when householdId is null', async () => {
+  const hh = await Household.create({ name: 'H' });
+  const acct = await seedAccount(hh.id);
+  await Transaction.create({
+    accountId: acct.id,
+    householdId: null,
+    date: '2026-01-01',
+    amount: '10.00',
+    currency: 'CAD',
+    merchantRaw: 'x',
+    merchantClean: 'X',
+    importBatch: 'test-hook',
+    sourceRowFingerprint: 'fp-hh-null',
+    sourceIdentityFingerprint: 'sif-hh-null',
+    finalCategory: 'ShouldNotAppear',
+  } as never);
+  const rows = await Category.findAll();
+  assert.equal(rows.length, 0);
+});
+
+test('Rule afterSave: no-op when householdId is null', async () => {
+  await Rule.create({
+    merchantPattern: 'foo',
+    householdId: null,
+    matchKind: 'contains',
+    priority: 0,
+    splitType: 'me',
+    isBusiness: false,
+    category: 'ShouldNotAppear',
+  } as never);
+  const rows = await Category.findAll();
+  assert.equal(rows.length, 0);
+});

@@ -308,10 +308,12 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       timestamps: true,
     }
   );
-  Transaction.addHook('afterSave', async (instance: Transaction) => {
+  Transaction.addHook('afterSave', async (instance: Transaction, options) => {
     const { ensureCategory } = await import('../util/ensureCategory');
     if (instance.householdId != null) {
-      await ensureCategory(instance.householdId, instance.finalCategory);
+      await ensureCategory(instance.householdId, instance.finalCategory, {
+        transaction: options.transaction,
+      });
     }
   });
   return Transaction;
