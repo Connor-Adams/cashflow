@@ -6,20 +6,14 @@ import {
 } from '../../models';
 import { sequelize } from '../../db';
 import type { ChatToolDefinition } from './openaiClient';
-
-/**
- * Returns an Op that does a case-insensitive substring match across dialects.
- * On Postgres we use Op.iLike (true case-insensitive). On SQLite the default
- * Op.like is case-insensitive for ASCII, so it suffices. The caller is
- * expected to wrap the substring in `%...%` themselves. The `merchant_pattern`
- * tool argument is documented as a literal substring; we do NOT escape LIKE
- * wildcards — Sequelize emits `LIKE '%x%'` without an `ESCAPE` clause, so any
- * escaping would be a misleading no-op. If a caller embeds `%` or `_`, that
- * is interpreted as part of their match expression.
- */
-function caseInsensitiveLikeOp(): typeof Op.like | typeof Op.iLike {
-  return sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
-}
+import { caseInsensitiveLikeOp } from './_common';
+import {
+  buildTransactionEditPreview,
+  buildBulkPatchPreview,
+  buildRuleCreatePreview,
+  buildRuleUpdatePreview,
+  buildRuleDeletePreview,
+} from './proposals';
 
 export interface ToolContext {
   userId: number;
@@ -399,5 +393,176 @@ registerTool('get_categories', {
       if (r.category) set.add(r.category);
     }
     return { ok: true, data: { categories: [...set].sort() } };
+  },
+});
+
+// ============================================================================
+// propose_transaction_edit
+// ============================================================================
+registerTool('propose_transaction_edit', {
+  schema: {
+    type: 'function',
+    function: {
+      name: 'propose_transaction_edit',
+      description:
+        'Stage a per-row edit. Returns a proposal_id + before/after preview. Apply happens when the user clicks Apply.',
+      parameters: {
+        type: 'object',
+        required: ['transaction_id', 'patch'],
+        properties: {
+          transaction_id: { type: 'integer' },
+          patch: {
+            type: 'object',
+            description:
+              'Whitelisted fields: split_override, pct_me_override, pct_partner_override, category_override, business_override, notes, review_flag.',
+          },
+        },
+      },
+    },
+  },
+  async execute(args, ctx) {
+    const a = (args as Record<string, unknown>) ?? {};
+    if (typeof a.transaction_id !== 'number') {
+      return { ok: false, error: 'transaction_id is required (integer)' };
+    }
+    const r = await buildTransactionEditPreview(
+      a.transaction_id,
+      (a.patch as Record<string, unknown>) ?? {},
+      ctx
+    );
+    return 'error' in r ? { ok: false, error: r.error } : { ok: true, data: r };
+  },
+});
+
+// ============================================================================
+// propose_bulk_patch
+// ============================================================================
+registerTool('propose_bulk_patch', {
+  schema: {
+    type: 'function',
+    function: {
+      name: 'propose_bulk_patch',
+      description:
+        'Stage a bulk edit by filter. Returns matched_count + sample (≤10 before/after rows). If matched_count is too high, you get a filter_too_broad error — refine and retry.',
+      parameters: {
+        type: 'object',
+        required: ['filter', 'patch'],
+        properties: {
+          filter: {
+            type: 'object',
+            description:
+              'Same filter shape as query_transactions: merchant_pattern, category, currency, date_from, date_to, account_id, split_type.',
+          },
+          patch: { type: 'object' },
+        },
+      },
+    },
+  },
+  async execute(args, ctx) {
+    const a = (args as Record<string, unknown>) ?? {};
+    const r = await buildBulkPatchPreview(
+      (a.filter as Record<string, unknown>) ?? {},
+      (a.patch as Record<string, unknown>) ?? {},
+      ctx
+    );
+    return 'error' in r ? { ok: false, error: r.error } : { ok: true, data: r };
+  },
+});
+
+// ============================================================================
+// propose_rule_create
+// ============================================================================
+registerTool('propose_rule_create', {
+  schema: {
+    type: 'function',
+    function: {
+      name: 'propose_rule_create',
+      description: 'Stage creating a new rule, optionally date-scoped.',
+      parameters: {
+        type: 'object',
+        required: ['merchant_pattern'],
+        properties: {
+          merchant_pattern: { type: 'string' },
+          match_kind: { type: 'string', enum: ['substring', 'regex'] },
+          priority: { type: 'integer' },
+          category: { type: 'string' },
+          is_business: { type: 'boolean' },
+          split_type: {
+            type: 'string',
+            enum: ['me', 'partner', 'shared', 'business'],
+          },
+          pct_me: { type: 'number', minimum: 0, maximum: 1 },
+          pct_partner: { type: 'number', minimum: 0, maximum: 1 },
+          effective_from: { type: 'string', description: 'YYYY-MM-DD' },
+          effective_to: { type: 'string', description: 'YYYY-MM-DD' },
+        },
+      },
+    },
+  },
+  async execute(args, ctx) {
+    const r = await buildRuleCreatePreview(
+      (args as Record<string, unknown>) ?? {},
+      ctx
+    );
+    return 'error' in r ? { ok: false, error: r.error } : { ok: true, data: r };
+  },
+});
+
+// ============================================================================
+// propose_rule_update
+// ============================================================================
+registerTool('propose_rule_update', {
+  schema: {
+    type: 'function',
+    function: {
+      name: 'propose_rule_update',
+      description: 'Stage updating an existing rule.',
+      parameters: {
+        type: 'object',
+        required: ['rule_id', 'patch'],
+        properties: {
+          rule_id: { type: 'integer' },
+          patch: { type: 'object' },
+        },
+      },
+    },
+  },
+  async execute(args, ctx) {
+    const a = (args as Record<string, unknown>) ?? {};
+    if (typeof a.rule_id !== 'number') {
+      return { ok: false, error: 'rule_id is required (integer)' };
+    }
+    const r = await buildRuleUpdatePreview(
+      a.rule_id,
+      (a.patch as Record<string, unknown>) ?? {},
+      ctx
+    );
+    return 'error' in r ? { ok: false, error: r.error } : { ok: true, data: r };
+  },
+});
+
+// ============================================================================
+// propose_rule_delete
+// ============================================================================
+registerTool('propose_rule_delete', {
+  schema: {
+    type: 'function',
+    function: {
+      name: 'propose_rule_delete',
+      description: 'Stage deleting a rule.',
+      parameters: {
+        type: 'object',
+        required: ['rule_id'],
+        properties: { rule_id: { type: 'integer' } },
+      },
+    },
+  },
+  async execute(args, ctx) {
+    const a = (args as Record<string, unknown>) ?? {};
+    if (typeof a.rule_id !== 'number') {
+      return { ok: false, error: 'rule_id is required (integer)' };
+    }
+    const r = await buildRuleDeletePreview(a.rule_id, ctx);
+    return 'error' in r ? { ok: false, error: r.error } : { ok: true, data: r };
   },
 });
