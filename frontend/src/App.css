@@ -165,8 +165,7 @@
   }
 
   .brandMark {
-    @apply block h-10 w-10 shrink-0 rounded-lg object-cover;
-    box-shadow: 0 10px 20px color-mix(in oklch, var(--primary) 22%, transparent);
+    @apply block h-10 w-10 shrink-0;
   }
 
   .brandEyebrow {
