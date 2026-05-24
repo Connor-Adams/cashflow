@@ -216,3 +216,12 @@ commands, CI parity, project layout, and git hooks.
 
 Design specs and implementation plans live under
 [docs/superpowers/](docs/superpowers).
+
+## License
+
+Copyright (c) 2026 Connor Adams. All rights reserved.
+
+This repository is source-available for review and evaluation only. It is not
+open-source software. You may not copy, modify, distribute, host, offer as a
+service, or use this project commercially without explicit written permission.
+See [LICENSE](LICENSE) for details.
