@@ -25,4 +25,4 @@ jobs:
           command: audit
           comment: true
           annotations: false
-          fail_on_issues: false
+          fail-on-issues: false
