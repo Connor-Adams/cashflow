@@ -97,8 +97,8 @@ The "By type" breakdown is dropped — `txn_type` distribution is low-signal her
 
 Two `Card`s side-by-side. Each shows up to 6 rows from the existing payload:
 
-- **Top firing rules** — three columns per row: `<code>pattern</code>` → category, count, `Edit` link. Header has "Manage rules →" link to `/rules`. Each row's `Edit` deep-links to `/rules?focus=<ruleId>`.
-- **Top canonical merchants** — three columns per row: name, count, `View` link. Each row's `View` deep-links to `/transactions?merchant=<encodeURIComponent(name)>`.
+- **Top firing rules** — three columns per row: `<code>pattern</code>` → category, count, `View` link. Header has "Manage rules →" link to `/rules`. Each row's `View` deep-links to `/rules?focus=<ruleId>` (scrolls + highlights the row on the rules page; editing the rule still happens by deleting + recreating via the existing form).
+- **Top canonical merchants** — two columns per row: name, count. **Read-only** (no deep-link). Backend transactions filter has no `merchant` support today; adding it is filed as a follow-up PR. When the filter ships, this card grows a `View` link in a follow-up.
 
 Empty states reuse existing copy ("None yet. Run the backfill to populate." / "No rule matches recorded yet.").
 
@@ -145,10 +145,11 @@ Two derived values computed client-side for the workflow tile:
 
 ## Deep-link wiring
 
-Two cross-page deep-links the redesign introduces:
+One cross-page deep-link the redesign introduces:
 
-1. **`/rules?focus=<ruleId>`** — RulesPage needs to read the `focus` query param on mount and (a) scroll its row into view, (b) put it into edit mode. New code in `RulesPage.tsx`, ~15 LoC. If `focus` is missing, behavior is unchanged.
-2. **`/transactions?merchant=<name>`** — TransactionsPage already supports merchant filtering via existing filter bar state; need to verify whether it accepts the query-string form. If not, wire `useEffect` on mount to seed the filter from `searchParams.get('merchant')`. Verification step in plan.
+1. **`/rules?focus=<ruleId>`** — RulesPage reads `focus` on mount, scrolls the matching `<tr>` into view, and applies a temporary `.isFocused` highlight class (CSS animation, ~2s). RulesPage rows are not inline-editable today (only Delete + recreate via the top form), so "focus" means **locate**, not **edit**. New code in `RulesPage.tsx`, ~20 LoC + a few lines of CSS. If `focus` is missing, behavior is unchanged.
+
+The merchant deep-link from the top-merchants card is intentionally dropped — backend transactions filter has no merchant predicate today and adding it (backend `buildTransactionFilterWhere`, dialect-safe LIKE, frontend filter state + FilterBar UI) is too much for this PR. Filed as a follow-up; the View link can be added then.
 
 ## Styling discipline
 
@@ -168,14 +169,15 @@ Two cross-page deep-links the redesign introduces:
 
 ## Risks / open questions
 
-- **`/transactions?merchant=` query-param support** — confirmed during implementation, not design. If unsupported, plan adds ~10 LoC to TransactionsPage. Captured as a verify step.
-- **Workflow tile when zero review backlog** — design says collapse to an empty StatCard ("In review: 0"). Plan alternative: hide entirely and let the grid become `repeat(5, 1fr)`. Pick the empty-StatCard path because the column count shouldn't shift between states.
-- **Recharts bundle size** — already imported elsewhere (DashboardPage, PortfolioPage), so no incremental cost.
+- **Workflow tile when zero review backlog** — design says render as a plain StatCard ("In review: 0") at the same 1.6fr width. Picked over hiding entirely so column count doesn't shift between states.
+- **Recharts bundle size** — already imported elsewhere (DashboardPage, PortfolioPage), no incremental cost.
 
 ## Out of scope (deferred follow-ups)
 
 - Backfill run history (would let us show "last run 2h ago, processed 12,489").
 - Time-series of review backlog (would let us show "+128 vs last week").
+- Backend + frontend merchant filter on `/transactions` (unlocks the `View` link on top-merchants card).
+- `oldestReviewFlaggedAt` field on `/enrichment/stats` (unlocks the workflow tile's "oldest" subtitle).
 - Inline rule editing on the tab.
 - Touching the other four settings tabs.
 
