@@ -100,5 +100,11 @@ export function initRule(sequelize: Sequelize): typeof Rule {
       timestamps: true,
     }
   );
+  Rule.addHook('afterSave', async (instance: Rule) => {
+    const { ensureCategory } = await import('../util/ensureCategory');
+    if (instance.householdId != null) {
+      await ensureCategory(instance.householdId, instance.category);
+    }
+  });
   return Rule;
 }
