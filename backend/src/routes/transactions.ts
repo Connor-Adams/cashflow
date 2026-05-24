@@ -57,7 +57,7 @@ export function enforceBulkPatchCap(
  * in one place ensures the bulk-patch-filter endpoint operates on exactly
  * the same set the user sees in the table.
  */
-function buildTransactionFilterWhere(
+export function buildTransactionFilterWhere(
   req: import('express').Request,
   source: Record<string, unknown>
 ): Record<string, unknown> {
