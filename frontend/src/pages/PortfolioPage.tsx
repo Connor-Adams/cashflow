@@ -808,12 +808,11 @@ function IncomePanel() {
 }
 
 function IncomeBody({ data, loading }: { data: PortfolioIncome | null; loading: boolean }) {
-  const totals = data?.totals ?? []
-  const bySecurity = data?.bySecurity ?? []
+  if (!data) return <section className="transactionsStats" aria-busy={loading} />
   return (
     <>
       <section className="transactionsStats" aria-busy={loading}>
-        {totals.map((row) => (
+        {data.totals.map((row) => (
           <StatCard
             key={row.currency}
             label={`${row.currency} total income`}
@@ -823,9 +822,9 @@ function IncomeBody({ data, loading }: { data: PortfolioIncome | null; loading: 
         ))}
       </section>
 
-      {data && <IncomeMonthlyChart data={data} />}
+      <IncomeMonthlyChart data={data} />
 
-      <IncomeBySecurityTable rows={bySecurity} loading={loading} />
+      <IncomeBySecurityTable rows={data.bySecurity} loading={loading} />
     </>
   )
 }
@@ -884,7 +883,7 @@ function IncomeBySecurityRow({ row }: { row: IncomeBySecurityRowData }) {
   return (
     <TableRow>
       <TableCell>
-        <SymbolLink securityId={row.securityId ?? null} symbol={row.symbol ?? null} />
+        <SymbolLink securityId={row.securityId} symbol={row.symbol} />
       </TableCell>
       <TableCell>{row.currency}</TableCell>
       <TableCell>{formatMoney(row.dividend, row.currency)}</TableCell>
@@ -1024,26 +1023,35 @@ function RealizedBody({
   data: PortfolioRealized | null
   loading: boolean
 }) {
-  const totals = data?.totals ?? []
-  const bySecurity = data?.bySecurity ?? []
-  const eventsWithRunning = withRunningTotal(data?.events ?? [])
-
+  if (!data) return <section className="transactionsStats" aria-busy={loading} />
+  const eventsWithRunning = withRunningTotal(data.events)
   return (
     <>
-      <section className="transactionsStats" aria-busy={loading}>
-        {totals.map((row) => (
-          <StatCard
-            key={row.currency}
-            label={`${row.currency} realized to date`}
-            value={formatMoney(row.realizedGain, row.currency)}
-            hint={`${row.eventCount} sell event${row.eventCount === 1 ? '' : 's'}`}
-          />
-        ))}
-      </section>
-
-      <RealizedBySecurityTable rows={bySecurity} />
+      <RealizedTotalsSection totals={data.totals} loading={loading} />
+      <RealizedBySecurityTable rows={data.bySecurity} />
       <RealizedEventsTable events={eventsWithRunning} />
     </>
+  )
+}
+
+function RealizedTotalsSection({
+  totals,
+  loading,
+}: {
+  totals: PortfolioRealized['totals']
+  loading: boolean
+}) {
+  return (
+    <section className="transactionsStats" aria-busy={loading}>
+      {totals.map((row) => (
+        <StatCard
+          key={row.currency}
+          label={`${row.currency} realized to date`}
+          value={formatMoney(row.realizedGain, row.currency)}
+          hint={`${row.eventCount} sell event${row.eventCount === 1 ? '' : 's'}`}
+        />
+      ))}
+    </section>
   )
 }
 
