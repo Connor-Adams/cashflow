@@ -353,3 +353,40 @@ test('POST /api/ai/insights does not supersede rows for a different period', asy
   });
   assert.equal(stillSuggestedFeb.length, 1, 'Feb row was not superseded by Mar refresh');
 });
+
+test('GET /api/transactions?ids=1,2 filters to listed ids', async () => {
+  const { Transaction, Account } = await import('../../src/models/index.js');
+  const crypto = await import('crypto');
+  const account = await Account.create({
+    householdId, name: 'IDs Account', owner: 'me', defaultCurrency: 'CAD',
+  } as never);
+  const a = await Transaction.create({
+    householdId, accountId: account.id, currency: 'CAD',
+    date: '2026-05-01', merchantRaw: 'A', merchantClean: 'A',
+    importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    amount: -1, finalCategory: 'X', finalBusiness: false, finalSplitType: 'me',
+  } as never);
+  const b = await Transaction.create({
+    householdId, accountId: account.id, currency: 'CAD',
+    date: '2026-05-02', merchantRaw: 'B', merchantClean: 'B',
+    importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    amount: -2, finalCategory: 'Y', finalBusiness: false, finalSplitType: 'me',
+  } as never);
+  await Transaction.create({
+    householdId, accountId: account.id, currency: 'CAD',
+    date: '2026-05-03', merchantRaw: 'C', merchantClean: 'C',
+    importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    amount: -3, finalCategory: 'Z', finalBusiness: false, finalSplitType: 'me',
+  } as never);
+
+  const r = await authed.get(`/api/transactions?ids=${a.id},${b.id}`);
+  assert.equal(r.status, 200);
+  const ids = (r.body.data as Array<{ id: number }>).map((t) => t.id).sort();
+  assert.deepEqual(ids, [a.id, b.id].sort());
+});
+
+test('GET /api/transactions?ids= ignores empty/invalid entries gracefully', async () => {
+  const r = await authed.get('/api/transactions?ids=abc,,999999');
+  assert.equal(r.status, 200);
+  assert.equal((r.body.data as unknown[]).length, 0);
+});
