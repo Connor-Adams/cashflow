@@ -385,7 +385,11 @@
   }
 
   .dashboardFilters {
-    @apply mt-2 rounded-lg border p-2 sm:p-3;
+    @apply mt-2 inline-block max-w-full rounded-lg border p-2 sm:p-3;
+    /* Shrink-wrap to content so the filter strip reads as a toolbar
+     * instead of a full-width panel. max-w-full keeps it from blowing
+     * past the page container on narrow viewports. */
+    width: fit-content;
     border-color: color-mix(in srgb, var(--border) 86%, white 4%);
     background: color-mix(in srgb, var(--bg2) 64%, transparent);
   }
