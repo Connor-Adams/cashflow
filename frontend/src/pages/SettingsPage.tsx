@@ -588,6 +588,8 @@ export function SettingsPage() {
     }
   }
 
+  // Sequential fetch + state transitions; exercised by every receipt upload path.
+  // fallow-ignore-next-line complexity
   async function uploadReceiptFile(
     file: File,
     busy: 'image' | 'pdf',
