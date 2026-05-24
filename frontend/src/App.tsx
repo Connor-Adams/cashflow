@@ -14,7 +14,15 @@ import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
-import { SettingsPage } from './pages/SettingsPage'
+import { SettingsPage } from './pages/settings/SettingsPage'
+import { SettingsTabLayout } from './pages/settings/SettingsTabLayout'
+import { DisplaySection } from './pages/settings/sections/DisplaySection'
+import { GmailSection } from './pages/settings/sections/GmailSection'
+import { PartnerInviteSection } from './pages/settings/sections/PartnerInviteSection'
+import { ImportsTab } from './pages/settings/tabs/ImportsTab'
+import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
+import { ContactsTab } from './pages/settings/tabs/ContactsTab'
+import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
@@ -42,7 +50,18 @@ function AppRoutes() {
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="reports" element={<ReportsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={<SettingsPage />}>
+            <Route index element={<Navigate to="display" replace />} />
+            <Route element={<SettingsTabLayout />}>
+              <Route path="display" element={<DisplaySection />} />
+              <Route path="gmail" element={<GmailSection />} />
+              <Route path="partner-invite" element={<PartnerInviteSection />} />
+            </Route>
+            <Route path="imports" element={<ImportsTab />} />
+            <Route path="enrichment" element={<EnrichmentTab />} />
+            <Route path="contacts" element={<ContactsTab />} />
+            <Route path="budgets" element={<BudgetsTab />} />
+          </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

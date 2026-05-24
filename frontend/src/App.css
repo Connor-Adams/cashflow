@@ -1774,3 +1774,40 @@
     grid-row: auto !important;
   }
 }
+
+/* SettingsTabLayout — sidebar + outlet layout */
+.settingsTabLayout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1.5rem;
+}
+
+.settingsSubnav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settingsSubnav__link {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  color: var(--color-foreground-muted, inherit);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.settingsSubnav__link.isActive,
+.settingsSubnav__link[aria-current="page"] {
+  background: var(--color-surface-subtle, rgba(0,0,0,0.04));
+  color: var(--color-foreground, inherit);
+}
+
+@media (max-width: 768px) {
+  .settingsTabLayout {
+    grid-template-columns: 1fr;
+  }
+  .settingsSubnav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+}
