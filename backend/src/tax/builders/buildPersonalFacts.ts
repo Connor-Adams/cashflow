@@ -4,16 +4,19 @@ import {
   Carryforward,
   Entity,
   FxRate,
+  HouseholdMember,
   InvestmentActivity,
   Security,
   TaxSlip,
   Transaction,
+  User,
 } from '../../models';
 import { D } from '../util/decimal';
 import type {
   CapGainEvent,
   IncomeItem,
   PersonalCarryforwards,
+  RrspContrib,
   SlipFact,
   TaxYearFacts,
 } from '../engine/types';
@@ -40,6 +43,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const employmentIncome: IncomeItem[] = [];
   const selfEmploymentIncome: IncomeItem[] = [];
   const selfEmploymentExpenses: IncomeItem[] = [];
+  const donations: IncomeItem[] = [];
+  const rrspContribs: RrspContrib[] = [];
+  const fhsaContribs: RrspContrib[] = [];
 
   for (const t of txns) {
     const cad = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
@@ -50,6 +56,13 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     };
     const cat = (t as any).finalCategory ?? '';
     if (cat === 'employment_income') employmentIncome.push(item);
+    else if (cat === 'donations') donations.push(item);
+    else if (cat === 'rrsp_contribution') {
+      rrspContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+    }
+    else if (cat === 'fhsa_contribution') {
+      fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+    }
     else if ((t as any).business && cad.greaterThan(0)) selfEmploymentIncome.push(item);
     else if ((t as any).business && cad.lessThan(0))
       selfEmploymentExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
@@ -79,8 +92,14 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     };
     if (a.activityType === 'interest') interestIncome.push(item);
     else if (a.activityType === 'dividend') {
-      // Default to eligible. Engineer note: future enhancement = tag eligible/non on Security or per activity.
-      eligibleDividends.push(item);
+      // Route based on Security.dividendEligibility; unknown defaults to eligible.
+      const eligibility = (a as any).security?.dividendEligibility ?? 'eligible';
+      if (eligibility === 'non_eligible') {
+        nonEligibleDividends.push(item);
+      } else {
+        // 'eligible' or 'unknown' → eligible
+        eligibleDividends.push(item);
+      }
     }
   }
 
@@ -130,6 +149,24 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     instalmentsPaid: D(cf.find((c) => c.kind === 'instalments_paid')?.amount ?? 0),
   };
 
+  // Age at year end — load User via HouseholdMember; fall back to 0 if no DOB
+  let ageAtYearEnd = 0;
+  const membership = await HouseholdMember.findOne({ where: { householdId: entity.householdId } });
+  if (membership) {
+    const user = await User.findByPk(membership.userId);
+    if (user?.dob) {
+      const dobYear = parseInt(user.dob.slice(0, 4), 10);
+      const dobMonth = parseInt(user.dob.slice(5, 7), 10); // 1-based
+      const dobDay = parseInt(user.dob.slice(8, 10), 10);
+      let age = year - dobYear;
+      // Subtract 1 if birthday hasn't occurred yet by Dec 31
+      if (dobMonth > 12 || (dobMonth === 12 && dobDay > 31)) {
+        age -= 1;
+      }
+      ageAtYearEnd = Math.max(0, age);
+    }
+  }
+
   return {
     year,
     jurisdiction: 'CA-ON',
@@ -140,10 +177,12 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     eligibleDividends,
     nonEligibleDividends,
     capitalGainEvents,
-    rrspContribs: [], // Phase 1: derive from Transactions with category=rrsp_contribution OR add slip-based path later
+    rrspContribs,
+    fhsaContribs,
+    donations,
     slips,
     carryforwards,
-    ageAtYearEnd: 0, // Phase 1: read from User profile; default 0 if missing
+    ageAtYearEnd,
   };
 }
 
