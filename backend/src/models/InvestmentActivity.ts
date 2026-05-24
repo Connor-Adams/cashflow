@@ -24,6 +24,7 @@ export class InvestmentActivity extends Model<
   declare price: string | null;
   declare amount: string | null;
   declare fees: string | null;
+  declare splitRatio: string | null;
   declare currency: string;
   declare sourceReference: string | null;
   declare sourceRowFingerprint: string;
@@ -73,6 +74,11 @@ export function initInvestmentActivity(
       price: { type: DataTypes.DECIMAL(20, 8), allowNull: true },
       amount: { type: DataTypes.DECIMAL(14, 4), allowNull: true },
       fees: { type: DataTypes.DECIMAL(14, 4), allowNull: true },
+      splitRatio: {
+        type: DataTypes.DECIMAL(10, 6),
+        field: 'split_ratio',
+        allowNull: true,
+      },
       currency: { type: DataTypes.STRING(3), allowNull: false },
       sourceReference: {
         type: DataTypes.STRING(256),
