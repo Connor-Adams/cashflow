@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { ChatThread, ChatMessage, ChatProposal } from '../models';
+import { ChatThread, ChatMessage, ChatProposal, Contact } from '../models';
 import { currentAuth } from '../auth/middleware';
+import { runChatTurn } from '../ai/chat/loop';
+import { defaultCurrency } from '../config/env';
+import { writeSseHeaders, writeSseEvent } from '../ai/chat/sse';
 
 const router = Router();
 
@@ -145,9 +148,71 @@ router.delete('/threads/:id', async (req, res, next) => {
   }
 });
 
-// POST /api/chat/threads/:id/messages — placeholder until Task 11
-router.post('/threads/:id/messages', (_req, res) => {
-  res.status(501).json({ error: 'chat loop not yet implemented (Task 11)' });
+// POST /api/chat/threads/:id/messages — stream a chat turn via SSE
+router.post('/threads/:id/messages', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const id = parseId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const thread = await ChatThread.findOne({ where: { id, userId: user.id } });
+    if (!thread) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const b = (req.body || {}) as { message?: unknown };
+    if (typeof b.message !== 'string' || b.message.trim().length === 0) {
+      res.status(400).json({ error: 'message is required (non-empty string)' });
+      return;
+    }
+    const userMessage = b.message.trim().slice(0, 20_000);
+
+    // Per-thread rate limit + per-day token budget come in Task 14.
+
+    // Build prompt context
+    const contacts = await Contact.findAll({
+      where: { householdId: household.id },
+      order: [['id', 'ASC']],
+    });
+    const promptContext = {
+      todayIso: new Date().toISOString().slice(0, 10),
+      defaultCurrency,
+      contacts: contacts.map((c) => {
+        const j = c.toJSON() as { id: number; name: string };
+        return { id: j.id, name: j.name, currency: null };
+      }),
+    };
+
+    writeSseHeaders(res);
+    // Wire abort: if client disconnects, abort the upstream OpenAI request.
+    const ac = new AbortController();
+    req.on('close', () => ac.abort());
+
+    try {
+      for await (const ev of runChatTurn({
+        thread,
+        userMessage,
+        userId: user.id,
+        householdId: household.id,
+        promptContext,
+        signal: ac.signal,
+      })) {
+        writeSseEvent(res, ev.type, ev);
+        if (ev.type === 'assistant_done' || ev.type === 'error') {
+          res.end();
+          return;
+        }
+      }
+      res.end();
+    } catch (e) {
+      writeSseEvent(res, 'error', { message: (e as Error).message });
+      res.end();
+    }
+  } catch (e) {
+    next(e);
+  }
 });
 
 export default router;
