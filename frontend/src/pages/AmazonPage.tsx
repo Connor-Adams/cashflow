@@ -340,7 +340,7 @@ export function AmazonPage() {
       </form>
 
       {summary && (
-        <section className="amazonSummaryGrid">
+        <section className="amazonSummaryGrid mb-4">
           <article className="card"><strong>{summary.created}</strong><span>Orders created</span></article>
           <article className="card"><strong>{summary.skipped}</strong><span>Skipped</span></article>
           <article className="card"><strong>{summary.importedItems}</strong><span>Items imported</span></article>

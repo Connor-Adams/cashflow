@@ -749,7 +749,7 @@ export function ReportsPage() {
         </section>
       </div>
 
-      <section className="card reportsTableCard">
+      <section className="card reportsTableCard mb-4">
         <div className="reportsCardHeader">
           <div>
             <h2>Recent settlements</h2>
@@ -1059,7 +1059,7 @@ function RankedReportSection<R>({
 }: RankedReportSectionProps<R>) {
   const totalColumns = (showCurrencyColumn ? 1 : 0) + headers.length
   return (
-    <section id={id} className="card reportsTableCard">
+    <section id={id} className="card reportsTableCard mb-4">
       <div className="reportsCardHeader">
         <div>
           <h2>{title}</h2>

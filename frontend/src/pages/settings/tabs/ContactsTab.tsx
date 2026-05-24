@@ -137,7 +137,7 @@ export function ContactsTab() {
           {err}
         </span>
       )}
-      <section className="accountsGrid">
+      <section className="accountsGrid mb-4">
         {contacts.map((contact) => (
           <Card className="accountCard" key={contact.id}>
             <div>
