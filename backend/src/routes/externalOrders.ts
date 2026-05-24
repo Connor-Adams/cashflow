@@ -41,6 +41,18 @@ function singleFile(uploader: ReturnType<typeof multer>, fieldName: string) {
   };
 }
 
+type UploadedFile = { mimetype: string; buffer: Buffer; originalname: string };
+
+/** Extract the multer-parsed `file` from the request, sending 400 if missing. Returns null when missing. */
+function requireUploadedFile(req: import('express').Request, res: import('express').Response): UploadedFile | null {
+  const file = (req as unknown as { file?: UploadedFile }).file;
+  if (!file) {
+    res.status(400).json({ error: 'file is required' });
+    return null;
+  }
+  return file;
+}
+
 async function persistExtractedOrder(
   extracted: ExtractedReceiptOrder,
   opts: { userId: number | null; householdId: number | null; source: string },
@@ -172,11 +184,8 @@ router.post(
     try {
       if (rejectDemoAiRequest(req, res)) return;
       const auth = currentAuth(req);
-      const file = (req as unknown as { file?: { mimetype: string; buffer: Buffer } }).file;
-      if (!file) {
-        res.status(400).json({ error: 'file is required' });
-        return;
-      }
+      const file = requireUploadedFile(req, res);
+      if (!file) return;
       const mime = (file.mimetype || '').toLowerCase();
       if (!mime.startsWith('image/')) {
         res.status(400).json({ error: 'only image/* uploads are supported (PNG, JPG, WebP)' });
@@ -222,11 +231,8 @@ router.post(
   async (req, res, next) => {
     try {
       const auth = currentAuth(req);
-      const file = (req as unknown as { file?: { mimetype: string; buffer: Buffer; originalname: string } }).file;
-      if (!file) {
-        res.status(400).json({ error: 'file is required' });
-        return;
-      }
+      const file = requireUploadedFile(req, res);
+      if (!file) return;
       const vendor = (() => {
         const raw = String(req.query.vendor ?? '').toLowerCase();
         if (raw === 'apple' || raw === 'google' || raw === 'amazon' || raw === 'other') {
@@ -304,13 +310,8 @@ router.post(
   async (req, res, next) => {
     try {
       const auth = currentAuth(req);
-      const file = (
-        req as unknown as { file?: { mimetype: string; buffer: Buffer; originalname: string } }
-      ).file;
-      if (!file) {
-        res.status(400).json({ error: 'file is required' });
-        return;
-      }
+      const file = requireUploadedFile(req, res);
+      if (!file) return;
       const mime = (file.mimetype || '').toLowerCase();
       const looksLikePdf = mime === 'application/pdf' || /\.pdf$/i.test(file.originalname);
       if (!looksLikePdf) {
