@@ -415,19 +415,28 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       recomputeTransactionAmounts(txn);
 
       try {
-        await txn.save({ transaction: t });
-        if (enriched.signals.length > 0) {
-          await TransactionSignal.bulkCreate(
-            enriched.signals.map((s) => ({
-              transactionId: txn.id,
-              source: s.source,
-              confidence: s.confidence,
-              fields: s.fields,
-              rationale: s.rationale ?? null,
-            })),
-            { transaction: t },
-          );
-        }
+        // SAVEPOINT around the per-row insert + its signal sidecar. On
+        // Postgres, a unique-violation here would otherwise poison the
+        // outer transaction; the next iteration's txn.save would then
+        // throw "current transaction is aborted, commands ignored until
+        // end of transaction block" and escape this catch. Nesting via
+        // sequelize.transaction({ transaction: t }, …) emits a SAVEPOINT
+        // so the unique-violation rolls back only this row.
+        await sequelize.transaction({ transaction: t }, async (sp) => {
+          await txn.save({ transaction: sp });
+          if (enriched.signals.length > 0) {
+            await TransactionSignal.bulkCreate(
+              enriched.signals.map((s) => ({
+                transactionId: txn.id,
+                source: s.source,
+                confidence: s.confidence,
+                fields: s.fields,
+                rationale: s.rationale ?? null,
+              })),
+              { transaction: sp },
+            );
+          }
+        });
         inserted += 1;
         if (enriched.fields.reviewFlag) {
           const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
