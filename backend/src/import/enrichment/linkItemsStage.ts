@@ -30,6 +30,11 @@ const VENDOR_MATCHERS: Array<{
     canonical: 'Google',
     pattern: /\b(google(?:\s*play)?|google\s*\*|googlepay|youtube\s*premium)\b/i,
   },
+  {
+    vendor: 'costco',
+    canonical: 'Costco',
+    pattern: /\bcostco\b/i,
+  },
 ];
 
 function matchVendor(merchantText: string): { vendor: string; canonical: string } | null {

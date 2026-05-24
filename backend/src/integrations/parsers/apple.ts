@@ -92,9 +92,12 @@ export function parseAppleReceipt(body: string): ExtractedReceiptOrder | null {
     vendorName: 'Apple',
     orderDate,
     orderId,
+    subtotal: null,
+    tax: null,
     total,
     currency: null, // Apple emails localise; let downstream default
     paymentLast4: last4,
+    tenders: [],
     items,
     notes: accountEmail ? `Apple ID: ${accountEmail}` : null,
   };
