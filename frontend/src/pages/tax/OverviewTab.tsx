@@ -1,4 +1,6 @@
 import { useTaxReturn } from '../../hooks/useTaxReturn';
+import { MultiYearCompareCard } from './MultiYearCompareCard';
+import { InstalmentTracker } from './InstalmentTracker';
 
 export function OverviewTab({ year }: { year: number }) {
   const { data, error, loading } = useTaxReturn(year);
@@ -22,6 +24,12 @@ export function OverviewTab({ year }: { year: number }) {
         </section>
       )}
       <p className="muted">{data.cached ? 'Cached snapshot' : 'Freshly computed'} at {new Date(data.computedAt).toLocaleString()}</p>
+      <section>
+        <MultiYearCompareCard from={year - 2} to={year} />
+      </section>
+      <section>
+        <InstalmentTracker year={year} />
+      </section>
     </div>
   );
 }

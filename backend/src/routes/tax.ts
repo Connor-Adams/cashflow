@@ -9,6 +9,9 @@ import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/b
 import { factsHash } from '../tax/util/factsHash';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
+import { runScenario } from '../tax/engine/scenario';
+import { D } from '../tax/util/decimal';
+import type { ScenarioInput } from '../tax/engine/types';
 
 const router = Router();
 
@@ -356,6 +359,72 @@ router.get('/slips', async (req, res, next) => {
   }
 });
 
+// POST /api/tax/scenarios
+// Body: { year, ownerComp: { salary, eligibleDividends, nonEligibleDividends } }
+// Loads personal + corp Entity from household, builds base facts via builders,
+// runs scenario, returns ScenarioResult.
+router.post('/scenarios', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const { year, ownerComp } = req.body ?? {};
+    if (!Number.isInteger(year)) {
+      res.status(400).json({ error: 'year_required' });
+      return;
+    }
+    if (!ownerComp || typeof ownerComp !== 'object') {
+      res.status(400).json({ error: 'ownerComp_required' });
+      return;
+    }
+
+    const personal = await Entity.findOne({ where: { householdId: household.id, kind: 'personal' } });
+    const corp = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
+    if (!personal || !corp) {
+      res.status(404).json({ error: 'entities_required', message: 'Both personal and corp entities must exist' });
+      return;
+    }
+
+    const personalFacts = await buildPersonalFacts(personal.id, year);
+    const corpFacts = await buildCorpFacts(corp.id, { startDate: `${year}-01-01`, endDate: `${year}-12-31` });
+
+    const input: ScenarioInput = {
+      year,
+      jurisdiction: 'CA-ON',
+      personalFactsBase: {
+        ...personalFacts,
+        employmentIncomeBase: personalFacts.employmentIncome,
+        eligibleDividendsBase: personalFacts.eligibleDividends,
+        nonEligibleDividendsBase: personalFacts.nonEligibleDividends,
+      },
+      corpFactsBase: corpFacts,
+      ownerComp: {
+        salary: D(ownerComp.salary ?? 0),
+        eligibleDividends: D(ownerComp.eligibleDividends ?? 0),
+        nonEligibleDividends: D(ownerComp.nonEligibleDividends ?? 0),
+      },
+    };
+
+    const result = runScenario(input, ratesFor(year));
+
+    // Serialize Decimals
+    const serialized = JSON.parse(JSON.stringify(result, (_k, v) =>
+      v && typeof v === 'object' && (v as { constructor?: { name?: string } }).constructor?.name === 'Decimal'
+        ? (v as { toFixed: (n: number) => string }).toFixed(2)
+        : v
+    ));
+
+    res.json(serialized);
+  } catch (err) {
+    if (err instanceof RateTableMissingError) {
+      res.status(409).json({
+        error: 'rate_table_missing',
+        message: (err as Error).message,
+      });
+      return;
+    }
+    next(err);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Corp routes
 // ---------------------------------------------------------------------------
@@ -545,5 +614,65 @@ function serializeTotals(totals: Record<string, { toFixed: (n: number) => string
     Object.entries(totals).map(([k, v]) => [k, v.toFixed(2)])
   );
 }
+
+// POST /api/tax/corp/:fiscalYear/roll-forward
+// Triggers rollCorpCarryforwards from the most recent snapshot for the fiscal year.
+router.post('/corp/:fiscalYear/roll-forward', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const householdId = household.id;
+    const entity = await Entity.findOne({ where: { householdId, kind: 'corp' } });
+    if (!entity) {
+      res.status(404).json({ error: 'no_corp_entity' });
+      return;
+    }
+    // Parse fiscalYear param: 'YYYY' or 'YYYY-MM-DD/YYYY-MM-DD'
+    const fy = String(req.params.fiscalYear);
+    const yearStr = fy.includes('/') ? fy.split('/')[1].slice(0, 4) : fy;
+    const asOfYear = Number(yearStr);
+    if (!Number.isInteger(asOfYear) || asOfYear < 2000 || asOfYear > 2100) {
+      res.status(400).json({ error: 'invalid_fiscal_year' });
+      return;
+    }
+    // Look up the snapshot
+    const snapshot = await TaxReturn.findOne({ where: { entityId: entity.id, year: asOfYear } });
+    if (!snapshot) {
+      res.status(404).json({
+        error: 'no_snapshot',
+        message: 'Compute corp return first via GET /api/tax/corp/:fiscalYear/return',
+      });
+      return;
+    }
+    // Reconstruct minimal CorpTaxReturn from snapshot.totals (stored as Decimal toFixed(2) strings)
+    const totals = snapshot.totals as Record<string, string>;
+    const { D } = await import('../tax/util/decimal');
+    const corpRet = {
+      fiscalYear: { startDate: `${asOfYear}-01-01`, endDate: `${asOfYear}-12-31` },
+      lines: [],
+      totals: {
+        activeBusinessIncome: D(totals.activeBusinessIncome ?? '0'),
+        sbdEligibleIncome: D(totals.sbdEligibleIncome ?? '0'),
+        generalRateIncome: D(totals.generalRateIncome ?? '0'),
+        aii: D(totals.aii ?? '0'),
+        taxableIncome: D(totals.taxableIncome ?? '0'),
+        federalTax: D(totals.federalTax ?? '0'),
+        provincialTax: D(totals.provincialTax ?? '0'),
+        refundableTaxOnAii: D(totals.refundableTaxOnAii ?? '0'),
+        dividendRefund: D(totals.dividendRefund ?? '0'),
+        netTaxPayable: D(totals.netTaxPayable ?? '0'),
+        gripEnding: D(totals.gripEnding ?? '0'),
+        cdaEnding: D(totals.cdaEnding ?? '0'),
+        erdtohEnding: D(totals.erdtohEnding ?? '0'),
+        nerdtohEnding: D(totals.nerdtohEnding ?? '0'),
+      },
+      warnings: [],
+    };
+    const { rollCorpCarryforwards } = await import('../tax/services/rollCorpCarryforwards');
+    const result = await rollCorpCarryforwards(entity.id, asOfYear, corpRet as any);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;
