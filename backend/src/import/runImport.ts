@@ -327,7 +327,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         date: v.date,
         amount: v.amount,
         currency: v.currency,
-        merchantClean: v.merchantClean,
+        merchantRaw: v.merchantRaw,
         sourceReference: v.sourceReference,
       });
 
