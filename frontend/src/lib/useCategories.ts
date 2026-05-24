@@ -17,12 +17,15 @@ export function _resetCategoriesCacheForTest(): void {
 async function load(force = false): Promise<Category[]> {
   if (!force && cache) return cache
   if (!force && inflight) return inflight
-  inflight = getJson<Category[]>('/api/categories').then((rows) => {
-    cache = rows
-    inflight = null
-    for (const l of listeners) l(rows)
-    return rows
-  })
+  inflight = getJson<Category[]>('/api/categories')
+    .then((rows) => {
+      cache = rows
+      for (const l of listeners) l(rows)
+      return rows
+    })
+    .finally(() => {
+      inflight = null
+    })
   return inflight
 }
 
@@ -35,7 +38,7 @@ export function useCategories(): {
 
   useEffect(() => {
     listeners.add(setCategories)
-    void load().then(setCategories)
+    load().then(setCategories).catch(() => {/* swallow; refresh() can retry */})
     return () => { listeners.delete(setCategories) }
   }, [])
 

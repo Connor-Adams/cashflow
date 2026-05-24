@@ -43,4 +43,21 @@ describe('useCategories', () => {
     expect(result.current.byName('Missing')).toBeUndefined()
     expect(result.current.byName(null)).toBeUndefined()
   })
+
+  it('recovers after a failed fetch when refresh is called', async () => {
+    const spy = vi
+      .spyOn(api, 'getJson')
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce([
+        { id: 1, householdId: 1, name: 'Coffee', icon: 'Coffee',
+          createdAt: '', updatedAt: '' },
+      ])
+    const { result } = renderHook(() => useCategories())
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      await result.current.refresh().catch(() => {/* expected */})
+    })
+    await waitFor(() => expect(result.current.categories.length).toBe(1))
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
 })
