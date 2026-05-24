@@ -8,6 +8,8 @@ import {
   CreationOptional,
 } from 'sequelize';
 
+export type SecurityDividendEligibility = 'eligible' | 'non_eligible' | 'unknown';
+
 export class Security extends Model<
   InferAttributes<Security>,
   InferCreationAttributes<Security>
@@ -18,6 +20,7 @@ export class Security extends Model<
   declare name: string | null;
   declare assetType: string | null;
   declare currency: string;
+  declare dividendEligibility: CreationOptional<SecurityDividendEligibility>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -39,6 +42,12 @@ export function initSecurity(sequelize: Sequelize): typeof Security {
         allowNull: true,
       },
       currency: { type: DataTypes.STRING(3), allowNull: false },
+      dividendEligibility: {
+        type: DataTypes.STRING(16),
+        field: 'dividend_eligibility',
+        allowNull: false,
+        defaultValue: 'eligible',
+      },
     } as ModelAttributes<Security>,
     {
       sequelize,
