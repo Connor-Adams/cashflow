@@ -31,6 +31,7 @@ export class Transaction extends Model<
   declare sourceRowFingerprint: string;
   declare sourceIdentityFingerprint: string;
   declare appliedRuleId: number | null;
+  declare entityId: number | null;
 
   declare merchantCanonical: string | null;
   declare txnType: CreationOptional<string>;
@@ -145,6 +146,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       appliedRuleId: {
         type: DataTypes.INTEGER,
         field: 'applied_rule_id',
+        allowNull: true,
+      },
+      entityId: {
+        type: DataTypes.INTEGER,
+        field: 'entity_id',
         allowNull: true,
       },
 

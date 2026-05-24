@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   BarChart3,
   BookOpenCheck,
+  Calculator,
   PackageSearch,
   CreditCard,
   ClipboardCheck,
@@ -43,6 +44,8 @@ const navItems: NavItem[] = [
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
+  { to: '/tax', label: 'Tax', icon: Calculator },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
