@@ -468,9 +468,12 @@ export function DashboardPage() {
       lookup.get(p.month)!.set(p.currency, p.sumAmount)
     }
     return months.map((month) => {
-      const row: Record<string, string | number> = { month }
+      // null (vs 0) so Recharts treats missing (month, currency) pairs as
+      // gaps rather than "$0 spent" — paired with connectNulls={false} on
+      // the Line element below.
+      const row: Record<string, string | number | null> = { month }
       for (const c of monthlyLineKeys) {
-        row[c] = lookup.get(month)?.get(c) ?? 0
+        row[c] = lookup.get(month)?.get(c) ?? null
       }
       return row
     })
@@ -1395,6 +1398,7 @@ export function DashboardPage() {
                     stroke={LINE_COLORS[i % LINE_COLORS.length]}
                     dot={false}
                     strokeWidth={2}
+                    connectNulls={false}
                   />
                 ))}
               </LineChart>
