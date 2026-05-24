@@ -80,10 +80,16 @@ export async function loadRelationshipCandidates(
   windowEnd.setUTCDate(windowEnd.getUTCDate() + refundWindowDays);
   const windowStartStr = windowStart.toISOString().slice(0, 10);
   const windowEndStr = windowEnd.toISOString().slice(0, 10);
+  // The merchant filter must always apply; only the household-OR-leg is
+  // conditional. Previously the entire clause was dropped when householdId
+  // was null, returning every transaction in the account+date window
+  // regardless of merchant.
   const householdClause = householdId != null
     ? `AND (merchant_clean = ? OR household_id = ?)`
-    : '';
-  const householdReplacements = householdId != null ? [merchantClean, householdId] : [];
+    : `AND merchant_clean = ?`;
+  const householdReplacements = householdId != null
+    ? [merchantClean, householdId]
+    : [merchantClean];
   const placeholders = householdAccountIds.map(() => '?').join(',');
   const rows = await sequelize.query<{
     id: number;
