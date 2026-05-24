@@ -14,6 +14,8 @@ test('findBestRule picks higher priority', () => {
       splitType: 'me',
       pctMe: null,
       pctPartner: null,
+      effectiveFrom: null,
+      effectiveTo: null,
     },
     {
       id: 2,
@@ -25,6 +27,8 @@ test('findBestRule picks higher priority', () => {
       splitType: 'me',
       pctMe: null,
       pctPartner: null,
+      effectiveFrom: null,
+      effectiveTo: null,
     },
   ];
   const { rule, ambiguous } = findBestRule(rules, 'COFFEE SHOP');
@@ -44,6 +48,8 @@ test('findBestRule ambiguous on tie', () => {
       splitType: 'me',
       pctMe: null,
       pctPartner: null,
+      effectiveFrom: null,
+      effectiveTo: null,
     },
     {
       id: 2,
@@ -55,6 +61,8 @@ test('findBestRule ambiguous on tie', () => {
       splitType: 'me',
       pctMe: null,
       pctPartner: null,
+      effectiveFrom: null,
+      effectiveTo: null,
     },
   ];
   const { rule, ambiguous } = findBestRule(rules, 'XY');

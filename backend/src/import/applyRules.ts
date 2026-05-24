@@ -10,6 +10,10 @@ export interface RuleRow {
   splitType: string;
   pctMe: string | null;
   pctPartner: string | null;
+  /** Inclusive lower bound on Transaction.date (YYYY-MM-DD); null = "always". */
+  effectiveFrom: string | null;
+  /** Exclusive upper bound on Transaction.date (YYYY-MM-DD); null = "forever". */
+  effectiveTo: string | null;
 }
 
 export function findBestRule(

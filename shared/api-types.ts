@@ -156,6 +156,8 @@ export type Rule = {
   splitType: string
   pctMe: string | null
   pctPartner: string | null
+  effectiveFrom: string | null
+  effectiveTo: string | null
   usageCount?: number
 }
 
