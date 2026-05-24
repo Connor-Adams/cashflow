@@ -49,7 +49,9 @@ describe('RulesPage', () => {
         </MemoryRouter>,
       )
       await waitFor(() => expect(screen.getByText('uber')).toBeInTheDocument())
-      expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+      await waitFor(() =>
+        expect(Element.prototype.scrollIntoView).toHaveBeenCalled(),
+      )
     })
 
     it('does not error when focus is missing', async () => {
