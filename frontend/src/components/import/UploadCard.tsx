@@ -89,34 +89,8 @@ type HoldingsResult = {
   accountsAffected: number
 }
 
-/**
- * Per-file result from the RBC PDF bundle endpoint
- * (POST /api/import/upload-rbc-bundle). Mirrors backend `RbcBundleFileResult`.
- */
-type RbcBundleFileResult = {
-  file: string
-  accountSuffix: string | null
-  productLabel: string | null
-  accountId: number | null
-  accountName: string | null
-  accountCreated: boolean
-  inserted: number
-  insertedTransactions: number
-  insertedInvestmentActivities: number
-  insertedHoldings: number
-  skippedDuplicates: number
-  rowErrors: number
-  parseErrors: { rowIndex: number; message: string }[]
-  warnings: string[]
-  error?: string
-}
-
-type RbcBundleUploadResponse = {
-  results: RbcBundleFileResult[]
-}
-
 /** Which upload form is currently rendered. */
-type UploadMode = 'standard' | 'bundle' | 'holdings' | 'rbc-bundle'
+type UploadMode = 'standard' | 'bundle' | 'holdings'
 
 type CsvProfileOption = { id: string; label: string; hint: string }
 
@@ -220,18 +194,9 @@ export function UploadCard({
     variant: AlertVariant
     title: string
   } | null>(null)
-  const [rbcBundleUploading, setRbcBundleUploading] = useState(false)
-  const [rbcBundleResults, setRbcBundleResults] = useState<RbcBundleFileResult[] | null>(
-    null,
-  )
-  const [rbcBundleFeedback, setRbcBundleFeedback] = useState<{
-    variant: AlertVariant
-    title: string
-  } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const bundleFileRef = useRef<HTMLInputElement>(null)
   const holdingsFileRef = useRef<HTMLInputElement>(null)
-  const rbcBundleFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void getJson<CsvProfileOption[]>('/api/import/profiles')
@@ -479,61 +444,6 @@ export function UploadCard({
     }
   }
 
-  async function onRbcBundleUpload(e: FormEvent) {
-    e.preventDefault()
-    const input = rbcBundleFileRef.current
-    const files = Array.from(input?.files ?? [])
-    if (files.length === 0) {
-      setRbcBundleFeedback({
-        variant: 'error',
-        title: 'Choose at least one RBC statement PDF first.',
-      })
-      return
-    }
-    setRbcBundleUploading(true)
-    setRbcBundleFeedback(null)
-    setRbcBundleResults(null)
-    try {
-      const fd = new FormData()
-      files.forEach((file) => fd.append('files', file))
-      const out = await postFormData<RbcBundleUploadResponse>(
-        '/api/import/upload-rbc-bundle',
-        fd,
-      )
-      setRbcBundleResults(out.results)
-      const filesWithErrors = out.results.filter((r) => r.error).length
-      const accountsCreated = out.results.filter((r) => r.accountCreated).length
-      const importedTxns = out.results.reduce(
-        (sum, r) => sum + r.insertedTransactions,
-        0,
-      )
-      const importedActs = out.results.reduce(
-        (sum, r) => sum + r.insertedInvestmentActivities,
-        0,
-      )
-      const importedHoldings = out.results.reduce(
-        (sum, r) => sum + r.insertedHoldings,
-        0,
-      )
-      const dupes = out.results.reduce((sum, r) => sum + r.skippedDuplicates, 0)
-      const title = `RBC bundle import complete — ${out.results.length} file(s), ${accountsCreated} new account(s), ${importedTxns} transaction(s), ${importedActs} investment activity(ies), ${importedHoldings} holding(s), ${dupes} dup(s) skipped${filesWithErrors ? `, ${filesWithErrors} file error(s)` : ''}.`
-      setRbcBundleFeedback({
-        variant: filesWithErrors > 0 ? 'warning' : 'success',
-        title,
-      })
-      if (input) input.value = ''
-      onCommitted()
-      ;(onAccountsChanged ?? onCommitted)()
-    } catch (e) {
-      setRbcBundleFeedback({
-        variant: 'error',
-        title: e instanceof Error ? e.message : 'RBC bundle upload failed',
-      })
-    } finally {
-      setRbcBundleUploading(false)
-    }
-  }
-
   async function onRunFolderImport() {
     try {
       setRunningFolderImport(true)
@@ -669,113 +579,6 @@ export function UploadCard({
     )
   }
 
-  if (mode === 'rbc-bundle') {
-    return (
-      <form
-        className="card uploadCard transactionsPanel"
-        onSubmit={onRbcBundleUpload}
-      >
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>RBC bundle (PDFs)</h2>
-            <p className="muted">
-              Drop RBC monthly PDF statements (chequing, savings, NOMI, Visa,
-              credit line, TFSA, RDSP). Accounts are auto-created on first
-              sight, keyed by the last 4 of the account number. The PDF body
-              is authoritative — filename hints are ignored. Investment
-              statements (TFSA/RDSP) also ingest holdings + activity rows.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              setMode('standard')
-              setRbcBundleFeedback(null)
-              setRbcBundleResults(null)
-            }}
-          >
-            Switch to standard upload
-          </Button>
-        </div>
-        <div className="formGrid transactionsFilterGrid">
-          <Label className="filePick">
-            RBC statement PDFs
-            <Input
-              ref={rbcBundleFileRef}
-              type="file"
-              accept=".pdf,application/pdf"
-              multiple
-              onChange={() => {
-                setRbcBundleFeedback(null)
-                setRbcBundleResults(null)
-              }}
-            />
-          </Label>
-        </div>
-        <div className="row transactionsActionRow">
-          <Button type="submit" disabled={rbcBundleUploading}>
-            {rbcBundleUploading ? 'Importing RBC bundle…' : 'Import RBC bundle'}
-          </Button>
-        </div>
-        {rbcBundleFeedback && (
-          <Alert
-            className="mt-3"
-            variant={rbcBundleFeedback.variant}
-            title={rbcBundleFeedback.title}
-          />
-        )}
-        {rbcBundleResults && rbcBundleResults.length > 0 && (
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>File</TableHead>
-                  <TableHead>Account</TableHead>
-                  <TableHead>Transactions</TableHead>
-                  <TableHead>Invest activities</TableHead>
-                  <TableHead>Holdings</TableHead>
-                  <TableHead>Skipped dupes</TableHead>
-                  <TableHead>Errors</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {[...rbcBundleResults]
-                  .sort((a, b) => {
-                    const an = a.accountName ?? 'zzzzz'
-                    const bn = b.accountName ?? 'zzzzz'
-                    return an === bn ? a.file.localeCompare(b.file) : an.localeCompare(bn)
-                  })
-                  .map((r) => (
-                    <TableRow key={r.file}>
-                      <TableCell title={r.file}>{r.file}</TableCell>
-                      <TableCell>
-                        {r.accountName ?? '—'}
-                        {r.accountCreated ? (
-                          <span className="muted"> (new)</span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>{r.insertedTransactions}</TableCell>
-                      <TableCell>{r.insertedInvestmentActivities}</TableCell>
-                      <TableCell>{r.insertedHoldings}</TableCell>
-                      <TableCell>{r.skippedDuplicates}</TableCell>
-                      <TableCell className={r.error ? 'error' : ''}>
-                        {r.error
-                          ? r.error
-                          : r.rowErrors > 0
-                            ? `${r.rowErrors} row error(s)`
-                            : '—'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </form>
-    )
-  }
-
   if (mode === 'holdings') {
     return (
       <form
@@ -891,17 +694,6 @@ export function UploadCard({
             }}
           >
             Wealthsimple bundle
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              setMode('rbc-bundle')
-              setUploadFeedback(null)
-              setPreviewData(null)
-            }}
-          >
-            RBC bundle (PDFs)
           </Button>
           <Button
             type="button"

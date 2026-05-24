@@ -31,17 +31,8 @@ let builtInsRegistered = false;
 export function registerBuiltInPdfParsers(): void {
   if (builtInsRegistered) return;
   // Lazy require avoids circular module init with extractLines/pdfjs-dist.
-  /* eslint-disable @typescript-eslint/no-require-imports */
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { cibcCostcoMastercardParser } = require('./cibcCostcoMastercard');
-  const { rbcPersonalBankingParser } = require('./rbcPersonalBanking');
-  const { rbcVisaParser } = require('./rbcVisa');
-  const { rbcCreditLineParser } = require('./rbcCreditLine');
-  const { rbcInvestmentParser } = require('./rbcInvestment');
-  /* eslint-enable @typescript-eslint/no-require-imports */
   registerPdfParser(cibcCostcoMastercardParser);
-  registerPdfParser(rbcPersonalBankingParser);
-  registerPdfParser(rbcVisaParser);
-  registerPdfParser(rbcCreditLineParser);
-  registerPdfParser(rbcInvestmentParser);
   builtInsRegistered = true;
 }

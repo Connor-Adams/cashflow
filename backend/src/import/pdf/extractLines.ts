@@ -1,4 +1,4 @@
-import type { PdfLine, PdfTextSpan } from './types';
+import type { PdfLine } from './types';
 
 /** Tolerance in PDF user-space units for considering two text items "on the same line". */
 const Y_TOLERANCE = 1;
@@ -26,16 +26,12 @@ function bucketByY(items: TextItem[]): Bucket[] {
   return buckets;
 }
 
-function sortedItems(items: TextItem[]): TextItem[] {
-  return [...items].sort((a, c) => a.transform[4] - c.transform[4]);
-}
-
 function joinBucket(items: TextItem[]): string {
-  const sorted = sortedItems(items);
+  items.sort((a, c) => a.transform[4] - c.transform[4]);
   const parts: string[] = [];
   let prevRight = -Infinity;
   let prevSpaceWidth = 0;
-  for (const it of sorted) {
+  for (const it of items) {
     const x = it.transform[4];
     if (parts.length === 0) {
       parts.push(it.str);
@@ -53,23 +49,6 @@ function joinBucket(items: TextItem[]): string {
   return parts.join('').replace(/\s+$/, '');
 }
 
-function bucketToSpans(items: TextItem[]): PdfTextSpan[] {
-  const sorted = sortedItems(items);
-  const merged: PdfTextSpan[] = [];
-  for (const it of sorted) {
-    const x = it.transform[4];
-    const last = merged[merged.length - 1];
-    // Coalesce adjacent fragments emitted by pdfjs for the same visual token.
-    if (last && x - (last.x + last.width) < 0.5) {
-      last.str += it.str;
-      last.width = x + it.width - last.x;
-    } else {
-      merged.push({ x, width: it.width, str: it.str });
-    }
-  }
-  return merged.filter((m) => m.str.trim().length > 0);
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function extractPageLines(page: any, pageNum: number): Promise<PdfLine[]> {
   const content = await page.getTextContent();
@@ -79,9 +58,7 @@ async function extractPageLines(page: any, pageNum: number): Promise<PdfLine[]> 
   const out: PdfLine[] = [];
   for (const b of buckets) {
     const text = joinBucket(b.items);
-    if (text.length > 0) {
-      out.push({ page: pageNum, y: b.y, text, items: bucketToSpans(b.items) });
-    }
+    if (text.length > 0) out.push({ page: pageNum, y: b.y, text });
   }
   return out;
 }
@@ -92,9 +69,7 @@ async function extractPageLines(page: any, pageNum: number): Promise<PdfLine[]> 
  * Strategy: pdfjs returns positioned text items per page. We bucket items by y-coord
  * (within Y_TOLERANCE), sort each bucket left-to-right by x, and join with the
  * minimum number of spaces needed to keep column gaps detectable (1 space if items
- * touch, more spaces proportional to the x-gap). Each line also carries the
- * raw positioned spans so column-sensitive parsers (RBC personal banking) can
- * disambiguate withdrawals vs deposits by x-coordinate.
+ * touch, more spaces proportional to the x-gap).
  *
  * Uses a dynamic import because pdfjs-dist v5 is ESM-only and the backend is
  * compiled to CommonJS (tsconfig.json `module: commonjs`). Dynamic import works

@@ -10,7 +10,6 @@ const ACCOUNT_TYPES = new Set([
   'savings',
   'credit_card',
   'investment',
-  'loan',
   'cash',
   'other',
 ]);

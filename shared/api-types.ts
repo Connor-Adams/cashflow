@@ -17,7 +17,6 @@ export type AccountType =
   | 'savings'
   | 'credit_card'
   | 'investment'
-  | 'loan'
   | 'cash'
   | 'other'
 

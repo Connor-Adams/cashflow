@@ -673,39 +673,11 @@ export async function parseStatementFile(opts: {
         sourceReference: v.sourceReference,
       }),
     }));
-    // Investment-statement parsers (RBC RDSP, etc) emit activities + holdings
-    // alongside cash transactions. Apply the same fingerprinting that the CSV
-    // path uses so dedup is consistent across import sources.
-    const investmentActivities: NormalizedInvestmentActivity[] = (out.investmentActivities ?? []).map((a) => ({
-      ...a,
-      sourceRowFingerprint: stableFingerprint({
-        kind: 'investment_activity',
-        accountId: account.id,
-        tradeDate: a.tradeDate,
-        type: a.activityType,
-        symbol: a.security?.symbol ?? null,
-        quantity: a.quantity,
-        amount: a.amount,
-      }),
-    }));
-    const holdings: NormalizedHoldingSnapshot[] = (out.holdings ?? []).map((h) => ({
-      ...h,
-      sourceRowFingerprint: stableFingerprint({
-        kind: 'holding',
-        accountId: account.id,
-        statementDate: h.statementDate,
-        symbol: h.security.symbol,
-        quantity: h.quantity,
-        marketValue: h.marketValue,
-      }),
-    }));
     const preview = {
       ...base,
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
       transactions,
-      investmentActivities,
-      holdings,
       warnings: out.warnings,
       parseErrors: out.parseErrors,
       rowErrors: out.parseErrors.length,

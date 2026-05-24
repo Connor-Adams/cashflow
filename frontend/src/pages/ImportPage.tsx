@@ -36,7 +36,7 @@ export function ImportPage() {
     <div className="page">
       <PageHeader
         title="Import"
-        description="CSVs, OFX exports, Wealthsimple bundles, or RBC PDF bundles."
+        description="CSVs, OFX exports, or Wealthsimple bundles."
       />
       <UploadCard
         accounts={accounts}
