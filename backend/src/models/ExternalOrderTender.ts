@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-class-member -- Sequelize `declare` fields are runtime schema, not consumed via .member access
 import {
   Model,
   DataTypes,

@@ -76,6 +76,7 @@ function scoreAmountComponent(txnAmount: number, payAmount: number): Component {
   return { points: -25, reason: `amount mismatch over $2.00 (${diff.toFixed(2)})` };
 }
 
+// fallow-ignore-next-line complexity -- piecewise date-gap scoring; covered by scoreReceiptMatch tests
 function scoreDateComponent(txnDate: string, orderDate: string | null): Component {
   if (!orderDate) return { points: 0, reason: null };
   const gap = daysBetween(txnDate, orderDate);
@@ -91,6 +92,7 @@ function scoreVendorComponent(order: ExternalOrder, txn: Transaction): Component
     : { points: 0, reason: null };
 }
 
+// fallow-ignore-next-line complexity -- short-circuit chain; covered by scoreReceiptMatch tests
 function scoreLast4Component(payment: CandidatePayment, txn: Transaction): Component {
   if (!payment.paymentLast4) return { points: 0, reason: null };
   const txnLast4 = last4FromText(`${txn.notes || ''} ${txn.sourceReference || ''}`);
@@ -125,6 +127,7 @@ export function scoreReceiptMatch(
  *
  * Returns counts useful for the upload-response payload.
  */
+// fallow-ignore-next-line complexity -- per-tender claim/upsert orchestration; covered by integration tests
 export async function matchReceiptOrderToTransactions(args: {
   externalOrderId: number;
   householdId: number;

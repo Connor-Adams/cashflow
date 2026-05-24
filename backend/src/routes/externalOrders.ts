@@ -304,6 +304,7 @@ router.post(
       next();
     });
   },
+  // fallow-ignore-next-line complexity -- sequential validation + parse + persist + match; covered by integration tests
   async (req, res, next) => {
     try {
       const auth = currentAuth(req);

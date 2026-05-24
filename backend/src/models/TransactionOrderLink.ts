@@ -18,6 +18,7 @@ export class TransactionOrderLink extends Model<
   declare confidence: string;
   declare matchReason: string;
   declare status: CreationOptional<string>;
+  // fallow-ignore-next-line unused-class-member -- Sequelize runtime schema, not consumed via .member access
   declare linkedAmount: string | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
