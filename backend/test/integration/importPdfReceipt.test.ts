@@ -193,6 +193,7 @@ test('POST /import-pdf: split-tender receipt auto-links to both card transaction
     currency: 'CAD',
     importBatch: 'test-receipt-match-1',
     sourceRowFingerprint: 'test-receipt-fp-1',
+    sourceIdentityFingerprint: 'test-receipt-identity-1',
   } as never);
 
   const t2 = await models.Transaction.create({
@@ -207,6 +208,7 @@ test('POST /import-pdf: split-tender receipt auto-links to both card transaction
     currency: 'CAD',
     importBatch: 'test-receipt-match-2',
     sourceRowFingerprint: 'test-receipt-fp-2',
+    sourceIdentityFingerprint: 'test-receipt-identity-2',
   } as never);
 
   // R2 was already uploaded by the previous test — re-upload to trigger re-matching.

@@ -1,6 +1,5 @@
 import type { Transaction as SequelizeTransaction } from 'sequelize';
 import { Transaction } from '../models';
-import { rowFingerprint } from './fingerprint';
 
 export type DedupOutcome =
   | { kind: 'no-match' }
@@ -15,21 +14,30 @@ function normalizeRef(v: string | null | undefined): string | null {
 
 /**
  * Look for an already-imported transaction that should be considered the same
- * as the incoming row, applying NULL-as-wildcard semantics on `source_reference`.
+ * as the incoming row, using `sourceIdentityFingerprint` (a hash over
+ * accountId + date + amount + currency + merchantRaw) as the dedup key.
  *
- * Matching key: (accountId, date, amount, currency, merchantRaw). Within that key:
- *   - exact source_reference match (incl. both NULL) → duplicate
- *   - incoming NULL, any existing populated     → duplicate (incoming has no new info)
- *   - incoming populated, existing NULL         → duplicate-backfilled
- *       (we write incoming.source_reference + new fingerprint onto the existing row)
- *   - both populated and different              → not a match (legitimate distinct charge)
+ * The identity fingerprint deliberately excludes `merchantClean` and
+ * `sourceReference`, both of which drift over time:
+ *   - `merchantClean` changes whenever `normalizeMerchant` rules evolve
+ *   - `sourceReference` flips NULL → AT… when Amex pending txns clear
+ * Either change would otherwise produce a "new" fingerprint and cause a
+ * re-imported CSV to insert duplicates.
+ *
+ * NULL-as-wildcard semantics on `source_reference` are preserved so we
+ * don't collapse legitimate same-merchant/same-day/same-amount repeats
+ * (e.g., two $25 Starbucks runs on 2025-12-08):
+ *   - same identity, same source_reference (incl. both NULL) → duplicate
+ *   - same identity, incoming NULL + existing populated      → duplicate
+ *   - same identity, incoming populated + existing NULL      → duplicate-backfilled
+ *       (we write incoming.source_reference onto the existing row, scoped
+ *        save so the audit-only sourceRowFingerprint stays untouched)
+ *   - same identity, both populated and different            → no-match
+ *       (legitimate distinct charges — preserved as in the prior dedup)
  */
 export async function findExistingForDedup(args: {
   accountId: number;
-  date: string;
-  amount: string | number;
-  currency: string;
-  merchantRaw: string;
+  sourceIdentityFingerprint: string;
   sourceReference: string | null;
   t: SequelizeTransaction;
 }): Promise<DedupOutcome> {
@@ -37,10 +45,7 @@ export async function findExistingForDedup(args: {
   const candidates = await Transaction.findAll({
     where: {
       accountId: args.accountId,
-      date: args.date,
-      amount: String(args.amount),
-      currency: args.currency,
-      merchantRaw: args.merchantRaw,
+      sourceIdentityFingerprint: args.sourceIdentityFingerprint,
     },
     transaction: args.t,
   });
@@ -65,15 +70,15 @@ export async function findExistingForDedup(args: {
     );
     if (nullExisting) {
       nullExisting.sourceReference = incomingRef;
-      nullExisting.sourceRowFingerprint = rowFingerprint({
-        accountId: nullExisting.accountId,
-        date: nullExisting.date,
-        amount: Number(nullExisting.amount),
-        currency: nullExisting.currency,
-        merchantRaw: nullExisting.merchantRaw,
-        sourceReference: incomingRef,
+      // Scoped save: only persist the sourceReference column. The audit-hash
+      // `sourceRowFingerprint` is intentionally left as the null-era hash —
+      // a mild mismatch is acceptable on backfill-arm rows, and rewriting it
+      // would risk colliding with the existing
+      // transactions_account_fingerprint_unique safety-net index.
+      await nullExisting.save({
+        transaction: args.t,
+        fields: ['sourceReference'],
       });
-      await nullExisting.save({ transaction: args.t });
       return { kind: 'duplicate-backfilled', existingId: nullExisting.id };
     }
   }

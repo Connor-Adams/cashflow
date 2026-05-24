@@ -56,6 +56,14 @@ const generic_amex: CsvProfile = {
     'Amount (GBP)',
   ],
   currencyHeaders: ['Currency', 'Currency Code', 'Txn Currency'],
+  // Amex CSVs include a `Reference Number` column populated for cleared
+  // transactions (e.g. AT26053000600001…). The column is blank while a
+  // transaction is in the ~30-day pending window, then flips to the
+  // assigned reference on re-download. Mapping it here surfaces it on the
+  // Transaction row; dedup keys off `sourceIdentityFingerprint` (which
+  // excludes sourceReference) so the NULL→populated flip no longer breaks
+  // re-imports.
+  referenceHeaders: ['Reference Number', 'Reference'],
   dateFormat: 'MM/dd/yyyy',
   // Amex exports commonly use positive charges and negative credits/payments.
   // Invert sign so charges become negative and credits/payments become positive.

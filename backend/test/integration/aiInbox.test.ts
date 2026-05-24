@@ -230,6 +230,7 @@ test('GET /api/ai/inbox includes rule_proposal items computed from transactions'
       merchantRaw: 'INBOX SHOP', merchantClean: 'INBOX SHOP',
       importBatch: 'inbox-test',
       sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
       amount: -10,
       finalCategory: 'Groceries', finalBusiness: false, finalSplitType: 'me',
       reviewedAt: new Date(),
@@ -273,6 +274,7 @@ test('GET /api/ai/inbox/count includes non-dismissed rule proposals', async () =
       merchantRaw: 'COUNT ME', merchantClean: 'COUNT ME',
       importBatch: 'inbox-test-2',
       sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
       amount: -8,
       finalCategory: 'Coffee', finalBusiness: false, finalSplitType: 'me',
       reviewedAt: new Date(),
@@ -295,6 +297,7 @@ test('POST /api/ai/rule-proposals dismiss normalizes multi-space patterns', asyn
       merchantRaw: 'SPACE  HOG', merchantClean: 'SPACE  HOG',
       importBatch: 'spaces-test',
       sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
       amount: -5,
       finalCategory: 'Misc', finalBusiness: false, finalSplitType: 'me',
       reviewedAt: new Date(),
@@ -441,18 +444,21 @@ test('GET /api/transactions?ids=1,2 filters to listed ids', async () => {
     householdId, accountId: account.id, currency: 'CAD',
     date: '2026-05-01', merchantRaw: 'A', merchantClean: 'A',
     importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
     amount: -1, finalCategory: 'X', finalBusiness: false, finalSplitType: 'me',
   } as never);
   const b = await Transaction.create({
     householdId, accountId: account.id, currency: 'CAD',
     date: '2026-05-02', merchantRaw: 'B', merchantClean: 'B',
     importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
     amount: -2, finalCategory: 'Y', finalBusiness: false, finalSplitType: 'me',
   } as never);
   await Transaction.create({
     householdId, accountId: account.id, currency: 'CAD',
     date: '2026-05-03', merchantRaw: 'C', merchantClean: 'C',
     importBatch: 'ids-test', sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
     amount: -3, finalCategory: 'Z', finalBusiness: false, finalSplitType: 'me',
   } as never);
 
