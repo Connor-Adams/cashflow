@@ -874,11 +874,11 @@
   }
 
   .aiActionBanner {
+    grid-column: 1 / -1;
     background: var(--destructive, #fee2e2);
     color: var(--destructive-foreground, #7f1d1d);
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
-    margin-bottom: 0.75rem;
     font-size: 0.875rem;
   }
   .aiActionBanner a {
@@ -1200,10 +1200,8 @@
   }
 
   .businessSpotlightTotals {
-    @apply rounded-lg border px-4 py-3;
-    min-width: 220px;
-    border-color: color-mix(in srgb, var(--border) 70%, white 10%);
-    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    @apply text-right;
+    min-width: 0;
   }
 
   .businessSpotlightTotalLabel {
@@ -1212,7 +1210,8 @@
   }
 
   .businessSpotlightTotalValue {
-    @apply mt-1 text-2xl font-semibold tracking-tight;
+    @apply mt-0.5 text-lg font-semibold tracking-tight tabular-nums;
+    color: var(--foreground);
   }
 
   .businessSpotlightGrid {
