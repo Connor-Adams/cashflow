@@ -101,11 +101,14 @@ export function initRule(sequelize: Sequelize): typeof Rule {
     }
   );
   Rule.addHook('afterSave', async (instance: Rule, options) => {
-    const { ensureCategory } = await import('../util/ensureCategory');
-    if (instance.householdId != null) {
+    if (instance.householdId == null) return;
+    try {
+      const { ensureCategory } = await import('../util/ensureCategory');
       await ensureCategory(instance.householdId, instance.category, {
         transaction: options.transaction,
       });
+    } catch (e) {
+      console.warn('[ensureCategory] Rule hook failed', e);
     }
   });
   return Rule;

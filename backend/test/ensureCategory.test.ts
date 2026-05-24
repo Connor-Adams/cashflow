@@ -1,12 +1,7 @@
-import { test, before, beforeEach } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { sequelize } from '../src/db';
 import { Category, Household } from '../src/models';
 import { ensureCategory } from '../src/util/ensureCategory';
-
-before(async () => {
-  await sequelize.sync({ force: true });
-});
 
 beforeEach(async () => {
   await Category.destroy({ where: {}, truncate: true });
