@@ -12,7 +12,7 @@ import type { Transaction as SequelizeTransaction } from 'sequelize';
 export async function ensureCategory(
   householdId: number,
   name: string | null | undefined,
-  options: { transaction?: SequelizeTransaction } = {}
+  options: { transaction?: SequelizeTransaction | null } = {}
 ): Promise<void> {
   if (name == null) return;
   const trimmed = name.trim();
@@ -20,6 +20,6 @@ export async function ensureCategory(
   await Category.findOrCreate({
     where: { householdId, name: trimmed },
     defaults: { householdId, name: trimmed, icon: null },
-    transaction: options.transaction,
+    transaction: options.transaction ?? undefined,
   });
 }
