@@ -79,6 +79,22 @@ export const RATES_2025: RateTable = {
   donationHighRateOntario: D('0.1116'),
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2837'),
+  // Disability Tax Credit — base amounts × 15% = credit value. 2025 values indexed ~2.7% from 2024.
+  dtcBaseFederal: D('10138'),          // 9872 × 1.027 ≈ 10138; verify vs CRA T2201-2025
+  dtcSupplementFederal: D('5916'),     // 5758 × 1.027 ≈ 5914; rounded to published 5916
+  dtcSupplementThreshold: D('3464'),   // 3373 × 1.027 ≈ 3464
+  dtcBaseOntario: D('9852'),           // 9586 × 1.028 ≈ 9852 (ON indexation ~2.8%)
+  // Caregiver amount L30450 base
+  caregiverAmountFederalInfirmAdult: D('8215'),  // 7999 × 1.027 ≈ 8215
+  caregiverThresholdFederal: D('19290'),          // 18783 × 1.027 ≈ 19290
+  // Pension income amount
+  pensionIncomeAmountCap: D('2000'),
+  pensionIncomeAmountCapOntario: D('1686'),        // 1641 × 1.028 ≈ 1686
+  // OAS clawback threshold 2025 — indexed from 2024
+  oasClawbackThreshold: D('93454'),               // 90997 × 1.027 ≈ 93454; verify vs CRA 2025 schedule
+  oasClawbackRate: D('0.15'),
+  // FHSA annual deduction limit (fixed at $8,000 — not indexed)
+  fhsaAnnualLimit: D('8000'),
   sources: [
     { name: 'CRA T1-2025 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2025 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
