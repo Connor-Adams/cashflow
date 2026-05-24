@@ -43,15 +43,12 @@ function* iterSection(
   sectionRe: RegExp,
   endRe: RegExp,
 ): Generator<{ line: PdfLine; text: string }> {
-  let inSection = false;
-  for (const l of lines) {
-    const text = l.text.trim();
-    if (!inSection) {
-      if (sectionRe.test(text)) inSection = true;
-      continue;
-    }
+  const startIdx = lines.findIndex((l) => sectionRe.test(l.text.trim()));
+  if (startIdx === -1) return;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const text = lines[i].text.trim();
     if (endRe.test(text)) return;
-    yield { line: l, text };
+    yield { line: lines[i], text };
   }
 }
 
