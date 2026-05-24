@@ -198,6 +198,22 @@ type ReceiptImportResult = {
   }
 }
 
+async function postFormDataFile<T>(endpoint: string, file: File): Promise<T> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const base = import.meta.env.VITE_API_BASE ?? ''
+  const res = await fetch(`${base}${endpoint}`, {
+    method: 'POST',
+    credentials: 'include',
+    body: fd,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  return (await res.json()) as T
+}
+
 export function SettingsPage() {
   const auth = useAuth()
   const { showToast } = useToast()
@@ -551,20 +567,7 @@ export function SettingsPage() {
     setReceiptError(null)
     setCsvResult(null)
     try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const base = import.meta.env.VITE_API_BASE ?? ''
-      const res = await fetch(`${base}/api/external-orders/import-csv?vendor=${csvVendor}`, {
-        method: 'POST',
-        credentials: 'include',
-        body: fd,
-      })
-      if (!res.ok) {
-        const text = await res.text().catch(() => res.statusText)
-        throw new Error(text || `HTTP ${res.status}`)
-      }
-      const r = (await res.json()) as PurchaseHistoryCsvResult
-      setCsvResult(r)
+      setCsvResult(await postFormDataFile<PurchaseHistoryCsvResult>(`/api/external-orders/import-csv?vendor=${csvVendor}`, file))
     } catch (e) {
       setReceiptError(e instanceof Error ? e.message : 'CSV upload failed')
     } finally {
@@ -588,8 +591,6 @@ export function SettingsPage() {
     }
   }
 
-  // Sequential fetch + state transitions; exercised by every receipt upload path.
-  // fallow-ignore-next-line complexity
   async function uploadReceiptFile(
     file: File,
     busy: 'image' | 'pdf',
@@ -601,19 +602,7 @@ export function SettingsPage() {
     setReceiptError(null)
     setReceiptResult(null)
     try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const base = import.meta.env.VITE_API_BASE ?? ''
-      const res = await fetch(`${base}${endpoint}`, {
-        method: 'POST',
-        credentials: 'include',
-        body: fd,
-      })
-      if (!res.ok) {
-        const text = await res.text().catch(() => res.statusText)
-        throw new Error(text || `HTTP ${res.status}`)
-      }
-      setReceiptResult((await res.json()) as ReceiptImportResult)
+      setReceiptResult(await postFormDataFile<ReceiptImportResult>(endpoint, file))
     } catch (e) {
       setReceiptError(e instanceof Error ? e.message : errorLabel)
     } finally {
