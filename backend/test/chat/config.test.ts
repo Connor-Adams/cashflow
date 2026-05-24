@@ -9,17 +9,6 @@ beforeEach(() => {
   delete process.env.OPENAI_MODEL;
 });
 
-test('getChatConfig disabled by default', () => {
-  assert.equal(getChatConfig().enabled, false);
-});
-
-test('getChatConfig enables on CHAT_ENABLED=true (string match)', () => {
-  process.env.CHAT_ENABLED = 'true';
-  assert.equal(getChatConfig().enabled, true);
-  process.env.CHAT_ENABLED = 'TRUE';
-  assert.equal(getChatConfig().enabled, false); // strict 'true' only
-});
-
 test('getChatConfig model precedence: CHAT_MODEL > OPENAI_MODEL > default', () => {
   delete process.env.OPENAI_MODEL;
   assert.equal(getChatConfig().model, 'gpt-4o-mini');

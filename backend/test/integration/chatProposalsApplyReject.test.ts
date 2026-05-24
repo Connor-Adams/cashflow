@@ -11,10 +11,6 @@
  * calling them with a hand-rolled ProposalContext rather than by going through
  * the SSE message endpoint — that keeps the test focused on the apply/reject
  * surface and avoids stubbing OpenAI.
- *
- * Why CHAT_ENABLED must be set BEFORE importing src/app: the chat router gate
- * (src/app.ts) reads the env var at module-load time and never registers the
- * router if it's not 'true'. Each *.test.ts runs in its own tsx process.
  */
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,9 +49,6 @@ before(async () => {
 
   process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
-  // MUST be set before importing src/app — the chat router gate is read at
-  // module-load time.
-  process.env.CHAT_ENABLED = 'true';
 
   execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
     cwd: backendRoot,

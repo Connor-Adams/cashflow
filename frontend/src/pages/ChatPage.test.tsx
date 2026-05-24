@@ -202,10 +202,10 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: /^Reject$/ })).toBeInTheDocument()
   })
 
-  it('renders a disabled banner when AI status reports chat=false', async () => {
+  it('renders a disabled banner when AI status reports openai=false', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: FetchInput) => {
       const url = typeof input === 'string' ? input : input.toString()
-      if (url.endsWith('/api/ai/status')) return jsonResponse({ openai: true, chat: false })
+      if (url.endsWith('/api/ai/status')) return jsonResponse({ openai: false, chat: false })
       if (url.endsWith('/api/chat/threads')) return jsonResponse([])
       return jsonResponse({ error: 'not mocked' }, 404)
     })
@@ -215,6 +215,6 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/Chat is disabled/i)).toBeInTheDocument()
     })
-    expect(screen.getByText(/CHAT_ENABLED=true/)).toBeInTheDocument()
+    expect(screen.getByText(/OpenAI is not configured/i)).toBeInTheDocument()
   })
 })

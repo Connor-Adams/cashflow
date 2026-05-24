@@ -1,8 +1,5 @@
 /**
  * Integration tests for /api/chat thread CRUD (PR2 Task 5).
- *
- * CHAT_ENABLED is set BEFORE importing src/app so the chat router actually
- * registers (the gate is read at module-load time).
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,8 +24,6 @@ before(async () => {
 
   process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
-  // MUST be set before importing src/app — the chat router gate is read at module-load.
-  process.env.CHAT_ENABLED = 'true';
 
   execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
     cwd: backendRoot,

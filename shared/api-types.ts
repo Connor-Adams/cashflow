@@ -550,8 +550,10 @@ export type PortfolioSecurityDetail = {
 /**
  * Response shape for GET /api/ai/status. `openai` reflects whether the
  * server has an OpenAI key configured (and the caller is not a demo user).
- * `chat` is the UI-facing flag: true only when BOTH the chat feature flag
- * is enabled AND OpenAI is available.
+ * `chat` is the UI-facing flag for chat availability; it now mirrors
+ * `openai` (chat is always-on whenever a provider is configured) but is
+ * kept as a separate field for backward compatibility with existing
+ * callers.
  */
 export type AiStatus = {
   openai: boolean

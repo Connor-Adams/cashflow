@@ -73,11 +73,12 @@ type SidebarProps = {
  */
 export function Sidebar({ open, onClose }: SidebarProps) {
   const aiStatus = useAiStatus()
-  // Hide chat nav until status loads (avoids a flash) and when chat is
-  // disabled server-side. Status is fetched once on mount; if it errors
-  // it resolves to `{ chat: false }` so we fail closed.
+  // Hide chat nav until status loads (avoids a flash) and when OpenAI is
+  // not configured (chat is useless without a provider). Status is fetched
+  // once on mount; on error it resolves to `{ openai: false }` so we fail
+  // closed and hide the nav entry rather than leading users to a broken page.
   const filteredItems = useMemo(() => {
-    if (aiStatus?.chat === true) return navItems
+    if (aiStatus?.openai === true) return navItems
     return navItems.filter((i) => i.to !== '/chat')
   }, [aiStatus])
 

@@ -38,10 +38,10 @@ type ApplyError =
  * 4. On apply/reject → POST /api/chat/proposals/:id/(apply|reject), then
  *    refetch.
  *
- * The chat feature is gated server-side via `AiStatus.chat`; we mirror
- * that gate here so the page stays usable on disabled environments
- * (shows a disabled banner instead of an empty 404-looking page). The
- * Sidebar gates the *nav entry* on the same flag — see Sidebar.tsx.
+ * Chat is always-on whenever OpenAI is configured; the page mirrors the
+ * server-side `openai` flag (chat is useless without a provider) and shows
+ * a disabled banner when it's not set instead of an empty 404-looking page.
+ * The Sidebar gates the *nav entry* on the same flag — see Sidebar.tsx.
  */
 export function ChatPage() {
   const aiStatus = useAiStatus()
@@ -340,8 +340,8 @@ export function ChatPage() {
 
   // Mirror the server-side gate. While loading, render the full layout
   // so SSR / first-paint doesn't flicker.
-  if (aiStatus && aiStatus.chat === false) {
-    return <ChatDisabled openai={aiStatus.openai} />
+  if (aiStatus && aiStatus.openai === false) {
+    return <ChatDisabled />
   }
 
   return (
@@ -379,7 +379,7 @@ export function ChatPage() {
   )
 }
 
-function ChatDisabled({ openai }: { openai: boolean }) {
+function ChatDisabled() {
   return (
     <div
       data-slot="chat-disabled"
@@ -387,9 +387,7 @@ function ChatDisabled({ openai }: { openai: boolean }) {
     >
       <h2 className="mb-2 text-lg font-semibold">Chat is disabled</h2>
       <p className="muted max-w-md text-sm">
-        {openai
-          ? 'Set CHAT_ENABLED=true in the backend environment to enable this feature.'
-          : 'OpenAI is not configured for this account, so chat is unavailable.'}
+        OpenAI is not configured for this account, so chat is unavailable.
       </p>
     </div>
   )
