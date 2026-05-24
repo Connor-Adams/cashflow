@@ -296,3 +296,77 @@ test('splitTxnByItems: applies businessUseOverride to businessAmount per allocat
   );
   assert.ok(Math.abs(out[0].businessAmount - -50) < 0.05, `got ${out[0].businessAmount}, want ~-50`);
 });
+
+test('splitTxnByItems: multi-item + linkedAmount split-tender allocates correctly', () => {
+  const ordersById = new Map([
+    [
+      10,
+      {
+        id: 10,
+        subtotal: '90.00',
+        tax: '10.00',
+        shipping: null,
+        total: '100.00',
+        currency: 'CAD',
+      },
+    ],
+  ]);
+  const itemsByOrder = new Map([
+    [
+      10,
+      [
+        {
+          id: 1,
+          totalPrice: '60.00',
+          unitPrice: null,
+          quantity: 1,
+          inferredCategory: 'Groceries',
+          categoryOverride: null,
+          businessUsePercent: null,
+          businessUseOverride: null,
+        },
+        {
+          id: 2,
+          totalPrice: '30.00',
+          unitPrice: null,
+          quantity: 1,
+          inferredCategory: 'Household',
+          categoryOverride: null,
+          businessUsePercent: null,
+          businessUseOverride: null,
+        },
+      ],
+    ],
+  ]);
+  const out = splitTxnByItems(
+    input({
+      txn: {
+        id: 1,
+        amount: '-60.00',
+        currency: 'CAD',
+        finalCategory: 'Shopping',
+        finalBusiness: false,
+        finalSplitType: 'me',
+        businessAmount: '0',
+      },
+      links: [{ externalOrderId: 10, linkedAmount: '60.00' }],
+      ordersById,
+      itemsByOrder,
+    }),
+  );
+  // share = 60/100 = 0.6
+  // Groceries: 60 * 0.6 + (10 * 0.6) * (60/90) = 36 + 4 = 40
+  // Household: 30 * 0.6 + (10 * 0.6) * (30/90) = 18 + 2 = 20
+  // Total = 60, no drift.
+  const sum = out.reduce((s, a) => s + a.amount, 0);
+  assert.ok(Math.abs(sum - (-60)) < 0.05, `sum should be -60, got ${sum}`);
+  const groceries = out.find((a) => a.category === 'Groceries');
+  const household = out.find((a) => a.category === 'Household');
+  assert.ok(groceries != null, 'Groceries allocation present');
+  assert.ok(household != null, 'Household allocation present');
+  assert.ok(Math.abs(groceries!.amount - (-40)) < 0.05, `Groceries should be -40, got ${groceries!.amount}`);
+  assert.ok(Math.abs(household!.amount - (-20)) < 0.05, `Household should be -20, got ${household!.amount}`);
+  // Importantly: NO drift bucket under 'Shopping' since math is exact.
+  const shopping = out.find((a) => a.category === 'Shopping');
+  assert.equal(shopping, undefined, 'no drift bucket should be created when allocation is exact');
+});

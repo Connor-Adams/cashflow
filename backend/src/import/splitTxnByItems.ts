@@ -134,9 +134,9 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
     }
 
     for (const it of items) {
-      const base = itemBase(it) * share;
-      const weight = base / baseSum;
-      const portion = base + extras * weight;
+      const rawBase = itemBase(it);
+      const weight = baseSum > 0 ? rawBase / baseSum : 0;
+      const portion = rawBase * share + extras * weight;
       const cat = effectiveCategory(it, txn.finalCategory);
       const biz = (effectiveBusinessPct(it) / 100) * portion;
       add(cat, portion * sign, biz * sign);

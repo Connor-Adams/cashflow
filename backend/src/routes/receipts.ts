@@ -281,10 +281,16 @@ router.post(
         householdId: auth.household.id,
         source: 'receipt-analyze',
       });
+      const previousExternalOrderId = row.externalOrderId;
       await row.update({
         externalOrderId: order.id,
         extractedNote: JSON.stringify(extracted),
       });
+      if (previousExternalOrderId != null && previousExternalOrderId !== order.id) {
+        await TransactionOrderLink.destroy({
+          where: { externalOrderId: previousExternalOrderId, status: 'suggested' },
+        });
+      }
       if (auth.household.id != null) {
         await matchReceiptOrderToTransactions({
           externalOrderId: order.id,
