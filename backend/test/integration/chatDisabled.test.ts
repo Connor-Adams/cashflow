@@ -95,3 +95,13 @@ test('POST /api/chat/threads 404s when CHAT_ENABLED unset', async () => {
   const res = await agent.post('/api/chat/threads').send({ title: 'x' });
   assert.equal(res.status, 404);
 });
+
+test('POST /api/chat/threads/:id/messages 404s when CHAT_ENABLED unset', async () => {
+  // The chat router is gated at app-import time, so /messages 404s along
+  // with the rest of /api/chat/* even though the path looks distinct from
+  // the bare /threads listing.
+  const res = await agent
+    .post('/api/chat/threads/1/messages')
+    .send({ message: 'hi' });
+  assert.equal(res.status, 404);
+});
