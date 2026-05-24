@@ -104,6 +104,8 @@ export type RateTable = {
   ageAmountAge: number;
   ageAmountFederalThreshold: Decimal;
   ageAmountOntarioThreshold: Decimal;
+  ageAmountFederalClawbackRate: Decimal;
+  ageAmountOntarioClawbackRate: Decimal;
   employmentAmountFederal: Decimal;
   dividendGrossUpEligible: Decimal;
   dividendGrossUpNonEligible: Decimal;

@@ -34,7 +34,7 @@ export function ageCreditFederal(
 ): Decimal {
   if (ageAtYearEnd < r.ageAmountAge) return D('0');
   if (netIncome.lessThanOrEqualTo(r.ageAmountFederalThreshold)) return r.ageAmountFederal;
-  const reduction = netIncome.minus(r.ageAmountFederalThreshold).times('0.15');
+  const reduction = netIncome.minus(r.ageAmountFederalThreshold).times(r.ageAmountFederalClawbackRate);
   return maxZero(r.ageAmountFederal.minus(reduction));
 }
 
@@ -81,7 +81,7 @@ export function ageCreditOntario(
 ): Decimal {
   if (ageAtYearEnd < r.ageAmountAge) return D('0');
   if (netIncome.lessThanOrEqualTo(r.ageAmountOntarioThreshold)) return r.ageAmountOntario;
-  const reduction = netIncome.minus(r.ageAmountOntarioThreshold).times('0.15');
+  const reduction = netIncome.minus(r.ageAmountOntarioThreshold).times(r.ageAmountOntarioClawbackRate);
   return maxZero(r.ageAmountOntario.minus(reduction));
 }
 
