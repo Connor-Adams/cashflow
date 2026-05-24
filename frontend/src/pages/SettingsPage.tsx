@@ -588,16 +588,21 @@ export function SettingsPage() {
     }
   }
 
-  async function parseReceiptImage(file: File) {
+  async function uploadReceiptFile(
+    file: File,
+    busy: 'image' | 'pdf',
+    endpoint: string,
+    errorLabel: string,
+  ) {
     if (receiptBusy) return
-    setReceiptBusy('image')
+    setReceiptBusy(busy)
     setReceiptError(null)
     setReceiptResult(null)
     try {
       const fd = new FormData()
       fd.append('file', file)
       const base = import.meta.env.VITE_API_BASE ?? ''
-      const res = await fetch(`${base}/api/external-orders/import-image`, {
+      const res = await fetch(`${base}${endpoint}`, {
         method: 'POST',
         credentials: 'include',
         body: fd,
@@ -606,42 +611,20 @@ export function SettingsPage() {
         const text = await res.text().catch(() => res.statusText)
         throw new Error(text || `HTTP ${res.status}`)
       }
-      const r = (await res.json()) as ReceiptImportResult
-      setReceiptResult(r)
+      setReceiptResult((await res.json()) as ReceiptImportResult)
     } catch (e) {
-      setReceiptError(e instanceof Error ? e.message : 'Image parse failed')
+      setReceiptError(e instanceof Error ? e.message : errorLabel)
     } finally {
       setReceiptBusy(null)
     }
   }
 
-  // Standard fetch/try-catch with state transitions, mirrors parseReceiptImage.
-  // fallow-ignore-next-line complexity
-  async function parseReceiptPdf(file: File) {
-    if (receiptBusy) return
-    setReceiptBusy('pdf')
-    setReceiptError(null)
-    setReceiptResult(null)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const base = import.meta.env.VITE_API_BASE ?? ''
-      const res = await fetch(`${base}/api/external-orders/import-pdf`, {
-        method: 'POST',
-        credentials: 'include',
-        body: fd,
-      })
-      if (!res.ok) {
-        const text = await res.text().catch(() => res.statusText)
-        throw new Error(text || `HTTP ${res.status}`)
-      }
-      const r = (await res.json()) as ReceiptImportResult
-      setReceiptResult(r)
-    } catch (e) {
-      setReceiptError(e instanceof Error ? e.message : 'PDF parse failed')
-    } finally {
-      setReceiptBusy(null)
-    }
+  function parseReceiptImage(file: File) {
+    return uploadReceiptFile(file, 'image', '/api/external-orders/import-image', 'Image parse failed')
+  }
+
+  function parseReceiptPdf(file: File) {
+    return uploadReceiptFile(file, 'pdf', '/api/external-orders/import-pdf', 'PDF parse failed')
   }
 
   const loadStats = useCallback(async () => {

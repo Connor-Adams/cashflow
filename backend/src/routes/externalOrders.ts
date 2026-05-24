@@ -31,6 +31,16 @@ const pdfUpload = multer({
   limits: { fileSize: 16 * 1024 * 1024 },
 });
 
+/** Wrap a multer single-field handler in an Express-friendly middleware that forwards errors via next(). */
+function singleFile(uploader: ReturnType<typeof multer>, fieldName: string) {
+  return (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+    uploader.single(fieldName)(req as never, res as never, (err: unknown) => {
+      if (err) return next(err);
+      next();
+    });
+  };
+}
+
 async function persistExtractedOrder(
   extracted: ExtractedReceiptOrder,
   opts: { userId: number | null; householdId: number | null; source: string },
@@ -157,12 +167,7 @@ router.post('/import-text', aiSuggestLimiter, async (req, res, next) => {
 router.post(
   '/import-image',
   aiSuggestLimiter,
-  (req, res, next) => {
-    upload.single('file')(req as never, res as never, (err: unknown) => {
-      if (err) return next(err);
-      next();
-    });
-  },
+  singleFile(upload, 'file'),
   async (req, res, next) => {
     try {
       if (rejectDemoAiRequest(req, res)) return;
@@ -213,12 +218,7 @@ router.post(
 router.post(
   '/import-csv',
   importUploadLimiter,
-  (req, res, next) => {
-    upload.single('file')(req as never, res as never, (err: unknown) => {
-      if (err) return next(err);
-      next();
-    });
-  },
+  singleFile(upload, 'file'),
   async (req, res, next) => {
     try {
       const auth = currentAuth(req);
@@ -298,12 +298,7 @@ router.post(
 router.post(
   '/import-pdf',
   importUploadLimiter,
-  (req, res, next) => {
-    pdfUpload.single('file')(req as never, res as never, (err: unknown) => {
-      if (err) return next(err);
-      next();
-    });
-  },
+  singleFile(pdfUpload, 'file'),
   // Sequential validation + parse + persist + match; covered by integration tests.
   // fallow-ignore-next-line complexity
   async (req, res, next) => {

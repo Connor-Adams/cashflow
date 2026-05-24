@@ -9,6 +9,8 @@
  *   - scores per-tender amount when ExternalOrderTender rows exist
  *   - falls back to order.total + order.paymentLast4 when no tenders
  */
+// Tiny date/number/last4 helpers intentionally mirror amazon/matcher.ts; consolidating into a shared util is out of scope here.
+// fallow-ignore-file code-duplication
 import { Op } from 'sequelize';
 import {
   ExternalOrder,

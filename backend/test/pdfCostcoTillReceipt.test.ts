@@ -1,3 +1,5 @@
+// Fixture-loader and assertion boilerplate intentionally mirrors pdfCibcCostcoMastercard.test.ts.
+// fallow-ignore-file code-duplication
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';

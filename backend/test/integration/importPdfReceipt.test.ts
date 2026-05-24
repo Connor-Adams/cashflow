@@ -3,6 +3,8 @@
  * Runs in isolation (`yarn test:integration`) so DATABASE_PATH is set before
  * any Sequelize import.
  */
+// Test boilerplate (setup, login, teardown) is acceptably duplicated across integration tests.
+// fallow-ignore-file code-duplication
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'path';
