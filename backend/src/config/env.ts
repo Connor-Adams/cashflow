@@ -16,6 +16,7 @@ export type EnvConfig = {
   nodeEnv: string;
   alphaVantageApiKey: string | null;
   quoteProvider: string;
+  logoDevToken: string | null;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -101,6 +102,7 @@ export function loadEnvConfig(
   const trustProxy = parseTrustProxy(e.TRUST_PROXY, nodeEnv);
   const alphaVantageApiKey = e.ALPHA_VANTAGE_API_KEY?.trim() || null;
   const quoteProvider = e.QUOTE_PROVIDER?.trim() || 'alpha_vantage';
+  const logoDevToken = e.LOGO_DEV_TOKEN?.trim() || null;
 
   return {
     csvUploadDir,
@@ -113,6 +115,7 @@ export function loadEnvConfig(
     nodeEnv,
     alphaVantageApiKey,
     quoteProvider,
+    logoDevToken,
   };
 }
 
@@ -128,6 +131,7 @@ export const corsOrigin = resolved.corsOrigin;
 export const nodeEnv = resolved.nodeEnv;
 export const alphaVantageApiKey = resolved.alphaVantageApiKey;
 export const quoteProvider = resolved.quoteProvider;
+export const logoDevToken = resolved.logoDevToken;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
