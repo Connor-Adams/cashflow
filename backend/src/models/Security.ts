@@ -10,6 +10,16 @@ import {
 
 export type SecurityDividendEligibility = 'eligible' | 'non_eligible' | 'unknown';
 
+export type SecurityMetadata = {
+  sector?: string | null;
+  industry?: string | null;
+  country?: string | null;
+  exchange?: string | null;
+  description?: string | null;
+  // Raw passthrough; later slices may surface more fields.
+  [key: string]: unknown;
+};
+
 export class Security extends Model<
   InferAttributes<Security>,
   InferCreationAttributes<Security>
@@ -21,6 +31,8 @@ export class Security extends Model<
   declare assetType: string | null;
   declare currency: string;
   declare dividendEligibility: CreationOptional<SecurityDividendEligibility>;
+  declare metadata: SecurityMetadata | null;
+  declare metadataFetchedAt: Date | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -47,6 +59,16 @@ export function initSecurity(sequelize: Sequelize): typeof Security {
         field: 'dividend_eligibility',
         allowNull: false,
         defaultValue: 'eligible',
+      },
+      metadata: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: null,
+      },
+      metadataFetchedAt: {
+        type: DataTypes.DATE,
+        field: 'metadata_fetched_at',
+        allowNull: true,
       },
     } as ModelAttributes<Security>,
     {
