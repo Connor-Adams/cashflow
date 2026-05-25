@@ -76,3 +76,29 @@ export function inferCadence(events: PaymentEvent[], asOf: Date): CadenceResult 
     eventCount12mo: inWindow.length,
   };
 }
+
+export interface ProjectNextEventsArgs {
+  lastEventDate: Date;
+  medianSpacingDays: number;
+  lastPerShareAmount: number;
+  horizonDays: number;
+  asOf: Date;
+}
+
+export function projectNextEvents(args: ProjectNextEventsArgs): Array<{
+  date: Date;
+  estimatedPerShare: number;
+}> {
+  const { lastEventDate, medianSpacingDays, lastPerShareAmount, horizonDays, asOf } = args;
+  if (medianSpacingDays <= 0) return [];
+  const horizonEnd = new Date(asOf.getTime() + horizonDays * ONE_DAY_MS);
+  const out: Array<{ date: Date; estimatedPerShare: number }> = [];
+  let next = new Date(lastEventDate.getTime() + medianSpacingDays * ONE_DAY_MS);
+  while (next <= horizonEnd) {
+    if (next > asOf) {
+      out.push({ date: next, estimatedPerShare: lastPerShareAmount });
+    }
+    next = new Date(next.getTime() + medianSpacingDays * ONE_DAY_MS);
+  }
+  return out;
+}

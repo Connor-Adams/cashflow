@@ -1,9 +1,9 @@
 /**
- * Unit tests for inferCadence in forwardIncome.ts.
+ * Unit tests for inferCadence and projectNextEvents in forwardIncome.ts.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inferCadence, type PaymentEvent } from '../../src/portfolio/forwardIncome';
+import { inferCadence, projectNextEvents, type PaymentEvent } from '../../src/portfolio/forwardIncome';
 
 const asOf = new Date('2025-01-01T00:00:00.000Z');
 
@@ -117,4 +117,63 @@ test('inferCadence — event outside 365-day window is excluded from annualPerSh
   const r = inferCadence(events, asOf);
   assert.equal(r.eventCount12mo, 1);
   approxEqual(r.annualPerShare, 0.5);
+});
+
+// ── projectNextEvents ──────────────────────────────────────────────────────────
+
+const asOf2 = new Date('2026-05-25T00:00:00.000Z');
+
+// medianSpacingDays > horizon → empty array
+test('projectNextEvents — medianSpacingDays > horizon returns empty array', () => {
+  const result = projectNextEvents({
+    lastEventDate: new Date('2026-05-01T00:00:00.000Z'),
+    medianSpacingDays: 180,
+    lastPerShareAmount: 0.5,
+    horizonDays: 90,
+    asOf: asOf2,
+  });
+  assert.deepEqual(result, []);
+});
+
+// Monthly cadence, horizon=90 → 2-3 entries, all have correct estimatedPerShare
+test('projectNextEvents — monthly cadence (spacing=30), horizon=90, returns 2-3 entries with correct estimatedPerShare', () => {
+  const result = projectNextEvents({
+    lastEventDate: new Date('2026-05-01T00:00:00.000Z'),
+    medianSpacingDays: 30,
+    lastPerShareAmount: 0.25,
+    horizonDays: 90,
+    asOf: asOf2,
+  });
+  assert.ok(result.length >= 2 && result.length <= 3, `expected 2-3 entries, got ${result.length}`);
+  for (const entry of result) {
+    assert.equal(entry.estimatedPerShare, 0.25);
+  }
+});
+
+// Quarterly cadence → single entry with date 2026-07-14
+test('projectNextEvents — quarterly cadence (spacing=90), horizon=90, lastEventDate=2026-04-15, returns 1 entry with date 2026-07-14', () => {
+  const result = projectNextEvents({
+    lastEventDate: new Date('2026-04-15T00:00:00.000Z'),
+    medianSpacingDays: 90,
+    lastPerShareAmount: 1.0,
+    horizonDays: 90,
+    asOf: asOf2,
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].date.toISOString().slice(0, 10), '2026-07-14');
+});
+
+// lastEventDate well in the past → all returned dates are after asOf
+test('projectNextEvents — lastEventDate well in the past with monthly cadence → all returned dates are after asOf', () => {
+  const result = projectNextEvents({
+    lastEventDate: new Date('2026-03-01T00:00:00.000Z'),
+    medianSpacingDays: 30,
+    lastPerShareAmount: 0.1,
+    horizonDays: 90,
+    asOf: asOf2,
+  });
+  assert.ok(result.length > 0, 'expected at least one result');
+  for (const entry of result) {
+    assert.ok(entry.date > asOf2, `expected date after asOf, got ${entry.date.toISOString()}`);
+  }
 });
