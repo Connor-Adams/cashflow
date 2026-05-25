@@ -5,10 +5,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -32,6 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { TabPanel, Tabs, type TabItem } from '@/components/ui/tabs'
+import { AllocationDonut } from '@/components/ui/allocation-donut'
 import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
@@ -685,64 +683,6 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
         </div>
       </Card>
     </>
-  )
-}
-
-type DonutSlice = {
-  key: string
-  name: string
-  value: number
-  currency: string
-  percentage: number
-}
-
-function AllocationDonut({ title, slices }: { title: string; slices: DonutSlice[] }) {
-  if (slices.length === 0) {
-    return (
-      <Card>
-        <div className="transactionsPanelHeader">
-          <h2>{title}</h2>
-        </div>
-        <p className="muted">No data.</p>
-      </Card>
-    )
-  }
-  return (
-    <Card>
-      <div className="transactionsPanelHeader">
-        <h2 className="text-base">{title}</h2>
-      </div>
-      <div style={{ width: '100%', height: 240 }}>
-        <ResponsiveContainer>
-          <PieChart>
-            <Pie
-              data={slices}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={48}
-              outerRadius={84}
-              paddingAngle={2}
-            >
-              {slices.map((s, i) => (
-                <Cell key={s.key} fill={colorFor(i)} />
-              ))}
-            </Pie>
-            <Tooltip
-              formatter={(value, _name, ctx) => {
-                const v = typeof value === 'number' ? value : Number(value)
-                if (!Number.isFinite(v)) return ''
-                const slice = (ctx?.payload ?? {}) as DonutSlice
-                return [
-                  `${formatMoney(v, slice.currency || 'CAD')} (${slice.percentage?.toFixed(1) ?? '0.0'}%)`,
-                  slice.name ?? '',
-                ]
-              }}
-            />
-            <Legend verticalAlign="bottom" height={36} />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-    </Card>
   )
 }
 
