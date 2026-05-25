@@ -45,6 +45,7 @@ import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
 } from './PortfolioForwardProjection';
+import { registerForwardIncomeStaleHooks } from '../hooks/forwardIncomeStaleHooks';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -89,6 +90,7 @@ initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
 initPortfolioForwardProjection(sequelize);
+registerForwardIncomeStaleHooks(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
