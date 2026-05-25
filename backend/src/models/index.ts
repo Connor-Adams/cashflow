@@ -38,6 +38,7 @@ import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
 import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
+import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -78,6 +79,7 @@ initCarryforward(sequelize);
 initTaxReturn(sequelize);
 initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
+initProviderJobLog(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -259,4 +261,5 @@ export {
   TaxReturn,
   ShareholderLoan,
   InstalmentPayment,
+  ProviderJobLog,
 };
