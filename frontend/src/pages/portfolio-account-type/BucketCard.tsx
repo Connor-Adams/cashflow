@@ -24,6 +24,7 @@ export function BucketCard({ bucket }: BucketCardProps) {
       </div>
       <AllocationDonut
         title={`Allocation by asset type`}
+        wrapInCard={false}
         slices={bucket.allocationByAssetType.map((row, i) => ({
           key: `${row.assetType ?? 'other'}-${i}`,
           name: row.assetType ?? 'Other',

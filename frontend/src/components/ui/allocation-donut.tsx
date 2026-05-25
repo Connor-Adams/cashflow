@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import {
   Cell,
   Legend,
@@ -30,25 +31,37 @@ function colorFor(index: number): string {
   return CHART_COLORS[index % CHART_COLORS.length]
 }
 
+export type AllocationDonutProps = {
+  title: string
+  slices: DonutSlice[]
+  /**
+   * Wrap output in a `<Card>`. Defaults to `true` for back-compat with the
+   * Allocation tab. Pass `false` when nesting inside another `<Card>` (e.g.
+   * `BucketCard`) to avoid doubled borders.
+   */
+  wrapInCard?: boolean
+}
+
 export function AllocationDonut({
   title,
   slices,
-}: {
-  title: string
-  slices: DonutSlice[]
-}) {
+  wrapInCard = true,
+}: AllocationDonutProps) {
+  const wrap = (content: ReactNode) =>
+    wrapInCard ? <Card>{content}</Card> : <>{content}</>
+
   if (slices.length === 0) {
-    return (
-      <Card>
+    return wrap(
+      <>
         <div className="transactionsPanelHeader">
           <h2>{title}</h2>
         </div>
         <p className="muted">No data.</p>
-      </Card>
+      </>,
     )
   }
-  return (
-    <Card>
+  return wrap(
+    <>
       <div className="transactionsPanelHeader">
         <h2 className="text-base">{title}</h2>
       </div>
@@ -82,6 +95,6 @@ export function AllocationDonut({
           </PieChart>
         </ResponsiveContainer>
       </div>
-    </Card>
+    </>,
   )
 }
