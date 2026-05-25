@@ -53,6 +53,59 @@ function decodeCursor(raw: string | undefined): Cursor | null {
   return null;
 }
 
+function mapItemToRow(it: ExternalOrderItem): ItemRow {
+  const order = (it as ExternalOrderItem & { order?: ExternalOrder }).order!;
+  const receipts = (order as ExternalOrder & { receipts?: Receipt[] }).receipts ?? [];
+  const receipt = receipts[0];
+  const txn = (receipt as Receipt & { transaction?: Transaction })?.transaction;
+  return {
+    id: it.id,
+    title: it.title,
+    qty: it.quantity,
+    unitPrice: num(it.unitPrice),
+    totalPrice: num(it.totalPrice),
+    taxShare: 0,
+    categoryEffective: effectiveCategory(it),
+    categoryOverride: it.categoryOverride,
+    businessUseEffective: effectiveBusinessUse(it),
+    businessUseOverride:
+      it.businessUseOverride == null ? null : Number(it.businessUseOverride) > 0,
+    order: { id: order.id, vendor: order.vendor },
+    receipt: {
+      id: receipt?.id ?? 0,
+      date: txn?.date ?? null,
+      sourceTxnId: txn?.id ?? null,
+    },
+  };
+}
+
+function csvEscape(v: unknown): string {
+  if (v == null) return '';
+  const s = String(v);
+  if (/[",\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function rowsToCsv(rows: ItemRow[]): string {
+  const header = 'id,date,vendor,title,qty,unitPrice,totalPrice,categoryEffective,businessUseEffective';
+  const lines = rows.map((r) =>
+    [
+      r.id,
+      r.receipt.date ?? '',
+      r.order.vendor,
+      csvEscape(r.title),
+      r.qty,
+      r.unitPrice ?? '',
+      r.totalPrice ?? '',
+      csvEscape(r.categoryEffective ?? ''),
+      r.businessUseEffective ? 'true' : 'false',
+    ].join(','),
+  );
+  return [header, ...lines].join('\n');
+}
+
 function parseFilters(req: Request): Filters {
   const q = req.query;
   const str = (k: string): string | undefined => {
@@ -162,6 +215,52 @@ router.get('/items', async (req, res, next) => {
       (txnWhereWithDate as Record<string, unknown>).date = dateCond;
     }
 
+    const format = typeof req.query.format === 'string' ? req.query.format : 'json';
+    if (format === 'csv') {
+      const maxRows = Number(process.env.ITEMS_CSV_MAX_ROWS ?? '50000');
+      const allItems = await ExternalOrderItem.findAll({
+        where: itemWhere,
+        include: [
+          {
+            model: ExternalOrder,
+            as: 'order',
+            required: true,
+            where: orderWhere,
+            include: [
+              {
+                model: Receipt,
+                as: 'receipts',
+                required: true,
+                include: [
+                  {
+                    model: Transaction,
+                    as: 'transaction',
+                    required: true,
+                    where: txnWhereWithDate,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        order: [['id', 'ASC']],
+        limit: maxRows + 1,
+        subQuery: false,
+      });
+      if (allItems.length > maxRows) {
+        res
+          .status(413)
+          .json({ error: `Result set too large (>${maxRows} items). Narrow your filters.` });
+        return;
+      }
+      const csv = rowsToCsv(allItems.map(mapItemToRow));
+      const filename = `items-${new Date().toISOString().slice(0, 10)}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(csv);
+      return;
+    }
+
     const items = await ExternalOrderItem.findAll({
       where: itemWhere,
       include: [
@@ -195,31 +294,7 @@ router.get('/items', async (req, res, next) => {
     const hasMore = items.length > limit;
     const sliced = hasMore ? items.slice(0, limit) : items;
 
-    const rows: ItemRow[] = sliced.map((it) => {
-      const order = (it as ExternalOrderItem & { order?: ExternalOrder }).order!;
-      const receipts = (order as ExternalOrder & { receipts?: Receipt[] }).receipts ?? [];
-      const receipt = receipts[0];
-      const txn = (receipt as Receipt & { transaction?: Transaction })?.transaction;
-      return {
-        id: it.id,
-        title: it.title,
-        qty: it.quantity,
-        unitPrice: num(it.unitPrice),
-        totalPrice: num(it.totalPrice),
-        taxShare: 0,
-        categoryEffective: effectiveCategory(it),
-        categoryOverride: it.categoryOverride,
-        businessUseEffective: effectiveBusinessUse(it),
-        businessUseOverride:
-          it.businessUseOverride == null ? null : Number(it.businessUseOverride) > 0,
-        order: { id: order.id, vendor: order.vendor },
-        receipt: {
-          id: receipt?.id ?? 0,
-          date: txn?.date ?? null,
-          sourceTxnId: txn?.id ?? null,
-        },
-      };
-    });
+    const rows: ItemRow[] = sliced.map(mapItemToRow);
 
     const last = rows[rows.length - 1];
     const nextCursor = hasMore && last ? encodeCursor({ itemId: last.id }) : null;

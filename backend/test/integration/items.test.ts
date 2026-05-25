@@ -281,3 +281,78 @@ test('GET /api/items paginates with cursor', async () => {
   assert.equal(page3.body.items.length, 20);
   assert.equal(page3.body.nextCursor, null);
 });
+
+test('GET /api/items?format=csv returns CSV', async () => {
+  const res = await agentA.get('/api/items?format=csv&vendor=amazon');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'text/csv; charset=utf-8');
+  assert.match(res.headers['content-disposition'] ?? '', /attachment; filename="items-/);
+  const lines = res.text.split('\n');
+  assert.equal(lines[0], 'id,date,vendor,title,qty,unitPrice,totalPrice,categoryEffective,businessUseEffective');
+  assert.ok(lines.length > 1);
+});
+
+test('GET /api/items?format=csv escapes quotes and commas', async () => {
+  const { Account, ExternalOrder, ExternalOrderItem, Receipt, Transaction } = await import(
+    '../../src/models/index.js'
+  );
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const account = await Account.create({
+    householdId: householdAId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'A CSV Account',
+    accountType: 'checking',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'csv-vendor',
+    dedupeKey: 'csv-1',
+    total: '5.00',
+    currency: 'USD',
+    source: 'image',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    householdId: householdAId,
+    importBatch: 'b-csv',
+    date: '2026-05-22',
+    merchantRaw: 'Y',
+    merchantClean: 'Y',
+    amount: '-5',
+    currency: 'USD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    visibility: 'shared',
+    ownershipType: 'shared',
+    finalCategory: null,
+    finalBusiness: false,
+    finalSplitType: 'none',
+    businessAmount: '0',
+  } as never);
+  await Receipt.create({
+    transactionId: txn.id,
+    storedFilename: 'c.jpg',
+    originalName: 'c.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 1,
+    externalOrderId: order.id,
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'thing, "quoted"',
+    quantity: 1,
+    totalPrice: '5.00',
+  } as never);
+
+  const res = await agentA.get('/api/items?format=csv&vendor=csv-vendor');
+  assert.match(res.text, /"thing, ""quoted"""/);
+});
+
+test('GET /api/items?format=csv returns 413 above row cap', async () => {
+  process.env.ITEMS_CSV_MAX_ROWS = '0';
+  const res = await agentA.get('/api/items?format=csv&vendor=amazon');
+  delete process.env.ITEMS_CSV_MAX_ROWS;
+  assert.equal(res.status, 413);
+  assert.match(res.body.error, /too large/i);
+});
