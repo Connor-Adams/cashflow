@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 
 export type BentoSpan = 3 | 4 | 6 | 8 | 12
 export type BentoRows = 1 | 2
+export type BentoVariant = 'default' | 'hero' | 'warning' | 'destructive'
 
 /**
  * Responsive column-span classes per authoring span. Literal strings (no
@@ -30,13 +31,33 @@ const ROW_CLASSES: Record<BentoRows, string> = {
   2: 'row-span-2',
 }
 
+/**
+ * Inline tint styles for alert-shaped variants. Mirrors the color-mix
+ * recipe used by the `Alert` component so a "this is a warning" or "this
+ * is critical" tile reads the same regardless of which chrome wraps it.
+ */
+const VARIANT_STYLE: Partial<Record<BentoVariant, React.CSSProperties>> = {
+  warning: {
+    background: 'color-mix(in srgb, var(--accent-warm) 12%, var(--card))',
+    borderColor: 'color-mix(in srgb, var(--accent-warm) 45%, var(--border))',
+  },
+  destructive: {
+    background: 'color-mix(in srgb, var(--danger) 10%, var(--card))',
+    borderColor: 'color-mix(in srgb, var(--danger) 42%, var(--border))',
+  },
+}
+
 type BentoTileProps = React.ComponentProps<'section'> & {
   /** Column span at the wide (12-col) authoring breakpoint. Collapses at narrow widths and halves at 3xl. */
   span: BentoSpan
   /** Row span (1 = compact, 2 = standard tile height). */
   rows?: BentoRows
-  /** Visual variant. 'hero' gets a subtle amber-tinted gradient at the top edge. */
-  variant?: 'default' | 'hero'
+  /** Visual variant.
+   *  - 'hero': subtle amber gradient (anchor tile).
+   *  - 'warning' / 'destructive': alert-shaped tint (used for tiles that
+   *    replaced standalone Alert/banner components).
+   */
+  variant?: BentoVariant
   /** Optional inline label rendered at the top of the tile. Use this for chart
    *  titles instead of `<h2>` so chrome stays consistent across tiles. */
   label?: React.ReactNode
@@ -59,10 +80,12 @@ export function BentoTile({
   description,
   actions,
   className,
+  style,
   children,
   ...props
 }: BentoTileProps) {
   const hasHeader = label != null || description != null || actions != null
+  const variantStyle = VARIANT_STYLE[variant]
   return (
     <section
       data-slot="bento-tile"
@@ -74,6 +97,7 @@ export function BentoTile({
         variant === 'hero' && 'bentoTile--hero',
         className,
       )}
+      style={variantStyle ? { ...variantStyle, ...style } : style}
       {...props}
     >
       {hasHeader && (
