@@ -6,6 +6,7 @@ export type SettingsTopTab =
   | 'enrichment'
   | 'contacts'
   | 'budgets'
+  | 'categories'
 
 export function useActiveSettingsTopTab(): SettingsTopTab {
   const isDisplay = useMatch('/settings/display')
@@ -15,11 +16,13 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isEnrichment = useMatch('/settings/enrichment')
   const isContacts = useMatch('/settings/contacts')
   const isBudgets = useMatch('/settings/budgets')
+  const isCategories = useMatch('/settings/categories')
 
   if (isDisplay || isGmail || isPartnerInvite) return 'settings'
   if (isImports) return 'imports'
   if (isEnrichment) return 'enrichment'
   if (isContacts) return 'contacts'
   if (isBudgets) return 'budgets'
+  if (isCategories) return 'categories'
   return 'settings'
 }

@@ -10,6 +10,7 @@ const TOP_TABS: TabItem[] = [
   { value: 'enrichment', label: 'Enrichment' },
   { value: 'contacts', label: 'Contacts' },
   { value: 'budgets', label: 'Budgets' },
+  { value: 'categories', label: 'Categories' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -18,6 +19,7 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   enrichment: '/settings/enrichment',
   contacts: '/settings/contacts',
   budgets: '/settings/budgets',
+  categories: '/settings/categories',
 }
 
 export function SettingsPage() {

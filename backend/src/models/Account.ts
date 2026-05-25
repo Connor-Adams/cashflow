@@ -31,6 +31,8 @@ export class Account extends Model<
   declare defaultCurrency: string | null;
   declare entityId: number | null;
   declare taxStatus: CreationOptional<AccountTaxStatus>;
+  declare openingBalance: CreationOptional<string>;
+  declare openingBalanceDate: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -90,6 +92,18 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         field: 'tax_status',
         allowNull: false,
         defaultValue: 'n_a',
+      },
+      openingBalance: {
+        type: DataTypes.DECIMAL(18, 4),
+        field: 'opening_balance',
+        allowNull: false,
+        defaultValue: 0,
+      },
+      openingBalanceDate: {
+        type: DataTypes.DATEONLY,
+        field: 'opening_balance_date',
+        allowNull: true,
+        defaultValue: null,
       },
     } as ModelAttributes<Account>,
     {

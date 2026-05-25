@@ -29,7 +29,7 @@ describe('SettingsPage shell', () => {
     expect(screen.getByRole('heading', { name: /settings/i })).toBeInTheDocument()
   })
 
-  it('renders five top tabs', () => {
+  it('renders six top tabs', () => {
     renderAt('/settings/display')
     const tabs = screen.getAllByRole('tab')
     expect(tabs.map((t) => t.textContent)).toEqual([
@@ -38,6 +38,7 @@ describe('SettingsPage shell', () => {
       'Enrichment',
       'Contacts',
       'Budgets',
+      'Categories',
     ])
   })
 

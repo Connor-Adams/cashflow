@@ -3,12 +3,20 @@ import { Tabs } from '../components/ui/tabs'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
 import { SlipsTab } from './tax/SlipsTab'
+import { ReconciliationTab } from './tax/ReconciliationTab'
+import { CorpT2Tab } from './tax/CorpT2Tab'
+import { ShareholderLoanTab } from './tax/ShareholderLoanTab'
+import { OwnerCompPlannerTab } from './tax/OwnerCompPlannerTab'
 import { useTaxYears } from '../hooks/useTaxYears'
 
 const TABS = [
   { value: 'overview', label: 'Overview' },
   { value: 'personal', label: 'Personal T1' },
   { value: 'slips', label: 'Slips' },
+  { value: 'reconciliation', label: 'Reconciliation' },
+  { value: 'corp', label: 'Corp T2' },
+  { value: 'shareholder-loans', label: 'Shareholder Loans' },
+  { value: 'planner', label: 'Owner Comp' },
 ]
 
 function pickDefaultYear(years: number[]): number {
@@ -52,6 +60,10 @@ export function TaxPage() {
           {tab === 'overview' && <OverviewTab year={year} />}
           {tab === 'personal' && <PersonalT1Tab year={year} />}
           {tab === 'slips' && <SlipsTab year={year} />}
+          {tab === 'reconciliation' && <ReconciliationTab year={year} />}
+          {tab === 'corp' && <CorpT2Tab />}
+          {tab === 'shareholder-loans' && <ShareholderLoanTab />}
+          {tab === 'planner' && <OwnerCompPlannerTab />}
         </>
       )}
     </section>

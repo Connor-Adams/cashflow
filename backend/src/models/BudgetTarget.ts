@@ -63,5 +63,15 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
       timestamps: true,
     }
   );
+  BudgetTarget.addHook('afterSave', async (instance: BudgetTarget, options) => {
+    try {
+      const { ensureCategory } = await import('../util/ensureCategory');
+      await ensureCategory(instance.householdId, instance.category, {
+        transaction: options.transaction,
+      });
+    } catch (e) {
+      console.warn('[ensureCategory] BudgetTarget hook failed', e);
+    }
+  });
   return BudgetTarget;
 }

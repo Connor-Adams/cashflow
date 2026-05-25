@@ -12,6 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { FilterX } from 'lucide-react'
+import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ import { BentoTile } from '@/components/dashboard/BentoTile'
 import { HeroTile } from '@/components/dashboard/HeroTile'
 import { KpiStack } from '@/components/dashboard/KpiStack'
 import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
+import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
@@ -811,7 +813,12 @@ export function DashboardPage() {
     {
       key: 'category',
       label: 'Category',
-      render: (r) => r.category ?? '(uncategorized)',
+      render: (r) => (
+        <span className="inline-flex items-center gap-1.5">
+          <CategoryIcon name={r.category} />
+          {r.category ?? '(uncategorized)'}
+        </span>
+      ),
     },
     {
       key: 'amount',
@@ -928,6 +935,7 @@ export function DashboardPage() {
       ) : null}
 
       <div className="dashboardBento" aria-busy={loading}>
+        <NetWorthTile />
         {budgetProgressSorted.length > 0 && (
           <BentoTile
             span={12}
@@ -957,8 +965,9 @@ export function DashboardPage() {
                     className={`budgetPill budgetPill--${tone}`}
                   >
                     <header className="budgetPill__header">
-                      <strong className="budgetPill__label" title={label}>
-                        {label}
+                      <strong className="budgetPill__label inline-flex items-center gap-1.5 min-w-0" title={label}>
+                        <CategoryIcon name={item.category} />
+                        <span className="truncate">{label}</span>
                       </strong>
                       <span className="budgetPill__pct">{percentRounded}%</span>
                     </header>

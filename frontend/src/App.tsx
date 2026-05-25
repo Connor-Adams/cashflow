@@ -6,6 +6,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
 import { RecurringPage } from './pages/RecurringPage'
@@ -24,6 +25,7 @@ import { ImportsTab } from './pages/settings/tabs/ImportsTab'
 import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
 import { ContactsTab } from './pages/settings/tabs/ContactsTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
+import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { ChatPage } from './pages/ChatPage'
@@ -51,6 +53,7 @@ function AppRoutes() {
           <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="portfolio/security/:id" element={<PortfolioSecurityPage />} />
+          <Route path="net-worth" element={<NetWorthPage />} />
           <Route path="amazon" element={<AmazonPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />
@@ -67,6 +70,7 @@ function AppRoutes() {
             <Route path="enrichment" element={<EnrichmentTab />} />
             <Route path="contacts" element={<ContactsTab />} />
             <Route path="budgets" element={<BudgetsTab />} />
+            <Route path="categories" element={<CategoriesTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="chat" element={<ChatPage />} />

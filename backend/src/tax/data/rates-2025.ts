@@ -79,6 +79,8 @@ export const RATES_2025: RateTable = {
   donationHighRateOntario: D('0.1116'),
   medicalThresholdPercent: D('0.03'),
   medicalThresholdCap: D('2837'),
+  rrspAnnualLimit: D('32490'),
+  fhsaLifetimeLimit: D('40000'),
   // Disability Tax Credit — base amounts × 15% = credit value. 2025 values indexed ~2.7% from 2024.
   dtcBaseFederal: D('10138'),          // 9872 × 1.027 ≈ 10138; verify vs CRA T2201-2025
   dtcSupplementFederal: D('5916'),     // 5758 × 1.027 ≈ 5914; rounded to published 5916
