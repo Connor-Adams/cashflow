@@ -204,3 +204,80 @@ test('GET /api/items filters by q (case-insensitive title substring)', async () 
   assert.equal(res.status, 200);
   assert.ok(res.body.items.every((r: { title: string }) => r.title.toLowerCase().includes('usb')));
 });
+
+test('GET /api/items paginates with cursor', async () => {
+  const { Account, ExternalOrder, ExternalOrderItem, Receipt, Transaction } = await import(
+    '../../src/models/index.js'
+  );
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const account = await Account.create({
+    householdId: householdAId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'A Pag Account',
+    accountType: 'checking',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    householdId: householdAId,
+    importBatch: 'b-pag',
+    date: '2026-05-15',
+    merchantRaw: 'X',
+    merchantClean: 'X',
+    amount: '-100',
+    currency: 'USD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    visibility: 'shared',
+    ownershipType: 'shared',
+    finalCategory: null,
+    finalBusiness: false,
+    finalSplitType: 'none',
+    businessAmount: '0',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'pagvendor',
+    dedupeKey: 'pag-1',
+    total: '100',
+    currency: 'USD',
+    source: 'image',
+  } as never);
+  await Receipt.create({
+    transactionId: txn.id,
+    storedFilename: 'p.jpg',
+    originalName: 'p.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 1,
+    externalOrderId: order.id,
+  } as never);
+  await ExternalOrderItem.bulkCreate(
+    Array.from({ length: 120 }, (_, i) => ({
+      externalOrderId: order.id,
+      title: `pag-item-${i}`,
+      quantity: 1,
+      totalPrice: '1.00',
+    })) as never,
+  );
+
+  const page1 = await agentA.get('/api/items?vendor=pagvendor&limit=50');
+  assert.equal(page1.status, 200);
+  assert.equal(page1.body.items.length, 50);
+  assert.ok(page1.body.nextCursor);
+
+  const page2 = await agentA.get(
+    `/api/items?vendor=pagvendor&limit=50&cursor=${encodeURIComponent(page1.body.nextCursor)}`,
+  );
+  assert.equal(page2.status, 200);
+  assert.equal(page2.body.items.length, 50);
+  const page1Ids = new Set(page1.body.items.map((r: { id: number }) => r.id));
+  for (const r of page2.body.items) {
+    assert.equal(page1Ids.has(r.id), false, 'page 2 must not repeat page 1 ids');
+  }
+
+  const page3 = await agentA.get(
+    `/api/items?vendor=pagvendor&limit=50&cursor=${encodeURIComponent(page2.body.nextCursor)}`,
+  );
+  assert.equal(page3.body.items.length, 20);
+  assert.equal(page3.body.nextCursor, null);
+});

@@ -36,6 +36,23 @@ type Filters = {
   q?: string;
 };
 
+type Cursor = { itemId: number };
+
+function encodeCursor(c: Cursor): string {
+  return Buffer.from(JSON.stringify(c)).toString('base64url');
+}
+
+function decodeCursor(raw: string | undefined): Cursor | null {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as { itemId?: unknown };
+    if (typeof obj.itemId === 'number') return { itemId: obj.itemId };
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
 function parseFilters(req: Request): Filters {
   const q = req.query;
   const str = (k: string): string | undefined => {
@@ -121,6 +138,15 @@ router.get('/items', async (req, res, next) => {
     const f = parseFilters(req);
     const itemWhere = buildItemWhere(f);
 
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const cursor = decodeCursor(typeof req.query.cursor === 'string' ? req.query.cursor : undefined);
+    if (cursor) {
+      (itemWhere as Record<string, unknown>)[Op.and as never] = [
+        ...(((itemWhere as Record<symbol, unknown>)[Op.and] as unknown[]) ?? []),
+        { id: { [Op.gt]: cursor.itemId } },
+      ];
+    }
+
     const orderWhere: WhereOptions = { householdId: household.id };
     if (f.vendor) {
       (orderWhere as Record<string, unknown>).vendor = {
@@ -162,11 +188,14 @@ router.get('/items', async (req, res, next) => {
         },
       ],
       order: [['id', 'ASC']],
-      limit: 50,
+      limit: limit + 1,
       subQuery: false,
     });
 
-    const rows: ItemRow[] = items.map((it) => {
+    const hasMore = items.length > limit;
+    const sliced = hasMore ? items.slice(0, limit) : items;
+
+    const rows: ItemRow[] = sliced.map((it) => {
       const order = (it as ExternalOrderItem & { order?: ExternalOrder }).order!;
       const receipts = (order as ExternalOrder & { receipts?: Receipt[] }).receipts ?? [];
       const receipt = receipts[0];
@@ -192,7 +221,9 @@ router.get('/items', async (req, res, next) => {
       };
     });
 
-    const body: ItemsListResponse = { items: rows, nextCursor: null };
+    const last = rows[rows.length - 1];
+    const nextCursor = hasMore && last ? encodeCursor({ itemId: last.id }) : null;
+    const body: ItemsListResponse = { items: rows, nextCursor };
     res.json(body);
   } catch (e) {
     next(e);
