@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '@/components/ui/card'
 import { getJson } from '../../lib/api'
+import { getAppConfig } from '../../lib/appConfig'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioSecurityDividends } from '../../types/api'
 
@@ -11,16 +12,34 @@ export type DividendHistoryCardProps = {
 }
 
 export function DividendHistoryCard({ securityId, currency }: DividendHistoryCardProps) {
+  const quoteProviderConfigured =
+    getAppConfig()?.quoteProviderConfigured ?? false
   const [data, setData] = useState<PortfolioSecurityDividends | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!quoteProviderConfigured) return
     let cancelled = false
     void getJson<PortfolioSecurityDividends>(`/api/portfolio/security/${securityId}/dividends`)
       .then((res) => { if (!cancelled) setData(res) })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load dividends') })
     return () => { cancelled = true }
-  }, [securityId])
+  }, [securityId, quoteProviderConfigured])
+
+  if (!quoteProviderConfigured) {
+    return (
+      <Card>
+        <div className="transactionsPanelHeader">
+          <div>
+            <h2 className="text-base">Dividend history</h2>
+          </div>
+        </div>
+        <p className="muted">
+          Set <code>ALPHA_VANTAGE_API_KEY</code> to enable dividend history.
+        </p>
+      </Card>
+    )
+  }
 
   return (
     <Card>
