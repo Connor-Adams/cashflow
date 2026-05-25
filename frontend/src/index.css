@@ -241,6 +241,10 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
+  /* Custom screen for dense-bento 4-wide tier. Slots above default xl (1280)
+   * and below 2xl (1536). Use the `3xl:` prefix. */
+  --breakpoint-3xl: 90rem;
+
   --color-background:        var(--background);
   --color-foreground:        var(--foreground);
   --color-card:              var(--card);
