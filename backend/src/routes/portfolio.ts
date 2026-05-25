@@ -9,7 +9,7 @@ import {
   SecurityDailyPrice,
   SecurityDividend,
 } from '../models';
-import { ensureDailyPrices, ensureDividends } from '../portfolio/backfill';
+import { ensureDailyPrices, ensureDividends, ensureOverview } from '../portfolio/backfill';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import * as env from '../config/env';
@@ -968,6 +968,31 @@ router.get('/security/:id/dividends', async (req, res, next) => {
         amount: Number(e.amount),
         currency: e.currency,
       })),
+      backfill,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/security/:id/overview', async (req, res, next) => {
+  try {
+    const scoped = await loadSecurityScoped(req, req.params.id);
+    if ('error' in scoped) {
+      res.status(scoped.error as number).json({ error: 'Security not visible' });
+      return;
+    }
+    const { security } = scoped;
+    const m = (security.metadata ?? {}) as Record<string, unknown>;
+    const backfill = await ensureOverview(security.id);
+    res.json({
+      securityId: security.id,
+      sector: m['sector'] ?? null,
+      industry: m['industry'] ?? null,
+      country: m['country'] ?? null,
+      exchange: m['exchange'] ?? null,
+      description: m['description'] ?? null,
+      metadataFetchedAt: security.metadataFetchedAt?.toISOString() ?? null,
       backfill,
     });
   } catch (e) {
