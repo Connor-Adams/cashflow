@@ -1,7 +1,10 @@
+import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useItemsQuery, type ItemsFilters } from './useItems'
 import * as api from '@/lib/api'
+
+void React
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
