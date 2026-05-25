@@ -1,30 +1,42 @@
 /**
- * Quote refresh scheduler.
+ * Alpha Vantage refresh scheduler.
  *
  * On each tick:
  *  1. Skip if Alpha Vantage isn't configured.
- *  2. Bail if today's call budget is already spent.
- *  3. Ask the picker for the staleness-oldest eligible symbol.
- *  4. Fetch the GLOBAL_QUOTE, log the call, and persist a SecurityPrice row
- *     for every Security holding that symbol (symbols are global across
- *     households).
+ *  2. Bail if today's shared call budget is already spent.
+ *  3. Ask the picker for the highest-staleness eligible (symbol, function)
+ *     work item across all configured functions.
+ *  4. Dispatch the function-specific fetch + persist, log the call to
+ *     `provider_job_log`, and return the outcome.
  *
- * A simple in-process re-entrancy guard prevents overlapping ticks if a fetch
- * is slow and the next cron fires.
+ * Per-function dispatchers persist to every Security row holding the
+ * symbol — the same AAPL fundamentals serve all households.
+ *
+ * A simple in-process re-entrancy guard prevents overlapping ticks if a
+ * fetch is slow and the next cron fires.
  */
 
 import cron, { type ScheduledTask } from 'node-cron';
 import { Security } from '../../models/Security';
+import { SecurityDividend } from '../../models/SecurityDividend';
 import { SecurityPrice } from '../../models/SecurityPrice';
 import { logger } from '../../observability/logger';
 import * as env from '../../config/env';
 import {
+  ALPHA_VANTAGE_PROVIDER,
+  checkBudget,
+  recordCall,
+} from './budget';
+import {
   AlphaVantageError,
+  fetchDividends,
   fetchGlobalQuote,
+  fetchOverview,
+  type DividendEvent,
+  type OverviewResult,
   type QuoteResult,
 } from './client';
-import { checkBudget, recordCall } from './budget';
-import { pickNext } from './picker';
+import { pickNext, type AvWorkFunction } from './picker';
 
 export interface TickResult {
   status:
@@ -37,6 +49,7 @@ export interface TickResult {
     | 'rate_limited'
     | 'error';
   symbol?: string;
+  function?: AvWorkFunction;
   budget?: { used: number; limit: number };
   error?: string;
 }
@@ -59,15 +72,19 @@ function configFromEnv(): TickConfig {
 
 let runningTick = false;
 
-async function persistQuoteForSymbol(symbol: string, quote: QuoteResult): Promise<void> {
-  const securities = await Security.findAll({ where: { symbol } });
+async function securitiesForSymbol(symbol: string): Promise<Security[]> {
+  return Security.findAll({ where: { symbol } });
+}
+
+async function persistGlobalQuote(symbol: string, quote: QuoteResult): Promise<void> {
+  const securities = await securitiesForSymbol(symbol);
   if (securities.length === 0) return;
   const now = new Date();
   await Promise.all(
     securities.map((security) =>
       SecurityPrice.create({
         securityId: security.id,
-        provider: 'alpha_vantage',
+        provider: ALPHA_VANTAGE_PROVIDER,
         symbol: security.symbol,
         pricedAt: quote.pricedAt,
         price: String(quote.price),
@@ -76,6 +93,117 @@ async function persistQuoteForSymbol(symbol: string, quote: QuoteResult): Promis
       }),
     ),
   );
+}
+
+async function persistOverview(symbol: string, overview: OverviewResult): Promise<void> {
+  const securities = await securitiesForSymbol(symbol);
+  if (securities.length === 0) return;
+  const now = new Date();
+  const metadata = {
+    sector: overview.sector,
+    industry: overview.industry,
+    country: overview.country,
+    exchange: overview.exchange,
+    description: overview.description,
+    ...overview.raw,
+  };
+  await Promise.all(
+    securities.map((security) =>
+      security.update({ metadata, metadataFetchedAt: now }),
+    ),
+  );
+}
+
+async function persistDividends(symbol: string, events: DividendEvent[]): Promise<void> {
+  if (events.length === 0) return;
+  const securities = await securitiesForSymbol(symbol);
+  if (securities.length === 0) return;
+  const now = new Date();
+  for (const security of securities) {
+    for (const ev of events) {
+      await SecurityDividend.upsert({
+        securityId: security.id,
+        exDividendDate: ev.exDividendDate,
+        declarationDate: ev.declarationDate,
+        recordDate: ev.recordDate,
+        paymentDate: ev.paymentDate,
+        amount: String(ev.amount),
+        currency: ev.currency,
+        source: ALPHA_VANTAGE_PROVIDER,
+        fetchedAt: now,
+      });
+    }
+  }
+}
+
+interface FunctionHandler<T> {
+  fetch: (symbol: string) => Promise<T | null>;
+  persist: (symbol: string, result: T) => Promise<void>;
+  notFoundIsEmptyArray?: boolean;
+}
+
+const HANDLERS: Record<AvWorkFunction, FunctionHandler<unknown>> = {
+  GLOBAL_QUOTE: {
+    fetch: (s) => fetchGlobalQuote(s),
+    persist: (s, r) => persistGlobalQuote(s, r as QuoteResult),
+  } as FunctionHandler<unknown>,
+  OVERVIEW: {
+    fetch: (s) => fetchOverview(s),
+    persist: (s, r) => persistOverview(s, r as OverviewResult),
+  } as FunctionHandler<unknown>,
+  DIVIDENDS: {
+    fetch: (s) => fetchDividends(s),
+    persist: (s, r) => persistDividends(s, r as DividendEvent[]),
+    notFoundIsEmptyArray: true,
+  } as FunctionHandler<unknown>,
+};
+
+async function dispatch(
+  fnName: AvWorkFunction,
+  symbol: string,
+): Promise<TickResult> {
+  const handler = HANDLERS[fnName];
+  try {
+    const result = await handler.fetch(symbol);
+    // DIVIDENDS returns an empty array (not null) for symbols with no
+    // payout history — treat that as `ok` so we don't keep retrying it.
+    const isEmptyArrayOk =
+      handler.notFoundIsEmptyArray && Array.isArray(result) && result.length === 0;
+    if (result == null) {
+      await recordCall({ function: fnName, symbol, status: 'not_found' });
+      return { status: 'not_found', symbol, function: fnName };
+    }
+    if (!isEmptyArrayOk) {
+      await handler.persist(symbol, result);
+    }
+    await recordCall({ function: fnName, symbol, status: 'ok' });
+    return { status: 'refreshed', symbol, function: fnName };
+  } catch (err) {
+    if (err instanceof AlphaVantageError) {
+      const isRateLimit = err.providerNote != null;
+      await recordCall({
+        function: fnName,
+        symbol,
+        status: isRateLimit ? 'rate_limited' : 'error',
+        httpStatus: err.httpStatus,
+        errorMessage: err.message.slice(0, 1024),
+      });
+      return {
+        status: isRateLimit ? 'rate_limited' : 'error',
+        symbol,
+        function: fnName,
+        error: err.message,
+      };
+    }
+    const message = err instanceof Error ? err.message : 'unknown error';
+    await recordCall({
+      function: fnName,
+      symbol,
+      status: 'error',
+      errorMessage: message.slice(0, 1024),
+    });
+    return { status: 'error', symbol, function: fnName, error: message };
+  }
 }
 
 export async function runQuoteSchedulerTick(
@@ -102,43 +230,13 @@ export async function runQuoteSchedulerTick(
     minAgeSeconds: config.minAgeHours * 3600,
   });
   if (!item) {
-    return { status: 'skipped_no_eligible_symbol', budget: { used: budget.used, limit: budget.limit } };
+    return {
+      status: 'skipped_no_eligible_symbol',
+      budget: { used: budget.used, limit: budget.limit },
+    };
   }
 
-  try {
-    const quote = await fetchGlobalQuote(item.symbol);
-    if (!quote) {
-      await recordCall({ function: item.function, symbol: item.symbol, status: 'not_found' });
-      return { status: 'not_found', symbol: item.symbol };
-    }
-    await persistQuoteForSymbol(item.symbol, quote);
-    await recordCall({ function: item.function, symbol: item.symbol, status: 'ok' });
-    return { status: 'refreshed', symbol: item.symbol };
-  } catch (err) {
-    if (err instanceof AlphaVantageError) {
-      const isRateLimit = err.providerNote != null;
-      await recordCall({
-        function: item.function,
-        symbol: item.symbol,
-        status: isRateLimit ? 'rate_limited' : 'error',
-        httpStatus: err.httpStatus,
-        errorMessage: err.message.slice(0, 1024),
-      });
-      return {
-        status: isRateLimit ? 'rate_limited' : 'error',
-        symbol: item.symbol,
-        error: err.message,
-      };
-    }
-    const message = err instanceof Error ? err.message : 'unknown error';
-    await recordCall({
-      function: item.function,
-      symbol: item.symbol,
-      status: 'error',
-      errorMessage: message.slice(0, 1024),
-    });
-    return { status: 'error', symbol: item.symbol, error: message };
-  }
+  return dispatch(item.function, item.symbol);
 }
 
 let activeTask: ScheduledTask | null = null;

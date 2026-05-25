@@ -1,18 +1,36 @@
 /**
- * Lazy + user-triggered backfill orchestration. Each ensureX function:
- *   1. checks current freshness in the DB
- *   2. if stale/never, enqueues a single in-flight promise (dedupe)
- *   3. returns the current BackfillStatus immediately so callers don't block
+ * Lazy + user-triggered Alpha Vantage backfill orchestration.
  *
- * The in-flight registry keys on `${endpoint}:${securityId}` so concurrent
- * price + dividend + overview requests for the same security do not collide.
+ * Each `ensureX` function:
+ *   1. Checks current freshness in the DB.
+ *   2. If stale or never fetched, enqueues a single in-flight promise so
+ *      concurrent callers for the same (endpoint, security) do not collide.
+ *   3. Returns the current `BackfillStatus` immediately so callers do not
+ *      block on the network round-trip.
  *
- * Rate budget is in-process and resets at UTC midnight (see RateBudget).
- * Single-server assumption — multi-process deploys would over-spend.
+ * The shared Alpha Vantage daily call budget lives in the `provider_job_log`
+ * table (see `../integrations/alphaVantage/budget`). Both the background
+ * scheduler and these lazy ensure-* paths consult the same counter, so the
+ * total number of AV calls per UTC day stays under the free-tier ceiling
+ * regardless of which subsystem triggered the work.
+ *
+ * Trade-off: budget checks are optimistic — a burst of concurrent calls can
+ * race past the cap before any of them have written their `ok` row. In
+ * practice the per-(endpoint, security) in-flight dedupe and the 4-minute
+ * scheduler cadence keep the overshoot bounded to a handful of calls per
+ * day, which is comfortably inside the 3-call headroom the 22/25 default
+ * budget leaves.
  */
 import { Security, SecurityDailyPrice, SecurityDividend } from '../models';
-import { RateBudget } from './rateBudget';
-import * as defaultAv from './avClient';
+import * as defaultAv from '../integrations/alphaVantage/client';
+import {
+  ALPHA_VANTAGE_PROVIDER,
+  checkBudget,
+  recordCall,
+} from '../integrations/alphaVantage/budget';
+import { AlphaVantageError } from '../integrations/alphaVantage/client';
+import * as env from '../config/env';
+import { logger } from '../observability/logger';
 
 export type BackfillStatus = {
   status: 'fresh' | 'stale' | 'never' | 'in_progress' | 'rate_limited';
@@ -21,27 +39,35 @@ export type BackfillStatus = {
   coverageDays: number;
 };
 
-type AvClient = Pick<typeof defaultAv, 'fetchDailyAdjusted' | 'fetchDividends' | 'fetchOverview'>;
+type AvClient = Pick<
+  typeof defaultAv,
+  'fetchDailyAdjusted' | 'fetchDividends' | 'fetchOverview' | 'fetchGlobalQuote'
+>;
 
 let av: AvClient = defaultAv;
-let rateBudget = new RateBudget({ dailyCap: 20 });
+let budgetCapOverride: number | null = null;
 const inFlight = new Map<string, Promise<void>>();
 
 const OVERVIEW_STALE_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+const DIVIDENDS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 /** Test seam — replaces the AV client with a stub. */
 export function __setAvClient(stub: AvClient): void {
   av = stub;
 }
-/** Test seam — resets in-flight map + rate budget. */
+/** Test seam — overrides the daily budget cap so tests don't need to seed 22 rows. */
+export function __setBudgetCap(cap: number | null): void {
+  budgetCapOverride = cap;
+}
+/** Test seam — clears in-flight map + restores default client + clears cap override. */
 export function __resetForTests(): void {
   inFlight.clear();
-  rateBudget = new RateBudget({ dailyCap: 20 });
   av = defaultAv;
+  budgetCapOverride = null;
 }
-/** Test seam — drains all rate budget so the next spend() fails. */
-export function __exhaustRateBudget(): void {
-  while (rateBudget.spend()) { /* keep spending */ }
+
+function activeBudgetCap(): number {
+  return budgetCapOverride ?? env.quoteDailyBudget;
 }
 
 function yesterdayISODate(): string {
@@ -50,11 +76,29 @@ function yesterdayISODate(): string {
   return d.toISOString().slice(0, 10);
 }
 
+function nextUtcMidnight(now: Date = new Date()): Date {
+  return new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+      0,
+      0,
+      0,
+      0,
+    ),
+  );
+}
+
 function enqueue(key: string, work: () => Promise<void>): void {
   if (inFlight.has(key)) return;
   const p = work()
     .catch((err) => {
-      console.warn(`[backfill] ${key} failed: ${err instanceof Error ? err.message : err}`);
+      logger.warn('backfill_failed', {
+        key,
+        provider: ALPHA_VANTAGE_PROVIDER,
+        error: err instanceof Error ? err.message : String(err),
+      });
     })
     .finally(() => {
       inFlight.delete(key);
@@ -66,9 +110,56 @@ function makeRateLimited(): BackfillStatus {
   return {
     status: 'rate_limited',
     lastFetchedAt: null,
-    nextRetryAt: rateBudget.nextResetAt().toISOString(),
+    nextRetryAt: nextUtcMidnight().toISOString(),
     coverageDays: 0,
   };
+}
+
+/**
+ * Wraps an AV fetch + DB upsert in unified budget accounting:
+ *   - Records `ok` on a successful fetch that returned usable data.
+ *   - Records `not_found` when AV returned no data for the symbol.
+ *   - Records `rate_limited` or `error` based on `AlphaVantageError` shape.
+ *
+ * The fetch itself is not guarded by `checkBudget` here — callers must do
+ * that synchronously before `enqueue()` to keep the budget pre-check tight
+ * around the work item that consumes the slot.
+ */
+async function runTrackedFetch<T>(
+  fnName: 'TIME_SERIES_DAILY_ADJUSTED' | 'DIVIDENDS' | 'OVERVIEW' | 'GLOBAL_QUOTE',
+  symbol: string,
+  fetcher: () => Promise<T | null>,
+  persist: (result: T) => Promise<void>,
+): Promise<void> {
+  try {
+    const result = await fetcher();
+    if (result == null) {
+      await recordCall({ function: fnName, symbol, status: 'not_found' });
+      return;
+    }
+    await persist(result);
+    await recordCall({ function: fnName, symbol, status: 'ok' });
+  } catch (err) {
+    if (err instanceof AlphaVantageError) {
+      const isRateLimit = err.providerNote != null;
+      await recordCall({
+        function: fnName,
+        symbol,
+        status: isRateLimit ? 'rate_limited' : 'error',
+        httpStatus: err.httpStatus,
+        errorMessage: err.message.slice(0, 1024),
+      });
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      await recordCall({
+        function: fnName,
+        symbol,
+        status: 'error',
+        errorMessage: message.slice(0, 1024),
+      });
+    }
+    throw err;
+  }
 }
 
 export async function ensureDailyPrices(securityId: number): Promise<BackfillStatus> {
@@ -94,31 +185,40 @@ export async function ensureDailyPrices(securityId: number): Promise<BackfillSta
   }
 
   if (rowCount === 0) {
-    if (!rateBudget.spend()) return makeRateLimited();
-    enqueue(key, () => backfillDailyFull(sec.id, sec.symbol));
+    const budget = await checkBudget(activeBudgetCap());
+    if (!budget.ok) return makeRateLimited();
+    enqueue(key, () => backfillDaily(sec.id, sec.symbol, 'full'));
     return { status: 'never', lastFetchedAt, nextRetryAt: null, coverageDays: 0 };
   }
   if (latest && latest.date < yesterdayISODate()) {
-    if (!rateBudget.spend()) return makeRateLimited();
-    enqueue(key, () => backfillDailyCompact(sec.id, sec.symbol));
+    const budget = await checkBudget(activeBudgetCap());
+    if (!budget.ok) return makeRateLimited();
+    enqueue(key, () => backfillDaily(sec.id, sec.symbol, 'compact'));
     return { status: 'stale', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
   }
   return { status: 'fresh', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
 }
 
-async function backfillDailyFull(securityId: number, symbol: string): Promise<void> {
-  const bars = await av.fetchDailyAdjusted(symbol, 'full');
-  if (!bars || bars.length === 0) return;
-  await upsertBars(securityId, bars);
+async function backfillDaily(
+  securityId: number,
+  symbol: string,
+  outputsize: 'compact' | 'full',
+): Promise<void> {
+  await runTrackedFetch(
+    'TIME_SERIES_DAILY_ADJUSTED',
+    symbol,
+    () => av.fetchDailyAdjusted(symbol, outputsize),
+    async (bars) => {
+      if (bars.length === 0) return;
+      await upsertBars(securityId, bars);
+    },
+  );
 }
 
-async function backfillDailyCompact(securityId: number, symbol: string): Promise<void> {
-  const bars = await av.fetchDailyAdjusted(symbol, 'compact');
-  if (!bars || bars.length === 0) return;
-  await upsertBars(securityId, bars);
-}
-
-async function upsertBars(securityId: number, bars: Awaited<ReturnType<typeof av.fetchDailyAdjusted>>): Promise<void> {
+async function upsertBars(
+  securityId: number,
+  bars: Awaited<ReturnType<typeof av.fetchDailyAdjusted>>,
+): Promise<void> {
   if (!bars) return;
   const now = new Date();
   for (const bar of bars) {
@@ -131,7 +231,7 @@ async function upsertBars(securityId: number, bars: Awaited<ReturnType<typeof av
       close: String(bar.close),
       adjClose: String(bar.adjClose),
       volume: bar.volume,
-      source: 'alpha_vantage',
+      source: ALPHA_VANTAGE_PROVIDER,
       fetchedAt: now,
     });
   }
@@ -158,33 +258,43 @@ export async function ensureDividends(securityId: number): Promise<BackfillStatu
       coverageDays: rowCount,
     };
   }
-  // Refresh dividends if never fetched OR latest fetchedAt > 30 days old.
-  const staleAgeMs = 30 * 24 * 60 * 60 * 1000;
+
   const isStale =
-    latest != null &&
-    Date.now() - latest.fetchedAt.getTime() > staleAgeMs;
+    latest != null && Date.now() - latest.fetchedAt.getTime() > DIVIDENDS_STALE_MS;
 
   if (rowCount === 0 || isStale) {
-    if (!rateBudget.spend()) return makeRateLimited();
-    enqueue(key, async () => {
-      const events = await av.fetchDividends(sec.symbol);
-      if (!events) return;
-      const now = new Date();
-      for (const ev of events) {
-        await SecurityDividend.upsert({
-          securityId,
-          exDividendDate: ev.exDividendDate,
-          declarationDate: ev.declarationDate,
-          recordDate: ev.recordDate,
-          paymentDate: ev.paymentDate,
-          amount: String(ev.amount),
-          currency: ev.currency,
-          source: 'alpha_vantage',
-          fetchedAt: now,
-        });
-      }
-    });
-    return { status: rowCount === 0 ? 'never' : 'stale', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
+    const budget = await checkBudget(activeBudgetCap());
+    if (!budget.ok) return makeRateLimited();
+    enqueue(key, () =>
+      runTrackedFetch(
+        'DIVIDENDS',
+        sec.symbol,
+        () => av.fetchDividends(sec.symbol),
+        async (events) => {
+          if (events.length === 0) return;
+          const now = new Date();
+          for (const ev of events) {
+            await SecurityDividend.upsert({
+              securityId,
+              exDividendDate: ev.exDividendDate,
+              declarationDate: ev.declarationDate,
+              recordDate: ev.recordDate,
+              paymentDate: ev.paymentDate,
+              amount: String(ev.amount),
+              currency: ev.currency,
+              source: ALPHA_VANTAGE_PROVIDER,
+              fetchedAt: now,
+            });
+          }
+        },
+      ),
+    );
+    return {
+      status: rowCount === 0 ? 'never' : 'stale',
+      lastFetchedAt,
+      nextRetryAt: null,
+      coverageDays: rowCount,
+    };
   }
   return { status: 'fresh', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
 }
@@ -204,22 +314,28 @@ export async function ensureOverview(securityId: number): Promise<BackfillStatus
     return { status: 'in_progress', lastFetchedAt, nextRetryAt: null, coverageDays: isNever ? 0 : 1 };
   }
   if (isNever || isStale) {
-    if (!rateBudget.spend()) return makeRateLimited();
-    enqueue(key, async () => {
-      const overview = await av.fetchOverview(sec.symbol);
-      if (!overview) return;
-      await sec.update({
-        metadata: {
-          sector: overview.sector,
-          industry: overview.industry,
-          country: overview.country,
-          exchange: overview.exchange,
-          description: overview.description,
-          ...overview.raw,
+    const budget = await checkBudget(activeBudgetCap());
+    if (!budget.ok) return makeRateLimited();
+    enqueue(key, () =>
+      runTrackedFetch(
+        'OVERVIEW',
+        sec.symbol,
+        () => av.fetchOverview(sec.symbol),
+        async (overview) => {
+          await sec.update({
+            metadata: {
+              sector: overview.sector,
+              industry: overview.industry,
+              country: overview.country,
+              exchange: overview.exchange,
+              description: overview.description,
+              ...overview.raw,
+            },
+            metadataFetchedAt: new Date(),
+          });
         },
-        metadataFetchedAt: new Date(),
-      });
-    });
+      ),
+    );
     return {
       status: isNever ? 'never' : 'stale',
       lastFetchedAt,
