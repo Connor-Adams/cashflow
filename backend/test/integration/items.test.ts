@@ -161,3 +161,46 @@ test('GET /api/items isolates households', async () => {
   assert.equal(resB.body.items.length, 0, 'household B should not see household A items');
   assert.ok(resA.body.items.length >= 1, 'household A should still see its items');
 });
+
+test('GET /api/items filters by category', async () => {
+  const res = await agentA.get('/api/items?category=Office');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.items.length >= 1);
+  assert.ok(res.body.items.every((r: { categoryEffective: string | null }) => r.categoryEffective === 'Office'));
+});
+
+test('GET /api/items filters by businessUse=true', async () => {
+  const res = await agentA.get('/api/items?businessUse=true');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.items.every((r: { businessUseEffective: boolean }) => r.businessUseEffective));
+});
+
+test('GET /api/items filters by vendor substring', async () => {
+  const res = await agentA.get('/api/items?vendor=ama');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.items.every((r: { order: { vendor: string } }) => r.order.vendor.toLowerCase().includes('ama')));
+});
+
+test('GET /api/items filters by date range', async () => {
+  const res = await agentA.get('/api/items?from=2026-05-19&to=2026-05-21');
+  assert.equal(res.status, 200);
+  for (const r of res.body.items) {
+    assert.ok(r.receipt.date >= '2026-05-19' && r.receipt.date <= '2026-05-21');
+  }
+});
+
+test('GET /api/items filters by price range', async () => {
+  const res = await agentA.get('/api/items?minPrice=10&maxPrice=30');
+  assert.equal(res.status, 200);
+  for (const r of res.body.items) {
+    if (r.totalPrice != null) {
+      assert.ok(r.totalPrice >= 10 && r.totalPrice <= 30);
+    }
+  }
+});
+
+test('GET /api/items filters by q (case-insensitive title substring)', async () => {
+  const res = await agentA.get('/api/items?q=USB');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.items.every((r: { title: string }) => r.title.toLowerCase().includes('usb')));
+});

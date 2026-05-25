@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { Op, type WhereOptions } from 'sequelize';
+import type { Request } from 'express';
 import { ExternalOrder, ExternalOrderItem, Receipt, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
@@ -23,18 +25,125 @@ function effectiveBusinessUse(item: ExternalOrderItem): boolean {
   return Number.isFinite(n) && n > 0;
 }
 
+type Filters = {
+  category?: string;
+  businessUse?: string;
+  from?: string;
+  to?: string;
+  vendor?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  q?: string;
+};
+
+function parseFilters(req: Request): Filters {
+  const q = req.query;
+  const str = (k: string): string | undefined => {
+    const v = q[k];
+    return typeof v === 'string' && v.length > 0 ? v : undefined;
+  };
+  const numQ = (k: string): number | undefined => {
+    const v = str(k);
+    if (v == null) return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  return {
+    category: str('category'),
+    businessUse: str('businessUse'),
+    from: str('from'),
+    to: str('to'),
+    vendor: str('vendor'),
+    minPrice: numQ('minPrice'),
+    maxPrice: numQ('maxPrice'),
+    q: str('q'),
+  };
+}
+
+function buildItemWhere(f: Filters): WhereOptions {
+  const and: WhereOptions[] = [];
+  if (f.q) {
+    and.push({ title: { [Op.like]: `%${f.q}%` } });
+  }
+  if (f.minPrice != null || f.maxPrice != null) {
+    const priceCond: Record<symbol, number> = {};
+    if (f.minPrice != null) priceCond[Op.gte] = f.minPrice;
+    if (f.maxPrice != null) priceCond[Op.lte] = f.maxPrice;
+    and.push({ totalPrice: priceCond as never });
+  }
+  if (f.category) {
+    and.push({
+      [Op.or]: [
+        { categoryOverride: f.category },
+        { categoryOverride: null, inferredCategory: f.category },
+      ],
+    });
+  }
+  if (f.businessUse === 'true') {
+    and.push({
+      [Op.or]: [
+        {
+          [Op.and]: [
+            { businessUseOverride: { [Op.ne]: null } },
+            { businessUseOverride: { [Op.ne]: '0' } },
+          ],
+        },
+        {
+          [Op.and]: [
+            { businessUseOverride: null },
+            { businessUsePercent: { [Op.ne]: null } },
+            { businessUsePercent: { [Op.ne]: '0' } },
+          ],
+        },
+      ],
+    });
+  } else if (f.businessUse === 'false') {
+    and.push({
+      [Op.or]: [
+        { businessUseOverride: '0' },
+        {
+          [Op.and]: [
+            { businessUseOverride: null },
+            { [Op.or]: [{ businessUsePercent: null }, { businessUsePercent: '0' }] },
+          ],
+        },
+      ],
+    });
+  }
+  return and.length > 0 ? { [Op.and]: and } : {};
+}
+
 router.get('/items', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
     const txnWhere = visibleTransactionWhere(req);
 
+    const f = parseFilters(req);
+    const itemWhere = buildItemWhere(f);
+
+    const orderWhere: WhereOptions = { householdId: household.id };
+    if (f.vendor) {
+      (orderWhere as Record<string, unknown>).vendor = {
+        [Op.like]: `%${f.vendor.toLowerCase()}%`,
+      };
+    }
+
+    const txnWhereWithDate: WhereOptions = { ...(txnWhere as object) };
+    if (f.from || f.to) {
+      const dateCond: Record<symbol, string> = {};
+      if (f.from) dateCond[Op.gte] = f.from;
+      if (f.to) dateCond[Op.lte] = f.to;
+      (txnWhereWithDate as Record<string, unknown>).date = dateCond;
+    }
+
     const items = await ExternalOrderItem.findAll({
+      where: itemWhere,
       include: [
         {
           model: ExternalOrder,
           as: 'order',
           required: true,
-          where: { householdId: household.id },
+          where: orderWhere,
           include: [
             {
               model: Receipt,
@@ -45,7 +154,7 @@ router.get('/items', async (req, res, next) => {
                   model: Transaction,
                   as: 'transaction',
                   required: true,
-                  where: txnWhere,
+                  where: txnWhereWithDate,
                 },
               ],
             },
