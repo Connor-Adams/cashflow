@@ -10,7 +10,7 @@ import { computeForwardProjection, type PaymentEvent } from './forwardIncome';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-async function latestHoldingsByHousehold(householdId: number): Promise<Map<number, { qty: number; currency: string }>> {
+async function latestHoldingsByHousehold(householdId: number, asOf: Date): Promise<Map<number, { qty: number; currency: string }>> {
   const invAccounts = await Account.findAll({
     where: { householdId, accountType: 'investment' },
     attributes: ['id'],
@@ -19,7 +19,10 @@ async function latestHoldingsByHousehold(householdId: number): Promise<Map<numbe
   const acctIds = invAccounts.map((a) => a.id);
 
   const snapshots = await HoldingSnapshot.findAll({
-    where: { accountId: { [Op.in]: acctIds } },
+    where: {
+      accountId: { [Op.in]: acctIds },
+      statementDate: { [Op.lte]: asOf.toISOString().slice(0, 10) },
+    },
     order: [['statementDate', 'DESC']],
   });
   const latestByPair = new Map<string, HoldingSnapshot>();
@@ -51,7 +54,7 @@ export async function rebuildForwardProjectionsForHousehold(
   householdId: number,
   asOf: Date = new Date(),
 ): Promise<RebuildResult> {
-  const holdings = await latestHoldingsByHousehold(householdId);
+  const holdings = await latestHoldingsByHousehold(householdId, asOf);
   const securityIds = [...holdings.keys()];
 
   let divEvents: SecurityDividend[] = [];
@@ -91,11 +94,14 @@ export async function rebuildForwardProjectionsForHousehold(
       .map((d) => ({ date: new Date(d.exDividendDate), perShareAmount: Number(d.amount) }));
 
     const intPayments: PaymentEvent[] = intEvents
-      .filter((a) => a.securityId === securityId && a.amount != null && holding.qty > 0)
-      .map((a) => ({
-        date: new Date(a.tradeDate),
-        perShareAmount: Number(a.amount) / holding.qty,
-      }));
+      .filter((a) => a.securityId === securityId && a.amount != null)
+      .map((a) => {
+        const perShareAmount = Number(a.amount) / holding.qty;
+        return Number.isFinite(perShareAmount)
+          ? { date: new Date(a.tradeDate), perShareAmount }
+          : null;
+      })
+      .filter((e): e is PaymentEvent => e !== null);
 
     const proj = computeForwardProjection({
       securityId,
@@ -120,24 +126,17 @@ export async function rebuildForwardProjectionsForHousehold(
       computedAt: asOf,
       staleAt: null,
     };
-    const [, created] = await PortfolioForwardProjection.findOrCreate({
-      where: { householdId, securityId },
-      defaults: { householdId, securityId, ...updateValues },
-    });
-    if (!created) {
-      await PortfolioForwardProjection.update(updateValues, { where: { householdId, securityId } });
-    }
+    await PortfolioForwardProjection.upsert(
+      { householdId, securityId, ...updateValues },
+      { conflictFields: ['household_id', 'security_id'] },
+    );
     rebuilt++;
   }
 
-  const existing = await PortfolioForwardProjection.findAll({ where: { householdId } });
-  const deleteIds = existing
-    .filter((row) => !holdings.has(row.securityId))
-    .map((row) => row.id);
-  let deleted = 0;
-  if (deleteIds.length > 0) {
-    deleted = await PortfolioForwardProjection.destroy({ where: { id: { [Op.in]: deleteIds } } });
-  }
+  const deleteWhere = securityIds.length > 0
+    ? { householdId, securityId: { [Op.notIn]: securityIds } }
+    : { householdId };
+  const deleted = await PortfolioForwardProjection.destroy({ where: deleteWhere });
 
   return { rebuilt, deleted };
 }
