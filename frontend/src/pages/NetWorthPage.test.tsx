@@ -1,8 +1,10 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { NetWorthPage } from './NetWorthPage'
+import { updateOpeningBalance } from '@/hooks/useNetWorth'
 
 vi.mock('@/hooks/useNetWorth', () => ({
   useNetWorthCurrent: () => ({
@@ -67,5 +69,23 @@ describe('NetWorthPage', () => {
     expect(screen.getByRole('button', { name: '3M' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '1Y' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument()
+  })
+
+  it('opening-balance editor PATCHes the new value on save', async () => {
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: /opening balances/i })
+    await userEvent.click(toggle)
+    const input = await screen.findByLabelText(/opening balance for chq/i)
+    await userEvent.clear(input)
+    await userEvent.type(input, '2500')
+    await userEvent.click(screen.getByRole('button', { name: /save chq/i }))
+    expect(updateOpeningBalance).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ openingBalance: 2500 }),
+    )
   })
 })

@@ -8,7 +8,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { useNetWorthCurrent, useNetWorthSeries } from '@/hooks/useNetWorth'
+import { useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance } from '@/hooks/useNetWorth'
 import {
   Table,
   TableHeader,
@@ -43,9 +43,22 @@ function rangeToParams(range: Range): {
 
 export function NetWorthPage() {
   const [range, setRange] = useState<Range>('1Y')
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [drafts, setDrafts] = useState<Record<number, string>>({})
   const current = useNetWorthCurrent()
   const seriesParams = useMemo(() => rangeToParams(range), [range])
   const series = useNetWorthSeries(seriesParams)
+
+  async function saveOpening(accountId: number) {
+    const raw = drafts[accountId] ?? ''
+    const val = Number(raw)
+    if (!Number.isFinite(val)) return
+    await updateOpeningBalance(accountId, {
+      openingBalance: val,
+      openingBalanceDate: null,
+    })
+    current.refresh()
+  }
 
   if (current.loading && !current.data) {
     return <div className="p-6">Loading net worth…</div>
@@ -61,6 +74,9 @@ export function NetWorthPage() {
   }
 
   const accountRows = [...cur.breakdown.assets, ...cur.breakdown.liabilities]
+  const editableAccounts = accountRows.filter(
+    (r): r is typeof r & { accountId: number } => r.source === 'account' && r.accountId != null,
+  )
 
   return (
     <div className="p-6 space-y-6">
@@ -157,6 +173,51 @@ export function NetWorthPage() {
             ))}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="rounded border">
+        <button
+          type="button"
+          onClick={() => setEditorOpen((v) => !v)}
+          className="w-full text-left p-4 font-medium"
+        >
+          Opening balances {editorOpen ? '−' : '+'}
+        </button>
+        {editorOpen && (
+          <div className="p-4 space-y-3 border-t">
+            {editableAccounts.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No accounts to edit.</div>
+            ) : (
+              editableAccounts.map((row) => (
+                <div
+                  key={`${row.accountId}-${row.currency}`}
+                  className="flex items-center gap-3"
+                >
+                  <label className="w-40 truncate" htmlFor={`opening-${row.accountId}`}>
+                    {row.label}
+                  </label>
+                  <input
+                    id={`opening-${row.accountId}`}
+                    aria-label={`Opening balance for ${row.label}`}
+                    type="number"
+                    className="border rounded px-2 py-1"
+                    onChange={(e) =>
+                      setDrafts((d) => ({ ...d, [row.accountId]: e.target.value }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveOpening(row.accountId)}
+                    aria-label={`Save ${row.label}`}
+                    className="rounded border px-3 py-1 text-sm"
+                  >
+                    Save
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
