@@ -1,10 +1,9 @@
 'use strict';
 
-/** @param {import('sequelize').QueryInterface} queryInterface */
-/** @param {typeof import('sequelize').Sequelize} Sequelize */
-
+/** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
+    const isPostgres = queryInterface.sequelize.getDialect() === 'postgres';
     await queryInterface.createTable('portfolio_forward_projections', {
       id: { type: Sequelize.INTEGER, primaryKey: true, autoIncrement: true },
       household_id: {
@@ -30,7 +29,7 @@ module.exports = {
       median_spacing_days: { type: Sequelize.INTEGER, allowNull: true },
       cv_pct: { type: Sequelize.DECIMAL(8, 4), allowNull: true },
       unreliable: { type: Sequelize.BOOLEAN, allowNull: false, defaultValue: false },
-      next_ex_div_dates: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
+      next_ex_div_dates: { type: isPostgres ? Sequelize.JSONB : Sequelize.JSON, allowNull: false, defaultValue: [] },
       computed_at: { type: Sequelize.DATE, allowNull: false },
       stale_at: { type: Sequelize.DATE, allowNull: true },
       created_at: { type: Sequelize.DATE, allowNull: false },
