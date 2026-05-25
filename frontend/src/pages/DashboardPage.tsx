@@ -14,7 +14,6 @@ import {
 import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
-import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
@@ -838,23 +837,6 @@ export function DashboardPage() {
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
 
-      {summaryStats.reviewCount > 0 ? (
-        <Alert
-          variant="warning"
-          title={`${summaryStats.reviewCount} transaction${
-            summaryStats.reviewCount === 1 ? '' : 's'
-          } flagged for review`}
-          action={
-            <Link to="/review" className="text-sm font-semibold underline">
-              Open Review Inbox
-            </Link>
-          }
-        >
-          Transactions flagged for review are waiting on category, split, or
-          business decisions before they roll into your totals.
-        </Alert>
-      ) : null}
-
       <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
         <CardContent className="p-0">
           <FilterBar
@@ -927,17 +909,45 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
-      {hasActionSeverity ? (
-        <div className="aiActionBanner" role="status">
-          AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
-          <a href="#ai-insights-tile">Jump to insights</a>
-        </div>
-      ) : null}
-
       <div
         className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 grid-flow-row-dense gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
       >
+        {summaryStats.reviewCount > 0 && (
+          <BentoTile
+            span={8}
+            rows={1}
+            variant="warning"
+            role="status"
+            aria-live="polite"
+            label={`${summaryStats.reviewCount} transaction${
+              summaryStats.reviewCount === 1 ? '' : 's'
+            } flagged for review`}
+            description="Waiting on category, split, or business decisions before they roll into your totals."
+            actions={
+              <Link to="/review" className="text-sm font-semibold underline">
+                Open Review Inbox
+              </Link>
+            }
+          />
+        )}
+        {hasActionSeverity && (
+          <BentoTile
+            span={4}
+            rows={1}
+            variant="destructive"
+            role="status"
+            aria-live="polite"
+            label={`AI flagged ${sortedInsights.filter((i) => i.severity === 'action').length} action item${
+              sortedInsights.filter((i) => i.severity === 'action').length === 1 ? '' : 's'
+            } this month`}
+            actions={
+              <a href="#ai-insights-tile" className="text-sm font-semibold underline">
+                Jump to insights
+              </a>
+            }
+          />
+        )}
         <NetWorthTile />
         {budgetProgressSorted.length > 0 && (
           <BentoTile
