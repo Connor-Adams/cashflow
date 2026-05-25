@@ -18,6 +18,8 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { SecurityLogo } from '@/components/ui/security-logo'
+import { Sparkline } from '@/components/ui/sparkline'
 import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
@@ -35,6 +37,8 @@ import type {
   PortfolioBySecurity,
   PortfolioIncome,
   PortfolioRealized,
+  PortfolioSparklinePoint,
+  PortfolioSparklines,
   PortfolioSummary,
 } from '../types/api'
 
@@ -95,6 +99,8 @@ export function PortfolioPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('holdings')
 
+  const [sparklines, setSparklines] = useState<Map<number, PortfolioSparklinePoint[]>>(new Map())
+
   const [quotesAsOf, setQuotesAsOf] = useState<number | null>(null)
   const [now, setNow] = useState<number>(() => Date.now())
 
@@ -102,15 +108,21 @@ export function PortfolioPage() {
     setLoading(true)
     setErr(null)
     try {
-      const [summaryRes, allocRes, bySecRes] =
+      const [summaryRes, allocRes, bySecRes, sparkRes] =
         await Promise.all([
           getJson<PortfolioSummary>('/api/portfolio'),
           getJson<PortfolioAllocation>('/api/portfolio/allocation'),
           getJson<PortfolioBySecurity>('/api/portfolio/by-security'),
+          getJson<PortfolioSparklines>('/api/portfolio/sparklines?range=30d'),
         ])
       setSummary(summaryRes)
       setAllocation(allocRes)
       setBySec(bySecRes)
+      setSparklines(
+        new Map(
+          Object.entries(sparkRes.bySecurityId).map(([k, v]) => [Number(k), v]),
+        ),
+      )
       const fetchedAts = summaryRes.holdings
         .map((h) => h.latestPrice?.fetchedAt)
         .filter((v): v is string => typeof v === 'string')
@@ -233,11 +245,11 @@ export function PortfolioPage() {
       </div>
 
       <TabPanel value="holdings" active={activeTab}>
-        <HoldingsPanel summary={summary} accountsById={accountsById} />
+        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} />
       </TabPanel>
 
       <TabPanel value="by-security" active={activeTab}>
-        <BySecurityPanel data={bySec} />
+        <BySecurityPanel data={bySec} sparklines={sparklines} />
       </TabPanel>
 
       <TabPanel value="allocation" active={activeTab}>
@@ -260,9 +272,11 @@ export function PortfolioPage() {
 function HoldingsPanel({
   summary,
   accountsById,
+  sparklines,
 }: {
   summary: PortfolioSummary | null
   accountsById: Map<number, PortfolioSummary['accounts'][number]>
+  sparklines: Map<number, PortfolioSparklinePoint[]>
 }) {
   return (
     <>
@@ -288,6 +302,7 @@ function HoldingsPanel({
                 <TableHead>Market value</TableHead>
                 <TableHead>Cost basis</TableHead>
                 <TableHead>Unrealized</TableHead>
+                <TableHead>30d</TableHead>
                 <TableHead>As of</TableHead>
               </TableRow>
             </TableHeader>
@@ -299,12 +314,19 @@ function HoldingsPanel({
                   </TableCell>
                   <TableCell>
                     {holding.security ? (
-                      <Link
-                        to={`/portfolio/security/${holding.security.id}`}
-                        className="text-foreground underline-offset-2 hover:underline"
-                      >
-                        {holding.security.symbol}
-                      </Link>
+                      <span className="flex items-center gap-2">
+                        <SecurityLogo
+                          size="sm"
+                          symbol={holding.security.symbol}
+                          name={holding.security.name}
+                        />
+                        <Link
+                          to={`/portfolio/security/${holding.security.id}`}
+                          className="text-foreground underline-offset-2 hover:underline"
+                        >
+                          {holding.security.symbol}
+                        </Link>
+                      </span>
                     ) : (
                       '—'
                     )}
@@ -334,12 +356,22 @@ function HoldingsPanel({
                       ? formatMoney(holding.unrealizedGainLoss, holding.currency)
                       : '—'}
                   </TableCell>
+                  <TableCell>
+                    {holding.security ? (
+                      <Sparkline
+                        data={(sparklines.get(holding.security.id) ?? []).map((p) => ({
+                          date: p.date,
+                          value: p.close,
+                        }))}
+                      />
+                    ) : null}
+                  </TableCell>
                   <TableCell>{holding.statementDate}</TableCell>
                 </TableRow>
               ))}
               {summary && summary.holdings.length === 0 && (
                 <EmptyTableRow
-                  colSpan={9}
+                  colSpan={10}
                   title="No holdings imported yet."
                   description="Import an investment statement to populate this table."
                 />
@@ -417,7 +449,13 @@ function HoldingsPanel({
 
 /* ---------------------- By-security tab ---------------------- */
 
-function BySecurityPanel({ data }: { data: PortfolioBySecurity | null }) {
+function BySecurityPanel({
+  data,
+  sparklines,
+}: {
+  data: PortfolioBySecurity | null
+  sparklines: Map<number, PortfolioSparklinePoint[]>
+}) {
   const rows = data?.rows ?? []
   return (
     <Card className="transactionsTableCard">
@@ -442,6 +480,7 @@ function BySecurityPanel({ data }: { data: PortfolioBySecurity | null }) {
               <TableHead>Total market value</TableHead>
               <TableHead>Unrealized</TableHead>
               <TableHead>Accounts</TableHead>
+              <TableHead>30d</TableHead>
               <TableHead>Latest quote</TableHead>
             </TableRow>
           </TableHeader>
@@ -449,12 +488,15 @@ function BySecurityPanel({ data }: { data: PortfolioBySecurity | null }) {
             {rows.map((row) => (
               <TableRow key={row.securityId}>
                 <TableCell>
-                  <Link
-                    to={`/portfolio/security/${row.securityId}`}
-                    className="text-foreground underline-offset-2 hover:underline"
-                  >
-                    {row.symbol}
-                  </Link>
+                  <span className="flex items-center gap-2">
+                    <SecurityLogo size="sm" symbol={row.symbol} name={row.name} />
+                    <Link
+                      to={`/portfolio/security/${row.securityId}`}
+                      className="text-foreground underline-offset-2 hover:underline"
+                    >
+                      {row.symbol}
+                    </Link>
+                  </span>
                 </TableCell>
                 <TableCell>{row.name ?? '—'}</TableCell>
                 <TableCell>{row.assetType ?? '—'}</TableCell>
@@ -472,6 +514,14 @@ function BySecurityPanel({ data }: { data: PortfolioBySecurity | null }) {
                 </TableCell>
                 <TableCell>{row.accountBreakdown.length}</TableCell>
                 <TableCell>
+                  <Sparkline
+                    data={(sparklines.get(row.securityId) ?? []).map((p) => ({
+                      date: p.date,
+                      value: p.close,
+                    }))}
+                  />
+                </TableCell>
+                <TableCell>
                   {row.latestPrice
                     ? `${formatMoney(row.latestPrice.price, row.latestPrice.currency)} · ${row.latestPrice.pricedAt.slice(0, 10)}`
                     : '—'}
@@ -480,7 +530,7 @@ function BySecurityPanel({ data }: { data: PortfolioBySecurity | null }) {
             ))}
             {rows.length === 0 && (
               <EmptyTableRow
-                colSpan={9}
+                colSpan={10}
                 title="No positions yet."
                 description="Aggregated view appears after holdings are imported."
               />
@@ -897,18 +947,23 @@ function IncomeBySecurityRow({ row }: { row: IncomeBySecurityRowData }) {
 function SymbolLink({
   securityId,
   symbol,
+  name,
 }: {
   securityId: number | null
   symbol: string | null
+  name?: string | null
 }) {
   if (securityId == null || !symbol) return <>{symbol ?? '—'}</>
   return (
-    <Link
-      to={`/portfolio/security/${securityId}`}
-      className="text-foreground underline-offset-2 hover:underline"
-    >
-      {symbol}
-    </Link>
+    <span className="flex items-center gap-2">
+      <SecurityLogo size="sm" symbol={symbol} name={name} />
+      <Link
+        to={`/portfolio/security/${securityId}`}
+        className="text-foreground underline-offset-2 hover:underline"
+      >
+        {symbol}
+      </Link>
+    </span>
   )
 }
 
@@ -1079,7 +1134,7 @@ function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }
             {rows.map((row) => (
               <TableRow key={`${row.securityId}|${row.currency}`}>
                 <TableCell>
-                  <SymbolLink securityId={row.securityId} symbol={row.symbol} />
+                  <SymbolLink securityId={row.securityId} symbol={row.symbol} name={row.name} />
                 </TableCell>
                 <TableCell>{row.name ?? '—'}</TableCell>
                 <TableCell>{row.currency}</TableCell>
