@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { getJson } from '../../lib/api'
+import { getAppConfig } from '../../lib/appConfig'
 import { formatMoney } from '../../lib/formatMoney'
 import type { PortfolioSecurityPrices } from '../../types/api'
 
@@ -32,6 +33,8 @@ export type PriceChartCardProps = {
 }
 
 export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
+  const quoteProviderConfigured =
+    getAppConfig()?.quoteProviderConfigured ?? false
   const [range, setRange] = useState<PortfolioSecurityPrices['range']>('1y')
   const [data, setData] = useState<PortfolioSecurityPrices | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -54,9 +57,10 @@ export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
   }, [securityId, range])
 
   useEffect(() => {
+    if (!quoteProviderConfigured) return
     pollAttemptsRef.current = 0
     void fetchData()
-  }, [fetchData])
+  }, [fetchData, quoteProviderConfigured])
 
   useEffect(() => {
     if (!data) return
@@ -68,6 +72,21 @@ export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
     }, POLL_INTERVAL_MS)
     return () => window.clearTimeout(id)
   }, [data, fetchData])
+
+  if (!quoteProviderConfigured) {
+    return (
+      <Card>
+        <div className="transactionsPanelHeader">
+          <div>
+            <h2 className="text-base">Price history</h2>
+          </div>
+        </div>
+        <p className="muted">
+          Set <code>ALPHA_VANTAGE_API_KEY</code> to enable price history.
+        </p>
+      </Card>
+    )
+  }
 
   const chartRows = data?.rows.map((r) => ({ date: r.date, close: r.adjClose })) ?? []
   const buyDots = data?.trades
@@ -100,7 +119,7 @@ export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
         </div>
       </div>
 
-      <BackfillBanner status={data?.backfill.status} nextRetryAt={data?.backfill.nextRetryAt ?? null} loading={loading} />
+      <BackfillBanner status={data?.backfill.status} loading={loading} />
 
       {err && <p className="error">{err}</p>}
 
@@ -139,11 +158,9 @@ export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
 
 function BackfillBanner({
   status,
-  nextRetryAt,
   loading,
 }: {
   status: string | undefined
-  nextRetryAt: string | null
   loading: boolean
 }) {
   if (status === 'never' || status === 'in_progress') {
@@ -154,10 +171,13 @@ function BackfillBanner({
     )
   }
   if (status === 'rate_limited') {
-    const next = nextRetryAt ? new Date(nextRetryAt).toLocaleString() : 'midnight UTC'
+    // Backfill rate budget resets at UTC midnight (see backend/src/portfolio/
+    // backfill.ts). Banner uses a literal phrase rather than a locale-formatted
+    // datetime for deterministic UX. The API still returns nextRetryAt for
+    // programmatic consumers.
     return (
       <p className="uploadMsg warn text-sm">
-        Daily AV quota exhausted — retry after {next}.
+        Daily AV quota exhausted — retry after midnight UTC.
       </p>
     )
   }
