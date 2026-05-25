@@ -6,6 +6,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
 import { RecurringPage } from './pages/RecurringPage'
@@ -50,6 +51,7 @@ function AppRoutes() {
           <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="portfolio/security/:id" element={<PortfolioSecurityPage />} />
+          <Route path="net-worth" element={<NetWorthPage />} />
           <Route path="amazon" element={<AmazonPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />

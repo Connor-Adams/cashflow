@@ -22,6 +22,7 @@ import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
 import emailIntegrationsRouter from './routes/emailIntegrations';
+import netWorthRouter from './routes/netWorth';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
 import captureRouter, { captureCors } from './routes/capture';
@@ -80,6 +81,7 @@ app.use('/api/amazon', amazonRouter);
 app.use('/api/external-orders', externalOrdersRouter);
 app.use('/api/email', emailIntegrationsRouter);
 app.use('/api/portfolio', portfolioRouter);
+app.use('/api/net-worth', netWorthRouter);
 app.use('/api/tax', taxRouter);
 app.use('/api', receiptsRouter);
 
