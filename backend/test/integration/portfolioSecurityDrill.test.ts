@@ -228,3 +228,23 @@ test('Unknown security id returns 404', async () => {
   const res = await authed.get('/api/portfolio/security/9999999');
   assert.equal(res.status, 404);
 });
+
+test('combined includes todayChangePct + 30d return + yield-on-cost when data present', async () => {
+  const { seedDailyPrice, seedDividend } = await import('./portfolioFixtures.js');
+  const models = await import('../../src/models');
+  for (let i = 0; i <= 31; i++) {
+    const date = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    await seedDailyPrice(models, { securityId: xeqtId, date, close: 30 + i * 0.1, adjClose: 30 + i * 0.1 });
+  }
+  await seedDividend(models, {
+    securityId: xeqtId,
+    exDividendDate: new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10),
+    amount: 0.25,
+    currency: 'CAD',
+  });
+  const res = await authed.get(`/api/portfolio/security/${xeqtId}`);
+  assert.equal(res.status, 200);
+  assert.notEqual(res.body.combined.thirtyDayReturnPct, null);
+  assert.notEqual(res.body.combined.yieldOnCostPct, null);
+  assert.ok(Number.isFinite(res.body.combined.thirtyDayReturnPct));
+});

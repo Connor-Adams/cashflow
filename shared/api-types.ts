@@ -516,6 +516,9 @@ export type PortfolioSecurityCombined = {
   realizedTotal: number
   income: { dividend: number; interest: number }
   currency: string
+  todayChangePct: number | null
+  thirtyDayReturnPct: number | null
+  yieldOnCostPct: number | null
 }
 
 export type PortfolioSecurityActivity = {

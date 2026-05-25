@@ -1167,6 +1167,48 @@ router.get('/security/:id', async (req, res, next) => {
       currency: h.currency,
     }));
 
+    // Today change %: needs current price + prevClose. Use latest SecurityPrice quote
+    // (refreshed via /prices/refresh). prevClose comes from yesterday's adj_close.
+    const dailyForToday = await SecurityDailyPrice.findAll({
+      where: { securityId },
+      order: [['date', 'DESC']],
+      limit: 2,
+    });
+    const todayPriceQuote = latestPrice ? Number(latestPrice.price) : null;
+    const prevClose = dailyForToday[0] ? Number(dailyForToday[0].adjClose) : null;
+    const todayChangePct =
+      todayPriceQuote != null && prevClose != null && prevClose !== 0
+        ? ((todayPriceQuote - prevClose) / prevClose) * 100
+        : null;
+
+    // 30-day return %: ((todayPrice + dividends_in_30d_per_unit) - price_30d_ago) / price_30d_ago
+    const cutoff30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const price30 = await SecurityDailyPrice.findOne({
+      where: { securityId, date: { [Op.lte]: cutoff30 } },
+      order: [['date', 'DESC']],
+    });
+    const divs30 = await SecurityDividend.findAll({
+      where: { securityId, exDividendDate: { [Op.gte]: cutoff30 } },
+    });
+    const divPerUnit30 = divs30.reduce((s, d) => s + Number(d.amount), 0);
+    const price30Val = price30 ? Number(price30.adjClose) : null;
+    const todayForReturn = todayPriceQuote ?? (dailyForToday[0] ? Number(dailyForToday[0].adjClose) : null);
+    const thirtyDayReturnPct =
+      price30Val != null && price30Val !== 0 && todayForReturn != null
+        ? ((todayForReturn + divPerUnit30 - price30Val) / price30Val) * 100
+        : null;
+
+    // Yield on cost (TTM)
+    const cutoff365 = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const divs365 = await SecurityDividend.findAll({
+      where: { securityId, exDividendDate: { [Op.gte]: cutoff365 } },
+    });
+    const divPerUnit365 = divs365.reduce((s, d) => s + Number(d.amount), 0);
+    const yieldOnCostPct =
+      combinedCost > 0 && combinedQty > 0
+        ? ((divPerUnit365 * combinedQty) / combinedCost) * 100
+        : null;
+
     res.json({
       security: {
         id: security.id,
@@ -1183,6 +1225,9 @@ router.get('/security/:id', async (req, res, next) => {
         realizedTotal: combinedRealized,
         income: { dividend: combinedDividend, interest: combinedInterest },
         currency: combinedCurrency,
+        todayChangePct,
+        thirtyDayReturnPct,
+        yieldOnCostPct,
       },
       activities: activitiesDto,
       holdings: holdingsDto,

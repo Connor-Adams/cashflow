@@ -132,9 +132,23 @@ export function PortfolioSecurityPage() {
           value={unrealized != null ? formatMoney(unrealized, combined.currency) : '—'}
           hint="MV − cost basis"
         />
-        <MetricStat label="Today" value="—" hint="Δ% vs prior close (coming soon)" />
-        <MetricStat label="30d return" value="—" hint="Price + dividends (coming soon)" />
-        <MetricStat label="Yield on cost (TTM)" value="—" hint="TTM dividends / cost basis (coming soon)" />
+        <MetricStat
+          label="Today"
+          value={combined.todayChangePct != null ? `${combined.todayChangePct >= 0 ? '+' : ''}${combined.todayChangePct.toFixed(2)}%` : '—'}
+          deltaPct={combined.todayChangePct ?? undefined}
+          hint="vs prior close"
+        />
+        <MetricStat
+          label="30d return"
+          value={combined.thirtyDayReturnPct != null ? `${combined.thirtyDayReturnPct >= 0 ? '+' : ''}${combined.thirtyDayReturnPct.toFixed(2)}%` : '—'}
+          deltaPct={combined.thirtyDayReturnPct ?? undefined}
+          hint="price + dividends"
+        />
+        <MetricStat
+          label="Yield on cost (TTM)"
+          value={combined.yieldOnCostPct != null ? `${combined.yieldOnCostPct.toFixed(2)}%` : '—'}
+          hint="TTM dividends / cost basis"
+        />
         <StatCard
           label="Realized to date"
           value={formatMoney(combined.realizedTotal, combined.currency)}
