@@ -13,10 +13,18 @@ export type SecurityLogoProps = {
   symbol: string
   name?: string | null
   size?: LetterAvatarSize
+  assetType?: string | null
+  currency?: string | null
 }
 
-export function SecurityLogo({ symbol, name, size = 'md' }: SecurityLogoProps) {
-  const url = securityLogoUrl(symbol)
+export function SecurityLogo({
+  symbol,
+  name,
+  size = 'md',
+  assetType,
+  currency,
+}: SecurityLogoProps) {
+  const url = securityLogoUrl(symbol, { assetType, currency })
   const [errored, setErrored] = useState(false)
   if (!url || errored) {
     return <LetterAvatar text={symbol || name || '?'} size={size} />
