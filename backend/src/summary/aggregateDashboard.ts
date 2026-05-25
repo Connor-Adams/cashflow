@@ -357,24 +357,13 @@ export function aggregateDashboard(
       totalCredits: 0,
       netSpend: 0,
     };
-    const businessKey = `${currency}\0${row.finalBusiness ? '1' : '0'}`;
-    const business = netSpendByBusiness.get(businessKey) ?? {
-      currency,
-      business: row.finalBusiness,
-      totalSpend: 0,
-      totalCredits: 0,
-      netSpend: 0,
-    };
-
     if (amount < 0 && !nonSpend) {
       const spend = -amount;
       monthly.totalSpend += spend;
       split.totalSpend += spend;
-      business.totalSpend += spend;
     } else if (amount > 0) {
       monthly.totalCredits += amount;
       split.totalCredits += amount;
-      business.totalCredits += amount;
     }
     // Note: negative-amount non-spend rows (transfers, investment buys, etc)
     // contribute to neither side; they're tracked elsewhere (transaction
@@ -382,10 +371,38 @@ export function aggregateDashboard(
     // totals because they aren't consumption nor income.
     monthly.netSpend = monthly.totalSpend - monthly.totalCredits;
     split.netSpend = split.totalSpend - split.totalCredits;
-    business.netSpend = business.totalSpend - business.totalCredits;
     monthlyByCurrency.set(monthlyKey, monthly);
     netSpendBySplit.set(splitKey, split);
-    netSpendByBusiness.set(businessKey, business);
+
+    // Per-allocation business/personal split: an item's business_use% rides
+    // on the allocation, so one row can land in both business=true and
+    // business=false buckets. The pre-allocator path keyed on row.finalBusiness
+    // and dropped 100% of the row into a single bucket.
+    for (const alloc of allocations) {
+      const businessPart = alloc.businessAmount;
+      const personalPart = alloc.amount - alloc.businessAmount;
+      for (const [isBiz, part] of [
+        [true, businessPart],
+        [false, personalPart],
+      ] as const) {
+        if (part === 0) continue;
+        const businessKey = `${currency}\0${isBiz ? '1' : '0'}`;
+        const business = netSpendByBusiness.get(businessKey) ?? {
+          currency,
+          business: isBiz,
+          totalSpend: 0,
+          totalCredits: 0,
+          netSpend: 0,
+        };
+        if (part < 0 && !nonSpend) {
+          business.totalSpend += -part;
+        } else if (part > 0) {
+          business.totalCredits += part;
+        }
+        business.netSpend = business.totalSpend - business.totalCredits;
+        netSpendByBusiness.set(businessKey, business);
+      }
+    }
 
     for (const alloc of allocations) {
       const categoryKey = `${currency}\0${alloc.category ?? ''}`;

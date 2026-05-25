@@ -7,6 +7,8 @@ import {
   classifyPositiveAmount,
   isNonSpend,
 } from '../summary/classifyTransactionFlow';
+import { loadItemAllocationContext } from '../summary/loadItemAllocations';
+import { splitTxnByItems } from '../import/splitTxnByItems';
 
 export type AiFinancialInsight = {
   title: string;
@@ -103,6 +105,7 @@ export async function buildFinancialInsights(
       'finalCategory',
       'finalBusiness',
       'finalSplitType',
+      'businessAmount',
       'txnType',
     ];
   const [rows, previousRows, accounts] = await Promise.all([
@@ -145,9 +148,19 @@ export async function buildFinancialInsights(
     finalCategory: string | null;
     finalBusiness: boolean;
     finalSplitType: string;
+    businessAmount?: string;
     txnType: string | null;
   };
-  const byCategory = new Map<string, { amount: number; ids: number[] }>();
+  const currentRows = rows as unknown as Row[];
+  const previousRowsTyped = previousRows as unknown as Row[];
+  // Load item-allocation context for both periods in parallel. Each call is
+  // bounded at 3 DB queries via loadItemAllocationContext; even with two
+  // periods that's a fixed 6-query overhead regardless of row count.
+  const [currentItemContext, previousItemContext] = await Promise.all([
+    loadItemAllocationContext(currentRows.map((r) => r.id)),
+    loadItemAllocationContext(previousRowsTyped.map((r) => r.id)),
+  ]);
+  const byCategory = new Map<string, { amount: number; ids: Set<number> }>();
   const previousByCategory = new Map<string, number>();
   const byMerchant = new Map<string, { amount: number; ids: number[] }>();
   // Track rows with no final category across every spend-eligible flow in
@@ -159,16 +172,39 @@ export async function buildFinancialInsights(
   let businessSpend = 0;
   let sharedSpend = 0;
   let totalSpend = 0;
-  for (const row of previousRows as unknown as Row[]) {
+
+  const allocationsFor = (row: Row, ctx: typeof currentItemContext) =>
+    splitTxnByItems({
+      txn: {
+        id: row.id,
+        amount: String(row.amount),
+        currency,
+        finalCategory: row.finalCategory,
+        finalBusiness: row.finalBusiness,
+        finalSplitType: row.finalSplitType,
+        businessAmount: row.businessAmount ?? '0',
+      },
+      links: ctx.linksByTxn.get(row.id) ?? [],
+      ordersById: ctx.ordersById,
+      itemsByOrder: ctx.itemsByOrder,
+    });
+
+  for (const row of previousRowsTyped) {
     const amount = num(row.amount);
     if (amount == null || amount >= 0) continue;
     // Apply the same spend filter as the dashboard route so previous-period
     // baselines don't include transfer/investment legs.
     if (isNonSpend(row.txnType, accountTypeById.get(row.accountId))) continue;
-    const category = row.finalCategory || 'Uncategorized';
-    previousByCategory.set(category, (previousByCategory.get(category) ?? 0) + -amount);
+    for (const alloc of allocationsFor(row, previousItemContext)) {
+      if (alloc.amount >= 0) continue;
+      const category = alloc.category || 'Uncategorized';
+      previousByCategory.set(
+        category,
+        (previousByCategory.get(category) ?? 0) + -alloc.amount,
+      );
+    }
   }
-  for (const row of rows as unknown as Row[]) {
+  for (const row of currentRows) {
     const amount = num(row.amount);
     if (amount == null) continue;
     const accountType = accountTypeById.get(row.accountId);
@@ -201,18 +237,26 @@ export async function buildFinancialInsights(
     if (isNonSpend(row.txnType, accountType)) continue;
     const spend = -amount;
     totalSpend += spend;
-    if (row.finalBusiness) businessSpend += spend;
     if (row.finalSplitType === 'shared') sharedSpend += spend;
-    const category = row.finalCategory || 'Uncategorized';
     const merchant = row.merchantClean || row.merchantRaw || 'Unknown merchant';
-    const cat = byCategory.get(category) ?? { amount: 0, ids: [] };
-    cat.amount += spend;
-    cat.ids.push(row.id);
-    byCategory.set(category, cat);
     const mer = byMerchant.get(merchant) ?? { amount: 0, ids: [] };
     mer.amount += spend;
     mer.ids.push(row.id);
     byMerchant.set(merchant, mer);
+    // Drive byCategory and businessSpend from item-level allocations so
+    // overrides on receipt items propagate into the insights. With no
+    // linked items the allocator returns a single bucket using the txn's
+    // own finalCategory and businessAmount, preserving prior behavior for
+    // un-itemized rows.
+    for (const alloc of allocationsFor(row, currentItemContext)) {
+      if (alloc.amount >= 0) continue;
+      const category = alloc.category || 'Uncategorized';
+      const cat = byCategory.get(category) ?? { amount: 0, ids: new Set<number>() };
+      cat.amount += -alloc.amount;
+      cat.ids.add(row.id);
+      byCategory.set(category, cat);
+      businessSpend += -alloc.businessAmount;
+    }
   }
   const topCategory = Array.from(byCategory.entries()).sort((a, b) => b[1].amount - a[1].amount)[0];
   const topMerchant = Array.from(byMerchant.entries()).sort((a, b) => b[1].amount - a[1].amount)[0];
@@ -230,7 +274,7 @@ export async function buildFinancialInsights(
       metric: 'category_spend',
       amount: Number(topCategory[1].amount.toFixed(2)),
       comparison: `${Math.round((topCategory[1].amount / Math.max(totalSpend, 1)) * 100)}% of period spend`,
-      supportingTransactionIds: topCategory[1].ids.slice(0, 8),
+      supportingTransactionIds: Array.from(topCategory[1].ids).slice(0, 8),
       rationale: 'Calculated from finalized transaction categories.',
       suggestedAction: 'Review the supporting transactions if this category looks high.',
     });
@@ -256,21 +300,22 @@ export async function buildFinancialInsights(
       metric: 'category_month_over_month_delta',
       amount: Number(biggestCategoryIncrease.delta.toFixed(2)),
       comparison: `${previousRange ? rangeLabel(previousRange) : 'previous comparable period'}: ${biggestCategoryIncrease.previous.toFixed(2)}; ${rangeLabel(range)}: ${biggestCategoryIncrease.current.amount.toFixed(2)}`,
-      supportingTransactionIds: biggestCategoryIncrease.current.ids.slice(0, 8),
+      supportingTransactionIds: Array.from(biggestCategoryIncrease.current.ids).slice(0, 8),
       rationale: 'Computed from finalized category totals for the current and previous month.',
       suggestedAction: 'Review the supporting transactions to see which merchants caused the increase.',
     });
   }
   const uncategorized = byCategory.get('Uncategorized');
-  if (uncategorized && uncategorized.ids.length > 0) {
+  if (uncategorized && uncategorized.ids.size > 0) {
+    const uncatIds = Array.from(uncategorized.ids);
     insights.push({
       title: 'Uncategorized spend is blocking clean reports',
-      summary: `${uncategorized.ids.length} transaction${uncategorized.ids.length === 1 ? '' : 's'} have no final category.`,
+      summary: `${uncatIds.length} transaction${uncatIds.length === 1 ? '' : 's'} have no final category.`,
       severity: 'action',
       metric: 'uncategorized_spend',
       amount: Number(uncategorized.amount.toFixed(2)),
-      comparison: `${uncategorized.ids.length} rows`,
-      supportingTransactionIds: uncategorized.ids.slice(0, 8),
+      comparison: `${uncatIds.length} rows`,
+      supportingTransactionIds: uncatIds.slice(0, 8),
       rationale: 'Rows without final categories reduce report quality and rule learning.',
       suggestedAction: 'Use the import cleanup queue or AI suggestions to categorize these rows.',
     });

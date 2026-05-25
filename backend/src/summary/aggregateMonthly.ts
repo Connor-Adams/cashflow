@@ -1,5 +1,7 @@
 import { num } from '../util/numbers';
 import { classifyPositiveAmount, isNonCategorical } from './classifyTransactionFlow';
+import { splitTxnByItems } from '../import/splitTxnByItems';
+import type { ItemAllocationContext } from './loadItemAllocations';
 
 /**
  * Transaction row shape consumed by the monthly aggregator. Mirrors the
@@ -8,19 +10,38 @@ import { classifyPositiveAmount, isNonCategorical } from './classifyTransactionF
  * tell at a glance which fields the aggregator actually reads.
  */
 export type MonthlyTxnRow = {
+  id: number;
   accountId: number;
   date: string;
   currency: string;
   merchantRaw: string | null;
   merchantClean: string | null;
   finalCategory: string | null;
+  finalBusiness: boolean;
+  finalSplitType: string;
   amount: unknown;
   txnType: string | null;
+  businessAmount?: string;
+};
+
+export type MonthlyPoint = { month: string; currency: string; sumAmount: number };
+export type MonthlyCategoryPoint = {
+  month: string;
+  currency: string;
+  category: string | null;
+  sumAmount: number;
+};
+export type MonthlyResult = {
+  points: MonthlyPoint[];
+  categoryPoints: MonthlyCategoryPoint[];
 };
 
 /**
  * Aggregator for the /api/summary/monthly endpoint. Sums signed `amount`
- * per (month, currency) into a single "activity" curve.
+ * per (month, currency) into a single "activity" curve and, when an
+ * `itemContext` is supplied, also produces a per-(month, currency, category)
+ * breakdown driven by `splitTxnByItems` — so an itemized receipt feeds its
+ * line-item categories into the monthly trend instead of the txn category.
  *
  * Excluded:
  *  - statement payments (positive amount with txnType resolving to 'payment'
@@ -38,8 +59,10 @@ export type MonthlyTxnRow = {
 export function aggregateMonthly(
   rows: MonthlyTxnRow[],
   accountTypeById: Map<number, string | null>,
-): Array<{ month: string; currency: string; sumAmount: number }> {
-  const points = new Map<string, { month: string; currency: string; sumAmount: number }>();
+  itemContext?: ItemAllocationContext,
+): MonthlyResult {
+  const points = new Map<string, MonthlyPoint>();
+  const categoryPoints = new Map<string, MonthlyCategoryPoint>();
   for (const row of rows) {
     const amount = num(row.amount);
     if (amount == null) continue;
@@ -72,6 +95,45 @@ export function aggregateMonthly(
     };
     existing.sumAmount += amount;
     points.set(key, existing);
+
+    const allocations = itemContext
+      ? splitTxnByItems({
+          txn: {
+            id: row.id,
+            amount: String(row.amount),
+            currency: row.currency,
+            finalCategory: row.finalCategory,
+            finalBusiness: row.finalBusiness,
+            finalSplitType: row.finalSplitType,
+            businessAmount: row.businessAmount ?? '0',
+          },
+          links: itemContext.linksByTxn.get(row.id) ?? [],
+          ordersById: itemContext.ordersById,
+          itemsByOrder: itemContext.itemsByOrder,
+        })
+      : [
+          {
+            category: row.finalCategory,
+            amount,
+            businessAmount: 0,
+            currency: row.currency,
+          },
+        ];
+
+    for (const alloc of allocations) {
+      const catKey = `${month}\0${row.currency}\0${alloc.category ?? ''}`;
+      const catExisting = categoryPoints.get(catKey) ?? {
+        month,
+        currency: row.currency,
+        category: alloc.category,
+        sumAmount: 0,
+      };
+      catExisting.sumAmount += alloc.amount;
+      categoryPoints.set(catKey, catExisting);
+    }
   }
-  return Array.from(points.values());
+  return {
+    points: Array.from(points.values()),
+    categoryPoints: Array.from(categoryPoints.values()),
+  };
 }

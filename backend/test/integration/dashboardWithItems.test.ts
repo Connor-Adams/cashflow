@@ -322,3 +322,158 @@ test('dashboard: falls back to txn category when no items linked', async () => {
     `expected Dining totalSpend ≈ 50, got ${dining.totalSpend}`,
   );
 });
+
+// ---------------------------------------------------------------------------
+// Test 3: netSpendByBusiness splits one txn across business + personal buckets
+// using item-level businessUsePercent. Pre-allocator behavior used the
+// row-level finalBusiness boolean which dropped the full amount into a single
+// bucket.
+// ---------------------------------------------------------------------------
+
+test('dashboard: netSpendByBusiness splits across buckets via item business%', async () => {
+  const txn = await models.Transaction.create({
+    accountId,
+    householdId,
+    createdByUserId: userId,
+    visibility: 'shared',
+    ownershipType: 'me',
+    importBatch: 'dashboard-items-test',
+    date: '2026-05-22',
+    merchantRaw: `STAPLES-${crypto.randomBytes(4).toString('hex')}`,
+    merchantClean: 'Staples',
+    merchantCanonical: null,
+    amount: '-100.00',
+    currency: 'CAD',
+    notes: null,
+    sourceReference: null,
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    appliedRuleId: null,
+    autoCategory: null,
+    categoryOverride: null,
+    finalCategory: 'Office',
+    autoBusiness: null,
+    businessOverride: null,
+    finalBusiness: false,
+    autoSplitType: null,
+    splitOverride: null,
+    finalSplitType: 'me',
+    autoPctMe: null,
+    pctMeOverride: null,
+    finalPctMe: null,
+    autoPctPartner: null,
+    pctPartnerOverride: null,
+    finalPctPartner: null,
+    myShareAmount: '-100.00',
+    partnerShareAmount: '0',
+    businessAmount: '0',
+    txnType: 'purchase',
+    autoSource: null,
+    autoConfidence: null,
+    linkedTransactionId: null,
+    isRecurring: false,
+    reviewFlag: false,
+    reviewedAt: null,
+  } as never);
+
+  const order = await models.ExternalOrder.create({
+    householdId,
+    createdByUserId: userId,
+    vendor: 'staples',
+    vendorOrderId: null,
+    dedupeKey: `di-biz-${crypto.randomBytes(8).toString('hex')}`,
+    orderDate: '2026-05-22',
+    shipmentDate: null,
+    subtotal: '100.00',
+    tax: '0',
+    shipping: null,
+    total: '100.00',
+    currency: 'CAD',
+    paymentLast4: null,
+    source: 'receipt-analyze',
+    rawPayload: null,
+  });
+
+  // Printer paper: $60, 100% business use.
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Printer paper',
+    quantity: 1,
+    unitPrice: '60.00',
+    totalPrice: '60.00',
+    inferredCategory: 'Office',
+    businessUsePercent: '100',
+    confidence: null,
+    categoryOverride: null,
+    businessUseOverride: null,
+    rawPayload: null,
+  });
+
+  // Snacks: $40, 0% business use (personal).
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Snacks',
+    quantity: 1,
+    unitPrice: '40.00',
+    totalPrice: '40.00',
+    inferredCategory: 'Groceries',
+    businessUsePercent: '0',
+    confidence: null,
+    categoryOverride: null,
+    businessUseOverride: null,
+    rawPayload: null,
+  });
+
+  await models.TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '95',
+    matchReason: 'test',
+    status: 'confirmed',
+    linkedAmount: '100.00',
+  });
+
+  const res = await agent
+    .get('/api/summary/dashboard')
+    .query({ currency: 'CAD', dateFrom: '2026-05-22', dateTo: '2026-05-22' });
+
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+
+  const byBiz = res.body.netSpendByBusiness as Array<{
+    currency: string;
+    business: boolean;
+    totalSpend: number;
+    totalCredits: number;
+    netSpend: number;
+  }>;
+  assert.ok(Array.isArray(byBiz), 'netSpendByBusiness must be an array');
+
+  const biz = byBiz.find((b) => b.currency === 'CAD' && b.business === true);
+  const personal = byBiz.find((b) => b.currency === 'CAD' && b.business === false);
+
+  assert.ok(biz != null, `expected business=true bucket, got: ${JSON.stringify(byBiz)}`);
+  assert.ok(personal != null, `expected business=false bucket, got: ${JSON.stringify(byBiz)}`);
+  assert.ok(
+    Math.abs(biz.totalSpend - 60) < 0.05,
+    `expected business totalSpend ≈ 60, got ${biz.totalSpend}`,
+  );
+  assert.ok(
+    Math.abs(personal.totalSpend - 40) < 0.05,
+    `expected personal totalSpend ≈ 40, got ${personal.totalSpend}`,
+  );
+
+  // Reconciliation: biz + personal must equal headline netSpend.
+  const metrics = res.body.metricsByCurrency as Array<{
+    currency: string;
+    netSpend: number;
+  }>;
+  const cad = metrics.find((m) => m.currency === 'CAD');
+  assert.ok(cad != null, 'expected CAD metrics row');
+  const bizSum = byBiz
+    .filter((b) => b.currency === 'CAD')
+    .reduce((s, b) => s + b.netSpend, 0);
+  assert.ok(
+    Math.abs(bizSum - cad.netSpend) < 0.01,
+    `business+personal netSpend (${bizSum}) must reconcile with headline (${cad.netSpend})`,
+  );
+});
