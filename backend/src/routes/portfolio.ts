@@ -10,6 +10,12 @@ import {
   SecurityDividend,
 } from '../models';
 import { ensureDailyPrices, ensureDividends, ensureOverview } from '../portfolio/backfill';
+import {
+  loadMetricsContext,
+  computeRowMetrics,
+  computeWeightPct,
+  computeUnifiedTodayDelta,
+} from '../portfolio/metrics';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import * as env from '../config/env';
@@ -134,6 +140,18 @@ router.get('/', async (req, res, next) => {
     const prices = await latestPricesBySecurity([
       ...new Set(latestHoldings.map((h) => h.securityId)),
     ]);
+    const securityIds = [...new Set(latestHoldings.map((h) => h.securityId))];
+    const currencies = [...new Set(latestHoldings.map((h) => {
+      const lp = prices.get(h.securityId);
+      return (lp?.currency ?? h.currency) as string;
+    }))];
+    const accountIdsForCtx = accounts.map((a) => a.id);
+    const metricsCtx = await loadMetricsContext({
+      securityIds,
+      currencies,
+      accountIds: accountIdsForCtx,
+    });
+
     const totals = new Map<string, number>();
     const holdingDtos = latestHoldings.map((holding) => {
       const security = holding.get('security') as Security | undefined;
@@ -145,6 +163,12 @@ router.get('/', async (req, res, next) => {
         quotePrice != null ? quantity * quotePrice : importedValue ?? 0;
       const cur = latestPrice?.currency || holding.currency;
       totals.set(cur, (totals.get(cur) ?? 0) + marketValue);
+      const rowMetrics = computeRowMetrics({
+        ctx: metricsCtx,
+        securityId: holding.securityId,
+        qty: quantity,
+        costBasis: n(holding.costBasis),
+      });
       return {
         id: holding.id,
         accountId: holding.accountId,
@@ -179,6 +203,10 @@ router.get('/', async (req, res, next) => {
               fetchedAt: latestPrice.fetchedAt.toISOString(),
             }
           : null,
+        todayChangePct: rowMetrics.todayChangePct,
+        thirtyDayReturnPct: rowMetrics.thirtyDayReturnPct,
+        yieldOnCostPct: rowMetrics.yieldOnCostPct,
+        weightPct: null as number | null, // populated after unifiedTotal known
       };
     });
 
@@ -202,11 +230,41 @@ router.get('/', async (req, res, next) => {
     const todayDate = new Date().toISOString().slice(0, 10);
     const unifiedTotal = await buildUnifiedCadTotal(totalsByCurrency, todayDate);
 
+    // Per-row weight pct now that unifiedTotal is known.
+    if (unifiedTotal) {
+      for (const dto of holdingDtos) {
+        const fxRate =
+          dto.currency === 'CAD' ? 1 : metricsCtx.fxRates.get(dto.currency);
+        if (fxRate == null) continue;
+        const cadMV = dto.marketValue * fxRate;
+        dto.weightPct = computeWeightPct({
+          ctx: metricsCtx,
+          cadMarketValue: cadMV,
+          unifiedTotalCad: unifiedTotal.marketValue,
+        });
+      }
+    }
+
+    const todayDelta = computeUnifiedTodayDelta({
+      ctx: metricsCtx,
+      holdings: latestHoldings.map((h) => {
+        const lp = prices.get(h.securityId);
+        return {
+          securityId: h.securityId,
+          quantity: n(h.quantity) ?? 0,
+          currency: lp?.currency ?? h.currency,
+        };
+      }),
+    });
+    const unifiedTotalWithDelta = unifiedTotal
+      ? { ...unifiedTotal, todayChangePct: todayDelta.todayChangePct, todayChangeCad: todayDelta.todayChangeCad }
+      : null;
+
     res.json({
       accounts,
       holdings: holdingDtos,
       totalsByCurrency,
-      unifiedTotal,
+      unifiedTotal: unifiedTotalWithDelta,
       recentActivities: recentActivities.map((activity) => {
         const security = activity.get('security') as Security | undefined;
         return {
