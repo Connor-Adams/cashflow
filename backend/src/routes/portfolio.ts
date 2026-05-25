@@ -6,7 +6,9 @@ import {
   InvestmentActivity,
   Security,
   SecurityPrice,
+  SecurityDailyPrice,
 } from '../models';
+import { ensureDailyPrices } from '../portfolio/backfill';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import * as env from '../config/env';
@@ -830,6 +832,112 @@ router.get('/realized', async (req, res, next) => {
       totals: [...totals.values()].sort((a, b) => a.currency.localeCompare(b.currency)),
       bySecurity: [...bySec.values()].sort((a, b) => b.realizedGain - a.realizedGain),
       events,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+type PriceRange = '1m' | '3m' | '1y' | '5y' | 'all';
+const PRICE_RANGES: Record<PriceRange, number | null> = {
+  '1m': 30,
+  '3m': 92,
+  '1y': 365,
+  '5y': 365 * 5,
+  all: null,
+};
+
+function parseRange(raw: unknown): PriceRange {
+  if (typeof raw === 'string' && raw in PRICE_RANGES) return raw as PriceRange;
+  return '1y';
+}
+
+async function loadSecurityScoped(req: Request, idRaw: string) {
+  const id = Number(idRaw);
+  if (!Number.isFinite(id) || id <= 0) return { error: 400 as const };
+  const security = await Security.findByPk(id);
+  if (!security) return { error: 404 as const };
+  // Household scoping: a security must have at least one activity OR holding
+  // visible to the caller. Reuse visibleAccountWhere for the account scope.
+  const accounts = await Account.findAll({
+    where: { ...visibleAccountWhere(req), accountType: 'investment' },
+  });
+  const accountIds = accounts.map((a) => a.id);
+  if (accountIds.length === 0) return { error: 404 as const };
+  const activityCount = await InvestmentActivity.count({
+    where: { accountId: accountIds, securityId: id },
+  });
+  const holdingCount = await HoldingSnapshot.count({
+    where: { accountId: accountIds, securityId: id },
+  });
+  if (activityCount === 0 && holdingCount === 0) return { error: 404 as const };
+  return { security, accountIds };
+}
+
+/**
+ * GET /api/portfolio/security/:id/prices — OHLCV history + trade overlays.
+ */
+router.get('/security/:id/prices', async (req, res, next) => {
+  try {
+    const scoped = await loadSecurityScoped(req, req.params.id);
+    if ('error' in scoped) {
+      res.status(scoped.error as number).json({ error: 'Security not visible' });
+      return;
+    }
+    const { security, accountIds } = scoped;
+    const range = parseRange(req.query.range);
+    const days = PRICE_RANGES[range];
+
+    const where: Record<string, unknown> = { securityId: security.id };
+    if (days != null) {
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      where.date = { [Op.gte]: cutoff };
+    }
+    const rows = await SecurityDailyPrice.findAll({
+      where,
+      order: [['date', 'ASC']],
+    });
+
+    // Trades filtered to same date window for overlay.
+    const tradeWhere: Record<string, unknown> = {
+      accountId: accountIds,
+      securityId: security.id,
+      activityType: ['buy', 'sell'],
+    };
+    if (days != null) {
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      tradeWhere.tradeDate = { [Op.gte]: cutoff };
+    }
+    const trades = await InvestmentActivity.findAll({
+      where: tradeWhere,
+      include: [{ model: Account, as: 'account' }],
+      order: [['tradeDate', 'ASC']],
+    });
+
+    const backfill = await ensureDailyPrices(security.id);
+
+    res.json({
+      securityId: security.id,
+      symbol: security.symbol,
+      currency: security.currency,
+      range,
+      rows: rows.map((r) => ({
+        date: r.date,
+        open: r.open != null ? Number(r.open) : null,
+        high: r.high != null ? Number(r.high) : null,
+        low: r.low != null ? Number(r.low) : null,
+        close: Number(r.close),
+        adjClose: Number(r.adjClose),
+        volume: r.volume,
+      })),
+      trades: trades.map((t) => ({
+        date: t.tradeDate,
+        type: t.activityType as 'buy' | 'sell',
+        quantity: t.quantity != null ? Number(t.quantity) : 0,
+        price: t.price != null ? Number(t.price) : null,
+        accountName: (t as unknown as { account?: { name: string } }).account?.name ?? '',
+      })),
+      backfill,
     });
   } catch (e) {
     next(e);
