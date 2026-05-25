@@ -305,6 +305,95 @@ router.get('/items', async (req, res, next) => {
   }
 });
 
+router.get('/items/:id/allocation', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const itemId = Number(req.params.id);
+    if (!Number.isFinite(itemId)) {
+      res.status(400).json({ error: 'invalid item id' });
+      return;
+    }
+
+    const item = await ExternalOrderItem.findOne({
+      where: { id: itemId },
+      include: [
+        { model: ExternalOrder, as: 'order', required: true, where: { householdId: household.id } },
+      ],
+    });
+    if (!item) {
+      res.status(403).json({ error: 'not found or not in scope' });
+      return;
+    }
+    const order = (item as ExternalOrderItem & { order?: ExternalOrder }).order!;
+    const itemTotal = Number(item.totalPrice ?? '0');
+    const categoryBucket = item.categoryOverride ?? item.inferredCategory ?? null;
+
+    const receipts = await Receipt.findAll({ where: { externalOrderId: order.id } });
+    const linkedTxnIds = receipts.map((r) => r.transactionId).filter((v) => v != null);
+
+    if (linkedTxnIds.length === 0) {
+      res.json({
+        itemId: item.id,
+        itemTotal,
+        allocatedTotal: null,
+        categoryBucket,
+        txnId: null,
+        txnAmount: null,
+        percentOfTxn: null,
+        linkedTxnIds: [],
+      });
+      return;
+    }
+
+    const txnId = linkedTxnIds[0];
+    const txn = await Transaction.findByPk(txnId);
+    if (!txn) {
+      res.json({
+        itemId: item.id,
+        itemTotal,
+        allocatedTotal: null,
+        categoryBucket,
+        txnId: null,
+        txnAmount: null,
+        percentOfTxn: null,
+        linkedTxnIds,
+      });
+      return;
+    }
+
+    const allItems = await ExternalOrderItem.findAll({ where: { externalOrderId: order.id } });
+    const itemBase = (it: ExternalOrderItem): number =>
+      it.totalPrice != null
+        ? Number(it.totalPrice)
+        : it.unitPrice != null
+          ? Number(it.unitPrice) * (it.quantity || 1)
+          : 0;
+    const orderTotal = Number(order.total ?? '0');
+    const linkAmt = orderTotal;
+    const share = orderTotal > 0 ? linkAmt / orderTotal : 1;
+    const baseSum = allItems.reduce((s, it) => s + itemBase(it), 0);
+    const extras = (Number(order.tax ?? 0) + Number(order.shipping ?? 0)) * share;
+    const rawBase = itemBase(item);
+    const weight = baseSum > 0 ? rawBase / baseSum : 0;
+    const allocated =
+      baseSum > 0 ? rawBase * share + extras * weight : linkAmt / Math.max(allItems.length, 1);
+
+    const txnAmount = Math.abs(Number(txn.amount));
+    res.json({
+      itemId: item.id,
+      itemTotal,
+      allocatedTotal: Math.round(allocated * 100) / 100,
+      categoryBucket: categoryBucket ?? txn.finalCategory ?? null,
+      txnId: txn.id,
+      txnAmount,
+      percentOfTxn: txnAmount > 0 ? Math.round((allocated / txnAmount) * 1000) / 10 : null,
+      linkedTxnIds,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/external-order-items/bulk-patch', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);

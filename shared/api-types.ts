@@ -718,3 +718,14 @@ export type ItemsListResponse = {
   items: ItemRow[]
   nextCursor: string | null
 }
+
+export type ItemAllocation = {
+  itemId: number
+  itemTotal: number
+  allocatedTotal: number | null
+  categoryBucket: string | null
+  txnId: number | null
+  txnAmount: number | null
+  percentOfTxn: number | null
+  linkedTxnIds: number[]
+}

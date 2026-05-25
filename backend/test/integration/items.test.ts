@@ -470,3 +470,115 @@ test('POST /api/external-order-items/bulk-patch blocks cross-household', async (
   const fresh = await ExternalOrderItem.findByPk(items[0].id);
   assert.equal(fresh?.categoryOverride, null);
 });
+
+test('GET /api/items/:id/allocation returns allocation for linked item', async () => {
+  const { Account, ExternalOrder, ExternalOrderItem, Receipt, Transaction } = await import(
+    '../../src/models/index.js'
+  );
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const account = await Account.create({
+    householdId: householdAId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'Alloc Acct',
+    accountType: 'checking',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'alloc',
+    dedupeKey: 'alloc-1',
+    subtotal: '40',
+    tax: '2',
+    shipping: '0',
+    total: '42',
+    currency: 'USD',
+    source: 'image',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    householdId: householdAId,
+    importBatch: 'b-alloc',
+    date: '2026-05-05',
+    merchantRaw: 'Q',
+    merchantClean: 'Q',
+    amount: '-42',
+    currency: 'USD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    visibility: 'shared',
+    ownershipType: 'shared',
+    finalCategory: 'Office',
+    finalBusiness: false,
+    finalSplitType: 'none',
+    businessAmount: '0',
+  } as never);
+  await Receipt.create({
+    transactionId: txn.id,
+    storedFilename: 'a.jpg',
+    originalName: 'a.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 1,
+    externalOrderId: order.id,
+  } as never);
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'alloc-thing',
+    quantity: 1,
+    totalPrice: '40',
+    inferredCategory: 'Office',
+  } as never);
+
+  const res = await agentA.get(`/api/items/${item.id}/allocation`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.itemId, item.id);
+  assert.equal(res.body.txnId, txn.id);
+  assert.equal(res.body.itemTotal, 40);
+  assert.ok(Math.abs(res.body.allocatedTotal - 42) < 0.01);
+  assert.equal(res.body.categoryBucket, 'Office');
+});
+
+test('GET /api/items/:id/allocation returns null txn for unlinked item', async () => {
+  const { ExternalOrder, ExternalOrderItem } = await import('../../src/models/index.js');
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'noLink',
+    dedupeKey: 'nolink-1',
+    total: '10',
+    currency: 'USD',
+    source: 'image',
+  } as never);
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'orphan',
+    quantity: 1,
+    totalPrice: '10',
+  } as never);
+
+  const res = await agentA.get(`/api/items/${item.id}/allocation`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.txnId, null);
+  assert.equal(res.body.allocatedTotal, null);
+  assert.equal(res.body.itemTotal, 10);
+});
+
+test('GET /api/items/:id/allocation blocks cross-household', async () => {
+  const { ExternalOrder, ExternalOrderItem } = await import('../../src/models/index.js');
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'priv',
+    dedupeKey: 'priv-alloc-1',
+    total: '5',
+    currency: 'USD',
+    source: 'image',
+  } as never);
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'secret-alloc',
+    quantity: 1,
+    totalPrice: '5',
+  } as never);
+  const res = await agentB.get(`/api/items/${item.id}/allocation`);
+  assert.equal(res.status, 403);
+});
