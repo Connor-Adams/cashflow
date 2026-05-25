@@ -38,6 +38,9 @@ import {
   harvestCandidate,
   type RowFlag,
 } from '../portfolio/tax-buckets';
+import { PortfolioForwardProjection } from '../models/PortfolioForwardProjection';
+import { rebuildForwardProjectionsForHousehold } from '../portfolio/forwardIncomeBuilder';
+import type { PortfolioForwardIncome } from '@cashflow/shared';
 
 const router = Router();
 const PRICE_CACHE_MS = 60 * 60 * 1000;
@@ -1831,6 +1834,193 @@ router.post('/prices/refresh', async (req, res, next) => {
     res.json({ provider: 'alpha_vantage', results });
   } catch (e) {
     next(e);
+  }
+});
+
+router.get('/forward-income', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    const householdId = auth.household.id;
+
+    // 1. Trigger lazy rebuild if any row stale, or no rows yet but household has holdings
+    const staleCount = await PortfolioForwardProjection.count({
+      where: { householdId, staleAt: { [Op.ne]: null } },
+    });
+    const totalRows = await PortfolioForwardProjection.count({ where: { householdId } });
+    const { latestHoldings, accounts } = await loadVisibleLatestHoldings(req);
+    if (staleCount > 0 || (totalRows === 0 && latestHoldings.length > 0)) {
+      await rebuildForwardProjectionsForHousehold(householdId);
+    }
+
+    // 2. Reload after rebuild
+    const rows = await PortfolioForwardProjection.findAll({ where: { householdId } });
+    const securityIds = rows.map((r) => r.securityId);
+    const securities = await Security.findAll({ where: { id: securityIds } });
+    const secById = new Map(securities.map((s) => [s.id, s]));
+    const acctById = new Map(accounts.map((a) => [a.id, a]));
+
+    // 3. Per-security qty totals + per (account, security) qty for apportionment
+    interface AcctSecPair { accountId: number; securityId: number; qty: number; mvNative: number; costNative: number; currency: string; taxStatus: string; }
+    const pairs: AcctSecPair[] = [];
+    const totalQtyBySec = new Map<number, number>();
+    const totalMvBySec = new Map<number, number>();
+    const totalCostBySec = new Map<number, number>();
+    for (const h of latestHoldings) {
+      const qty = Number(h.quantity);
+      if (qty === 0) continue;
+      const mv = Number(h.marketValue ?? 0);
+      const cost = Number(h.costBasis ?? 0);
+      const acct = acctById.get(h.accountId);
+      const taxStatus = acct?.taxStatus ?? 'n_a';
+      pairs.push({
+        accountId: h.accountId, securityId: h.securityId, qty,
+        mvNative: mv, costNative: cost, currency: h.currency, taxStatus,
+      });
+      totalQtyBySec.set(h.securityId, (totalQtyBySec.get(h.securityId) ?? 0) + qty);
+      totalMvBySec.set(h.securityId, (totalMvBySec.get(h.securityId) ?? 0) + mv);
+      totalCostBySec.set(h.securityId, (totalCostBySec.get(h.securityId) ?? 0) + cost);
+    }
+
+    // 4. FX rates per currency (today)
+    const asOf = new Date();
+    const asOfDate = asOf.toISOString().slice(0, 10);
+    const fxByCurrency = new Map<string, number>();
+    fxByCurrency.set('CAD', 1);
+    for (const r of rows) {
+      if (r.currency !== 'CAD' && !fxByCurrency.has(r.currency)) {
+        const fx = await ensureFxRate(r.currency, 'CAD', asOfDate);
+        fxByCurrency.set(r.currency, fx ? Number(fx.rate) : 1);
+      }
+    }
+
+    // 5. Build per-row output + accumulate totals
+    let totalAnnualCad = 0;
+    let totalMvCad = 0;
+    let totalCostCad = 0;
+    const byCurrencyTotal = new Map<string, number>();
+    const outRows = rows.map((r) => {
+      const sec = secById.get(r.securityId);
+      const qty = totalQtyBySec.get(r.securityId) ?? Number(r.qtyBasis);
+      const mvNative = totalMvBySec.get(r.securityId) ?? 0;
+      const costNative = totalCostBySec.get(r.securityId) ?? 0;
+      const fx = fxByCurrency.get(r.currency) ?? 1;
+      const projNative = Number(r.projectedAnnualIncomeNative);
+      const projCad = projNative * fx;
+      const forwardYieldPct = mvNative > 0 ? (projNative / mvNative) * 100 : 0;
+      const forwardYieldOnCostPct = costNative > 0 ? (projNative / costNative) * 100 : 0;
+      totalAnnualCad += projCad;
+      totalMvCad += mvNative * fx;
+      totalCostCad += costNative * fx;
+      byCurrencyTotal.set(r.currency, (byCurrencyTotal.get(r.currency) ?? 0) + projNative);
+      return {
+        securityId: r.securityId,
+        symbol: sec?.symbol ?? '',
+        name: sec?.name ?? '',
+        assetType: sec?.assetType ?? null,
+        currency: r.currency,
+        qty,
+        currentMvNative: mvNative,
+        costBasisNative: costNative,
+        annualDividendPerShare: Number(r.annualDividendPerShare),
+        annualInterestPerShare: Number(r.annualInterestPerShare),
+        projectedAnnualIncomeNative: projNative,
+        projectedAnnualIncomeCad: projCad,
+        forwardYieldPct,
+        forwardYieldOnCostPct,
+        cadenceLabel: r.cadenceLabel,
+        cvPct: r.cvPct === null ? null : Number(r.cvPct),
+        unreliable: r.unreliable,
+        nextExDivDates: r.nextExDivDates.map((d) => ({
+          date: d.date,
+          estimatedPerShare: d.estimatedPerShare,
+          estimatedTotal: d.estimatedPerShare * qty,
+          kind: d.kind,
+        })),
+      };
+    });
+
+    // 6. byTaxStatus + byAssetType — apportion per-security income across accounts by qty
+    const taxMap = new Map<string, Map<string, number>>();
+    const assetMap = new Map<string, Map<string, number>>();
+    const projBySec = new Map(rows.map((r) => [r.securityId, Number(r.projectedAnnualIncomeNative)]));
+    const currencyBySec = new Map(rows.map((r) => [r.securityId, r.currency]));
+    for (const p of pairs) {
+      const proj = projBySec.get(p.securityId);
+      const totalQty = totalQtyBySec.get(p.securityId) ?? 0;
+      if (proj == null || totalQty === 0) continue;
+      const share = (p.qty / totalQty) * proj;
+      const cur = currencyBySec.get(p.securityId) ?? p.currency;
+      // tax
+      if (!taxMap.has(p.taxStatus)) taxMap.set(p.taxStatus, new Map());
+      taxMap.get(p.taxStatus)!.set(cur, (taxMap.get(p.taxStatus)!.get(cur) ?? 0) + share);
+      // asset
+      const sec = secById.get(p.securityId);
+      const assetType = sec?.assetType ?? 'other';
+      if (!assetMap.has(assetType)) assetMap.set(assetType, new Map());
+      assetMap.get(assetType)!.set(cur, (assetMap.get(assetType)!.get(cur) ?? 0) + share);
+    }
+    const cadConv = (cur: string, amt: number) => amt * (fxByCurrency.get(cur) ?? 1);
+    const byTaxStatus = [...taxMap.entries()].map(([taxStatus, byCur]) => ({
+      taxStatus: taxStatus as PortfolioForwardIncome['byTaxStatus'][number]['taxStatus'],
+      byCurrency: [...byCur.entries()].map(([currency, amount]) => ({ currency, amount })),
+      totalCad: [...byCur.entries()].reduce((s, [c, a]) => s + cadConv(c, a), 0),
+    }));
+    const byAssetType = [...assetMap.entries()].map(([assetType, byCur]) => ({
+      assetType,
+      byCurrency: [...byCur.entries()].map(([currency, amount]) => ({ currency, amount })),
+      totalCad: [...byCur.entries()].reduce((s, [c, a]) => s + cadConv(c, a), 0),
+    }));
+
+    // 7. upcoming90d (flatten + sort)
+    const upcoming: PortfolioForwardIncome['upcoming90d'] = [];
+    for (const out of outRows) {
+      for (const d of out.nextExDivDates) {
+        upcoming.push({
+          date: d.date,
+          securityId: out.securityId,
+          symbol: out.symbol,
+          estimatedTotalNative: d.estimatedTotal,
+          estimatedTotalCad: d.estimatedTotal * (fxByCurrency.get(out.currency) ?? 1),
+          currency: out.currency,
+          kind: d.kind,
+        });
+      }
+    }
+    upcoming.sort((a, b) => a.date.localeCompare(b.date));
+
+    // 8. caveats
+    const unreliableSecurityIds = outRows.filter((r) => r.unreliable).map((r) => r.securityId);
+    const holdingsWithoutHistory = outRows
+      .filter((r) => r.cadenceLabel === 'none')
+      .map((r) => ({
+        securityId: r.securityId,
+        symbol: r.symbol,
+        reason: 'no_dividend_history' as const,
+      }));
+
+    // 9. totals
+    const oldestComputedAt = rows.length === 0
+      ? asOf.toISOString()
+      : rows.reduce((min, r) => (r.computedAt < min ? r.computedAt : min), rows[0].computedAt).toISOString();
+
+    const response: PortfolioForwardIncome = {
+      totals: {
+        projectedAnnualIncomeCad: totalAnnualCad,
+        projectedAnnualIncomeByCurrency: [...byCurrencyTotal.entries()].map(([currency, amount]) => ({ currency, amount })),
+        forwardYieldPct: totalMvCad > 0 ? (totalAnnualCad / totalMvCad) * 100 : 0,
+        forwardYieldOnCostPct: totalCostCad > 0 ? (totalAnnualCad / totalCostCad) * 100 : 0,
+        computedAt: oldestComputedAt,
+        fxRateUsedAt: asOf.toISOString(),
+      },
+      rows: outRows,
+      byTaxStatus,
+      byAssetType,
+      upcoming90d: upcoming,
+      caveats: { unreliableSecurityIds, holdingsWithoutHistory },
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
   }
 });
 
