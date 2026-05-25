@@ -90,6 +90,13 @@ test('computeRowMetrics yieldOnCostPct null when costBasis is zero', () => {
   assert.equal(m.yieldOnCostPct, null);
 });
 
+test('computeRowMetrics yieldOnCostPct null when qty is zero (sold-out position)', () => {
+  const ctx = emptyContext();
+  ctx.divPerUnit365d.set(1, 2.5);
+  const m = computeRowMetrics({ ctx, securityId: 1, qty: 0, costBasis: 500 });
+  assert.equal(m.yieldOnCostPct, null);
+});
+
 test('computeWeightPct correct when unifiedTotal > 0', () => {
   assert.equal(computeWeightPct({ ctx: emptyContext(), cadMarketValue: 250, unifiedTotalCad: 1000 }), 25);
 });

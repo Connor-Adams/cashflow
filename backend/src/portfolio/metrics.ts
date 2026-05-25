@@ -61,7 +61,7 @@ export function computeRowMetrics(args: {
       : null;
 
   const yieldOnCostPct =
-    costBasis != null && costBasis !== 0 && div365 > 0
+    costBasis != null && costBasis !== 0 && qty > 0 && div365 > 0
       ? ((div365 * qty) / costBasis) * 100
       : null;
 
