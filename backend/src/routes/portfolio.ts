@@ -14,6 +14,7 @@ import {
   loadMetricsContext,
   computeRowMetrics,
   computeWeightPct,
+  computeTotalReturnPct,
   computeUnifiedTodayDelta,
 } from '../portfolio/metrics';
 import { currentAuth } from '../auth/middleware';
@@ -681,13 +682,105 @@ router.get('/by-security', async (req, res, next) => {
         });
       }
     }
-    const rows = [...map.values()].map((row) => ({
+    const baseRows = [...map.values()].map((row) => ({
       ...row,
       unrealizedGainLoss:
         row.totalCostBasis != null ? row.totalMarketValue - row.totalCostBasis : null,
     }));
+
+    const rows: typeof baseRows = [];
+    for (const row of baseRows) {
+      rows.push(row);
+    }
     rows.sort((a, b) => b.totalMarketValue - a.totalMarketValue);
-    res.json({ rows });
+
+    // Slice A — metrics enrichment
+    const securityIds = rows.map((r) => r.securityId);
+    const currencies = [...new Set(rows.map((r) => r.currency))];
+    const accountIdsForCtx = accounts.map((a) => a.id);
+    const metricsCtx = await loadMetricsContext({
+      securityIds,
+      currencies,
+      accountIds: accountIdsForCtx,
+    });
+
+    // Populate realizedBySec by computing ACB per security
+    for (const row of rows) {
+      const acts = await InvestmentActivity.findAll({
+        where: { securityId: row.securityId, accountId: accountIdsForCtx },
+        order: [['tradeDate', 'ASC'], ['id', 'ASC']],
+      });
+      const acbInput: AcbActivity[] = acts.map((a) => ({
+        id: a.id,
+        activityType: a.activityType,
+        tradeDate: a.tradeDate,
+        quantity: n(a.quantity),
+        price: n(a.price),
+        amount: n(a.amount),
+        fees: n(a.fees),
+        currency: a.currency,
+      }));
+      const acb = computeAcb(acbInput);
+      metricsCtx.realizedBySec.set(row.securityId, acb.realizedTotal);
+    }
+
+    // Build totals-by-currency map for unifiedTotal
+    const bySecTotals = new Map<string, number>();
+    for (const row of rows) {
+      bySecTotals.set(row.currency, (bySecTotals.get(row.currency) ?? 0) + row.totalMarketValue);
+    }
+    const totalsByCurrency = [...bySecTotals.entries()].map(([currency, marketValue]) => ({
+      currency,
+      marketValue,
+    }));
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const unifiedTotal = await buildUnifiedCadTotal(totalsByCurrency, todayDate);
+
+    // Per-row metrics + weightPct + totalReturnPct
+    const rowsWithMetrics = rows.map((row) => {
+      const fxRate =
+        row.currency === 'CAD' ? 1 : metricsCtx.fxRates.get(row.currency);
+      const cadMV = fxRate != null ? row.totalMarketValue * fxRate : null;
+      const m = computeRowMetrics({
+        ctx: metricsCtx,
+        securityId: row.securityId,
+        qty: row.totalQuantity,
+        costBasis: row.totalCostBasis,
+      });
+      return {
+        ...row,
+        todayChangePct: m.todayChangePct,
+        thirtyDayReturnPct: m.thirtyDayReturnPct,
+        weightPct:
+          cadMV != null
+            ? computeWeightPct({
+                ctx: metricsCtx,
+                cadMarketValue: cadMV,
+                unifiedTotalCad: unifiedTotal?.marketValue ?? null,
+              })
+            : null,
+        totalReturnPct: computeTotalReturnPct({
+          ctx: metricsCtx,
+          securityId: row.securityId,
+          currentMV: row.totalMarketValue,
+          costBasis: row.totalCostBasis,
+        }),
+      };
+    });
+
+    const todayDelta = computeUnifiedTodayDelta({
+      ctx: metricsCtx,
+      holdings: rows.map((r) => ({
+        securityId: r.securityId,
+        quantity: r.totalQuantity,
+        currency: r.currency,
+      })),
+    });
+    const unifiedTotalWithDelta = unifiedTotal
+      ? { ...unifiedTotal, todayChangePct: todayDelta.todayChangePct, todayChangeCad: todayDelta.todayChangeCad }
+      : null;
+
+    res.json({ rows: rowsWithMetrics, unifiedTotal: unifiedTotalWithDelta });
   } catch (e) {
     next(e);
   }
