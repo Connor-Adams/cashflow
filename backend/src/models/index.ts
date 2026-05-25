@@ -26,6 +26,8 @@ import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
+import { SecurityDailyPrice, initSecurityDailyPrice } from './SecurityDailyPrice';
+import { SecurityDividend, initSecurityDividend } from './SecurityDividend';
 import { FxRate, initFxRate } from './FxRate';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
@@ -66,6 +68,8 @@ initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
+initSecurityDailyPrice(sequelize);
+initSecurityDividend(sequelize);
 initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
@@ -124,6 +128,22 @@ Security.hasMany(HoldingSnapshot, { foreignKey: 'security_id', as: 'holdings' })
 HoldingSnapshot.belongsTo(Security, { foreignKey: 'security_id', as: 'security' });
 Security.hasMany(SecurityPrice, { foreignKey: 'security_id', as: 'prices' });
 SecurityPrice.belongsTo(Security, { foreignKey: 'security_id', as: 'security' });
+Security.hasMany(SecurityDailyPrice, {
+  foreignKey: 'security_id',
+  as: 'dailyPrices',
+});
+SecurityDailyPrice.belongsTo(Security, {
+  foreignKey: 'security_id',
+  as: 'security',
+});
+Security.hasMany(SecurityDividend, {
+  foreignKey: 'security_id',
+  as: 'dividends',
+});
+SecurityDividend.belongsTo(Security, {
+  foreignKey: 'security_id',
+  as: 'security',
+});
 User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
 Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(HouseholdMember, { foreignKey: 'household_id', as: 'members' });
@@ -247,6 +267,8 @@ export {
   InvestmentActivity,
   HoldingSnapshot,
   SecurityPrice,
+  SecurityDailyPrice,
+  SecurityDividend,
   FxRate,
   UserEmailIntegration,
   ReceiptSenderAllowlist,
