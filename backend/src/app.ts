@@ -25,6 +25,7 @@ import emailIntegrationsRouter from './routes/emailIntegrations';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
 import captureRouter, { captureCors } from './routes/capture';
+import configRouter from './routes/config';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -60,6 +61,7 @@ app.use(attachAuth);
 
 app.use('/api/health', healthRouter);
 app.use('/api/version', versionRouter);
+app.use('/api/config', configRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
