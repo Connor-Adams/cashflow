@@ -143,3 +143,67 @@ export async function seedActivity(
     importBatch: 'portfolio-test',
   });
 }
+
+export async function seedDailyPrice(
+  models: Models,
+  args: {
+    securityId: number;
+    date: string;
+    close: number;
+    adjClose?: number;
+    open?: number;
+    high?: number;
+    low?: number;
+    volume?: number;
+  },
+): Promise<void> {
+  await models.SecurityDailyPrice.create({
+    securityId: args.securityId,
+    date: args.date,
+    open: args.open != null ? String(args.open) : null,
+    high: args.high != null ? String(args.high) : null,
+    low: args.low != null ? String(args.low) : null,
+    close: String(args.close),
+    adjClose: String(args.adjClose ?? args.close),
+    volume: args.volume ?? null,
+    source: 'fixture',
+    fetchedAt: new Date(),
+  });
+}
+
+export async function seedDividend(
+  models: Models,
+  args: {
+    securityId: number;
+    exDividendDate: string;
+    amount: number;
+    currency?: string;
+    paymentDate?: string | null;
+    recordDate?: string | null;
+  },
+): Promise<void> {
+  await models.SecurityDividend.create({
+    securityId: args.securityId,
+    exDividendDate: args.exDividendDate,
+    declarationDate: null,
+    recordDate: args.recordDate ?? null,
+    paymentDate: args.paymentDate ?? null,
+    amount: String(args.amount),
+    currency: args.currency ?? 'USD',
+    source: 'fixture',
+    fetchedAt: new Date(),
+  });
+}
+
+export async function seedSecurityMetadata(
+  models: Models,
+  securityId: number,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  const sec = await models.Security.findByPk(securityId);
+  if (!sec) throw new Error(`Security ${securityId} not found`);
+  await sec.update({
+    metadata: metadata as never,
+    metadataFetchedAt: new Date(),
+  });
+}

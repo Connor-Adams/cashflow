@@ -1,8 +1,9 @@
 /**
- * Per-security drill view. Lives at /portfolio/security/:id. Sources
- * GET /api/portfolio/security/:id which already returns the full
- * payload — per-account ACB results, full activities timeline, every
- * historical holding snapshot, and the latest quote.
+ * Per-security drill view (slice F). Composes the new cards on top of
+ * /api/portfolio/security/:id, /api/portfolio/security/:id/overview,
+ * /api/portfolio/security/:id/dividends, /api/portfolio/security/:id/prices.
+ * Retains the existing per-account ACB cards, activity timeline, and
+ * holdings snapshots below.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
@@ -15,10 +16,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
+import { MetricStat } from '@/components/ui/metric-stat'
 import { PageHeader } from '@/components/ui/page-header'
 import { StatCard } from '@/components/ui/stat-card'
 import {
@@ -31,11 +32,19 @@ import {
 } from '@/components/ui/table'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
-import type { PortfolioSecurityDetail } from '../types/api'
+import { AboutCard } from './portfolio-security/AboutCard'
+import { DividendHistoryCard } from './portfolio-security/DividendHistoryCard'
+import { PriceChartCard } from './portfolio-security/PriceChartCard'
+import { SecurityHeader } from './portfolio-security/SecurityHeader'
+import type {
+  PortfolioSecurityDetail,
+  PortfolioSecurityOverview,
+} from '../types/api'
 
 export function PortfolioSecurityPage() {
   const { id } = useParams<{ id: string }>()
   const [data, setData] = useState<PortfolioSecurityDetail | null>(null)
+  const [overview, setOverview] = useState<PortfolioSecurityOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -44,8 +53,12 @@ export function PortfolioSecurityPage() {
     setLoading(true)
     setErr(null)
     try {
-      const res = await getJson<PortfolioSecurityDetail>(`/api/portfolio/security/${id}`)
-      setData(res)
+      const [base, over] = await Promise.all([
+        getJson<PortfolioSecurityDetail>(`/api/portfolio/security/${id}`),
+        getJson<PortfolioSecurityOverview>(`/api/portfolio/security/${id}/overview`).catch(() => null),
+      ])
+      setData(base)
+      setOverview(over)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not load security detail')
     } finally {
@@ -63,10 +76,8 @@ export function PortfolioSecurityPage() {
     return map
   }, [data])
 
-  // Running position across activities, computed in display order.
   const activitiesWithRunning = useMemo(() => {
     if (!data) return []
-    // Group by account; running position is per-account.
     const runByAccount = new Map<number, number>()
     return data.activities
       .slice()
@@ -82,46 +93,23 @@ export function PortfolioSecurityPage() {
       })
   }, [data])
 
-  if (!id) {
-    return (
-      <div className="page">
-        <p className="error">Missing security id.</p>
-      </div>
-    )
-  }
+  if (!id) return <div className="page"><p className="error">Missing security id.</p></div>
+  if (loading) return <div className="page"><PageHeader title="Loading security…" /></div>
+  if (err) return (
+    <div className="page">
+      <PageHeader title="Security" />
+      <p className="error">{err}</p>
+      <Link to="/portfolio"><Button variant="outline">Back to portfolio</Button></Link>
+    </div>
+  )
+  if (!data) return (
+    <div className="page">
+      <PageHeader title="Security not found" />
+      <Link to="/portfolio"><Button variant="outline">Back to portfolio</Button></Link>
+    </div>
+  )
 
-  if (loading) {
-    return (
-      <div className="page">
-        <PageHeader title="Loading security…" />
-      </div>
-    )
-  }
-
-  if (err) {
-    return (
-      <div className="page">
-        <PageHeader title="Security" />
-        <p className="error">{err}</p>
-        <Link to="/portfolio">
-          <Button variant="outline">Back to portfolio</Button>
-        </Link>
-      </div>
-    )
-  }
-
-  if (!data) {
-    return (
-      <div className="page">
-        <PageHeader title="Security not found" />
-        <Link to="/portfolio">
-          <Button variant="outline">Back to portfolio</Button>
-        </Link>
-      </div>
-    )
-  }
-
-  const { security, perAccount, combined, holdings, latestPrice } = data
+  const { security, perAccount, combined, holdings } = data
   const unrealized =
     combined.currentCostBasis !== 0
       ? combined.currentMarketValue - combined.currentCostBasis
@@ -130,64 +118,55 @@ export function PortfolioSecurityPage() {
   return (
     <div className="page">
       <PageHeader
-        title={security.name ? `${security.symbol} — ${security.name}` : security.symbol}
-        description={
-          <span className="flex items-center gap-2 flex-wrap">
-            {security.assetType ? (
-              <Badge variant="secondary">{security.assetType}</Badge>
-            ) : null}
-            <Badge variant="outline">{security.currency}</Badge>
-            <span>
-              Combined across accounts plus per-account ACB and the full activity timeline.
-            </span>
-          </span>
-        }
-        actions={
-          <Link to="/portfolio">
-            <Button variant="outline">Back to portfolio</Button>
-          </Link>
-        }
+        title=""
+        actions={<Link to="/portfolio"><Button variant="outline">Back to portfolio</Button></Link>}
       />
+      <SecurityHeader security={security} overview={overview} />
 
-      <section className="transactionsStats">
-        <StatCard
-          label="Current quantity"
-          value={String(combined.currentQuantity)}
-          hint="Across all visible accounts"
-        />
-        <StatCard
-          label="Market value"
-          value={formatMoney(combined.currentMarketValue, combined.currency)}
-          hint={
-            latestPrice
-              ? `Quote ${formatMoney(latestPrice.price, latestPrice.currency)} · ${latestPrice.pricedAt.slice(0, 10)}`
-              : 'No live quote'
-          }
-        />
-        <StatCard
-          label="Cost basis"
-          value={formatMoney(combined.currentCostBasis, combined.currency)}
-          hint="Broker-reported"
-        />
+      <section className="transactionsStats mt-4">
+        <StatCard label="Quantity" value={String(combined.currentQuantity)} hint="Across all accounts" />
+        <StatCard label="Market value" value={formatMoney(combined.currentMarketValue, combined.currency)} />
+        <StatCard label="Cost basis" value={formatMoney(combined.currentCostBasis, combined.currency)} />
         <StatCard
           label="Unrealized"
           value={unrealized != null ? formatMoney(unrealized, combined.currency) : '—'}
           hint="MV − cost basis"
         />
+        <MetricStat
+          label="Today"
+          value={combined.todayChangePct != null ? `${combined.todayChangePct >= 0 ? '+' : ''}${combined.todayChangePct.toFixed(2)}%` : '—'}
+          deltaPct={combined.todayChangePct ?? undefined}
+          hint="vs prior close"
+        />
+        <MetricStat
+          label="30d return"
+          value={combined.thirtyDayReturnPct != null ? `${combined.thirtyDayReturnPct >= 0 ? '+' : ''}${combined.thirtyDayReturnPct.toFixed(2)}%` : '—'}
+          deltaPct={combined.thirtyDayReturnPct ?? undefined}
+          hint="price + dividends"
+        />
+        <MetricStat
+          label="Yield on cost (TTM)"
+          value={combined.yieldOnCostPct != null ? `${combined.yieldOnCostPct.toFixed(2)}%` : '—'}
+          hint="TTM dividends / cost basis"
+        />
         <StatCard
           label="Realized to date"
           value={formatMoney(combined.realizedTotal, combined.currency)}
-          hint="Weighted-average ACB, all SELLs"
-        />
-        <StatCard
-          label="Lifetime income"
-          value={formatMoney(
-            combined.income.dividend + combined.income.interest,
-            combined.currency,
-          )}
-          hint={`Dividends ${formatMoney(combined.income.dividend, combined.currency)} · Interest ${formatMoney(combined.income.interest, combined.currency)}`}
+          hint="Weighted-average ACB"
         />
       </section>
+
+      <div className="mt-4">
+        <PriceChartCard securityId={security.id} currency={combined.currency} />
+      </div>
+
+      <div className="mt-4">
+        <DividendHistoryCard securityId={security.id} currency={combined.currency} />
+      </div>
+
+      <div className="mt-4">
+        <AboutCard overview={overview} />
+      </div>
 
       <h2 className="mt-6">Per-account</h2>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -195,9 +174,7 @@ export function PortfolioSecurityPage() {
           <PerAccountCard key={row.accountId} row={row} />
         ))}
         {perAccount.length === 0 && (
-          <Card>
-            <p className="muted">No accounts hold this security.</p>
-          </Card>
+          <Card><p className="muted">No accounts hold this security.</p></Card>
         )}
       </div>
 
@@ -206,8 +183,7 @@ export function PortfolioSecurityPage() {
           <div>
             <h2>Activity timeline</h2>
             <p className="muted">
-              Chronological buys, sells, dividends, interest, and other rows. Running
-              position is per-account.
+              Chronological buys, sells, dividends, interest, and other rows. Running position is per-account.
             </p>
           </div>
         </div>
@@ -231,21 +207,13 @@ export function PortfolioSecurityPage() {
                   <TableCell>{accountById.get(a.accountId) ?? a.accountName}</TableCell>
                   <TableCell>{a.activityType}</TableCell>
                   <TableCell>{a.quantity ?? '—'}</TableCell>
-                  <TableCell>
-                    {a.price != null ? formatMoney(a.price, a.currency) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {a.amount != null ? formatMoney(a.amount, a.currency) : '—'}
-                  </TableCell>
+                  <TableCell>{a.price != null ? formatMoney(a.price, a.currency) : '—'}</TableCell>
+                  <TableCell>{a.amount != null ? formatMoney(a.amount, a.currency) : '—'}</TableCell>
                   <TableCell>{a.runningPosition}</TableCell>
                 </TableRow>
               ))}
               {activitiesWithRunning.length === 0 && (
-                <EmptyTableRow
-                  colSpan={7}
-                  title="No activities."
-                  description="No imported trades or income for this security yet."
-                />
+                <EmptyTableRow colSpan={7} title="No activities." description="No imported trades or income for this security yet." />
               )}
             </TableBody>
           </Table>
@@ -256,9 +224,7 @@ export function PortfolioSecurityPage() {
         <div className="transactionsPanelHeader">
           <div>
             <h2>Historical holdings snapshots</h2>
-            <p className="muted">
-              Every imported snapshot row for this security, newest first.
-            </p>
+            <p className="muted">Every imported snapshot row for this security, newest first.</p>
           </div>
         </div>
         <div className="transactionsTableWrap">
@@ -280,28 +246,14 @@ export function PortfolioSecurityPage() {
                   <TableCell>{h.statementDate}</TableCell>
                   <TableCell>{h.accountName}</TableCell>
                   <TableCell>{h.quantity}</TableCell>
-                  <TableCell>
-                    {h.price != null ? formatMoney(h.price, h.currency) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {h.marketValue != null ? formatMoney(h.marketValue, h.currency) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {h.costBasis != null ? formatMoney(h.costBasis, h.currency) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {h.unrealizedGainLoss != null
-                      ? formatMoney(h.unrealizedGainLoss, h.currency)
-                      : '—'}
-                  </TableCell>
+                  <TableCell>{h.price != null ? formatMoney(h.price, h.currency) : '—'}</TableCell>
+                  <TableCell>{h.marketValue != null ? formatMoney(h.marketValue, h.currency) : '—'}</TableCell>
+                  <TableCell>{h.costBasis != null ? formatMoney(h.costBasis, h.currency) : '—'}</TableCell>
+                  <TableCell>{h.unrealizedGainLoss != null ? formatMoney(h.unrealizedGainLoss, h.currency) : '—'}</TableCell>
                 </TableRow>
               ))}
               {holdings.length === 0 && (
-                <EmptyTableRow
-                  colSpan={7}
-                  title="No snapshots."
-                  description="No historical holdings imported for this security."
-                />
+                <EmptyTableRow colSpan={7} title="No snapshots." description="No historical holdings imported for this security." />
               )}
             </TableBody>
           </Table>
@@ -324,8 +276,7 @@ function PerAccountCard({ row }: { row: PortfolioSecurityDetail['perAccount'][nu
         <div>
           <h2 className="text-base">{row.accountName}</h2>
           <p className="muted">
-            Qty {row.currentQuantity} · MV{' '}
-            {formatMoney(row.currentMarketValue, acbCurrency)} · Cost{' '}
+            Qty {row.currentQuantity} · MV {formatMoney(row.currentMarketValue, acbCurrency)} · Cost{' '}
             {formatMoney(row.currentCostBasis, acbCurrency)} · Realized{' '}
             {formatMoney(row.acb.realizedTotal, acbCurrency)}
           </p>
@@ -349,14 +300,7 @@ function PerAccountCard({ row }: { row: PortfolioSecurityDetail['perAccount'][nu
                   ]
                 }}
               />
-              <Line
-                type="monotone"
-                dataKey="acbPerUnit"
-                stroke="var(--chart-line-1)"
-                strokeWidth={2}
-                dot
-                name="ACB / unit"
-              />
+              <Line type="monotone" dataKey="acbPerUnit" stroke="var(--chart-line-1)" strokeWidth={2} dot name="ACB / unit" />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -365,9 +309,7 @@ function PerAccountCard({ row }: { row: PortfolioSecurityDetail['perAccount'][nu
       )}
       {row.acb.warnings.length > 0 && (
         <ul className="muted text-xs mt-2 list-disc list-inside">
-          {row.acb.warnings.slice(0, 3).map((w, i) => (
-            <li key={i}>{w}</li>
-          ))}
+          {row.acb.warnings.slice(0, 3).map((w, i) => (<li key={i}>{w}</li>))}
         </ul>
       )}
     </Card>

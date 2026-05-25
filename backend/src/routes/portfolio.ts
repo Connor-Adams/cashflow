@@ -6,7 +6,10 @@ import {
   InvestmentActivity,
   Security,
   SecurityPrice,
+  SecurityDailyPrice,
+  SecurityDividend,
 } from '../models';
+import { ensureDailyPrices, ensureDividends, ensureOverview } from '../portfolio/backfill';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import * as env from '../config/env';
@@ -844,6 +847,167 @@ router.get('/realized', async (req, res, next) => {
   }
 });
 
+type PriceRange = '1m' | '3m' | '1y' | '5y' | 'all';
+const PRICE_RANGES: Record<PriceRange, number | null> = {
+  '1m': 30,
+  '3m': 92,
+  '1y': 365,
+  '5y': 365 * 5,
+  all: null,
+};
+
+function parseRange(raw: unknown): PriceRange {
+  if (typeof raw === 'string' && raw in PRICE_RANGES) return raw as PriceRange;
+  return '1y';
+}
+
+async function loadSecurityScoped(req: Request, idRaw: string) {
+  const id = Number(idRaw);
+  if (!Number.isFinite(id) || id <= 0) return { error: 400 as const };
+  const security = await Security.findByPk(id);
+  if (!security) return { error: 404 as const };
+  // Household scoping: a security must have at least one activity OR holding
+  // visible to the caller. Reuse visibleAccountWhere for the account scope.
+  const accounts = await Account.findAll({
+    where: { ...visibleAccountWhere(req), accountType: 'investment' },
+  });
+  const accountIds = accounts.map((a) => a.id);
+  if (accountIds.length === 0) return { error: 404 as const };
+  const activityCount = await InvestmentActivity.count({
+    where: { accountId: accountIds, securityId: id },
+  });
+  const holdingCount = await HoldingSnapshot.count({
+    where: { accountId: accountIds, securityId: id },
+  });
+  if (activityCount === 0 && holdingCount === 0) return { error: 404 as const };
+  return { security, accountIds };
+}
+
+/**
+ * GET /api/portfolio/security/:id/prices — OHLCV history + trade overlays.
+ */
+router.get('/security/:id/prices', async (req, res, next) => {
+  try {
+    const scoped = await loadSecurityScoped(req, req.params.id);
+    if ('error' in scoped) {
+      res.status(scoped.error as number).json({ error: 'Security not visible' });
+      return;
+    }
+    const { security, accountIds } = scoped;
+    const range = parseRange(req.query.range);
+    const days = PRICE_RANGES[range];
+
+    const where: Record<string, unknown> = { securityId: security.id };
+    if (days != null) {
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      where.date = { [Op.gte]: cutoff };
+    }
+    const rows = await SecurityDailyPrice.findAll({
+      where,
+      order: [['date', 'ASC']],
+    });
+
+    // Trades filtered to same date window for overlay.
+    const tradeWhere: Record<string, unknown> = {
+      accountId: accountIds,
+      securityId: security.id,
+      activityType: ['buy', 'sell'],
+    };
+    if (days != null) {
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      tradeWhere.tradeDate = { [Op.gte]: cutoff };
+    }
+    const trades = await InvestmentActivity.findAll({
+      where: tradeWhere,
+      include: [{ model: Account, as: 'account' }],
+      order: [['tradeDate', 'ASC']],
+    });
+
+    const backfill = await ensureDailyPrices(security.id);
+
+    res.json({
+      securityId: security.id,
+      symbol: security.symbol,
+      currency: security.currency,
+      range,
+      rows: rows.map((r) => ({
+        date: r.date,
+        open: r.open != null ? Number(r.open) : null,
+        high: r.high != null ? Number(r.high) : null,
+        low: r.low != null ? Number(r.low) : null,
+        close: Number(r.close),
+        adjClose: Number(r.adjClose),
+        volume: r.volume,
+      })),
+      trades: trades.map((t) => ({
+        date: t.tradeDate,
+        type: t.activityType as 'buy' | 'sell',
+        quantity: t.quantity != null ? Number(t.quantity) : 0,
+        price: t.price != null ? Number(t.price) : null,
+        accountName: (t as unknown as { account?: { name: string } }).account?.name ?? '',
+      })),
+      backfill,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/security/:id/dividends', async (req, res, next) => {
+  try {
+    const scoped = await loadSecurityScoped(req, req.params.id);
+    if ('error' in scoped) {
+      res.status(scoped.error as number).json({ error: 'Security not visible' });
+      return;
+    }
+    const { security } = scoped;
+    const events = await SecurityDividend.findAll({
+      where: { securityId: security.id },
+      order: [['exDividendDate', 'ASC']],
+    });
+    const backfill = await ensureDividends(security.id);
+    res.json({
+      securityId: security.id,
+      currency: security.currency,
+      events: events.map((e) => ({
+        exDividendDate: e.exDividendDate,
+        paymentDate: e.paymentDate,
+        recordDate: e.recordDate,
+        amount: Number(e.amount),
+        currency: e.currency,
+      })),
+      backfill,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/security/:id/overview', async (req, res, next) => {
+  try {
+    const scoped = await loadSecurityScoped(req, req.params.id);
+    if ('error' in scoped) {
+      res.status(scoped.error as number).json({ error: 'Security not visible' });
+      return;
+    }
+    const { security } = scoped;
+    const m = (security.metadata ?? {}) as Record<string, unknown>;
+    const backfill = await ensureOverview(security.id);
+    res.json({
+      securityId: security.id,
+      sector: m['sector'] ?? null,
+      industry: m['industry'] ?? null,
+      country: m['country'] ?? null,
+      exchange: m['exchange'] ?? null,
+      description: m['description'] ?? null,
+      metadataFetchedAt: security.metadataFetchedAt?.toISOString() ?? null,
+      backfill,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * GET /api/portfolio/security/:id — full per-security drill payload.
  */
@@ -1011,6 +1175,48 @@ router.get('/security/:id', async (req, res, next) => {
       currency: h.currency,
     }));
 
+    // Today change %: needs current price + prevClose. Use latest SecurityPrice quote
+    // (refreshed via /prices/refresh). prevClose comes from yesterday's adj_close.
+    const dailyForToday = await SecurityDailyPrice.findAll({
+      where: { securityId },
+      order: [['date', 'DESC']],
+      limit: 2,
+    });
+    const todayPriceQuote = latestPrice ? Number(latestPrice.price) : null;
+    const prevClose = dailyForToday[0] ? Number(dailyForToday[0].adjClose) : null;
+    const todayChangePct =
+      todayPriceQuote != null && prevClose != null && prevClose !== 0
+        ? ((todayPriceQuote - prevClose) / prevClose) * 100
+        : null;
+
+    // 30-day return %: ((todayPrice + dividends_in_30d_per_unit) - price_30d_ago) / price_30d_ago
+    const cutoff30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const price30 = await SecurityDailyPrice.findOne({
+      where: { securityId, date: { [Op.lte]: cutoff30 } },
+      order: [['date', 'DESC']],
+    });
+    const divs30 = await SecurityDividend.findAll({
+      where: { securityId, exDividendDate: { [Op.gte]: cutoff30 } },
+    });
+    const divPerUnit30 = divs30.reduce((s, d) => s + Number(d.amount), 0);
+    const price30Val = price30 ? Number(price30.adjClose) : null;
+    const todayForReturn = todayPriceQuote ?? (dailyForToday[0] ? Number(dailyForToday[0].adjClose) : null);
+    const thirtyDayReturnPct =
+      price30Val != null && price30Val !== 0 && todayForReturn != null
+        ? ((todayForReturn + divPerUnit30 - price30Val) / price30Val) * 100
+        : null;
+
+    // Yield on cost (TTM)
+    const cutoff365 = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const divs365 = await SecurityDividend.findAll({
+      where: { securityId, exDividendDate: { [Op.gte]: cutoff365 } },
+    });
+    const divPerUnit365 = divs365.reduce((s, d) => s + Number(d.amount), 0);
+    const yieldOnCostPct =
+      combinedCost > 0 && combinedQty > 0
+        ? ((divPerUnit365 * combinedQty) / combinedCost) * 100
+        : null;
+
     res.json({
       security: {
         id: security.id,
@@ -1027,6 +1233,9 @@ router.get('/security/:id', async (req, res, next) => {
         realizedTotal: combinedRealized,
         income: { dividend: combinedDividend, interest: combinedInterest },
         currency: combinedCurrency,
+        todayChangePct,
+        thirtyDayReturnPct,
+        yieldOnCostPct,
       },
       activities: activitiesDto,
       holdings: holdingsDto,

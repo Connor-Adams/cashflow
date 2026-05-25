@@ -194,6 +194,72 @@ export type BudgetInput = {
   period?: 'monthly'
 }
 
+export type AppConfig = {
+  logoDevToken: string | null;
+  quoteProviderConfigured: boolean;
+};
+
+export type BackfillStatus = {
+  status: 'fresh' | 'stale' | 'never' | 'in_progress' | 'rate_limited';
+  lastFetchedAt: string | null;
+  nextRetryAt: string | null;
+  coverageDays: number;
+};
+
+export type PortfolioSecurityPriceRow = {
+  date: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number;
+  adjClose: number;
+  volume: number | null;
+};
+
+export type PortfolioSecurityTrade = {
+  date: string;
+  type: 'buy' | 'sell';
+  quantity: number;
+  price: number | null;
+  accountName: string;
+};
+
+export type PortfolioSecurityPrices = {
+  securityId: number;
+  symbol: string;
+  currency: string;
+  range: '1m' | '3m' | '1y' | '5y' | 'all';
+  rows: PortfolioSecurityPriceRow[];
+  trades: PortfolioSecurityTrade[];
+  backfill: BackfillStatus;
+};
+
+export type PortfolioSecurityDividendEvent = {
+  exDividendDate: string;
+  paymentDate: string | null;
+  recordDate: string | null;
+  amount: number;
+  currency: string;
+};
+
+export type PortfolioSecurityDividends = {
+  securityId: number;
+  currency: string;
+  events: PortfolioSecurityDividendEvent[];
+  backfill: BackfillStatus;
+};
+
+export type PortfolioSecurityOverview = {
+  securityId: number;
+  sector: string | null;
+  industry: string | null;
+  country: string | null;
+  exchange: string | null;
+  description: string | null;
+  metadataFetchedAt: string | null;
+  backfill: BackfillStatus;
+};
+
 export type NetWorthBreakdownRow = {
   source: 'account' | 'portfolio';
   accountId: number | null;
