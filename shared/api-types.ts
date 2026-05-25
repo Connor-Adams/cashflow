@@ -230,6 +230,10 @@ export type HoldingSnapshot = {
   importBatch: string
   security: Security | null
   latestPrice: SecurityPrice | null
+  todayChangePct: number | null
+  thirtyDayReturnPct: number | null
+  weightPct: number | null
+  yieldOnCostPct: number | null
 }
 
 export type StatementPreview = {
@@ -305,6 +309,8 @@ export type PortfolioSummary = {
     baseCurrency: 'CAD'
     marketValue: number
     ratesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }>
+    todayChangePct: number | null
+    todayChangeCad: number | null
   } | null
   recentActivities: InvestmentActivity[]
   quoteProvider: string
@@ -418,11 +424,22 @@ export type BySecurityRow = {
   unrealizedGainLoss: number | null
   accountBreakdown: BySecurityAccountBreakdown[]
   latestPrice: PortfolioLatestPrice | null
+  todayChangePct: number | null
+  thirtyDayReturnPct: number | null
+  weightPct: number | null
+  totalReturnPct: number | null
 }
 
 /** Response shape for GET /api/portfolio/by-security. */
 export type PortfolioBySecurity = {
   rows: BySecurityRow[]
+  unifiedTotal: {
+    baseCurrency: 'CAD'
+    marketValue: number
+    ratesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }>
+    todayChangePct: number | null
+    todayChangeCad: number | null
+  } | null
 }
 
 /** Aggregate realized-gain row per currency. */
