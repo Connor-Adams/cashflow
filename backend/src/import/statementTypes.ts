@@ -46,6 +46,7 @@ export type NormalizedInvestmentActivity = {
     | 'transfer_in'
     | 'transfer_out'
     | 'cash_movement'
+    | 'staking_reward'
     | 'other';
   tradeDate: string;
   settlementDate: string | null;
