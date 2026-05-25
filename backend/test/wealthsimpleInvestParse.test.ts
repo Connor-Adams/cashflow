@@ -208,7 +208,7 @@ test('P2P_RECEIVED returns null', () => {
   assert.equal(r, null);
 });
 
-test('CRYPTORWD returns null', () => {
+test('CRYPTORWD: extracts symbol + quantity, emits staking_reward activity', () => {
   const r = parseWsInvestRow(
     row({
       date: '2025-01-01',
@@ -219,7 +219,47 @@ test('CRYPTORWD returns null', () => {
     ACCOUNT_ID,
     DEFAULT_CCY,
   );
-  assert.equal(r, null);
+  assert.ok(r);
+  assert.equal(r.activityType, 'staking_reward');
+  assert.equal(r.tradeDate, '2025-01-01');
+  assert.equal(r.security?.symbol, 'DOT');
+  assert.equal(r.security?.assetType, 'cryptocurrency');
+  assert.equal(r.quantity, 0.0020732867);
+  assert.equal(r.amount, 0);
+});
+
+test('CRYPTORWD ETH variant', () => {
+  const r = parseWsInvestRow(
+    row({
+      date: '2025-02-15',
+      transaction: 'CRYPTORWD',
+      description: '0.0000714937 of ETH rewards earned',
+      amount: '0.0',
+    }),
+    ACCOUNT_ID,
+    DEFAULT_CCY,
+  );
+  assert.ok(r);
+  assert.equal(r.activityType, 'staking_reward');
+  assert.equal(r.security?.symbol, 'ETH');
+  assert.equal(r.quantity, 0.0000714937);
+});
+
+test('CRYPTORWD with unparseable description: still returns staking_reward but null security', () => {
+  const r = parseWsInvestRow(
+    row({
+      date: '2025-01-01',
+      transaction: 'CRYPTORWD',
+      description: 'unexpected description shape',
+      amount: '0.0',
+    }),
+    ACCOUNT_ID,
+    DEFAULT_CCY,
+  );
+  assert.ok(r);
+  assert.equal(r.activityType, 'staking_reward');
+  assert.equal(r.security, null);
+  assert.equal(r.quantity, null);
 });
 
 test('Crypto BUY: extracts symbol, qty, exec-at from "Purchase of N SYM" format', () => {

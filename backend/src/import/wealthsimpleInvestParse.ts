@@ -6,13 +6,13 @@ import type { NormalizedInvestmentActivity } from './statementTypes';
  *
  * Header layout: `date,transaction,description,amount,balance,currency`. The
  * `transaction` field is a stable Wealthsimple TX code (BUY/SELL/DIV/INT/CONT/
- * FEE/FPLINT/etc.); the `description` field contains a free-text string that
- * for BUY/SELL/DIV rows encodes ticker, name, and (importantly) a more
- * accurate executed-at / received-on date than the row date.
+ * FEE/FPLINT/CRYPTORWD/etc.); the `description` field contains a free-text
+ * string that for BUY/SELL/DIV rows encodes ticker, name, and (importantly)
+ * a more accurate executed-at / received-on date than the row date.
  *
  * Returns null for TX codes outside the supported set — including P2P_*,
- * AFT_*, CRYPTORWD, LOAN, RECALL, etc. — so callers can drop them silently
- * (they're either irrelevant or surfaced through the cash-transaction path).
+ * AFT_*, LOAN, RECALL, etc. — so callers can drop them silently (they're
+ * either irrelevant or surfaced through the cash-transaction path).
  */
 
 export type WsRow = {
@@ -34,6 +34,7 @@ const TX_TO_ACTIVITY: Record<string, ActivityType> = {
   INT: 'interest',
   CONT: 'transfer',
   FEE: 'fee',
+  CRYPTORWD: 'staking_reward',
 };
 
 // Match BUY/SELL descriptions in either format Wealthsimple emits:
@@ -67,6 +68,15 @@ const CRYPTO_TRADING_FEE_RE =
   /^Trading fee for (?:purchase|sale)\s+of\s+[\d.]+\s+([A-Z0-9]+)\s*\(executed at (\d{4}-\d{2}-\d{2})\)/i;
 const CRYPTO_STAKING_FEE_RE =
   /^Fee paid on ([A-Z0-9]+)-([^:]+) staking reward:/i;
+
+// CRYPTORWD descriptions on monthly statements take the shape:
+//   "0.0020732867 of DOT rewards earned"
+//   "0.0000714937 of ETH rewards earned"
+// Captures (qty, symbol). The cash-leg of the staking reward emits with
+// amount=0 in the CAD half (the USD half carries the dollar value but is
+// filtered out by the zero-value-non-CAD noise filter upstream), so the
+// emitted InvestmentActivity has amount=0 and quantity=coin received.
+const CRYPTORWD_RE = /^([\d.]+)\s+of\s+([A-Z0-9]+)\s+rewards?\s+earned/i;
 
 function parseAmount(raw: string): number {
   const n = parseFloat(raw);
@@ -140,6 +150,14 @@ export function parseWsInvestRow(
         const name = s[2].trim();
         security = { symbol, name, assetType: 'cryptocurrency', currency };
       }
+    }
+  } else if (activityType === 'staking_reward') {
+    const m = desc.match(CRYPTORWD_RE);
+    if (m) {
+      const qty = parseFloat(m[1]);
+      const symbol = m[2].trim().toUpperCase();
+      security = { symbol, name: symbol, assetType: 'cryptocurrency', currency };
+      quantity = Number.isFinite(qty) ? qty : null;
     }
   }
 
