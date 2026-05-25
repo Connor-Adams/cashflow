@@ -32,6 +32,8 @@ export type {
   PortfolioSecurityDetail,
   PortfolioSecurityHeader,
   PortfolioSecurityHolding,
+  PortfolioSparklinePoint,
+  PortfolioSparklines,
   PortfolioSummary,
   RealizedEvent,
   RealizedSecurityRow,
