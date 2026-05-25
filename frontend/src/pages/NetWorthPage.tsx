@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Area,
   AreaChart,
@@ -8,7 +8,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { useNetWorthCurrent, useNetWorthSeries, updateOpeningBalance } from '@/hooks/useNetWorth'
+import {
+  useNetWorthCurrent,
+  useNetWorthSeries,
+  updateOpeningBalance,
+} from '@/hooks/useNetWorth'
 import {
   Table,
   TableHeader,
@@ -48,6 +52,7 @@ export function NetWorthPage() {
   const current = useNetWorthCurrent()
   const seriesParams = useMemo(() => rangeToParams(range), [range])
   const series = useNetWorthSeries(seriesParams)
+  const editorRef = useRef<HTMLDivElement>(null)
 
   async function saveOpening(accountId: number) {
     const raw = drafts[accountId] ?? ''
@@ -58,6 +63,12 @@ export function NetWorthPage() {
       openingBalanceDate: null,
     })
     current.refresh()
+  }
+
+  function openEditorAndScroll() {
+    setEditorOpen(true)
+    // Defer scroll so the editor is in the DOM before we measure it.
+    setTimeout(() => editorRef.current?.scrollIntoView({ behavior: 'smooth' }), 0)
   }
 
   if (current.loading && !current.data) {
@@ -75,7 +86,21 @@ export function NetWorthPage() {
 
   const accountRows = [...cur.breakdown.assets, ...cur.breakdown.liabilities]
   const editableAccounts = accountRows.filter(
-    (r): r is typeof r & { accountId: number } => r.source === 'account' && r.accountId != null,
+    (r): r is typeof r & { accountId: number } =>
+      r.source === 'account' && r.accountId != null,
+  )
+  const needsOpeningCount = editableAccounts.filter(
+    (r) => !r.openingBalanceSet,
+  ).length
+  const negativeAssetCount = cur.breakdown.assets.filter(
+    (r) => r.dataQualityWarning === 'asset_balance_negative',
+  ).length
+  const gapCurrencies = Array.from(
+    new Set(
+      cur.gaps
+        .filter((g) => g.reason === 'fx_rate_unavailable')
+        .map((g) => g.currency),
+    ),
   )
 
   return (
@@ -101,17 +126,56 @@ export function NetWorthPage() {
         </div>
       </header>
 
-      {cur.partial && (
-        <div className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm">
-          Some balances couldn’t be converted to CAD. {cur.gaps.length} gap
-          {cur.gaps.length === 1 ? '' : 's'}.
+      {needsOpeningCount > 0 && (
+        <div
+          role="alert"
+          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm flex items-center justify-between gap-3"
+        >
+          <div>
+            <strong>{needsOpeningCount}</strong> account
+            {needsOpeningCount === 1 ? '' : 's'} ha
+            {needsOpeningCount === 1 ? 's' : 've'} no opening balance set —
+            derived totals will be off until you set them.
+          </div>
+          <button
+            type="button"
+            onClick={openEditorAndScroll}
+            className="rounded border border-amber-600 px-3 py-1 text-sm font-medium"
+          >
+            Set opening balances
+          </button>
+        </div>
+      )}
+
+      {negativeAssetCount > 0 && (
+        <div
+          role="alert"
+          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm"
+        >
+          <strong>{negativeAssetCount}</strong> asset account
+          {negativeAssetCount === 1 ? '' : 's'} had a negative derived
+          balance — excluded from the headline total. Check the rows
+          flagged below.
+        </div>
+      )}
+
+      {gapCurrencies.length > 0 && (
+        <div
+          role="alert"
+          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm"
+        >
+          Missing FX rate{gapCurrencies.length === 1 ? '' : 's'} for{' '}
+          <strong>{gapCurrencies.join(', ')}</strong> → CAD on {cur.asOf}.
+          Those balances are excluded from the total.
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded border p-4">
           <div className="text-sm text-muted-foreground">Net worth (CAD)</div>
-          <div className="text-3xl font-semibold">{formatMoney(cur.total, 'CAD')}</div>
+          <div className="text-3xl font-semibold">
+            {formatMoney(cur.total, 'CAD')}
+          </div>
         </div>
         <div className="rounded border p-4">
           <div className="text-sm text-muted-foreground">Assets</div>
@@ -157,26 +221,45 @@ export function NetWorthPage() {
               <TableHead>Currency</TableHead>
               <TableHead className="text-right">Native</TableHead>
               <TableHead className="text-right">CAD value</TableHead>
+              <TableHead>Notes</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {accountRows.map((row, i) => (
-              <TableRow key={`${row.source}-${row.accountId}-${row.currency}-${i}`}>
-                <TableCell>{row.label}</TableCell>
-                <TableCell>{row.currency}</TableCell>
-                <TableCell className="text-right">
-                  {row.native != null ? formatMoney(row.native, row.currency) : '—'}
-                </TableCell>
-                <TableCell className="text-right">
-                  {row.cadValue != null ? formatMoney(row.cadValue, 'CAD') : '—'}
-                </TableCell>
-              </TableRow>
-            ))}
+            {accountRows.map((row, i) => {
+              const badges: string[] = []
+              if (row.dataQualityWarning === 'asset_balance_negative') {
+                badges.push('Negative — excluded')
+              }
+              if (row.source === 'account' && !row.openingBalanceSet) {
+                badges.push('Opening balance not set')
+              }
+              return (
+                <TableRow key={`${row.source}-${row.accountId}-${row.currency}-${i}`}>
+                  <TableCell>{row.label}</TableCell>
+                  <TableCell>{row.currency}</TableCell>
+                  <TableCell className="text-right">
+                    {row.native != null ? formatMoney(row.native, row.currency) : '—'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {row.cadValue != null ? formatMoney(row.cadValue, 'CAD') : '—'}
+                  </TableCell>
+                  <TableCell>
+                    {badges.length === 0 ? (
+                      ''
+                    ) : (
+                      <span className="text-xs text-amber-700">
+                        {badges.join(' · ')}
+                      </span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       </div>
 
-      <div className="rounded border">
+      <div ref={editorRef} className="rounded border">
         <button
           type="button"
           onClick={() => setEditorOpen((v) => !v)}
@@ -194,8 +277,14 @@ export function NetWorthPage() {
                   key={`${row.accountId}-${row.currency}`}
                   className="flex items-center gap-3"
                 >
-                  <label className="w-40 truncate" htmlFor={`opening-${row.accountId}`}>
+                  <label
+                    className="w-40 truncate"
+                    htmlFor={`opening-${row.accountId}`}
+                  >
                     {row.label}
+                    {!row.openingBalanceSet && (
+                      <span className="ml-2 text-xs text-amber-700">(unset)</span>
+                    )}
                   </label>
                   <input
                     id={`opening-${row.accountId}`}
@@ -203,7 +292,10 @@ export function NetWorthPage() {
                     type="number"
                     className="border rounded px-2 py-1"
                     onChange={(e) =>
-                      setDrafts((d) => ({ ...d, [row.accountId]: e.target.value }))
+                      setDrafts((d) => ({
+                        ...d,
+                        [row.accountId]: e.target.value,
+                      }))
                     }
                   />
                   <button

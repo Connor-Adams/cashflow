@@ -201,6 +201,8 @@ export type NetWorthBreakdownRow = {
   currency: string;
   native: number | null;
   cadValue: number | null;
+  openingBalanceSet: boolean;
+  dataQualityWarning?: 'asset_balance_negative';
 };
 
 export type NetWorthGap =

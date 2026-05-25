@@ -16,10 +16,26 @@ vi.mock('@/hooks/useNetWorth', () => ({
       liabilitiesTotal: -2100,
       breakdown: {
         assets: [
-          { source: 'account', accountId: 1, label: 'Chq', currency: 'CAD', native: 5000, cadValue: 5000 },
+          {
+            source: 'account',
+            accountId: 1,
+            label: 'Chq',
+            currency: 'CAD',
+            native: 5000,
+            cadValue: 5000,
+            openingBalanceSet: true,
+          },
         ],
         liabilities: [
-          { source: 'account', accountId: 7, label: 'Visa', currency: 'CAD', native: -2100, cadValue: -2100 },
+          {
+            source: 'account',
+            accountId: 7,
+            label: 'Visa',
+            currency: 'CAD',
+            native: -2100,
+            cadValue: -2100,
+            openingBalanceSet: true,
+          },
         ],
       },
       fxRatesUsed: [],
