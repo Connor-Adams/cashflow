@@ -78,4 +78,5 @@ export function stopForwardIncomeScheduler(): void {
   if (!activeTask) return;
   activeTask.stop();
   activeTask = null;
+  runningTick = false;
 }
