@@ -101,13 +101,13 @@ export function AuthPage() {
           </label>
           {mode === 'register' && !auth.bootstrapRequired && (
             <label>
-              Invite code
-              <Input name="inviteToken" defaultValue={inviteFromUrl} required />
+              Invite code <span className="muted">(optional — leave blank to start a new household)</span>
+              <Input name="inviteToken" defaultValue={inviteFromUrl} />
             </label>
           )}
           {err && <span className="error">{err}</span>}
           <Button type="submit">
-            {mode === 'login' ? 'Log in' : auth.bootstrapRequired ? 'Create first account' : 'Join household'}
+            {mode === 'login' ? 'Log in' : auth.bootstrapRequired ? 'Create first account' : 'Create account'}
           </Button>
         </form>
       </Card>
