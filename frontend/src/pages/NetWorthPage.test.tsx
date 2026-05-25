@@ -1,0 +1,71 @@
+import React from 'react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { NetWorthPage } from './NetWorthPage'
+
+vi.mock('@/hooks/useNetWorth', () => ({
+  useNetWorthCurrent: () => ({
+    data: {
+      asOf: '2026-05-24',
+      baseCurrency: 'CAD',
+      total: 152340.12,
+      assetsTotal: 154440.12,
+      liabilitiesTotal: -2100,
+      breakdown: {
+        assets: [
+          { source: 'account', accountId: 1, label: 'Chq', currency: 'CAD', native: 5000, cadValue: 5000 },
+        ],
+        liabilities: [
+          { source: 'account', accountId: 7, label: 'Visa', currency: 'CAD', native: -2100, cadValue: -2100 },
+        ],
+      },
+      fxRatesUsed: [],
+      partial: false,
+      gaps: [],
+    },
+    loading: false,
+    error: null,
+    refresh: () => {},
+  }),
+  useNetWorthSeries: () => ({
+    data: { baseCurrency: 'CAD', granularity: 'monthly', points: [], partial: false, gaps: [] },
+    loading: false,
+    error: null,
+    refresh: () => {},
+  }),
+  updateOpeningBalance: vi.fn(),
+}))
+
+describe('NetWorthPage', () => {
+  it('renders the headline figure', async () => {
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText(/152,340/)).toBeInTheDocument())
+  })
+
+  it('renders rows for both assets and liabilities', async () => {
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('Chq')).toBeInTheDocument()
+    expect(screen.getByText('Visa')).toBeInTheDocument()
+  })
+
+  it('renders the range picker buttons', () => {
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('button', { name: '1M' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '3M' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1Y' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument()
+  })
+})
