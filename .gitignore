@@ -5,6 +5,7 @@ dist/
 *.sqlite-journal
 .DS_Store
 .serena/
+.claude/worktrees/
 coverage/
 uploads/
 *.log
