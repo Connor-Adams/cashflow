@@ -10,6 +10,9 @@ import assert from 'node:assert/strict';
 
 let AlphaVantageError: typeof import('../../../src/integrations/alphaVantage/client.js').AlphaVantageError;
 let fetchGlobalQuote: typeof import('../../../src/integrations/alphaVantage/client.js').fetchGlobalQuote;
+let fetchDailyAdjusted: typeof import('../../../src/integrations/alphaVantage/client.js').fetchDailyAdjusted;
+let fetchDividends: typeof import('../../../src/integrations/alphaVantage/client.js').fetchDividends;
+let fetchOverview: typeof import('../../../src/integrations/alphaVantage/client.js').fetchOverview;
 
 const originalFetch = globalThis.fetch;
 
@@ -20,6 +23,9 @@ before(async () => {
   const clientModule = await import('../../../src/integrations/alphaVantage/client.js');
   AlphaVantageError = clientModule.AlphaVantageError;
   fetchGlobalQuote = clientModule.fetchGlobalQuote;
+  fetchDailyAdjusted = clientModule.fetchDailyAdjusted;
+  fetchDividends = clientModule.fetchDividends;
+  fetchOverview = clientModule.fetchOverview;
 });
 
 after(() => {
@@ -85,4 +91,97 @@ test('fetchGlobalQuote: throws AlphaVantageError with providerNote on Note paylo
     (err: unknown) =>
       err instanceof AlphaVantageError && err.providerNote === note,
   );
+});
+
+test('fetchDailyAdjusted: parses Time Series (Daily) and returns ascending bars', async () => {
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        'Time Series (Daily)': {
+          '2026-05-22': { '1. open': '180', '2. high': '185', '3. low': '178', '4. close': '184', '5. adjusted close': '183.5', '6. volume': '12345' },
+          '2026-05-21': { '1. open': '178', '2. high': '181', '3. low': '177', '4. close': '180', '5. adjusted close': '179.5', '6. volume': '11111' },
+        },
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+  const bars = await fetchDailyAdjusted('AAPL', 'compact');
+  assert.ok(bars);
+  assert.equal(bars.length, 2);
+  assert.equal(bars[0].date, '2026-05-21');
+  assert.equal(bars[1].date, '2026-05-22');
+  assert.equal(bars[1].close, 184);
+  assert.equal(bars[1].adjClose, 183.5);
+});
+
+test('fetchDailyAdjusted: returns null when series missing from payload', async () => {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({}), { status: 200 })) as typeof fetch;
+  const bars = await fetchDailyAdjusted('XYZ', 'compact');
+  assert.equal(bars, null);
+});
+
+test('fetchDividends: parses data array and sorts ascending by ex_dividend_date', async () => {
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        data: [
+          { ex_dividend_date: '2026-03-14', amount: '0.485', currency: 'USD' },
+          { ex_dividend_date: '2025-12-15', amount: '0.46', currency: 'USD' },
+        ],
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+  const events = await fetchDividends('KO');
+  assert.ok(events);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].exDividendDate, '2025-12-15');
+  assert.equal(events[1].amount, 0.485);
+});
+
+test('fetchDividends: returns null when data missing', async () => {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({}), { status: 200 })) as typeof fetch;
+  const events = await fetchDividends('XYZ');
+  assert.equal(events, null);
+});
+
+test('fetchOverview: parses standard payload and preserves raw', async () => {
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        Symbol: 'AAPL',
+        Sector: 'Technology',
+        Industry: 'Consumer Electronics',
+        Country: 'USA',
+        Exchange: 'NASDAQ',
+        Description: 'Designs phones.',
+        PERatio: '30.5',
+      }),
+      { status: 200 },
+    )) as typeof fetch;
+  const overview = await fetchOverview('AAPL');
+  assert.ok(overview);
+  assert.equal(overview.sector, 'Technology');
+  assert.equal(overview.exchange, 'NASDAQ');
+  assert.equal(overview.raw.PERatio, '30.5');
+});
+
+test('fetchOverview: returns null when Symbol field absent', async () => {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({}), { status: 200 })) as typeof fetch;
+  const overview = await fetchOverview('XYZ');
+  assert.equal(overview, null);
+});
+
+test('fetchOverview: filters "None" sentinel strings to null', async () => {
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({ Symbol: 'X', Sector: 'None', Industry: '', Country: 'USA' }),
+      { status: 200 },
+    )) as typeof fetch;
+  const overview = await fetchOverview('X');
+  assert.ok(overview);
+  assert.equal(overview.sector, null);
+  assert.equal(overview.industry, null);
+  assert.equal(overview.country, 'USA');
 });

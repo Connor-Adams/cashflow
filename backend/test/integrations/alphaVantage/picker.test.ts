@@ -1,6 +1,7 @@
 /**
  * Picker tests — verifies stale-first global rotation across distinct held
- * symbols with the min-age floor honored.
+ * symbols. Single-function tests scope `functions: ['GLOBAL_QUOTE']` so they
+ * exercise legacy behavior independently of OVERVIEW + DIVIDENDS rotation.
  */
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,11 +57,11 @@ function offsetHours(base: Date, hours: number): Date {
 }
 
 test('pickNext: returns null when no securities exist', async () => {
-  const result = await pickNext({ minAgeSeconds: 0, now: NOW });
+  const result = await pickNext({ minAgeSeconds: 0, now: NOW, functions: ['GLOBAL_QUOTE'] });
   assert.equal(result, null);
 });
 
-test('pickNext: never-fetched symbol wins over fresh symbol', async () => {
+test('pickNext: never-fetched symbol wins over fresh symbol (GLOBAL_QUOTE)', async () => {
   await Security.create({ householdId: 1, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
   await Security.create({ householdId: 1, symbol: 'MSFT', name: 'Microsoft', currency: 'USD', assetType: null });
   await ProviderJobLog.create({
@@ -71,14 +72,14 @@ test('pickNext: never-fetched symbol wins over fresh symbol', async () => {
     fetchedAt: offsetHours(NOW, 1),
   });
 
-  const result = await pickNext({ minAgeSeconds: 0, now: NOW });
+  const result = await pickNext({ minAgeSeconds: 0, now: NOW, functions: ['GLOBAL_QUOTE'] });
   assert.ok(result);
   assert.equal(result.symbol, 'MSFT');
   assert.equal(result.lastFetchedAt, null);
   assert.equal(result.ageSeconds, Number.POSITIVE_INFINITY);
 });
 
-test('pickNext: returns null when every symbol is younger than minAge', async () => {
+test('pickNext: GLOBAL_QUOTE returns null when every symbol is younger than min-age floor', async () => {
   await Security.create({ householdId: 1, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
   await Security.create({ householdId: 1, symbol: 'MSFT', name: 'Microsoft', currency: 'USD', assetType: null });
   await ProviderJobLog.create({
@@ -96,11 +97,11 @@ test('pickNext: returns null when every symbol is younger than minAge', async ()
     fetchedAt: offsetHours(NOW, 2),
   });
 
-  const result = await pickNext({ minAgeSeconds: 18 * 3600, now: NOW });
+  const result = await pickNext({ minAgeSeconds: 18 * 3600, now: NOW, functions: ['GLOBAL_QUOTE'] });
   assert.equal(result, null);
 });
 
-test('pickNext: picks the symbol with the oldest successful fetch', async () => {
+test('pickNext: picks the symbol with the oldest successful fetch (GLOBAL_QUOTE)', async () => {
   await Security.create({ householdId: 1, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
   await Security.create({ householdId: 1, symbol: 'MSFT', name: 'Microsoft', currency: 'USD', assetType: null });
   await Security.create({ householdId: 1, symbol: 'GOOG', name: 'Google', currency: 'USD', assetType: null });
@@ -126,12 +127,12 @@ test('pickNext: picks the symbol with the oldest successful fetch', async () => 
     fetchedAt: offsetHours(NOW, 50),
   });
 
-  const result = await pickNext({ minAgeSeconds: 18 * 3600, now: NOW });
+  const result = await pickNext({ minAgeSeconds: 18 * 3600, now: NOW, functions: ['GLOBAL_QUOTE'] });
   assert.ok(result);
   assert.equal(result.symbol, 'GOOG');
 });
 
-test('pickNext: ignores error-only history (treats symbol as never fetched)', async () => {
+test('pickNext: ignores error-only history (treats pair as never fetched)', async () => {
   await Security.create({ householdId: 1, symbol: 'XYZ', name: null, currency: 'USD', assetType: null });
   await ProviderJobLog.create({
     provider: 'alpha_vantage',
@@ -141,7 +142,7 @@ test('pickNext: ignores error-only history (treats symbol as never fetched)', as
     fetchedAt: offsetHours(NOW, 1),
   });
 
-  const result = await pickNext({ minAgeSeconds: 0, now: NOW });
+  const result = await pickNext({ minAgeSeconds: 0, now: NOW, functions: ['GLOBAL_QUOTE'] });
   assert.ok(result);
   assert.equal(result.symbol, 'XYZ');
   assert.equal(result.lastFetchedAt, null);
@@ -151,7 +152,84 @@ test('pickNext: dedupes the same symbol shared across households', async () => {
   await Security.create({ householdId: 1, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
   await Security.create({ householdId: 2, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
 
-  const result = await pickNext({ minAgeSeconds: 0, now: NOW });
+  const result = await pickNext({ minAgeSeconds: 0, now: NOW, functions: ['GLOBAL_QUOTE'] });
   assert.ok(result);
   assert.equal(result.symbol, 'AAPL');
+});
+
+test('pickNext (multi-function): GLOBAL_QUOTE wins over OVERVIEW when both stale, because GLOBAL_QUOTE has a tighter target', async () => {
+  await Security.create({ householdId: 1, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
+  // Both functions have a stale row. GLOBAL_QUOTE target = 1d, OVERVIEW target = 90d.
+  // GLOBAL_QUOTE age 48h → ratio 2.0; OVERVIEW age 100d → ratio ~1.11.
+  await ProviderJobLog.create({
+    provider: 'alpha_vantage',
+    function: 'GLOBAL_QUOTE',
+    symbol: 'AAPL',
+    status: 'ok',
+    fetchedAt: offsetHours(NOW, 48),
+  });
+  await ProviderJobLog.create({
+    provider: 'alpha_vantage',
+    function: 'OVERVIEW',
+    symbol: 'AAPL',
+    status: 'ok',
+    fetchedAt: offsetHours(NOW, 100 * 24),
+  });
+
+  const result = await pickNext({
+    minAgeSeconds: 0,
+    now: NOW,
+    functions: ['GLOBAL_QUOTE', 'OVERVIEW'],
+  });
+  assert.ok(result);
+  assert.equal(result.function, 'GLOBAL_QUOTE');
+  assert.equal(result.symbol, 'AAPL');
+});
+
+test('pickNext (multi-function): OVERVIEW wins when GLOBAL_QUOTE is fresh but OVERVIEW is stale', async () => {
+  await Security.create({ householdId: 1, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
+  await ProviderJobLog.create({
+    provider: 'alpha_vantage',
+    function: 'GLOBAL_QUOTE',
+    symbol: 'AAPL',
+    status: 'ok',
+    fetchedAt: offsetHours(NOW, 2),
+  });
+  await ProviderJobLog.create({
+    provider: 'alpha_vantage',
+    function: 'OVERVIEW',
+    symbol: 'AAPL',
+    status: 'ok',
+    fetchedAt: offsetHours(NOW, 100 * 24),
+  });
+
+  const result = await pickNext({
+    minAgeSeconds: 0,
+    now: NOW,
+    functions: ['GLOBAL_QUOTE', 'OVERVIEW'],
+  });
+  assert.ok(result);
+  assert.equal(result.function, 'OVERVIEW');
+});
+
+test('pickNext (multi-function): respects custom target ages', async () => {
+  await Security.create({ householdId: 1, symbol: 'AAPL', name: 'Apple', currency: 'USD', assetType: null });
+  await ProviderJobLog.create({
+    provider: 'alpha_vantage',
+    function: 'DIVIDENDS',
+    symbol: 'AAPL',
+    status: 'ok',
+    fetchedAt: offsetHours(NOW, 2),
+  });
+
+  // Default DIVIDENDS target = 30d. Tighten to 1h → 2h-old fetch becomes stale (ratio = 2).
+  const result = await pickNext({
+    minAgeSeconds: 0,
+    now: NOW,
+    functions: ['DIVIDENDS'],
+    targetAgeSeconds: { DIVIDENDS: 3600 },
+  });
+  assert.ok(result);
+  assert.equal(result.function, 'DIVIDENDS');
+  assert.equal(result.stalenessRatio, 2);
 });
