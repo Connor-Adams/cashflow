@@ -691,3 +691,30 @@ export type ClientLogPayload = {
   requestId?: string
   fields?: Record<string, unknown>
 }
+
+export type ItemRow = {
+  id: number
+  title: string
+  qty: number
+  unitPrice: number | null
+  totalPrice: number | null
+  taxShare: number
+  categoryEffective: string | null
+  categoryOverride: string | null
+  businessUseEffective: boolean
+  businessUseOverride: boolean | null
+  order: {
+    id: number
+    vendor: string
+  }
+  receipt: {
+    id: number
+    date: string | null
+    sourceTxnId: number | null
+  }
+}
+
+export type ItemsListResponse = {
+  items: ItemRow[]
+  nextCursor: string | null
+}
