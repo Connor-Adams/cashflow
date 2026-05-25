@@ -245,6 +245,67 @@ test('byTaxStatus contains registered_tfsa entry matching totalCad', async () =>
   );
 });
 
+// ─── Test 7: Perf smoke — p95 < 500ms with 50-security fixture ───────────────
+
+test('forward income endpoint: p95 < 500ms with 50-security fixture (3 sample runs)', async () => {
+  const { household, user, agent } = await makeHousehold('perf-50');
+  const { seedSecurity, seedHolding, seedDividend } = await import('./portfolioFixtures.js');
+
+  const acct = await seedAccountWithTax(household.id, user.id, 'Perf-RRSP', 'PERF01', 'registered_rrsp');
+
+  const today = new Date().toISOString().slice(0, 10);
+  await models.FxRate.create({
+    fromCurrency: 'USD',
+    toCurrency: 'CAD',
+    ratedDate: today,
+    rate: '1.37',
+    source: 'fixture',
+    fetchedAt: new Date(),
+  });
+
+  const months = [
+    '2025-06-01', '2025-07-01', '2025-08-01', '2025-09-01',
+    '2025-10-01', '2025-11-01', '2025-12-01', '2026-01-01',
+    '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01',
+  ];
+
+  for (let i = 0; i < 50; i++) {
+    const currency = i % 2 === 0 ? 'CAD' : 'USD';
+    const sym = `PERF${String(i).padStart(2, '0')}`;
+    const sec = await seedSecurity(models, household.id, sym, `Perf Security ${i}`, 'ETF', currency);
+
+    await seedHolding(models, {
+      accountId: acct.id,
+      householdId: household.id,
+      securityId: sec.id,
+      statementDate: '2025-01-31',
+      quantity: 100,
+      price: 10,
+      marketValue: 1000,
+      costBasis: 900,
+      currency,
+    });
+
+    for (const date of months) {
+      await seedDividend(models, { securityId: sec.id, exDividendDate: date, amount: 0.10, currency });
+    }
+  }
+
+  // Warm call — triggers lazy projection rebuild for all 50 securities
+  await agent.get('/api/portfolio/forward-income').expect(200);
+
+  const durations: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const t0 = Date.now();
+    const res = await agent.get('/api/portfolio/forward-income');
+    durations.push(Date.now() - t0);
+    assert.equal(res.status, 200);
+  }
+  durations.sort((a, b) => a - b);
+  const p95 = durations[Math.floor(durations.length * 0.95)] ?? durations[durations.length - 1];
+  assert.ok(p95 < 500, `p95 was ${p95}ms (durations: ${durations.join(', ')})`);
+});
+
 // ─── Test 6: Lazy rebuild on stale ───────────────────────────────────────────
 
 test('second call refreshes projections when dividend added between calls', async () => {
