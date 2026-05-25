@@ -16,6 +16,10 @@ export type EnvConfig = {
   nodeEnv: string;
   alphaVantageApiKey: string | null;
   quoteProvider: string;
+  quoteSchedulerEnabled: boolean;
+  quoteDailyBudget: number;
+  quoteTickCron: string;
+  quoteMinAgeHours: number;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -101,6 +105,14 @@ export function loadEnvConfig(
   const trustProxy = parseTrustProxy(e.TRUST_PROXY, nodeEnv);
   const alphaVantageApiKey = e.ALPHA_VANTAGE_API_KEY?.trim() || null;
   const quoteProvider = e.QUOTE_PROVIDER?.trim() || 'alpha_vantage';
+  const quoteSchedulerEnabled = parseQuoteSchedulerEnabled(
+    e.QUOTE_SCHEDULER_ENABLED,
+    nodeEnv,
+    alphaVantageApiKey,
+  );
+  const quoteDailyBudget = parseQuoteDailyBudget(e.QUOTE_DAILY_BUDGET);
+  const quoteTickCron = e.QUOTE_TICK_CRON?.trim() || '*/4 * * * *';
+  const quoteMinAgeHours = parseQuoteMinAgeHours(e.QUOTE_MIN_AGE_HOURS);
 
   return {
     csvUploadDir,
@@ -113,7 +125,48 @@ export function loadEnvConfig(
     nodeEnv,
     alphaVantageApiKey,
     quoteProvider,
+    quoteSchedulerEnabled,
+    quoteDailyBudget,
+    quoteTickCron,
+    quoteMinAgeHours,
   };
+}
+
+const QUOTE_TRUTHY = new Set(['true', '1', 'yes']);
+const QUOTE_FALSY = new Set(['false', '0', 'no']);
+
+export function parseQuoteSchedulerEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+  apiKey: string | null,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return apiKey != null;
+}
+
+export function parseQuoteDailyBudget(raw: string | undefined): number {
+  if (raw == null || raw.trim() === '') return 22;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 25) {
+    throw new Error(
+      `QUOTE_DAILY_BUDGET must be an integer between 1 and 25 (Alpha Vantage free tier ceiling), got: ${raw}`,
+    );
+  }
+  return n;
+}
+
+export function parseQuoteMinAgeHours(raw: string | undefined): number {
+  if (raw == null || raw.trim() === '') return 18;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 24 * 7) {
+    throw new Error(
+      `QUOTE_MIN_AGE_HOURS must be between 0 and 168, got: ${raw}`,
+    );
+  }
+  return n;
 }
 
 const resolved = loadEnvConfig(process.env as Record<string, string | undefined>);
@@ -128,6 +181,10 @@ export const corsOrigin = resolved.corsOrigin;
 export const nodeEnv = resolved.nodeEnv;
 export const alphaVantageApiKey = resolved.alphaVantageApiKey;
 export const quoteProvider = resolved.quoteProvider;
+export const quoteSchedulerEnabled = resolved.quoteSchedulerEnabled;
+export const quoteDailyBudget = resolved.quoteDailyBudget;
+export const quoteTickCron = resolved.quoteTickCron;
+export const quoteMinAgeHours = resolved.quoteMinAgeHours;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];

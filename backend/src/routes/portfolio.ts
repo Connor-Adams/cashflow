@@ -13,6 +13,14 @@ import * as env from '../config/env';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
 import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
+import {
+  AlphaVantageError,
+  fetchGlobalQuote,
+} from '../integrations/alphaVantage/client';
+import {
+  checkBudget,
+  recordCall,
+} from '../integrations/alphaVantage/budget';
 
 const router = Router();
 const PRICE_CACHE_MS = 60 * 60 * 1000;
@@ -1036,30 +1044,6 @@ router.get('/security/:id', async (req, res, next) => {
   }
 });
 
-async function fetchAlphaVantageQuote(symbol: string): Promise<{
-  price: number;
-  pricedAt: Date;
-} | null> {
-  if (!env.alphaVantageApiKey) return null;
-  const url = new URL('https://www.alphavantage.co/query');
-  url.searchParams.set('function', 'GLOBAL_QUOTE');
-  url.searchParams.set('symbol', symbol);
-  url.searchParams.set('apikey', env.alphaVantageApiKey);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Alpha Vantage returned HTTP ${response.status}`);
-  }
-  const json = (await response.json()) as Record<string, unknown>;
-  const quote = json['Global Quote'] as Record<string, string> | undefined;
-  const price = n(quote?.['05. price']);
-  if (price == null) return null;
-  const latestDay = quote?.['07. latest trading day'];
-  return {
-    price,
-    pricedAt: latestDay ? new Date(`${latestDay}T21:00:00.000Z`) : new Date(),
-  };
-}
-
 router.post('/prices/refresh', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
@@ -1080,6 +1064,8 @@ router.post('/prices/refresh', async (req, res, next) => {
     });
     const latest = await latestPricesBySecurity(securities.map((s) => s.id));
     const results = [];
+    let budget = await checkBudget(env.quoteDailyBudget);
+
     for (const security of securities) {
       const cached = latest.get(security.id);
       if (
@@ -1094,10 +1080,29 @@ router.post('/prices/refresh', async (req, res, next) => {
         });
         continue;
       }
+      if (!budget.ok) {
+        results.push({
+          symbol: security.symbol,
+          status: 'budget_exhausted',
+          budget: { used: budget.used, limit: budget.limit },
+        });
+        await recordCall({
+          function: 'GLOBAL_QUOTE',
+          symbol: security.symbol,
+          status: 'budget_exceeded',
+        });
+        continue;
+      }
       try {
-        const quote = await fetchAlphaVantageQuote(security.symbol);
+        const quote = await fetchGlobalQuote(security.symbol);
         if (!quote) {
+          await recordCall({
+            function: 'GLOBAL_QUOTE',
+            symbol: security.symbol,
+            status: 'not_found',
+          });
           results.push({ symbol: security.symbol, status: 'not_found' });
+          budget = await checkBudget(env.quoteDailyBudget);
           continue;
         }
         const row = await SecurityPrice.create({
@@ -1109,6 +1114,11 @@ router.post('/prices/refresh', async (req, res, next) => {
           currency: security.currency,
           fetchedAt: new Date(),
         });
+        await recordCall({
+          function: 'GLOBAL_QUOTE',
+          symbol: security.symbol,
+          status: 'ok',
+        });
         results.push({
           symbol: security.symbol,
           status: 'refreshed',
@@ -1116,12 +1126,23 @@ router.post('/prices/refresh', async (req, res, next) => {
           fetchedAt: row.fetchedAt.toISOString(),
         });
       } catch (e) {
+        const message = e instanceof Error ? e.message : 'Quote refresh failed';
+        const isProviderErr = e instanceof AlphaVantageError;
+        const isRateLimit = isProviderErr && e.providerNote != null;
+        await recordCall({
+          function: 'GLOBAL_QUOTE',
+          symbol: security.symbol,
+          status: isRateLimit ? 'rate_limited' : 'error',
+          httpStatus: isProviderErr ? e.httpStatus : null,
+          errorMessage: message.slice(0, 1024),
+        });
         results.push({
           symbol: security.symbol,
-          status: 'error',
-          error: e instanceof Error ? e.message : 'Quote refresh failed',
+          status: isRateLimit ? 'rate_limited' : 'error',
+          error: message,
         });
       }
+      budget = await checkBudget(env.quoteDailyBudget);
     }
     res.json({ provider: 'alpha_vantage', results });
   } catch (e) {
