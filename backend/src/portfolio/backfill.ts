@@ -31,6 +31,7 @@ import {
 import { AlphaVantageError } from '../integrations/alphaVantage/client';
 import * as env from '../config/env';
 import { logger } from '../observability/logger';
+import { reconcileDividendsForSecurity } from './reconcileDividends';
 
 export type BackfillStatus = {
   status: 'fresh' | 'stale' | 'never' | 'in_progress' | 'rate_limited';
@@ -265,8 +266,8 @@ export async function ensureDividends(securityId: number): Promise<BackfillStatu
   if (rowCount === 0 || isStale) {
     const budget = await checkBudget(activeBudgetCap());
     if (!budget.ok) return makeRateLimited();
-    enqueue(key, () =>
-      runTrackedFetch(
+    enqueue(key, async () => {
+      await runTrackedFetch(
         'DIVIDENDS',
         sec.symbol,
         () => av.fetchDividends(sec.symbol),
@@ -287,8 +288,11 @@ export async function ensureDividends(securityId: number): Promise<BackfillStatu
             });
           }
         },
-      ),
-    );
+      );
+      if (env.dividendReconcileEnabled) {
+        await reconcileDividendsForSecurity(securityId);
+      }
+    });
     return {
       status: rowCount === 0 ? 'never' : 'stale',
       lastFetchedAt,

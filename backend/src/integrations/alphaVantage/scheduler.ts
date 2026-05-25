@@ -22,6 +22,7 @@ import { SecurityDividend } from '../../models/SecurityDividend';
 import { SecurityPrice } from '../../models/SecurityPrice';
 import { logger } from '../../observability/logger';
 import * as env from '../../config/env';
+import { reconcileDividendsForSecurity } from '../../portfolio/reconcileDividends';
 import {
   ALPHA_VANTAGE_PROVIDER,
   checkBudget,
@@ -132,6 +133,11 @@ async function persistDividends(symbol: string, events: DividendEvent[]): Promis
         source: ALPHA_VANTAGE_PROVIDER,
         fetchedAt: now,
       });
+    }
+  }
+  if (env.dividendReconcileEnabled) {
+    for (const security of securities) {
+      await reconcileDividendsForSecurity(security.id);
     }
   }
 }
