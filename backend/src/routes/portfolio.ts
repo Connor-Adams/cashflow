@@ -1843,11 +1843,14 @@ router.get('/forward-income', async (req, res, next) => {
     const householdId = auth.household.id;
 
     // 1. Trigger lazy rebuild if any row stale, or no rows yet but household has holdings
-    const staleCount = await PortfolioForwardProjection.count({
-      where: { householdId, staleAt: { [Op.ne]: null } },
-    });
-    const totalRows = await PortfolioForwardProjection.count({ where: { householdId } });
-    const { latestHoldings, accounts } = await loadVisibleLatestHoldings(req);
+    const [staleCount, totalRows, holdingsResult] = await Promise.all([
+      PortfolioForwardProjection.count({
+        where: { householdId, staleAt: { [Op.ne]: null } },
+      }),
+      PortfolioForwardProjection.count({ where: { householdId } }),
+      loadVisibleLatestHoldings(req),
+    ]);
+    const { latestHoldings, accounts } = holdingsResult;
     if (staleCount > 0 || (totalRows === 0 && latestHoldings.length > 0)) {
       await rebuildForwardProjectionsForHousehold(householdId);
     }
