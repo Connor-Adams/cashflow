@@ -31,6 +31,7 @@ import {
 import { TabPanel, Tabs, type TabItem } from '@/components/ui/tabs'
 import { AllocationDonut } from '@/components/ui/allocation-donut'
 import { AccountTypePanel } from './portfolio-account-type/AccountTypePanel'
+import { ForwardIncomePanel } from './portfolio-forward-income/ForwardIncomePanel'
 import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
@@ -79,7 +80,7 @@ type RefreshResult = {
   }>
 }
 
-type TabKey = 'holdings' | 'by-security' | 'allocation' | 'by-account-type' | 'income' | 'realized'
+type TabKey = 'holdings' | 'by-security' | 'allocation' | 'by-account-type' | 'income' | 'forward-income' | 'realized'
 
 const TAB_ITEMS: TabItem[] = [
   { value: 'holdings', label: 'Holdings' },
@@ -87,6 +88,7 @@ const TAB_ITEMS: TabItem[] = [
   { value: 'allocation', label: 'Allocation' },
   { value: 'by-account-type', label: 'By account type' },
   { value: 'income', label: 'Income' },
+  { value: 'forward-income', label: 'Forward income' },
   { value: 'realized', label: 'Realized P&L' },
 ]
 
@@ -265,6 +267,10 @@ export function PortfolioPage() {
 
       <TabPanel value="income" active={activeTab}>
         <IncomePanel />
+      </TabPanel>
+
+      <TabPanel value="forward-income" active={activeTab}>
+        <ForwardIncomePanel />
       </TabPanel>
 
       <TabPanel value="realized" active={activeTab}>
