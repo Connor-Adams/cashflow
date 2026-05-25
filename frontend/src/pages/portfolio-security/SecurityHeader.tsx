@@ -10,7 +10,13 @@ export type SecurityHeaderProps = {
 export function SecurityHeader({ security, overview }: SecurityHeaderProps) {
   return (
     <div className="flex items-center gap-4">
-      <SecurityLogo symbol={security.symbol} name={security.name} size="xl" />
+      <SecurityLogo
+        symbol={security.symbol}
+        name={security.name}
+        size="xl"
+        assetType={security.assetType}
+        currency={security.currency}
+      />
       <div className="flex flex-col gap-1">
         <h1 className="text-xl font-semibold">
           {security.symbol}

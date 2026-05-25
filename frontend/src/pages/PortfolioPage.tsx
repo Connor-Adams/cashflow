@@ -326,6 +326,8 @@ function HoldingsPanel({
                           size="sm"
                           symbol={holding.security.symbol}
                           name={holding.security.name}
+                          assetType={holding.security.assetType}
+                          currency={holding.security.currency}
                         />
                         <Link
                           to={`/portfolio/security/${holding.security.id}`}
@@ -512,7 +514,13 @@ function BySecurityPanel({
               <TableRow key={row.securityId}>
                 <TableCell>
                   <span className="flex items-center gap-2">
-                    <SecurityLogo size="sm" symbol={row.symbol} name={row.name} />
+                    <SecurityLogo
+                      size="sm"
+                      symbol={row.symbol}
+                      name={row.name}
+                      assetType={row.assetType}
+                      currency={row.currency}
+                    />
                     <Link
                       to={`/portfolio/security/${row.securityId}`}
                       className="text-foreground underline-offset-2 hover:underline"
@@ -968,7 +976,11 @@ function IncomeBySecurityRow({ row }: { row: IncomeBySecurityRowData }) {
   return (
     <TableRow>
       <TableCell>
-        <SymbolLink securityId={row.securityId} symbol={row.symbol} />
+        <SymbolLink
+          securityId={row.securityId}
+          symbol={row.symbol}
+          currency={row.currency}
+        />
       </TableCell>
       <TableCell>{row.currency}</TableCell>
       <TableCell>{formatMoney(row.dividend, row.currency)}</TableCell>
@@ -983,15 +995,25 @@ function SymbolLink({
   securityId,
   symbol,
   name,
+  assetType,
+  currency,
 }: {
   securityId: number | null
   symbol: string | null
   name?: string | null
+  assetType?: string | null
+  currency?: string | null
 }) {
   if (securityId == null || !symbol) return <>{symbol ?? '—'}</>
   return (
     <span className="flex items-center gap-2">
-      <SecurityLogo size="sm" symbol={symbol} name={name} />
+      <SecurityLogo
+        size="sm"
+        symbol={symbol}
+        name={name}
+        assetType={assetType}
+        currency={currency}
+      />
       <Link
         to={`/portfolio/security/${securityId}`}
         className="text-foreground underline-offset-2 hover:underline"
@@ -1169,7 +1191,12 @@ function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }
             {rows.map((row) => (
               <TableRow key={`${row.securityId}|${row.currency}`}>
                 <TableCell>
-                  <SymbolLink securityId={row.securityId} symbol={row.symbol} name={row.name} />
+                  <SymbolLink
+                    securityId={row.securityId}
+                    symbol={row.symbol}
+                    name={row.name}
+                    currency={row.currency}
+                  />
                 </TableCell>
                 <TableCell>{row.name ?? '—'}</TableCell>
                 <TableCell>{row.currency}</TableCell>
@@ -1216,7 +1243,11 @@ function RealizedEventsTable({ events }: { events: RealizedEventWithRunning[] })
                 <TableCell>{ev.tradeDate}</TableCell>
                 <TableCell>{ev.accountName}</TableCell>
                 <TableCell>
-                  <SymbolLink securityId={ev.securityId} symbol={ev.symbol} />
+                  <SymbolLink
+                    securityId={ev.securityId}
+                    symbol={ev.symbol}
+                    currency={ev.currency}
+                  />
                 </TableCell>
                 <TableCell>{ev.qtySold}</TableCell>
                 <TableCell>{formatMoney(ev.proceeds, ev.currency)}</TableCell>
