@@ -138,9 +138,10 @@ export function NetWorthPage() {
               <XAxis dataKey="date" />
               <YAxis />
               <Tooltip
-                formatter={(value: number | string) =>
-                  formatMoney(typeof value === 'number' ? value : Number(value), 'CAD')
-                }
+                formatter={(value) => {
+                  const v = typeof value === 'number' ? value : Number(value)
+                  return Number.isFinite(v) ? formatMoney(v, 'CAD') : ''
+                }}
               />
               <Area type="monotone" dataKey="total" />
             </AreaChart>
