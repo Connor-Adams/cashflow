@@ -834,3 +834,13 @@ export function isCategoryIconName(value: unknown): value is CategoryIconName {
     (CATEGORY_ICON_NAMES as readonly string[]).includes(value)
   )
 }
+
+export type PortfolioSparklinePoint = {
+  date: string  // 'YYYY-MM-DD'
+  close: number
+}
+
+export type PortfolioSparklines = {
+  range: '30d'
+  bySecurityId: Record<number, PortfolioSparklinePoint[]>
+}

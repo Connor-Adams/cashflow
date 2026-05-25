@@ -1253,6 +1253,71 @@ router.get('/security/:id', async (req, res, next) => {
   }
 });
 
+router.get('/sparklines', async (req, res, next) => {
+  try {
+    const rawRange = req.query.range;
+    if (rawRange !== undefined && rawRange !== '30d') {
+      res.status(400).json({ error: 'Unsupported range; only "30d" is currently supported' });
+      return;
+    }
+
+    const accounts = await Account.findAll({
+      where: { ...visibleAccountWhere(req), accountType: 'investment' },
+      attributes: ['id'],
+    });
+    const accountIds = accounts.map((a) => a.id);
+    if (accountIds.length === 0) {
+      res.json({ range: '30d', bySecurityId: {} });
+      return;
+    }
+
+    // Securities the caller actually has activity or holdings for.
+    const [activitySecIds, holdingSecIds] = await Promise.all([
+      InvestmentActivity.findAll({
+        where: { accountId: accountIds, securityId: { [Op.ne]: null as any } },
+        attributes: ['securityId'],
+        group: ['securityId'],
+      }),
+      HoldingSnapshot.findAll({
+        where: { accountId: accountIds, securityId: { [Op.ne]: null as any } },
+        attributes: ['securityId'],
+        group: ['securityId'],
+      }),
+    ]);
+    const securityIds = Array.from(
+      new Set(
+        [
+          ...activitySecIds.map((a) => a.securityId),
+          ...holdingSecIds.map((h) => h.securityId),
+        ].filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+    if (securityIds.length === 0) {
+      res.json({ range: '30d', bySecurityId: {} });
+      return;
+    }
+
+    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const rows = await SecurityDailyPrice.findAll({
+      where: {
+        securityId: securityIds,
+        date: { [Op.gte]: cutoff },
+      },
+      order: [['securityId', 'ASC'], ['date', 'ASC']],
+    });
+
+    const bySecurityId: Record<number, Array<{ date: string; close: number }>> = {};
+    for (const row of rows) {
+      const arr = bySecurityId[row.securityId] ?? (bySecurityId[row.securityId] = []);
+      arr.push({ date: row.date, close: Number(row.adjClose) });
+    }
+
+    res.json({ range: '30d', bySecurityId });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/prices/refresh', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
