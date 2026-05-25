@@ -38,7 +38,7 @@ test('inferCadence — 12 monthly events → monthly, annualPerShare≈1.20, med
   assert.equal(r.cadenceLabel, 'monthly');
   approxEqual(r.annualPerShare, 1.2);
   assert.equal(r.medianSpacingDays, 30);
-  assert.ok(r.cvPct !== null && r.cvPct < 0.001, `expected cvPct≈0, got ${r.cvPct}`);
+  assert.ok(r.cvPct !== null && r.cvPct < 0.1, `expected cvPct≈0, got ${r.cvPct}`);
   assert.equal(r.eventCount12mo, 12);
 });
 
@@ -97,15 +97,15 @@ test('inferCadence — 3 events → cvPct is null', () => {
   assert.equal(r.cvPct, null);
 });
 
-// 4 events with varying values → cvPct > 0.25
-test('inferCadence — 4 events with values [0.1,0.2,0.3,0.4] → cvPct > 0.25', () => {
+// 4 events with varying values → cvPct > 25
+test('inferCadence — 4 events with values [0.1,0.2,0.3,0.4] → cvPct > 25', () => {
   const amounts = [0.1, 0.2, 0.3, 0.4];
   const events: PaymentEvent[] = amounts.map((perShareAmount, i) => ({
     date: daysAgo(90 * (3 - i)),
     perShareAmount,
   }));
   const r = inferCadence(events, asOf);
-  assert.ok(r.cvPct !== null && r.cvPct > 0.25, `expected cvPct > 0.25, got ${r.cvPct}`);
+  assert.ok(r.cvPct !== null && r.cvPct > 25, `expected cvPct > 25, got ${r.cvPct}`);
 });
 
 // Event outside 365-day window is excluded

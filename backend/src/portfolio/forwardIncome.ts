@@ -61,7 +61,8 @@ export function inferCadence(events: PaymentEvent[], asOf: Date): CadenceResult 
     const mean = last4.reduce((s, x) => s + x, 0) / 4;
     if (mean !== 0) {
       const variance = last4.reduce((s, x) => s + (x - mean) ** 2, 0) / 4;
-      cvPct = Math.sqrt(variance) / Math.abs(mean);
+      // Percentage (0-100+) consistent with repo *Pct convention (e.g. todayChangePct)
+      cvPct = (Math.sqrt(variance) / Math.abs(mean)) * 100;
     } else {
       cvPct = 0;
     }
