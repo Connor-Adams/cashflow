@@ -133,6 +133,69 @@ test('buildNetWorthAt: includes portfolio market value as asset', async () => {
   assert.equal(result.total, 1000);
 });
 
+test('buildNetWorthAt: investment accounts skip txn-stream balance', async () => {
+  // Investment account with cash-flow txns (deposits, transfers, buys).
+  // Pre-fix this would double-count: balanceAtDate(txns) + portfolio.
+  // Post-fix only portfolio market value counts.
+  const acc = await seedAcc({ accountType: 'investment', opening: 5000 });
+  await seedTxn(acc.id, '2026-01-01', -1000); // e.g. security buy debit
+  await seedTxn(acc.id, '2026-01-02', 50);    // e.g. dividend
+  const sec = await models.Security.create({ symbol: 'X', name: 'X', currency: 'CAD' } as never);
+  await models.HoldingSnapshot.create({
+    accountId: acc.id, securityId: sec.id,
+    statementDate: '2026-01-01', quantity: '5', currency: 'CAD',
+    sourceRowFingerprint: 'h2', importBatch: 'test',
+  } as never);
+  await models.SecurityPrice.create({
+    securityId: sec.id, provider: 'test', symbol: 'X',
+    pricedAt: new Date('2026-01-01T16:00:00Z'),
+    price: '200', currency: 'CAD',
+    fetchedAt: new Date('2026-01-01T16:00:00Z'),
+  } as never);
+
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  // Portfolio = 5 × 200 = 1000. The opening 5000 and txns are ignored.
+  assert.equal(result.assetsTotal, 1000);
+  // No account-source row for investment accounts.
+  assert.ok(!result.breakdown.assets.some((r) => r.source === 'account'));
+  assert.ok(result.breakdown.assets.some((r) => r.source === 'portfolio'));
+});
+
+test('buildNetWorthAt: asset with negative balance is flagged and excluded from totals', async () => {
+  // Checking account with no opening and a net-negative txn run — should
+  // not poison the assetsTotal. Row surfaces with dataQualityWarning.
+  const acc = await seedAcc({ accountType: 'checking', opening: 0 });
+  await seedTxn(acc.id, '2026-01-01', -500);
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  assert.equal(result.assetsTotal, 0);
+  assert.equal(result.total, 0);
+  const flagged = result.breakdown.assets.find(
+    (r) => r.source === 'account' && r.accountId === acc.id,
+  );
+  assert.ok(flagged, 'expected the account row to still appear in breakdown');
+  assert.equal(flagged.dataQualityWarning, 'asset_balance_negative');
+});
+
+test('buildNetWorthAt: openingBalanceSet=false when implicit zero and txns exist', async () => {
+  const acc = await seedAcc({ accountType: 'checking', opening: 0 });
+  await seedTxn(acc.id, '2026-01-01', 100);
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  const row = result.breakdown.assets.find((r) => r.source === 'account' && r.accountId === acc.id);
+  assert.ok(row);
+  assert.equal(row.openingBalanceSet, false);
+});
+
+test('buildNetWorthAt: openingBalanceSet=true when opening set or no txns', async () => {
+  const accWithOpening = await seedAcc({ accountType: 'checking', opening: 1000 });
+  await seedTxn(accWithOpening.id, '2026-01-01', 50);
+  const accNoTxns = await seedAcc({ accountType: 'checking', opening: 0 });
+  const result = await agg.buildNetWorthAt('2026-02-01', [accWithOpening.id, accNoTxns.id], stubFx);
+  const row1 = result.breakdown.assets.find((r) => r.accountId === accWithOpening.id);
+  const row2 = result.breakdown.assets.find((r) => r.accountId === accNoTxns.id);
+  assert.equal(row1?.openingBalanceSet, true);
+  assert.equal(row2?.openingBalanceSet, true);
+});
+
 test('monthEndDatesInRange: returns last day of each month in range, inclusive', () => {
   assert.deepEqual(
     agg.monthEndDatesInRange('2026-01-15', '2026-03-10'),
