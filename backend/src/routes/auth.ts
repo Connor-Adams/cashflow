@@ -100,9 +100,10 @@ router.post('/register', async (req, res, next) => {
     }
 
     const userCount = await User.count();
-    const invite = userCount === 0 ? null : await resolveInvite(body.inviteToken);
-    if (userCount > 0 && !invite) {
-      res.status(403).json({ error: 'A valid household invite is required' });
+    const rawInviteToken = String(body.inviteToken ?? '').trim();
+    const invite = rawInviteToken ? await resolveInvite(rawInviteToken) : null;
+    if (rawInviteToken && !invite) {
+      res.status(403).json({ error: 'Invite is invalid or expired' });
       return;
     }
 
@@ -122,7 +123,17 @@ router.post('/register', async (req, res, next) => {
         },
         { transaction: t }
       );
-      if (userCount === 0) {
+      if (invite) {
+        household = await Household.findByPk(invite.householdId, { transaction: t }) as Household;
+        await HouseholdMember.create(
+          { householdId: household.id, userId: createdUser.id, role },
+          { transaction: t }
+        );
+        await invite.update(
+          { acceptedAt: new Date(), acceptedByUserId: createdUser.id },
+          { transaction: t }
+        );
+      } else {
         household = await Household.create(
           { name: `${displayName}'s household` },
           { transaction: t }
@@ -132,34 +143,26 @@ router.post('/register', async (req, res, next) => {
           { householdId: household.id, userId: createdUser.id, role },
           { transaction: t }
         );
-        await Promise.all([
-          Account.update(
-            { householdId: household.id, ownerUserId: createdUser.id, visibility: 'private' },
-            { where: { householdId: null }, transaction: t }
-          ),
-          Transaction.update(
-            { householdId: household.id, createdByUserId: createdUser.id, visibility: 'private' },
-            { where: { householdId: null }, transaction: t }
-          ),
-          Rule.update(
-            { householdId: household.id, createdByUserId: createdUser.id },
-            { where: { householdId: null }, transaction: t }
-          ),
-          ImportHistory.update(
-            { householdId: household.id, createdByUserId: createdUser.id },
-            { where: { householdId: null }, transaction: t }
-          ),
-        ]);
-      } else {
-        household = await Household.findByPk(invite!.householdId, { transaction: t }) as Household;
-        await HouseholdMember.create(
-          { householdId: household.id, userId: createdUser.id, role },
-          { transaction: t }
-        );
-        await invite!.update(
-          { acceptedAt: new Date(), acceptedByUserId: createdUser.id },
-          { transaction: t }
-        );
+        if (userCount === 0) {
+          await Promise.all([
+            Account.update(
+              { householdId: household.id, ownerUserId: createdUser.id, visibility: 'private' },
+              { where: { householdId: null }, transaction: t }
+            ),
+            Transaction.update(
+              { householdId: household.id, createdByUserId: createdUser.id, visibility: 'private' },
+              { where: { householdId: null }, transaction: t }
+            ),
+            Rule.update(
+              { householdId: household.id, createdByUserId: createdUser.id },
+              { where: { householdId: null }, transaction: t }
+            ),
+            ImportHistory.update(
+              { householdId: household.id, createdByUserId: createdUser.id },
+              { where: { householdId: null }, transaction: t }
+            ),
+          ]);
+        }
       }
     });
 
