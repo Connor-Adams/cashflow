@@ -4,7 +4,7 @@ import type { Request } from 'express';
 import { ExternalOrder, ExternalOrderItem, Receipt, Transaction, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
-import type { ItemRow, ItemsListResponse } from '../../../shared/api-types';
+import type { ItemRow, ItemsListResponse } from '@cashflow/shared';
 
 const router = Router();
 
