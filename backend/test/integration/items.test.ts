@@ -25,6 +25,7 @@ const dbPath = path.join(backendRoot, 'data', 'test-integration-items.sqlite');
 let app: import('express').Express;
 let superAgent: ReturnType<typeof request.agent>;
 let agentA: ReturnType<typeof request.agent>;
+let agentB: ReturnType<typeof request.agent>;
 
 before(async () => {
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
@@ -53,6 +54,10 @@ before(async () => {
   const a = await seedHousehold('ItemsA', 'A Partner');
   agentA = request.agent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
+
+  const b = await seedHousehold('ItemsB', 'B Partner');
+  agentB = request.agent(app);
+  agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 });
 
 after(() => {
@@ -146,4 +151,13 @@ test('GET /api/items returns enriched rows from joined tables', async () => {
   assert.equal(row.receipt.id, receipt.id);
   assert.equal(row.receipt.date, '2026-05-20');
   assert.equal(row.receipt.sourceTxnId, txn.id);
+});
+
+test('GET /api/items isolates households', async () => {
+  const resA = await agentA.get('/api/items');
+  const resB = await agentB.get('/api/items');
+  assert.equal(resA.status, 200);
+  assert.equal(resB.status, 200);
+  assert.equal(resB.body.items.length, 0, 'household B should not see household A items');
+  assert.ok(resA.body.items.length >= 1, 'household A should still see its items');
 });
