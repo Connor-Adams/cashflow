@@ -20,6 +20,8 @@ import { EmptyTableRow } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
 import { SecurityLogo } from '@/components/ui/security-logo'
 import { Sparkline } from '@/components/ui/sparkline'
+import { MetricStat } from '@/components/ui/metric-stat'
+import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
@@ -212,10 +214,11 @@ export function PortfolioPage() {
 
       <section className="transactionsStats" aria-busy={loading}>
         {summary?.unifiedTotal != null && (
-          <StatCard
+          <MetricStat
             key="unified-cad"
             label="Total (CAD)"
             value={formatMoney(summary.unifiedTotal.marketValue, 'CAD')}
+            deltaPct={summary.unifiedTotal.todayChangePct ?? undefined}
             hint={`Converted from ${summary.unifiedTotal.ratesUsed.length} ${summary.unifiedTotal.ratesUsed.length === 1 ? 'currency' : 'currencies'} via BoC daily rates`}
           />
         )}
@@ -302,6 +305,10 @@ function HoldingsPanel({
                 <TableHead>Market value</TableHead>
                 <TableHead>Cost basis</TableHead>
                 <TableHead>Unrealized</TableHead>
+                <TableHead>Today</TableHead>
+                <TableHead>30d Δ</TableHead>
+                <TableHead>Weight</TableHead>
+                <TableHead>Yield</TableHead>
                 <TableHead>30d</TableHead>
                 <TableHead>As of</TableHead>
               </TableRow>
@@ -357,6 +364,18 @@ function HoldingsPanel({
                       : '—'}
                   </TableCell>
                   <TableCell>
+                    <PctDeltaCell value={holding.todayChangePct} />
+                  </TableCell>
+                  <TableCell>
+                    <PctDeltaCell value={holding.thirtyDayReturnPct} />
+                  </TableCell>
+                  <TableCell>
+                    {holding.weightPct != null ? `${holding.weightPct.toFixed(1)}%` : '—'}
+                  </TableCell>
+                  <TableCell>
+                    {holding.yieldOnCostPct != null ? `${holding.yieldOnCostPct.toFixed(2)}%` : '—'}
+                  </TableCell>
+                  <TableCell>
                     {holding.security ? (
                       <Sparkline
                         data={(sparklines.get(holding.security.id) ?? []).map((p) => ({
@@ -371,7 +390,7 @@ function HoldingsPanel({
               ))}
               {summary && summary.holdings.length === 0 && (
                 <EmptyTableRow
-                  colSpan={10}
+                  colSpan={14}
                   title="No holdings imported yet."
                   description="Import an investment statement to populate this table."
                 />
@@ -479,6 +498,10 @@ function BySecurityPanel({
               <TableHead>Total cost basis</TableHead>
               <TableHead>Total market value</TableHead>
               <TableHead>Unrealized</TableHead>
+              <TableHead>Today</TableHead>
+              <TableHead>30d Δ</TableHead>
+              <TableHead>Weight</TableHead>
+              <TableHead>Total Return</TableHead>
               <TableHead>Accounts</TableHead>
               <TableHead>30d</TableHead>
               <TableHead>Latest quote</TableHead>
@@ -512,6 +535,18 @@ function BySecurityPanel({
                     ? formatMoney(row.unrealizedGainLoss, row.currency)
                     : '—'}
                 </TableCell>
+                <TableCell>
+                  <PctDeltaCell value={row.todayChangePct} />
+                </TableCell>
+                <TableCell>
+                  <PctDeltaCell value={row.thirtyDayReturnPct} />
+                </TableCell>
+                <TableCell>
+                  {row.weightPct != null ? `${row.weightPct.toFixed(1)}%` : '—'}
+                </TableCell>
+                <TableCell>
+                  <PctDeltaCell value={row.totalReturnPct} />
+                </TableCell>
                 <TableCell>{row.accountBreakdown.length}</TableCell>
                 <TableCell>
                   <Sparkline
@@ -530,7 +565,7 @@ function BySecurityPanel({
             ))}
             {rows.length === 0 && (
               <EmptyTableRow
-                colSpan={10}
+                colSpan={14}
                 title="No positions yet."
                 description="Aggregated view appears after holdings are imported."
               />
