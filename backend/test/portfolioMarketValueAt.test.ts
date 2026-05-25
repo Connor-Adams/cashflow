@@ -136,3 +136,58 @@ test('portfolioMarketValueAt: empty accountIds returns empty result', async () =
   assert.deepEqual(result.rows, []);
   assert.deepEqual(result.gaps, []);
 });
+
+test('portfolioMarketValueAt: falls back to HoldingSnapshot.marketValue when SecurityPrice missing', async () => {
+  // Crypto / illiquid securities often have HoldingSnapshot.marketValue
+  // imported from the bank CSV but no SecurityPrice row in our cache.
+  // The function should use the imported value rather than dropping the row.
+  const acc = await seedAccount('Crypto');
+  const sec = await seedSecurity('BTC');
+  await models.HoldingSnapshot.create({
+    accountId: acc.id,
+    securityId: sec.id,
+    statementDate: '2026-02-01',
+    quantity: '0.5',
+    marketValue: '32000', // bank-imported total
+    currency: 'CAD',
+    sourceRowFingerprint: `${acc.id}-${sec.id}-fallback`,
+    importBatch: 'test',
+  } as never);
+  // Intentionally NO SecurityPrice row.
+
+  const result = await mod.portfolioMarketValueAt('2026-02-15', [acc.id]);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].marketValue, 32000);
+  assert.equal(result.rows[0].currency, 'CAD');
+  assert.deepEqual(result.gaps, []);
+});
+
+test('portfolioMarketValueAt: prefers quote price over imported marketValue when both exist', async () => {
+  const acc = await seedAccount('RRSP');
+  const sec = await seedSecurity('VFV');
+  await models.HoldingSnapshot.create({
+    accountId: acc.id,
+    securityId: sec.id,
+    statementDate: '2026-02-01',
+    quantity: '10',
+    marketValue: '950', // stale import-time value
+    currency: 'CAD',
+    sourceRowFingerprint: `${acc.id}-${sec.id}-prefer`,
+    importBatch: 'test',
+  } as never);
+  await seedPrice(sec.id, '2026-02-10T16:00:00Z', 100); // fresher quote
+
+  const result = await mod.portfolioMarketValueAt('2026-02-15', [acc.id]);
+  assert.equal(result.rows.length, 1);
+  // Should use quote: 10 × 100 = 1000, NOT the stale 950
+  assert.equal(result.rows[0].marketValue, 1000);
+});
+
+test('portfolioMarketValueAt: gaps only when neither quote nor imported marketValue exists', async () => {
+  const acc = await seedAccount('RRSP');
+  const sec = await seedSecurity('OBSCURE');
+  await seedHolding(acc.id, sec.id, '2026-02-01', 5); // no marketValue, no price
+  const result = await mod.portfolioMarketValueAt('2026-02-15', [acc.id]);
+  assert.deepEqual(result.rows, []);
+  assert.equal(result.gaps.length, 1);
+});
