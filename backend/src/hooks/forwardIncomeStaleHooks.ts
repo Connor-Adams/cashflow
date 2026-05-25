@@ -15,7 +15,11 @@ async function householdIdForAccount(accountId: number): Promise<number | null> 
 
 const ACTIVITY_TYPES_OF_INTEREST = new Set(['interest', 'buy', 'sell', 'dividend', 'transfer']);
 
+let registered = false;
+
 export function registerForwardIncomeStaleHooks(_sequelize: Sequelize): void {
+  if (registered) return;
+  registered = true;
   InvestmentActivity.addHook('afterCreate', 'fwd_income_stale_inv_create', async (instance) => {
     if (!ACTIVITY_TYPES_OF_INTEREST.has(instance.activityType)) return;
     if (instance.securityId == null) return;
