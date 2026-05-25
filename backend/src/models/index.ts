@@ -41,6 +41,10 @@ import { TaxReturn, initTaxReturn } from './TaxReturn';
 import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
+import {
+  PortfolioForwardProjection,
+  initPortfolioForwardProjection,
+} from './PortfolioForwardProjection';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -84,6 +88,7 @@ initTaxReturn(sequelize);
 initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
+initPortfolioForwardProjection(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -284,4 +289,5 @@ export {
   ShareholderLoan,
   InstalmentPayment,
   ProviderJobLog,
+  PortfolioForwardProjection,
 };
