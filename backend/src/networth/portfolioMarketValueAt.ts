@@ -19,15 +19,28 @@ export type PortfolioMarketValueResult = {
   gaps: PortfolioGap[];
 };
 
+function n(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /**
  * For each (accountId, securityId) pair within the given account scope, compute
- * market value at `asOf` using:
- *   - latest HoldingSnapshot with statementDate <= asOf
- *   - latest SecurityPrice with pricedAt <= asOf (end-of-day)
+ * market value at `asOf`. Value resolution order, matching the existing
+ * `portfolio.ts` logic so net worth agrees with the Portfolio page:
  *
- * If a held security has no qualifying price, a `price_unavailable` gap is
- * emitted and the row is excluded. Pairs with no qualifying holding are treated
- * as zero positions (no row, no gap).
+ *   1. quantity × latest SecurityPrice ≤ asOf, if a price row exists
+ *   2. HoldingSnapshot.marketValue (the import-time value from the bank CSV)
+ *      when no price row is available — common for crypto and illiquid
+ *      securities that don't have quotes in our SecurityPrice cache
+ *   3. otherwise emit a `price_unavailable` gap and exclude
+ *
+ * Currency falls back from `latestPrice.currency` to `holding.currency` so
+ * holdings without quotes still show a sensible currency.
+ *
+ * Pairs with no qualifying holding (statementDate ≤ asOf) are treated as zero
+ * positions (no row, no gap).
  *
  * SecurityPrice.pricedAt is a DATETIME, so we compare against
  * `${asOf}T23:59:59.999Z` to include same-day prices. HoldingSnapshot.statementDate
@@ -77,20 +90,33 @@ export async function portfolioMarketValueAt(
 
   for (const h of latest.values()) {
     const price = priceBySecurity.get(h.securityId);
-    if (!price) {
+    const quantity = n(h.quantity) ?? 0;
+    const quotePrice = n(price?.price);
+    const importedValue = n(h.marketValue);
+    const currency = price?.currency || h.currency;
+
+    let marketValue: number | null = null;
+    if (quotePrice != null) {
+      marketValue = quantity * quotePrice;
+    } else if (importedValue != null) {
+      marketValue = importedValue;
+    }
+
+    if (marketValue == null) {
       gaps.push({
         date: asOf,
-        currency: h.currency,
+        currency,
         reason: 'price_unavailable',
         securityId: h.securityId,
       });
       continue;
     }
+
     rows.push({
       accountId: h.accountId,
       securityId: h.securityId,
-      marketValue: Number(h.quantity) * Number(price.price),
-      currency: price.currency,
+      marketValue,
+      currency,
     });
   }
 
