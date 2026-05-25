@@ -861,3 +861,54 @@ export type PortfolioSparklines = {
   range: '30d'
   bySecurityId: Record<number, PortfolioSparklinePoint[]>
 }
+
+export type PortfolioByAccountTypeRow = {
+  securityId: number
+  symbol: string
+  name: string | null
+  assetType: string | null
+  accountId: number
+  accountName: string
+  quantity: number
+  currency: string
+  marketValue: number
+  marketValueCad: number | null
+  costBasis: number | null
+  unrealizedGainCad: number | null
+  weightInBucketPct: number | null
+  flags: Array<'us_withholding' | 'fixed_income_in_non_reg' | 'us_payer_in_tfsa'>
+}
+
+export type PortfolioByAccountTypeBucket = {
+  taxStatus: 'registered_tfsa' | 'registered_rrsp' | 'registered_fhsa' | 'registered_rrif' | 'non_registered' | 'n_a'
+  label: string
+  accounts: Array<{ id: number; name: string; currency: string }>
+  holdingsCount: number
+  totalCadMV: number | null
+  allocationByAssetType: Array<{ assetType: string | null; marketValueCad: number; percentage: number }>
+  rows: PortfolioByAccountTypeRow[]
+}
+
+export type PortfolioByAccountTypeWarning = {
+  kind: 'fixed_income_in_non_reg' | 'us_payer_in_tfsa'
+  securityId: number
+  symbol: string
+  accountName: string
+  text: string
+}
+
+export type PortfolioByAccountTypeHarvestCandidate = {
+  securityId: number
+  symbol: string
+  accountId: number
+  accountName: string
+  unrealizedLossCad: number
+  superficialLossWarning: boolean
+  superficialLossDetail: string | null
+}
+
+export type PortfolioByAccountType = {
+  buckets: PortfolioByAccountTypeBucket[]
+  warnings: PortfolioByAccountTypeWarning[]
+  harvestCandidates: PortfolioByAccountTypeHarvestCandidate[]
+}

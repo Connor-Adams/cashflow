@@ -31,6 +31,13 @@ import {
   checkBudget,
   recordCall,
 } from '../integrations/alphaVantage/budget';
+import {
+  TAX_STATUS_LABELS,
+  TAX_STATUS_ORDER,
+  rowFlags,
+  harvestCandidate,
+  type RowFlag,
+} from '../portfolio/tax-buckets';
 
 const router = Router();
 const PRICE_CACHE_MS = 60 * 60 * 1000;
@@ -1464,6 +1471,258 @@ router.get('/sparklines', async (req, res, next) => {
     }
 
     res.json({ range: '30d', bySecurityId });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/by-account-type', async (req, res, next) => {
+  try {
+    const accounts = await Account.findAll({
+      where: { ...visibleAccountWhere(req), accountType: 'investment' },
+      order: [['name', 'ASC']],
+    });
+    if (accounts.length === 0) {
+      res.json({ buckets: [], warnings: [], harvestCandidates: [] });
+      return;
+    }
+    const accountIds = accounts.map((a) => a.id);
+    const accountById = new Map(accounts.map((a) => [a.id, a]));
+
+    const { latestHoldings } = await loadVisibleLatestHoldings(req);
+    const securityIdsRaw = [...new Set(latestHoldings.map((h) => h.securityId))];
+
+    const securities = await Security.findAll({ where: { id: securityIdsRaw } });
+    const securityById = new Map(securities.map((s) => [s.id, s]));
+
+    const prices = await latestPricesBySecurity(securityIdsRaw);
+    const currencies = [...new Set(latestHoldings.map((h) => {
+      const lp = prices.get(h.securityId);
+      return (lp?.currency ?? h.currency) as string;
+    }))];
+    const metricsCtx = await loadMetricsContext({
+      securityIds: securityIdsRaw,
+      currencies,
+      accountIds,
+    });
+
+    const dividendRows = await SecurityDividend.findAll({
+      where: { securityId: securityIdsRaw },
+      attributes: ['securityId'],
+      group: ['securityId'],
+    });
+    const hasDividendsSet = new Set(dividendRows.map((d) => d.securityId));
+
+    type BucketRow = {
+      securityId: number
+      symbol: string
+      name: string | null
+      assetType: string | null
+      accountId: number
+      accountName: string
+      quantity: number
+      currency: string
+      marketValue: number
+      marketValueCad: number | null
+      costBasis: number | null
+      unrealizedGainCad: number | null
+      weightInBucketPct: number | null
+      flags: RowFlag[]
+    };
+
+    type Bucket = {
+      taxStatus: typeof TAX_STATUS_ORDER[number]
+      label: string
+      accounts: Array<{ id: number; name: string; currency: string }>
+      holdingsCount: number
+      totalCadMV: number | null
+      allocationByAssetType: Array<{ assetType: string | null; marketValueCad: number; percentage: number }>
+      rows: BucketRow[]
+    };
+
+    const bucketMap = new Map<string, Bucket>();
+    for (const acct of accounts) {
+      const taxStatus = (acct.taxStatus ?? 'n_a') as typeof TAX_STATUS_ORDER[number];
+      let bucket = bucketMap.get(taxStatus);
+      if (!bucket) {
+        bucket = {
+          taxStatus,
+          label: TAX_STATUS_LABELS[taxStatus],
+          accounts: [],
+          holdingsCount: 0,
+          totalCadMV: 0,
+          allocationByAssetType: [],
+          rows: [],
+        };
+        bucketMap.set(taxStatus, bucket);
+      }
+      bucket.accounts.push({
+        id: acct.id,
+        name: acct.name,
+        currency: acct.defaultCurrency ?? 'CAD',
+      });
+    }
+
+    const warnings: Array<{ kind: RowFlag; securityId: number; symbol: string; accountName: string; text: string }> = [];
+
+    for (const holding of latestHoldings) {
+      const security = securityById.get(holding.securityId);
+      const account = accountById.get(holding.accountId);
+      if (!security || !account) continue;
+      const acctTaxStatus = (account.taxStatus ?? 'n_a') as typeof TAX_STATUS_ORDER[number];
+      const bucket = bucketMap.get(acctTaxStatus);
+      if (!bucket) continue;
+
+      const latestPrice = prices.get(holding.securityId);
+      const { marketValue, currency } = valueHolding(holding, latestPrice);
+      const qty = n(holding.quantity) ?? 0;
+      const cost = n(holding.costBasis);
+      const fxRate = currency === 'CAD' ? 1 : metricsCtx.fxRates.get(currency);
+      const marketValueCad = fxRate != null ? marketValue * fxRate : null;
+      const costBasisCad = fxRate != null && cost != null ? cost * fxRate : null;
+      const unrealizedGainCad =
+        marketValueCad != null && costBasisCad != null ? marketValueCad - costBasisCad : null;
+
+      const flags = rowFlags({
+        security: {
+          symbol: security.symbol,
+          currency: security.currency,
+          assetType: security.assetType,
+          metadata: (security.metadata ?? null) as Record<string, unknown> | null,
+        },
+        account: { taxStatus: acctTaxStatus },
+        hasDividends: hasDividendsSet.has(security.id),
+      });
+
+      bucket.rows.push({
+        securityId: security.id,
+        symbol: security.symbol,
+        name: security.name,
+        assetType: security.assetType,
+        accountId: holding.accountId,
+        accountName: account.name,
+        quantity: qty,
+        currency,
+        marketValue,
+        marketValueCad,
+        costBasis: cost,
+        unrealizedGainCad,
+        weightInBucketPct: null,
+        flags,
+      });
+      bucket.holdingsCount += 1;
+
+      if (bucket.totalCadMV != null && marketValueCad != null) {
+        bucket.totalCadMV += marketValueCad;
+      } else {
+        bucket.totalCadMV = null;
+      }
+
+      for (const flag of flags) {
+        if (flag === 'fixed_income_in_non_reg' || flag === 'us_payer_in_tfsa') {
+          warnings.push({
+            kind: flag,
+            securityId: security.id,
+            symbol: security.symbol,
+            accountName: account.name,
+            text:
+              flag === 'fixed_income_in_non_reg'
+                ? `Fixed income (${security.symbol}) held in non-registered account ${account.name} — consider moving to a registered account.`
+                : `US dividend payer (${security.symbol}) held in TFSA ${account.name} — 15% US withholding tax cannot be recovered.`,
+          });
+        }
+      }
+    }
+
+    for (const bucket of bucketMap.values()) {
+      if (bucket.totalCadMV != null && bucket.totalCadMV > 0) {
+        for (const row of bucket.rows) {
+          if (row.marketValueCad != null) {
+            row.weightInBucketPct = (row.marketValueCad / bucket.totalCadMV) * 100;
+          }
+        }
+      }
+      const byAssetType = new Map<string, number>();
+      let allocatableTotal = 0;
+      for (const row of bucket.rows) {
+        if (row.marketValueCad == null) continue;
+        const key = row.assetType ?? 'Other';
+        byAssetType.set(key, (byAssetType.get(key) ?? 0) + row.marketValueCad);
+        allocatableTotal += row.marketValueCad;
+      }
+      bucket.allocationByAssetType = [...byAssetType.entries()].map(([assetType, marketValueCad]) => ({
+        assetType: assetType === 'Other' ? null : assetType,
+        marketValueCad,
+        percentage: allocatableTotal > 0 ? (marketValueCad / allocatableTotal) * 100 : 0,
+      }));
+    }
+
+    const buckets = TAX_STATUS_ORDER
+      .map((status) => bucketMap.get(status))
+      .filter((b): b is Bucket => b != null);
+
+    const nrBucket = bucketMap.get('non_registered');
+    const candidatesRaw = (nrBucket?.rows ?? [])
+      .map((row) => {
+        const c = harvestCandidate({
+          securityId: row.securityId,
+          symbol: row.symbol,
+          accountId: row.accountId,
+          accountName: row.accountName,
+          costBasisCad: row.unrealizedGainCad != null && row.marketValueCad != null
+            ? row.marketValueCad - row.unrealizedGainCad
+            : null,
+          marketValueCad: row.marketValueCad,
+        });
+        if (!c) return null;
+        return { row, unrealizedLossCad: c.unrealizedLossCad };
+      })
+      .filter((x): x is { row: BucketRow; unrealizedLossCad: number } => x != null);
+
+    const windowStart = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const windowEnd = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    const candidateSecIds = candidatesRaw.map((c) => c.row.securityId);
+    const recentBuys = candidateSecIds.length > 0
+      ? await InvestmentActivity.findAll({
+          where: {
+            accountId: accountIds,
+            securityId: candidateSecIds,
+            activityType: ['buy', 'reinvestment'],
+            tradeDate: { [Op.between]: [windowStart, windowEnd] },
+          },
+          attributes: ['securityId', 'accountId', 'tradeDate'],
+        })
+      : [];
+    const buysBySec = new Map<number, Array<{ accountId: number; tradeDate: string }>>();
+    for (const b of recentBuys) {
+      const sid = b.securityId;
+      if (sid == null) continue;
+      const arr = buysBySec.get(sid) ?? [];
+      arr.push({ accountId: b.accountId, tradeDate: b.tradeDate });
+      buysBySec.set(sid, arr);
+    }
+
+    const harvestCandidates = candidatesRaw.map(({ row, unrealizedLossCad }) => {
+      const buys = buysBySec.get(row.securityId) ?? [];
+      const superficialLossWarning = buys.length > 0;
+      const detail = superficialLossWarning
+        ? `Buy/reinvestment in ${buys.map((b) => {
+            const acctName = accountById.get(b.accountId)?.name ?? `account ${b.accountId}`;
+            return `${acctName} on ${b.tradeDate}`;
+          }).join('; ')} within ±30 days of today.`
+        : null;
+      return {
+        securityId: row.securityId,
+        symbol: row.symbol,
+        accountId: row.accountId,
+        accountName: row.accountName,
+        unrealizedLossCad,
+        superficialLossWarning,
+        superficialLossDetail: detail,
+      };
+    });
+
+    res.json({ buckets, warnings, harvestCandidates });
   } catch (e) {
     next(e);
   }
