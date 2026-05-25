@@ -144,7 +144,7 @@ test('projectNextEvents — monthly cadence (spacing=30), horizon=90, returns 2-
     horizonDays: 90,
     asOf: asOf2,
   });
-  assert.ok(result.length >= 2 && result.length <= 3, `expected 2-3 entries, got ${result.length}`);
+  assert.equal(result.length, 3);
   for (const entry of result) {
     assert.equal(entry.estimatedPerShare, 0.25);
   }
