@@ -23,6 +23,8 @@ export type EnvConfig = {
   quoteMinAgeHours: number;
   dividendReconcileEnabled: boolean;
   dividendDedupDays: number;
+  forwardIncomeEnabled: boolean;
+  forwardIncomeCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -122,6 +124,8 @@ export function loadEnvConfig(
     nodeEnv,
   );
   const dividendDedupDays = parseDividendDedupDays(e.DIVIDEND_DEDUP_DAYS);
+  const forwardIncomeEnabled = parseForwardIncomeEnabled(e.FORWARD_INCOME_ENABLED, nodeEnv);
+  const forwardIncomeCron = e.FORWARD_INCOME_CRON?.trim() || '0 2 * * *';
 
   return {
     csvUploadDir,
@@ -141,6 +145,8 @@ export function loadEnvConfig(
     quoteMinAgeHours,
     dividendReconcileEnabled,
     dividendDedupDays,
+    forwardIncomeEnabled,
+    forwardIncomeCron,
   };
 }
 
@@ -194,6 +200,14 @@ export function parseDividendReconcileEnabled(
   return true;
 }
 
+export function parseForwardIncomeEnabled(raw: string | undefined, nodeEnv: string): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -224,6 +238,8 @@ export const quoteTickCron = resolved.quoteTickCron;
 export const quoteMinAgeHours = resolved.quoteMinAgeHours;
 export const dividendReconcileEnabled = resolved.dividendReconcileEnabled;
 export const dividendDedupDays = resolved.dividendDedupDays;
+export const forwardIncomeEnabled = resolved.forwardIncomeEnabled;
+export const forwardIncomeCron = resolved.forwardIncomeCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];

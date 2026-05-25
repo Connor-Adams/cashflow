@@ -5,6 +5,7 @@ import { seedDemoData } from './demo/seedDemoData';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 import { startQuoteScheduler } from './integrations/alphaVantage/scheduler';
+import { startForwardIncomeScheduler } from './portfolio/forwardIncomeScheduler';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -24,6 +25,7 @@ async function start() {
   });
 
   startQuoteScheduler();
+  startForwardIncomeScheduler();
 }
 
 start().catch((err) => {
