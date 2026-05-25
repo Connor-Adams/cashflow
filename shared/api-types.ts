@@ -701,6 +701,44 @@ export type ClientLogPayload = {
   fields?: Record<string, unknown>
 }
 
+export type ItemRow = {
+  id: number
+  title: string
+  qty: number
+  unitPrice: number | null
+  totalPrice: number | null
+  taxShare: number
+  categoryEffective: string | null
+  categoryOverride: string | null
+  businessUseEffective: boolean
+  businessUseOverride: boolean | null
+  order: {
+    id: number
+    vendor: string
+  }
+  receipt: {
+    id: number
+    date: string | null
+    sourceTxnId: number | null
+  }
+}
+
+export type ItemsListResponse = {
+  items: ItemRow[]
+  nextCursor: string | null
+}
+
+export type ItemAllocation = {
+  itemId: number
+  itemTotal: number
+  allocatedTotal: number | null
+  categoryBucket: string | null
+  txnId: number | null
+  txnAmount: number | null
+  percentOfTxn: number | null
+  linkedTxnIds: number[]
+}
+
 // Category icon names. MUST exactly match lucide-react exports — every
 // name listed here is imported into the frontend bundle.
 export const CATEGORY_ICON_NAMES = [
