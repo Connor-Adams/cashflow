@@ -149,6 +149,9 @@ export function computeForwardProjection(
 
   const totalEvents = divCadence.eventCount12mo + intCadence.eventCount12mo;
   // cvPct is now 0-100+ scale (repo *Pct convention); threshold 25 = "25% CV"
+  // Zero-event securities are surfaced via caveats.holdingsWithoutHistory in the
+  // endpoint layer, not flagged here as unreliable. The 1-3 event case IS unreliable
+  // (insufficient history to validate cadence).
   const unreliable =
     (cvPct !== null && cvPct > 25) ||
     (totalEvents > 0 && totalEvents < 4);
