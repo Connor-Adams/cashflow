@@ -21,6 +21,8 @@ export type EnvConfig = {
   quoteDailyBudget: number;
   quoteTickCron: string;
   quoteMinAgeHours: number;
+  dividendReconcileEnabled: boolean;
+  dividendDedupDays: number;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -115,6 +117,11 @@ export function loadEnvConfig(
   const quoteDailyBudget = parseQuoteDailyBudget(e.QUOTE_DAILY_BUDGET);
   const quoteTickCron = e.QUOTE_TICK_CRON?.trim() || '*/4 * * * *';
   const quoteMinAgeHours = parseQuoteMinAgeHours(e.QUOTE_MIN_AGE_HOURS);
+  const dividendReconcileEnabled = parseDividendReconcileEnabled(
+    e.DIVIDEND_RECONCILE_ENABLED,
+    nodeEnv,
+  );
+  const dividendDedupDays = parseDividendDedupDays(e.DIVIDEND_DEDUP_DAYS);
 
   return {
     csvUploadDir,
@@ -132,6 +139,8 @@ export function loadEnvConfig(
     quoteDailyBudget,
     quoteTickCron,
     quoteMinAgeHours,
+    dividendReconcileEnabled,
+    dividendDedupDays,
   };
 }
 
@@ -172,6 +181,30 @@ export function parseQuoteMinAgeHours(raw: string | undefined): number {
   return n;
 }
 
+export function parseDividendReconcileEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  // Default off in test so existing AV scheduler/backfill tests don't
+  // silently pull HoldingSnapshot rows into InvestmentActivity.
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
+export function parseDividendDedupDays(raw: string | undefined): number {
+  if (raw == null || raw.trim() === '') return 5;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 60) {
+    throw new Error(
+      `DIVIDEND_DEDUP_DAYS must be an integer between 0 and 60, got: ${raw}`,
+    );
+  }
+  return n;
+}
+
 const resolved = loadEnvConfig(process.env as Record<string, string | undefined>);
 
 export const csvUploadDir = resolved.csvUploadDir;
@@ -189,6 +222,8 @@ export const quoteSchedulerEnabled = resolved.quoteSchedulerEnabled;
 export const quoteDailyBudget = resolved.quoteDailyBudget;
 export const quoteTickCron = resolved.quoteTickCron;
 export const quoteMinAgeHours = resolved.quoteMinAgeHours;
+export const dividendReconcileEnabled = resolved.dividendReconcileEnabled;
+export const dividendDedupDays = resolved.dividendDedupDays;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
