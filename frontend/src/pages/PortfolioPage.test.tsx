@@ -9,7 +9,13 @@ import { _resetAppConfigForTest } from '../lib/appConfig'
 const baseSummary = {
   accounts: [{ id: 1, name: 'TFSA', shortCode: 'TFSA01', currency: 'CAD' }],
   totalsByCurrency: [{ currency: 'CAD', marketValue: 4400 }],
-  unifiedTotal: null,
+  unifiedTotal: {
+    baseCurrency: 'CAD',
+    marketValue: 4400,
+    ratesUsed: [],
+    todayChangePct: 0.45,
+    todayChangeCad: 20,
+  },
   holdings: [
     {
       id: 10,
@@ -23,6 +29,10 @@ const baseSummary = {
       unrealizedGainLoss: 300,
       statementDate: '2026-05-01',
       latestPrice: null,
+      todayChangePct: 1.5,
+      thirtyDayReturnPct: 4.2,
+      weightPct: 68.0,
+      yieldOnCostPct: 2.1,
     },
     {
       id: 11,
@@ -36,6 +46,10 @@ const baseSummary = {
       unrealizedGainLoss: 100,
       statementDate: '2026-05-01',
       latestPrice: null,
+      todayChangePct: null,
+      thirtyDayReturnPct: null,
+      weightPct: null,
+      yieldOnCostPct: null,
     },
   ],
   recentActivities: [],
@@ -61,8 +75,19 @@ const baseBySec = {
       accountBreakdown: [{ accountId: 1, accountName: 'TFSA', quantity: 100 }],
       currency: 'CAD',
       latestPrice: null,
+      todayChangePct: 1.5,
+      thirtyDayReturnPct: 4.2,
+      weightPct: 100,
+      totalReturnPct: 12.5,
     },
   ],
+  unifiedTotal: {
+    baseCurrency: 'CAD',
+    marketValue: 3000,
+    ratesUsed: [],
+    todayChangePct: 1.5,
+    todayChangeCad: 45,
+  },
 }
 
 const baseSparks = {
@@ -176,5 +201,57 @@ describe('PortfolioPage table polish', () => {
       const allHeads = getAllByText('30d')
       expect(allHeads.length).toBeGreaterThanOrEqual(1)
     })
+  })
+
+  it('renders Today / 30d Δ / Weight / Yield cells with values for XEQT', async () => {
+    mockApi({
+      '/api/portfolio/sparklines': baseSparks,
+      '/api/portfolio/allocation': baseAllocation,
+      '/api/portfolio/by-security': baseBySec,
+      '/api/portfolio': baseSummary,
+    })
+    const { findByText, container } = render(
+      <MemoryRouter>
+        <PortfolioPage />
+      </MemoryRouter>,
+    )
+    await findByText('XEQT')
+    expect(container.textContent).toContain('1.50%')
+    expect(container.textContent).toContain('4.20%')
+    expect(container.textContent).toContain('68.0%')
+    expect(container.textContent).toContain('2.10%')
+  })
+
+  it('renders em-dash in metric cells when fields are null', async () => {
+    mockApi({
+      '/api/portfolio/sparklines': baseSparks,
+      '/api/portfolio/allocation': baseAllocation,
+      '/api/portfolio/by-security': baseBySec,
+      '/api/portfolio': baseSummary,
+    })
+    const { findByText, container } = render(
+      <MemoryRouter>
+        <PortfolioPage />
+      </MemoryRouter>,
+    )
+    await findByText('BNS')
+    const emDashCount = (container.textContent?.match(/—/g) ?? []).length
+    expect(emDashCount).toBeGreaterThanOrEqual(4)
+  })
+
+  it('Total (CAD) stat card shows delta when present', async () => {
+    mockApi({
+      '/api/portfolio/sparklines': baseSparks,
+      '/api/portfolio/allocation': baseAllocation,
+      '/api/portfolio/by-security': baseBySec,
+      '/api/portfolio': baseSummary,
+    })
+    const { findByText, container } = render(
+      <MemoryRouter>
+        <PortfolioPage />
+      </MemoryRouter>,
+    )
+    await findByText('Total (CAD)')
+    expect(container.textContent).toContain('0.45%')
   })
 })
