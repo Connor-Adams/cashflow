@@ -102,3 +102,101 @@ export function projectNextEvents(args: ProjectNextEventsArgs): Array<{
   }
   return out;
 }
+
+export interface ForwardProjectionInput {
+  securityId: number;
+  qtyToday: number;
+  currency: string;
+  dividendEvents: PaymentEvent[];
+  interestEvents: PaymentEvent[];
+  asOf: Date;
+}
+
+export interface ForwardProjectionOutput {
+  qtyBasis: number;
+  annualDividendPerShare: number;
+  annualInterestPerShare: number;
+  projectedAnnualIncomeNative: number;
+  currency: string;
+  cadenceLabel: CadenceLabel;
+  medianSpacingDays: number | null;
+  cvPct: number | null;             // 0-100+ scale (repo *Pct convention)
+  unreliable: boolean;
+  nextExDivDates: Array<{ date: string; estimatedPerShare: number; kind: 'dividend' | 'interest' }>;
+}
+
+function toIsoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+export function computeForwardProjection(
+  input: ForwardProjectionInput,
+): ForwardProjectionOutput {
+  const { qtyToday, currency, dividendEvents, interestEvents, asOf } = input;
+  const divCadence = inferCadence(dividendEvents, asOf);
+  const intCadence = inferCadence(interestEvents, asOf);
+
+  const annualDividendPerShare = divCadence.annualPerShare;
+  const annualInterestPerShare = intCadence.annualPerShare;
+  const projectedAnnualIncomeNative =
+    qtyToday * (annualDividendPerShare + annualInterestPerShare);
+
+  // Dominant series = whichever has more events; ties favor dividend.
+  const dominant = intCadence.eventCount12mo > divCadence.eventCount12mo ? intCadence : divCadence;
+  const cadenceLabel = dominant.cadenceLabel;
+  const medianSpacingDays = dominant.medianSpacingDays;
+  const cvPct = dominant.cvPct;
+
+  const totalEvents = divCadence.eventCount12mo + intCadence.eventCount12mo;
+  // cvPct is now 0-100+ scale (repo *Pct convention); threshold 25 = "25% CV"
+  const unreliable =
+    (cvPct !== null && cvPct > 25) ||
+    (totalEvents > 0 && totalEvents < 4);
+
+  const nextExDivDates: ForwardProjectionOutput['nextExDivDates'] = [];
+
+  if (divCadence.eventCount12mo > 0 && divCadence.medianSpacingDays && divCadence.medianSpacingDays > 0) {
+    const sortedDiv = [...dividendEvents].sort((a, b) => a.date.getTime() - b.date.getTime());
+    const last = sortedDiv[sortedDiv.length - 1];
+    const events = projectNextEvents({
+      lastEventDate: last.date,
+      medianSpacingDays: divCadence.medianSpacingDays,
+      lastPerShareAmount: last.perShareAmount,
+      horizonDays: 90,
+      asOf,
+    });
+    for (const e of events) {
+      nextExDivDates.push({ date: toIsoDate(e.date), estimatedPerShare: e.estimatedPerShare, kind: 'dividend' });
+    }
+  }
+
+  if (intCadence.eventCount12mo > 0 && intCadence.medianSpacingDays && intCadence.medianSpacingDays > 0) {
+    const sortedInt = [...interestEvents].sort((a, b) => a.date.getTime() - b.date.getTime());
+    const last = sortedInt[sortedInt.length - 1];
+    const events = projectNextEvents({
+      lastEventDate: last.date,
+      medianSpacingDays: intCadence.medianSpacingDays,
+      lastPerShareAmount: last.perShareAmount,
+      horizonDays: 90,
+      asOf,
+    });
+    for (const e of events) {
+      nextExDivDates.push({ date: toIsoDate(e.date), estimatedPerShare: e.estimatedPerShare, kind: 'interest' });
+    }
+  }
+
+  nextExDivDates.sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    qtyBasis: qtyToday,
+    annualDividendPerShare,
+    annualInterestPerShare,
+    projectedAnnualIncomeNative,
+    currency,
+    cadenceLabel,
+    medianSpacingDays,
+    cvPct,
+    unreliable,
+    nextExDivDates,
+  };
+}

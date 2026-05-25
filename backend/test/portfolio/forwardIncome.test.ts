@@ -3,7 +3,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inferCadence, projectNextEvents, type PaymentEvent } from '../../src/portfolio/forwardIncome';
+import { inferCadence, projectNextEvents, computeForwardProjection, type PaymentEvent } from '../../src/portfolio/forwardIncome';
 
 const asOf = new Date('2025-01-01T00:00:00.000Z');
 
@@ -176,4 +176,150 @@ test('projectNextEvents — lastEventDate well in the past with monthly cadence 
   for (const entry of result) {
     assert.ok(entry.date > asOf2, `expected date after asOf, got ${entry.date.toISOString()}`);
   }
+});
+
+// ── computeForwardProjection ──────────────────────────────────────────────────
+
+const fpAsOf = new Date('2025-01-01T00:00:00.000Z');
+
+function fpDaysAgo(n: number): Date {
+  return new Date(fpAsOf.getTime() - n * 24 * 60 * 60 * 1000);
+}
+
+// 1. qty=0 → projectedAnnualIncomeNative=0, qtyBasis=0
+test('computeForwardProjection — qty=0 → projectedAnnualIncomeNative=0, qtyBasis=0', () => {
+  const dividends: PaymentEvent[] = Array.from({ length: 12 }, (_, i) => ({
+    date: fpDaysAgo(30 * (11 - i)),
+    perShareAmount: 0.1,
+  }));
+  const r = computeForwardProjection({
+    securityId: 1,
+    qtyToday: 0,
+    currency: 'USD',
+    dividendEvents: dividends,
+    interestEvents: [],
+    asOf: fpAsOf,
+  });
+  assert.equal(r.projectedAnnualIncomeNative, 0);
+  assert.equal(r.qtyBasis, 0);
+});
+
+// 2. Dividend-only (qty=100, 12 monthly 0.10)
+test('computeForwardProjection — dividend-only: annualDividendPerShare≈1.20, annualInterestPerShare=0, projectedAnnualIncome≈120, cadenceLabel=monthly, nextExDivDates all kind=dividend, unreliable=false', () => {
+  const dividends: PaymentEvent[] = Array.from({ length: 12 }, (_, i) => ({
+    date: fpDaysAgo(30 * (11 - i)),
+    perShareAmount: 0.1,
+  }));
+  const r = computeForwardProjection({
+    securityId: 2,
+    qtyToday: 100,
+    currency: 'USD',
+    dividendEvents: dividends,
+    interestEvents: [],
+    asOf: fpAsOf,
+  });
+  assert.ok(Math.abs(r.annualDividendPerShare - 1.2) < 0.01, `annualDividendPerShare expected ~1.2, got ${r.annualDividendPerShare}`);
+  assert.equal(r.annualInterestPerShare, 0);
+  assert.ok(Math.abs(r.projectedAnnualIncomeNative - 120) < 0.1, `projectedAnnualIncomeNative expected ~120, got ${r.projectedAnnualIncomeNative}`);
+  assert.equal(r.cadenceLabel, 'monthly');
+  assert.ok(r.nextExDivDates.length > 0, 'expected nextExDivDates to be non-empty');
+  for (const entry of r.nextExDivDates) {
+    assert.equal(entry.kind, 'dividend');
+  }
+  assert.equal(r.unreliable, false);
+});
+
+// 3. Interest-only / bond (qty=1000, 2 semiannual 2.5)
+test('computeForwardProjection — interest-only: annualDividendPerShare=0, annualInterestPerShare≈5.0, projectedAnnualIncome≈5000, cadenceLabel=semiannual, all nextExDivDates kind=interest', () => {
+  const interest: PaymentEvent[] = [
+    { date: fpDaysAgo(180), perShareAmount: 2.5 },
+    { date: fpDaysAgo(0), perShareAmount: 2.5 },
+  ];
+  const r = computeForwardProjection({
+    securityId: 3,
+    qtyToday: 1000,
+    currency: 'USD',
+    dividendEvents: [],
+    interestEvents: interest,
+    asOf: fpAsOf,
+  });
+  assert.equal(r.annualDividendPerShare, 0);
+  assert.ok(Math.abs(r.annualInterestPerShare - 5.0) < 0.01, `annualInterestPerShare expected ~5.0, got ${r.annualInterestPerShare}`);
+  assert.ok(Math.abs(r.projectedAnnualIncomeNative - 5000) < 1, `projectedAnnualIncomeNative expected ~5000, got ${r.projectedAnnualIncomeNative}`);
+  assert.equal(r.cadenceLabel, 'semiannual');
+  for (const entry of r.nextExDivDates) {
+    assert.equal(entry.kind, 'interest');
+  }
+});
+
+// 4. Combined (qty=50, 12 monthly dividends 0.10 + 1 interest 0.05)
+test('computeForwardProjection — combined: annualDividendPerShare≈1.20, annualInterestPerShare≈0.05, projectedAnnualIncome≈62.5, currency passed through', () => {
+  const dividends: PaymentEvent[] = Array.from({ length: 12 }, (_, i) => ({
+    date: fpDaysAgo(30 * (11 - i)),
+    perShareAmount: 0.1,
+  }));
+  const interest: PaymentEvent[] = [
+    { date: fpDaysAgo(50), perShareAmount: 0.05 },
+  ];
+  const r = computeForwardProjection({
+    securityId: 4,
+    qtyToday: 50,
+    currency: 'USD',
+    dividendEvents: dividends,
+    interestEvents: interest,
+    asOf: fpAsOf,
+  });
+  assert.ok(Math.abs(r.annualDividendPerShare - 1.2) < 0.01, `annualDividendPerShare expected ~1.2, got ${r.annualDividendPerShare}`);
+  assert.ok(Math.abs(r.annualInterestPerShare - 0.05) < 0.001, `annualInterestPerShare expected ~0.05, got ${r.annualInterestPerShare}`);
+  assert.ok(Math.abs(r.projectedAnnualIncomeNative - 62.5) < 0.5, `projectedAnnualIncomeNative expected ~62.5, got ${r.projectedAnnualIncomeNative}`);
+  assert.equal(r.currency, 'USD');
+});
+
+// 5. Unreliable via cvPct: 4 dividend events [0.10, 0.20, 0.30, 0.40] → unreliable=true (cvPct > 25)
+test('computeForwardProjection — unreliable via cvPct: 4 dividends [0.1,0.2,0.3,0.4] → unreliable=true', () => {
+  const amounts = [0.1, 0.2, 0.3, 0.4];
+  const dividends: PaymentEvent[] = amounts.map((perShareAmount, i) => ({
+    date: fpDaysAgo(90 * (3 - i)),
+    perShareAmount,
+  }));
+  const r = computeForwardProjection({
+    securityId: 5,
+    qtyToday: 10,
+    currency: 'USD',
+    dividendEvents: dividends,
+    interestEvents: [],
+    asOf: fpAsOf,
+  });
+  assert.equal(r.unreliable, true);
+});
+
+// 6. Unreliable via insufficient history: 2 events → unreliable=true
+test('computeForwardProjection — unreliable via insufficient history: 2 events → unreliable=true', () => {
+  const dividends: PaymentEvent[] = [
+    { date: fpDaysAgo(180), perShareAmount: 0.5 },
+    { date: fpDaysAgo(0), perShareAmount: 0.5 },
+  ];
+  const r = computeForwardProjection({
+    securityId: 6,
+    qtyToday: 10,
+    currency: 'USD',
+    dividendEvents: dividends,
+    interestEvents: [],
+    asOf: fpAsOf,
+  });
+  assert.equal(r.unreliable, true);
+});
+
+// 7. Zero events → unreliable=false, cadenceLabel='none'
+test('computeForwardProjection — zero events → unreliable=false, cadenceLabel=none', () => {
+  const r = computeForwardProjection({
+    securityId: 7,
+    qtyToday: 100,
+    currency: 'USD',
+    dividendEvents: [],
+    interestEvents: [],
+    asOf: fpAsOf,
+  });
+  assert.equal(r.unreliable, false);
+  assert.equal(r.cadenceLabel, 'none');
 });
