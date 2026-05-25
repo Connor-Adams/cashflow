@@ -1274,12 +1274,12 @@ router.get('/sparklines', async (req, res, next) => {
     // Securities the caller actually has activity or holdings for.
     const [activitySecIds, holdingSecIds] = await Promise.all([
       InvestmentActivity.findAll({
-        where: { accountId: accountIds, securityId: { [Op.ne]: null } },
+        where: { accountId: accountIds, securityId: { [Op.ne]: null as any } },
         attributes: ['securityId'],
         group: ['securityId'],
       }),
       HoldingSnapshot.findAll({
-        where: { accountId: accountIds, securityId: { [Op.ne]: null } },
+        where: { accountId: accountIds, securityId: { [Op.ne]: null as any } },
         attributes: ['securityId'],
         group: ['securityId'],
       }),
