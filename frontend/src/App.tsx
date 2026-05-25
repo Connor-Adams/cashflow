@@ -6,12 +6,14 @@ import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
+import { ItemsPage } from './pages/ItemsPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
@@ -46,10 +48,12 @@ function AppRoutes() {
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="review" element={<ReviewInboxPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="items" element={<ItemsPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="portfolio/security/:id" element={<PortfolioSecurityPage />} />
+          <Route path="net-worth" element={<NetWorthPage />} />
           <Route path="amazon" element={<AmazonPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />

@@ -812,6 +812,10 @@ const WS_ACCOUNT_TEMPLATES: Record<WsProductHint, WsAccountTemplate> = {
     name: 'Wealthsimple Save for Business',
     accountType: 'checking',
   },
+  corporate_chequing: {
+    name: 'Wealthsimple Corporate Chequing',
+    accountType: 'checking',
+  },
   tfsa: { name: 'Wealthsimple TFSA', accountType: 'investment' },
   fhsa: { name: 'Wealthsimple FHSA', accountType: 'investment' },
   margin: { name: 'Wealthsimple Investing', accountType: 'investment' },
@@ -852,9 +856,10 @@ function emptyBundleResult(file: string, error: string): BundleFileResult {
  *   3. Pick a generic CSV profile: `generic_simple` for credit-card-style
  *      Purchase/Payment files, `generic_passthrough` for the standard
  *      pre-signed monthly statements.
- *   4. For newly-created corporate accounts (`corporate_investing`,
- *      `save_for_business`), flip `overrideBusiness=true` so every
- *      Transaction gets `autoBusiness=true`.
+ *   4. For corp-typed files (`corporate_investing`, `save_for_business`,
+ *      `corporate_chequing`), flip `overrideBusiness=true` so every new
+ *      Transaction gets `autoBusiness=true`, regardless of whether this
+ *      file created the account or matched an existing one.
  *   5. Parse + commit using the standard preview/commit pipeline.
  */
 export async function importWsBundleFile(opts: {
@@ -887,13 +892,15 @@ export async function importWsBundleFile(opts: {
 
   const profileId = parsed.isCreditCard ? 'generic_simple' : 'generic_passthrough';
 
-  // Force business flag for newly-discovered corporate accounts. Existing
-  // accounts retain whatever the user previously chose — don't surprise the
-  // user by retroactively flipping flags on prior Wealthsimple data.
+  // Force business flag on every row imported into a corp-typed WS account.
+  // Driven by productHint alone (not `accountCreated`) — multi-file bundles
+  // and re-imports must still stamp business on subsequent files for the same
+  // WSID. The flag applies only to NEW rows committed in this run; existing
+  // rows are not retroactively touched by this code path.
   const overrideBusiness =
-    accountCreated &&
-    (parsed.productHint === 'corporate_investing' ||
-      parsed.productHint === 'save_for_business');
+    parsed.productHint === 'corporate_investing' ||
+    parsed.productHint === 'save_for_business' ||
+    parsed.productHint === 'corporate_chequing';
 
   const preview = await parseStatementFile({
     buffer: opts.buffer,

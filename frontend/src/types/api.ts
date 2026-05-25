@@ -259,3 +259,45 @@ export type PortfolioSecurityOverview = {
   metadataFetchedAt: string | null;
   backfill: BackfillStatus;
 };
+
+export type NetWorthBreakdownRow = {
+  source: 'account' | 'portfolio';
+  accountId: number | null;
+  label: string;
+  currency: string;
+  native: number | null;
+  cadValue: number | null;
+  openingBalanceSet: boolean;
+  dataQualityWarning?: 'asset_balance_negative';
+};
+
+export type NetWorthGap =
+  | { date: string; currency: string; reason: 'fx_rate_unavailable' }
+  | { date: string; currency: string; reason: 'price_unavailable'; securityId: number };
+
+export type NetWorthCurrent = {
+  asOf: string;
+  baseCurrency: 'CAD';
+  total: number;
+  assetsTotal: number;
+  liabilitiesTotal: number;
+  breakdown: { assets: NetWorthBreakdownRow[]; liabilities: NetWorthBreakdownRow[] };
+  fxRatesUsed: { from: string; to: 'CAD'; rate: number; ratedDate: string }[];
+  partial: boolean;
+  gaps: NetWorthGap[];
+};
+
+export type NetWorthSeriesPoint = {
+  date: string;
+  total: number;
+  assetsTotal: number;
+  liabilitiesTotal: number;
+};
+
+export type NetWorthSeries = {
+  baseCurrency: 'CAD';
+  granularity: 'monthly' | 'daily';
+  points: NetWorthSeriesPoint[];
+  partial: boolean;
+  gaps: NetWorthGap[];
+};

@@ -23,6 +23,7 @@
 export type WsProductHint =
   | 'chequing'
   | 'save_for_business'
+  | 'corporate_chequing'
   | 'tfsa'
   | 'fhsa'
   | 'margin'
@@ -52,6 +53,11 @@ function normalizeDisplayName(raw: string): string {
 
 function productHintFromDisplayName(raw: string): WsProductHint {
   const norm = normalizeDisplayName(raw);
+  // Corporate chequing must match BEFORE the generic chequing check, otherwise
+  // "Corporate chequing" normalizes to "corporatechequing" and falls into the
+  // personal chequing branch — silently colliding with the personal account
+  // template and skipping the corp business-stamp override.
+  if (norm.includes('corporate') && norm.includes('chequing')) return 'corporate_chequing';
   if (norm.includes('chequing')) return 'chequing';
   if (norm.includes('saveforbusiness')) return 'save_for_business';
   if (norm === 'tfsa') return 'tfsa';

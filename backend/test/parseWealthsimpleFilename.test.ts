@@ -61,6 +61,25 @@ test('parses Save for business monthly statement', () => {
   assert.equal(r.wsid, 'WKSAVE7777CAD');
 });
 
+test('parses Corporate chequing (space) monthly statement', () => {
+  const r = parseWealthsimpleFilename(
+    'Corporate chequing-2025-09-01-monthly-statement-transactions-WKCORPCHQ09CAD.csv',
+  );
+  assert.ok(r);
+  assert.equal(r.productHint, 'corporate_chequing');
+  assert.equal(r.wsid, 'WKCORPCHQ09CAD');
+  assert.equal(r.periodEnd, '2025-09-01');
+});
+
+test('parses Corporate-chequing (hyphenated) monthly statement', () => {
+  const r = parseWealthsimpleFilename(
+    'Corporate-chequing-2025-10-01-monthly-statement-transactions-WKCORPCHQ10CAD.csv',
+  );
+  assert.ok(r);
+  assert.equal(r.productHint, 'corporate_chequing');
+  assert.equal(r.wsid, 'WKCORPCHQ10CAD');
+});
+
 test('parses Non-registered-margin monthly statement', () => {
   const r = parseWealthsimpleFilename(
     'Non-registered-margin-2025-09-01-monthly-statement-transactions-HQMARGIN09CAD.csv',
