@@ -243,12 +243,16 @@ router.get('/monthly', async (req, res, next) => {
       Transaction.findAll({
         where,
         attributes: [
+          'id',
           'accountId',
           'date',
           'currency',
           'merchantRaw',
           'merchantClean',
           'finalCategory',
+          'finalBusiness',
+          'finalSplitType',
+          'businessAmount',
           'amount',
           'txnType',
         ],
@@ -267,13 +271,24 @@ router.get('/monthly', async (req, res, next) => {
       ]),
     );
 
-    const points = aggregateMonthly(rows as unknown as MonthlyTxnRow[], accountTypeById);
+    const txnIds = (rows as unknown as Array<{ id: number }>).map((r) => r.id);
+    const itemContext = await loadItemAllocationContext(txnIds);
+    const { points, categoryPoints } = aggregateMonthly(
+      rows as unknown as MonthlyTxnRow[],
+      accountTypeById,
+      itemContext,
+    );
     res.json({
       points: points.sort((a, b) =>
         a.month === b.month
           ? a.currency.localeCompare(b.currency)
           : a.month.localeCompare(b.month)
       ),
+      categoryPoints: categoryPoints.sort((a, b) => {
+        if (a.month !== b.month) return a.month.localeCompare(b.month);
+        if (a.currency !== b.currency) return a.currency.localeCompare(b.currency);
+        return (a.category ?? '').localeCompare(b.category ?? '');
+      }),
     });
   } catch (e) {
     next(e);
