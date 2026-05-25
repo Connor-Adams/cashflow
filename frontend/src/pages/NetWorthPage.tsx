@@ -1,4 +1,13 @@
 import { useMemo, useState } from 'react'
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { useNetWorthCurrent, useNetWorthSeries } from '@/hooks/useNetWorth'
 import {
   Table,
@@ -102,11 +111,25 @@ export function NetWorthPage() {
         </div>
       </div>
 
-      <div className="rounded border p-4 min-h-[240px]">
+      <div className="rounded border p-4">
         <div className="text-sm text-muted-foreground mb-2">
           Trend ({seriesParams.granularity})
         </div>
-        <div>{series.data ? `${series.data.points.length} points` : 'Loading…'}</div>
+        <div className="h-[280px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={series.data?.points ?? []}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip
+                formatter={(value: number | string) =>
+                  formatMoney(typeof value === 'number' ? value : Number(value), 'CAD')
+                }
+              />
+              <Area type="monotone" dataKey="total" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       <div className="rounded border">

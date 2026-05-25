@@ -22,6 +22,7 @@ import { BentoTile } from '@/components/dashboard/BentoTile'
 import { HeroTile } from '@/components/dashboard/HeroTile'
 import { KpiStack } from '@/components/dashboard/KpiStack'
 import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
+import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
@@ -928,6 +929,7 @@ export function DashboardPage() {
       ) : null}
 
       <div className="dashboardBento" aria-busy={loading}>
+        <NetWorthTile />
         {budgetProgressSorted.length > 0 && (
           <BentoTile
             span={12}
