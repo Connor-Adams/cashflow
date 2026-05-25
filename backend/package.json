@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "test": "tsx --test test/*.test.ts test/portfolio/*.test.ts test/fx/*.test.ts test/chat/*.test.ts test/tax/*.test.ts test/config/*.test.ts test/integrations/alphaVantage/*.test.ts",
+    "test": "tsx --test test/*.test.ts test/portfolio/*.test.ts test/fx/*.test.ts test/chat/*.test.ts test/tax/*.test.ts test/config/*.test.ts test/integrations/alphaVantage/*.test.ts test/migrations/*.test.ts",
     "test:integration": "tsx --test test/integration/*.test.ts",
     "ai:eval": "tsx scripts/ai-eval.ts"
   },
