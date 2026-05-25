@@ -114,7 +114,7 @@ export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
               <XAxis dataKey="date" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
               <Tooltip
-                formatter={(value: number | string) => {
+                formatter={(value) => {
                   const v = typeof value === 'number' ? value : Number(value)
                   return Number.isFinite(v) ? formatMoney(v, currency) : ''
                 }}

@@ -1,4 +1,3 @@
-import * as React from 'react'
 import type { CSSProperties } from 'react'
 
 export type LetterAvatarSize = 'sm' | 'md' | 'lg' | 'xl'
