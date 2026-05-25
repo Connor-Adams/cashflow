@@ -934,7 +934,10 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="dashboardBento" aria-busy={loading}>
+      <div
+        className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 grid-flow-row-dense gap-4 auto-rows-[minmax(160px,auto)]"
+        aria-busy={loading}
+      >
         <NetWorthTile />
         {budgetProgressSorted.length > 0 && (
           <BentoTile
