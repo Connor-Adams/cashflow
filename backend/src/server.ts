@@ -4,6 +4,7 @@ import * as env from './config/env';
 import { seedDemoData } from './demo/seedDemoData';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
+import { startQuoteScheduler } from './integrations/alphaVantage/scheduler';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -21,6 +22,8 @@ async function start() {
       receiptStorage: isS3ReceiptStorageEnabled() ? 's3' : 'local',
     });
   });
+
+  startQuoteScheduler();
 }
 
 start().catch((err) => {
