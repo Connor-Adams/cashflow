@@ -356,3 +356,117 @@ test('GET /api/items?format=csv returns 413 above row cap', async () => {
   assert.equal(res.status, 413);
   assert.match(res.body.error, /too large/i);
 });
+
+async function createHouseholdItem(
+  agent: ReturnType<typeof request.agent>,
+  opts: { vendor: string; dedupeKey: string; itemTitles: string[]; total?: string; date?: string },
+): Promise<{ items: { id: number }[] }> {
+  const { Account, ExternalOrder, ExternalOrderItem, Receipt, Transaction } = await import(
+    '../../src/models/index.js'
+  );
+  const householdId = (await agent.get('/api/auth/me')).body.user.household.id;
+  const account = await Account.create({
+    householdId,
+    owner: 'me',
+    visibility: 'shared',
+    name: `Acct ${opts.dedupeKey}`,
+    accountType: 'checking',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId,
+    vendor: opts.vendor,
+    dedupeKey: opts.dedupeKey,
+    total: opts.total ?? '30',
+    currency: 'USD',
+    source: 'image',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    householdId,
+    importBatch: `b-${opts.dedupeKey}`,
+    date: opts.date ?? '2026-05-10',
+    merchantRaw: 'Z',
+    merchantClean: 'Z',
+    amount: '-30',
+    currency: 'USD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    visibility: 'shared',
+    ownershipType: 'shared',
+    finalCategory: null,
+    finalBusiness: false,
+    finalSplitType: 'none',
+    businessAmount: '0',
+  } as never);
+  await Receipt.create({
+    transactionId: txn.id,
+    storedFilename: `${opts.dedupeKey}.jpg`,
+    originalName: `${opts.dedupeKey}.jpg`,
+    mimeType: 'image/jpeg',
+    sizeBytes: 1,
+    externalOrderId: order.id,
+  } as never);
+  const items: { id: number }[] = [];
+  for (const title of opts.itemTitles) {
+    const it = await ExternalOrderItem.create({
+      externalOrderId: order.id,
+      title,
+      quantity: 1,
+      totalPrice: '10',
+    } as never);
+    items.push({ id: it.id });
+  }
+  return { items };
+}
+
+test('POST /api/external-order-items/bulk-patch updates many items', async () => {
+  const { ExternalOrderItem } = await import('../../src/models/index.js');
+  const { items } = await createHouseholdItem(agentA, {
+    vendor: 'bulk',
+    dedupeKey: 'bulk-1',
+    itemTitles: ['a', 'b', 'c'],
+  });
+
+  const res = await agentA
+    .post('/api/external-order-items/bulk-patch')
+    .send({ itemIds: items.map((i) => i.id), categoryOverride: 'Office' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.updated, 3);
+
+  for (const i of items) {
+    const fresh = await ExternalOrderItem.findByPk(i.id);
+    assert.equal(fresh?.categoryOverride, 'Office');
+  }
+});
+
+test('POST /api/external-order-items/bulk-patch rejects empty itemIds', async () => {
+  const res = await agentA
+    .post('/api/external-order-items/bulk-patch')
+    .send({ itemIds: [], categoryOverride: 'X' });
+  assert.equal(res.status, 400);
+});
+
+test('POST /api/external-order-items/bulk-patch rejects >200 itemIds', async () => {
+  const ids = Array.from({ length: 201 }, (_, i) => i + 1);
+  const res = await agentA
+    .post('/api/external-order-items/bulk-patch')
+    .send({ itemIds: ids, categoryOverride: 'X' });
+  assert.equal(res.status, 400);
+});
+
+test('POST /api/external-order-items/bulk-patch blocks cross-household', async () => {
+  const { ExternalOrderItem } = await import('../../src/models/index.js');
+  const { items } = await createHouseholdItem(agentA, {
+    vendor: 'priv',
+    dedupeKey: 'priv-1',
+    itemTitles: ['secret'],
+  });
+
+  const res = await agentB
+    .post('/api/external-order-items/bulk-patch')
+    .send({ itemIds: items.map((i) => i.id), categoryOverride: 'Z' });
+  assert.equal(res.status, 403);
+
+  const fresh = await ExternalOrderItem.findByPk(items[0].id);
+  assert.equal(fresh?.categoryOverride, null);
+});

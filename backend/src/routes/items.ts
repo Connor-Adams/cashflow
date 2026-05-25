@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Op, type WhereOptions } from 'sequelize';
 import type { Request } from 'express';
-import { ExternalOrder, ExternalOrderItem, Receipt, Transaction } from '../models';
+import { ExternalOrder, ExternalOrderItem, Receipt, Transaction, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
 import type { ItemRow, ItemsListResponse } from '../../../shared/api-types';
@@ -300,6 +300,79 @@ router.get('/items', async (req, res, next) => {
     const nextCursor = hasMore && last ? encodeCursor({ itemId: last.id }) : null;
     const body: ItemsListResponse = { items: rows, nextCursor };
     res.json(body);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/external-order-items/bulk-patch', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = req.body as {
+      itemIds?: unknown;
+      categoryOverride?: unknown;
+      businessUseOverride?: unknown;
+    };
+    if (!Array.isArray(body.itemIds) || body.itemIds.length === 0) {
+      res.status(400).json({ error: 'itemIds must be a non-empty array' });
+      return;
+    }
+    if (body.itemIds.length > 200) {
+      res.status(400).json({ error: 'cannot update more than 200 items at once' });
+      return;
+    }
+    const ids = body.itemIds.map(Number).filter((n) => Number.isFinite(n));
+    if (ids.length !== body.itemIds.length) {
+      res.status(400).json({ error: 'itemIds must all be numbers' });
+      return;
+    }
+
+    const patch: { categoryOverride?: string | null; businessUseOverride?: string | null } = {};
+    if (Object.prototype.hasOwnProperty.call(body, 'categoryOverride')) {
+      const v = body.categoryOverride;
+      if (v !== null && typeof v !== 'string') {
+        res.status(400).json({ error: 'categoryOverride must be string or null' });
+        return;
+      }
+      patch.categoryOverride = v as string | null;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'businessUseOverride')) {
+      const v = body.businessUseOverride;
+      if (v !== null && typeof v !== 'boolean') {
+        res.status(400).json({ error: 'businessUseOverride must be boolean or null' });
+        return;
+      }
+      patch.businessUseOverride = v === null ? null : v ? '100' : '0';
+    }
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: 'no fields to patch' });
+      return;
+    }
+
+    const result = await sequelize.transaction(async (t) => {
+      const found = await ExternalOrderItem.findAll({
+        where: { id: ids },
+        include: [
+          { model: ExternalOrder, as: 'order', required: true, where: { householdId: household.id } },
+        ],
+        transaction: t,
+      });
+      if (found.length !== ids.length) {
+        const err = new Error('one or more items not found or not in scope') as Error & {
+          status?: number;
+        };
+        err.status = 403;
+        throw err;
+      }
+      let updated = 0;
+      for (const it of found) {
+        await it.update(patch, { transaction: t });
+        updated += 1;
+      }
+      return updated;
+    });
+
+    res.json({ updated: result });
   } catch (e) {
     next(e);
   }
