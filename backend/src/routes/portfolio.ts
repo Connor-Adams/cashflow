@@ -7,8 +7,9 @@ import {
   Security,
   SecurityPrice,
   SecurityDailyPrice,
+  SecurityDividend,
 } from '../models';
-import { ensureDailyPrices } from '../portfolio/backfill';
+import { ensureDailyPrices, ensureDividends } from '../portfolio/backfill';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import * as env from '../config/env';
@@ -936,6 +937,36 @@ router.get('/security/:id/prices', async (req, res, next) => {
         quantity: t.quantity != null ? Number(t.quantity) : 0,
         price: t.price != null ? Number(t.price) : null,
         accountName: (t as unknown as { account?: { name: string } }).account?.name ?? '',
+      })),
+      backfill,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/security/:id/dividends', async (req, res, next) => {
+  try {
+    const scoped = await loadSecurityScoped(req, req.params.id);
+    if ('error' in scoped) {
+      res.status(scoped.error as number).json({ error: 'Security not visible' });
+      return;
+    }
+    const { security } = scoped;
+    const events = await SecurityDividend.findAll({
+      where: { securityId: security.id },
+      order: [['exDividendDate', 'ASC']],
+    });
+    const backfill = await ensureDividends(security.id);
+    res.json({
+      securityId: security.id,
+      currency: security.currency,
+      events: events.map((e) => ({
+        exDividendDate: e.exDividendDate,
+        paymentDate: e.paymentDate,
+        recordDate: e.recordDate,
+        amount: Number(e.amount),
+        currency: e.currency,
       })),
       backfill,
     });
