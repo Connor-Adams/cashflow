@@ -514,6 +514,13 @@ export type Budget = {
    * window contributes $0 to the budget.
    */
   excludeRefundedPurchases: boolean
+  /**
+   * Percentages (1–500) at which the daily `budget_breach_check` cron fires
+   * a proactive in-app notification (issue #268). Defaults to
+   * `[80, 100, 120]`; an empty array disables alerts entirely for this
+   * budget. Validated server-side: integers, 1≤n≤500, dedup+sort ascending.
+   */
+  alertThresholds: number[]
   createdAt: string
   updatedAt: string
 }
@@ -573,6 +580,11 @@ export type BudgetInput = {
   scope?: BudgetScope
   rolloverEnabled?: boolean
   excludeRefundedPurchases?: boolean
+  /**
+   * See `Budget.alertThresholds` for the contract. Omitting the field keeps
+   * the existing value on update, or applies server defaults on create.
+   */
+  alertThresholds?: number[]
 }
 
 /** One row in the GET /api/budgets/:id/exclusions response. */

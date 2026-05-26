@@ -28,6 +28,7 @@ import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMont
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
+import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { useInsightsSeen } from '@/hooks/useInsightsSeen'
@@ -1092,6 +1093,12 @@ export function DashboardPage() {
             </div>
           </BentoTile>
         )}
+
+        {/* Status-pill card (issue #268). Sits alongside the pacing tile —
+            pacing reflects time-elapsed; status reflects the same 80/100
+            thresholds the daily breach-check cron uses, so what the user
+            sees here matches what they'd be alerted about. */}
+        <BudgetStatusCard currency={currency || 'CAD'} />
 
         <BentoTile
           span={8}
