@@ -1,0 +1,22 @@
+# infra/docker-compose.yml — local dev observability stack
+services:
+  loki:
+    build: ./loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+
+  otel-collector:
+    build: ./otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    environment:
+      - LOKI_HOST=loki
+      - PUBLIC_FRONTEND_ORIGIN=localhost:5173
+    depends_on:
+      - loki
+
+volumes:
+  loki-data:

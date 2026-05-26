@@ -1,10 +1,12 @@
 // backend/src/observability/logger.ts
-import pino, { type LoggerOptions } from 'pino';
+import pino, { type LoggerOptions, type TransportTargetOptions } from 'pino';
 import { context as otelContext, trace } from '@opentelemetry/api';
 import { als } from './requestContext';
 
 const isProd = process.env.NODE_ENV === 'production';
 const isDev = process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
+const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+const otlpEnabled = !!otlpEndpoint && process.env.OTEL_SDK_DISABLED !== 'true';
 
 const baseOptions: LoggerOptions = {
   level: process.env.LOG_LEVEL ?? 'info',
@@ -13,8 +15,6 @@ const baseOptions: LoggerOptions = {
     env: process.env.NODE_ENV ?? 'development',
   },
   formatters: {
-    // Emit `level: "info"` instead of pino's numeric default — matches OTel
-    // `severity_text` convention and Loki's expectations.
     level: (label) => ({ level: label }),
   },
   mixin() {
@@ -44,27 +44,62 @@ const baseOptions: LoggerOptions = {
   timestamp: pino.stdTimeFunctions.isoTime,
 };
 
-const prettyTransport: LoggerOptions['transport'] | undefined = isDev
-  ? {
+function buildTargets(): TransportTargetOptions[] {
+  const targets: TransportTargetOptions[] = [];
+
+  if (isDev) {
+    // Dev: pretty-print to stdout. pino-pretty writes to fd 1 itself.
+    targets.push({
       target: 'pino-pretty',
+      level: process.env.LOG_LEVEL ?? 'info',
       options: {
         colorize: true,
         translateTime: 'SYS:HH:mm:ss.l',
         ignore: 'pid,hostname,service,env',
       },
-    }
-  : undefined;
+    });
+  } else {
+    // Prod / test: JSON to stdout so Railway log capture keeps working.
+    targets.push({
+      target: 'pino/file',
+      level: process.env.LOG_LEVEL ?? 'info',
+      options: { destination: 1 },
+    });
+  }
 
-export const logger = pino({
-  ...baseOptions,
-  ...(prettyTransport ? { transport: prettyTransport } : {}),
-});
+  if (otlpEnabled) {
+    // OTLP export in a worker thread; main loop never blocks on the network.
+    targets.push({
+      target: 'pino-opentelemetry-transport',
+      level: process.env.LOG_LEVEL ?? 'info',
+      options: {
+        loggerName: 'cashflow-backend',
+        serviceVersion: process.env.GIT_SHA ?? 'dev',
+        resourceAttributes: {
+          'service.name': 'cashflow-backend',
+          'deployment.environment': process.env.NODE_ENV ?? 'development',
+          'service.version': process.env.GIT_SHA ?? 'dev',
+        },
+        logRecordProcessorOptions: {
+          recordProcessorType: 'batch',
+          exporterOptions: {
+            protocol: 'http/protobuf',
+            url: `${otlpEndpoint!.replace(/\/$/, '')}/v1/logs`,
+          },
+        },
+      },
+    });
+  }
 
-// Backwards-compatible type aliases so call sites that still import these
-// don't break during the migration window. Remove in a follow-up once all
-// callers use pino's call shape directly.
+  return targets;
+}
+
+const targets = buildTargets();
+
+export const logger = pino(baseOptions, pino.transport({ targets }));
+
+// Backwards-compatible type aliases.
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogFields = Record<string, unknown>;
 
-// Stamp `isProd` into the file so the prod-only branches are tree-shaken.
 void isProd;
