@@ -143,6 +143,63 @@ export type SubscriptionsSummary = {
   }>
 }
 
+// -------- Money leaks dashboard (GET /api/money-leaks) -----------------
+// Mirrors backend/src/money_leaks/detect.ts. Each leak row is detector
+// output; identityKey + leakType are stable across reads so the UI can
+// post dismissals without round-tripping through a numeric leak id.
+
+/** Money-leak type emitted by the detectors. New types must be added in
+ *  lockstep with MONEY_LEAK_TYPES on the backend. */
+export type MoneyLeakType =
+  | 'subscription_price_increase'
+  | 'small_subscription'
+  | 'recurring_fee'
+  | 'duplicate_service'
+  | 'delivery_fee_high'
+
+export type MoneyLeakSeverity = 'low' | 'medium' | 'high'
+
+/** One leak row as returned by GET /api/money-leaks. */
+export type MoneyLeakItem = {
+  leakType: MoneyLeakType
+  identityKey: string
+  title: string
+  description: string
+  currency: string
+  monthlyImpact: number
+  annualImpact: number
+  severity: MoneyLeakSeverity
+  meta: Record<string, unknown>
+}
+
+/** Response shape for GET /api/money-leaks. */
+export type MoneyLeaksResponse = {
+  items: MoneyLeakItem[]
+  totals: {
+    byCurrency: Array<{
+      currency: string
+      monthlyImpact: number
+      annualImpact: number
+      count: number
+    }>
+  }
+}
+
+/** One persisted dismissal row as returned by GET /api/money-leaks/dismissed. */
+export type MoneyLeakDismissal = {
+  id: number
+  leakType: MoneyLeakType
+  identityKey: string
+  snapshot: Record<string, unknown> | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/money-leaks/dismissed. */
+export type MoneyLeakDismissedResponse = {
+  items: MoneyLeakDismissal[]
+}
+
 /** Direction of a partner-balance settlement record. */
 export type PartnerSettlementDirection = 'i_paid_partner' | 'partner_paid_me'
 

@@ -16,6 +16,7 @@ import { GoalsPage } from './pages/GoalsPage'
 import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
+import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
@@ -73,6 +74,7 @@ function AppRoutes() {
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
+          <Route path="money-leaks" element={<MoneyLeaksPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />

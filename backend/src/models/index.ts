@@ -63,6 +63,10 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
+import {
+  MoneyLeakDismissal,
+  initMoneyLeakDismissal,
+} from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 
 initUser(sequelize);
@@ -123,6 +127,7 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
+initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
@@ -418,6 +423,25 @@ Household.hasMany(Subscription, {
 });
 Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
+Household.hasMany(MoneyLeakDismissal, {
+  foreignKey: 'household_id',
+  as: 'moneyLeakDismissals',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+MoneyLeakDismissal.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(MoneyLeakDismissal, {
+  foreignKey: 'dismissed_by_user_id',
+  as: 'moneyLeakDismissals',
+});
+MoneyLeakDismissal.belongsTo(User, {
+  foreignKey: 'dismissed_by_user_id',
+  as: 'dismissedByUser',
+});
+
 Household.hasMany(AiReviewRun, {
   foreignKey: 'household_id',
   as: 'aiReviewRuns',
@@ -506,5 +530,6 @@ export {
   FinancialGoal,
   Subscription,
   AiReviewRun,
+  MoneyLeakDismissal,
   TaxReserveSetting,
 };
