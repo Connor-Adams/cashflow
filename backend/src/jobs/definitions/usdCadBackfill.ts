@@ -17,7 +17,7 @@ defineJob({
       await backfillUsdCadHistory({ startDate: fiveYearsAgo, endDate: today });
       return { summary: { startDate: fiveYearsAgo, endDate: today, status: 'ok' } };
     } catch (err) {
-      logger.error('usdcad_backfill_job_failed', {}, err as Error);
+      logger.error({ err }, 'usdcad_backfill_job_failed');
       throw err;
     }
   },

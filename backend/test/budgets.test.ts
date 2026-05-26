@@ -6,6 +6,9 @@ import {
   aggregateSpendByCategory,
   computeBudgetProgress,
   currentMonthBounds,
+  currentPeriodBounds,
+  periodElapsedPercent,
+  pacingState,
 } from '../src/routes/budgets';
 
 // ---- validateBudgetInput ------------------------------------------------
@@ -288,4 +291,107 @@ test('currentMonthBounds: short month (April) ends on the 30th', () => {
   const bounds = currentMonthBounds(new Date(2026, 3, 12));
   assert.equal(bounds.periodStart, '2026-04-01');
   assert.equal(bounds.periodEnd, '2026-04-30');
+});
+
+// ---- currentPeriodBounds (multi-period support) -----------------------
+
+test('currentPeriodBounds: monthly returns calendar month', () => {
+  const bounds = currentPeriodBounds('monthly', new Date(2026, 4, 17));
+  assert.equal(bounds.periodStart, '2026-05-01');
+  assert.equal(bounds.periodEnd, '2026-05-31');
+});
+
+test('currentPeriodBounds: weekly starts on Monday, ends on Sunday', () => {
+  // 2026-05-20 is a Wednesday → Monday is 2026-05-18, Sunday is 2026-05-24.
+  const bounds = currentPeriodBounds('weekly', new Date(2026, 4, 20));
+  assert.equal(bounds.periodStart, '2026-05-18');
+  assert.equal(bounds.periodEnd, '2026-05-24');
+});
+
+test('currentPeriodBounds: weekly on a Sunday returns that same week', () => {
+  // 2026-05-24 is a Sunday — should be the LAST day of its week
+  // (Mon 18 - Sun 24), not the start of the next week.
+  const bounds = currentPeriodBounds('weekly', new Date(2026, 4, 24));
+  assert.equal(bounds.periodStart, '2026-05-18');
+  assert.equal(bounds.periodEnd, '2026-05-24');
+});
+
+test('currentPeriodBounds: weekly on a Monday returns Mon through Sun', () => {
+  // 2026-05-18 is a Monday — first day of its week.
+  const bounds = currentPeriodBounds('weekly', new Date(2026, 4, 18));
+  assert.equal(bounds.periodStart, '2026-05-18');
+  assert.equal(bounds.periodEnd, '2026-05-24');
+});
+
+test('currentPeriodBounds: annual returns calendar year', () => {
+  const bounds = currentPeriodBounds('annual', new Date(2026, 4, 17));
+  assert.equal(bounds.periodStart, '2026-01-01');
+  assert.equal(bounds.periodEnd, '2026-12-31');
+});
+
+// ---- periodElapsedPercent (the pacing math) ---------------------------
+
+test('periodElapsedPercent: at start of period is 0%', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const pct = periodElapsedPercent(new Date(2026, 4, 1, 0, 0, 0), bounds);
+  assert.equal(Math.round(pct * 100) / 100, 0);
+});
+
+test('periodElapsedPercent: at end of period is 100%', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const pct = periodElapsedPercent(new Date(2026, 4, 31, 23, 59, 59), bounds);
+  assert.ok(pct >= 99.99 && pct <= 100, `Expected ~100, got ${pct}`);
+});
+
+test('periodElapsedPercent: midway through the period is ~50%', () => {
+  // 31-day month: halfway through is end of day 15 / start of day 16 →
+  // (15 + 0.5) / 31 * 100 ≈ 50%. We use noon of day 16 for a clean 50%.
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  // Day 16 at noon ≈ 50% through a 31-day window (Apr 30 ~midnight → May 31 ~midnight).
+  const pct = periodElapsedPercent(new Date(2026, 4, 16, 12, 0, 0), bounds);
+  assert.ok(pct > 45 && pct < 55, `Expected ~50, got ${pct}`);
+});
+
+test('periodElapsedPercent: before period starts is 0%', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const pct = periodElapsedPercent(new Date(2026, 3, 30), bounds);
+  assert.equal(pct, 0);
+});
+
+test('periodElapsedPercent: after period ends is 100%', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const pct = periodElapsedPercent(new Date(2026, 5, 5), bounds);
+  assert.equal(pct, 100);
+});
+
+// ---- pacingState (the headline UX) ------------------------------------
+
+test('pacingState: overspent (>100%) is over regardless of pacing', () => {
+  assert.equal(pacingState(105, 50), 'over');
+  assert.equal(pacingState(120, 95), 'over');
+});
+
+test('pacingState: percentUsed within 5pp of elapsed is on-pace', () => {
+  // 88% spent vs 90% elapsed → on-pace (delta -2)
+  assert.equal(pacingState(88, 90), 'on-pace');
+  // 65% spent vs 62% elapsed → on-pace (delta +3)
+  assert.equal(pacingState(65, 62), 'on-pace');
+  // Exact match
+  assert.equal(pacingState(50, 50), 'on-pace');
+});
+
+test('pacingState: spending faster than time is ahead (red flag)', () => {
+  // The headline example: 88% spent, 62% of month elapsed → ahead.
+  assert.equal(pacingState(88, 62), 'ahead');
+  assert.equal(pacingState(70, 30), 'ahead');
+});
+
+test('pacingState: spending slower than time is behind (frugal)', () => {
+  // 30% spent, 80% of month elapsed → behind (under-pacing, on track to save)
+  assert.equal(pacingState(30, 80), 'behind');
+});
+
+test('pacingState: never returns over for percentUsed exactly 100', () => {
+  // 100% spent, 100% elapsed → maxed out but on-pace exactly.
+  assert.equal(pacingState(100, 100), 'on-pace');
 });

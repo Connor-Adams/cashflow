@@ -160,6 +160,16 @@ export type BulkPatchFilterResponse = {
   ids: number[]
 }
 
+/** Supported budget recurrence periods (matches BUDGET_TARGET_PERIODS on the server). */
+export type BudgetPeriod = 'monthly' | 'weekly' | 'annual'
+
+/**
+ * Budget scope vocabulary. Cashflow's transaction model splits these
+ * across visibility / ownership / business flags; the server maps a
+ * `scope` value back to that combination when computing spend.
+ */
+export type BudgetScope = 'personal' | 'partner' | 'business' | 'household'
+
 /**
  * One row from GET /api/budgets. Mirrors the BudgetTarget serializer in
  * backend/src/routes/budgets.ts — `amount` arrives as a string (decimal)
@@ -175,7 +185,9 @@ export type Budget = {
   category: string | null
   currency: string
   amount: string
-  period: 'monthly'
+  period: BudgetPeriod
+  scope: BudgetScope
+  rolloverEnabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -186,9 +198,18 @@ export type BudgetsResponse = {
 }
 
 /**
- * One row from GET /api/budgets/progress — combines a budget with current
- * spend for the active calendar month. Amounts here are pre-coerced to
- * numbers by the backend so UI code can format/compare directly.
+ * The "pacing state" classification surfaced by /api/budgets/status —
+ * compares percentUsed against periodElapsedPercent. See backend
+ * `pacingState` for the thresholds.
+ */
+export type BudgetPacingState = 'on-pace' | 'ahead' | 'behind' | 'over'
+
+/**
+ * One row from GET /api/budgets/progress and /api/budgets/status — combines
+ * a budget with current spend for the active period. Amounts here are
+ * pre-coerced to numbers by the backend so UI code can format/compare
+ * directly. The pacing fields (`periodElapsedPercent` and `pacingState`)
+ * are populated by both endpoints.
  */
 export type BudgetProgress = {
   budgetId: number
@@ -200,6 +221,11 @@ export type BudgetProgress = {
   percentUsed: number
   periodStart: string
   periodEnd: string
+  scope: BudgetScope
+  period: BudgetPeriod
+  rolloverEnabled: boolean
+  periodElapsedPercent: number
+  pacingState: BudgetPacingState
 }
 
 /** Response shape for GET /api/budgets/progress. */
@@ -207,12 +233,159 @@ export type BudgetProgressResponse = {
   items: BudgetProgress[]
 }
 
+/** Response shape for GET /api/budgets/status — identical to /progress. */
+export type BudgetStatusResponse = BudgetProgressResponse
+
 /** POST/PUT /api/budgets body shape. */
 export type BudgetInput = {
   category: string | null
   currency: string
   amount: number
-  period?: 'monthly'
+  period?: BudgetPeriod
+  scope?: BudgetScope
+  rolloverEnabled?: boolean
+}
+
+/** One row in the GET /api/budgets/:id/exclusions response. */
+export type BudgetExclusion = {
+  id: number
+  budgetId: number
+  transactionId: number
+  createdAt: string
+}
+
+export type BudgetExclusionsResponse = {
+  data: BudgetExclusion[]
+}
+
+/**
+ * Planned financial event kind. Mirrors `PlannedEventType` in the backend
+ * model. Drives forecast direction (income flows in, expense/debt_payment
+ * flow out, transfer/settlement are intra-system, savings is goal-directed).
+ */
+export type PlannedEventType =
+  | 'income'
+  | 'expense'
+  | 'transfer'
+  | 'settlement'
+  | 'debt_payment'
+  | 'savings'
+
+/**
+ * Where a planned event came from. `manual` is user-authored; the others
+ * are system-generated and should typically be treated as read-only in the
+ * UI until the originating subsystem is refactored.
+ */
+export type PlannedEventSource =
+  | 'manual'
+  | 'recurring_detection'
+  | 'settlement'
+  | 'debt'
+  | 'goal'
+  | 'system'
+
+/**
+ * Lifecycle. `planned` is the default; `posted` means the event has been
+ * matched to an actual transaction via `linkedTransactionId`; `skipped` and
+ * `ignored` distinguish one-time skip from a hard dismiss.
+ */
+export type PlannedEventStatus = 'planned' | 'posted' | 'skipped' | 'ignored'
+
+/**
+ * One row from GET /api/planned-events. Mirrors the PlannedEvent serializer
+ * in `backend/src/routes/plannedEvents.ts` — `amount` arrives as a string
+ * (DECIMAL(14,4)) for lossless transport; coerce with `Number(...)` for
+ * arithmetic.
+ */
+export type PlannedEvent = {
+  id: number
+  userId: number
+  householdId: number
+  accountId: number | null
+  type: PlannedEventType
+  name: string
+  amount: string
+  currency: string
+  /** YYYY-MM-DD. */
+  expectedDate: string
+  /** Optional RRULE or JSON blob; null = one-off. */
+  recurrenceRule: string | null
+  source: PlannedEventSource
+  status: PlannedEventStatus
+  linkedTransactionId: number | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/planned-events. */
+export type PlannedEventsResponse = {
+  data: PlannedEvent[]
+}
+
+/** POST /api/planned-events body shape. */
+export type PlannedEventInput = {
+  type: PlannedEventType
+  name: string
+  amount: number
+  currency: string
+  expectedDate: string
+  accountId?: number | null
+  recurrenceRule?: string | null
+  source?: PlannedEventSource
+  status?: PlannedEventStatus
+  linkedTransactionId?: number | null
+  notes?: string | null
+}
+
+/** PUT /api/planned-events/:id body shape — every field optional. */
+export type PlannedEventPatch = Partial<PlannedEventInput>
+
+/**
+ * Direction of a forecast occurrence — drives sign + colour in the UI.
+ * 'neutral' covers intra-household transfers / partner settlements that
+ * net to zero at the household level.
+ */
+export type ForecastEventDirection = 'in' | 'out' | 'neutral'
+
+/**
+ * Source of a forecast occurrence row in GET /api/forecast.events.
+ * 'planned_event' came from the planned_events table; 'recurring_detection'
+ * was inferred from transaction history.
+ */
+export type ForecastEventSource = 'planned_event' | 'recurring_detection'
+
+/** One projected occurrence inside the forecast window. */
+export type ForecastEvent = {
+  date: string
+  /** Always non-negative; sign comes from `direction`. */
+  amount: number
+  direction: ForecastEventDirection
+  sourceType: ForecastEventSource
+  sourceId: number
+  sourceName: string
+  accountId: number | null
+}
+
+/** One daily point on the projected balance line. */
+export type ForecastDailyPoint = {
+  date: string
+  balance: number
+}
+
+/** Response shape for GET /api/forecast. */
+export type ForecastResponse = {
+  currency: string
+  /** YYYY-MM-DD inclusive. */
+  dateFrom: string
+  /** YYYY-MM-DD inclusive. */
+  dateTo: string
+  openingBalance: number
+  projectedClosingBalance: number
+  lowestProjectedBalance: number
+  lowestProjectedBalanceDate: string | null
+  dailyPoints: ForecastDailyPoint[]
+  events: ForecastEvent[]
 }
 
 export type AppConfig = {

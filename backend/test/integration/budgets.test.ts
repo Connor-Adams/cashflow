@@ -62,20 +62,27 @@ async function seed(emailPrefix: string): Promise<Seeded> {
   return { token, householdId: household.id, userId: user.id, accountId: account.id };
 }
 
+type TxOverrides = {
+  visibility?: string;
+  ownershipType?: string;
+  finalBusiness?: boolean;
+};
+
 async function createTransaction(
   householdId: number,
   accountId: number,
   date: string,
   category: string | null,
   amount: number,
-  currency = 'CAD'
-): Promise<void> {
+  currency = 'CAD',
+  overrides: TxOverrides = {}
+): Promise<number> {
   const models = await import('../../src/models');
-  await models.Transaction.create({
+  const row = await models.Transaction.create({
     accountId,
     householdId,
-    visibility: 'shared',
-    ownershipType: 'me',
+    visibility: overrides.visibility ?? 'shared',
+    ownershipType: overrides.ownershipType ?? 'me',
     ownershipContactId: null,
     importBatch: 'budgets-test',
     date,
@@ -93,6 +100,7 @@ async function createTransaction(
     finalCategory: category,
     autoBusiness: null,
     businessOverride: null,
+    finalBusiness: overrides.finalBusiness ?? false,
     autoSplitType: null,
     splitOverride: null,
     autoPctMe: null,
@@ -105,6 +113,7 @@ async function createTransaction(
     reviewedAt: null,
     createdByUserId: null,
   });
+  return row.id;
 }
 
 before(async () => {
@@ -285,4 +294,301 @@ test('DELETE /api/budgets/:id only affects the owning household', async () => {
 
   const gone = await primaryAgent.delete(`/api/budgets/${id}`);
   assert.equal(gone.status, 404);
+});
+
+// ---- Issue #201: scope, period, rollover, exclusions, status ----------
+
+test('POST /api/budgets accepts scope and rolloverEnabled with new defaults', async () => {
+  const res = await primaryAgent.post('/api/budgets').send({
+    category: 'Coffee',
+    currency: 'CAD',
+    amount: 60,
+    scope: 'personal',
+    rolloverEnabled: true,
+  });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.scope, 'personal');
+  assert.equal(res.body.rolloverEnabled, true);
+  // Without explicit period, monthly is preserved.
+  assert.equal(res.body.period, 'monthly');
+});
+
+test('POST /api/budgets defaults scope to household and rollover to false', async () => {
+  const res = await primaryAgent.post('/api/budgets').send({
+    category: 'Streaming',
+    currency: 'CAD',
+    amount: 30,
+  });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.scope, 'household');
+  assert.equal(res.body.rolloverEnabled, false);
+});
+
+test('POST /api/budgets rejects unknown scope value', async () => {
+  const res = await primaryAgent.post('/api/budgets').send({
+    category: 'Travel',
+    currency: 'CAD',
+    amount: 200,
+    scope: 'planet',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /scope/);
+});
+
+test('POST /api/budgets accepts weekly and annual period values', async () => {
+  const weekly = await primaryAgent.post('/api/budgets').send({
+    category: 'Lunch',
+    currency: 'CAD',
+    amount: 80,
+    period: 'weekly',
+  });
+  assert.equal(weekly.status, 201);
+  assert.equal(weekly.body.period, 'weekly');
+
+  const annual = await primaryAgent.post('/api/budgets').send({
+    category: 'Insurance',
+    currency: 'CAD',
+    amount: 2400,
+    period: 'annual',
+  });
+  assert.equal(annual.status, 201);
+  assert.equal(annual.body.period, 'annual');
+});
+
+test('GET /api/budgets/status returns pacing fields', async () => {
+  // The Groceries budget seeded earlier has CAD 150 spent / 400 target.
+  // We assert the new pacing fields appear regardless of date drift.
+  const res = await primaryAgent.get('/api/budgets/status');
+  assert.equal(res.status, 200);
+  const items = res.body.items as Array<{
+    category: string | null;
+    currency: string;
+    spent: number;
+    target: number;
+    percentUsed: number;
+    periodElapsedPercent: number;
+    pacingState: string;
+    scope: string;
+    period: string;
+    rolloverEnabled: boolean;
+  }>;
+  const groceries = items.find(
+    (i) => i.category === 'Groceries' && i.currency === 'CAD' && i.period === 'monthly'
+  );
+  assert.ok(groceries, 'should include the monthly Groceries CAD row');
+  assert.equal(groceries!.scope, 'household');
+  // periodElapsedPercent is always 0..100
+  assert.ok(groceries!.periodElapsedPercent >= 0);
+  assert.ok(groceries!.periodElapsedPercent <= 100);
+  // pacingState is one of the four known states
+  assert.ok(
+    ['on-pace', 'ahead', 'behind', 'over'].includes(groceries!.pacingState),
+    `unexpected pacing state ${groceries!.pacingState}`
+  );
+  assert.equal(typeof groceries!.rolloverEnabled, 'boolean');
+});
+
+test('GET /api/budgets/status: personal scope filters out shared spend', async () => {
+  // Create a personal-scope budget for a unique category, then seed:
+  //   - One shared spend on that category (should NOT count for personal)
+  //   - One private spend on that category (SHOULD count for personal)
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'Personal-Scope-Test',
+    currency: 'CAD',
+    amount: 100,
+    scope: 'personal',
+  });
+  assert.equal(created.status, 201);
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  // Shared spend — should be ignored by a personal-scope budget.
+  await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-10`,
+    'Personal-Scope-Test',
+    -50,
+    'CAD',
+    { visibility: 'shared' }
+  );
+  // Private spend — should count.
+  await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-11`,
+    'Personal-Scope-Test',
+    -20,
+    'CAD',
+    { visibility: 'private' }
+  );
+
+  const res = await primaryAgent.get('/api/budgets/status');
+  const items = res.body.items as Array<{
+    category: string | null;
+    scope: string;
+    spent: number;
+  }>;
+  const personal = items.find(
+    (i) => i.category === 'Personal-Scope-Test' && i.scope === 'personal'
+  );
+  assert.ok(personal, 'personal budget row should exist');
+  // Only the 20 should count; 50 was shared.
+  assert.equal(personal!.spent, 20);
+});
+
+test('GET /api/budgets/status: business scope only counts finalBusiness=true', async () => {
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'Business-Scope-Test',
+    currency: 'CAD',
+    amount: 500,
+    scope: 'business',
+  });
+  assert.equal(created.status, 201);
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  // Non-business charge — should be ignored.
+  await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-12`,
+    'Business-Scope-Test',
+    -75,
+    'CAD',
+    { finalBusiness: false }
+  );
+  // Business charge — should count.
+  await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-13`,
+    'Business-Scope-Test',
+    -125,
+    'CAD',
+    { finalBusiness: true }
+  );
+
+  const res = await primaryAgent.get('/api/budgets/status');
+  const items = res.body.items as Array<{
+    category: string | null;
+    scope: string;
+    spent: number;
+  }>;
+  const biz = items.find(
+    (i) => i.category === 'Business-Scope-Test' && i.scope === 'business'
+  );
+  assert.ok(biz);
+  assert.equal(biz!.spent, 125);
+});
+
+test('budget exclusions are honored by /api/budgets/status', async () => {
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'Exclusion-Test',
+    currency: 'CAD',
+    amount: 200,
+    scope: 'household',
+  });
+  const budgetId = created.body.id as number;
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+
+  // Two charges in-period that would normally both count.
+  const goodTxnId = await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-14`,
+    'Exclusion-Test',
+    -40
+  );
+  const excludedTxnId = await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-15`,
+    'Exclusion-Test',
+    -160
+  );
+
+  // Baseline — both count.
+  const before = await primaryAgent.get('/api/budgets/status');
+  const beforeItem = (before.body.items as Array<{
+    category: string | null;
+    spent: number;
+  }>).find((i) => i.category === 'Exclusion-Test');
+  assert.equal(beforeItem!.spent, 200);
+
+  // Exclude the larger one.
+  const ex = await primaryAgent
+    .post(`/api/budgets/${budgetId}/exclusions`)
+    .send({ transactionId: excludedTxnId });
+  assert.equal(ex.status, 201);
+  assert.equal(ex.body.transactionId, excludedTxnId);
+
+  // After — only the 40 charge counts.
+  const after = await primaryAgent.get('/api/budgets/status');
+  const afterItem = (after.body.items as Array<{
+    category: string | null;
+    spent: number;
+  }>).find((i) => i.category === 'Exclusion-Test');
+  assert.equal(afterItem!.spent, 40);
+
+  // Idempotency: re-POSTing the same exclusion returns 200 with the
+  // existing row, not 409 or a duplicate.
+  const dup = await primaryAgent
+    .post(`/api/budgets/${budgetId}/exclusions`)
+    .send({ transactionId: excludedTxnId });
+  assert.equal(dup.status, 200);
+  assert.equal(dup.body.id, ex.body.id);
+
+  // GET /exclusions lists what we created.
+  const listed = await primaryAgent.get(`/api/budgets/${budgetId}/exclusions`);
+  assert.equal(listed.status, 200);
+  assert.ok(
+    (listed.body.data as Array<{ transactionId: number }>).some(
+      (row) => row.transactionId === excludedTxnId
+    )
+  );
+
+  // DELETE exclusion restores the spend.
+  const del = await primaryAgent.delete(
+    `/api/budgets/${budgetId}/exclusions/${excludedTxnId}`
+  );
+  assert.equal(del.status, 204);
+  const restored = await primaryAgent.get('/api/budgets/status');
+  const restoredItem = (restored.body.items as Array<{
+    category: string | null;
+    spent: number;
+  }>).find((i) => i.category === 'Exclusion-Test');
+  assert.equal(restoredItem!.spent, 200);
+
+  void goodTxnId;
+});
+
+test('POST /api/budgets/:id/exclusions rejects another household transaction', async () => {
+  // Create a budget on primary, then try to exclude an other-household txn.
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'Cross-Household-Test',
+    currency: 'CAD',
+    amount: 100,
+  });
+  const budgetId = created.body.id as number;
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const foreignTxnId = await createTransaction(
+    otherHouseholdId,
+    otherAccountId,
+    `${y}-${m}-09`,
+    'Cross-Household-Test',
+    -50
+  );
+
+  const res = await primaryAgent
+    .post(`/api/budgets/${budgetId}/exclusions`)
+    .send({ transactionId: foreignTxnId });
+  assert.equal(res.status, 404);
 });

@@ -302,3 +302,317 @@ test('GET /compare with mixed ownership returns 403', async () => {
   );
   assert.equal(res.status, 403, `expected 403, got ${res.status}: ${JSON.stringify(res.body)}`);
 });
+
+// ----- POST /:id/project-next-year (P9 Task 4) -----
+//
+// Each project-next-year test seeds its OWN entity (in the shared household)
+// so the per-entity `kind=projection_root` idempotency check doesn't collide
+// across tests. Year is fixed at 2025 because only rate tables 2024-2026 are
+// encoded — projecting to 2026 stays inside the encoded range.
+
+async function seedFreshPersonalEntity(legalName: string) {
+  const models = await import('../../src/models/index.js');
+  const householdMember = await models.HouseholdMember.findOne({});
+  assert.ok(householdMember);
+  return models.Entity.create({
+    householdId: householdMember.householdId,
+    kind: 'personal',
+    legalName,
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  });
+}
+
+test('POST /:id/project-next-year without auth returns 401', async () => {
+  const res = await request(app).post('/api/tax/personal-scenarios/1/project-next-year').send({});
+  assert.equal(res.status, 401, `expected 401, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('POST /:id/project-next-year creates a projection_root for year+1', async () => {
+  const models = await import('../../src/models/index.js');
+  const fresh = await seedFreshPersonalEntity('ProjPersonal1');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'ProjBaseParent',
+    overrides: { 'income.employment': 90000 },
+  });
+  const parentId = parent.body.scenario.id;
+  const res = await authed
+    .post(`/api/tax/personal-scenarios/${parentId}/project-next-year`)
+    .send({});
+  assert.equal(res.status, 201, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenario.kind, 'projection_root');
+  assert.equal(res.body.scenario.year, 2026);
+  assert.equal(res.body.scenario.parentId, parentId);
+  assert.equal(res.body.scenario.name, 'Projection 2026');
+  // Parent should now point forward via next_year_id. Re-read directly from
+  // the DB to avoid the GET endpoint's eager computeScenario (which doesn't
+  // matter here — we're checking the link, not the engine).
+  const reloaded = await models.Scenario.findByPk(parentId);
+  assert.ok(reloaded);
+  assert.equal(reloaded.nextYearId, res.body.scenario.id);
+});
+
+test('POST /:id/project-next-year is idempotent: second call returns 409 with existing', async () => {
+  const fresh = await seedFreshPersonalEntity('ProjPersonal2');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'ProjBaseParent',
+    overrides: {},
+  });
+  const parentId = parent.body.scenario.id;
+  const first = await authed
+    .post(`/api/tax/personal-scenarios/${parentId}/project-next-year`)
+    .send({});
+  assert.equal(first.status, 201);
+  const second = await authed
+    .post(`/api/tax/personal-scenarios/${parentId}/project-next-year`)
+    .send({});
+  assert.equal(second.status, 409, `expected 409, got ${second.status}: ${JSON.stringify(second.body)}`);
+  assert.equal(second.body.error, 'projection_already_exists');
+  assert.equal(second.body.scenario.id, first.body.scenario.id);
+});
+
+test('POST /:id/project-next-year persists custom assumptions and name', async () => {
+  const fresh = await seedFreshPersonalEntity('ProjPersonal3');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'ProjBaseParent',
+    overrides: {},
+  });
+  const res = await authed
+    .post(`/api/tax/personal-scenarios/${parent.body.scenario.id}/project-next-year`)
+    .send({
+      name: 'Aggressive 2026',
+      assumptions: { inflation: 0.04, investmentReturn: 0.07 },
+    });
+  assert.equal(res.status, 201, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenario.name, 'Aggressive 2026');
+  assert.equal(res.body.scenario.assumptions.inflation, 0.04);
+  assert.equal(res.body.scenario.assumptions.investmentReturn, 0.07);
+});
+
+test('POST /:id/project-next-year inherits householdPlanId from parent', async () => {
+  // Attach the parent to a plan so the projection should inherit the link.
+  const models = await import('../../src/models/index.js');
+  const fresh = await seedFreshPersonalEntity('ProjPersonal4');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'ProjBaseParent',
+    overrides: {},
+  });
+  const plan = await models.HouseholdPlan.create({
+    householdId: fresh.householdId,
+    name: 'PlanInheritTest',
+  } as never);
+  await models.Scenario.update(
+    { householdPlanId: plan.id },
+    { where: { id: parent.body.scenario.id } },
+  );
+  const res = await authed
+    .post(`/api/tax/personal-scenarios/${parent.body.scenario.id}/project-next-year`)
+    .send({});
+  assert.equal(res.status, 201, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenario.householdPlanId, plan.id);
+});
+
+test('POST /:id/project-next-year on a projection_root returns 400', async () => {
+  const fresh = await seedFreshPersonalEntity('ProjPersonal5');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'ProjBaseParent',
+    overrides: {},
+  });
+  const proj = await authed
+    .post(`/api/tax/personal-scenarios/${parent.body.scenario.id}/project-next-year`)
+    .send({});
+  assert.equal(proj.status, 201);
+  const double = await authed
+    .post(`/api/tax/personal-scenarios/${proj.body.scenario.id}/project-next-year`)
+    .send({});
+  assert.equal(double.status, 400, `expected 400, got ${double.status}: ${JSON.stringify(double.body)}`);
+  assert.equal(double.body.error, 'already_projection_root');
+});
+
+test('POST /:id/project-next-year on a cross-household scenario returns 403', async () => {
+  const models = await import('../../src/models/index.js');
+  const otherHousehold = await models.Household.create({ name: 'OtherProj' });
+  const otherEntity = await models.Entity.create({
+    householdId: otherHousehold.id,
+    kind: 'personal',
+    legalName: 'Other P',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  });
+  const otherScenario = await models.Scenario.create({
+    parentId: null,
+    householdPlanId: null,
+    entityId: otherEntity.id,
+    year: 2025,
+    name: 'OtherBaseline',
+    kind: 'baseline',
+    overrides: {},
+    assumptions: {},
+    nextYearId: null,
+    notes: null,
+  });
+  const res = await authed
+    .post(`/api/tax/personal-scenarios/${otherScenario.id}/project-next-year`)
+    .send({});
+  assert.equal(res.status, 403, `expected 403, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+// ----- GET /:id/chain (P9 Task 5) -----
+//
+// The chain endpoint walks parentId backwards to find the earliest ancestor
+// with `nextYearId` set (the year-N anchor), then walks forwards via
+// `nextYearId` collecting scenarios in year order along with their computed
+// returns. Each /chain test seeds its OWN entity so the per-entity chain
+// state doesn't leak between tests.
+
+test('GET /:id/chain without auth returns 401', async () => {
+  const res = await request(app).get('/api/tax/personal-scenarios/1/chain');
+  assert.equal(res.status, 401, `expected 401, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('GET /:id/chain returns 404 on unknown id', async () => {
+  const res = await authed.get('/api/tax/personal-scenarios/9999999/chain');
+  assert.equal(res.status, 404, `expected 404, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('GET /:id/chain returns a single entry when no nextYearId is set', async () => {
+  const fresh = await seedFreshPersonalEntity('ChainPersonal1');
+  const lonely = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'Lonely',
+    overrides: { 'income.employment': 50000 },
+  });
+  const res = await authed.get(`/api/tax/personal-scenarios/${lonely.body.scenario.id}/chain`);
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.chain.length, 1);
+  assert.equal(res.body.chain[0].scenario.id, lonely.body.scenario.id);
+  assert.ok(res.body.chain[0].computed);
+});
+
+test('GET /:id/chain returns 2 entries after one POST /:id/project-next-year', async () => {
+  const fresh = await seedFreshPersonalEntity('ChainPersonal2');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'ChainParent',
+    overrides: { 'income.employment': 90000 },
+  });
+  const proj = await authed
+    .post(`/api/tax/personal-scenarios/${parent.body.scenario.id}/project-next-year`)
+    .send({});
+  assert.equal(proj.status, 201);
+  // Chain accessed from the parent should include parent + projection.
+  const res = await authed.get(
+    `/api/tax/personal-scenarios/${parent.body.scenario.id}/chain`,
+  );
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.chain.length, 2);
+  assert.equal(res.body.chain[0].scenario.id, parent.body.scenario.id);
+  assert.equal(res.body.chain[1].scenario.id, proj.body.scenario.id);
+  assert.equal(res.body.chain[0].scenario.year, 2025);
+  assert.equal(res.body.chain[1].scenario.year, 2026);
+  assert.ok(res.body.chain[0].computed);
+  assert.ok(res.body.chain[1].computed);
+});
+
+test('GET /:id/chain on the projection child returns the same chain in year order', async () => {
+  const fresh = await seedFreshPersonalEntity('ChainPersonal3');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2025,
+    name: 'ChainParent',
+    overrides: { 'income.employment': 88000 },
+  });
+  const proj = await authed
+    .post(`/api/tax/personal-scenarios/${parent.body.scenario.id}/project-next-year`)
+    .send({});
+  // Walking back from the projection should find the parent's anchor and
+  // return the same chain.
+  const res = await authed.get(`/api/tax/personal-scenarios/${proj.body.scenario.id}/chain`);
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.chain.length, 2);
+  // Order is strictly year-ascending.
+  const years = res.body.chain.map((e: { scenario: { year: number } }) => e.scenario.year);
+  assert.deepEqual(years, [2025, 2026]);
+});
+
+test('GET /:id/chain returns 3 entries when chained twice (year+2)', async () => {
+  // The /project-next-year endpoint refuses to chain a projection_root, so the
+  // year+2 scenario is created directly via the model to verify the chain
+  // walker handles the structural case described in the plan ("works
+  // structurally — projectFromPrevYear recurses through parent chain"). Start
+  // at 2024 so the full 2024→2025→2026 chain stays inside the encoded rate
+  // tables (2024-2026).
+  const models = await import('../../src/models/index.js');
+  const fresh = await seedFreshPersonalEntity('ChainPersonal4');
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId: fresh.id,
+    year: 2024,
+    name: 'ChainParent',
+    overrides: { 'income.employment': 95000 },
+  });
+  const proj1 = await authed
+    .post(`/api/tax/personal-scenarios/${parent.body.scenario.id}/project-next-year`)
+    .send({});
+  const proj2 = await models.Scenario.create({
+    parentId: proj1.body.scenario.id,
+    householdPlanId: null,
+    entityId: fresh.id,
+    year: 2026,
+    name: 'Projection 2026',
+    kind: 'projection_root',
+    overrides: {},
+    assumptions: {},
+    nextYearId: null,
+    notes: null,
+  });
+  await models.Scenario.update(
+    { nextYearId: proj2.id },
+    { where: { id: proj1.body.scenario.id } },
+  );
+  const res = await authed.get(`/api/tax/personal-scenarios/${proj2.id}/chain`);
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.chain.length, 3);
+  const years = res.body.chain.map((e: { scenario: { year: number } }) => e.scenario.year);
+  assert.deepEqual(years, [2024, 2025, 2026]);
+  assert.equal(res.body.chain[0].scenario.id, parent.body.scenario.id);
+  assert.equal(res.body.chain[1].scenario.id, proj1.body.scenario.id);
+  assert.equal(res.body.chain[2].scenario.id, proj2.id);
+});
+
+test('GET /:id/chain on a cross-household scenario returns 403', async () => {
+  const models = await import('../../src/models/index.js');
+  const otherHousehold = await models.Household.create({ name: 'OtherChain' });
+  const otherEntity = await models.Entity.create({
+    householdId: otherHousehold.id,
+    kind: 'personal',
+    legalName: 'Other P',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  });
+  const otherScenario = await models.Scenario.create({
+    parentId: null,
+    householdPlanId: null,
+    entityId: otherEntity.id,
+    year: 2025,
+    name: 'OtherChainBaseline',
+    kind: 'baseline',
+    overrides: {},
+    assumptions: {},
+    nextYearId: null,
+    notes: null,
+  });
+  const res = await authed.get(`/api/tax/personal-scenarios/${otherScenario.id}/chain`);
+  assert.equal(res.status, 403, `expected 403, got ${res.status}: ${JSON.stringify(res.body)}`);
+});

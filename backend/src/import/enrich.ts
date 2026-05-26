@@ -1,3 +1,4 @@
+import { logger } from '../observability/logger';
 import { mergeSignals } from './enrichment/computeReviewFlag';
 import { runNormalizeStage } from './enrichment/normalizeStage';
 import { runDetectTypeStage } from './enrichment/detectTypeStage';
@@ -41,8 +42,7 @@ function safeStage<T>(name: string, fn: () => T, fallback: T): T {
   try {
     return fn();
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[enrichment] stage "${name}" threw — continuing with no signals`, err);
+    logger.error({ err, stage: name, module: 'enrichment' }, 'enrichment_stage_failed');
     return fallback;
   }
 }
@@ -132,6 +132,7 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     refundWindowDays: input.refundWindowDays,
     transferWindowDays: input.transferWindowDays,
     candidates: input.relationshipCandidates,
+    sourceReference: input.raw.sourceReference,
   }), []));
 
   // Stage 9: compute-review-flag (merge)

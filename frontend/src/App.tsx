@@ -9,6 +9,8 @@ import { ReportsPage } from './pages/ReportsPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
+import { PlannedEventsPage } from './pages/PlannedEventsPage'
+import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RulesPage } from './pages/RulesPage'
@@ -29,6 +31,7 @@ import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
+import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
@@ -56,6 +59,8 @@ function AppRoutes() {
           <Route path="portfolio/security/:id" element={<PortfolioSecurityPage />} />
           <Route path="net-worth" element={<NetWorthPage />} />
           <Route path="amazon" element={<AmazonPage />} />
+          <Route path="planned" element={<PlannedEventsPage />} />
+          <Route path="forecast" element={<ForecastPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="reports" element={<ReportsPage />} />
@@ -75,6 +80,7 @@ function AppRoutes() {
             <Route path="jobs" element={<JobsTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
+          <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

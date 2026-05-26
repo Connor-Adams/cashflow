@@ -147,20 +147,22 @@ async function drain(householdId: number): Promise<void> {
     const sources = Array.from(slot.sources).join(',');
     try {
       const result = await getRunner()(flags);
-      logger.info('enrichment_backfill_internal_completed', {
-        householdId,
-        sources,
-        dateFrom: slot.dateFrom,
-        dateTo: slot.dateTo,
-        merchantPattern,
-        durationMs: Date.now() - startedAt,
-        ...result,
-      });
+      logger.info(
+        {
+          householdId,
+          sources,
+          dateFrom: slot.dateFrom,
+          dateTo: slot.dateTo,
+          merchantPattern,
+          durationMs: Date.now() - startedAt,
+          ...result,
+        },
+        'enrichment_backfill_internal_completed',
+      );
     } catch (err) {
       logger.error(
+        { err: err instanceof Error ? err : new Error(String(err)), householdId, sources },
         'enrichment_backfill_internal_failed',
-        { householdId, sources },
-        err instanceof Error ? err : new Error(String(err)),
       );
     } finally {
       running.delete(householdId);

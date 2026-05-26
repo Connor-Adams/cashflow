@@ -74,18 +74,18 @@ async function applyConfig(def: JobDefinition): Promise<void> {
     scheduled.delete(def.name);
   }
   if (!cfg.enabled) {
-    logger.info('job_disabled', { name: def.name, cron: cfg.cron });
+    logger.info({ name: def.name, cron: cfg.cron }, 'job_disabled');
     return;
   }
   if (!cron.validate(cfg.cron)) {
-    logger.error('job_reconcile_invalid_cron', { name: def.name, cron: cfg.cron });
+    logger.error({ name: def.name, cron: cfg.cron }, 'job_reconcile_invalid_cron');
     return;
   }
   const task = cron.schedule(cfg.cron, async () => {
     await tick(def);
   });
   scheduled.set(def.name, { task, cron: cfg.cron, enabled: cfg.enabled });
-  logger.info('job_scheduled', { name: def.name, cron: cfg.cron });
+  logger.info({ name: def.name, cron: cfg.cron }, 'job_scheduled');
 }
 
 export async function reconcileOnceForTest(): Promise<void> {
@@ -111,7 +111,7 @@ export async function startAllJobs(opts: StartOptions = {}): Promise<void> {
           try {
             await applyConfig(def);
           } catch (err) {
-            logger.error('job_reconcile_failed', { name: def.name }, err as Error);
+            logger.error({ err, name: def.name }, 'job_reconcile_failed');
           }
         }
       })();

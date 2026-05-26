@@ -9,12 +9,46 @@
 // (the global `requireAuth` middleware at `/api` enforces this). Every handler
 // re-checks `household.id` ownership of the plan so cross-household requests
 // 403 even with a valid session.
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { currentAuth } from '../auth/middleware';
 import { HouseholdPlan, Scenario } from '../models';
 import { computeHouseholdPlan } from '../tax/scenarios/computeHouseholdPlan';
 
 const router = Router();
+
+// Wraps an `:id` handler: parses the param, loads the plan, enforces the
+// caller's household owns it, and funnels thrown errors into `next`. Cuts the
+// 14-line auth/lookup preamble that otherwise repeats in every `:id` route.
+type OwnedPlanHandler = (
+  req: Request,
+  res: Response,
+  plan: HouseholdPlan,
+) => Promise<void>;
+
+function withOwnedPlan(handler: OwnedPlanHandler) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { household } = currentAuth(req);
+      const planId = Number(req.params.id);
+      if (!Number.isInteger(planId)) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+      const plan = await HouseholdPlan.findByPk(planId);
+      if (!plan) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+      if (plan.householdId !== household.id) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+      }
+      await handler(req, res, plan);
+    } catch (err) {
+      next(err);
+    }
+  };
+}
 
 // POST /api/tax/household-plans — create a new plan owned by the caller's
 // household. Scenario linkage is via PATCH (`addScenarioIds`); a freshly
@@ -65,82 +99,38 @@ router.get('/', async (req, res, next) => {
 // MUST be registered BEFORE `GET /:id` so Express doesn't match the literal
 // "compute" segment as the `:id` param. Same pattern as P7's `/compare` and
 // P8a's `/compare`.
-router.get('/:id/compute', async (req, res, next) => {
-  try {
-    const { household } = currentAuth(req);
-    const planId = Number(req.params.id);
-    if (!Number.isInteger(planId)) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    const plan = await HouseholdPlan.findByPk(planId);
-    if (!plan) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    if (plan.householdId !== household.id) {
-      res.status(403).json({ error: 'forbidden' });
-      return;
-    }
-    const result = await computeHouseholdPlan(planId);
+router.get(
+  '/:id/compute',
+  withOwnedPlan(async (_req, res, plan) => {
+    const result = await computeHouseholdPlan(plan.id);
     res.json(result);
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 // GET /api/tax/household-plans/:id — fetch the plan + every Scenario linked
 // to it (ordered by createdAt for stable rendering). Useful for the
 // HouseholdPlanPicker detail view.
-router.get('/:id', async (req, res, next) => {
-  try {
-    const { household } = currentAuth(req);
-    const planId = Number(req.params.id);
-    if (!Number.isInteger(planId)) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    const plan = await HouseholdPlan.findByPk(planId);
-    if (!plan) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    if (plan.householdId !== household.id) {
-      res.status(403).json({ error: 'forbidden' });
-      return;
-    }
+router.get(
+  '/:id',
+  withOwnedPlan(async (_req, res, plan) => {
     const scenarios = await Scenario.findAll({
-      where: { householdPlanId: planId },
+      where: { householdPlanId: plan.id },
       order: [['createdAt', 'ASC']],
     });
     res.json({ plan, scenarios });
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 // PATCH /api/tax/household-plans/:id — update name/notes AND/OR link
 // scenarios in/out of the plan via `addScenarioIds` / `removeScenarioIds`.
 // Linking is intentionally lax: passing IDs the caller doesn't own would
 // orphan-link them, so we filter the update through the scenarios' entities'
 // household ownership before applying.
-router.patch('/:id', async (req, res, next) => {
-  try {
+router.patch(
+  '/:id',
+  withOwnedPlan(async (req, res, plan) => {
     const { household } = currentAuth(req);
-    const planId = Number(req.params.id);
-    if (!Number.isInteger(planId)) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    const plan = await HouseholdPlan.findByPk(planId);
-    if (!plan) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    if (plan.householdId !== household.id) {
-      res.status(403).json({ error: 'forbidden' });
-      return;
-    }
+    const planId = plan.id;
 
     const updates: Partial<{ name: string; notes: string | null }> = {};
     if (req.body && 'name' in req.body) updates.name = String(req.body.name);
@@ -192,40 +182,22 @@ router.patch('/:id', async (req, res, next) => {
       );
     }
     res.json({ plan });
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 // DELETE /api/tax/household-plans/:id — delete the plan. Linked scenarios
 // stay (FK onDelete:'SET NULL' handles it; we also explicitly unlink for
 // clarity and to keep the post-delete state predictable across DB engines).
-router.delete('/:id', async (req, res, next) => {
-  try {
-    const { household } = currentAuth(req);
-    const planId = Number(req.params.id);
-    if (!Number.isInteger(planId)) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    const plan = await HouseholdPlan.findByPk(planId);
-    if (!plan) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    if (plan.householdId !== household.id) {
-      res.status(403).json({ error: 'forbidden' });
-      return;
-    }
+router.delete(
+  '/:id',
+  withOwnedPlan(async (_req, res, plan) => {
     await Scenario.update(
       { householdPlanId: null },
-      { where: { householdPlanId: planId } },
+      { where: { householdPlanId: plan.id } },
     );
     await plan.destroy();
     res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 export default router;

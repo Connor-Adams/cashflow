@@ -3,11 +3,115 @@ import { Op } from 'sequelize';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { UserCaptureToken } from '../models';
-import { currentAuth } from '../auth/middleware';
+import { currentAuth, requireAuth } from '../auth/middleware';
 import { hashCaptureToken, mintCaptureTokenPlaintext } from '../auth/captureToken';
 import { captureAuth } from '../auth/captureAuth';
-import { captureOrders } from '../import/vendorCapture';
+import { captureOrders, type CapturedOrderInput, type CaptureResult } from '../import/vendorCapture';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
+
+class CapturePayloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CapturePayloadError';
+  }
+}
+
+/**
+ * Validate a capture payload, persist the orders, and schedule the post-write
+ * enrichment backfill. Shared by the bearer-token route (live bookmarklet
+ * fetch) and the session-authed paste route (clipboard fallback when a
+ * vendor's CSP blocks the direct fetch). `sourcePrefix` distinguishes the two
+ * call sites in `external_orders.source` and in backfill logs.
+ */
+async function processCapturePayload(args: {
+  body: unknown;
+  householdId: number;
+  userId: number;
+  sourcePrefix: string;
+}): Promise<CaptureResult> {
+  const body = (args.body ?? {}) as Record<string, unknown>;
+  const vendor = String(body.vendor ?? '').trim().toLowerCase();
+  if (vendor !== 'amazon' && vendor !== 'apple') {
+    throw new CapturePayloadError('vendor must be one of: amazon, apple');
+  }
+  const ordersRaw = Array.isArray(body.orders) ? body.orders : null;
+  if (!ordersRaw || ordersRaw.length === 0) {
+    throw new CapturePayloadError('orders must be a non-empty array');
+  }
+  if (ordersRaw.length > 1000) {
+    throw new CapturePayloadError('orders cap is 1000 per request');
+  }
+
+  const orders: CapturedOrderInput[] = ordersRaw.map((raw, idx) => {
+    const o = raw as Record<string, unknown>;
+    const orderDate = String(o.orderDate ?? '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) {
+      throw new CapturePayloadError(`orders[${idx}].orderDate must be YYYY-MM-DD`);
+    }
+    // Reject inputs like '2026-13-45' that match the regex but aren't real
+    // calendar dates. SQLite would store the string as-is; downstream
+    // `new Date(...)` would crash inside the post-response setImmediate.
+    const parsed = new Date(`${orderDate}T00:00:00Z`);
+    if (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== orderDate
+    ) {
+      throw new CapturePayloadError(
+        `orders[${idx}].orderDate is not a valid calendar date: ${orderDate}`,
+      );
+    }
+    const total = Number(o.total);
+    if (!Number.isFinite(total)) {
+      throw new CapturePayloadError(`orders[${idx}].total must be a number`);
+    }
+    const items = Array.isArray(o.items) ? o.items : [];
+    return {
+      vendorOrderId: typeof o.vendorOrderId === 'string' ? o.vendorOrderId : null,
+      orderDate,
+      total,
+      currency: typeof o.currency === 'string' && o.currency.length === 3 ? o.currency : 'CAD',
+      paymentLast4:
+        typeof o.paymentLast4 === 'string' && /^\d{4}$/.test(o.paymentLast4) ? o.paymentLast4 : null,
+      items: items.map((itRaw) => {
+        const it = itRaw as Record<string, unknown>;
+        const title = String(it.title ?? '').trim();
+        return {
+          title: title || 'Unknown item',
+          quantity: typeof it.quantity === 'number' ? it.quantity : 1,
+          unitPrice: typeof it.unitPrice === 'number' ? it.unitPrice : null,
+          totalPrice: typeof it.totalPrice === 'number' ? it.totalPrice : null,
+        };
+      }),
+    };
+  });
+
+  const source = `${args.sourcePrefix}-${vendor}-v1`;
+  const result = await captureOrders({
+    householdId: args.householdId,
+    userId: args.userId,
+    vendor,
+    source,
+    orders,
+  });
+
+  // Widen by ±14 days so the enrichment sweep catches transactions that
+  // posted before / after the captured order date.
+  const dates = orders.map((o) => o.orderDate).sort();
+  if (dates.length > 0) {
+    const from = new Date(`${dates[0]}T00:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 14);
+    const to = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
+    to.setUTCDate(to.getUTCDate() + 14);
+    scheduleInternalBackfill({
+      householdId: args.householdId,
+      dateFrom: from.toISOString().slice(0, 10),
+      dateTo: to.toISOString().slice(0, 10),
+      source: `capture-${args.sourcePrefix}-${vendor}`,
+    });
+  }
+
+  return result;
+}
 
 const router = Router();
 
@@ -127,102 +231,42 @@ router.options('/orders', captureCors);
 
 router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (req, res, next) => {
   try {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const vendor = String(body.vendor ?? '').trim().toLowerCase();
-    if (vendor !== 'amazon' && vendor !== 'apple') {
-      res.status(400).json({ error: 'vendor must be one of: amazon, apple' });
-      return;
-    }
-    const ordersRaw = Array.isArray(body.orders) ? body.orders : null;
-    if (!ordersRaw || ordersRaw.length === 0) {
-      res.status(400).json({ error: 'orders must be a non-empty array' });
-      return;
-    }
-    if (ordersRaw.length > 1000) {
-      res.status(400).json({ error: 'orders cap is 1000 per request' });
-      return;
-    }
-
-    const orders = ordersRaw.map((raw, idx) => {
-      const o = raw as Record<string, unknown>;
-      const orderDate = String(o.orderDate ?? '').trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) {
-        throw new Error(`orders[${idx}].orderDate must be YYYY-MM-DD`);
-      }
-      // Reject inputs like '2026-13-45' that match the regex but aren't real
-      // calendar dates. SQLite would store the string as-is; downstream
-      // `new Date(...)` would crash inside the post-response setImmediate.
-      const parsed = new Date(`${orderDate}T00:00:00Z`);
-      if (
-        Number.isNaN(parsed.getTime()) ||
-        parsed.toISOString().slice(0, 10) !== orderDate
-      ) {
-        throw new Error(
-          `orders[${idx}].orderDate is not a valid calendar date: ${orderDate}`,
-        );
-      }
-      const total = Number(o.total);
-      if (!Number.isFinite(total)) {
-        throw new Error(`orders[${idx}].total must be a number`);
-      }
-      const items = Array.isArray(o.items) ? o.items : [];
-      return {
-        vendorOrderId: typeof o.vendorOrderId === 'string' ? o.vendorOrderId : null,
-        orderDate,
-        total,
-        currency: typeof o.currency === 'string' && o.currency.length === 3 ? o.currency : 'CAD',
-        paymentLast4:
-          typeof o.paymentLast4 === 'string' && /^\d{4}$/.test(o.paymentLast4) ? o.paymentLast4 : null,
-        items: items.map((itRaw) => {
-          const it = itRaw as Record<string, unknown>;
-          const title = String(it.title ?? '').trim();
-          return {
-            title: title || 'Unknown item',
-            quantity: typeof it.quantity === 'number' ? it.quantity : 1,
-            unitPrice: typeof it.unitPrice === 'number' ? it.unitPrice : null,
-            totalPrice: typeof it.totalPrice === 'number' ? it.totalPrice : null,
-          };
-        }),
-      };
-    });
-
     const { user, household } = req.captureAuth!;
-    const source = `bookmarklet-${vendor}-v1`;
-    const result = await captureOrders({
+    const result = await processCapturePayload({
+      body: req.body,
       householdId: household.id,
       userId: user.id,
-      vendor,
-      source,
-      orders,
+      sourcePrefix: 'bookmarklet',
     });
-
-    // Compute the post-response backfill window BEFORE responding, so any
-    // unexpected throw here surfaces as a 400 instead of a
-    // "headers already sent" crash inside setImmediate.
-    const dates = orders.map((o) => o.orderDate).sort();
-    let dateFrom: string | null = null;
-    let dateTo: string | null = null;
-    if (dates.length > 0) {
-      const from = new Date(`${dates[0]}T00:00:00Z`);
-      from.setUTCDate(from.getUTCDate() - 14);
-      const to = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
-      to.setUTCDate(to.getUTCDate() + 14);
-      dateFrom = from.toISOString().slice(0, 10);
-      dateTo = to.toISOString().slice(0, 10);
-    }
-
     res.json(result);
-
-    if (dateFrom && dateTo) {
-      scheduleInternalBackfill({
-        householdId: household.id,
-        dateFrom,
-        dateTo,
-        source: `capture-${vendor}`,
-      });
-    }
   } catch (e) {
-    if (e instanceof Error && /orders\[\d+\]/.test(e.message)) {
+    if (e instanceof CapturePayloadError) {
+      res.status(400).json({ error: e.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+/**
+ * Session-authed paste fallback. When a vendor page's CSP blocks the
+ * bookmarklet's direct fetch (e.g. reportaproblem.apple.com), the bookmarklet
+ * copies the orders JSON to the clipboard and the user pastes it into the
+ * Settings → Imports UI, which posts here. Same payload shape as /orders, but
+ * authenticated by session cookie instead of a bearer capture token.
+ */
+router.post('/orders-from-paste', requireAuth, async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const result = await processCapturePayload({
+      body: req.body,
+      householdId: household.id,
+      userId: user.id,
+      sourcePrefix: 'bookmarklet-paste',
+    });
+    res.json(result);
+  } catch (e) {
+    if (e instanceof CapturePayloadError) {
       res.status(400).json({ error: e.message });
       return;
     }

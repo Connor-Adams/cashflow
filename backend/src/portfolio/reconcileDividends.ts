@@ -198,21 +198,21 @@ export async function reconcileDividendsForSecurity(
       } catch (err) {
         // Race: another reconcile-and-insert path may have just landed
         // the same row. Surface for observability but don't fail the run.
-        logger.warn('av_dividend_reconcile_insert_failed', {
+        logger.warn({
           accountId,
           securityId,
           exDate: ev.exDividendDate,
           error: err instanceof Error ? err.message : String(err),
-        });
+        }, 'av_dividend_reconcile_insert_failed');
       }
     }
   }
 
   if (result.inserted > 0) {
-    logger.info('av_dividend_reconcile_completed', {
+    logger.info({
       securityId,
       ...result,
-    });
+    }, 'av_dividend_reconcile_completed');
   }
   return result;
 }

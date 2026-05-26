@@ -37,7 +37,7 @@ export async function withAdvisoryLock<T>(
     )) as [Array<{ locked: boolean }>, unknown];
     acquired = Boolean(rows[0]?.locked);
   } catch (err) {
-    logger.error('job_lock_query_failed', { name }, err as Error);
+    logger.error({ err, name }, 'job_lock_query_failed');
     return { acquired: false };
   }
   if (!acquired) return { acquired: false };
@@ -50,7 +50,7 @@ export async function withAdvisoryLock<T>(
         replacements: [key],
       });
     } catch (err) {
-      logger.error('job_lock_release_failed', { name }, err as Error);
+      logger.error({ err, name }, 'job_lock_release_failed');
     }
   }
 }

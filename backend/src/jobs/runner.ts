@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { Job } from '../models';
 import { logger } from '../observability/logger';
+import { withContext } from '../observability/requestContext';
 import { resolveJobConfig } from './configResolver';
 import { withAdvisoryLock } from './pgLock';
 import type { JobDefinition, JobStatus } from './types';
@@ -41,7 +43,7 @@ async function upsertState(
     });
     await row.update(patch);
   } catch (err) {
-    logger.error('job_state_persist_failed', { name }, err as Error);
+    logger.error({ err, name }, 'job_state_persist_failed');
   }
 }
 
@@ -53,6 +55,10 @@ export interface TickOutcome {
 }
 
 export async function tick(def: JobDefinition): Promise<TickOutcome> {
+  return withContext({ jobName: def.name, tickId: randomUUID() }, () => tickInner(def));
+}
+
+async function tickInner(def: JobDefinition): Promise<TickOutcome> {
   const startedAt = new Date();
   const cfg = await resolveJobConfig(def);
   if (!cfg.enabled) {
@@ -107,7 +113,7 @@ export async function tick(def: JobDefinition): Promise<TickOutcome> {
       lastError: null,
       lastResultJson,
     });
-    logger.info('job_tick_ok', { name: def.name, durationMs });
+    logger.info({ name: def.name, durationMs }, 'job_tick_ok');
     return { status: 'ok', durationMs, result: summary };
   } catch (err) {
     const durationMs = Date.now() - t0;
@@ -118,7 +124,7 @@ export async function tick(def: JobDefinition): Promise<TickOutcome> {
       lastDurationMs: durationMs,
       lastError: truncate(message, ERROR_MAX),
     });
-    logger.error('job_tick_failed', { name: def.name, durationMs }, err as Error);
+    logger.error({ err, name: def.name, durationMs }, 'job_tick_failed');
     return { status: 'error', durationMs, error: message };
   } finally {
     runningTicks.delete(def.name);

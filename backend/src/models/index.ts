@@ -13,6 +13,7 @@ import { Contact, initContact } from './Contact';
 import { Category, initCategory } from './Category';
 import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
 import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
+import { BudgetExclusion, initBudgetExclusion } from './BudgetExclusion';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ChatThread, initChatThread } from './ChatThread';
 import { ChatMessage, initChatMessage } from './ChatMessage';
@@ -55,6 +56,8 @@ import { registerDailySnapshotStaleHooks } from '../hooks/dailySnapshotStaleHook
 import { Scenario, initScenario } from './Scenario';
 import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
+import { Insight, initInsight } from './Insight';
+import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -65,6 +68,7 @@ initContact(sequelize);
 initCategory(sequelize);
 initPartnerSettlement(sequelize);
 initBudgetTarget(sequelize);
+initBudgetExclusion(sequelize);
 initAccount(sequelize);
 initRule(sequelize);
 initTransaction(sequelize);
@@ -106,6 +110,8 @@ registerDailySnapshotStaleHooks(sequelize);
 initScenario(sequelize);
 initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
+initInsight(sequelize);
+initPlannedEvent(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -196,6 +202,20 @@ Household.hasMany(BudgetTarget, {
   as: 'budgetTargets',
 });
 BudgetTarget.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+BudgetTarget.hasMany(BudgetExclusion, {
+  foreignKey: 'budget_id',
+  as: 'exclusions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetExclusion.belongsTo(BudgetTarget, {
+  foreignKey: 'budget_id',
+  as: 'budget',
+});
+BudgetExclusion.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
 Rule.hasMany(Transaction, {
   foreignKey: 'applied_rule_id',
   as: 'appliedTransactions',
@@ -293,6 +313,41 @@ HouseholdPlan.hasMany(Scenario, {
   as: 'scenarios',
 });
 
+Household.hasMany(PlannedEvent, {
+  foreignKey: 'household_id',
+  as: 'plannedEvents',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+PlannedEvent.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(PlannedEvent, {
+  foreignKey: 'user_id',
+  as: 'plannedEvents',
+});
+PlannedEvent.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+Account.hasMany(PlannedEvent, {
+  foreignKey: 'account_id',
+  as: 'plannedEvents',
+});
+PlannedEvent.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+Transaction.hasMany(PlannedEvent, {
+  foreignKey: 'linked_transaction_id',
+  as: 'plannedEvents',
+});
+PlannedEvent.belongsTo(Transaction, {
+  foreignKey: 'linked_transaction_id',
+  as: 'linkedTransaction',
+});
+
 export {
   sequelize,
   User,
@@ -304,6 +359,7 @@ export {
   Category,
   PartnerSettlement,
   BudgetTarget,
+  BudgetExclusion,
   Account,
   Rule,
   Transaction,
@@ -343,4 +399,6 @@ export {
   Scenario,
   ScenarioReturn,
   HouseholdPlan,
+  Insight,
+  PlannedEvent,
 };

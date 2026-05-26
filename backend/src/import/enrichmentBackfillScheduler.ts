@@ -76,9 +76,8 @@ export async function runEnrichmentBackfillTick(
         householdsProcessed += 1;
       } catch (err) {
         logger.error(
+          { err, householdId: hh.id },
           'enrichment_backfill_cron_household_failed',
-          { householdId: hh.id },
-          err instanceof Error ? err : new Error(String(err)),
         );
       }
     }

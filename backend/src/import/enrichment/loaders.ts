@@ -103,10 +103,12 @@ export async function loadRelationshipCandidates(
     merchantClean: string;
     finalCategory: string | null;
     finalBusiness: number;
+    sourceReference: string | null;
   }>(
     `SELECT id, account_id AS "accountId", CAST(amount AS REAL) AS amount, date,
             merchant_clean AS "merchantClean", final_category AS "finalCategory",
-            final_business AS "finalBusiness"
+            final_business AS "finalBusiness",
+            source_reference AS "sourceReference"
        FROM transactions
        WHERE account_id IN (${placeholders})
          AND date BETWEEN ? AND ?
@@ -124,5 +126,6 @@ export async function loadRelationshipCandidates(
     merchantClean: r.merchantClean,
     finalCategory: r.finalCategory,
     finalBusiness: Boolean(r.finalBusiness),
+    sourceReference: r.sourceReference ?? null,
   }));
 }

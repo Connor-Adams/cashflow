@@ -19,6 +19,9 @@ import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
 import settlementsRouter from './routes/settlements';
 import budgetsRouter from './routes/budgets';
+import insightsRouter from './routes/insights';
+import plannedEventsRouter from './routes/plannedEvents';
+import forecastRouter from './routes/forecast';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
@@ -36,6 +39,7 @@ import jobsRouter from './jobs/api';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
+import { withContext } from './observability/requestContext';
 
 const app = express();
 
@@ -65,6 +69,20 @@ app.use(
 app.use(requestLogger);
 app.use(express.json({ limit: '2mb' }));
 app.use(attachAuth);
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  if (req.auth) {
+    withContext(
+      {
+        userId: String(req.auth.user.id),
+        householdId: String(req.auth.household.id),
+        role: req.auth.role,
+      },
+      () => next(),
+    );
+  } else {
+    next();
+  }
+});
 
 app.use('/api/health', healthRouter);
 app.use('/api/version', versionRouter);
@@ -81,6 +99,9 @@ app.use('/api/contacts', contactsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/settlements', settlementsRouter);
 app.use('/api/budgets', budgetsRouter);
+app.use('/api/insights', insightsRouter);
+app.use('/api/planned-events', plannedEventsRouter);
+app.use('/api/forecast', forecastRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
@@ -147,13 +168,13 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     householdId: _req.auth?.household.id,
   };
   if (responseStatus >= 500) {
-    logger.error('request_failed', requestContext, err);
+    logger.error({ ...requestContext, err }, 'request_failed');
   } else {
-    logger.warn('request_failed', {
+    logger.warn({
       ...requestContext,
       errorName: err instanceof Error ? err.name : undefined,
       errorMessage: err instanceof Error ? err.message : undefined,
-    });
+    }, 'request_failed');
   }
   if (code === 'LIMIT_FILE_SIZE') {
     res.status(400).json({ error: 'File too large (max 15MB)' });

@@ -1,10 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { logger } from '../observability/logger';
 import { Op } from 'sequelize';
 import type { Account as AccountModel } from '../models/Account';
 import {
   sequelize,
   Account,
+  Entity,
   HoldingSnapshot,
   Transaction,
   ImportHistory,
@@ -667,8 +669,7 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: n
     }
     return true;
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`[enrichment] ai-batch post-update failed for txn ${c.txnId}`, err instanceof Error ? err.message : err);
+    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');
     return false;
   }
 }
@@ -987,7 +988,36 @@ const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
   'Individual RRSP': { name: 'Questrade RRSP', accountType: 'investment' },
   'Individual Cash': { name: 'Questrade Cash', accountType: 'investment' },
   'Questrade Investment': { name: 'Questrade Investment', accountType: 'investment' },
+  'Wise CAD': { name: 'Wise CAD', accountType: 'checking' },
+  'Wise USD': { name: 'Wise USD', accountType: 'checking' },
+  'Wise GBP': { name: 'Wise GBP', accountType: 'checking' },
+  'Wise EUR': { name: 'Wise EUR', accountType: 'checking' },
 };
+
+// Corp entity suffix patterns (Inc., Corp., Ltd., LLC, GmbH, Pty, S.A.). When a
+// PDF header's accountHolder matches one of these, the bundle importer
+// find-or-creates a `kind='corp'` Entity and stamps every committed
+// transaction `autoBusiness=true` via `overrideBusiness`.
+const CORP_HOLDER_RE = /(?:\bInc\.?|\bCorp\.?|\bCorporation\b|\bLtd\.?|\bLLC\b|\bLLP\b|\bGmbH\b|\bPty\b|\bS\.A\.)/i;
+
+export async function resolveEntityForHolder(
+  holder: string | null | undefined,
+  householdId: number,
+): Promise<InstanceType<typeof Entity> | null> {
+  if (!holder) return null;
+  const trimmed = holder.trim();
+  if (!trimmed) return null;
+  const existing = await Entity.findOne({
+    where: { householdId, legalName: trimmed },
+  });
+  if (existing) return existing;
+  if (!CORP_HOLDER_RE.test(trimmed)) return null;
+  return Entity.create({
+    householdId,
+    kind: 'corp',
+    legalName: trimmed,
+  });
+}
 
 function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult {
   return {
@@ -1063,6 +1093,10 @@ export async function importPdfBundleFile(opts: {
       accountType: header.accountType,
     };
 
+  const headerCurrency = header.currency ?? 'CAD';
+  const entity = await resolveEntityForHolder(header.accountHolder, opts.householdId);
+  const overrideBusiness = entity?.kind === 'corp';
+
   const [account, accountCreated] = await Account.findOrCreate({
     where: { householdId: opts.householdId, shortCode: header.accountSuffix },
     defaults: {
@@ -1071,17 +1105,22 @@ export async function importPdfBundleFile(opts: {
       accountType: template.accountType,
       owner: 'me',
       visibility: 'private',
-      defaultCurrency: 'CAD',
+      defaultCurrency: headerCurrency,
       ownerUserId: opts.userId,
       shortCode: header.accountSuffix,
+      entityId: entity?.id ?? null,
     },
   });
+  if (entity && account.entityId !== entity.id) {
+    await account.update({ entityId: entity.id });
+  }
 
   const preview = await parseStatementFile({
     buffer: opts.buffer,
     fileName: file,
     accountId: account.id,
     householdId: opts.householdId,
+    overrideBusiness: overrideBusiness ? true : undefined,
   });
   if ('error' in preview) {
     return {

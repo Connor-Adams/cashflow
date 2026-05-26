@@ -21,18 +21,18 @@ async function start() {
   await seedDemoData();
 
   app.listen(env.port, () => {
-    logger.info('server_started', {
+    logger.info({
       port: env.port,
       nodeEnv: env.nodeEnv,
       uploadDir,
       receiptStorage: isS3ReceiptStorageEnabled() ? 's3' : 'local',
-    });
+    }, 'server_started');
   });
 
   await startAllJobs();
 }
 
 start().catch((err) => {
-  logger.error('server_start_failed', { port: env.port }, err);
+  logger.error({ err, port: env.port }, 'server_start_failed');
   process.exit(1);
 });
