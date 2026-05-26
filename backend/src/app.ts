@@ -10,7 +10,9 @@ import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
 import recurringRouter from './routes/recurring';
+import subscriptionsRouter from './routes/subscriptions';
 import aiRouter from './routes/ai';
+import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
@@ -23,6 +25,7 @@ import partnerRouter from './routes/partner';
 import budgetsRouter from './routes/budgets';
 import insightsRouter from './routes/insights';
 import plannedEventsRouter from './routes/plannedEvents';
+import calendarRouter from './routes/calendar';
 import goalsRouter from './routes/goals';
 import forecastRouter from './routes/forecast';
 import clientLogsRouter from './routes/clientLogs';
@@ -106,16 +109,19 @@ app.use('/api/partner', partnerRouter);
 app.use('/api/budgets', budgetsRouter);
 app.use('/api/insights', insightsRouter);
 app.use('/api/planned-events', plannedEventsRouter);
+app.use('/api/calendar', calendarRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/forecast', forecastRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai
 // prefix to satisfy the issue's endpoint spec.
 app.use('/api/ai', aiReviewRouter);
 app.use('/api/ai', aiRouter);
+app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/amazon', amazonRouter);
 app.use('/api/external-orders', externalOrdersRouter);

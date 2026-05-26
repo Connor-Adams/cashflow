@@ -1,6 +1,6 @@
 // backend/src/tax/scenarios/computeHouseholdPlan.ts
 import { Entity, HouseholdPlan, Scenario } from '../../models';
-import { D } from '../util/decimal';
+import { D, type Decimal } from '../util/decimal';
 import { computeCorpScenario, type ComputeCorpScenarioResult } from './computeCorpScenario';
 import { computeScenario, type ComputeScenarioResult } from './computeScenario';
 import {
@@ -16,12 +16,17 @@ import {
   type IntercorpDistribution,
   type IntercorpRouterOutput,
 } from './intercorpRouter';
+import {
+  spouseRouter,
+  type SpouseRouterOutput,
+  type SpouseRouterPersonalInput,
+} from './spouseRouter';
 import { resolveCorpScenario } from './resolveCorpScenario';
 import { resolveScenario } from './resolveScenario';
 import { buildT1 } from '../engine/t1';
 import { buildT2 } from '../engine/t2';
 import { ratesFor } from '../engine/brackets';
-import type { CorpTaxYearFacts } from '../engine/types';
+import type { CorpTaxYearFacts, TaxYearFacts } from '../engine/types';
 
 export interface HouseholdPlanComputeResult {
   planId: number;
@@ -29,7 +34,17 @@ export interface HouseholdPlanComputeResult {
   personal: Array<{ scenario: Scenario; computed: ComputeScenarioResult }>;
   intercorp: IntercorpRouterOutput;
   integration: IntegrationRouterOutput;
+  /**
+   * P10: spouseRouter output kept in its own bucket (parallel to `integration`)
+   * so router-specific warnings remain attributable. Shifts are applied to
+   * personal T1s inside the orchestrator; consumers can use `byEntityId` for
+   * reconciliation / UI display.
+   */
+  spouse: SpouseRouterOutput;
 }
+
+/** Spouse-router shift amounts already applied to a personal scenario's T1. */
+type SpouseShift = SpouseRouterOutput['byEntityId'][number];
 
 const OWNER_COMP_RE =
   /^ownerComp\.(\d+)\.(salary|bonus|eligibleDividend|nonEligibleDividend|capitalDividend)$/;
@@ -128,56 +143,77 @@ function buildRouterInputs(corp: CorpResult[]): {
 
 // Merge an `IncomeItem`-shaped row into one of the personal facts arrays. The
 // router emits a single per-source aggregate per addition kind, so we append
-// at most one row per call.
-async function buildIntegratedPersonalFacts(
-  scenario: Scenario,
-  additions: PersonalAdditions,
-): Promise<Awaited<ReturnType<typeof resolveScenario>>> {
-  const baseFacts = await resolveScenario(scenario.id);
-  const factsPlus = { ...baseFacts };
-  if (additions.employmentIncome.greaterThan(0)) {
-    factsPlus.employmentIncome = [
-      ...factsPlus.employmentIncome,
-      {
-        source: 'integration:routed-salary',
-        amount: additions.employmentIncome,
-        cadAmount: additions.employmentIncome,
-      },
-    ];
+// at most one row per call. Optionally folds in spouseRouter shifts: a positive
+// IncomeItem for `pensionSplitTransferIn` and a negative IncomeItem for
+// `pensionSplitTransferOut` (negative `cadAmount` subtracts via sum in
+// `buildT1`'s computed-employment path on L10100).
+function applyAdditionsAndShifts(
+  baseFacts: TaxYearFacts,
+  additions: PersonalAdditions | null,
+  shift: SpouseShift | null,
+): TaxYearFacts {
+  const factsPlus: TaxYearFacts = { ...baseFacts };
+  const employmentExtras = [...factsPlus.employmentIncome];
+
+  if (additions && additions.employmentIncome.greaterThan(0)) {
+    employmentExtras.push({
+      source: 'integration:routed-salary',
+      amount: additions.employmentIncome,
+      cadAmount: additions.employmentIncome,
+    });
   }
-  if (additions.eligibleDividends.greaterThan(0)) {
-    factsPlus.eligibleDividends = [
-      ...factsPlus.eligibleDividends,
-      {
-        source: 'integration:routed-eligible-div',
-        amount: additions.eligibleDividends,
-        cadAmount: additions.eligibleDividends,
-      },
-    ];
+  if (shift && shift.pensionSplitTransferIn.greaterThan(0)) {
+    employmentExtras.push({
+      source: 'spouseRouter:pensionSplit.transferIn',
+      amount: shift.pensionSplitTransferIn,
+      cadAmount: shift.pensionSplitTransferIn,
+    });
   }
-  if (additions.nonEligibleDividends.greaterThan(0)) {
-    factsPlus.nonEligibleDividends = [
-      ...factsPlus.nonEligibleDividends,
-      {
-        source: 'integration:routed-non-eligible-div',
-        amount: additions.nonEligibleDividends,
-        cadAmount: additions.nonEligibleDividends,
-      },
-    ];
+  if (shift && shift.pensionSplitTransferOut.greaterThan(0)) {
+    const out = shift.pensionSplitTransferOut.negated();
+    employmentExtras.push({
+      source: 'spouseRouter:pensionSplit.transferOut',
+      amount: out,
+      cadAmount: out,
+    });
+  }
+  factsPlus.employmentIncome = employmentExtras;
+
+  if (additions) {
+    if (additions.eligibleDividends.greaterThan(0)) {
+      factsPlus.eligibleDividends = [
+        ...factsPlus.eligibleDividends,
+        {
+          source: 'integration:routed-eligible-div',
+          amount: additions.eligibleDividends,
+          cadAmount: additions.eligibleDividends,
+        },
+      ];
+    }
+    if (additions.nonEligibleDividends.greaterThan(0)) {
+      factsPlus.nonEligibleDividends = [
+        ...factsPlus.nonEligibleDividends,
+        {
+          source: 'integration:routed-non-eligible-div',
+          amount: additions.nonEligibleDividends,
+          cadAmount: additions.nonEligibleDividends,
+        },
+      ];
+    }
   }
   // Note: capitalDividendsReceived are tax-free pass-through — surface on the
   // integration output but do not inject into T1 (no taxable line).
   return factsPlus;
 }
 
-// Personal scenarios with routed additions skip the scenario_returns cache —
-// see file-level cache-behavior note. Build T1 directly with the integrated
-// facts and synthesize a ComputeScenarioResult around the engine output.
-async function computeIntegratedPersonal(
+// Personal scenarios with routed additions or spouse shifts skip the
+// scenario_returns cache — see file-level cache-behavior note. Build T1
+// directly with the integrated facts and synthesize a ComputeScenarioResult
+// around the engine output.
+function computeIntegratedPersonalFromFacts(
   scenario: Scenario,
-  additions: PersonalAdditions,
-): Promise<ComputeScenarioResult> {
-  const factsPlus = await buildIntegratedPersonalFacts(scenario, additions);
+  factsPlus: TaxYearFacts,
+): ComputeScenarioResult {
   const engineReturn = buildT1(factsPlus, ratesFor(scenario.year));
   return {
     scenarioId: scenario.id,
@@ -246,8 +282,9 @@ function computeIntercorpReceiverCorp(
  * computes corp scenarios (corps receiving routed divs build T2 directly with
  * the injected received-div facts; others use the cached path), extracts
  * ownerComp plans from corp overrides, runs the integration router to derive
- * per-shareholder additions, then computes each personal scenario with those
- * additions injected into its facts.
+ * per-shareholder additions, runs the spouseRouter to derive cross-spouse
+ * pension-split shifts, then computes each personal scenario with both flows
+ * injected into its facts.
  *
  * Cache behavior — intentional asymmetry vs `computeScenario` / `computeCorpScenario`:
  *  - Corp scenarios that DON'T receive routed intercorp divs go through
@@ -258,14 +295,20 @@ function computeIntercorpReceiverCorp(
  *    (which other corps are linked + their `intercorp.*` overrides) so the
  *    facts hash wouldn't capture it. `computed.cached` is always false; the
  *    `factsHash` sentinel is `'household-intercorp'`.
- *  - Personal scenarios with NO routed additions also use the cache via
- *    `computeScenario` (cheap, deterministic on facts).
- *  - Personal scenarios WITH routed additions skip the cache and call
- *    `buildT1` directly because the integrated facts depend on plan-wide
- *    inputs (which corp scenarios are linked + their ownerComp overrides).
- *    Caching that result would require keying on plan_id + every corp scenario
- *    in the plan; P9 may add plan-scoped caching when performance demands it.
- *    Returned `computed.cached` is always false in this branch.
+ *  - Personal scenarios with NO routed additions AND no spouse shifts use the
+ *    cache via `computeScenario` (cheap, deterministic on facts).
+ *  - Personal scenarios WITH integration additions OR spouse shifts skip the
+ *    cache and call `buildT1` directly because the integrated facts depend on
+ *    plan-wide inputs (which corp scenarios are linked, their ownerComp
+ *    overrides, and the spouse's pensionSplit override). Caching that result
+ *    would require keying on plan_id + every linked scenario; P9 may add
+ *    plan-scoped caching when performance demands it. Returned
+ *    `computed.cached` is always false in this branch.
+ *
+ * Router output shape (P10 choice): `spouse` lives parallel to `integration`
+ * on the result. Each router keeps its own `warnings` array so callers can
+ * attribute the source; a UI that wants a single warning list can concat
+ * `integration.warnings.concat(spouse.warnings.map(...))`.
  */
 export async function computeHouseholdPlan(
   planId: number,
@@ -281,6 +324,7 @@ export async function computeHouseholdPlan(
       personal: [],
       intercorp: { byReceiverEntityId: {}, warnings: [] },
       integration: { byShareholder: {}, warnings: [] },
+      spouse: { byEntityId: {}, warnings: [] },
     };
   }
 
@@ -288,6 +332,7 @@ export async function computeHouseholdPlan(
   const entityIds = Array.from(new Set(scenarios.map((s) => s.entityId)));
   const entities = await Entity.findAll({ where: { id: entityIds } });
   const entityKindById = new Map(entities.map((e) => [e.id, e.kind]));
+  const entityById = new Map(entities.map((e) => [e.id, e]));
   const corpScenarios = scenarios.filter((s) => entityKindById.get(s.entityId) === 'corp');
   const personalScenarios = scenarios.filter(
     (s) => entityKindById.get(s.entityId) === 'personal',
@@ -346,22 +391,47 @@ export async function computeHouseholdPlan(
   //    shareholder additions + GRIP / CDA cap warnings.
   const integration = integrationRouter(buildRouterInputs(corp));
 
-  // 5. Compute personal scenarios. If the integration router emitted additions
-  //    for this entity, inject them as IncomeItems and run buildT1 directly
-  //    (skipping the scenario_returns cache — see header comment). Otherwise
-  //    fall back to the standard cache path via computeScenario.
+  // 5. Pre-resolve facts for every personal scenario (one resolve per scenario;
+  //    reused by both the spouseRouter input + the T1 build below).
+  const resolvedPersonalFacts = new Map<number, TaxYearFacts>();
+  for (const ps of personalScenarios) {
+    resolvedPersonalFacts.set(ps.id, await resolveScenario(ps.id));
+  }
+
+  // 6. Build spouseRouter inputs and run it. `pensionSplitTransferOut` comes
+  //    from `facts.pensionSplit?.transferAmount` (stamped by the override
+  //    key); `spouseEntityId` comes from the Entity row.
+  const spouseInputs: SpouseRouterPersonalInput[] = personalScenarios.map((ps) => {
+    const facts = resolvedPersonalFacts.get(ps.id)!;
+    const transferOut: Decimal = facts.pensionSplit?.transferAmount ?? D('0');
+    return {
+      scenarioId: ps.id,
+      entityId: ps.entityId,
+      spouseEntityId: entityById.get(ps.entityId)?.spouseEntityId ?? null,
+      pensionSplitTransferOut: transferOut,
+    };
+  });
+  const spouse = spouseRouter(spouseInputs);
+
+  // 7. Compute personal scenarios. If integration additions OR spouse shifts
+  //    apply, inject them as IncomeItems and run buildT1 directly (skipping
+  //    the scenario_returns cache — see header comment). Otherwise fall back
+  //    to the standard cache path via computeScenario.
   const personal: PersonalResult[] = [];
   for (const ps of personalScenarios) {
-    const additions = integration.byShareholder[ps.entityId];
-    if (!additions) {
+    const additions = integration.byShareholder[ps.entityId] ?? null;
+    const shift = spouse.byEntityId[ps.entityId] ?? null;
+    if (additions === null && shift === null) {
       personal.push({ scenario: ps, computed: await computeScenario(ps.id) });
       continue;
     }
+    const baseFacts = resolvedPersonalFacts.get(ps.id)!;
+    const factsPlus = applyAdditionsAndShifts(baseFacts, additions, shift);
     personal.push({
       scenario: ps,
-      computed: await computeIntegratedPersonal(ps, additions),
+      computed: computeIntegratedPersonalFromFacts(ps, factsPlus),
     });
   }
 
-  return { planId, corp, personal, intercorp, integration };
+  return { planId, corp, personal, intercorp, integration, spouse };
 }

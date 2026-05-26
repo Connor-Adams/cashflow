@@ -120,6 +120,8 @@ export type TaxYearFacts = {
   spouse?: {
     netIncome: Decimal;
   };
+  /** P10: pension-split synthetic field. Stamped by override key, read by spouseRouter. */
+  pensionSplit?: { transferAmount: Decimal };
   ageAtYearEnd: number;
 };
 

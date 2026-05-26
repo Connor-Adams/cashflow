@@ -88,3 +88,32 @@ test('apply: capgains.dispositions appends events to capitalGainEvents', () => {
   assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '100000.00');
   assert.equal(facts.capitalGainEvents[1].acb.toFixed(2), '40000.00');
 });
+
+test('registry contains P10 spouse-split personal keys', () => {
+  const keys = overrideKeyRegistry.map((k) => k.key);
+  assert.ok(keys.includes('deductions.spousalRrspContrib'));
+  assert.ok(keys.includes('pensionSplit.transferAmount'));
+});
+
+test('apply: deductions.spousalRrspContrib appends an RRSP contrib with spousal source tag', () => {
+  const entry = getOverrideKey('deductions.spousalRrspContrib')!;
+  assert.equal(entry.kind, 'personal');
+  entry.validate(8000);
+  // Seed with an existing personal RRSP contrib to verify spousal appends rather than replaces.
+  const base = emptyFacts();
+  base.rrspContribs = [{ source: 'override:deductions.rrspContrib', amount: D('5000'), date: '' }];
+  const facts = entry.apply(base, 8000);
+  assert.equal(facts.rrspContribs.length, 2);
+  assert.equal(facts.rrspContribs[0].source, 'override:deductions.rrspContrib');
+  assert.equal(facts.rrspContribs[1].source, 'override:deductions.spousalRrspContrib');
+  assert.equal(facts.rrspContribs[1].amount.toFixed(2), '8000.00');
+});
+
+test('apply: pensionSplit.transferAmount stamps synthetic pensionSplit field on facts', () => {
+  const entry = getOverrideKey('pensionSplit.transferAmount')!;
+  assert.equal(entry.kind, 'personal');
+  entry.validate(15000);
+  const facts = entry.apply(emptyFacts(), 15000);
+  assert.ok(facts.pensionSplit, 'pensionSplit should be set');
+  assert.equal(facts.pensionSplit!.transferAmount.toFixed(2), '15000.00');
+});
