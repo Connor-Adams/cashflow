@@ -24,6 +24,8 @@ export type EnvConfig = {
   forwardIncomeCron: string;
   dailySnapshotEnabled: boolean;
   dailySnapshotCron: string;
+  enrichmentBackfillEnabled: boolean;
+  enrichmentBackfillCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -123,6 +125,11 @@ export function loadEnvConfig(
   const forwardIncomeCron = e.FORWARD_INCOME_CRON?.trim() || '0 2 * * *';
   const dailySnapshotEnabled = parseDailySnapshotEnabled(e.DAILY_SNAPSHOT_ENABLED, nodeEnv);
   const dailySnapshotCron = e.DAILY_SNAPSHOT_CRON?.trim() || '0 3 * * *';
+  const enrichmentBackfillEnabled = parseEnrichmentBackfillEnabled(
+    e.ENRICHMENT_BACKFILL_ENABLED,
+    nodeEnv,
+  );
+  const enrichmentBackfillCron = e.ENRICHMENT_BACKFILL_CRON?.trim() || '0 4 * * *';
 
   return {
     csvUploadDir,
@@ -143,6 +150,8 @@ export function loadEnvConfig(
     forwardIncomeCron,
     dailySnapshotEnabled,
     dailySnapshotCron,
+    enrichmentBackfillEnabled,
+    enrichmentBackfillCron,
   };
 }
 
@@ -200,6 +209,17 @@ export function parseDailySnapshotEnabled(raw: string | undefined, nodeEnv: stri
   return true;
 }
 
+export function parseEnrichmentBackfillEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -231,6 +251,8 @@ export const forwardIncomeEnabled = resolved.forwardIncomeEnabled;
 export const forwardIncomeCron = resolved.forwardIncomeCron;
 export const dailySnapshotEnabled = resolved.dailySnapshotEnabled;
 export const dailySnapshotCron = resolved.dailySnapshotCron;
+export const enrichmentBackfillEnabled = resolved.enrichmentBackfillEnabled;
+export const enrichmentBackfillCron = resolved.enrichmentBackfillCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];

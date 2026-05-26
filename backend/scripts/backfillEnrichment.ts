@@ -15,6 +15,8 @@
  *   --batch-size N             fetch batch size (default 100)
  *   --date-from YYYY-MM-DD     only re-enrich txns on/after this date
  *   --date-to YYYY-MM-DD       only re-enrich txns on/before this date
+ *   --merchant-pattern STR     only re-enrich txns whose merchantClean or
+ *                              merchantRaw contains STR (case-insensitive)
  *   --verbose                  print per-row decision
  *
  * Usage on Railway:
@@ -48,6 +50,7 @@ function parseFlags(argv: string[]): BackfillFlags {
     batchSize: intFlag('--batch-size') ?? 100,
     dateFrom: strFlag('--date-from'),
     dateTo: strFlag('--date-to'),
+    merchantPattern: strFlag('--merchant-pattern'),
   };
 }
 
