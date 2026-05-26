@@ -47,23 +47,29 @@ cd infra && docker compose down -v
 
 ## Railway setup (one-time)
 
-In the cashflow Railway project:
+The backend and frontend deploy as GHCR images, not source builds. The new observability services follow the same pattern — `build-images.yml` publishes images to GHCR on every merge to `main`; `promote-to-production.yml` retags `:sha-XXX` as `:production` on each GitHub release and triggers `railway redeploy`.
 
-1. **Create the `loki` service.**
-   - New Service → "Empty" → Connect repository → Root directory: `infra/loki/`.
+To onboard:
+
+1. **Create the `loki` Railway service.**
+   - New Service → "Deploy from Docker image".
+   - Image: `ghcr.io/connor-adams/cashflow-loki:main` (initially) — bump to `:production` once a release has tagged it.
    - Add a persistent volume, mount at `/loki`, size 10GB.
-   - Set service domain / private networking name to `loki` (Railway internal).
+   - Set service name to `loki` (Railway will expose it as `loki.railway.internal` in private networking).
    - Deploy.
 
-2. **Create the `otel-collector` service.**
-   - New Service → "Empty" → Connect repository → Root directory: `infra/otel-collector/`.
+2. **Create the `otel-collector` Railway service.**
+   - New Service → "Deploy from Docker image".
+   - Image: `ghcr.io/connor-adams/cashflow-otel-collector:main` (or `:production`).
    - Env vars:
-     - `LOKI_HOST=loki.railway.internal` (or whatever Railway shows for the loki service's internal hostname)
+     - `LOKI_HOST=loki.railway.internal`
      - `PUBLIC_FRONTEND_ORIGIN=cashflow.<your-domain>` (frontend origin without protocol)
    - Expose port 4318 publicly (for browser OTLP later) AND internally (for the backend).
    - Deploy.
 
-3. **Update `cashflow-backend` env vars.**
+3. **Add the two service IDs to `.github/workflows/promote-to-production.yml`** so future releases auto-redeploy them. Copy the IDs from the Railway dashboard URL of each service. Open a follow-up PR with the two `env:` values filled in.
+
+4. **Update `cashflow-backend` env vars.**
    - `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.railway.internal:4318`
    - `GIT_SHA=${{RAILWAY_GIT_COMMIT_SHA}}`
    - Redeploy.
