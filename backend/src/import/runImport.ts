@@ -938,10 +938,10 @@ export async function importWsBundleFile(opts: {
   };
 }
 
-// ─── RBC PDF bundle import ──────────────────────────────────────────────────
+// ─── PDF bundle import (RBC, CIBC, Questrade) ───────────────────────────────
 
-/** Per-file result emitted by `importRbcBundleFile`. */
-export type RbcBundleFileResult = {
+/** Per-file result emitted by `importPdfBundleFile`. */
+export type PdfBundleFileResult = {
   file: string;
   accountSuffix: string | null;
   productLabel: string | null;
@@ -959,18 +959,18 @@ export type RbcBundleFileResult = {
   error?: string;
 };
 
-type RbcAccountTemplate = {
+type PdfAccountTemplate = {
   name: string;
   accountType: 'checking' | 'savings' | 'credit_card' | 'investment' | 'loan';
 };
 
 /**
- * Maps the productLabel emitted by an RBC PDF parser's `header.productLabel`
- * to the auto-create defaults (account name + accountType). PDF body is
+ * Maps the productLabel emitted by a PDF parser's `header.productLabel` to
+ * the auto-create defaults (account name + accountType). PDF body is
  * authoritative — filename hints (e.g. "Chequing-4660" which is actually an
  * eSavings) are ignored at this step.
  */
-const RBC_ACCOUNT_TEMPLATES: Record<string, RbcAccountTemplate> = {
+const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
   'RBC Day to Day Banking': { name: 'RBC Day to Day Banking', accountType: 'checking' },
   'RBC Day to Day Savings': { name: 'RBC Day to Day Savings', accountType: 'savings' },
   'RBC High Interest eSavings': { name: 'RBC High Interest eSavings', accountType: 'savings' },
@@ -981,9 +981,15 @@ const RBC_ACCOUNT_TEMPLATES: Record<string, RbcAccountTemplate> = {
   'Royal Credit Line': { name: 'RBC Royal Credit Line', accountType: 'loan' },
   'Tax-Free Savings Account': { name: 'RBC TFSA', accountType: 'investment' },
   'Registered Disability Savings Plan': { name: 'RBC RDSP', accountType: 'investment' },
+  'Individual Margin': { name: 'Questrade Margin', accountType: 'investment' },
+  'Individual FHSA': { name: 'Questrade FHSA', accountType: 'investment' },
+  'Individual TFSA': { name: 'Questrade TFSA', accountType: 'investment' },
+  'Individual RRSP': { name: 'Questrade RRSP', accountType: 'investment' },
+  'Individual Cash': { name: 'Questrade Cash', accountType: 'investment' },
+  'Questrade Investment': { name: 'Questrade Investment', accountType: 'investment' },
 };
 
-function emptyRbcBundleResult(file: string, error: string): RbcBundleFileResult {
+function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult {
   return {
     file,
     accountSuffix: null,
@@ -1004,22 +1010,23 @@ function emptyRbcBundleResult(file: string, error: string): RbcBundleFileResult 
 }
 
 /**
- * Import a single RBC PDF statement from a bundle upload.
+ * Import a single PDF statement from a bundle upload. Works with any parser
+ * registered via `registerBuiltInPdfParsers` (RBC, CIBC, Questrade today).
  *
  * Pipeline:
  *   1. Extract PDF lines once, find the matching parser via sniff.
  *   2. Parse to get `header` (accountSuffix, productLabel, accountType, period).
  *   3. `Account.findOrCreate` keyed on `(householdId, shortCode=accountSuffix)`.
- *      The productLabel determines name + accountType from `RBC_ACCOUNT_TEMPLATES`.
+ *      The productLabel determines name + accountType from `PDF_ACCOUNT_TEMPLATES`.
  *   4. Run the standard parseStatementFile → commitStatementImport pipeline so
  *      fingerprinting / dedup / enrichment matches single-file uploads.
  */
-export async function importRbcBundleFile(opts: {
+export async function importPdfBundleFile(opts: {
   buffer: Buffer;
   fileName: string;
   householdId: number;
   userId: number;
-}): Promise<RbcBundleFileResult> {
+}): Promise<PdfBundleFileResult> {
   const file = path.basename(opts.fileName || 'statement.pdf').replace(/[\\/]/g, '');
 
   // Lazy-require to dodge the same circular-init concern as registry.ts.
@@ -1033,25 +1040,25 @@ export async function importRbcBundleFile(opts: {
   try {
     lines = await extractPdfLines(opts.buffer);
   } catch (err) {
-    return emptyRbcBundleResult(file, `Could not read PDF: ${(err as Error).message}`);
+    return emptyPdfBundleResult(file, `Could not read PDF: ${(err as Error).message}`);
   }
 
   const parser = findPdfParser(lines);
   if (!parser) {
-    return emptyRbcBundleResult(file, 'No PDF parser matched this RBC statement layout');
+    return emptyPdfBundleResult(file, 'No PDF parser matched this statement layout');
   }
   let parseOut;
   try {
     parseOut = parser.parse(lines, { defaultCurrency: 'CAD' });
   } catch (err) {
-    return emptyRbcBundleResult(file, `Parser ${parser.id} threw: ${(err as Error).message}`);
+    return emptyPdfBundleResult(file, `Parser ${parser.id} threw: ${(err as Error).message}`);
   }
   if (!parseOut.header) {
-    return emptyRbcBundleResult(file, `Parser ${parser.id} produced no header for account match`);
+    return emptyPdfBundleResult(file, `Parser ${parser.id} produced no header for account match`);
   }
   const header = parseOut.header;
   const template =
-    RBC_ACCOUNT_TEMPLATES[header.productLabel] ?? {
+    PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? {
       name: header.productLabel,
       accountType: header.accountType,
     };
@@ -1078,7 +1085,7 @@ export async function importRbcBundleFile(opts: {
   });
   if ('error' in preview) {
     return {
-      ...emptyRbcBundleResult(file, preview.error),
+      ...emptyPdfBundleResult(file, preview.error),
       accountSuffix: header.accountSuffix,
       productLabel: header.productLabel,
       accountId: account.id,
