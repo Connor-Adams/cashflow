@@ -967,24 +967,64 @@ export function DashboardPage() {
             span={12}
             rows={1}
             aria-busy={loading}
-            label="Monthly budget progress"
-            description="Spend so far this calendar month against targets in Settings. Sorted by share used."
+            label="Budget progress + pacing"
+            description="Spend so far against each budget plus how much of the period has elapsed. Tick on the bar = where you'd be if perfectly paced."
           >
             <div className="budgetPillStrip">
               {budgetProgressSorted.map((item) => {
-                // Color thresholds: under 80% is on-pace, 80-100% warns,
-                // over 100% spills to destructive. Bar fill capped at 100%
-                // width so overage doesn't break layout; the percent caption
-                // still shows the true value.
-                const tone =
-                  item.percentUsed > 100
+                // Tone prefers the backend's pacingState classification
+                // when available — it already accounts for time-elapsed,
+                // so 'ahead' surfaces the "88% spent, 62% of month done"
+                // headline. We fall back to the old percentUsed thresholds
+                // so existing tests / pre-status payloads still render
+                // sensibly.
+                const tone: 'ok' | 'warn' | 'over' = item.pacingState
+                  ? item.pacingState === 'over'
+                    ? 'over'
+                    : item.pacingState === 'ahead'
+                      ? 'warn'
+                      : 'ok'
+                  : item.percentUsed > 100
                     ? 'over'
                     : item.percentUsed >= 80
                       ? 'warn'
                       : 'ok'
                 const width = `${Math.min(100, item.percentUsed)}%`
+                const elapsedTick =
+                  typeof item.periodElapsedPercent === 'number'
+                    ? `${Math.min(100, Math.max(0, item.periodElapsedPercent))}%`
+                    : null
                 const label = item.category ?? 'Overall'
                 const percentRounded = Math.round(item.percentUsed)
+                const elapsedRounded =
+                  typeof item.periodElapsedPercent === 'number'
+                    ? Math.round(item.periodElapsedPercent)
+                    : null
+                const periodWord =
+                  item.period === 'weekly'
+                    ? 'week'
+                    : item.period === 'annual'
+                      ? 'year'
+                      : 'month'
+                // Lookup table for JIT-safe Tailwind class names. The state
+                // string comes from server data so we cannot template the
+                // class with interpolation — Tailwind won't pick it up.
+                const pacingBadgeClass: Record<string, string> = {
+                  'on-pace':
+                    'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+                  ahead:
+                    'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
+                  behind:
+                    'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200',
+                  over:
+                    'bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200',
+                }
+                const pacingLabel: Record<string, string> = {
+                  'on-pace': 'On pace',
+                  ahead: 'Ahead of pace',
+                  behind: 'Under pace',
+                  over: 'Over budget',
+                }
                 return (
                   <article
                     key={item.budgetId}
@@ -998,20 +1038,50 @@ export function DashboardPage() {
                       <span className="budgetPill__pct">{percentRounded}%</span>
                     </header>
                     <div
-                      className="budgetPill__bar"
+                      className="budgetPill__bar relative"
                       role="img"
-                      aria-label={`${label} ${percentRounded} percent of monthly target used`}
+                      aria-label={
+                        elapsedRounded !== null
+                          ? `${label}: ${percentRounded} percent of ${periodWord}'s budget used; ${elapsedRounded} percent of the ${periodWord} has elapsed.`
+                          : `${label} ${percentRounded} percent of target used`
+                      }
                     >
                       <span
                         className="budgetPill__fill"
                         style={{ width }}
                       />
+                      {elapsedTick !== null && (
+                        // Vertical tick indicating where spend "should" be
+                        // if the user were perfectly on-pace. Helps the eye
+                        // compare the filled bar's right edge to where the
+                        // period clock is at.
+                        <span
+                          className="absolute top-0 bottom-0 w-px bg-foreground/60"
+                          style={{ left: elapsedTick }}
+                          aria-hidden="true"
+                        />
+                      )}
                     </div>
                     <p className="budgetPill__amount">
                       {formatMoney(item.spent, item.currency)} /{' '}
                       {formatMoney(item.target, item.currency)}{' '}
                       <span className="budgetPill__currency">{item.currency}</span>
                     </p>
+                    {item.pacingState && elapsedRounded !== null && (
+                      <p className="budgetPill__pacing mt-1">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            pacingBadgeClass[item.pacingState] ?? ''
+                          }`}
+                        >
+                          {pacingLabel[item.pacingState] ?? item.pacingState}
+                          <span className="ml-1 opacity-75">
+                            ({percentRounded}% spent / {elapsedRounded}%{' '}
+                            {periodWord})
+                          </span>
+                        </span>
+                      </p>
+                    )}
                   </article>
                 )
               })}

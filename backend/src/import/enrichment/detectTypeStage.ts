@@ -39,6 +39,15 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
     type: 'transfer',
     re: /\b(transfer (?:to|from|in|out)|wire transfer|interac e?-?transfer|pre-?authorized (?:debit|credit)|cash (?:sent|received)|direct deposit|from chequing account|eft (?:in|out)|aft)\b/i,
   },
+  // Wise FX conversion: "Converted 5,207.60 USD to 7,084.89 CAD". Both legs of
+  // a Wise FX appear on the matching CAD + USD statements with a shared
+  // sourceReference; classifying them as transfer lets detectRelationshipsStage
+  // pair them via sourceReference (amounts differ across currencies so the
+  // amount-equality path can't catch them).
+  {
+    type: 'transfer',
+    re: /\bConverted\s+[\d.,]+\s+[A-Z]{3}\s+to\s+[\d.,]+\s+[A-Z]{3}\b/i,
+  },
   { type: 'interest', re: /\b(interest charge|interest on|finance charge|stock lending monthly interest)\b/i },
   { type: 'reward', re: /\b(cash ?back|reward|points redemption)\b/i, requireSign: 'positive' },
 ];

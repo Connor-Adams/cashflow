@@ -132,6 +132,7 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     refundWindowDays: input.refundWindowDays,
     transferWindowDays: input.transferWindowDays,
     candidates: input.relationshipCandidates,
+    sourceReference: input.raw.sourceReference,
   }), []));
 
   // Stage 9: compute-review-flag (merge)

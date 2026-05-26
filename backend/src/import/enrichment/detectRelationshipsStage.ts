@@ -8,6 +8,14 @@ export interface RelationshipCandidate {
   merchantClean: string;
   finalCategory: string | null;
   finalBusiness: boolean;
+  /**
+   * Bank-supplied transaction identifier (e.g. Wise `BALANCE-5207451832`).
+   * When two transactions share the same sourceReference across accounts they
+   * are the same logical event under different currencies — the transfer-pair
+   * linker uses this to bypass the amount-equality check that would otherwise
+   * miss FX conversions.
+   */
+  sourceReference: string | null;
 }
 
 export interface DetectRelationshipsInput {
@@ -20,6 +28,8 @@ export interface DetectRelationshipsInput {
   refundWindowDays: number;
   transferWindowDays: number;
   candidates: RelationshipCandidate[];
+  /** sourceReference of the txn being enriched (see RelationshipCandidate). */
+  sourceReference: string | null;
 }
 
 function daysBetween(a: string, b: string): number {
@@ -41,6 +51,21 @@ function findRefundOriginal(input: DetectRelationshipsInput): RelationshipCandid
 }
 
 function findTransferSibling(input: DetectRelationshipsInput): RelationshipCandidate | null {
+  // 1) sourceReference match: when both legs of a cross-account transfer carry
+  // the same bank-supplied id (e.g. Wise `BALANCE-<id>` on the matching CAD +
+  // USD statements), link regardless of amount. FX conversions move different
+  // numbers between currencies, so the equal-amount path below would miss it.
+  if (input.sourceReference) {
+    const byRef = input.candidates
+      .filter((c) => c.accountId !== input.accountId)
+      .filter((c) => input.householdAccountIds.includes(c.accountId))
+      .filter((c) => c.sourceReference != null && c.sourceReference === input.sourceReference)
+      .filter((c) => daysBetween(input.date, c.date) <= input.transferWindowDays)
+      .sort((a, b) => daysBetween(input.date, a.date) - daysBetween(input.date, b.date));
+    if (byRef[0]) return byRef[0];
+  }
+  // 2) Amount-equality fallback: same-currency transfers (e.g. RBC → WS) that
+  // move identical amounts in opposite signs within the transfer window.
   const matches = input.candidates
     .filter((c) => c.accountId !== input.accountId)
     .filter((c) => input.householdAccountIds.includes(c.accountId))

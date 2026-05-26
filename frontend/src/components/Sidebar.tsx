@@ -10,6 +10,7 @@ import {
   PackageSearch,
   CreditCard,
   ClipboardCheck,
+  Lightbulb,
   LineChart,
   LayoutDashboard,
   LogOut,
@@ -29,6 +30,7 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '../lib/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useAiInboxCount } from '@/hooks/useAiInboxCount'
+import { useInsightsCount } from '@/hooks/useInsightsCount'
 import { useAiStatus } from '@/hooks/useAiStatus'
 import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
 
@@ -54,6 +56,7 @@ const navItems: NavItem[] = [
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
   { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
+  { to: '/insights', label: 'Insights', icon: Lightbulb },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
@@ -123,6 +126,12 @@ function SidebarNavList({
   onItemClick: () => void
 }) {
   const { count: aiInboxCount } = useAiInboxCount()
+  const { count: insightsCount } = useInsightsCount()
+  function badgeFor(to: string): number {
+    if (to === '/ai/inbox') return aiInboxCount
+    if (to === '/insights') return insightsCount
+    return 0
+  }
   return (
     <nav className="sidebar__nav" aria-label="Main">
       {items.map((item) => (
@@ -130,7 +139,7 @@ function SidebarNavList({
           key={item.to}
           item={item}
           onClick={onItemClick}
-          badgeCount={item.to === '/ai/inbox' ? aiInboxCount : 0}
+          badgeCount={badgeFor(item.to)}
         />
       ))}
     </nav>
