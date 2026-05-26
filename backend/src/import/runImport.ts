@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { logger } from '../observability/logger';
 import { Op } from 'sequelize';
 import type { Account as AccountModel } from '../models/Account';
 import {
@@ -667,8 +668,7 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: n
     }
     return true;
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`[enrichment] ai-batch post-update failed for txn ${c.txnId}`, err instanceof Error ? err.message : err);
+    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');
     return false;
   }
 }

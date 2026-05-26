@@ -15,6 +15,7 @@
  * without monkey-patching the singleton.
  */
 import YahooFinance from 'yahoo-finance2';
+import { logger } from '../../observability/logger';
 import type {
   ChartEventDividend,
   ChartOptionsWithReturnArray,
@@ -250,27 +251,41 @@ function createDemotingLogger() {
       first.includes('Invalid options')
     );
   };
+  const formatArgs = (args: unknown[]): { msg: string; data?: unknown } => {
+    if (args.length === 0) return { msg: '' };
+    const [first, ...rest] = args;
+    if (typeof first === 'string') {
+      return rest.length === 0 ? { msg: first } : { msg: first, data: rest };
+    }
+    return { msg: 'yahoo_log', data: args };
+  };
   return {
     info: (...args: unknown[]) => {
+      const { msg, data } = formatArgs(args);
       if (pendingOptionsDump) {
         pendingOptionsDump = false;
-        console.warn(...args);
+        logger.warn({ source: 'yahoo-finance2', data }, `yahoo_invalid_options_dump: ${msg}`);
         return;
       }
-      console.log(...args);
+      logger.info({ source: 'yahoo-finance2', data }, msg);
     },
-    warn: (...args: unknown[]) => console.warn(...args),
+    warn: (...args: unknown[]) => {
+      const { msg, data } = formatArgs(args);
+      logger.warn({ source: 'yahoo-finance2', data }, msg);
+    },
     error: (...args: unknown[]) => {
+      const { msg, data } = formatArgs(args);
       if (isOptionsErrorHeadline(args)) {
         pendingOptionsDump = true;
-        console.warn(...args);
+        logger.warn({ source: 'yahoo-finance2', data }, `yahoo_invalid_options: ${msg}`);
         return;
       }
-      console.error(...args);
+      logger.error({ source: 'yahoo-finance2', data }, msg);
     },
     debug: (..._args: unknown[]) => {},
-    dir: (item: unknown, options?: unknown) =>
-      console.dir(item, options as Parameters<typeof console.dir>[1]),
+    dir: (item: unknown, _options?: unknown) => {
+      logger.debug({ source: 'yahoo-finance2', item }, 'yahoo_dir');
+    },
   };
 }
 

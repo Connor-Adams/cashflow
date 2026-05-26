@@ -17,7 +17,11 @@ import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { logger } from '../observability/logger';
 import { runBackfill } from '../import/runEnrichmentBackfill';
-import { backfillRunning } from '../import/backfillCoordinator';
+import {
+  backfillRunning,
+  isBackfillInFlight,
+  scheduleInternalBackfill,
+} from '../import/backfillCoordinator';
 
 const router = Router();
 
@@ -112,7 +116,67 @@ function logTransactionEvent(
   event: string,
   details: Record<string, string | number | boolean | null | undefined>
 ): void {
-  logger.info(`transactions_${event}`, details);
+  logger.info(details, `transactions_${event}`);
+}
+
+export interface MemorySnapshot {
+  reviewedAt: Date | null;
+  finalCategory: string | null;
+}
+
+/**
+ * Decides whether a patched transaction should trigger a memory-fanout
+ * re-enrich. Extracted as a pure function so it can be unit-tested without
+ * spinning up the route. Returns the request to schedule, or null when no
+ * fanout is needed.
+ */
+export function decideMemoryFanout(
+  prev: MemorySnapshot,
+  txn: {
+    householdId: number | null;
+    reviewedAt: Date | null;
+    finalCategory: string | null;
+    merchantClean: string | null;
+  },
+): { householdId: number; merchantPattern: string } | null {
+  if (txn.householdId == null) return null;
+  if (txn.reviewedAt == null) return null;
+  if (txn.finalCategory == null || txn.finalCategory === '') return null;
+  if (!txn.merchantClean) return null;
+  const wasReviewed = prev.reviewedAt != null;
+  const categoryUnchanged = prev.finalCategory === txn.finalCategory;
+  if (wasReviewed && categoryUnchanged) return null;
+  return { householdId: txn.householdId, merchantPattern: txn.merchantClean };
+}
+
+function captureMemorySnapshot(txn: InstanceType<typeof Transaction>): MemorySnapshot {
+  return {
+    reviewedAt: txn.reviewedAt,
+    finalCategory: txn.finalCategory,
+  };
+}
+
+/**
+ * findMerchantMemory queries reviewed transactions with a non-null
+ * final_category, grouped by exact merchant_clean. A patch shifts that lookup
+ * for sibling merchants when:
+ *  - the row transitions from unreviewed → reviewed, OR
+ *  - finalCategory changes on an already-reviewed row.
+ *
+ * In either case, schedule a re-enrich pass scoped to the same merchant so
+ * siblings can pick up the new memory.
+ */
+function scheduleMemoryFanoutIfNeeded(
+  prev: MemorySnapshot,
+  txn: InstanceType<typeof Transaction>,
+): void {
+  const req = decideMemoryFanout(prev, txn);
+  if (!req) return;
+  scheduleInternalBackfill({
+    householdId: req.householdId,
+    merchantPattern: req.merchantPattern,
+    source: 'memory-fanout',
+  });
 }
 
 const PATCHABLE_KEYS = [
@@ -273,6 +337,7 @@ router.post('/bulk-patch', async (req, res, next) => {
       patchKeys: Object.keys(patch).join(','),
     });
 
+    const fanoutTargets: Array<{ snap: MemorySnapshot; txn: InstanceType<typeof Transaction> }> = [];
     await sequelize.transaction(async (t) => {
       for (const id of ids) {
         const txn = await Transaction.findOne({
@@ -286,11 +351,16 @@ router.post('/bulk-patch', async (req, res, next) => {
           err.status = 404;
           throw err;
         }
+        const snap = captureMemorySnapshot(txn);
         await applyPatchBody(req, txn, patch);
         recomputeTransactionAmounts(txn);
         await txn.save({ transaction: t });
+        fanoutTargets.push({ snap, txn });
       }
     });
+    // Fire memory-fanout AFTER the outer commit so we never schedule a
+    // re-enrich for a transaction whose patch was rolled back.
+    for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
 
     logTransactionEvent('bulk_patch_completed', {
       count: ids.length,
@@ -339,6 +409,7 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
     });
 
     const updatedIds: number[] = [];
+    const fanoutTargets: Array<{ snap: MemorySnapshot; txn: InstanceType<typeof Transaction> }> = [];
     await sequelize.transaction(async (t) => {
       // Pull every matching row up front to keep the patched set deterministic
       // for the duration of the transaction. The count above also gates this
@@ -352,12 +423,15 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
         ],
       });
       for (const txn of matched) {
+        const snap = captureMemorySnapshot(txn);
         await applyPatchBody(req, txn, patch);
         recomputeTransactionAmounts(txn);
         await txn.save({ transaction: t });
         updatedIds.push(txn.id);
+        fanoutTargets.push({ snap, txn });
       }
     });
+    for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
 
     logTransactionEvent('bulk_patch_filter_completed', {
       updated: updatedIds.length,
@@ -560,10 +634,12 @@ router.patch('/:id', async (req, res, next) => {
       return;
     }
 
+    const memSnap = captureMemorySnapshot(txn);
     await applyPatchBody(req, txn, b);
 
     recomputeTransactionAmounts(txn);
     await txn.save();
+    scheduleMemoryFanoutIfNeeded(memSnap, txn);
     const aiSuggestionId = Number(b.aiSuggestionId);
     if (Number.isInteger(aiSuggestionId) && aiSuggestionId > 0) {
       await markTransactionSuggestionOutcome(req, aiSuggestionId, txn);
@@ -613,11 +689,11 @@ router.post('/:id/re-enrich', async (req, res, next) => {
       dateFrom: null,
       dateTo: null,
     });
-    logger.info('enrichment_single_reenrich', {
+    logger.info({
       householdId: txn.householdId,
       transactionId: id,
       ...result,
-    });
+    }, 'enrichment_single_reenrich');
     await txn.reload({
       include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
     });
@@ -789,7 +865,7 @@ router.get('/enrichment/stats', async (req, res, next) => {
 router.post('/enrichment/backfill', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
-    if (backfillRunning.has(household.id)) {
+    if (isBackfillInFlight(household.id)) {
       res.status(409).json({ error: 'Backfill already running for this household' });
       return;
     }
@@ -828,14 +904,14 @@ router.post('/enrichment/backfill', async (req, res, next) => {
 
     backfillRunning.add(household.id);
     const startedAt = Date.now();
-    logger.info('enrichment_backfill_started', {
+    logger.info({
       householdId: household.id,
       dryRun: flags.dryRun,
       noReviewFlag: flags.noReviewFlag,
       reviewOnly: flags.reviewOnly,
       limit: flags.limit,
       streaming: wantsStream,
-    });
+    }, 'enrichment_backfill_started');
 
     if (wantsStream) {
       res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -850,16 +926,16 @@ router.post('/enrichment/backfill', async (req, res, next) => {
           onError: (e) => emit({ kind: 'error', ...e }),
         });
         const durationMs = Date.now() - startedAt;
-        logger.info('enrichment_backfill_completed', {
+        logger.info({
           householdId: household.id,
           durationMs,
           ...result,
-        });
+        }, 'enrichment_backfill_completed');
         emit({ kind: 'summary', ...result, durationMs, dryRun: flags.dryRun });
         res.end();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error('enrichment_backfill_failed', { householdId: household.id, message });
+        logger.error({ householdId: household.id, message }, 'enrichment_backfill_failed');
         emit({ kind: 'error', message });
         res.end();
       } finally {
@@ -872,15 +948,15 @@ router.post('/enrichment/backfill', async (req, res, next) => {
     try {
       const result = await runBackfill(flags);
       const durationMs = Date.now() - startedAt;
-      logger.info('enrichment_backfill_completed', {
+      logger.info({
         householdId: household.id,
         durationMs,
         ...result,
-      });
+      }, 'enrichment_backfill_completed');
       res.json({ ...result, durationMs, dryRun: flags.dryRun });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('enrichment_backfill_failed', { householdId: household.id, message });
+      logger.error({ householdId: household.id, message }, 'enrichment_backfill_failed');
       next(err);
     } finally {
       backfillRunning.delete(household.id);

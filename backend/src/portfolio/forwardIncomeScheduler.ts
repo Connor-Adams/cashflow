@@ -1,5 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
+import { randomUUID } from 'crypto';
 import { logger } from '../observability/logger';
+import { withContext } from '../observability/requestContext';
 import * as env from '../config/env';
 import { rebuildForwardProjectionsForAllHouseholds } from './forwardIncomeBuilder';
 
@@ -44,33 +46,38 @@ export async function runForwardIncomeTick(
 
 export function startForwardIncomeScheduler(): ScheduledTask | null {
   if (!env.forwardIncomeEnabled) {
-    logger.info('forward_income_scheduler_disabled');
+    logger.info({}, 'forward_income_scheduler_disabled');
     return null;
   }
   if (activeTask) {
-    logger.warn('forward_income_scheduler_already_running');
+    logger.warn({}, 'forward_income_scheduler_already_running');
     return activeTask;
   }
   if (!cron.validate(env.forwardIncomeCron)) {
-    logger.error('forward_income_scheduler_invalid_cron', { expression: env.forwardIncomeCron });
+    logger.error({ expression: env.forwardIncomeCron }, 'forward_income_scheduler_invalid_cron');
     return null;
   }
   activeTask = cron.schedule(env.forwardIncomeCron, async () => {
-    if (runningTick) {
-      logger.debug('forward_income_tick_skipped_reentrant');
-      return;
-    }
-    runningTick = true;
-    try {
-      const r = await runForwardIncomeTick();
-      logger.info('forward_income_tick', r as unknown as Record<string, unknown>);
-    } catch (err) {
-      logger.error('forward_income_tick_unhandled', {}, err);
-    } finally {
-      runningTick = false;
-    }
+    await withContext(
+      { jobName: 'forward_income_scheduler', tickId: randomUUID() },
+      async () => {
+        if (runningTick) {
+          logger.debug({}, 'forward_income_tick_skipped_reentrant');
+          return;
+        }
+        runningTick = true;
+        try {
+          const r = await runForwardIncomeTick();
+          logger.info(r as unknown as Record<string, unknown>, 'forward_income_tick');
+        } catch (err) {
+          logger.error({ err }, 'forward_income_tick_unhandled');
+        } finally {
+          runningTick = false;
+        }
+      },
+    );
   });
-  logger.info('forward_income_scheduler_started', { cron: env.forwardIncomeCron });
+  logger.info({ cron: env.forwardIncomeCron }, 'forward_income_scheduler_started');
   return activeTask;
 }
 

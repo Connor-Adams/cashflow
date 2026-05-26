@@ -29,11 +29,13 @@ import taxRouter from './routes/tax';
 import householdRouter from './routes/household';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
+import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import configRouter from './routes/config';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
+import { withContext } from './observability/requestContext';
 
 const app = express();
 
@@ -63,6 +65,20 @@ app.use(
 app.use(requestLogger);
 app.use(express.json({ limit: '2mb' }));
 app.use(attachAuth);
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  if (req.auth) {
+    withContext(
+      {
+        userId: String(req.auth.user.id),
+        householdId: String(req.auth.household.id),
+        role: req.auth.role,
+      },
+      () => next(),
+    );
+  } else {
+    next();
+  }
+});
 
 app.use('/api/health', healthRouter);
 app.use('/api/version', versionRouter);
@@ -91,6 +107,7 @@ app.use('/api/household', householdRouter);
 app.use('/api/net-worth', netWorthRouter);
 app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
 app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
+app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
 app.use('/api/tax', taxRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
@@ -143,13 +160,13 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     householdId: _req.auth?.household.id,
   };
   if (responseStatus >= 500) {
-    logger.error('request_failed', requestContext, err);
+    logger.error({ ...requestContext, err }, 'request_failed');
   } else {
-    logger.warn('request_failed', {
+    logger.warn({
       ...requestContext,
       errorName: err instanceof Error ? err.name : undefined,
       errorMessage: err instanceof Error ? err.message : undefined,
-    });
+    }, 'request_failed');
   }
   if (code === 'LIMIT_FILE_SIZE') {
     res.status(400).json({ error: 'File too large (max 15MB)' });

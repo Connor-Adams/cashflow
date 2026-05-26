@@ -7,8 +7,7 @@ import { currentAuth, requireAuth } from '../auth/middleware';
 import { hashCaptureToken, mintCaptureTokenPlaintext } from '../auth/captureToken';
 import { captureAuth } from '../auth/captureAuth';
 import { captureOrders, type CapturedOrderInput, type CaptureResult } from '../import/vendorCapture';
-import { runBackfill } from '../import/runEnrichmentBackfill';
-import { backfillRunning } from '../import/backfillCoordinator';
+import { scheduleInternalBackfill } from '../import/backfillCoordinator';
 
 class CapturePayloadError extends Error {
   constructor(message: string) {
@@ -17,25 +16,19 @@ class CapturePayloadError extends Error {
   }
 }
 
-interface ProcessedCapture {
-  result: CaptureResult;
-  backfill: { dateFrom: string; dateTo: string } | null;
-}
-
 /**
- * Validate a capture payload, persist the orders, and compute the post-response
- * backfill window. Shared by the bearer-token route (live bookmarklet fetch)
- * and the session-authed paste route (clipboard fallback when a vendor's CSP
- * blocks the direct fetch). The route handlers stay responsible for sending
- * the HTTP response and scheduling the backfill so each can apply its own
- * error mapping.
+ * Validate a capture payload, persist the orders, and schedule the post-write
+ * enrichment backfill. Shared by the bearer-token route (live bookmarklet
+ * fetch) and the session-authed paste route (clipboard fallback when a
+ * vendor's CSP blocks the direct fetch). `sourcePrefix` distinguishes the two
+ * call sites in `external_orders.source` and in backfill logs.
  */
 async function processCapturePayload(args: {
   body: unknown;
   householdId: number;
   userId: number;
   sourcePrefix: string;
-}): Promise<ProcessedCapture> {
+}): Promise<CaptureResult> {
   const body = (args.body ?? {}) as Record<string, unknown>;
   const vendor = String(body.vendor ?? '').trim().toLowerCase();
   if (vendor !== 'amazon' && vendor !== 'apple') {
@@ -101,52 +94,23 @@ async function processCapturePayload(args: {
     orders,
   });
 
-  // Compute the post-response backfill window BEFORE returning, so any
-  // unexpected throw here surfaces as a 400 instead of a "headers already
-  // sent" crash inside setImmediate.
+  // Widen by ±14 days so the enrichment sweep catches transactions that
+  // posted before / after the captured order date.
   const dates = orders.map((o) => o.orderDate).sort();
-  let backfill: ProcessedCapture['backfill'] = null;
   if (dates.length > 0) {
     const from = new Date(`${dates[0]}T00:00:00Z`);
     from.setUTCDate(from.getUTCDate() - 14);
     const to = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
     to.setUTCDate(to.getUTCDate() + 14);
-    backfill = {
+    scheduleInternalBackfill({
+      householdId: args.householdId,
       dateFrom: from.toISOString().slice(0, 10),
       dateTo: to.toISOString().slice(0, 10),
-    };
+      source: `capture-${args.sourcePrefix}-${vendor}`,
+    });
   }
 
-  return { result, backfill };
-}
-
-function scheduleCaptureBackfill(
-  householdId: number,
-  window: { dateFrom: string; dateTo: string },
-): void {
-  setImmediate(() => {
-    if (backfillRunning.has(householdId)) {
-      // Another backfill is in flight for this household — skip this one; its
-      // date range will be covered by the in-flight call or a subsequent one.
-      // Prevents thundering-herd on rapid bookmarklet clicks.
-      return;
-    }
-    backfillRunning.add(householdId);
-    runBackfill({
-      dryRun: false,
-      noReviewFlag: false,
-      reviewOnly: false,
-      verbose: false,
-      accountId: null,
-      householdId,
-      limit: null,
-      batchSize: 50,
-      dateFrom: window.dateFrom,
-      dateTo: window.dateTo,
-    })
-      .catch((err) => console.error('[capture] post-capture backfill failed', err))
-      .finally(() => backfillRunning.delete(householdId));
-  });
+  return result;
 }
 
 const router = Router();
@@ -268,14 +232,13 @@ router.options('/orders', captureCors);
 router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (req, res, next) => {
   try {
     const { user, household } = req.captureAuth!;
-    const { result, backfill } = await processCapturePayload({
+    const result = await processCapturePayload({
       body: req.body,
       householdId: household.id,
       userId: user.id,
       sourcePrefix: 'bookmarklet',
     });
     res.json(result);
-    if (backfill) scheduleCaptureBackfill(household.id, backfill);
   } catch (e) {
     if (e instanceof CapturePayloadError) {
       res.status(400).json({ error: e.message });
@@ -295,14 +258,13 @@ router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (re
 router.post('/orders-from-paste', requireAuth, async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
-    const { result, backfill } = await processCapturePayload({
+    const result = await processCapturePayload({
       body: req.body,
       householdId: household.id,
       userId: user.id,
       sourcePrefix: 'bookmarklet-paste',
     });
     res.json(result);
-    if (backfill) scheduleCaptureBackfill(household.id, backfill);
   } catch (e) {
     if (e instanceof CapturePayloadError) {
       res.status(400).json({ error: e.message });

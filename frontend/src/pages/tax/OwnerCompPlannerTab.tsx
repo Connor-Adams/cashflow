@@ -1,125 +1,120 @@
-import { useState } from 'react';
-import { useScenario } from '../../hooks/useScenario';
+// frontend/src/pages/tax/OwnerCompPlannerTab.tsx
+//
+// Thin wrapper around `OwnerCompLeverSurface` (P8b Task 10). The legacy single-
+// shot scenario form has been removed in favour of the household-plan-driven
+// slider UI. The wrapper's job is to:
+//
+//   1. Receive the active `planId` from `TaxPage` (lifted state — TaxPage is
+//      the single source of truth so `OverviewTab`'s picker and this tab stay
+//      in sync without prop-drilling through a context).
+//   2. Fetch the household-plan compute bundle so we can derive the corp
+//      scenario id, corp entity id, fiscal year, and shareholder ids that the
+//      lever surface needs.
+//   3. Hand those derived values to `OwnerCompLeverSurface`.
+//
+// P8b limitations (documented in the plan):
+//   - If a plan has multiple corp scenarios linked, we pick the FIRST one. The
+//     UI surfaces a note so the user knows the others are ignored on this
+//     screen. Future phases (P10/P11) need a corp picker.
+//   - `shareholderEntityIds` is derived from the deduped entity ids on the
+//     plan's linked personal scenarios. A personal entity with no linked
+//     personal scenario won't appear, which matches the integration router's
+//     model where personal scenarios are the routing target.
+import { useHouseholdPlanCompute } from '../../hooks/useHouseholdPlanCompute';
+import { OwnerCompLeverSurface } from './scenarios/OwnerCompLeverSurface';
 
-const CURRENT_YEAR = new Date().getFullYear();
-
-function fmt(val: string): string {
-  return `$${Number(val).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+interface Props {
+  activePlanId: number | null;
 }
 
-function pct(val: string): string {
-  return `${(Number(val) * 100).toFixed(2)}%`;
-}
+export function OwnerCompPlannerTab({ activePlanId }: Props) {
+  const planCompute = useHouseholdPlanCompute(activePlanId);
 
-export function OwnerCompPlannerTab() {
-  const { result, error, loading, run } = useScenario();
-
-  const [year, setYear] = useState<number>(CURRENT_YEAR);
-  const [salary, setSalary] = useState<string>('0');
-  const [eligibleDividends, setEligibleDividends] = useState<string>('0');
-  const [nonEligibleDividends, setNonEligibleDividends] = useState<string>('0');
-
-  function handleRun(e: React.FormEvent) {
-    e.preventDefault();
-    void run({
-      year,
-      ownerComp: {
-        salary: Number(salary),
-        eligibleDividends: Number(eligibleDividends),
-        nonEligibleDividends: Number(nonEligibleDividends),
-      },
-    });
+  if (activePlanId === null) {
+    return (
+      <div>
+        <h2>Owner Comp</h2>
+        <p className="muted">
+          Select a household plan in the Overview tab to start tuning owner
+          compensation. Each plan groups one corp + at least one personal
+          scenario so the salary-vs-dividend mix can be evaluated as a single
+          integrated number.
+        </p>
+      </div>
+    );
   }
+
+  if (planCompute.error) {
+    return (
+      <div>
+        <h2>Owner Comp</h2>
+        <p className="error">Failed to load household plan: {planCompute.error}</p>
+      </div>
+    );
+  }
+
+  if (!planCompute.data) {
+    return (
+      <div>
+        <h2>Owner Comp</h2>
+        <p className="muted">Loading household plan…</p>
+      </div>
+    );
+  }
+
+  const { corp, personal } = planCompute.data;
+
+  if (corp.length === 0) {
+    return (
+      <div>
+        <h2>Owner Comp</h2>
+        <p className="muted">
+          This household plan has no corp scenarios linked. Add a corp scenario
+          to the plan (Corp T2 tab → set its household plan) so distributions
+          can be routed.
+        </p>
+      </div>
+    );
+  }
+
+  // Derive shareholder entity ids from the deduped personal scenario entity
+  // ids. If the plan has no personal scenarios, the lever surface still
+  // renders (it shows its own empty state) so the user can see the corp side.
+  const shareholderEntityIds = Array.from(
+    new Set(personal.map((p) => p.scenario.entityId)),
+  );
+
+  // P8b limitation: a plan can technically link multiple corp scenarios. The
+  // lever surface targets a single corp scenario at a time. Pick the first.
+  const primaryCorp = corp[0];
+  const corpScenarioId = primaryCorp.scenario.id;
+  const corpEntityId = primaryCorp.scenario.entityId;
+  const fiscalYear = primaryCorp.scenario.year;
 
   return (
     <div>
-      <h2>Owner Comp Planner</h2>
-      <p className="muted">
-        Model the tax impact of different salary / dividend mixes for a given year.
-      </p>
-
-      <form onSubmit={handleRun} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '28rem', marginBottom: '1.5rem' }}>
-        <label>
-          Year{' '}
-          <input
-            type="number"
-            value={year}
-            min={2000}
-            max={2100}
-            onChange={(e) => setYear(Number(e.target.value))}
-          />
-        </label>
-        <label>
-          Salary ($){' '}
-          <input
-            type="number"
-            step="1"
-            min="0"
-            value={salary}
-            onChange={(e) => setSalary(e.target.value)}
-            placeholder="0"
-          />
-        </label>
-        <label>
-          Eligible Dividends ($){' '}
-          <input
-            type="number"
-            step="1"
-            min="0"
-            value={eligibleDividends}
-            onChange={(e) => setEligibleDividends(e.target.value)}
-            placeholder="0"
-          />
-        </label>
-        <label>
-          Non-Eligible Dividends ($){' '}
-          <input
-            type="number"
-            step="1"
-            min="0"
-            value={nonEligibleDividends}
-            onChange={(e) => setNonEligibleDividends(e.target.value)}
-            placeholder="0"
-          />
-        </label>
-        <div>
-          <button type="submit" disabled={loading}>
-            {loading ? 'Running…' : 'Run Scenario'}
-          </button>
-        </div>
-      </form>
-
-      {error && <p className="error">Error: {error}</p>}
-
-      {result && (
-        <section>
-          <h3>Results</h3>
-          <table>
-            <tbody>
-              <tr>
-                <td>Corp Net Tax Payable</td>
-                <td>{fmt(result.combinedTotals.corpNetTaxPayable)}</td>
-              </tr>
-              <tr>
-                <td>Personal Total Payable</td>
-                <td>{fmt(result.combinedTotals.personalTotalPayable)}</td>
-              </tr>
-              <tr>
-                <td>Personal After-Tax Income</td>
-                <td>{fmt(result.combinedTotals.personalAfterTaxIncome)}</td>
-              </tr>
-              <tr>
-                <td>Household Total Tax</td>
-                <td><strong>{fmt(result.combinedTotals.householdTotalTax)}</strong></td>
-              </tr>
-              <tr>
-                <td>Effective Rate</td>
-                <td><strong>{pct(result.combinedTotals.effectiveRate)}</strong></td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-      )}
+      <header style={{ marginBottom: '0.75rem' }}>
+        <h2>Owner Comp</h2>
+        <p className="muted">
+          Active corp scenario:{' '}
+          <strong>{primaryCorp.scenario.name}</strong> (FY {fiscalYear}).
+          {corp.length > 1 && (
+            <>
+              {' '}
+              Plan links {corp.length} corp scenarios — showing the first.
+              Multi-corp planning lands in P10/P11.
+            </>
+          )}
+        </p>
+      </header>
+      <OwnerCompLeverSurface
+        key={`${corpScenarioId}:${activePlanId}`}
+        corpScenarioId={corpScenarioId}
+        corpEntityId={corpEntityId}
+        fiscalYear={fiscalYear}
+        planId={activePlanId}
+        shareholderEntityIds={shareholderEntityIds}
+      />
     </div>
   );
 }

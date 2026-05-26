@@ -1,4 +1,5 @@
 import { FxRate } from '../models/FxRate';
+import { logger } from '../observability/logger';
 
 interface BoCObservation {
   d: string;
@@ -26,12 +27,12 @@ export const defaultBoCWindowFetcher: WindowFetcher = async (startDate, endDate)
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      console.error(`[backfillUsdCadHistory] HTTP ${response.status} for ${url}`);
+      logger.error({ status: response.status, url, module: 'backfillUsdCadHistory' }, 'fx_backfill_http_error');
       return null;
     }
     return (await response.json()) as BoCWindowResponse;
   } catch (err) {
-    console.error('[backfillUsdCadHistory] fetch error', err);
+    logger.error({ err, url, module: 'backfillUsdCadHistory' }, 'fx_backfill_fetch_failed');
     return null;
   }
 };
@@ -90,9 +91,9 @@ export async function backfillUsdCadHistory(opts: BackfillOptions): Promise<numb
 
   if (rowsToCreate.length === 0) return 0;
   await FxRate.bulkCreate(rowsToCreate);
-  console.log(
-    `[backfillUsdCadHistory] inserted ${rowsToCreate.length} USD→CAD rows ` +
-      `(${opts.startDate}..${opts.endDate})`,
+  logger.info(
+    { count: rowsToCreate.length, startDate: opts.startDate, endDate: opts.endDate, module: 'backfillUsdCadHistory' },
+    'fx_backfill_rows_inserted',
   );
   return rowsToCreate.length;
 }

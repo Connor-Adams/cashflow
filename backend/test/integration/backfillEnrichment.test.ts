@@ -307,6 +307,54 @@ test('backfill links a transaction to an Apple ExternalOrder', async () => {
   assert.equal(fields.linkedExternalOrderId, order.id);
 });
 
+test('backfill respects merchantPattern filter (substring, case-insensitive)', async () => {
+  const acc = await models.Account.findOne();
+  assert.ok(acc);
+  // Create two rows: one matching pattern, one not.
+  const matching = await createTxn({
+    merchantRaw: 'COSTCO WHOLESALE #123',
+    merchantClean: 'COSTCO WHOLESALE',
+    amount: -42.5,
+    date: '2026-05-01',
+    reviewFlag: true,
+    autoSource: null,
+  });
+  const nonMatching = await createTxn({
+    merchantRaw: 'STARBUCKS DOWNTOWN',
+    merchantClean: 'STARBUCKS',
+    amount: -5.5,
+    date: '2026-05-02',
+    reviewFlag: true,
+    autoSource: null,
+  });
+  // Sanity: neither has signals yet.
+  assert.equal(
+    await models.TransactionSignal.count({ where: { transactionId: matching.id } }),
+    0,
+  );
+  assert.equal(
+    await models.TransactionSignal.count({ where: { transactionId: nonMatching.id } }),
+    0,
+  );
+
+  const result = await backfillModule.runBackfill(
+    seedFlags({ merchantPattern: 'costco' }), // lowercase: must be case-insensitive
+  );
+
+  assert.ok(result.processed >= 1);
+  // matching row processed
+  assert.ok(
+    (await models.TransactionSignal.count({ where: { transactionId: matching.id } })) > 0,
+    'merchantPattern-matching row should be processed',
+  );
+  // non-matching row untouched
+  assert.equal(
+    await models.TransactionSignal.count({ where: { transactionId: nonMatching.id } }),
+    0,
+    'non-matching row must not be processed',
+  );
+});
+
 test('backfill respects dateFrom/dateTo filter', async () => {
   const inWindow = await createTxn({
     merchantRaw: 'WINDOW INSIDE',

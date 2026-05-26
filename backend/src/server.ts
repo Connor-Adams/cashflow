@@ -8,6 +8,7 @@ import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 import { startQuoteScheduler } from './integrations/yahoo/scheduler';
 import { startForwardIncomeScheduler } from './portfolio/forwardIncomeScheduler';
 import { startDailySnapshotScheduler } from './portfolio/dailySnapshotScheduler';
+import { startEnrichmentBackfillScheduler } from './import/enrichmentBackfillScheduler';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -18,12 +19,12 @@ async function start() {
   await seedDemoData();
 
   app.listen(env.port, () => {
-    logger.info('server_started', {
+    logger.info({
       port: env.port,
       nodeEnv: env.nodeEnv,
       uploadDir,
       receiptStorage: isS3ReceiptStorageEnabled() ? 's3' : 'local',
-    });
+    }, 'server_started');
   });
 
   // Backfill USD→CAD daily noon rates for the last 5 years. Idempotent: skips
@@ -35,15 +36,16 @@ async function start() {
     return d.toISOString().slice(0, 10);
   })();
   backfillUsdCadHistory({ startDate: fiveYearsAgo, endDate: today }).catch((err) => {
-    console.error('[boot] USD/CAD backfill failed (non-fatal):', err);
+    logger.warn({ err }, 'boot_usd_cad_backfill_failed');
   });
 
   startQuoteScheduler();
   startForwardIncomeScheduler();
   startDailySnapshotScheduler();
+  startEnrichmentBackfillScheduler();
 }
 
 start().catch((err) => {
-  logger.error('server_start_failed', { port: env.port }, err);
+  logger.error({ err, port: env.port }, 'server_start_failed');
   process.exit(1);
 });

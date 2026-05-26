@@ -7,6 +7,7 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
+import { logger } from '../observability/logger';
 
 /**
  * Budget recurrence period. Stored as a string column (not a true PG enum) so
@@ -70,7 +71,7 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
         transaction: options.transaction,
       });
     } catch (e) {
-      console.warn('[ensureCategory] BudgetTarget hook failed', e);
+      logger.warn({ err: e, model: 'BudgetTarget' }, 'ensure_category_hook_failed');
     }
   });
   return BudgetTarget;

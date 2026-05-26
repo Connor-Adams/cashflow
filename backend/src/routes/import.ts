@@ -104,7 +104,7 @@ function logImportEvent(
   event: string,
   details: LogFields
 ): void {
-  logger.info(`import_${event}`, details);
+  logger.info(details, `import_${event}`);
 }
 
 router.get('/profiles', (_req, res) => {
