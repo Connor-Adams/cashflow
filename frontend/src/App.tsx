@@ -7,6 +7,7 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { ExplainMonthPage } from './pages/ExplainMonthPage'
 import { SankeyPage } from './pages/SankeyPage'
 import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
@@ -19,6 +20,7 @@ import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
 import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
+import { MonthlyClosePage } from './pages/MonthlyClosePage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
@@ -87,8 +89,10 @@ function AppRoutes() {
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="reports/explain-month" element={<ExplainMonthPage />} />
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
+          <Route path="monthly-close" element={<MonthlyClosePage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="return-warranty" element={<ReturnWarrantyPage />} />
           <Route path="settings" element={<SettingsPage />}>

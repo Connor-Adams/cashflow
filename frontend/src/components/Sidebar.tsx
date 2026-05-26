@@ -2,10 +2,12 @@ import { useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   BarChart3,
+  BookOpen,
   BookOpenCheck,
   Calculator,
   CalendarClock,
   CalendarDays,
+  CheckSquare,
   Coins,
   Globe,
   Package,
@@ -83,8 +85,10 @@ const navItems: NavItem[] = [
   { to: '/ask', label: 'Ask Cashflow', icon: Search },
   { to: '/partner', label: 'Partner', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/reports/explain-month', label: 'Explain month', icon: BookOpen },
   { to: '/sankey', label: 'Cashflow', icon: Waypoints },
   { to: '/currency', label: 'Currency', icon: Globe },
+  { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },
   { to: '/settings', label: 'Settings', icon: Settings },

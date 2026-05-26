@@ -200,6 +200,77 @@ export type MoneyLeakDismissedResponse = {
   items: MoneyLeakDismissal[]
 }
 
+// -------- Explain this month report (GET /api/reports/explain-month) ----
+// Mirrors backend/src/summary/explainMonth.ts. The deterministic engine
+// produces a month-over-month breakdown by currency plus a flat list of
+// findings (spend changes, missing receipts, subscription changes, review
+// backlog, business summary). The aiSummary field is filled in by the
+// route when `ai=true` and OpenAI is configured; otherwise it stays null.
+
+export type ExplainMonthFindingKind =
+  | 'spend_change'
+  | 'missing_receipt'
+  | 'subscription_change'
+  | 'review_needed'
+  | 'business_summary'
+
+export type ExplainMonthSeverity = 'low' | 'medium' | 'high'
+
+/** Filter payload backing each finding — the page translates it into the
+ *  TransactionsPage URL params it natively understands. */
+export type ExplainMonthTransactionFilter = {
+  dateFrom?: string
+  dateTo?: string
+  category?: string
+  merchant?: string
+  businessOnly?: boolean
+  reviewFlag?: boolean
+  currency?: string
+}
+
+export type ExplainMonthFinding = {
+  id: string
+  kind: ExplainMonthFindingKind
+  title: string
+  summary: string
+  currency: string
+  monthlyImpact: number
+  severity: ExplainMonthSeverity
+  supportingTransactionIds: number[]
+  transactionFilter: ExplainMonthTransactionFilter
+  meta: Record<string, unknown>
+}
+
+export type ExplainMonthCategoryDelta = {
+  category: string
+  current: number
+  previous: number
+  delta: number
+  deltaPct: number | null
+}
+
+export type ExplainMonthMonthOverMonth = {
+  currency: string
+  currentSpend: number
+  previousSpend: number
+  spendDelta: number
+  currentIncome: number
+  previousIncome: number
+  incomeDelta: number
+  netCurrent: number
+  netPrevious: number
+  netDelta: number
+  byCategory: ExplainMonthCategoryDelta[]
+}
+
+export type ExplainMonthResponse = {
+  month: string
+  previousMonth: string
+  monthOverMonth: ExplainMonthMonthOverMonth[]
+  findings: ExplainMonthFinding[]
+  aiSummary: string | null
+}
+
 /** Direction of a partner-balance settlement record. */
 export type PartnerSettlementDirection = 'i_paid_partner' | 'partner_paid_me'
 
@@ -443,13 +514,6 @@ export type Budget = {
    * window contributes $0 to the budget.
    */
   excludeRefundedPurchases: boolean
-  /**
-   * Percentages (1–500) at which the daily `budget_breach_check` cron fires
-   * a proactive in-app notification (issue #268). Defaults to
-   * `[80, 100, 120]`; an empty array disables alerts entirely for this
-   * budget. Validated server-side: integers, 1≤n≤500, dedup+sort ascending.
-   */
-  alertThresholds: number[]
   createdAt: string
   updatedAt: string
 }
@@ -509,11 +573,6 @@ export type BudgetInput = {
   scope?: BudgetScope
   rolloverEnabled?: boolean
   excludeRefundedPurchases?: boolean
-  /**
-   * See `Budget.alertThresholds` for the contract. Omitting the field keeps
-   * the existing value on update, or applies server defaults on create.
-   */
-  alertThresholds?: number[]
 }
 
 /** One row in the GET /api/budgets/:id/exclusions response. */
