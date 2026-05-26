@@ -74,6 +74,13 @@ export type CorpTaxYearFacts = {
   dividendsPaid: CorpDividendPaid[];
   salaryPaid: Decimal;                  // T4 box 14 from corp to owner
   carryforwards: CorpCarryforwards;
+  /**
+   * P11b: Associated-group AAII total. When present, used in place of per-corp
+   * AAII for the SBD grind so all corps in an associated group share the
+   * $500k SBD limit / $50k AAII threshold under s.125(5.1).
+   * Injected by `computeHouseholdPlan` via `computeGroupAaii` rollup.
+   */
+  groupAaii?: Decimal;
 };
 
 export type CorpTaxReturn = {

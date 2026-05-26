@@ -20,8 +20,14 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const aaii = computeAaii(facts, r);
   push('L417', 'Adjusted aggregate investment income', aaii);
 
-  // SBD calc
-  const sbd = sbdEligibleIncome(abi, aaii, r);
+  // SBD calc — P11b: if associated-group AAII was injected, use it for the
+  // grind so the $500k SBD limit / $50k AAII threshold is shared across the
+  // group (s.125(5.1)). Otherwise fall back to per-corp AAII.
+  const aaiiForSbd = facts.groupAaii ?? aaii;
+  if (facts.groupAaii) {
+    push('L417G', 'Group AAII (used for SBD grind)', aaiiForSbd);
+  }
+  const sbd = sbdEligibleIncome(abi, aaiiForSbd, r);
   push('L425', 'SBD limit (after AAII grind)', sbd.limit);
   push('L427', 'Income eligible for SBD', sbd.eligible);
   push('L430', 'General-rate active business income', sbd.generalRate);
