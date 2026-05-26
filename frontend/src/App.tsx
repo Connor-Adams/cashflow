@@ -40,6 +40,7 @@ import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { NotificationsTab } from './pages/settings/tabs/NotificationsTab'
 import { TaxPage } from './pages/TaxPage'
+import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
 import { InsightsPage } from './pages/InsightsPage'
@@ -87,6 +88,7 @@ function AppRoutes() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="tax" element={<TaxPage />} />
+          <Route path="return-warranty" element={<ReturnWarrantyPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
             <Route element={<SettingsTabLayout />}>
