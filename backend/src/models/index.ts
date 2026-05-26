@@ -23,6 +23,7 @@ import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
+import { TransactionRevision, initTransactionRevision } from './TransactionRevision';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
@@ -98,6 +99,7 @@ initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
+initTransactionRevision(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
@@ -344,6 +346,17 @@ TransactionSignal.belongsTo(Transaction, {
   as: 'transaction',
 });
 
+Transaction.hasMany(TransactionRevision, {
+  foreignKey: 'transaction_id',
+  as: 'revisions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionRevision.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
 Scenario.hasMany(ScenarioReturn, {
   foreignKey: 'scenario_id',
   as: 'returns',
@@ -520,6 +533,7 @@ export {
   ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
+  TransactionRevision,
   Security,
   InvestmentActivity,
   HoldingSnapshot,
