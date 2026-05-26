@@ -31,16 +31,14 @@ test('accountKind: mortgage is liability', () => {
 });
 
 test('accountKind: unknown defaults to asset and warns', () => {
-  const originalWarn = console.warn;
-  const warnings: string[] = [];
-  console.warn = (msg: string) => { warnings.push(msg); };
-  try {
-    assert.equal(accountKind('mystery'), 'asset');
-    assert.ok(
-      warnings.some((w) => w.includes('[networth] unknown accountType: mystery')),
-      `expected a warn about "mystery", got: ${JSON.stringify(warnings)}`
-    );
-  } finally {
-    console.warn = originalWarn;
-  }
+  const warns: Array<{ fields: Record<string, unknown>; msg: string }> = [];
+  const stubLogger = {
+    warn: (fields: Record<string, unknown>, msg: string) => warns.push({ fields, msg }),
+  };
+  const result = accountKind('mystery', stubLogger);
+  assert.equal(result, 'asset');
+  assert.equal(warns.length, 1);
+  assert.equal(warns[0].msg, 'unknown_account_type_default_asset');
+  assert.equal(warns[0].fields.accountType, 'mystery');
+  assert.equal(warns[0].fields.module, 'networth');
 });
