@@ -279,21 +279,17 @@ test('GET /: ?dateFrom= (empty string) is ignored and returns all rows', async (
   );
 });
 
-test('GET /: ?dateFrom=null (literal string) documents current SQLite behavior', async () => {
-  // CURRENT BEHAVIOR: the route builds where.date = { [Op.gte]: "null" }.
-  // In SQLite, ISO date strings ("2026-02-01" etc) are lexicographically
-  // LESS than "null" (digits sort before letters), so the comparison
-  // matches nothing — endpoint returns 200 with zero rows. This is a
-  // latent footgun (any literal string passed as dateFrom acts as a
-  // silent filter rather than a 400); follow-up could either validate
-  // or coerce. We assert current behavior so we know if it changes.
+test('GET /: ?dateFrom=null (literal string) is rejected with 400', async () => {
+  // Route validates dateFrom/dateTo before they reach Sequelize. Junk strings
+  // like "null" fail `new Date(s)` (NaN), so the route responds 400 rather
+  // than letting Postgres reject the bad input with a 500.
   const res = await agentA.get('/api/transactions').query({ dateFrom: 'null' });
-  assert.equal(res.status, 200, `unexpected status ${res.status}: ${JSON.stringify(res.body)}`);
-  assert.equal(
-    (res.body.data as unknown[]).length,
-    0,
-    'literal "null" passed as dateFrom silently filters everything; if this changes, decide whether to validate or coerce',
-  );
+  assert.equal(res.status, 400, `unexpected status ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.error, 'invalid dateFrom');
+
+  const toRes = await agentA.get('/api/transactions').query({ dateTo: 'null' });
+  assert.equal(toRes.status, 400);
+  assert.equal(toRes.body.error, 'invalid dateTo');
 });
 
 // ---------------- Pagination ----------------

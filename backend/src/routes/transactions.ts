@@ -58,6 +58,20 @@ export function enforceBulkPatchCap(
  * in one place ensures the bulk-patch-filter endpoint operates on exactly
  * the same set the user sees in the table.
  */
+/**
+ * Validates a `dateFrom` / `dateTo` query param. Empty/missing means "no
+ * filter" (returns true). Otherwise the value must look like an ISO date
+ * (YYYY-MM-DD) or be parseable by `new Date(...)` to a non-NaN timestamp.
+ * Without this gate, junk like `?dateFrom=null` reaches Postgres and
+ * triggers `invalid input syntax for type date` → 500.
+ */
+export function isValidDateFilter(raw: unknown): boolean {
+  if (raw === undefined || raw === null || raw === '') return true;
+  const s = String(raw);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return true;
+  return !Number.isNaN(new Date(s).getTime());
+}
+
 export function buildTransactionFilterWhere(
   req: import('express').Request,
   source: Record<string, unknown>
@@ -409,6 +423,15 @@ router.get('/category-hints', async (_req, res, next) => {
 
 router.get('/', async (req, res, next) => {
   try {
+    if (!isValidDateFilter(req.query.dateFrom)) {
+      res.status(400).json({ error: 'invalid dateFrom' });
+      return;
+    }
+    if (!isValidDateFilter(req.query.dateTo)) {
+      res.status(400).json({ error: 'invalid dateTo' });
+      return;
+    }
+
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
     const pageSize = Math.min(
       100,
