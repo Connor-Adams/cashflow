@@ -70,6 +70,7 @@ import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
+import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
 import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
@@ -89,6 +90,7 @@ import {
   initNotificationPreference,
 } from './NotificationPreference';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
+import { SyncBackup, initSyncBackup } from './SyncBackup';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -151,6 +153,7 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
+initCfoBriefing(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
@@ -162,6 +165,7 @@ initNotificationPreference(sequelize);
 initAuditLog(sequelize);
 initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
+initSyncBackup(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -552,6 +556,27 @@ AiReviewRun.belongsTo(User, {
   as: 'user',
 });
 
+// CFO briefings (issue #236). Cascades with household; user FK for the
+// actor that requested the briefing.
+Household.hasMany(CfoBriefing, {
+  foreignKey: 'household_id',
+  as: 'cfoBriefings',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+CfoBriefing.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(CfoBriefing, {
+  foreignKey: 'user_id',
+  as: 'cfoBriefings',
+});
+CfoBriefing.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 Household.hasMany(TaxReserveSetting, {
   foreignKey: 'household_id',
   as: 'taxReserveSettings',
@@ -679,6 +704,27 @@ CashflowSettings.belongsTo(User, {
   as: 'user',
 });
 
+// Sync backups (issue #239). No CASCADE on household delete: the audit
+// history is useful diagnostic context, so we keep the rows around even
+// if the household is later removed. The intentionally-loose FK (no
+// constraint) matches the migration.
+Household.hasMany(SyncBackup, {
+  foreignKey: 'household_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(SyncBackup, {
+  foreignKey: 'user_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -740,6 +786,7 @@ export {
   FinancialGoal,
   Subscription,
   AiReviewRun,
+  CfoBriefing,
   MoneyLeakDismissal,
   TaxReserveSetting,
   MonthlyClosePeriod,
@@ -751,4 +798,5 @@ export {
   AuditLog,
   FinanceEvent,
   BudgetAlertState,
+  SyncBackup,
 };

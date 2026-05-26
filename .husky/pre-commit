@@ -1,2 +1,8 @@
 #!/usr/bin/env sh
-cd "$(dirname "$0")/.." && yarn lint-staged
+# Use `git rev-parse --show-toplevel` instead of `$(dirname "$0")/..` so the
+# hook works correctly from a git worktree. The `.husky/_` symlink points to
+# the main repo's husky dir, so `$0`-based path resolution always landed in
+# the main repo cwd — lint-staged would then see the main repo's staged files
+# (often nothing), not the worktree's. Using `git rev-parse` resolves to the
+# CURRENT working tree root regardless of where the hook script physically lives.
+cd "$(git rev-parse --show-toplevel)" && yarn lint-staged
