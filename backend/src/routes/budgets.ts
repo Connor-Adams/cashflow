@@ -1,11 +1,13 @@
 import { Router } from 'express';
-import { Op } from 'sequelize';
+import { Op, type WhereOptions } from 'sequelize';
 import {
   BudgetTarget,
   BUDGET_TARGET_PERIODS,
+  BUDGET_TARGET_SCOPES,
   type BudgetTargetPeriod,
+  type BudgetTargetScope,
 } from '../models/BudgetTarget';
-import { Transaction } from '../models';
+import { BudgetExclusion, Transaction } from '../models';
 import { num } from '../util/numbers';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
@@ -19,6 +21,8 @@ type NormalizedBudgetInput = {
   currency: string;
   amount: string;
   period: BudgetTargetPeriod;
+  scope: BudgetTargetScope;
+  rolloverEnabled: boolean;
 };
 
 type ValidationResult =
@@ -38,7 +42,8 @@ type PatchValidationResult =
  * Treats `null` / `''` category as "overall" — the budget covers total spend
  * across all categories in the matching currency. Amount must be a finite,
  * positive number; currency must be a 3-letter ISO code; period defaults to
- * `monthly` (extension hook for future weekly/yearly buckets).
+ * `monthly` (now extended to also accept weekly/annual); scope defaults to
+ * `household`; rolloverEnabled is a boolean and defaults to false.
  */
 export function validateBudgetInput(
   raw: Record<string, unknown>
@@ -76,6 +81,21 @@ export function validateBudgetInput(
     period = candidate as BudgetTargetPeriod;
   }
 
+  let scope: BudgetTargetScope = 'household';
+  if (raw.scope != null && raw.scope !== '') {
+    const candidate = String(raw.scope);
+    if (!(BUDGET_TARGET_SCOPES as readonly string[]).includes(candidate)) {
+      return {
+        ok: false,
+        status: 400,
+        error: `scope must be one of: ${BUDGET_TARGET_SCOPES.join(', ')}`,
+      };
+    }
+    scope = candidate as BudgetTargetScope;
+  }
+
+  const rolloverEnabled = parseBooleanFlag(raw.rolloverEnabled);
+
   return {
     ok: true,
     value: {
@@ -83,6 +103,8 @@ export function validateBudgetInput(
       currency: currencyRaw,
       amount: amountNumber.toFixed(4),
       period,
+      scope,
+      rolloverEnabled,
     },
   };
 }
@@ -91,7 +113,7 @@ export function validateBudgetInput(
  * Pure validator for PUT /api/budgets/:id bodies. Each field is optional;
  * unknown fields are ignored. Returns a partial input that callers can apply
  * via `row.set(...)`. The same rules as POST apply to any field that IS
- * supplied (positive amount, 3-letter currency, known period).
+ * supplied (positive amount, 3-letter currency, known period, known scope).
  */
 export function validateBudgetPatch(
   raw: Record<string, unknown>
@@ -138,6 +160,22 @@ export function validateBudgetPatch(
     out.period = candidate as BudgetTargetPeriod;
   }
 
+  if (raw.scope !== undefined) {
+    const candidate = String(raw.scope);
+    if (!(BUDGET_TARGET_SCOPES as readonly string[]).includes(candidate)) {
+      return {
+        ok: false,
+        status: 400,
+        error: `scope must be one of: ${BUDGET_TARGET_SCOPES.join(', ')}`,
+      };
+    }
+    out.scope = candidate as BudgetTargetScope;
+  }
+
+  if (raw.rolloverEnabled !== undefined) {
+    out.rolloverEnabled = parseBooleanFlag(raw.rolloverEnabled);
+  }
+
   return { ok: true, value: out };
 }
 
@@ -148,6 +186,20 @@ function normalizeCategory(raw: unknown): string | null {
   return s.slice(0, 128);
 }
 
+/**
+ * Coerce a truthy-style input into a strict boolean. Accepts the literal
+ * `true`, the strings 'true'/'1'/'yes' (case-insensitive), and numeric 1.
+ * Everything else (including undefined/null) becomes false. This matches
+ * how form submissions and JSON booleans commonly arrive.
+ */
+function parseBooleanFlag(raw: unknown): boolean {
+  if (raw === true) return true;
+  if (raw === false || raw == null) return false;
+  if (typeof raw === 'number') return raw === 1;
+  const s = String(raw).trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'yes';
+}
+
 type BudgetResponse = {
   id: number;
   householdId: number;
@@ -155,6 +207,8 @@ type BudgetResponse = {
   currency: string;
   amount: string;
   period: BudgetTargetPeriod;
+  scope: BudgetTargetScope;
+  rolloverEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -167,6 +221,8 @@ function serializeBudget(row: InstanceType<typeof BudgetTarget>): BudgetResponse
     currency: row.currency,
     amount: String(row.amount),
     period: row.period,
+    scope: row.scope,
+    rolloverEnabled: Boolean(row.rolloverEnabled),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -206,13 +262,123 @@ export function currentMonthBounds(
   const m = now.getMonth();
   const startDate = new Date(y, m, 1);
   const endDate = new Date(y, m + 1, 0);
-  const fmt = (d: Date): string => {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
+  return { periodStart: formatLocalDate(startDate), periodEnd: formatLocalDate(endDate) };
+}
+
+function formatLocalDate(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
+ * Returns the [start, end] of the ISO week (Mon → Sun) containing `now`.
+ * ISO week was chosen because most finance UIs the user has encountered
+ * (Google Calendar default, banking dashboards, payroll) use Mon-Sun;
+ * it also matches the date-fns default `weekStartsOn: 1`. If a user wants
+ * a Sun-Sat week later we can add a household-level setting and split here.
+ */
+export function currentWeekBounds(
+  now: Date = new Date()
+): { periodStart: string; periodEnd: string } {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // JS Date.getDay() returns 0 (Sun) through 6 (Sat).
+  // Convert to Mon=0..Sun=6 so we can subtract back to Monday.
+  const dayMondayBased = (today.getDay() + 6) % 7;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - dayMondayBased);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    periodStart: formatLocalDate(monday),
+    periodEnd: formatLocalDate(sunday),
   };
-  return { periodStart: fmt(startDate), periodEnd: fmt(endDate) };
+}
+
+/** Returns the [Jan 1, Dec 31] bounds of the calendar year containing `now`. */
+export function currentYearBounds(
+  now: Date = new Date()
+): { periodStart: string; periodEnd: string } {
+  const y = now.getFullYear();
+  return {
+    periodStart: formatLocalDate(new Date(y, 0, 1)),
+    periodEnd: formatLocalDate(new Date(y, 11, 31)),
+  };
+}
+
+/**
+ * Dispatch helper — pick the right bounds for a budget's `period`. Pure so
+ * we can unit-test each branch without a DB. Default monthly is preserved
+ * for back-compat with callers that pass `undefined`.
+ */
+export function currentPeriodBounds(
+  period: BudgetTargetPeriod = 'monthly',
+  now: Date = new Date()
+): { periodStart: string; periodEnd: string } {
+  switch (period) {
+    case 'weekly':
+      return currentWeekBounds(now);
+    case 'annual':
+      return currentYearBounds(now);
+    case 'monthly':
+    default:
+      return currentMonthBounds(now);
+  }
+}
+
+/**
+ * Percentage of the current period that has elapsed at `now`. Returns 0
+ * before the period starts and 100 after it ends.
+ *
+ * Why fractional-day instead of floor((days_so_far / total_days) * 100)?
+ * The pacing display feels jumpy at day boundaries — at 11:59 PM you're
+ * 1/30 done and at 12:01 AM you're 2/30, a 3.3pp jump from one minute to
+ * the next. Using `(now - start) / (end - start)` keeps the bar smooth and
+ * makes the math match the spirit of "we're roughly N% through the month".
+ */
+export function periodElapsedPercent(
+  now: Date,
+  bounds: { periodStart: string; periodEnd: string }
+): number {
+  const startMs = Date.parse(`${bounds.periodStart}T00:00:00`);
+  // periodEnd is the LAST day of the period (inclusive). Treat the end of
+  // that day (23:59:59.999) as the boundary so the full last day counts.
+  const endMs = Date.parse(`${bounds.periodEnd}T23:59:59.999`);
+  const nowMs = now.getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return 0;
+  }
+  if (nowMs <= startMs) return 0;
+  if (nowMs >= endMs) return 100;
+  return ((nowMs - startMs) / (endMs - startMs)) * 100;
+}
+
+export type BudgetPacingState = 'on-pace' | 'ahead' | 'behind' | 'over';
+
+/**
+ * Classify a budget's current state by comparing how much of the target has
+ * been used against how much of the period has elapsed. This is the
+ * "Dining is 88% spent but the month is only 62% complete" headline.
+ *
+ *   over    — already past 100% of target (overspent).
+ *   ahead   — spending faster than time elapsed (delta > 5pp).
+ *   behind  — spending slower than time elapsed (delta < -5pp).
+ *   on-pace — within ±5pp of elapsed.
+ *
+ * The ±5pp band keeps the badge from flickering when spend and time are
+ * essentially matched. 5pp ≈ a day-and-a-half on a monthly budget, which
+ * felt like a comfortable "noise floor" in design review.
+ */
+export function pacingState(
+  percentUsed: number,
+  periodElapsed: number
+): BudgetPacingState {
+  if (percentUsed > 100) return 'over';
+  const delta = percentUsed - periodElapsed;
+  if (delta > 5) return 'ahead';
+  if (delta < -5) return 'behind';
+  return 'on-pace';
 }
 
 type SpendRow = {
@@ -353,9 +519,40 @@ export function computeBudgetProgress(
   });
 }
 
+/**
+ * Maps a BudgetTargetScope into a Sequelize where-clause that filters
+ * Transactions to the subset that counts toward the budget. The mapping
+ * is intentionally a single source of truth so chat tools and other
+ * consumers can adopt the same vocabulary later.
+ *
+ *   household → visibility = 'shared' (the joint/shared spend)
+ *   personal  → visibility = 'private' AND (final_business=false OR null)
+ *   partner   → ownership_type = 'partner'
+ *   business  → final_business = true
+ *
+ * Returns `{}` for unknown scope to fail-open (don't accidentally hide all
+ * transactions due to a bad string).
+ */
+export function scopeWhereClause(scope: BudgetTargetScope): WhereOptions {
+  switch (scope) {
+    case 'personal':
+      return {
+        visibility: 'private',
+        [Op.or]: [{ finalBusiness: false }, { finalBusiness: null }],
+      } as WhereOptions;
+    case 'partner':
+      return { ownershipType: 'partner' } as WhereOptions;
+    case 'business':
+      return { finalBusiness: true } as WhereOptions;
+    case 'household':
+      return { visibility: 'shared' } as WhereOptions;
+    default:
+      return {} as WhereOptions;
+  }
+}
+
 router.get('/progress', async (req, res, next) => {
   try {
-    const bounds = currentMonthBounds();
     const where: Record<string, unknown> = { ...householdWhere(req) };
     if (req.query.currency) {
       where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
@@ -370,47 +567,141 @@ router.get('/progress', async (req, res, next) => {
       ],
     });
 
-    const currencies = Array.from(new Set(budgets.map((b) => b.currency)));
-    const txWhere: Record<string, unknown> = {
-      ...householdWhere(req),
-      date: {
-        [Op.gte]: bounds.periodStart,
-        [Op.lte]: bounds.periodEnd,
-      },
-    };
-    if (currencies.length > 0) {
-      txWhere.currency = { [Op.in]: currencies };
-    }
-    const rows =
-      budgets.length === 0
-        ? []
-        : await Transaction.findAll({
-            where: txWhere,
-            attributes: ['id', 'currency', 'finalCategory', 'finalBusiness', 'finalSplitType', 'amount', 'businessAmount'],
-            raw: true,
-          });
-
-    const itemContext = await loadItemAllocationContext(rows.map((r) => (r as unknown as SpendRow).id));
-    const spendByCategory = aggregateSpendByCategory(
-      rows as unknown as SpendRow[],
-      itemContext,
-    );
-    const items = computeBudgetProgress(
-      budgets.map((b) => ({
-        id: b.id,
-        category: b.category,
-        currency: b.currency,
-        amount: String(b.amount),
-      })),
-      spendByCategory,
-      bounds
-    );
-
+    const items = await computeStatusForBudgets(req, budgets);
     res.json({ items });
   } catch (e) {
     next(e);
   }
 });
+
+/**
+ * GET /api/budgets/status — issue #201's "status" endpoint. Returns the same
+ * shape as /progress (kept identical to avoid splitting the dashboard widget
+ * code path) but the canonical name from the issue spec. Adopt this endpoint
+ * for new clients; /progress is preserved for back-compat with the existing
+ * DashboardPage widget.
+ */
+router.get('/status', async (req, res, next) => {
+  try {
+    const where: Record<string, unknown> = { ...householdWhere(req) };
+    if (req.query.currency) {
+      where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
+    }
+
+    const budgets = await BudgetTarget.findAll({
+      where,
+      order: [
+        ['currency', 'ASC'],
+        ['category', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
+    });
+
+    const items = await computeStatusForBudgets(req, budgets);
+    res.json({ items });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Internal helper that turns a list of budget rows into the status response
+ * shape (target/spent/percentUsed + monthElapsed + pacingState). Shared
+ * between /progress and /status so the math stays in one place.
+ *
+ * Each budget is computed independently because budgets in different
+ * scopes/periods cannot share their underlying transaction aggregate. The
+ * inner per-budget query is bounded by the budget's own period and scope.
+ * For the common case (a handful of budgets) the N+1 is negligible.
+ */
+async function computeStatusForBudgets(
+  req: import('express').Request,
+  budgets: InstanceType<typeof BudgetTarget>[]
+): Promise<
+  Array<
+    ProgressItem & {
+      scope: BudgetTargetScope;
+      period: BudgetTargetPeriod;
+      rolloverEnabled: boolean;
+      periodElapsedPercent: number;
+      pacingState: BudgetPacingState;
+    }
+  >
+> {
+  const now = new Date();
+  if (budgets.length === 0) return [];
+
+  // For each budget compute its own period bounds + scope-filtered spend.
+  const results = await Promise.all(
+    budgets.map(async (budget) => {
+      const bounds = currentPeriodBounds(budget.period, now);
+
+      // Exclusions for this budget — applied as `id NOT IN (...)` below.
+      const excluded = await BudgetExclusion.findAll({
+        where: { budgetId: budget.id },
+        attributes: ['transactionId'],
+        raw: true,
+      });
+      const excludedIds = excluded.map((row) => row.transactionId);
+
+      const txWhere: WhereOptions = {
+        ...householdWhere(req),
+        currency: budget.currency,
+        date: {
+          [Op.gte]: bounds.periodStart,
+          [Op.lte]: bounds.periodEnd,
+        },
+        ...scopeWhereClause(budget.scope),
+        ...(excludedIds.length > 0
+          ? { id: { [Op.notIn]: excludedIds } }
+          : {}),
+      } as WhereOptions;
+
+      const rows = await Transaction.findAll({
+        where: txWhere,
+        attributes: [
+          'id',
+          'currency',
+          'finalCategory',
+          'finalBusiness',
+          'finalSplitType',
+          'amount',
+          'businessAmount',
+        ],
+        raw: true,
+      });
+      const itemContext = await loadItemAllocationContext(
+        rows.map((r) => (r as unknown as SpendRow).id)
+      );
+      const spendByCategory = aggregateSpendByCategory(
+        rows as unknown as SpendRow[],
+        itemContext
+      );
+      const [progress] = computeBudgetProgress(
+        [
+          {
+            id: budget.id,
+            category: budget.category,
+            currency: budget.currency,
+            amount: String(budget.amount),
+          },
+        ],
+        spendByCategory,
+        bounds
+      );
+      const elapsed = periodElapsedPercent(now, bounds);
+      return {
+        ...progress,
+        scope: budget.scope,
+        period: budget.period,
+        rolloverEnabled: Boolean(budget.rolloverEnabled),
+        periodElapsedPercent: elapsed,
+        pacingState: pacingState(progress.percentUsed, elapsed),
+      };
+    })
+  );
+  return results;
+}
 
 router.post('/', async (req, res, next) => {
   try {
@@ -427,6 +718,8 @@ router.post('/', async (req, res, next) => {
       currency: result.value.currency,
       amount: result.value.amount,
       period: result.value.period,
+      scope: result.value.scope,
+      rolloverEnabled: result.value.rolloverEnabled,
     });
     res.status(201).json(serializeBudget(row));
   } catch (e) {
@@ -459,6 +752,48 @@ router.put('/:id', async (req, res, next) => {
     if (patch.currency !== undefined) row.set('currency', patch.currency);
     if (patch.amount !== undefined) row.set('amount', patch.amount);
     if (patch.period !== undefined) row.set('period', patch.period);
+    if (patch.scope !== undefined) row.set('scope', patch.scope);
+    if (patch.rolloverEnabled !== undefined)
+      row.set('rolloverEnabled', patch.rolloverEnabled);
+    await row.save();
+    res.json(serializeBudget(row));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Alias for PUT so consumers that prefer PATCH semantics can use the same
+ * partial-patch shape. Internally identical handling.
+ */
+router.patch('/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const row = await BudgetTarget.findOne({
+      where: { id, ...householdWhere(req) },
+    });
+    if (!row) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = validateBudgetPatch(body);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    const patch = result.value;
+    if (patch.category !== undefined) row.set('category', patch.category);
+    if (patch.currency !== undefined) row.set('currency', patch.currency);
+    if (patch.amount !== undefined) row.set('amount', patch.amount);
+    if (patch.period !== undefined) row.set('period', patch.period);
+    if (patch.scope !== undefined) row.set('scope', patch.scope);
+    if (patch.rolloverEnabled !== undefined)
+      row.set('rolloverEnabled', patch.rolloverEnabled);
     await row.save();
     res.json(serializeBudget(row));
   } catch (e) {
@@ -475,6 +810,134 @@ router.delete('/:id', async (req, res, next) => {
     }
     const row = await BudgetTarget.findOne({
       where: { id, ...householdWhere(req) },
+    });
+    if (!row) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    await row.destroy();
+    res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---- Exclusions -----------------------------------------------------
+
+/**
+ * Verify a budget belongs to the requesting household, returning the row
+ * or null for not-found. Centralizes the cross-household 404 protection
+ * for all exclusion sub-routes.
+ */
+async function loadOwnedBudget(
+  req: import('express').Request,
+  id: number
+): Promise<InstanceType<typeof BudgetTarget> | null> {
+  return BudgetTarget.findOne({
+    where: { id, ...householdWhere(req) },
+  });
+}
+
+router.get('/:id/exclusions', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const budget = await loadOwnedBudget(req, id);
+    if (!budget) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const rows = await BudgetExclusion.findAll({
+      where: { budgetId: id },
+      order: [['createdAt', 'ASC']],
+    });
+    res.json({
+      data: rows.map((row) => ({
+        id: row.id,
+        budgetId: row.budgetId,
+        transactionId: row.transactionId,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/exclusions', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const budget = await loadOwnedBudget(req, id);
+    if (!budget) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const txnId = Number(body.transactionId);
+    if (!Number.isInteger(txnId) || txnId < 1) {
+      res.status(400).json({ error: 'transactionId must be a positive integer' });
+      return;
+    }
+    // Confirm the transaction is in the same household — otherwise the
+    // exclusion would silently apply to someone else's data.
+    const txn = await Transaction.findOne({
+      where: { id: txnId, ...householdWhere(req) },
+      attributes: ['id'],
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
+    // Idempotent: if it already exists, return the existing row.
+    const existing = await BudgetExclusion.findOne({
+      where: { budgetId: id, transactionId: txnId },
+    });
+    if (existing) {
+      res.status(200).json({
+        id: existing.id,
+        budgetId: existing.budgetId,
+        transactionId: existing.transactionId,
+        createdAt: existing.createdAt.toISOString(),
+      });
+      return;
+    }
+    const created = await BudgetExclusion.create({
+      budgetId: id,
+      transactionId: txnId,
+    });
+    res.status(201).json({
+      id: created.id,
+      budgetId: created.budgetId,
+      transactionId: created.transactionId,
+      createdAt: created.createdAt.toISOString(),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.delete('/:id/exclusions/:transactionId', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const txnId = parseInt(req.params.transactionId, 10);
+    if (!Number.isInteger(id) || id < 1 || !Number.isInteger(txnId) || txnId < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const budget = await loadOwnedBudget(req, id);
+    if (!budget) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const row = await BudgetExclusion.findOne({
+      where: { budgetId: id, transactionId: txnId },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });

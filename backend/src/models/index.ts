@@ -13,6 +13,7 @@ import { Contact, initContact } from './Contact';
 import { Category, initCategory } from './Category';
 import { PartnerSettlement, initPartnerSettlement } from './PartnerSettlement';
 import { BudgetTarget, initBudgetTarget } from './BudgetTarget';
+import { BudgetExclusion, initBudgetExclusion } from './BudgetExclusion';
 import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ChatThread, initChatThread } from './ChatThread';
 import { ChatMessage, initChatMessage } from './ChatMessage';
@@ -64,6 +65,7 @@ initContact(sequelize);
 initCategory(sequelize);
 initPartnerSettlement(sequelize);
 initBudgetTarget(sequelize);
+initBudgetExclusion(sequelize);
 initAccount(sequelize);
 initRule(sequelize);
 initTransaction(sequelize);
@@ -194,6 +196,20 @@ Household.hasMany(BudgetTarget, {
   as: 'budgetTargets',
 });
 BudgetTarget.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+BudgetTarget.hasMany(BudgetExclusion, {
+  foreignKey: 'budget_id',
+  as: 'exclusions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetExclusion.belongsTo(BudgetTarget, {
+  foreignKey: 'budget_id',
+  as: 'budget',
+});
+BudgetExclusion.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
 Rule.hasMany(Transaction, {
   foreignKey: 'applied_rule_id',
   as: 'appliedTransactions',
@@ -302,6 +318,7 @@ export {
   Category,
   PartnerSettlement,
   BudgetTarget,
+  BudgetExclusion,
   Account,
   Rule,
   Transaction,
