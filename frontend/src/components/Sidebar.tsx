@@ -22,6 +22,7 @@ import {
   Sun,
   Moon,
   Upload,
+  Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -53,6 +54,7 @@ const navItems: NavItem[] = [
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/partner', label: 'Partner', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },

@@ -5,6 +5,7 @@ import { AccountsPage } from './pages/AccountsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
+import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
@@ -59,6 +60,7 @@ function AppRoutes() {
           <Route path="planned" element={<PlannedEventsPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />
+          <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="settings" element={<SettingsPage />}>
