@@ -1,4 +1,4 @@
-import { Decimal, sumD, maxZero } from '../util/decimal';
+import { D, Decimal, sumD, maxZero } from '../util/decimal';
 import type { CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
 import { computeAaii } from './aaii';
 import { sbdEligibleIncome } from './sbd';
@@ -80,7 +80,16 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const netTaxPayable = maxZero(federalTax.plus(provincialTax).minus(integ.dividendRefund));
   push('L770', 'Net tax payable', netTaxPayable);
 
-  const gripEnding = facts.carryforwards.grip.plus(integ.gripAddition)
+  // P11b T6: GRIP designation from received intercorp eligible dividends
+  // (Σ eligible × ownership%/100) flows in via `openingGripBoost`, injected by
+  // computeHouseholdPlan from `intercorpRouter`'s gripBoost output.
+  const openingGripBoost = facts.openingGripBoost ?? D('0');
+  if (openingGripBoost.greaterThan(0)) {
+    push('L500B', 'GRIP boost from intercorp eligible dividends received', openingGripBoost);
+  }
+  const gripEnding = facts.carryforwards.grip
+    .plus(integ.gripAddition)
+    .plus(openingGripBoost)
     .minus(sumD(facts.dividendsPaid.filter(d => d.kind === 'eligible').map(d => d.amount)));
   const cdaEnding = facts.carryforwards.cda.plus(integ.cdaAddition);
   const erdtohEnding = facts.carryforwards.erdtoh.plus(integ.erdtohAddition); // refund subtracted below

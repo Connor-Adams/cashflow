@@ -81,6 +81,15 @@ export type CorpTaxYearFacts = {
    * Injected by `computeHouseholdPlan` via `computeGroupAaii` rollup.
    */
   groupAaii?: Decimal;
+  /**
+   * P11b T6: GRIP designation flowing in from intercorp eligible dividends
+   * received this year. Injected by `computeHouseholdPlan` from
+   * `intercorpRouter`'s `CorpReceivedDivs.gripBoost`
+   * (Σ eligible × ownership%/100 across received transfers). Engine adds this
+   * to `gripEnding` in `buildT2`, on top of the existing growth from the corp's
+   * own general-rate income.
+   */
+  openingGripBoost?: Decimal;
 };
 
 export type CorpTaxReturn = {

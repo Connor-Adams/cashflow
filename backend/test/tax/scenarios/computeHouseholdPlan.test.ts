@@ -213,6 +213,112 @@ test('computeHouseholdPlan routes intercorp non-eligible dividend from Opco to H
   );
 });
 
+test('computeHouseholdPlan P11b T6: intercorp eligible div boosts receiver GRIP via openingGripBoost (default ownership 100%)', async () => {
+  // Seed: Opco pays 60k eligible div to Holdco. No ownershipPercent override →
+  // default = 100% → gripBoost = 60000 × 100/100 = 60000.
+  // Expected: Holdco's gripEnding includes the 60k boost (priorGrip = 0, no
+  // own general-rate income, no eligible divs paid out by Holdco).
+  const household = await Household.create({ name: 'GRIP Flow' });
+  const personalEntity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const opco = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'Opco',
+    jurisdiction: 'CA-ON', fiscalYearEnd: '12-31',
+  });
+  const holdco = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'Holdco',
+    jurisdiction: 'CA-ON', fiscalYearEnd: '12-31',
+  });
+
+  const plan = await HouseholdPlan.create({
+    householdId: household.id, name: 'GRIP Flow Plan', notes: null,
+  });
+
+  const opcoBaseline = await ensureCorpBaselineScenario(opco.id, 2025);
+  await Scenario.create({
+    parentId: opcoBaseline.id, householdPlanId: plan.id,
+    entityId: opco.id, year: 2025, name: 'Opco fork', kind: 'fork',
+    overrides: {
+      'corp.activeIncome': 200000,
+      [`intercorp.${holdco.id}.eligible`]: 60000,
+      // ownershipPercent omitted → defaults to 100
+    },
+    assumptions: {}, nextYearId: null, notes: null,
+  });
+
+  const holdcoBaseline = await ensureCorpBaselineScenario(holdco.id, 2025);
+  await holdcoBaseline.update({ householdPlanId: plan.id });
+
+  const personalBaseline = await ensureBaselineScenario(personalEntity.id, 2025);
+  await personalBaseline.update({ householdPlanId: plan.id });
+
+  const out = await computeHouseholdPlan(plan.id);
+
+  // Router emits gripBoost = 60000 for Holdco
+  const holdcoReceived = out.intercorp.byReceiverEntityId[holdco.id];
+  assert.ok(holdcoReceived, 'expected Holdco to have a received-divs entry');
+  assert.equal(holdcoReceived.gripBoost.toFixed(2), '60000.00');
+
+  // Holdco's gripEnding includes the 60k boost
+  const holdcoResult = out.corp.find((c) => c.scenario.entityId === holdco.id)!;
+  assert.equal(holdcoResult.computed.factsHash, 'household-intercorp');
+  const holdcoGripEnding = String(holdcoResult.computed.totals.gripEnding ?? '0');
+  // priorGrip 0 + own gripAddition 0 + boost 60000 − 0 paid = 60000
+  assert.equal(holdcoGripEnding, '60000');
+});
+
+test('computeHouseholdPlan P11b T6: ownershipPercent override scales gripBoost', async () => {
+  // Opco pays 40k eligible div to Holdco with ownershipPercent = 75 →
+  // gripBoost = 40000 × 75/100 = 30000.
+  const household = await Household.create({ name: 'GRIP Flow Partial' });
+  const personalEntity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const opco = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'Opco',
+    jurisdiction: 'CA-ON', fiscalYearEnd: '12-31',
+  });
+  const holdco = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'Holdco',
+    jurisdiction: 'CA-ON', fiscalYearEnd: '12-31',
+  });
+
+  const plan = await HouseholdPlan.create({
+    householdId: household.id, name: 'GRIP Partial Plan', notes: null,
+  });
+
+  const opcoBaseline = await ensureCorpBaselineScenario(opco.id, 2025);
+  await Scenario.create({
+    parentId: opcoBaseline.id, householdPlanId: plan.id,
+    entityId: opco.id, year: 2025, name: 'Opco fork', kind: 'fork',
+    overrides: {
+      'corp.activeIncome': 200000,
+      [`intercorp.${holdco.id}.eligible`]: 40000,
+      [`intercorp.${holdco.id}.ownershipPercent`]: 75,
+    },
+    assumptions: {}, nextYearId: null, notes: null,
+  });
+
+  const holdcoBaseline = await ensureCorpBaselineScenario(holdco.id, 2025);
+  await holdcoBaseline.update({ householdPlanId: plan.id });
+
+  const personalBaseline = await ensureBaselineScenario(personalEntity.id, 2025);
+  await personalBaseline.update({ householdPlanId: plan.id });
+
+  const out = await computeHouseholdPlan(plan.id);
+
+  const holdcoReceived = out.intercorp.byReceiverEntityId[holdco.id];
+  assert.ok(holdcoReceived, 'expected Holdco to have a received-divs entry');
+  assert.equal(holdcoReceived.gripBoost.toFixed(2), '30000.00');
+
+  const holdcoResult = out.corp.find((c) => c.scenario.entityId === holdco.id)!;
+  const holdcoGripEnding = String(holdcoResult.computed.totals.gripEnding ?? '0');
+  assert.equal(holdcoGripEnding, '30000');
+});
+
 test('computeHouseholdPlan applies pension split between two linked spouses', async () => {
   // Seed a household with two personal entities A + B; link them as spouses.
   const household = await Household.create({ name: 'SpousePair' });

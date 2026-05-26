@@ -191,6 +191,51 @@ test('Scenario E (P11b): groupAaii override applied to SBD grind', () => {
 });
 
 // -------------------------------------------------------------------
+// Scenario F (P11b T6): openingGripBoost adds to GRIP ending
+//   Pure holdco: $0 ABI, $0 general-rate income (so no own GRIP growth),
+//   priorGrip = $10,000, openingGripBoost = $50,000 (injected by
+//   computeHouseholdPlan from intercorpRouter.gripBoost), $0 dividends paid.
+//   Expected: gripEnding = priorGrip + gripAddition + openingGripBoost
+//                        = 10000 + 0          + 50000 = 60000
+// -------------------------------------------------------------------
+test('Scenario F (P11b T6): openingGripBoost adds to GRIP ending', () => {
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    carryforwards: {
+      ...baseFacts().carryforwards,
+      grip: D('10000'),
+    },
+    openingGripBoost: D('50000'),
+  };
+
+  const ret = buildT2(facts, r);
+
+  // No own general-rate income → integration.gripAddition = 0
+  // gripEnding = 10000 (prior) + 0 (own growth) + 50000 (boost) − 0 (paid) = 60000
+  assert.equal(ret.totals.gripEnding.toFixed(2), '60000.00');
+
+  // L500B surfaces only when boost > 0
+  const codes = ret.lines.map((l) => l.code);
+  assert.ok(codes.includes('L500B'), 'Expected L500B line when openingGripBoost present');
+  const l500b = ret.lines.find((l) => l.code === 'L500B')!;
+  assert.equal(l500b.amount.toFixed(2), '50000.00');
+});
+
+test('Scenario F2 (P11b T6): omitting openingGripBoost is a no-op (backwards compat)', () => {
+  // Same facts as Scenario A — should produce identical gripEnding (0 here)
+  // and NOT surface L500B.
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    activeBusinessIncome: [{ source: 'consulting', amount: D('300000'), cadAmount: D('300000') }],
+  };
+  const ret = buildT2(facts, r);
+  // 300k SBD income → general rate = 0 → gripAddition = 0; priorGrip = 0; boost absent
+  assert.equal(ret.totals.gripEnding.toFixed(2), '0.00');
+  const codes = ret.lines.map((l) => l.code);
+  assert.ok(!codes.includes('L500B'), 'L500B must not appear when openingGripBoost is omitted');
+});
+
+// -------------------------------------------------------------------
 // Bonus: losses reduce taxable income to zero
 // -------------------------------------------------------------------
 test('Carryforward losses can reduce taxable income to zero (not negative)', () => {

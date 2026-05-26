@@ -48,7 +48,7 @@ type SpouseShift = SpouseRouterOutput['byEntityId'][number];
 
 const OWNER_COMP_RE =
   /^ownerComp\.(\d+)\.(salary|bonus|eligibleDividend|nonEligibleDividend|capitalDividend)$/;
-const INTERCORP_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital)$/;
+const INTERCORP_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital|ownershipPercent)$/;
 
 type CorpResult = { scenario: Scenario; computed: ComputeCorpScenarioResult };
 type PersonalResult = { scenario: Scenario; computed: ComputeScenarioResult };
@@ -81,6 +81,9 @@ function intercorpDistributionsForCorp(
     eligible: D(String(fields.eligible ?? '0')),
     nonEligible: D(String(fields.nonEligible ?? '0')),
     capital: D(String(fields.capital ?? '0')),
+    // P11b T6: ownership% (0..100) drives GRIP designation in the router.
+    // Default 100 when unset — matches the common sole-shareholder holdco case.
+    ownershipPercent: D(String(fields.ownershipPercent ?? '100')),
   }));
 }
 
@@ -230,6 +233,8 @@ function computeIntegratedPersonalFromFacts(
 // Inject intercorpRouter-emitted received-dividend IncomeItems into a corp's
 // resolved investmentIncome facts. Capital divs are tax-free pass-through —
 // surfaced on `intercorp` output but not added to taxable investment income.
+// P11b T6: also stamps `openingGripBoost` from the router so the engine adds
+// the routed GRIP designation (Σ eligible × ownership%/100) to gripEnding.
 function buildIntercorpCorpFacts(
   baseFacts: CorpTaxYearFacts,
   received: CorpReceivedDivs,
@@ -247,6 +252,7 @@ function buildIntercorpCorpFacts(
         ...received.nonEligibleDividends,
       ],
     },
+    openingGripBoost: received.gripBoost,
   };
 }
 
