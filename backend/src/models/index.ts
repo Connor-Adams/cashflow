@@ -282,6 +282,15 @@ HouseholdPlan.belongsTo(Household, {
   as: 'household',
 });
 
+Scenario.belongsTo(HouseholdPlan, {
+  foreignKey: 'householdPlanId',
+  as: 'householdPlan',
+});
+HouseholdPlan.hasMany(Scenario, {
+  foreignKey: 'householdPlanId',
+  as: 'scenarios',
+});
+
 export {
   sequelize,
   User,

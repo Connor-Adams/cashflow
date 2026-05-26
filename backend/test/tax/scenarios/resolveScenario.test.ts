@@ -53,7 +53,7 @@ test('resolveScenario(fork) layers override on top of baseline actuals', async (
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
   const fork = await Scenario.create({
-    parentId: baseline.id, entityId: entity.id, year: 2025,
+    parentId: baseline.id, householdPlanId: null, entityId: entity.id, year: 2025,
     name: 'High salary', kind: 'fork',
     overrides: { 'income.employment': 120000 },
     assumptions: {}, nextYearId: null, notes: null,
@@ -67,13 +67,13 @@ test('resolveScenario walks multi-level ancestry (baseline -> fork1 -> fork2)', 
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
   const fork1 = await Scenario.create({
-    parentId: baseline.id, entityId: entity.id, year: 2025,
+    parentId: baseline.id, householdPlanId: null, entityId: entity.id, year: 2025,
     name: 'L1', kind: 'fork',
     overrides: { 'income.employment': 90000 },
     assumptions: {}, nextYearId: null, notes: null,
   });
   const fork2 = await Scenario.create({
-    parentId: fork1.id, entityId: entity.id, year: 2025,
+    parentId: fork1.id, householdPlanId: null, entityId: entity.id, year: 2025,
     name: 'L2', kind: 'fork',
     overrides: { 'deductions.rrspContrib': 25000 },
     assumptions: {}, nextYearId: null, notes: null,
@@ -88,11 +88,11 @@ test('resolveScenario throws on cyclic ancestry', async () => {
   // Build a cycle: a -> b -> a (only possible via raw update bypassing our APIs).
   const { entity } = await seedEntity();
   const a = await Scenario.create({
-    parentId: null, entityId: entity.id, year: 2025, name: 'A', kind: 'fork',
+    parentId: null, householdPlanId: null, entityId: entity.id, year: 2025, name: 'A', kind: 'fork',
     overrides: {}, assumptions: {}, nextYearId: null, notes: null,
   });
   const b = await Scenario.create({
-    parentId: a.id, entityId: entity.id, year: 2025, name: 'B', kind: 'fork',
+    parentId: a.id, householdPlanId: null, entityId: entity.id, year: 2025, name: 'B', kind: 'fork',
     overrides: {}, assumptions: {}, nextYearId: null, notes: null,
   });
   await a.update({ parentId: b.id });

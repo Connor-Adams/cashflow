@@ -281,6 +281,7 @@ test('GET /compare with mixed ownership returns 403', async () => {
   });
   const otherScenario = await models.Scenario.create({
     parentId: null,
+    householdPlanId: null,
     entityId: otherEntity.id,
     year: 2025,
     name: 'Other',

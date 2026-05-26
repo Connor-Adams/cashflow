@@ -10,6 +10,7 @@ export class Scenario extends Model<
 > {
   declare id: CreationOptional<number>;
   declare parentId: number | null;
+  declare householdPlanId: number | null;
   declare entityId: number;
   declare year: number;
   declare name: string;
@@ -27,6 +28,7 @@ export function initScenario(sequelize: Sequelize): typeof Scenario {
     {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
       parentId: { type: DataTypes.INTEGER, field: 'parent_id', allowNull: true },
+      householdPlanId: { type: DataTypes.INTEGER, field: 'household_plan_id', allowNull: true },
       entityId: { type: DataTypes.INTEGER, field: 'entity_id', allowNull: false },
       year: { type: DataTypes.INTEGER, allowNull: false },
       name: { type: DataTypes.STRING(120), allowNull: false },
@@ -50,6 +52,7 @@ export function initScenario(sequelize: Sequelize): typeof Scenario {
         },
         { name: 'scenarios_parent_id', fields: ['parent_id'] },
         { name: 'scenarios_entity_year', fields: ['entity_id', 'year'] },
+        { name: 'scenarios_household_plan_id', fields: ['household_plan_id'] },
       ],
     }
   );

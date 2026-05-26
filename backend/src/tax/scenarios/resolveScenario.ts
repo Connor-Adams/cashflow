@@ -21,6 +21,7 @@ export async function ensureBaselineScenario(
   if (existing) return existing;
   return Scenario.create({
     parentId: null,
+    householdPlanId: null,
     entityId,
     year,
     name: 'Baseline',
