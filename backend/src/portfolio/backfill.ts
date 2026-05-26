@@ -293,11 +293,17 @@ export async function ensureOverview(securityId: number): Promise<BackfillStatus
   const fetched = sec.metadataFetchedAt;
   const lastFetchedAt = fetched?.toISOString() ?? null;
   const ageStale = fetched != null && Date.now() - fetched.getTime() > OVERVIEW_STALE_MS;
-  // Schema-stale: rows persisted before the expanded-modules rollout lack
-  // structured market-data keys. Force a refresh so the user sees fundamentals
-  // on first visit instead of waiting for the 90-day staleness window.
+  // Schema-stale: rows persisted before a metadata-shape rollout lack the
+  // newest structured keys. Force a refresh so users see new fields on the
+  // first visit instead of waiting out the 90-day staleness window.
+  //
+  // Canary keys (bump these whenever fetchOverview adds new fields):
+  //   - marketCap         (rollout 1: market data / fundamentals / analysts)
+  //   - fundExpenseRatio  (rollout 2: fund + crypto fields)
+  const SCHEMA_CANARIES = ['marketCap', 'fundExpenseRatio'] as const;
+  const metadataKeys = sec.metadata as Record<string, unknown> | null;
   const schemaStale =
-    sec.metadata != null && !('marketCap' in (sec.metadata as Record<string, unknown>));
+    metadataKeys != null && SCHEMA_CANARIES.some((k) => !(k in metadataKeys));
   const isStale = ageStale || schemaStale;
   const isNever = sec.metadata == null;
 

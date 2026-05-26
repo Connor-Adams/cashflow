@@ -108,7 +108,39 @@ export interface OverviewResult {
   numberOfAnalystOpinions: number | null;
   /** Currency this issuer reports in (often differs from listing currency). */
   financialCurrency: string | null;
+  /** Crypto-only fields — `summaryDetail` for cryptocurrency symbols. */
+  circulatingSupply: number | null;
+  volume24Hr: number | null;
+  cryptoStartDate: string | null;
+  fromCurrency: string | null;
+  /**
+   * Fund / ETF fields — `fundProfile`, `topHoldings`, `fundPerformance`.
+   * `null` outside the fund domain (most equities, all crypto).
+   */
+  fundFamily: string | null;
+  fundCategory: string | null;
+  fundLegalType: string | null;
+  fundExpenseRatio: number | null;
+  fundTotalAssets: number | null;
+  fundYield: number | null;
+  topHoldings: TopHoldingEntry[] | null;
+  sectorWeightings: Record<string, number> | null;
+  bondPosition: number | null;
+  stockPosition: number | null;
+  cashPosition: number | null;
+  /** Trailing total return windows from `fundPerformance.trailingReturns`. */
+  trailingReturn1y: number | null;
+  trailingReturn3y: number | null;
+  trailingReturn5y: number | null;
+  trailingReturn10y: number | null;
+  trailingReturnYtd: number | null;
   raw: Record<string, unknown>;
+}
+
+export interface TopHoldingEntry {
+  symbol: string | null;
+  name: string | null;
+  percent: number | null;
 }
 
 export class YahooFinanceError extends Error {
@@ -396,6 +428,11 @@ export async function fetchOverview(
         'summaryDetail',
         'defaultKeyStatistics',
         'financialData',
+        // Fund-only modules — silently absent for equities/crypto, populated
+        // for ETFs and mutual funds.
+        'fundProfile',
+        'topHoldings',
+        'fundPerformance',
       ],
     });
   } catch (err) {
@@ -408,6 +445,9 @@ export async function fetchOverview(
   const detail = summary.summaryDetail as Record<string, unknown> | undefined;
   const stats = summary.defaultKeyStatistics as Record<string, unknown> | undefined;
   const fin = summary.financialData as Record<string, unknown> | undefined;
+  const fundProfile = summary.fundProfile as Record<string, unknown> | undefined;
+  const topHoldingsMod = summary.topHoldings as Record<string, unknown> | undefined;
+  const fundPerf = summary.fundPerformance as Record<string, unknown> | undefined;
   const sector =
     asString(asset?.['sector']) ?? asString(summaryProfile?.['sector']);
   const industry =
@@ -483,14 +523,107 @@ export async function fetchOverview(
     recommendationKey: asString(fin?.['recommendationKey']),
     numberOfAnalystOpinions: asNumber(fin?.['numberOfAnalystOpinions']),
     financialCurrency: asString(fin?.['financialCurrency']),
+    circulatingSupply: asNumber(detail?.['circulatingSupply']),
+    volume24Hr: asNumber(detail?.['volume24Hr']),
+    cryptoStartDate: asDateString(detail?.['startDate']),
+    fromCurrency: asString(detail?.['fromCurrency']),
+    fundFamily: asString(fundProfile?.['family']),
+    fundCategory: asString(fundProfile?.['categoryName']),
+    fundLegalType: asString(fundProfile?.['legalType']),
+    fundExpenseRatio: extractExpenseRatio(fundProfile),
+    fundTotalAssets:
+      extractFromFees(fundProfile, 'totalNetAssets') ??
+      asNumber(detail?.['totalAssets']),
+    fundYield: asNumber(detail?.['yield']),
+    topHoldings: extractTopHoldings(topHoldingsMod),
+    sectorWeightings: extractSectorWeightings(topHoldingsMod),
+    bondPosition: asNumber(topHoldingsMod?.['bondPosition']),
+    stockPosition: asNumber(topHoldingsMod?.['stockPosition']),
+    cashPosition: asNumber(topHoldingsMod?.['cashPosition']),
+    trailingReturn1y: extractTrailingReturn(fundPerf, 'oneYear'),
+    trailingReturn3y: extractTrailingReturn(fundPerf, 'threeYear'),
+    trailingReturn5y: extractTrailingReturn(fundPerf, 'fiveYear'),
+    trailingReturn10y: extractTrailingReturn(fundPerf, 'tenYear'),
+    trailingReturnYtd: extractTrailingReturn(fundPerf, 'ytd'),
     raw: summary as unknown as Record<string, unknown>,
   };
 
   const hasAnySignal = Object.entries(result).some(([k, v]) => {
     if (k === 'raw') return false;
-    return v !== null;
+    if (v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === 'object') return Object.keys(v).length > 0;
+    return true;
   });
   return hasAnySignal ? result : null;
+}
+
+function extractFromFees(
+  fundProfile: Record<string, unknown> | undefined,
+  key: string,
+): number | null {
+  if (!fundProfile) return null;
+  const fees = fundProfile['feesExpensesInvestment'] as
+    | Record<string, unknown>
+    | undefined;
+  return asNumber(fees?.[key]);
+}
+
+function extractExpenseRatio(
+  fundProfile: Record<string, unknown> | undefined,
+): number | null {
+  // Prefer net (what the investor actually pays); fall back to gross then
+  // the annual report ratio. Yahoo populates whichever it has.
+  return (
+    extractFromFees(fundProfile, 'netExpRatio') ??
+    extractFromFees(fundProfile, 'grossExpRatio') ??
+    extractFromFees(fundProfile, 'annualReportExpenseRatio')
+  );
+}
+
+function extractTopHoldings(
+  topHoldingsMod: Record<string, unknown> | undefined,
+): TopHoldingEntry[] | null {
+  const arr = topHoldingsMod?.['holdings'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const out: TopHoldingEntry[] = [];
+  for (const h of arr) {
+    if (!h || typeof h !== 'object') continue;
+    const rec = h as Record<string, unknown>;
+    const symbol = asString(rec['symbol']);
+    const name = asString(rec['holdingName']);
+    const percent = asNumber(rec['holdingPercent']);
+    if (symbol == null && name == null) continue;
+    out.push({ symbol, name, percent });
+  }
+  return out.length === 0 ? null : out;
+}
+
+function extractSectorWeightings(
+  topHoldingsMod: Record<string, unknown> | undefined,
+): Record<string, number> | null {
+  const arr = topHoldingsMod?.['sectorWeightings'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const out: Record<string, number> = {};
+  for (const entry of arr) {
+    if (!entry || typeof entry !== 'object') continue;
+    for (const [k, v] of Object.entries(entry as Record<string, unknown>)) {
+      const n = asNumber(v);
+      if (n != null) out[k] = n;
+    }
+  }
+  return Object.keys(out).length === 0 ? null : out;
+}
+
+function extractTrailingReturn(
+  fundPerf: Record<string, unknown> | undefined,
+  field: string,
+): number | null {
+  if (!fundPerf) return null;
+  const trailing = fundPerf['trailingReturns'] as
+    | Record<string, unknown>
+    | undefined;
+  return asNumber(trailing?.[field]);
 }
 
 /** Test seam — swaps the underlying client. Pass null to restore the singleton. */

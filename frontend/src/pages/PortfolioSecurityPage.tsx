@@ -34,6 +34,7 @@ import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { AboutCard } from './portfolio-security/AboutCard'
 import { DividendHistoryCard } from './portfolio-security/DividendHistoryCard'
+import { FundFactsCard } from './portfolio-security/FundFactsCard'
 import { MarketDataCard } from './portfolio-security/MarketDataCard'
 import { PriceChartCard } from './portfolio-security/PriceChartCard'
 import { SecurityHeader } from './portfolio-security/SecurityHeader'
@@ -159,6 +160,10 @@ export function PortfolioSecurityPage() {
 
       <div className="mt-4">
         <MarketDataCard overview={overview} currency={combined.currency} />
+      </div>
+
+      <div className="mt-4">
+        <FundFactsCard overview={overview} currency={combined.currency} />
       </div>
 
       <div className="mt-4">

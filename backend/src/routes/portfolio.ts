@@ -1201,6 +1201,21 @@ const OVERVIEW_NUMBER_FIELDS = [
   'targetLowPrice',
   'recommendationMean',
   'numberOfAnalystOpinions',
+  // Crypto
+  'circulatingSupply',
+  'volume24Hr',
+  // Fund
+  'fundExpenseRatio',
+  'fundTotalAssets',
+  'fundYield',
+  'bondPosition',
+  'stockPosition',
+  'cashPosition',
+  'trailingReturn1y',
+  'trailingReturn3y',
+  'trailingReturn5y',
+  'trailingReturn10y',
+  'trailingReturnYtd',
 ] as const;
 
 const OVERVIEW_STRING_FIELDS = [
@@ -1212,7 +1227,44 @@ const OVERVIEW_STRING_FIELDS = [
   'exDividendDate',
   'recommendationKey',
   'financialCurrency',
+  // Crypto
+  'cryptoStartDate',
+  'fromCurrency',
+  // Fund
+  'fundFamily',
+  'fundCategory',
+  'fundLegalType',
 ] as const;
+
+function pickTopHoldings(
+  m: Record<string, unknown>,
+): Array<{ symbol: string | null; name: string | null; percent: number | null }> | null {
+  const arr = m['topHoldings'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr.map((h) => {
+    const rec = (h ?? {}) as Record<string, unknown>;
+    return {
+      symbol: typeof rec['symbol'] === 'string' ? (rec['symbol'] as string) : null,
+      name: typeof rec['name'] === 'string' ? (rec['name'] as string) : null,
+      percent:
+        typeof rec['percent'] === 'number' && Number.isFinite(rec['percent'])
+          ? (rec['percent'] as number)
+          : null,
+    };
+  });
+}
+
+function pickSectorWeightings(
+  m: Record<string, unknown>,
+): Record<string, number> | null {
+  const obj = m['sectorWeightings'];
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return Object.keys(out).length === 0 ? null : out;
+}
 
 function pickNumber(m: Record<string, unknown>, key: string): number | null {
   const v = m[key];
@@ -1240,6 +1292,8 @@ router.get('/security/:id/overview', async (req, res, next) => {
     };
     for (const key of OVERVIEW_STRING_FIELDS) payload[key] = pickString(m, key);
     for (const key of OVERVIEW_NUMBER_FIELDS) payload[key] = pickNumber(m, key);
+    payload['topHoldings'] = pickTopHoldings(m);
+    payload['sectorWeightings'] = pickSectorWeightings(m);
     res.json(payload);
   } catch (e) {
     next(e);
