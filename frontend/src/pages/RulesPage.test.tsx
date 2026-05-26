@@ -15,6 +15,19 @@ function mockFetch(rules: typeof SAMPLE_RULES) {
     const url = String(input)
     if (url.endsWith('/api/rules')) return Promise.resolve({ ok: true, json: () => Promise.resolve(rules) } as Response)
     if (url.endsWith('/api/ai/rule-proposals')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ proposals: [] }) } as Response)
+    if (url.endsWith('/api/rules/health')) return Promise.resolve({ ok: true, json: () => Promise.resolve({
+      windowDays: 90,
+      totalRules: rules.length,
+      totalTransactions: 0,
+      hitCount: 0,
+      hitRate: 0,
+      uncategorizedCount: 0,
+      reviewFlagCount: 0,
+      staleRules: [],
+      duplicateRules: [],
+      topMerchantsWithoutRules: [],
+    }) } as Response)
+    if (url.endsWith('/api/rules/suggestions')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ suggestions: [] }) } as Response)
     if (url.endsWith('/api/transactions/category-hints')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ categories: [] }) } as Response)
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
   }))
