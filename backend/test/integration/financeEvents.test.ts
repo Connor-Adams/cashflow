@@ -218,7 +218,10 @@ test('Settlement create + delete each emit one finance event', async () => {
   const items1 = list1.body.items as Array<{ type: string; payload: Record<string, unknown> | null }>;
   assert.ok(items1.some((i) => i.type === 'settlement.created'));
   const created = items1.find((i) => i.type === 'settlement.created');
-  assert.equal((created!.payload as Record<string, unknown>).amount, '25.00');
+  // DECIMAL(14,4) round-trips as "25.0000" — assert numeric equality, not
+  // raw string equality, so we're robust to the column scale.
+  const createdAmount = (created!.payload as Record<string, unknown>).amount;
+  assert.equal(Number(createdAmount), 25);
   assert.equal((created!.payload as Record<string, unknown>).direction, 'partner_paid_me');
 
   const del = await primaryAgent.delete(`/api/settlements/${settlementId}`);
