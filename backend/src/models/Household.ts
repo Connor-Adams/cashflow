@@ -14,6 +14,7 @@ export class Household extends Model<
 > {
   declare id: CreationOptional<number>;
   declare name: string;
+  declare benchmarkSymbol: CreationOptional<string>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -23,6 +24,12 @@ export function initHousehold(sequelize: Sequelize): typeof Household {
     {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
       name: { type: DataTypes.STRING(160), allowNull: false },
+      benchmarkSymbol: {
+        type: DataTypes.STRING(16),
+        field: 'benchmark_symbol',
+        allowNull: false,
+        defaultValue: 'SPY',
+      },
     } as ModelAttributes<Household>,
     {
       sequelize,
