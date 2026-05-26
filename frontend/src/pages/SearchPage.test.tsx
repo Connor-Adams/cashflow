@@ -39,7 +39,10 @@ describe('SearchPage', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText(/Smart search/i)).toBeTruthy()
-    expect(screen.getByText(/category:Groceries amount:>100/i)).toBeTruthy()
+    // The example buttons appear in a list of "Try one of these" suggestions.
+    expect(screen.getByText('Try one of these')).toBeTruthy()
+    // The exact button (not the prose code snippet) should be clickable.
+    expect(screen.getByRole('button', { name: /merchant:Costco date:2026-01-01/i })).toBeTruthy()
     await waitFor(() => {
       expect((globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.length).toBeGreaterThan(0)
     })
