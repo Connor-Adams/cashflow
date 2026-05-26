@@ -1,9 +1,8 @@
 // backend/src/observability/logger.ts
-import pino, { type LoggerOptions, type TransportTargetOptions } from 'pino';
+import pino, { type LoggerOptions } from 'pino';
 import { context as otelContext, trace } from '@opentelemetry/api';
 import { als } from './requestContext';
 
-const isProd = process.env.NODE_ENV === 'production';
 const isDev = process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
 const otlpEnabled = !!otlpEndpoint && process.env.OTEL_SDK_DISABLED !== 'true';
@@ -44,34 +43,11 @@ const baseOptions: LoggerOptions = {
   timestamp: pino.stdTimeFunctions.isoTime,
 };
 
-function buildTargets(): TransportTargetOptions[] {
-  const targets: TransportTargetOptions[] = [];
-
-  if (isDev) {
-    // Dev: pretty-print to stdout. pino-pretty writes to fd 1 itself.
-    targets.push({
-      target: 'pino-pretty',
-      level: process.env.LOG_LEVEL ?? 'info',
-      options: {
-        colorize: true,
-        translateTime: 'SYS:HH:mm:ss.l',
-        ignore: 'pid,hostname,service,env',
-      },
-    });
-  } else {
-    // Prod / test: JSON to stdout so Railway log capture keeps working.
-    targets.push({
-      target: 'pino/file',
-      level: process.env.LOG_LEVEL ?? 'info',
-      options: { destination: 1 },
-    });
-  }
-
-  if (otlpEnabled) {
-    // OTLP export in a worker thread; main loop never blocks on the network.
-    targets.push({
+function buildOtlpTransport() {
+  if (!otlpEnabled) return undefined;
+  try {
+    const transport = pino.transport({
       target: 'pino-opentelemetry-transport',
-      level: process.env.LOG_LEVEL ?? 'info',
       options: {
         loggerName: 'cashflow-backend',
         serviceVersion: process.env.GIT_SHA ?? 'dev',
@@ -89,17 +65,49 @@ function buildTargets(): TransportTargetOptions[] {
         },
       },
     });
+    transport.on('error', (err: Error) => {
+      // Worker thread failed — surface to stderr so prod logs at least show it.
+      // eslint-disable-next-line no-console
+      console.error('[observability] OTLP transport error:', err.message);
+    });
+    return transport;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[observability] Failed to init OTLP transport, falling back to stdout-only:', err);
+    return undefined;
   }
-
-  return targets;
 }
 
-const targets = buildTargets();
+let logger: pino.Logger;
 
-export const logger = pino(baseOptions, pino.transport({ targets }));
+if (isDev) {
+  // Dev: pino-pretty for human-readable stdout. OTLP unsupported in dev path
+  // (most devs don't run the local collector); use Phase 2 docker-compose if needed.
+  logger = pino({
+    ...baseOptions,
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:HH:mm:ss.l',
+        ignore: 'pid,hostname,service,env',
+      },
+    },
+  });
+} else {
+  // Prod / test: stdout is always written synchronously via the destination
+  // arg. OTLP is added in parallel via pino.multistream so a transport failure
+  // never kills stdout.
+  const otlpTransport = buildOtlpTransport();
+  const streams: Parameters<typeof pino.multistream>[0] = [
+    { level: 'trace', stream: process.stdout },
+    ...(otlpTransport ? [{ level: 'trace' as const, stream: otlpTransport }] : []),
+  ];
+  logger = pino(baseOptions, pino.multistream(streams));
+}
+
+export { logger };
 
 // Backwards-compatible type aliases.
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogFields = Record<string, unknown>;
-
-void isProd;
