@@ -18,6 +18,8 @@ const KEY_DEFS: KeyDef[] = [
   { key: 'deductions.rrspContrib', label: 'RRSP contribution (CAD)', inputType: 'decimal' },
   { key: 'deductions.fhsaContrib', label: 'FHSA contribution (CAD)', inputType: 'decimal' },
   { key: 'deductions.donations', label: 'Donations (CAD)', inputType: 'decimal' },
+  { key: 'deductions.spousalRrspContrib', label: 'Spousal RRSP contribution (CAD, contributor side)', inputType: 'decimal' },
+  { key: 'pensionSplit.transferAmount', label: 'Pension income split — transferred to spouse (CAD)', inputType: 'decimal' },
   { key: 'capgains.dispositions', label: 'Capital gain dispositions', inputType: 'array_capgain_dispositions' },
 ];
 
