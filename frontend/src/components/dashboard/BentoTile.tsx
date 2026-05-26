@@ -12,18 +12,19 @@ export type BentoVariant = 'default' | 'hero' | 'warning' | 'destructive'
  * Tiers:
  *   base (<640):     stack — every tile full-width
  *   sm   (≥640):     6-col grid
- *   lg   (≥1024):    12-col grid (current default authoring width)
- *   3xl  (≥1440):    12-col grid with halved spans → 3-4 wide rows
+ *   lg   (≥1024):    12-col grid (authoring width)
+ *   3xl  (≥1440):    same 12-col layout, wider container
  *
- * Container uses `grid-flow-row-dense` so smaller tiles auto-fill earlier
- * gaps; DOM order is preserved for a11y.
+ * Spans stay constant at lg and 3xl so authored pairs (e.g. 8+4, 6+6)
+ * keep summing to 12. Halving at 3xl previously broke the parity and
+ * left 2-3 column holes between tiles.
  */
 const SPAN_CLASSES: Record<BentoSpan, string> = {
-  3:  'col-span-full sm:col-span-3 lg:col-span-3 3xl:col-span-2',
-  4:  'col-span-full sm:col-span-3 lg:col-span-4 3xl:col-span-3',
-  6:  'col-span-full sm:col-span-6 lg:col-span-6 3xl:col-span-3',
-  8:  'col-span-full sm:col-span-6 lg:col-span-8 3xl:col-span-6',
-  12: 'col-span-full sm:col-span-6 lg:col-span-12 3xl:col-span-12',
+  3:  'col-span-full sm:col-span-3 lg:col-span-3',
+  4:  'col-span-full sm:col-span-3 lg:col-span-4',
+  6:  'col-span-full sm:col-span-6 lg:col-span-6',
+  8:  'col-span-full sm:col-span-6 lg:col-span-8',
+  12: 'col-span-full sm:col-span-6 lg:col-span-12',
 }
 
 const ROW_CLASSES: Record<BentoRows, string> = {

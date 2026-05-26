@@ -46,7 +46,7 @@ export function CurrencyMixTile({ metrics, loading }: CurrencyMixTileProps) {
 
   return (
     <BentoTile
-      span={6}
+      span={12}
       rows={2}
       aria-busy={loading}
       label="Currency mix"
