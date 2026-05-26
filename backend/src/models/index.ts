@@ -84,12 +84,14 @@ import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 import { Purchase, initPurchase } from './Purchase';
 import { Notification, initNotification } from './Notification';
 import { AuditLog, initAuditLog } from './AuditLog';
+import { FinanceEvent, initFinanceEvent } from './FinanceEvent';
 import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
+import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
 
 initUser(sequelize);
@@ -163,8 +165,10 @@ initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
 initAuditLog(sequelize);
+initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
+initAccountStatement(sequelize);
 initSyncBackup(sequelize);
 
 User.hasMany(Notification, {
@@ -607,6 +611,28 @@ AuditLog.belongsTo(User, {
   as: 'actor',
 });
 
+// Finance domain events (issue #238) — append-only stream parallel to
+// audit_log. Cascade on household delete so removing a household
+// removes its event stream too.
+Household.hasMany(FinanceEvent, {
+  foreignKey: 'household_id',
+  as: 'financeEvents',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinanceEvent.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinanceEvent, {
+  foreignKey: 'actor_user_id',
+  as: 'financeEventsEmitted',
+});
+FinanceEvent.belongsTo(User, {
+  foreignKey: 'actor_user_id',
+  as: 'actor',
+});
+
 // Monthly close (issue #227). Period cascades to tasks; deleting a
 // household removes its periods and (via the period→task cascade) tasks.
 Household.hasMany(MonthlyClosePeriod, {
@@ -667,6 +693,39 @@ User.hasMany(Purchase, {
 Purchase.belongsTo(User, {
   foreignKey: 'marked_by_user_id',
   as: 'markedByUser',
+});
+
+// AccountStatement (issue #242). A statement belongs to one Account; an
+// Account can have many statements over time. Household and creator
+// associations mirror the Account model so authorization checks via
+// visibility + createdByUserId compose cleanly.
+Household.hasMany(AccountStatement, {
+  foreignKey: 'household_id',
+  as: 'accountStatements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Account.hasMany(AccountStatement, {
+  foreignKey: 'account_id',
+  as: 'statements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+User.hasMany(AccountStatement, {
+  foreignKey: 'created_by_user_id',
+  as: 'accountStatements',
+});
+AccountStatement.belongsTo(User, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdByUser',
 });
 
 // CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
@@ -784,7 +843,9 @@ export {
   Notification,
   NotificationPreference,
   AuditLog,
+  FinanceEvent,
   BudgetAlertState,
   SavedSearch,
+  AccountStatement,
   SyncBackup,
 };

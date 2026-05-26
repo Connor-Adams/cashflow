@@ -18,6 +18,11 @@ import {
   diffPatchableFields,
   recordAudit,
 } from '../audit/log';
+import {
+  FINANCE_EVENT_TYPES,
+  FINANCE_EVENT_ENTITY_TYPES,
+  recordFinanceEvent,
+} from '../events/financeEvents';
 
 /**
  * Map a rule's shape to the InternalBackfillRequest parameters. Regex
@@ -172,6 +177,22 @@ router.post('/', async (req, res, next) => {
         effectiveTo: row.effectiveTo,
       },
     });
+    await recordFinanceEvent({
+      req,
+      type: FINANCE_EVENT_TYPES.RuleCreated,
+      entityType: FINANCE_EVENT_ENTITY_TYPES.Rule,
+      entityId: row.id,
+      payload: {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        category: row.category,
+        priority: row.priority,
+        isBusiness: row.isBusiness,
+        splitType: row.splitType,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+      },
+    });
     res.status(201).json(row);
   } catch (e) {
     next(e);
@@ -281,6 +302,19 @@ router.patch('/:id', async (req, res, next) => {
         summary: `Updated rule "${row.merchantPattern}": ${Object.keys(diff.after).slice(0, 3).join(', ')}`,
         before: diff.before,
         after: diff.after,
+      });
+      // Stream event includes the new field values only — replay-style
+      // payload. Consumers can join earlier rule.created/rule.updated
+      // events to reconstruct full history if needed.
+      await recordFinanceEvent({
+        req,
+        type: FINANCE_EVENT_TYPES.RuleUpdated,
+        entityType: FINANCE_EVENT_ENTITY_TYPES.Rule,
+        entityId: row.id,
+        payload: {
+          changed: Object.keys(diff.after),
+          after: diff.after,
+        },
       });
     }
     res.json(row);
@@ -675,6 +709,13 @@ router.delete('/:id', async (req, res, next) => {
       entityId: ruleId,
       summary: `Deleted rule "${snapshot.merchantPattern}"`,
       before: auditSnapshot,
+    });
+    await recordFinanceEvent({
+      req,
+      type: FINANCE_EVENT_TYPES.RuleDeleted,
+      entityType: FINANCE_EVENT_ENTITY_TYPES.Rule,
+      entityId: ruleId,
+      payload: auditSnapshot,
     });
     res.status(204).send();
   } catch (e) {
