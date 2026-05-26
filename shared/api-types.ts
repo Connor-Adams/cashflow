@@ -50,6 +50,81 @@ export type AccountType =
 
 export type TransactionStatus = 'pending' | 'posted' | 'cleared'
 
+/**
+ * Account statement record (issue #242). One row per statement period
+ * (e.g. a single monthly credit-card statement). The reconciliation flow
+ * compares `closingBalance` against the per-account sum of transactions
+ * in the period window plus `openingBalance`.
+ */
+export type AccountStatement = {
+  id: number
+  householdId: number
+  accountId: number
+  createdByUserId: number | null
+  visibility: 'private' | 'shared'
+  /** YYYY-MM-DD (inclusive). */
+  periodStart: string
+  /** YYYY-MM-DD (inclusive). */
+  periodEnd: string
+  openingBalance: number
+  closingBalance: number
+  currency: string
+  sourceFilename: string | null
+  notes: string | null
+  /** ISO timestamp; null when not yet reconciled. */
+  reconciledAt: string | null
+  varianceExplanation: string | null
+  createdAt: string
+  updatedAt: string
+  account?: {
+    id: number
+    name: string
+    shortCode: string | null
+    defaultCurrency: string | null
+  } | null
+}
+
+/**
+ * Statement reconciliation math output (issue #242). Returned alongside
+ * the statement on detail/patch/reconcile responses so the UI can render
+ * variance and balance without re-deriving.
+ */
+export type StatementReconciliation = {
+  expectedClosing: number
+  variance: number
+  transactionCount: number
+  transactionTotal: number
+  isBalanced: boolean
+}
+
+/** Transaction shape returned inside the statement detail payload. */
+export type StatementTransaction = {
+  id: number
+  date: string
+  amount: number
+  currency: string
+  merchantClean: string
+  merchantRaw: string
+  finalCategory: string | null
+  txnType: string
+  linkedTransactionId: number | null
+  transferPurpose: TransferPurpose | null
+  status: TransactionStatus
+}
+
+export type StatementDetailResponse = {
+  data: AccountStatement
+  reconciliation: StatementReconciliation
+  transactions: StatementTransaction[]
+}
+
+export type StatementListResponse = {
+  data: AccountStatement[]
+  page: number
+  pageSize: number
+  total: number
+}
+
 export type Transaction = {
   id: number
   accountId: number
