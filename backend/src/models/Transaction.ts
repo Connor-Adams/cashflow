@@ -8,6 +8,7 @@ import {
   CreationOptional,
 } from 'sequelize';
 import { logger } from '../observability/logger';
+import { TRANSACTION_STATUSES, type TransactionStatus } from '../transactions/types';
 
 export class Transaction extends Model<
   InferAttributes<Transaction>,
@@ -31,6 +32,7 @@ export class Transaction extends Model<
   declare sourceReference: string | null;
   declare sourceRowFingerprint: string;
   declare sourceIdentityFingerprint: string;
+  declare status: CreationOptional<TransactionStatus>;
   declare appliedRuleId: number | null;
   declare entityId: number | null;
 
@@ -160,6 +162,14 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         type: DataTypes.STRING(128),
         field: 'source_identity_fingerprint',
         allowNull: false,
+      },
+      status: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        defaultValue: 'posted',
+        validate: {
+          isIn: [TRANSACTION_STATUSES],
+        },
       },
       appliedRuleId: {
         type: DataTypes.INTEGER,

@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { TransactionsPage } from './TransactionsPage'
 import { ToastProvider } from '@/components/ui/toast'
 import * as api from '@/lib/api'
+import type { Transaction } from '@/types/api'
 
 void React
 
@@ -109,3 +110,126 @@ describe('TransactionsPage date range validation', () => {
     }
   })
 })
+
+describe('TransactionsPage transaction status controls', () => {
+  it('sends status query param from the status filter chips', async () => {
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: /^pending$/i }))
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(api.getJson)
+          .mock.calls.some((call) => String(call[0]).includes('status=pending')),
+      ).toBe(true),
+    )
+  })
+
+  it('renders Pending and Cleared badges but no Posted badge', async () => {
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({ id: 1, merchantClean: 'Pending Merchant', status: 'pending' }),
+            makeTransaction({ id: 2, merchantClean: 'Cleared Merchant', status: 'cleared' }),
+            makeTransaction({ id: 3, merchantClean: 'Posted Merchant', status: 'posted' }),
+          ],
+          page: 1,
+          pageSize: 25,
+          total: 3,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/ai/status') return { openai: false }
+      if (path === '/api/contacts') return []
+      return null
+    })
+    renderPage()
+    expect(await screen.findByText('Pending')).toBeInTheDocument()
+    expect(screen.getAllByText('Cleared').length).toBeGreaterThan(0)
+    expect(screen.queryByTitle('Posted')).not.toBeInTheDocument()
+  })
+
+  it('confirms before changing a transaction to cleared', async () => {
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [makeTransaction({ id: 11, merchantClean: 'Clear Me', status: 'posted' })],
+          page: 1,
+          pageSize: 25,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/ai/status') return { openai: false }
+      if (path === '/api/contacts') return []
+      return null
+    })
+    renderPage()
+    const statusSelect = await screen.findByLabelText(/status for clear me/i)
+    await userEvent.selectOptions(statusSelect, 'cleared')
+    expect(await screen.findByText('Mark as cleared?')).toBeInTheDocument()
+    expect(
+      screen.getByText('Cleared usually comes from statement reconciliation. Continue?'),
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Mark cleared' }))
+    await waitFor(() =>
+      expect(api.patchJson).toHaveBeenCalledWith('/api/transactions/11', {
+        status: 'cleared',
+      }),
+    )
+  })
+})
+
+function makeTransaction(
+  overrides: Partial<Transaction> & Pick<Transaction, 'id' | 'merchantClean' | 'status'>,
+): Transaction {
+  return {
+    id: overrides.id,
+    accountId: 1,
+    householdId: 1,
+    createdByUserId: 1,
+    visibility: 'shared',
+    ownershipType: 'me',
+    ownershipContactId: null,
+    importBatch: 'test',
+    date: '2026-05-01',
+    merchantRaw: overrides.merchantClean,
+    merchantClean: overrides.merchantClean,
+    amount: -10,
+    currency: 'CAD',
+    notes: null,
+    sourceReference: null,
+    sourceRowFingerprint: `row-${overrides.id}`,
+    appliedRuleId: null,
+    autoCategory: null,
+    categoryOverride: null,
+    finalCategory: null,
+    autoBusiness: null,
+    businessOverride: null,
+    finalBusiness: false,
+    autoSplitType: null,
+    splitOverride: null,
+    finalSplitType: 'me',
+    autoPctMe: null,
+    pctMeOverride: null,
+    finalPctMe: null,
+    autoPctPartner: null,
+    pctPartnerOverride: null,
+    finalPctPartner: null,
+    myShareAmount: -10,
+    partnerShareAmount: 0,
+    businessAmount: 0,
+    reviewFlag: false,
+    reviewedAt: null,
+    merchantCanonical: null,
+    txnType: 'purchase',
+    autoSource: null,
+    autoConfidence: null,
+    linkedTransactionId: null,
+    transferPurpose: null,
+    transferLinkedAt: null,
+    isRecurring: false,
+    status: overrides.status,
+    ...overrides,
+  }
+}

@@ -48,6 +48,8 @@ export type AccountType =
   | 'cash'
   | 'other'
 
+export type TransactionStatus = 'pending' | 'posted' | 'cleared'
+
 export type Transaction = {
   id: number
   accountId: number
@@ -65,6 +67,7 @@ export type Transaction = {
   notes: string | null
   sourceReference: string | null
   sourceRowFingerprint: string
+  status: TransactionStatus
   appliedRuleId: number | null
   autoCategory: string | null
   categoryOverride: string | null

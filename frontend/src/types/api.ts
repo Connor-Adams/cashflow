@@ -73,6 +73,7 @@ export type {
   SecurityPrice,
   StatementPreview,
   Transaction,
+  TransactionStatus,
   TransferPurpose,
 } from '@cashflow/shared'
 
@@ -460,6 +461,7 @@ export type TransactionFilterPayload = {
   importBatch?: string
   dateFrom?: string
   dateTo?: string
+  status?: import('@cashflow/shared').TransactionStatus
 }
 
 /**
