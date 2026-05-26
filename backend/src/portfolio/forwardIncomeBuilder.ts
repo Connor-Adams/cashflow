@@ -128,7 +128,7 @@ export async function rebuildForwardProjectionsForHousehold(
     };
     await PortfolioForwardProjection.upsert(
       { householdId, securityId, ...updateValues },
-      { conflictFields: ['household_id', 'security_id'] },
+      { conflictFields: ['household_id', 'security_id'] as unknown as ('householdId' | 'securityId')[] },
     );
     rebuilt++;
   }

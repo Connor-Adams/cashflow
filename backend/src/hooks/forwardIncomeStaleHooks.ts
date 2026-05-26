@@ -32,41 +32,48 @@ export function registerForwardIncomeStaleHooks(_sequelize: Sequelize): void {
   registered = true;
 
   InvestmentActivity.addHook('afterCreate', 'fwd_income_stale_inv_create', async (instance, opts) => {
-    if (!ACTIVITY_TYPES_OF_INTEREST.has(instance.activityType)) return;
-    if (instance.securityId == null) return;
-    const hhId = instance.householdId ?? (await householdIdForAccount(instance.accountId));
+    const inv = instance as InvestmentActivity;
+    if (!ACTIVITY_TYPES_OF_INTEREST.has(inv.activityType)) return;
+    if (inv.securityId == null) return;
+    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
     if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, instance.securityId!));
+    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, inv.securityId!));
   });
 
   InvestmentActivity.addHook('afterUpdate', 'fwd_income_stale_inv_update', async (instance, opts) => {
-    if (!ACTIVITY_TYPES_OF_INTEREST.has(instance.activityType)) return;
-    if (instance.securityId == null) return;
-    const hhId = instance.householdId ?? (await householdIdForAccount(instance.accountId));
+    const inv = instance as InvestmentActivity;
+    if (!ACTIVITY_TYPES_OF_INTEREST.has(inv.activityType)) return;
+    if (inv.securityId == null) return;
+    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
     if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, instance.securityId!));
+    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, inv.securityId!));
   });
 
   InvestmentActivity.addHook('afterDestroy', 'fwd_income_stale_inv_destroy', async (instance, opts) => {
-    if (instance.securityId == null) return;
-    const hhId = instance.householdId ?? (await householdIdForAccount(instance.accountId));
+    const inv = instance as InvestmentActivity;
+    if (inv.securityId == null) return;
+    const hhId = inv.householdId ?? (await householdIdForAccount(inv.accountId));
     if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, instance.securityId!));
+    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, inv.securityId!));
   });
 
   SecurityDividend.addHook('afterCreate', 'fwd_income_stale_div_create', async (instance, opts) => {
-    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(instance.securityId));
+    const div = instance as SecurityDividend;
+    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(div.securityId));
   });
   SecurityDividend.addHook('afterUpdate', 'fwd_income_stale_div_update', async (instance, opts) => {
-    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(instance.securityId));
+    const div = instance as SecurityDividend;
+    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(div.securityId));
   });
   SecurityDividend.addHook('afterDestroy', 'fwd_income_stale_div_destroy', async (instance, opts) => {
-    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(instance.securityId));
+    const div = instance as SecurityDividend;
+    await deferOrRun(opts as HookOpts, () => markStaleForAllHoldersOfSecurity(div.securityId));
   });
 
   HoldingSnapshot.addHook('afterCreate', 'fwd_income_stale_snap_create', async (instance, opts) => {
-    const hhId = instance.householdId ?? (await householdIdForAccount(instance.accountId));
+    const snap = instance as HoldingSnapshot;
+    const hhId = snap.householdId ?? (await householdIdForAccount(snap.accountId));
     if (hhId == null) return;
-    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, instance.securityId));
+    await deferOrRun(opts as HookOpts, () => markStaleForHousehold(hhId, snap.securityId));
   });
 }
