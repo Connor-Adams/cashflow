@@ -18,10 +18,10 @@ function parseAmount(text: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-// Backend caps POST /capture/orders at 200 orders per request. Apple lifetime
+// Backend caps POST /capture/orders at 1000 orders per request. Apple lifetime
 // history can exceed 600; truncate to the most recent batch (DOM order is
 // reverse-chronological on reportaproblem.apple.com).
-const MAX_ORDERS = 200;
+const MAX_ORDERS = 1000;
 
 export function extractApplePurchasesFromDom(doc: Document): CapturedOrder[] {
   const purchases = Array.from(doc.querySelectorAll('.purchase'));

@@ -139,8 +139,8 @@ router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (re
       res.status(400).json({ error: 'orders must be a non-empty array' });
       return;
     }
-    if (ordersRaw.length > 200) {
-      res.status(400).json({ error: 'orders cap is 200 per request' });
+    if (ordersRaw.length > 1000) {
+      res.status(400).json({ error: 'orders cap is 1000 per request' });
       return;
     }
 
