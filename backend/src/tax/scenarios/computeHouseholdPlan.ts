@@ -8,6 +8,7 @@ import {
   type OwnerCompPlan,
   type CorpReturnSummary,
   type IntegrationRouterOutput,
+  type PersonalAdditions,
 } from './integrationRouter';
 import { resolveScenario } from './resolveScenario';
 import { buildT1 } from '../engine/t1';
@@ -22,6 +23,131 @@ export interface HouseholdPlanComputeResult {
 
 const OWNER_COMP_RE =
   /^ownerComp\.(\d+)\.(salary|bonus|eligibleDividend|nonEligibleDividend|capitalDividend)$/;
+
+type CorpResult = { scenario: Scenario; computed: ComputeCorpScenarioResult };
+type PersonalResult = { scenario: Scenario; computed: ComputeScenarioResult };
+
+// Walk a corp scenario's overrides, parse ownerComp.<shareholderId>.<field>
+// keys, return one OwnerCompPlan per shareholder. Caller folds them across
+// every corp in the plan before handing to the integration router.
+function ownerCompPlansForCorp(
+  scenario: Scenario,
+  overrides: Record<string, unknown>,
+): OwnerCompPlan[] {
+  const byShareholder: Record<string, Record<string, number>> = {};
+  for (const [k, v] of Object.entries(overrides)) {
+    const m = k.match(OWNER_COMP_RE);
+    if (!m) continue;
+    const shareholderId = m[1];
+    const field = m[2];
+    const numericValue = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(numericValue)) continue;
+    byShareholder[shareholderId] = {
+      ...(byShareholder[shareholderId] ?? {}),
+      [field]: numericValue,
+    };
+  }
+  return Object.entries(byShareholder).map(([shareholderId, fields]) => ({
+    corpScenarioId: scenario.id,
+    shareholderEntityId: Number(shareholderId),
+    salary: D(String(fields.salary ?? '0')),
+    bonus: D(String(fields.bonus ?? '0')),
+    eligibleDividend: D(String(fields.eligibleDividend ?? '0')),
+    nonEligibleDividend: D(String(fields.nonEligibleDividend ?? '0')),
+    capitalDividend: D(String(fields.capitalDividend ?? '0')),
+  }));
+}
+
+// Build the router inputs by walking computed corp results: one
+// CorpReturnSummary per corp (for GRIP / CDA caps) and N OwnerCompPlan rows.
+function buildRouterInputs(corp: CorpResult[]): {
+  ownerCompPlans: OwnerCompPlan[];
+  corpReturns: CorpReturnSummary[];
+} {
+  const ownerCompPlans: OwnerCompPlan[] = [];
+  const corpReturns: CorpReturnSummary[] = [];
+  for (const { scenario, computed } of corp) {
+    const totals = computed.totals as Record<string, unknown>;
+    corpReturns.push({
+      corpScenarioId: scenario.id,
+      gripEnding: D(String(totals.gripEnding ?? '0')),
+      cdaEnding: D(String(totals.cdaEnding ?? '0')),
+      // Engine doesn't expose retained earnings as a totals field; router doesn't
+      // enforce against it for v1. Placeholder D('0') is intentional — flagged in
+      // the plan's "risks / out of scope" section.
+      retainedEarningsAfter: D('0'),
+    });
+    ownerCompPlans.push(
+      ...ownerCompPlansForCorp(scenario, scenario.overrides as Record<string, unknown>),
+    );
+  }
+  return { ownerCompPlans, corpReturns };
+}
+
+// Merge an `IncomeItem`-shaped row into one of the personal facts arrays. The
+// router emits a single per-source aggregate per addition kind, so we append
+// at most one row per call.
+async function buildIntegratedPersonalFacts(
+  scenario: Scenario,
+  additions: PersonalAdditions,
+): Promise<Awaited<ReturnType<typeof resolveScenario>>> {
+  const baseFacts = await resolveScenario(scenario.id);
+  const factsPlus = { ...baseFacts };
+  if (additions.employmentIncome.greaterThan(0)) {
+    factsPlus.employmentIncome = [
+      ...factsPlus.employmentIncome,
+      {
+        source: 'integration:routed-salary',
+        amount: additions.employmentIncome,
+        cadAmount: additions.employmentIncome,
+      },
+    ];
+  }
+  if (additions.eligibleDividends.greaterThan(0)) {
+    factsPlus.eligibleDividends = [
+      ...factsPlus.eligibleDividends,
+      {
+        source: 'integration:routed-eligible-div',
+        amount: additions.eligibleDividends,
+        cadAmount: additions.eligibleDividends,
+      },
+    ];
+  }
+  if (additions.nonEligibleDividends.greaterThan(0)) {
+    factsPlus.nonEligibleDividends = [
+      ...factsPlus.nonEligibleDividends,
+      {
+        source: 'integration:routed-non-eligible-div',
+        amount: additions.nonEligibleDividends,
+        cadAmount: additions.nonEligibleDividends,
+      },
+    ];
+  }
+  // Note: capitalDividendsReceived are tax-free pass-through — surface on the
+  // integration output but do not inject into T1 (no taxable line).
+  return factsPlus;
+}
+
+// Personal scenarios with routed additions skip the scenario_returns cache —
+// see file-level cache-behavior note. Build T1 directly with the integrated
+// facts and synthesize a ComputeScenarioResult around the engine output.
+async function computeIntegratedPersonal(
+  scenario: Scenario,
+  additions: PersonalAdditions,
+): Promise<ComputeScenarioResult> {
+  const factsPlus = await buildIntegratedPersonalFacts(scenario, additions);
+  const engineReturn = buildT1(factsPlus, ratesFor(scenario.year));
+  return {
+    scenarioId: scenario.id,
+    // Sentinel hash — integrated result is plan-scoped, not cached.
+    factsHash: 'household-integrated',
+    computedAt: new Date().toISOString(),
+    lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
+    totals: JSON.parse(JSON.stringify(engineReturn.totals)) as Record<string, unknown>,
+    warnings: engineReturn.warnings,
+    cached: false,
+  };
+}
 
 /**
  * Orchestrator for a HouseholdPlan: loads the plan, partitions linked scenarios
@@ -69,119 +195,30 @@ export async function computeHouseholdPlan(
 
   // 1. Compute corp scenarios in parallel — independent of each other.
   const corp = await Promise.all(
-    corpScenarios.map(async (s) => ({
+    corpScenarios.map<Promise<CorpResult>>(async (s) => ({
       scenario: s,
       computed: await computeCorpScenario(s.id),
     })),
   );
 
-  // 2. Extract ownerComp plans + corp summaries for the router. Walk each
-  //    corp scenario's overrides, parse ownerComp.<id>.<field> keys, group
-  //    by shareholderId into OwnerCompPlan rows. Pull gripEnding / cdaEnding
-  //    out of the computed totals for the GRIP / CDA cap warnings.
-  const ownerCompPlans: OwnerCompPlan[] = [];
-  const corpReturns: CorpReturnSummary[] = [];
-  for (const { scenario, computed } of corp) {
-    const overrides = scenario.overrides as Record<string, unknown>;
-    const totals = computed.totals as Record<string, unknown>;
-    corpReturns.push({
-      corpScenarioId: scenario.id,
-      gripEnding: D(String(totals.gripEnding ?? '0')),
-      cdaEnding: D(String(totals.cdaEnding ?? '0')),
-      // Engine doesn't expose retained earnings as a totals field; router doesn't
-      // enforce against it for v1. Placeholder D('0') is intentional — flagged in
-      // the plan's "risks / out of scope" section.
-      retainedEarningsAfter: D('0'),
-    });
-
-    const byShareholder: Record<string, Record<string, number>> = {};
-    for (const [k, v] of Object.entries(overrides)) {
-      const m = k.match(OWNER_COMP_RE);
-      if (!m) continue;
-      const shareholderId = m[1];
-      const field = m[2];
-      const numericValue = typeof v === 'number' ? v : Number(v);
-      if (!Number.isFinite(numericValue)) continue;
-      byShareholder[shareholderId] = {
-        ...(byShareholder[shareholderId] ?? {}),
-        [field]: numericValue,
-      };
-    }
-    for (const [shareholderId, fields] of Object.entries(byShareholder)) {
-      ownerCompPlans.push({
-        corpScenarioId: scenario.id,
-        shareholderEntityId: Number(shareholderId),
-        salary: D(String(fields.salary ?? '0')),
-        bonus: D(String(fields.bonus ?? '0')),
-        eligibleDividend: D(String(fields.eligibleDividend ?? '0')),
-        nonEligibleDividend: D(String(fields.nonEligibleDividend ?? '0')),
-        capitalDividend: D(String(fields.capitalDividend ?? '0')),
-      });
-    }
-  }
-
-  const integration = integrationRouter({ corpReturns, ownerCompPlans });
+  // 2. Run the integration router over the corp outputs to derive per-
+  //    shareholder additions + GRIP / CDA cap warnings.
+  const integration = integrationRouter(buildRouterInputs(corp));
 
   // 3. Compute personal scenarios. If the integration router emitted additions
   //    for this entity, inject them as IncomeItems and run buildT1 directly
   //    (skipping the scenario_returns cache — see header comment). Otherwise
   //    fall back to the standard cache path via computeScenario.
-  const personal: Array<{ scenario: Scenario; computed: ComputeScenarioResult }> = [];
+  const personal: PersonalResult[] = [];
   for (const ps of personalScenarios) {
     const additions = integration.byShareholder[ps.entityId];
     if (!additions) {
       personal.push({ scenario: ps, computed: await computeScenario(ps.id) });
       continue;
     }
-
-    const baseFacts = await resolveScenario(ps.id);
-    const factsPlus = { ...baseFacts };
-    if (additions.employmentIncome.greaterThan(0)) {
-      factsPlus.employmentIncome = [
-        ...factsPlus.employmentIncome,
-        {
-          source: 'integration:routed-salary',
-          amount: additions.employmentIncome,
-          cadAmount: additions.employmentIncome,
-        },
-      ];
-    }
-    if (additions.eligibleDividends.greaterThan(0)) {
-      factsPlus.eligibleDividends = [
-        ...factsPlus.eligibleDividends,
-        {
-          source: 'integration:routed-eligible-div',
-          amount: additions.eligibleDividends,
-          cadAmount: additions.eligibleDividends,
-        },
-      ];
-    }
-    if (additions.nonEligibleDividends.greaterThan(0)) {
-      factsPlus.nonEligibleDividends = [
-        ...factsPlus.nonEligibleDividends,
-        {
-          source: 'integration:routed-non-eligible-div',
-          amount: additions.nonEligibleDividends,
-          cadAmount: additions.nonEligibleDividends,
-        },
-      ];
-    }
-    // Note: capitalDividendsReceived are tax-free pass-through — surface on the
-    // integration output but do not inject into T1 (no taxable line).
-
-    const engineReturn = buildT1(factsPlus, ratesFor(ps.year));
     personal.push({
       scenario: ps,
-      computed: {
-        scenarioId: ps.id,
-        // Sentinel hash — integrated result is plan-scoped, not cached.
-        factsHash: 'household-integrated',
-        computedAt: new Date().toISOString(),
-        lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
-        totals: JSON.parse(JSON.stringify(engineReturn.totals)) as Record<string, unknown>,
-        warnings: engineReturn.warnings,
-        cached: false,
-      },
+      computed: await computeIntegratedPersonal(ps, additions),
     });
   }
 

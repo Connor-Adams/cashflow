@@ -42,42 +42,52 @@ export interface IntegrationRouterOutput {
   warnings: IntegrationWarning[];
 }
 
-/**
- * Pure router: takes corp scenario outputs + per-shareholder owner-comp plans,
- * returns per-shareholder additions (employment, dividends w/ gross-up applied
- * later at engine, capital dividends as tax-free) plus validation warnings
- * (GRIP / CDA cap breaches).
- *
- * No IO, no async, no DB. Safe to call from any context.
- */
-export function integrationRouter(inputs: CorpDistributionInputs): IntegrationRouterOutput {
+function emptyAdditions(): PersonalAdditions {
+  return {
+    employmentIncome: D('0'),
+    eligibleDividends: D('0'),
+    nonEligibleDividends: D('0'),
+    capitalDividendsReceived: D('0'),
+    cppEnrolled: false,
+  };
+}
+
+function addAdditions(
+  base: PersonalAdditions,
+  patch: Partial<PersonalAdditions>,
+): PersonalAdditions {
+  return {
+    employmentIncome: base.employmentIncome.plus(patch.employmentIncome ?? D('0')),
+    eligibleDividends: base.eligibleDividends.plus(patch.eligibleDividends ?? D('0')),
+    nonEligibleDividends: base.nonEligibleDividends.plus(patch.nonEligibleDividends ?? D('0')),
+    capitalDividendsReceived: base.capitalDividendsReceived.plus(
+      patch.capitalDividendsReceived ?? D('0'),
+    ),
+    cppEnrolled: base.cppEnrolled || (patch.cppEnrolled ?? false),
+  };
+}
+
+interface RoutedShareholderState {
+  byShareholder: Record<number, PersonalAdditions>;
+  eligibleDivByCorp: Record<number, Decimal>;
+  capDivByCorp: Record<number, Decimal>;
+}
+
+// Sum each plan's owner-comp components into per-shareholder additions, plus
+// per-corp running totals used downstream for GRIP / CDA cap checks.
+function routeOwnerCompPlans(plans: OwnerCompPlan[]): RoutedShareholderState {
   const byShareholder: Record<number, PersonalAdditions> = {};
-  const warnings: IntegrationWarning[] = [];
-
-  function bump(shareholderId: number, patch: Partial<PersonalAdditions>): void {
-    const existing = byShareholder[shareholderId] ?? {
-      employmentIncome: D('0'),
-      eligibleDividends: D('0'),
-      nonEligibleDividends: D('0'),
-      capitalDividendsReceived: D('0'),
-      cppEnrolled: false,
-    };
-    byShareholder[shareholderId] = {
-      employmentIncome: existing.employmentIncome.plus(patch.employmentIncome ?? D('0')),
-      eligibleDividends: existing.eligibleDividends.plus(patch.eligibleDividends ?? D('0')),
-      nonEligibleDividends: existing.nonEligibleDividends.plus(patch.nonEligibleDividends ?? D('0')),
-      capitalDividendsReceived: existing.capitalDividendsReceived.plus(
-        patch.capitalDividendsReceived ?? D('0'),
-      ),
-      cppEnrolled: existing.cppEnrolled || (patch.cppEnrolled ?? false),
-    };
-  }
-
-  // Aggregate per-corp totals to enforce overall caps (GRIP, CDA) below.
   const eligibleDivByCorp: Record<number, Decimal> = {};
   const capDivByCorp: Record<number, Decimal> = {};
 
-  for (const plan of inputs.ownerCompPlans) {
+  const bump = (shareholderId: number, patch: Partial<PersonalAdditions>) => {
+    byShareholder[shareholderId] = addAdditions(
+      byShareholder[shareholderId] ?? emptyAdditions(),
+      patch,
+    );
+  };
+
+  for (const plan of plans) {
     const salaryPlusBonus = plan.salary.plus(plan.bonus);
     if (salaryPlusBonus.greaterThan(0)) {
       bump(plan.shareholderEntityId, {
@@ -102,8 +112,19 @@ export function integrationRouter(inputs: CorpDistributionInputs): IntegrationRo
     }
   }
 
-  // Cap checks per corp: eligible-div total vs GRIP, capital-div total vs CDA.
-  for (const corp of inputs.corpReturns) {
+  return { byShareholder, eligibleDivByCorp, capDivByCorp };
+}
+
+// Compare per-corp eligible / capital dividend totals against the GRIP / CDA
+// balances on the corp's return summary. Excess emits a soft warning — the
+// engine still computes the result, but downstream review surfaces the breach.
+function checkDividendCaps(
+  corpReturns: CorpReturnSummary[],
+  eligibleDivByCorp: Record<number, Decimal>,
+  capDivByCorp: Record<number, Decimal>,
+): IntegrationWarning[] {
+  const warnings: IntegrationWarning[] = [];
+  for (const corp of corpReturns) {
     const eligTotal = eligibleDivByCorp[corp.corpScenarioId] ?? D('0');
     if (eligTotal.greaterThan(corp.gripEnding)) {
       warnings.push({
@@ -123,6 +144,21 @@ export function integrationRouter(inputs: CorpDistributionInputs): IntegrationRo
       });
     }
   }
+  return warnings;
+}
 
+/**
+ * Pure router: takes corp scenario outputs + per-shareholder owner-comp plans,
+ * returns per-shareholder additions (employment, dividends w/ gross-up applied
+ * later at engine, capital dividends as tax-free) plus validation warnings
+ * (GRIP / CDA cap breaches).
+ *
+ * No IO, no async, no DB. Safe to call from any context.
+ */
+export function integrationRouter(inputs: CorpDistributionInputs): IntegrationRouterOutput {
+  const { byShareholder, eligibleDivByCorp, capDivByCorp } = routeOwnerCompPlans(
+    inputs.ownerCompPlans,
+  );
+  const warnings = checkDividendCaps(inputs.corpReturns, eligibleDivByCorp, capDivByCorp);
   return { byShareholder, warnings };
 }
