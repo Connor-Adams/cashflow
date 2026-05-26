@@ -12,6 +12,12 @@ import { saveStatementPreview } from './statementPreviewStore';
 import { extractPdfLines } from './pdf/extractLines';
 import { findPdfParser, registerBuiltInPdfParsers } from './pdf/registry';
 import { parseWsInvestRow, type WsRow } from './wealthsimpleInvestParse';
+import {
+  parseActivitiesExportRow,
+  isActivitiesExportHeaders,
+  isAsOfFooterRow,
+  type WsActivitiesExportRow,
+} from './wealthsimpleActivitiesExportParse';
 import { wsTxCodeToTxnType } from './wealthsimpleTxnType';
 import type {
   NormalizedCashTransaction,
@@ -505,6 +511,82 @@ export async function parseStatementFile(opts: {
       records,
       defaultCurrency
     );
+    const wsActivities = isActivitiesExportHeaders(headers);
+    if (wsActivities) {
+      // Wealthsimple unified activities-export: one file covers all WS
+      // accounts. Filter rows to the upload's target account by matching
+      // `account_id` (WS account shortcode) against `account.shortCode`.
+      // Emit only InvestmentActivity rows — MoneyMovement and BonusPayment
+      // rows belong to the cash-side path (the monthly cash statement
+      // parser already covers them with richer merchantRaw text).
+      const targetShortCode = (account.shortCode || '').toUpperCase();
+      const previewRows: NonNullable<StatementPreview['rows']> = [];
+      let nonMatchingAccount = 0;
+      let skippedCashSide = 0;
+      records.forEach((rec, index) => {
+        const row: WsActivitiesExportRow = {
+          transaction_date: String(rec['transaction_date'] ?? ''),
+          settlement_date: String(rec['settlement_date'] ?? ''),
+          account_id: String(rec['account_id'] ?? ''),
+          account_type: String(rec['account_type'] ?? ''),
+          activity_type: String(rec['activity_type'] ?? ''),
+          activity_sub_type: String(rec['activity_sub_type'] ?? ''),
+          direction: String(rec['direction'] ?? ''),
+          symbol: String(rec['symbol'] ?? ''),
+          name: String(rec['name'] ?? ''),
+          currency: String(rec['currency'] ?? ''),
+          quantity: String(rec['quantity'] ?? ''),
+          unit_price: String(rec['unit_price'] ?? ''),
+          commission: String(rec['commission'] ?? ''),
+          net_cash_amount: String(rec['net_cash_amount'] ?? ''),
+        };
+        if (isAsOfFooterRow(row)) return;
+        if (row.account_id.toUpperCase() !== targetShortCode) {
+          nonMatchingAccount += 1;
+          return;
+        }
+        const parsed = parseActivitiesExportRow(row, defaultCurrency);
+        if (parsed.kind === 'skip') {
+          skippedCashSide += 1;
+          return;
+        }
+        base.investmentActivities.push(parsed.activity);
+        previewRows.push({
+          rowIndex: index + 1,
+          ok: true,
+          mapped: {
+            date: parsed.activity.tradeDate,
+            merchantClean: parsed.activity.description,
+            amount: parsed.activity.amount ?? 0,
+            currency: parsed.activity.currency,
+          },
+        });
+      });
+      if (nonMatchingAccount > 0) {
+        base.warnings.push(
+          `Filtered ${nonMatchingAccount} row(s) for other accounts (file covers ${
+            new Set(records.map((r) => String(r['account_id'] ?? ''))).size
+          } accounts; upload one file per account).`,
+        );
+      }
+      if (skippedCashSide > 0) {
+        base.warnings.push(
+          `Skipped ${skippedCashSide} cash-side row(s) — import these via the monthly cash statement.`,
+        );
+      }
+      const preview = {
+        ...base,
+        usedParser: 'csv' as const,
+        usedProfileId: 'wealthsimple_activities_export',
+        profileInferred: true,
+        headers,
+        rows: previewRows,
+        crossSourceDedup: 'fuzzy-window-5d' as const,
+      };
+      await markDuplicates(preview);
+      return saveStatementPreview(preview);
+    }
+
     const wsMonthly = isWsMonthlyHeaders(headers);
     const previewRows: NonNullable<StatementPreview['rows']> = [];
     let zeroValueNonCadFiltered = 0;

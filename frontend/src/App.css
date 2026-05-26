@@ -888,18 +888,6 @@
     @apply mb-0 mt-1 leading-5;
   }
 
-  .aiActionBanner {
-    background: var(--destructive, #fee2e2);
-    color: var(--destructive-foreground, #7f1d1d);
-    padding: 0.5rem 0.75rem;
-    border-radius: 0.5rem;
-    margin-bottom: 0.75rem;
-    font-size: 0.875rem;
-  }
-  .aiActionBanner a {
-    color: inherit;
-    text-decoration: underline;
-  }
   .aiVisibilityItem.is-unread {
     border-left: 3px solid var(--brand, #f59e0b);
     padding-left: 0.5rem;
@@ -1439,22 +1427,10 @@
     @apply flex-row items-center gap-2;
   }
 
-  /* ─── Bento dashboard ─────────────────────────────────────────────────
-   * Grid container + tile chrome for the bento layout. Tiles are <section>
-   * elements with data-span / data-rows / data-variant attributes set by
-   * BentoTile.tsx. Tables sit below the bento in .dashboardTableCard
-   * (renamed-but-equivalent .dashboardChartCard) and stay full-width.
+  /* ─── Bento dashboard tile chrome ─────────────────────────────────────
+   * Grid container + column/row spans live in Tailwind utilities
+   * (DashboardPage container + SPAN_CLASSES/ROW_CLASSES in BentoTile.tsx).
    * ─────────────────────────────────────────────────────────────────── */
-
-  .dashboardBento {
-    @apply mb-4 grid;
-    grid-template-columns: repeat(12, 1fr);
-    /* 160px floor per row; tracks grow to fit content so dense tiles
-     * (e.g. Business vs personal with split-cards + share bar) don't
-     * overflow their box. Other tiles in the same row stretch in lockstep. */
-    grid-auto-rows: minmax(160px, auto);
-    gap: 16px;
-  }
 
   .bentoTile {
     @apply flex flex-col gap-3 rounded-lg border p-4 sm:p-5;
@@ -1463,14 +1439,6 @@
     box-shadow: var(--shadow);
     min-width: 0;
   }
-
-  .bentoTile[data-span="3"]  { grid-column: span 3; }
-  .bentoTile[data-span="4"]  { grid-column: span 4; }
-  .bentoTile[data-span="6"]  { grid-column: span 6; }
-  .bentoTile[data-span="8"]  { grid-column: span 8; }
-  .bentoTile[data-span="12"] { grid-column: span 12; }
-  .bentoTile[data-rows="1"]  { grid-row: span 1; }
-  .bentoTile[data-rows="2"]  { grid-row: span 2; }
 
   .bentoTile--hero {
     background:
@@ -1530,12 +1498,12 @@
   }
 
   .heroTile__sparkline {
-    @apply mt-1 block w-full;
+    @apply mt-1 block w-full max-w-md;
     height: 48px;
   }
 
   .heroTile__subMetrics {
-    @apply mt-auto m-0 grid gap-1.5 pt-3;
+    @apply mt-auto m-0 grid max-w-md gap-1.5 pt-3;
     border-top: 1px solid var(--border);
   }
 
@@ -1931,36 +1899,6 @@
 
   .businessFocusMetrics {
     grid-template-columns: 1fr;
-  }
-}
-
-/* ─── Bento responsive collapse ──────────────────────────────────────────
- * Tablet (≤1023px): grid collapses 12 → 6 columns. Wide tiles (span 8/12)
- *   become full-width; medium tiles (span 4) become half-width.
- * Mobile (≤639px): single column, each tile takes its natural height.
- * ──────────────────────────────────────────────────────────────────── */
-
-@media (max-width: 1023px) {
-  .dashboardBento {
-    grid-template-columns: repeat(6, 1fr);
-  }
-  .bentoTile[data-span="8"],
-  .bentoTile[data-span="12"] {
-    grid-column: span 6;
-  }
-  .bentoTile[data-span="4"] {
-    grid-column: span 3;
-  }
-}
-
-@media (max-width: 639px) {
-  .dashboardBento {
-    grid-template-columns: 1fr;
-    grid-auto-rows: auto;
-  }
-  .bentoTile {
-    grid-column: 1 / -1 !important;
-    grid-row: auto !important;
   }
 }
 

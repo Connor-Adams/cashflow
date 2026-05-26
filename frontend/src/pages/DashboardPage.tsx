@@ -14,12 +14,11 @@ import {
 import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
-import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
-import { BentoTile } from '@/components/dashboard/BentoTile'
+import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
 import { HeroTile } from '@/components/dashboard/HeroTile'
 import { KpiStack } from '@/components/dashboard/KpiStack'
 import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
@@ -316,6 +315,7 @@ export function DashboardPage() {
       })
     : []
   const hasActionSeverity = sortedInsights.some((i) => i.severity === 'action')
+
 
   const summaryQs = useMemo(
     () => summaryQueryString({ currency, dateFrom, dateTo }),
@@ -829,6 +829,17 @@ export function DashboardPage() {
     },
   ]
 
+  // Review banner pins to 8 cols so it lines up with the HeroTile beneath
+  // it instead of sprawling full-width across an empty middle. The AI
+  // action banner takes the remaining 4 cols when both fire, otherwise
+  // stretches across the full row.
+  const showReviewBanner = summaryStats.reviewCount > 0
+  const showAiActionBanner = hasActionSeverity
+  const bannerCount =
+    (showReviewBanner ? 1 : 0) + (showAiActionBanner ? 1 : 0)
+  const reviewBannerSpan: BentoSpan = 8
+  const aiBannerSpan: BentoSpan = bannerCount === 2 ? 4 : 12
+
   return (
     <div className="page">
       <PageHeader
@@ -837,23 +848,6 @@ export function DashboardPage() {
       />
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
-
-      {summaryStats.reviewCount > 0 ? (
-        <Alert
-          variant="warning"
-          title={`${summaryStats.reviewCount} transaction${
-            summaryStats.reviewCount === 1 ? '' : 's'
-          } flagged for review`}
-          action={
-            <Link to="/review" className="text-sm font-semibold underline">
-              Open Review Inbox
-            </Link>
-          }
-        >
-          Transactions flagged for review are waiting on category, split, or
-          business decisions before they roll into your totals.
-        </Alert>
-      ) : null}
 
       <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
         <CardContent className="p-0">
@@ -927,15 +921,47 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
-      {hasActionSeverity ? (
-        <div className="aiActionBanner" role="status">
-          AI flagged {sortedInsights.filter((i) => i.severity === 'action').length} action item(s) this month.{' '}
-          <a href="#ai-insights-tile">Jump to insights</a>
-        </div>
-      ) : null}
-
-      <div className="dashboardBento" aria-busy={loading}>
-        <NetWorthTile />
+      <div
+        className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
+        aria-busy={loading}
+      >
+        {showReviewBanner && (
+          <BentoTile
+            span={reviewBannerSpan}
+            rows={1}
+            variant="warning"
+            role="status"
+            aria-live="polite"
+            label={`${summaryStats.reviewCount} transaction${
+              summaryStats.reviewCount === 1 ? '' : 's'
+            } flagged for review`}
+            description={
+              <>
+                Waiting on category, split, or business decisions before they roll into your totals.{' '}
+                <Link to="/review" className="font-semibold underline">
+                  Open Review Inbox
+                </Link>
+              </>
+            }
+          />
+        )}
+        {showAiActionBanner && (
+          <BentoTile
+            span={aiBannerSpan}
+            rows={1}
+            variant="destructive"
+            role="status"
+            aria-live="polite"
+            label={`AI flagged ${sortedInsights.filter((i) => i.severity === 'action').length} action item${
+              sortedInsights.filter((i) => i.severity === 'action').length === 1 ? '' : 's'
+            } this month`}
+            actions={
+              <a href="#ai-insights-tile" className="text-sm font-semibold underline">
+                Jump to insights
+              </a>
+            }
+          />
+        )}
         {budgetProgressSorted.length > 0 && (
           <BentoTile
             span={12}
@@ -1066,8 +1092,10 @@ export function DashboardPage() {
           />
         </BentoTile>
 
+        <NetWorthTile />
+
         <BentoTile
-          span={6}
+          span={8}
           rows={2}
           aria-busy={loading}
           label="Business vs personal"
@@ -1161,68 +1189,8 @@ export function DashboardPage() {
         </BentoTile>
 
         <BentoTile
-          span={6}
-          rows={2}
-          aria-busy={loading}
-          label="Monthly flow"
-          description="Gross spend, refunds / credits, and payments / transfers by month."
-        >
-          {monthlyBreakdownData.length === 0 ? (
-            !loading ? (
-              <p className="emptyState">No monthly breakdown data for these filters.</p>
-            ) : null
-          ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={monthlyBreakdownData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis
-                  dataKey="month"
-                  tick={narrowAxisTick}
-                  tickFormatter={monthTickFormatter}
-                  // preserveStartEnd at every viewport: with ~16 months of data,
-                  // forcing interval={0} on wide caused Recharts to fragment the
-                  // year-prefixed labels. preserveStartEnd lets it drop interior
-                  // ticks to keep the start/end pinned. minTickGap widens the
-                  // spacing once the short "Jan"/"Feb" labels fit.
-                  interval="preserveStartEnd"
-                  minTickGap={isNarrowViewport ? 12 : 24}
-                />
-                <YAxis
-                  tick={narrowAxisTick}
-                  width={isNarrowViewport ? 44 : 60}
-                  tickFormatter={compactCurrencyTickFormatter}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                  cursor={CHART_TOOLTIP_CURSOR}
-                  formatter={(value) => {
-                    const v = typeof value === 'number' ? value : Number(value)
-                    if (!Number.isFinite(v)) return ''
-                    return formatDashboardAmount(v)
-                  }}
-                />
-                <Legend
-                  verticalAlign="bottom"
-                  align="center"
-                  wrapperStyle={{ fontSize: 11 }}
-                />
-                <Bar dataKey="totalSpend" name="Spend" fill="var(--chart-spend)" />
-                <Bar dataKey="totalCredits" name="Refunds / credits" fill="var(--chart-credit)" />
-                <Bar
-                  dataKey="totalPayments"
-                  name="Payments / transfers"
-                  fill="var(--chart-payment)"
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </BentoTile>
-
-        <BentoTile
           span={8}
-          rows={2}
+          rows={1}
           aria-busy={loading}
           label="Net spend by category"
           description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
@@ -1256,7 +1224,7 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <BarChart data={chartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -1338,7 +1306,7 @@ export function DashboardPage() {
         </BentoTile>
 
         <BentoTile
-          span={hasActionSeverity ? 6 : 4}
+          span={4}
           rows={2}
           aria-busy={loading}
           label="AI insights"
@@ -1403,14 +1371,74 @@ export function DashboardPage() {
 
         <BentoTile
           span={6}
-          rows={2}
+          rows={1}
+          aria-busy={loading}
+          label="Monthly flow"
+          description="Gross spend, refunds / credits, and payments / transfers by month."
+        >
+          {monthlyBreakdownData.length === 0 ? (
+            !loading ? (
+              <p className="emptyState">No monthly breakdown data for these filters.</p>
+            ) : null
+          ) : (
+            <ResponsiveContainer width="100%" height={110}>
+              <BarChart data={monthlyBreakdownData} margin={narrowChartMargin}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis
+                  dataKey="month"
+                  tick={narrowAxisTick}
+                  tickFormatter={monthTickFormatter}
+                  // preserveStartEnd at every viewport: with ~16 months of data,
+                  // forcing interval={0} on wide caused Recharts to fragment the
+                  // year-prefixed labels. preserveStartEnd lets it drop interior
+                  // ticks to keep the start/end pinned. minTickGap widens the
+                  // spacing once the short "Jan"/"Feb" labels fit.
+                  interval="preserveStartEnd"
+                  minTickGap={isNarrowViewport ? 12 : 24}
+                />
+                <YAxis
+                  tick={narrowAxisTick}
+                  width={isNarrowViewport ? 44 : 60}
+                  tickFormatter={compactCurrencyTickFormatter}
+                />
+                <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
+                  cursor={CHART_TOOLTIP_CURSOR}
+                  formatter={(value) => {
+                    const v = typeof value === 'number' ? value : Number(value)
+                    if (!Number.isFinite(v)) return ''
+                    return formatDashboardAmount(v)
+                  }}
+                />
+                <Legend
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ fontSize: 11 }}
+                />
+                <Bar dataKey="totalSpend" name="Spend" fill="var(--chart-spend)" />
+                <Bar dataKey="totalCredits" name="Refunds / credits" fill="var(--chart-credit)" />
+                <Bar
+                  dataKey="totalPayments"
+                  name="Payments / transfers"
+                  fill="var(--chart-payment)"
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </BentoTile>
+
+        <BentoTile
+          span={6}
+          rows={1}
           label="Activity by month"
           description="One line per currency using signed monthly totals, excluding payments and transfers."
         >
           {monthlyChartData.length === 0 ? (
             !loading ? <p className="muted">No transactions in this range.</p> : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -1480,11 +1508,6 @@ export function DashboardPage() {
           loading={recurringLoading}
         />
 
-        <CurrencyMixTile
-          metrics={data?.metricsByCurrency ?? []}
-          loading={loading}
-        />
-
         <TableTile
           span={6}
           label="Top merchants"
@@ -1524,6 +1547,11 @@ export function DashboardPage() {
           viewAllLabel="All accounts in Reports"
           viewAllHref="/reports#accounts"
           emptyLabel="No account activity in this view."
+          loading={loading}
+        />
+
+        <CurrencyMixTile
+          metrics={data?.metricsByCurrency ?? []}
           loading={loading}
         />
 

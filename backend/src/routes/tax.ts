@@ -9,6 +9,7 @@ import { ratesFor, supportedYears, RateTableMissingError } from '../tax/engine/b
 import { factsHash } from '../tax/util/factsHash';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
+import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
 import { runScenario } from '../tax/engine/scenario';
 import { D } from '../tax/util/decimal';
 import type { ScenarioInput } from '../tax/engine/types';
@@ -113,6 +114,32 @@ router.get('/personal/:year/return', async (req, res, next) => {
       });
       return;
     }
+    next(err);
+  }
+});
+
+// GET /api/tax/personal/:year/reconciliation — slip / txn / categorisation issues.
+router.get('/personal/:year/reconciliation', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      res.status(400).json({ error: 'invalid_year', message: 'Year must be between 2000 and 2100.' });
+      return;
+    }
+    const entity = await Entity.findOne({
+      where: { householdId: household.id, kind: 'personal' },
+    });
+    if (!entity) {
+      res.status(404).json({
+        error: 'no_personal_entity',
+        message: 'No Personal entity for this household.',
+      });
+      return;
+    }
+    const report = await buildReconciliationReport(entity.id, year);
+    res.json(report);
+  } catch (err) {
     next(err);
   }
 });

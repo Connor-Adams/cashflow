@@ -70,7 +70,7 @@ export function initInvestmentActivity(
         allowNull: true,
       },
       description: { type: DataTypes.STRING(1024), allowNull: false },
-      quantity: { type: DataTypes.DECIMAL(20, 8), allowNull: true },
+      quantity: { type: DataTypes.DECIMAL(28, 10), allowNull: true },
       price: { type: DataTypes.DECIMAL(20, 8), allowNull: true },
       amount: { type: DataTypes.DECIMAL(14, 4), allowNull: true },
       fees: { type: DataTypes.DECIMAL(14, 4), allowNull: true },

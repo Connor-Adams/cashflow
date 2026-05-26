@@ -1,15 +1,9 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import request from 'supertest';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-networth-routes.sqlite');
-
+let testDb: PgTestDb;
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
 let otherAuthed: ReturnType<typeof request.agent>;
@@ -19,15 +13,7 @@ let otherUserId: number;
 let otherHouseholdId: number;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development', GH_PACKAGES_TOKEN: 'dummy' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('networth-routes');
   const mod = await import('../../src/app.js');
   app = mod.default;
 
@@ -48,9 +34,7 @@ before(async () => {
 });
 
 after(async () => {
-  const models = await import('../../src/models/index.js');
-  await models.sequelize.close();
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  await teardownPgTestDb(testDb);
 });
 
 test('GET /api/net-worth/current: 401 unauthenticated', async () => {

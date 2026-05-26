@@ -46,6 +46,7 @@ export type NormalizedInvestmentActivity = {
     | 'transfer_in'
     | 'transfer_out'
     | 'cash_movement'
+    | 'staking_reward'
     | 'other';
   tradeDate: string;
   settlementDate: string | null;
@@ -98,6 +99,14 @@ export type StatementPreview = {
   warnings: string[];
   rowErrors: number;
   parseErrors: { rowIndex: number; message: string }[];
+  /**
+   * Cross-source dedup strategy. When set, the commit pipeline runs the
+   * named matcher BEFORE attempting an insert on each investment activity
+   * row. Used by the activities-export importer so the same logical event
+   * imported via both the unified export and a per-account monthly
+   * statement does not produce two InvestmentActivity rows.
+   */
+  crossSourceDedup?: 'fuzzy-window-5d';
   /**
    * When true, every Transaction inserted during commit forces
    * autoBusiness=true, regardless of what the enrichment pipeline produced.

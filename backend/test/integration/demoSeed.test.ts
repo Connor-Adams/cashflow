@@ -1,40 +1,22 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import request from 'supertest';
 import type { Express } from 'express';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-demo-seed.sqlite');
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let models: typeof import('../../src/models/index.js');
 let seedDemoData: typeof import('../../src/demo/seedDemoData.js').seedDemoData;
 let app: Express;
+let testDb: PgTestDb;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'production';
   process.env.DEMO_ACCOUNT_ENABLED = 'true';
   process.env.DEMO_ACCOUNT_EMAIL = 'dev-test@cashflow.local';
   process.env.DEMO_ACCOUNT_PASSWORD = 'cashflow-demo-test';
   process.env.OPENAI_API_KEY = 'test-key';
 
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: {
-      ...process.env,
-      DATABASE_PATH: dbPath,
-      NODE_ENV: 'development',
-    },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('demo-seed');
 
   models = await import('../../src/models/index.js');
   ({ seedDemoData } = await import('../../src/demo/seedDemoData.js'));
@@ -43,13 +25,7 @@ before(async () => {
 
 after(async () => {
   await models?.sequelize.close();
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+  await teardownPgTestDb(testDb);
 });
 
 test('seedDemoData creates an idempotent production demo account with sample ledger data', async () => {

@@ -13,6 +13,7 @@ import {
 import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { findExistingForDedup } from './dedupExisting';
+import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivity';
 import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
@@ -369,6 +370,48 @@ export async function commitStatementImport(
     }
 
     for (const row of preview.investmentActivities) {
+      // When the preview was produced by a multi-source importer
+      // (activities-export), run the fuzzy-window matcher BEFORE attempting
+      // the insert. The matcher absorbs the T+1..T+3 day drift between
+      // "executed at" (monthly statement) and settlement (activities-export)
+      // so re-imports do not produce duplicates. A single match backfills
+      // settlement_date on the existing row; zero matches insert as new;
+      // multi-match logs a warning and skips (review queue surfaced via
+      // warnings rather than blocking commit — fewer false multi-matches
+      // are expected in practice than no-matches).
+      if (preview.crossSourceDedup === 'fuzzy-window-5d') {
+        const outcome = await findExistingInvestmentByFuzzyMatch({
+          accountId: account.id,
+          activityType: row.activityType,
+          symbol: row.security?.symbol ?? null,
+          quantity: row.quantity,
+          amount: row.amount,
+          currency: row.currency,
+          csvDate: row.settlementDate ?? row.tradeDate,
+          t,
+        });
+        if (outcome.kind === 'single-match') {
+          if (outcome.backfillSettlement && row.settlementDate) {
+            outcome.existing.settlementDate = row.settlementDate;
+            await outcome.existing.save({
+              transaction: t,
+              fields: ['settlementDate'],
+            });
+          }
+          skippedDuplicates += 1;
+          continue;
+        }
+        if (outcome.kind === 'multi-match') {
+          preview.warnings.push(
+            `Multi-match on activities-export row (${row.activityType} ${
+              row.security?.symbol ?? '-'
+            } ${row.tradeDate}); skipped — manual review needed.`,
+          );
+          skippedDuplicates += 1;
+          continue;
+        }
+        // no-match → fall through to the standard insert path.
+      }
       const status = await createInvestmentActivity(row, account, preview, t);
       if (status === 'inserted') insertedInvestmentActivities += 1;
       else skippedDuplicates += 1;

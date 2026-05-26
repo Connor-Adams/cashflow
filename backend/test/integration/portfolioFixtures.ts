@@ -1,7 +1,7 @@
 /**
  * Shared seed helpers for the portfolio v2 integration tests
  * (allocation, income, by-security, realized, security drill). Each
- * test file imports this module AFTER setting process.env.DATABASE_PATH
+ * test file imports this module AFTER setting process.env.DATABASE_URL
  * — every helper accepts the live Sequelize models passed in by the
  * caller to avoid module-load order surprises.
  */

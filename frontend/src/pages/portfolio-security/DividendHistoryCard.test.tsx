@@ -3,9 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { DividendHistoryCard } from './DividendHistoryCard'
 import * as api from '../../lib/api'
+import { _resetAppConfigForTest } from '../../lib/appConfig'
 
 describe('DividendHistoryCard', () => {
-  beforeEach(() => vi.restoreAllMocks())
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    _resetAppConfigForTest()
+    window.__APP_CONFIG__ = { logoDevToken: null, quoteProviderConfigured: true }
+  })
 
   it('fetches and renders dividend events', async () => {
     vi.spyOn(api, 'getJson').mockResolvedValue({
@@ -26,5 +31,13 @@ describe('DividendHistoryCard', () => {
     })
     const { findByText } = render(<DividendHistoryCard securityId={1} currency="CAD" />)
     expect(await findByText(/No dividends recorded/i)).not.toBeNull()
+  })
+
+  it('shows config-prompt placeholder when AV key is unset (AC7) and does NOT fetch', async () => {
+    window.__APP_CONFIG__ = { logoDevToken: null, quoteProviderConfigured: false }
+    const spy = vi.spyOn(api, 'getJson')
+    const { findByText } = render(<DividendHistoryCard securityId={1} currency="CAD" />)
+    expect(await findByText(/ALPHA_VANTAGE_API_KEY/i)).not.toBeNull()
+    expect(spy).not.toHaveBeenCalled()
   })
 })

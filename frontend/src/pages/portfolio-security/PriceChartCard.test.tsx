@@ -3,10 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor, fireEvent } from '@testing-library/react'
 import { PriceChartCard } from './PriceChartCard'
 import * as api from '../../lib/api'
+import { _resetAppConfigForTest } from '../../lib/appConfig'
 
 describe('PriceChartCard', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    _resetAppConfigForTest()
+    window.__APP_CONFIG__ = { logoDevToken: null, quoteProviderConfigured: true }
   })
 
   it('fetches 1y range by default and renders chart', async () => {
@@ -44,12 +47,22 @@ describe('PriceChartCard', () => {
     expect(await findByText(/History loading/i)).not.toBeNull()
   })
 
-  it('shows rate-limited banner when backfill exhausted', async () => {
+  it('shows rate-limited banner with literal "midnight UTC" phrasing (AC10)', async () => {
     vi.spyOn(api, 'getJson').mockResolvedValue({
       securityId: 1, symbol: 'X', currency: 'CAD', range: '1y', rows: [], trades: [],
       backfill: { status: 'rate_limited', lastFetchedAt: null, nextRetryAt: '2026-05-25T00:00:00.000Z', coverageDays: 0 },
     })
-    const { findByText } = render(<PriceChartCard securityId={1} currency="CAD" />)
+    const { findByText, container } = render(<PriceChartCard securityId={1} currency="CAD" />)
     expect(await findByText(/quota exhausted/i)).not.toBeNull()
+    // Spec AC10: literal phrase, not locale-formatted datetime.
+    expect(container.textContent).toContain('retry after midnight UTC')
+  })
+
+  it('shows config-prompt placeholder when AV key is unset (AC7) and does NOT fetch', async () => {
+    window.__APP_CONFIG__ = { logoDevToken: null, quoteProviderConfigured: false }
+    const spy = vi.spyOn(api, 'getJson')
+    const { findByText } = render(<PriceChartCard securityId={1} currency="CAD" />)
+    expect(await findByText(/ALPHA_VANTAGE_API_KEY/i)).not.toBeNull()
+    expect(spy).not.toHaveBeenCalled()
   })
 })

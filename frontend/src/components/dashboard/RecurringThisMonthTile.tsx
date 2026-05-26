@@ -43,7 +43,7 @@ export function RecurringThisMonthTile({
   return (
     <BentoTile
       span={6}
-      rows={2}
+      rows={1}
       aria-busy={loading}
       label="Recurring this month"
       description="Subscriptions and recurring charges expected this calendar month."
