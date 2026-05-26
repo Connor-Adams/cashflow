@@ -13,6 +13,7 @@ import { OverrideEditor } from './scenarios/OverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
+import { RrifMinCalc } from './scenarios/RrifMinCalc';
 
 export function PersonalT1Tab({ year }: { year: number }) {
   const { entities, error: entitiesError } = useTaxEntities();
@@ -297,6 +298,16 @@ function ActiveScenarioPanel({
             onChange={onAssumptionsChange}
           />
         </div>
+      )}
+      {isProjection && (
+        <details className="mb-3 rounded-md border border-gray-200 bg-white">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-gray-800">
+            RRIF minimum withdrawal calculator
+          </summary>
+          <div className="px-3 pb-3">
+            <RrifMinCalc />
+          </div>
+        </details>
       )}
       <OverrideEditor overrides={scenario.overrides} onChange={onOverridesChange} />
       <section style={{ marginTop: '1rem' }}>
