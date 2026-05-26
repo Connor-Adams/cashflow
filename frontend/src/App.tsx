@@ -23,6 +23,7 @@ import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
+import { PurchasesPage } from './pages/PurchasesPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
@@ -65,6 +66,7 @@ function AppRoutes() {
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
+          <Route path="purchases" element={<PurchasesPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />

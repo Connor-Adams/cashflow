@@ -19,6 +19,7 @@ import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
+import purchasesRouter from './routes/purchases';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
@@ -148,6 +149,7 @@ app.use('/api/tax', taxRouter);
 app.use('/api', businessTaxRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
+app.use('/api', purchasesRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
