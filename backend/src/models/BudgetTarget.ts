@@ -69,6 +69,13 @@ export class BudgetTarget extends Model<
    * toggle in this PR but the rollover *behavior* is a follow-up.
    */
   declare rolloverEnabled: CreationOptional<boolean>;
+  /**
+   * If true (issue #215), the budget progress route subtracts the
+   * linked-original-purchase amount of every refund whose link points at a
+   * txn inside the period bounds. Effect: a $200 purchase that's been
+   * refunded in the same period contributes $0 to budget spend.
+   */
+  declare excludeRefundedPurchases: CreationOptional<boolean>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -98,6 +105,12 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
       rolloverEnabled: {
         type: DataTypes.BOOLEAN,
         field: 'rollover_enabled',
+        allowNull: false,
+        defaultValue: false,
+      },
+      excludeRefundedPurchases: {
+        type: DataTypes.BOOLEAN,
+        field: 'exclude_refunded_purchases',
         allowNull: false,
         defaultValue: false,
       },

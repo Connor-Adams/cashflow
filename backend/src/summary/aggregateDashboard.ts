@@ -27,6 +27,13 @@ export type SummaryTxnRow = {
   amount: unknown;
   reviewFlag: boolean;
   txnType: string | null;
+  /**
+   * When non-null and txnType==='refund' this row is a refund tied back to
+   * an original purchase. The dashboard aggregator splits these out as
+   * `refundCredits` so users can see how much of their headline credits is
+   * specifically money-back-on-purchases.
+   */
+  linkedTransactionId?: number | null;
   businessAmount?: string;
 };
 
@@ -64,6 +71,17 @@ export type DashboardAggregates = {
       totalPayments: number;
       netSpend: number;
       transactionCount: number;
+      /**
+       * Subset of totalCredits whose row is a refund AND has a non-null
+       * linked_transaction_id — i.e. the refund detector (or manual link)
+       * tied it back to an original purchase. Lets the dashboard render a
+       * "Refunded $X via Y linked refunds" line so users can see what
+       * portion of their headline credits is "money back" vs. cashback,
+       * statement-credit, or other.
+       */
+      refundCredits: number;
+      /** Count of refund rows that contributed to refundCredits. */
+      linkedRefundCount: number;
     }
   >;
   monthlyByCurrency: Map<
@@ -203,6 +221,8 @@ export function aggregateDashboard(
       totalPayments: 0,
       netSpend: 0,
       transactionCount: 0,
+      refundCredits: 0,
+      linkedRefundCount: 0,
     };
     metrics.transactionCount += 1;
 
@@ -263,6 +283,14 @@ export function aggregateDashboard(
       metrics.totalCredits += amount;
       merchantSummary.totalCredits += amount;
       accountSummary.totalCredits += amount;
+      // Refund-attributable credits (issue #215): a refund row counts only
+      // when it's tied back to an original purchase, so reward/cashback/
+      // statement-credit rows that route through the same 'credit' bucket
+      // don't inflate the "refunded" subtotal.
+      if (row.txnType === 'refund' && row.linkedTransactionId != null) {
+        metrics.refundCredits += amount;
+        metrics.linkedRefundCount += 1;
+      }
     }
     // 'skip' (positive non-categorical) and negative non-spend fall
     // through without contributing to any bucket — matches the

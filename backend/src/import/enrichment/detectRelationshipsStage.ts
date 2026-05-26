@@ -16,6 +16,20 @@ export interface RelationshipCandidate {
    * miss FX conversions.
    */
   sourceReference: string | null;
+  /**
+   * Canonical brand name when the normalize stage recognised it (e.g. "Amazon").
+   * Used by the refund detector to surface a medium-confidence
+   * `refund-link-suggested` signal when the cleaned merchant differs but the
+   * canonical brand matches — e.g. "AMZN MKTP CA*123" vs. "AMAZON.CA REFUND".
+   */
+  merchantCanonical?: string | null;
+  /**
+   * The id of an existing refund row that already linked to this candidate.
+   * The loader sets this so a second refund chasing the same original is
+   * NOT auto-linked again — instead the detector emits a medium-confidence
+   * suggested-link with reviewFlag for the user to confirm/split.
+   */
+  alreadyLinkedByRefundId?: number | null;
 }
 
 export interface DetectRelationshipsInput {
@@ -30,6 +44,12 @@ export interface DetectRelationshipsInput {
   candidates: RelationshipCandidate[];
   /** sourceReference of the txn being enriched (see RelationshipCandidate). */
   sourceReference: string | null;
+  /**
+   * Canonical brand name of the txn being enriched (when normalize recognised
+   * it). Powers the fuzzy `refund-link-suggested` signal when only the
+   * canonical brand matches between refund and original.
+   */
+  merchantCanonical?: string | null;
 }
 
 function daysBetween(a: string, b: string): number {
@@ -38,12 +58,44 @@ function daysBetween(a: string, b: string): number {
   ));
 }
 
+/**
+ * Hunt for an exact-merchant, opposite-sign, original-purchase candidate to
+ * link a refund to. Skips candidates that are already linked by another
+ * refund row — those are surfaced as suggested matches instead so the user
+ * can decide how to split a multi-refund situation.
+ */
 function findRefundOriginal(input: DetectRelationshipsInput): RelationshipCandidate | null {
   if (input.amount <= 0) return null;
   const targetSign = -1;
   const matches = input.candidates
     .filter((c) => Math.sign(c.amount) === targetSign)
     .filter((c) => c.merchantClean === input.merchantClean)
+    .filter((c) => Math.abs(c.amount) >= Math.abs(input.amount))
+    .filter((c) => daysBetween(input.date, c.date) <= input.refundWindowDays)
+    .filter((c) => c.alreadyLinkedByRefundId == null)
+    .sort((a, b) => daysBetween(input.date, a.date) - daysBetween(input.date, b.date));
+  return matches[0] ?? null;
+}
+
+/**
+ * Lower-confidence companion to `findRefundOriginal`. Looks for purchase
+ * candidates whose `merchantCanonical` matches the refund's canonical brand
+ * (but whose cleaned merchant differs, otherwise the exact path would have
+ * caught it). This surfaces likely-refund pairs the user should confirm —
+ * e.g. "AMZN MKTP CA*A1B2C3" refund of "AMAZON.CA*REFUND-X" purchase.
+ *
+ * Returns null when no canonical brand is known, or when no candidate matches.
+ * Will return a candidate even if it's already linked to another refund —
+ * suggesting overlapping links is exactly the use case here.
+ */
+function findRefundSuggestedOriginal(input: DetectRelationshipsInput): RelationshipCandidate | null {
+  if (input.amount <= 0) return null;
+  if (!input.merchantCanonical) return null;
+  const canonical = input.merchantCanonical;
+  const matches = input.candidates
+    .filter((c) => Math.sign(c.amount) === -1)
+    .filter((c) => c.merchantCanonical != null && c.merchantCanonical === canonical)
+    .filter((c) => c.merchantClean !== input.merchantClean)
     .filter((c) => Math.abs(c.amount) >= Math.abs(input.amount))
     .filter((c) => daysBetween(input.date, c.date) <= input.refundWindowDays)
     .sort((a, b) => daysBetween(input.date, a.date) - daysBetween(input.date, b.date));
@@ -92,6 +144,25 @@ export function runDetectRelationshipsStage(input: DetectRelationshipsInput): Si
         },
         rationale: `linked to original purchase #${original.id}`,
       });
+    } else {
+      // No exact-merchant match — fall back to a canonical-brand suggestion so
+      // the review queue surfaces likely pairs (e.g. Amazon refunds whose
+      // merchant_clean drifted between the purchase and the refund row). The
+      // signal carries autoCategory/autoBusiness so a one-click confirm still
+      // copies the original's classification onto the refund.
+      const suggested = findRefundSuggestedOriginal(input);
+      if (suggested) {
+        out.push({
+          source: 'refund-link-suggested',
+          confidence: 'medium',
+          fields: {
+            linkedTransactionId: suggested.id,
+            autoCategory: suggested.finalCategory,
+            autoBusiness: suggested.finalBusiness,
+          },
+          rationale: `suggested refund-link to original #${suggested.id} via canonical brand "${input.merchantCanonical}"`,
+        });
+      }
     }
   }
 

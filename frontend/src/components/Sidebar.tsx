@@ -28,6 +28,7 @@ import {
   Moon,
   Target,
   TrendingUp,
+  Undo2,
   Upload,
   Users,
 } from 'lucide-react'
@@ -51,6 +52,7 @@ const navItems: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/accounts', label: 'Accounts', icon: CreditCard },
   { to: '/review', label: 'Review', icon: ClipboardCheck },
+  { to: '/refunds', label: 'Refunds', icon: Undo2 },
   { to: '/transactions', label: 'Transactions', icon: ReceiptText },
   { to: '/items', label: 'Items', icon: Package },
   { to: '/import', label: 'Import', icon: Upload },
