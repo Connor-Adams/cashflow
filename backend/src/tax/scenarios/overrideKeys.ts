@@ -213,17 +213,21 @@ function ownerCompEntryFor(key: string): OverrideKeyDef | undefined {
  *
  * The intercorp router (P11a T2) reads this map to emit per-receiver-corp received-div additions.
  */
-const INTERCORP_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital)$/;
+const INTERCORP_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital|ownershipPercent)$/;
 
 function intercorpEntryFor(key: string): OverrideKeyDef | undefined {
   const m = key.match(INTERCORP_RE);
   if (!m) return undefined;
   const receiverId = m[1];
   const field = m[2];
+  const label =
+    field === 'ownershipPercent'
+      ? `Intercorp - ownership % -> corp ${receiverId} (0..100)`
+      : `Intercorp - ${field} dividend -> corp ${receiverId} (CAD)`;
   return {
     kind: 'corp',
     key,
-    label: `Intercorp - ${field} dividend -> corp ${receiverId} (CAD)`,
+    label,
     inputType: 'decimal',
     validate: (v) => assertNumber(v, key),
     apply: (facts, value) => {
@@ -272,7 +276,7 @@ export function validateOverrideMap(map: OverrideMap, kind: 'personal' | 'corp')
       // but use a malformed shape — common during hand-editing of overrides.
       if (key.startsWith('intercorp.')) {
         throw new Error(
-          `invalid intercorp key shape: ${key} (expected intercorp.<receiverCorpEntityId>.<field> where field ∈ {eligible, nonEligible, capital})`,
+          `invalid intercorp key shape: ${key} (expected intercorp.<receiverCorpEntityId>.<field> where field ∈ {eligible, nonEligible, capital, ownershipPercent})`,
         );
       }
       throw new Error(`unknown override key: ${key}`);

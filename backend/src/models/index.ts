@@ -67,6 +67,7 @@ import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
 } from './MoneyLeakDismissal';
+import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -127,6 +128,7 @@ initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initMoneyLeakDismissal(sequelize);
+initTaxReserveSetting(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -459,6 +461,17 @@ AiReviewRun.belongsTo(User, {
   as: 'user',
 });
 
+Household.hasMany(TaxReserveSetting, {
+  foreignKey: 'household_id',
+  as: 'taxReserveSettings',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TaxReserveSetting.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
 export {
   sequelize,
   User,
@@ -518,4 +531,5 @@ export {
   Subscription,
   AiReviewRun,
   MoneyLeakDismissal,
+  TaxReserveSetting,
 };

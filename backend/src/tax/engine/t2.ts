@@ -1,4 +1,4 @@
-import { Decimal, sumD, maxZero } from '../util/decimal';
+import { D, Decimal, sumD, maxZero } from '../util/decimal';
 import type { CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
 import { computeAaii } from './aaii';
 import { sbdEligibleIncome } from './sbd';
@@ -20,8 +20,14 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const aaii = computeAaii(facts, r);
   push('L417', 'Adjusted aggregate investment income', aaii);
 
-  // SBD calc
-  const sbd = sbdEligibleIncome(abi, aaii, r);
+  // SBD calc — P11b: if associated-group AAII was injected, use it for the
+  // grind so the $500k SBD limit / $50k AAII threshold is shared across the
+  // group (s.125(5.1)). Otherwise fall back to per-corp AAII.
+  const aaiiForSbd = facts.groupAaii ?? aaii;
+  if (facts.groupAaii) {
+    push('L417G', 'Group AAII (used for SBD grind)', aaiiForSbd);
+  }
+  const sbd = sbdEligibleIncome(abi, aaiiForSbd, r);
   push('L425', 'SBD limit (after AAII grind)', sbd.limit);
   push('L427', 'Income eligible for SBD', sbd.eligible);
   push('L430', 'General-rate active business income', sbd.generalRate);
@@ -74,7 +80,16 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const netTaxPayable = maxZero(federalTax.plus(provincialTax).minus(integ.dividendRefund));
   push('L770', 'Net tax payable', netTaxPayable);
 
-  const gripEnding = facts.carryforwards.grip.plus(integ.gripAddition)
+  // P11b T6: GRIP designation from received intercorp eligible dividends
+  // (Σ eligible × ownership%/100) flows in via `openingGripBoost`, injected by
+  // computeHouseholdPlan from `intercorpRouter`'s gripBoost output.
+  const openingGripBoost = facts.openingGripBoost ?? D('0');
+  if (openingGripBoost.greaterThan(0)) {
+    push('L500B', 'GRIP boost from intercorp eligible dividends received', openingGripBoost);
+  }
+  const gripEnding = facts.carryforwards.grip
+    .plus(integ.gripAddition)
+    .plus(openingGripBoost)
     .minus(sumD(facts.dividendsPaid.filter(d => d.kind === 'eligible').map(d => d.amount)));
   const cdaEnding = facts.carryforwards.cda.plus(integ.cdaAddition);
   const erdtohEnding = facts.carryforwards.erdtoh.plus(integ.erdtohAddition); // refund subtracted below
