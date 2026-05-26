@@ -1,15 +1,97 @@
 <!doctype html>
 <html><body>
-<ul class="purchase-list">
-  <li class="purchase-row">
-    <span class="purchase-date">May 12, 2026</span>
-    <span class="purchase-title">iCloud+ with 50 GB</span>
-    <span class="purchase-amount">$4.99</span>
-  </li>
-  <li class="purchase-row">
-    <span class="purchase-date">May 3, 2026</span>
-    <span class="purchase-title">Procreate</span>
-    <span class="purchase-amount">$12.99</span>
-  </li>
-</ul>
+<div class="purchase-list">
+
+  <!-- Pending bucket: should be skipped by the scraper. -->
+  <div class="purchase loaded collapsed">
+    <h3 class="purchase-header collapsed" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label">
+      <button class="disclosure" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Button.ToggleDisclosure">
+        <div class="button-content-container">
+          <span class="pending-purchases-header" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label.PendingPurchases">PENDING&nbsp;PURCHASES</span>
+        </div>
+      </button>
+    </h3>
+    <ul class="pli-list applicable-items">
+      <li class="pli">
+        <div class="pli-data-fields">
+          <label class="pli-title" data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Title.PEND01.PendingThing">
+            <div aria-label="Pending Thing">Pending Thing</div>
+          </label>
+        </div>
+        <div class="pli-price"><span data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Price.PEND01.PendingThing">$9.99</span></div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Paid order with a single line item. -->
+  <div class="purchase loaded collapsed">
+    <h3 class="purchase-header collapsed" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label">
+      <button class="disclosure" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Button.ToggleDisclosure">
+        <div class="button-content-container">
+          <span class="invoice-date" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Display.Date">May 25, 2026</span>
+          <div class="second-element" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label.Display.WebOrder">
+            <span data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Display.WebOrder">MM63QG6X09</span>
+          </div>
+          <div class="third-element" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label.Display.Invoice.Amount">
+            <span data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Display.Invoice.Amount">Total <span data-auto-test-id="RAP2.PurchaseList.Display.Invoice.Amount" dir="auto">$12.99</span></span>
+          </div>
+        </div>
+      </button>
+    </h3>
+    <ul class="pli-list applicable-items">
+      <li class="pli">
+        <div class="pli-data-fields">
+          <div class="pli-title-and-publisher has-publisher">
+            <div>
+              <label class="pli-title" data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Title.MM63QG6X09.PremiumLifetime">
+                <div aria-label="Premium Lifetime">Premium Lifetime</div>
+              </label>
+            </div>
+            <div class="pli-publisher has-publisher" data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Publisher.MM63QG6X09.PremiumLifetime">Golf Dreams</div>
+          </div>
+        </div>
+        <div class="pli-price">
+          <span data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Price.MM63QG6X09.PremiumLifetime">$12.99</span>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Free order: total $0.00, item price "Free". -->
+  <div class="purchase loaded collapsed">
+    <h3 class="purchase-header collapsed" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label">
+      <button class="disclosure" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Button.ToggleDisclosure">
+        <div class="button-content-container">
+          <span class="invoice-date" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Display.Date">May 3, 2026</span>
+          <div class="second-element" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label.Display.WebOrder">
+            <span data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Display.WebOrder">R24YW5T998T2QQ</span>
+          </div>
+          <div class="third-element" data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Label.Display.Invoice.Amount">
+            <span data-auto-test-id="RAP2.PurchaseList.PurchaseHeader.Display.Invoice.Amount">Total <span data-auto-test-id="RAP2.PurchaseList.Display.Invoice.Amount" dir="auto">$0.00</span></span>
+          </div>
+        </div>
+      </button>
+    </h3>
+    <ul class="pli-list applicable-items">
+      <li class="pli">
+        <div class="pli-data-fields">
+          <div class="pli-title-and-publisher has-publisher">
+            <div>
+              <label class="pli-title" data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Title.R24YW5T998T2QQ.FlipperMobileApp">
+                <div aria-label="Flipper Mobile App">Flipper Mobile App</div>
+              </label>
+            </div>
+            <div class="pli-publisher has-publisher" data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Publisher.R24YW5T998T2QQ.FlipperMobileApp">Flipper Devices Inc.</div>
+          </div>
+        </div>
+        <div class="pli-price">
+          <span data-auto-test-id="RAP2.PurchaseList.PLIDetails.Display.Price.R24YW5T998T2QQ.FlipperMobileApp">
+            <span data-auto-test-id="RAP2.PurchaseList.PLI.Label.Free">Free</span>
+          </span>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+</div>
 </body></html>
