@@ -76,7 +76,14 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
 
 export async function runAmazonMatching(args: {
   householdId: number;
-}): Promise<{ suggested: number; scannedTransactions: number }> {
+}): Promise<{
+  suggested: number;
+  scannedTransactions: number;
+  /** Earliest txn date that received a newly-suggested link, or null if none. */
+  matchedDateFrom: string | null;
+  /** Latest txn date that received a newly-suggested link, or null if none. */
+  matchedDateTo: string | null;
+}> {
   const txns = await Transaction.findAll({
     where: {
       householdId: args.householdId,
@@ -97,6 +104,8 @@ export async function runAmazonMatching(args: {
     where: { householdId: args.householdId, vendor: 'amazon' },
   });
   let suggested = 0;
+  let matchedDateFrom: string | null = null;
+  let matchedDateTo: string | null = null;
 
   for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
     const scores = orders
@@ -123,9 +132,13 @@ export async function runAmazonMatching(args: {
           matchReason: candidate.matchReason,
         });
       }
-      if (created) suggested += 1;
+      if (created) {
+        suggested += 1;
+        if (matchedDateFrom == null || txn.date < matchedDateFrom) matchedDateFrom = txn.date;
+        if (matchedDateTo == null || txn.date > matchedDateTo) matchedDateTo = txn.date;
+      }
     }
   }
 
-  return { suggested, scannedTransactions: txns.length };
+  return { suggested, scannedTransactions: txns.length, matchedDateFrom, matchedDateTo };
 }
