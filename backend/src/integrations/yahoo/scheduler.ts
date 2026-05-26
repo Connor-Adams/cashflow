@@ -19,13 +19,9 @@
  * fetch is slow and the next cron fires.
  */
 
-import cron, { type ScheduledTask } from 'node-cron';
-import { randomUUID } from 'crypto';
 import { Security } from '../../models/Security';
 import { SecurityDividend } from '../../models/SecurityDividend';
 import { SecurityPrice } from '../../models/SecurityPrice';
-import { logger } from '../../observability/logger';
-import { withContext } from '../../observability/requestContext';
 import * as env from '../../config/env';
 import { reconcileDividendsForSecurity } from '../../portfolio/reconcileDividends';
 import { recordCall } from './jobLog';
@@ -67,8 +63,6 @@ function configFromEnv(): TickConfig {
     minAgeHours: env.quoteMinAgeHours,
   };
 }
-
-let runningTick = false;
 
 async function securitiesForYahooSymbol(yahooSymbol: string): Promise<Security[]> {
   const all = await Security.findAll({ where: {} });
@@ -256,49 +250,3 @@ export async function runQuoteSchedulerTick(
   return dispatch(item.function, item.yahooSymbol);
 }
 
-let activeTask: ScheduledTask | null = null;
-
-export function startQuoteScheduler(): ScheduledTask | null {
-  if (!env.quoteSchedulerEnabled) {
-    logger.info({ reason: 'flag_off' }, 'quote_scheduler_disabled');
-    return null;
-  }
-  if (activeTask) {
-    logger.warn({}, 'quote_scheduler_already_running');
-    return activeTask;
-  }
-  if (!cron.validate(env.quoteTickCron)) {
-    logger.error({ expression: env.quoteTickCron }, 'quote_scheduler_invalid_cron');
-    return null;
-  }
-
-  activeTask = cron.schedule(env.quoteTickCron, async () => {
-    await withContext(
-      { jobName: 'yahoo_quote_scheduler', tickId: randomUUID() },
-      async () => {
-        if (runningTick) {
-          logger.debug({}, 'quote_scheduler_tick_skipped_reentrant');
-          return;
-        }
-        runningTick = true;
-        try {
-          const result = await runQuoteSchedulerTick();
-          logger.info(result as unknown as Record<string, unknown>, 'quote_scheduler_tick');
-        } catch (err) {
-          logger.error({ err }, 'quote_scheduler_tick_unhandled');
-        } finally {
-          runningTick = false;
-        }
-      },
-    );
-  });
-
-  logger.info({ cron: env.quoteTickCron, minAgeHours: env.quoteMinAgeHours }, 'quote_scheduler_started');
-  return activeTask;
-}
-
-export function stopQuoteScheduler(): void {
-  if (!activeTask) return;
-  activeTask.stop();
-  activeTask = null;
-}
