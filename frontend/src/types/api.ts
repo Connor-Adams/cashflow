@@ -1026,3 +1026,35 @@ export type NetWorthSeries = {
   partial: boolean;
   gaps: NetWorthGap[];
 };
+
+/**
+ * Per-user safe-to-spend knobs (issue #199). Returned by both GET and
+ * PATCH /api/settings/cashflow.
+ */
+export type CashflowSettings = {
+  /** DECIMAL(14,4) string. */
+  minimumCashBuffer: string;
+  safeToSpendWindowDays: number;
+  includeCreditCardBalance: boolean;
+  includeGoalContributions: boolean;
+};
+
+export type SafeToSpendBreakdown = {
+  currentCash: number;
+  upcomingRequiredExpenses: number;
+  requiredSavingsContributions: number;
+  expectedCreditCardPayments: number;
+  minimumBuffer: number;
+};
+
+/** Response shape for GET /api/forecast/safe-to-spend. */
+export type SafeToSpendResponse = {
+  currency: string;
+  asOfDate: string;
+  windowDays: number;
+  windowEndDate: string;
+  value: number;
+  isNegative: boolean;
+  breakdown: SafeToSpendBreakdown;
+  settings: CashflowSettings;
+};

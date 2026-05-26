@@ -63,6 +63,7 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
+import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
@@ -129,6 +130,7 @@ initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
+initCashflowSettings(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -472,6 +474,19 @@ TaxReserveSetting.belongsTo(Household, {
   as: 'household',
 });
 
+// CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
+// the DB level; we surface the relationship as hasOne so callers can eager
+// load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
+User.hasOne(CashflowSettings, {
+  foreignKey: 'user_id',
+  as: 'cashflowSettings',
+  onDelete: 'CASCADE',
+});
+CashflowSettings.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -532,4 +547,5 @@ export {
   AiReviewRun,
   MoneyLeakDismissal,
   TaxReserveSetting,
+  CashflowSettings,
 };
