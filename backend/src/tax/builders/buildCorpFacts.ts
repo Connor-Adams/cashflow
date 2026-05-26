@@ -3,7 +3,6 @@ import {
   Account,
   Carryforward,
   Entity,
-  FxRate,
   InvestmentActivity,
   Security,
   ShareholderLoan,
@@ -11,6 +10,7 @@ import {
 } from '../../models';
 import { D } from '../util/decimal';
 import { computeAcb } from '../../portfolio/acb';
+import { toCad } from '../../fx/toCad';
 import type {
   CapGainEvent,
   CorpCarryforwards,
@@ -41,7 +41,7 @@ export async function buildCorpFacts(
   const activeBusinessIncome: IncomeItem[] = [];
   for (const t of txns) {
     if (t.finalBusiness) {
-      const cad = await toCad(
+      const { cad } = await toCad(
         D(t.amount as unknown as string),
         t.currency ?? 'CAD',
         t.date as unknown as string,
@@ -69,7 +69,7 @@ export async function buildCorpFacts(
   const nonEligibleDividends: IncomeItem[] = [];
 
   for (const a of activity) {
-    const cad = await toCad(
+    const { cad } = await toCad(
       D(a.amount as unknown as string),
       (a as unknown as { currency?: string }).currency ?? 'CAD',
       a.tradeDate as unknown as string,
@@ -179,18 +179,4 @@ export async function buildCorpFacts(
     salaryPaid,
     carryforwards,
   };
-}
-
-async function toCad(
-  amount: import('../util/decimal').Decimal,
-  currency: string,
-  date: string,
-): Promise<import('../util/decimal').Decimal> {
-  if (currency === 'CAD') return amount;
-  const rate = await FxRate.findOne({
-    where: { fromCurrency: currency, toCurrency: 'CAD', ratedDate: { [Op.lte]: date } },
-    order: [['ratedDate', 'DESC']],
-  });
-  if (!rate) throw new Error(`FX rate missing for ${currency}→CAD on/before ${date}`);
-  return amount.times(rate.rate as unknown as string);
 }

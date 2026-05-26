@@ -2,6 +2,7 @@ import fs from 'fs';
 import app from './app';
 import * as env from './config/env';
 import { seedDemoData } from './demo/seedDemoData';
+import { backfillUsdCadHistory } from './fx/backfillUsdCadHistory';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 import { startQuoteScheduler } from './integrations/alphaVantage/scheduler';
@@ -21,6 +22,18 @@ async function start() {
       uploadDir,
       receiptStorage: isS3ReceiptStorageEnabled() ? 's3' : 'local',
     });
+  });
+
+  // Backfill USD→CAD daily noon rates for the last 5 years. Idempotent: skips
+  // existing rows. Runs in the background; failures are non-fatal (logged).
+  const today = new Date().toISOString().slice(0, 10);
+  const fiveYearsAgo = (() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 5);
+    return d.toISOString().slice(0, 10);
+  })();
+  backfillUsdCadHistory({ startDate: fiveYearsAgo, endDate: today }).catch((err) => {
+    console.error('[boot] USD/CAD backfill failed (non-fatal):', err);
   });
 
   startQuoteScheduler();
