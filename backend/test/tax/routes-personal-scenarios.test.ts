@@ -1,0 +1,215 @@
+/**
+ * Integration tests for /api/tax/personal-scenarios CRUD routes (Task 6, P7).
+ *
+ * Mirrors the auth-setup pattern from backend/test/tax/routes-reconciliation.test.ts:
+ * - sequelize.sync({ force: true }) instead of running migrations (one P6
+ *   migration uses Postgres-only ALTER COLUMN syntax that SQLite can't parse).
+ * - Models imported BEFORE sync so all model tables are registered/created (P6
+ *   lesson).
+ * - Direct User + Household + HouseholdMember + Session creation, then
+ *   request.agent(app) with cookie injection.
+ */
+import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
+import request from 'supertest';
+import crypto from 'crypto';
+
+let app: import('express').Express;
+let authed: ReturnType<typeof request.agent>;
+let entityId: number;
+
+before(async () => {
+  process.env.NODE_ENV = 'test';
+  const { sequelize } = await import('../../src/db.js');
+  // Import models BEFORE sync so all model tables are registered/created.
+  const models = await import('../../src/models/index.js');
+  await sequelize.sync({ force: true });
+
+  const mod = await import('../../src/app.js');
+  app = mod.default;
+
+  const { hashPassword, hashToken } = await import('../../src/auth/password.js');
+
+  const password = await hashPassword('password123');
+  const user = await models.User.create({
+    email: `scenarios-${Date.now()}@example.com`,
+    displayName: 'Scenarios Test',
+    globalRole: 'user',
+    passwordHash: password.hash,
+    passwordSalt: password.salt,
+    passwordParams: password.params,
+  });
+  const household = await models.Household.create({ name: 'Scenarios HH' });
+  await models.HouseholdMember.create({
+    householdId: household.id,
+    userId: user.id,
+    role: 'owner',
+  });
+  const entity = await models.Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'P',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  });
+  entityId = entity.id;
+
+  // Seed one txn so baseline has employment income.
+  const account = await models.Account.create({
+    name: 'Chk',
+    householdId: household.id,
+    accountType: 'checking',
+    entityId: entity.id,
+    taxStatus: 'non_registered',
+    defaultCurrency: 'CAD',
+  } as never);
+  await models.Transaction.create({
+    accountId: account.id,
+    householdId: household.id,
+    entityId: entity.id,
+    date: '2025-03-15',
+    amount: '80000',
+    currency: 'CAD',
+    finalCategory: 'employment_income',
+    merchantRaw: 'E',
+    merchantClean: 'E',
+    importBatch: 'b',
+    sourceRowFingerprint: 'fp1',
+    sourceIdentityFingerprint: 'sif1',
+  } as never);
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
+  await models.Session.create({
+    userId: user.id,
+    tokenHash: hashToken(token),
+    expiresAt,
+  });
+  authed = request.agent(app);
+  authed.jar.setCookie(`cashflow_session=${token}; Path=/`);
+});
+
+after(async () => {
+  const { sequelize } = await import('../../src/db.js');
+  await sequelize.close();
+});
+
+test('GET /api/tax/personal-scenarios without auth returns 401', async () => {
+  const res = await request(app).get(`/api/tax/personal-scenarios?entityId=${entityId}&year=2025`);
+  assert.equal(res.status, 401, `expected 401, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('POST /api/tax/personal-scenarios creates a fork', async () => {
+  const res = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'High salary',
+    overrides: { 'income.employment': 120000 },
+  });
+  assert.equal(res.status, 201, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenario.name, 'High salary');
+  assert.equal(res.body.scenario.kind, 'fork');
+  assert.ok(typeof res.body.scenario.parentId === 'number'); // baseline auto-created
+});
+
+test('GET /api/tax/personal-scenarios lists scenarios for entity+year', async () => {
+  const res = await authed.get(`/api/tax/personal-scenarios?entityId=${entityId}&year=2025`);
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  // Baseline + the fork from previous test → at least 2 scenarios.
+  assert.ok(res.body.scenarios.length >= 2);
+});
+
+test('GET /api/tax/personal-scenarios/:id returns scenario + computed return', async () => {
+  const create = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'For-get-test',
+    overrides: { 'income.employment': 60000 },
+  });
+  const id = create.body.scenario.id;
+  const res = await authed.get(`/api/tax/personal-scenarios/${id}`);
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenario.id, id);
+  assert.ok(res.body.computed);
+  assert.ok('totalPayable' in res.body.computed.totals);
+});
+
+test('PATCH /api/tax/personal-scenarios/:id updates overrides', async () => {
+  const create = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'PatchMe',
+    overrides: { 'income.employment': 50000 },
+  });
+  const id = create.body.scenario.id;
+  const res = await authed.patch(`/api/tax/personal-scenarios/${id}`).send({
+    overrides: { 'income.employment': 75000 },
+    notes: 'updated',
+  });
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenario.overrides['income.employment'], 75000);
+  assert.equal(res.body.scenario.notes, 'updated');
+});
+
+test('PATCH with invalid override key returns 400', async () => {
+  const create = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'InvalidPatch',
+    overrides: {},
+  });
+  const res = await authed.patch(`/api/tax/personal-scenarios/${create.body.scenario.id}`).send({
+    overrides: { 'totally.fake': 1 },
+  });
+  assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.match(res.body.message, /unknown override key/i);
+});
+
+test('DELETE /api/tax/personal-scenarios/:id removes a fork', async () => {
+  const create = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'DeleteMe',
+    overrides: {},
+  });
+  const id = create.body.scenario.id;
+  const del = await authed.delete(`/api/tax/personal-scenarios/${id}`);
+  assert.equal(del.status, 204, `expected 204, got ${del.status}: ${JSON.stringify(del.body)}`);
+  const get = await authed.get(`/api/tax/personal-scenarios/${id}`);
+  assert.equal(get.status, 404, `expected 404, got ${get.status}: ${JSON.stringify(get.body)}`);
+});
+
+test('DELETE baseline is forbidden (409)', async () => {
+  // Trigger baseline auto-create first.
+  await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'EnsureBaseline',
+    overrides: {},
+  });
+  const list = await authed.get(`/api/tax/personal-scenarios?entityId=${entityId}&year=2025`);
+  const baseline = list.body.scenarios.find((s: { kind: string }) => s.kind === 'baseline');
+  assert.ok(baseline, 'baseline scenario should exist after at least one create');
+  const res = await authed.delete(`/api/tax/personal-scenarios/${baseline.id}`);
+  assert.equal(res.status, 409, `expected 409, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('DELETE scenario with children is forbidden (409)', async () => {
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'Parent',
+    overrides: {},
+  });
+  const fork = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'ParentChild',
+    parentId: parent.body.scenario.id,
+    overrides: {},
+  });
+  const del = await authed.delete(`/api/tax/personal-scenarios/${parent.body.scenario.id}`);
+  assert.equal(del.status, 409, `expected 409, got ${del.status}: ${JSON.stringify(del.body)}`);
+  // Cleanup so subsequent tests don't see stray children.
+  await authed.delete(`/api/tax/personal-scenarios/${fork.body.scenario.id}`);
+});
