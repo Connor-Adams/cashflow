@@ -7,6 +7,7 @@ import versionRouter from './routes/version';
 import accountsRouter from './routes/accounts';
 import transactionsRouter from './routes/transactions';
 import transfersRouter from './routes/transfers';
+import statementsRouter from './routes/statements';
 import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
@@ -19,6 +20,7 @@ import reportsRouter from './routes/reports';
 import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
+import cfoBriefingsRouter from './routes/cfoBriefings';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
@@ -59,6 +61,8 @@ import captureRouter, { captureCors } from './routes/capture';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
+import financeEventsRouter from './routes/financeEvents';
+import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
@@ -119,6 +123,7 @@ app.use('/api/jobs', jobsRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/transfers', transfersRouter);
+app.use('/api/statements', statementsRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/categories', categoriesRouter);
@@ -148,11 +153,15 @@ app.use('/api/data-quality', dataQualityRouter);
 app.use('/api/money-leaks', moneyLeaksRouter);
 app.use('/api/audit-log', auditLogRouter);
 app.use('/api/vault', vaultRouter);
+app.use('/api/finance-events', financeEventsRouter);
+app.use('/api/sync', syncRouter);
 app.use('/api/reports', reportsRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai
 // prefix to satisfy the issue's endpoint spec.
 app.use('/api/ai', aiReviewRouter);
+// Personal CFO briefings (issue #236).
+app.use('/api/cfo', cfoBriefingsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);

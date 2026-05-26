@@ -17,6 +17,7 @@ env:
   RAILWAY_FRONTEND_SERVICE_ID: e0dc05b7-3961-4d4f-aea9-bed3810ea2f5
   RAILWAY_OTEL_COLLECTOR_SERVICE_ID: "8e2cf3d2-7255-43d7-8237-6dd4b97a6699"
   RAILWAY_LOKI_SERVICE_ID: "90312934-b760-4cb4-aae5-2c1eddf0b483"
+  RAILWAY_GRAFANA_SERVICE_ID: 0649a415-40cb-4d45-b28f-38111a77b959
   IMAGE_WAIT_ATTEMPTS: 30
   IMAGE_WAIT_SECONDS: 10
 
@@ -60,6 +61,7 @@ jobs:
           echo "frontend=ghcr.io/${REPO_LC}-frontend" >> "$GITHUB_OUTPUT"
           echo "otel_collector=ghcr.io/${REPO_LC}-otel-collector" >> "$GITHUB_OUTPUT"
           echo "loki=ghcr.io/${REPO_LC}-loki" >> "$GITHUB_OUTPUT"
+          echo "grafana=ghcr.io/${REPO_LC}-grafana" >> "$GITHUB_OUTPUT"
           echo "Released tag $RELEASE_TAG -> commit $COMMIT_SHA (short $SHA_SHORT)"
 
       - name: Verify source images exist for this commit
@@ -68,6 +70,7 @@ jobs:
           FRONTEND: ${{ steps.resolve.outputs.frontend }}
           OTEL_COLLECTOR: ${{ steps.resolve.outputs.otel_collector }}
           LOKI: ${{ steps.resolve.outputs.loki }}
+          GRAFANA: ${{ steps.resolve.outputs.grafana }}
           SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
         run: |
           set -euo pipefail
@@ -76,7 +79,8 @@ jobs:
             if docker buildx imagetools inspect "$BACKEND:sha-$SHA_SHORT" > /dev/null 2>&1 && \
               docker buildx imagetools inspect "$FRONTEND:sha-$SHA_SHORT" > /dev/null 2>&1 && \
               docker buildx imagetools inspect "$OTEL_COLLECTOR:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$LOKI:sha-$SHA_SHORT" > /dev/null 2>&1; then
+              docker buildx imagetools inspect "$LOKI:sha-$SHA_SHORT" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$GRAFANA:sha-$SHA_SHORT" > /dev/null 2>&1; then
               echo "Source images are available."
               exit 0
             fi
@@ -92,6 +96,7 @@ jobs:
           echo "  $FRONTEND:sha-$SHA_SHORT" >&2
           echo "  $OTEL_COLLECTOR:sha-$SHA_SHORT" >&2
           echo "  $LOKI:sha-$SHA_SHORT" >&2
+          echo "  $GRAFANA:sha-$SHA_SHORT" >&2
           exit 1
 
       - name: Re-tag backend image as release version and :production
@@ -137,6 +142,17 @@ jobs:
             --tag "$LOKI:$RELEASE_TAG" \
             --tag "$LOKI:production" \
             "$LOKI:sha-$SHA_SHORT"
+
+      - name: Re-tag grafana image as release version and :production
+        env:
+          GRAFANA: ${{ steps.resolve.outputs.grafana }}
+          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$GRAFANA:$RELEASE_TAG" \
+            --tag "$GRAFANA:production" \
+            "$GRAFANA:sha-$SHA_SHORT"
 
       - name: Install Railway CLI
         run: |
@@ -188,3 +204,15 @@ jobs:
             exit 1
           fi
           railway redeploy --service "$RAILWAY_LOKI_SERVICE_ID" -y
+
+      - name: Trigger Railway grafana redeploy
+        if: env.RAILWAY_GRAFANA_SERVICE_ID != ''
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "RAILWAY_TOKEN secret is not set" >&2
+            exit 1
+          fi
+          railway redeploy --service "$RAILWAY_GRAFANA_SERVICE_ID" -y

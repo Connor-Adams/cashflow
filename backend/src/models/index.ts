@@ -70,6 +70,7 @@ import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
+import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
 import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
@@ -83,12 +84,15 @@ import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 import { Purchase, initPurchase } from './Purchase';
 import { Notification, initNotification } from './Notification';
 import { AuditLog, initAuditLog } from './AuditLog';
+import { FinanceEvent, initFinanceEvent } from './FinanceEvent';
 import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
 import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
+import { AccountStatement, initAccountStatement } from './AccountStatement';
+import { SyncBackup, initSyncBackup } from './SyncBackup';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -151,6 +155,7 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
+initCfoBriefing(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
@@ -161,7 +166,10 @@ initNotification(sequelize);
 initNotificationPreference(sequelize);
 initAuditLog(sequelize);
 initVaultDocument(sequelize);
+initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
+initAccountStatement(sequelize);
+initSyncBackup(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -552,6 +560,27 @@ AiReviewRun.belongsTo(User, {
   as: 'user',
 });
 
+// CFO briefings (issue #236). Cascades with household; user FK for the
+// actor that requested the briefing.
+Household.hasMany(CfoBriefing, {
+  foreignKey: 'household_id',
+  as: 'cfoBriefings',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+CfoBriefing.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(CfoBriefing, {
+  foreignKey: 'user_id',
+  as: 'cfoBriefings',
+});
+CfoBriefing.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 Household.hasMany(TaxReserveSetting, {
   foreignKey: 'household_id',
   as: 'taxReserveSettings',
@@ -599,6 +628,28 @@ User.hasMany(VaultDocument, {
 VaultDocument.belongsTo(User, {
   foreignKey: 'uploaded_by_user_id',
   as: 'uploadedByUser',
+});
+
+// Finance domain events (issue #238) — append-only stream parallel to
+// audit_log. Cascade on household delete so removing a household
+// removes its event stream too.
+Household.hasMany(FinanceEvent, {
+  foreignKey: 'household_id',
+  as: 'financeEvents',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinanceEvent.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinanceEvent, {
+  foreignKey: 'actor_user_id',
+  as: 'financeEventsEmitted',
+});
+FinanceEvent.belongsTo(User, {
+  foreignKey: 'actor_user_id',
+  as: 'actor',
 });
 
 // Monthly close (issue #227). Period cascades to tasks; deleting a
@@ -663,6 +714,39 @@ Purchase.belongsTo(User, {
   as: 'markedByUser',
 });
 
+// AccountStatement (issue #242). A statement belongs to one Account; an
+// Account can have many statements over time. Household and creator
+// associations mirror the Account model so authorization checks via
+// visibility + createdByUserId compose cleanly.
+Household.hasMany(AccountStatement, {
+  foreignKey: 'household_id',
+  as: 'accountStatements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Account.hasMany(AccountStatement, {
+  foreignKey: 'account_id',
+  as: 'statements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+User.hasMany(AccountStatement, {
+  foreignKey: 'created_by_user_id',
+  as: 'accountStatements',
+});
+AccountStatement.belongsTo(User, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdByUser',
+});
+
 // CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
 // the DB level; we surface the relationship as hasOne so callers can eager
 // load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
@@ -672,6 +756,27 @@ User.hasOne(CashflowSettings, {
   onDelete: 'CASCADE',
 });
 CashflowSettings.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// Sync backups (issue #239). No CASCADE on household delete: the audit
+// history is useful diagnostic context, so we keep the rows around even
+// if the household is later removed. The intentionally-loose FK (no
+// constraint) matches the migration.
+Household.hasMany(SyncBackup, {
+  foreignKey: 'household_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(SyncBackup, {
+  foreignKey: 'user_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
@@ -737,6 +842,7 @@ export {
   FinancialGoal,
   Subscription,
   AiReviewRun,
+  CfoBriefing,
   MoneyLeakDismissal,
   TaxReserveSetting,
   MonthlyClosePeriod,
@@ -746,6 +852,9 @@ export {
   Notification,
   NotificationPreference,
   AuditLog,
+  FinanceEvent,
   BudgetAlertState,
   VaultDocument,
+  AccountStatement,
+  SyncBackup,
 };

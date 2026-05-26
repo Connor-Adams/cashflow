@@ -9,12 +9,12 @@
  *  - PATCH  /api/vault/documents/:id           — rename / retag / relink
  *  - DELETE /api/vault/documents/:id           — drop row + bytes
  *
- * Auth scope: rows are filtered by `visibleWhere(req)` so household members
+ * Auth scope: rows are filtered by `visibleVaultWhere(req)` so household members
  * see shared documents and only their own private documents. The route is
  * authenticated and DB-bound, so `aiSuggestLimiter` is applied per the
  * project's CodeQL convention for new authenticated endpoints.
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
@@ -29,7 +29,7 @@ import {
   type VaultVisibility,
 } from '../models/VaultDocument';
 import { currentAuth } from '../auth/middleware';
-import { visibleWhere } from '../auth/scope';
+import { isSuperadmin } from '../auth/scope';
 import { aiSuggestLimiter } from './aiRateLimit';
 import {
   deleteVaultObject,
@@ -49,6 +49,24 @@ const router = Router();
 // in NODE_ENV=test (see aiRateLimit.ts) so integration tests stay
 // deterministic.
 router.use(aiSuggestLimiter);
+
+/**
+ * Vault-specific visibility filter. Mirrors `visibleWhere` from auth/scope
+ * but uses the vault's actual column name (`uploadedByUserId`) for the
+ * per-user predicate — the shared `visibleWhere` helper hard-codes
+ * `createdByUserId` / `ownerUserId` which don't exist on `vault_documents`.
+ */
+function visibleVaultWhere(req: Request): WhereOptions {
+  if (isSuperadmin(req)) return {};
+  const auth = currentAuth(req);
+  return {
+    householdId: auth.household.id,
+    [Op.or]: [
+      { visibility: 'shared' },
+      { uploadedByUserId: auth.user.id },
+    ],
+  } as WhereOptions;
+}
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -336,7 +354,7 @@ router.post(
 
 router.get('/documents', async (req, res, next) => {
   try {
-    const where = visibleWhere(req) as WhereOptions;
+    const where = visibleVaultWhere(req) as WhereOptions;
     const merged: WhereOptions = { ...where };
 
     if (typeof req.query.linkedType === 'string' && req.query.linkedType !== '') {
@@ -401,7 +419,7 @@ router.get('/documents/:id', async (req, res, next) => {
       return;
     }
     const row = await VaultDocument.findOne({
-      where: { id, ...visibleWhere(req) },
+      where: { id, ...visibleVaultWhere(req) },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
@@ -423,7 +441,7 @@ router.get('/documents/:id/file', async (req, res, next) => {
       return;
     }
     const row = await VaultDocument.findOne({
-      where: { id, ...visibleWhere(req) },
+      where: { id, ...visibleVaultWhere(req) },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
@@ -454,7 +472,7 @@ router.patch('/documents/:id', async (req, res, next) => {
       return;
     }
     const row = await VaultDocument.findOne({
-      where: { id, ...visibleWhere(req) },
+      where: { id, ...visibleVaultWhere(req) },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
@@ -557,7 +575,7 @@ router.delete('/documents/:id', async (req, res, next) => {
       return;
     }
     const row = await VaultDocument.findOne({
-      where: { id, ...visibleWhere(req) },
+      where: { id, ...visibleVaultWhere(req) },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });

@@ -72,6 +72,11 @@ export type {
   Security,
   SecurityPrice,
   StatementPreview,
+  AccountStatement,
+  StatementReconciliation,
+  StatementTransaction,
+  StatementDetailResponse,
+  StatementListResponse,
   Transaction,
   TransactionStatus,
   TransferPurpose,
@@ -1340,4 +1345,50 @@ export type NotificationPreference = {
 
 export type NotificationPreferencesListResponse = {
   data: NotificationPreference[];
+};
+
+/** Local-first encrypted sync foundation (#239). */
+export type SyncBackupResponse = {
+  bundle: string;
+  bundleVersion: number;
+  schemaVersion: number;
+  createdAt: string;
+  origin: string;
+  bundleBytes: number;
+  rowCount: number;
+  tableCounts: Record<string, number>;
+};
+
+export type SyncRestorePreviewResponse = {
+  sourceHouseholdId: number | null;
+  createdAt: string;
+  origin: string;
+  schemaVersion: number;
+  bundleBytes: number;
+  rowCount: number;
+  tableCounts: Record<string, number>;
+};
+
+export type SyncRestoreMode = 'merge' | 'replace';
+
+export type SyncRestoreResponse = {
+  mode: SyncRestoreMode;
+  inserted: Record<string, number>;
+  skipped: Record<string, number>;
+  sourceHouseholdId: number | null;
+  createdAt: string;
+};
+
+export type SyncHistoryEntry = {
+  id: number;
+  kind: 'backup' | 'restore';
+  bundleVersion: number;
+  schemaVersion: number;
+  bundleBytes: number;
+  tableCounts: Record<string, number>;
+  createdAt: string;
+};
+
+export type SyncHistoryResponse = {
+  data: SyncHistoryEntry[];
 };

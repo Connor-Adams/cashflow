@@ -1,6 +1,4 @@
 import fs from 'fs';
-import { lookup } from 'node:dns';
-import { promisify } from 'node:util';
 import app from './app';
 import * as env from './config/env';
 import { seedDemoData } from './demo/seedDemoData';
@@ -17,22 +15,6 @@ import './jobs/definitions/budgetBreachCheck';
 import './jobs/definitions/jobRunCleanup';
 import { startAllJobs } from './jobs';
 
-const lookupAsync = promisify(lookup);
-
-async function probeRailwayDns(): Promise<void> {
-  const hosts = ['otel-collector.railway.internal', 'loki.railway.internal'];
-  for (const host of hosts) {
-    try {
-      // family: 0 accepts either IPv4 or IPv6 — Railway internal is IPv6-only.
-      const result = await lookupAsync(host, { family: 0, all: true });
-      logger.info({ host, addresses: result }, 'dns_probe_ok');
-    } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      logger.warn({ host, code: e.code, message: e.message }, 'dns_probe_failed');
-    }
-  }
-}
-
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -40,7 +22,6 @@ if (!fs.existsSync(uploadDir)) {
 
 async function start() {
   await seedDemoData();
-  await probeRailwayDns();
 
   app.listen(env.port, () => {
     logger.info({

@@ -18,6 +18,11 @@ import {
   diffPatchableFields,
   recordAudit,
 } from '../audit/log';
+import {
+  FINANCE_EVENT_TYPES,
+  FINANCE_EVENT_ENTITY_TYPES,
+  recordFinanceEvent,
+} from '../events/financeEvents';
 import { currentAuth } from '../auth/middleware';
 import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -778,6 +783,24 @@ router.patch('/:id', async (req, res, next) => {
           Number.isInteger(aiSuggestionId) && aiSuggestionId > 0
             ? { aiSuggestionId }
             : undefined,
+      });
+      // Domain event for the stream (issue #238). The payload is the
+      // set of changed fields keyed by field name — replay-friendly
+      // and small. Consumers wanting the full before/after diff should
+      // go to audit_log; this stream is for "what changed" reactions.
+      await recordFinanceEvent({
+        req,
+        type: FINANCE_EVENT_TYPES.TransactionUpdated,
+        entityType: FINANCE_EVENT_ENTITY_TYPES.Transaction,
+        entityId: txn.id,
+        payload: {
+          changed: Object.keys(diff.after),
+          after: diff.after,
+          aiSuggestionId:
+            Number.isInteger(aiSuggestionId) && aiSuggestionId > 0
+              ? aiSuggestionId
+              : null,
+        },
       });
     }
     logTransactionEvent('patch_completed', { id });
