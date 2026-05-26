@@ -145,3 +145,69 @@ test('buildCashFlowSeries — includes mid-stream deposits/withdrawals', () => {
 test('buildCashFlowSeries — empty snapshots returns empty array', () => {
   assert.deepEqual(buildCashFlowSeries([], 0), []);
 });
+
+import { computeBenchmarkSeries } from '../../src/portfolio/returns';
+
+test('computeBenchmarkSeries — flat prices → flat at initial value', () => {
+  const prices = [
+    { date: '2026-01-01', adjClose: 100 },
+    { date: '2026-01-02', adjClose: 100 },
+    { date: '2026-01-03', adjClose: 100 },
+  ];
+  const fx = new Map([
+    ['2026-01-01', 1.0],
+    ['2026-01-02', 1.0],
+    ['2026-01-03', 1.0],
+  ]);
+  const series = computeBenchmarkSeries(prices, fx, 10000);
+  assert.equal(series.length, 3);
+  series.forEach((s) => approxEqual(s.valueCad, 10000));
+});
+
+test('computeBenchmarkSeries — doubling price doubles series', () => {
+  const prices = [
+    { date: '2026-01-01', adjClose: 100 },
+    { date: '2026-01-02', adjClose: 200 },
+  ];
+  const fx = new Map([
+    ['2026-01-01', 1.0],
+    ['2026-01-02', 1.0],
+  ]);
+  const series = computeBenchmarkSeries(prices, fx, 1000);
+  approxEqual(series[0].valueCad, 1000);
+  approxEqual(series[1].valueCad, 2000);
+});
+
+test('computeBenchmarkSeries — FX change reflected', () => {
+  // Buy 10 USD shares at $100 each = $1000 USD = $1370 CAD at fx 1.37
+  // Day 2: same USD price, FX moves to 1.40 → $1400 CAD
+  const prices = [
+    { date: '2026-01-01', adjClose: 100 },
+    { date: '2026-01-02', adjClose: 100 },
+  ];
+  const fx = new Map([
+    ['2026-01-01', 1.37],
+    ['2026-01-02', 1.40],
+  ]);
+  const series = computeBenchmarkSeries(prices, fx, 1370);
+  approxEqual(series[0].valueCad, 1370);
+  approxEqual(series[1].valueCad, 1400);
+});
+
+test('computeBenchmarkSeries — missing FX forward-fills', () => {
+  const prices = [
+    { date: '2026-01-01', adjClose: 100 },
+    { date: '2026-01-02', adjClose: 100 },
+    { date: '2026-01-03', adjClose: 100 },
+  ];
+  const fx = new Map([
+    ['2026-01-01', 1.37],
+    ['2026-01-03', 1.40],
+  ]);
+  const series = computeBenchmarkSeries(prices, fx, 1370);
+  approxEqual(series[1].valueCad, 1370); // forward-fill from 2026-01-01
+});
+
+test('computeBenchmarkSeries — empty prices returns empty array', () => {
+  assert.deepEqual(computeBenchmarkSeries([], new Map(), 1000), []);
+});

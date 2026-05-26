@@ -99,3 +99,25 @@ export function computeXirr(cashFlows: IrrCashFlow[], guess = 0.1): number | nul
   }
   return null;
 }
+
+export function computeBenchmarkSeries(
+  benchmarkDailyPrices: Array<{ date: string; adjClose: number }>,
+  fxByDate: Map<string, number>,
+  initialPortfolioValueCad: number,
+): Array<{ date: string; valueCad: number }> {
+  if (benchmarkDailyPrices.length === 0) return [];
+  const sorted = [...benchmarkDailyPrices].sort((a, b) => a.date.localeCompare(b.date));
+
+  let lastFx = fxByDate.get(sorted[0].date) ?? 1;
+  const firstPriceCad = sorted[0].adjClose * lastFx;
+  if (firstPriceCad === 0) {
+    return sorted.map((p) => ({ date: p.date, valueCad: 0 }));
+  }
+  const fixedShares = initialPortfolioValueCad / firstPriceCad;
+
+  return sorted.map((p) => {
+    const fx = fxByDate.get(p.date) ?? lastFx;
+    lastFx = fx;
+    return { date: p.date, valueCad: fixedShares * p.adjClose * fx };
+  });
+}
