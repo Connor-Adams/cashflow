@@ -123,6 +123,16 @@ export function ImportsTab() {
     }
   }, [])
 
+  // React 18+ blocks `javascript:` URLs in href props. Set them imperatively
+  // via setAttribute after mount so the bookmarklet links remain draggable.
+  const amazonAnchorRef = useRef<HTMLAnchorElement>(null)
+  const appleAnchorRef = useRef<HTMLAnchorElement>(null)
+  useEffect(() => {
+    if (!captureBookmarklets) return
+    amazonAnchorRef.current?.setAttribute('href', captureBookmarklets.amazon)
+    appleAnchorRef.current?.setAttribute('href', captureBookmarklets.apple)
+  }, [captureBookmarklets])
+
   useEffect(() => {
     void (async () => {
       try {
@@ -544,7 +554,7 @@ export function ImportsTab() {
           <div className="row" style={{ gap: '0.5rem', marginTop: '0.75rem' }}>
             <Button asChild variant="secondary">
               <a
-                href={captureBookmarklets.amazon}
+                ref={amazonAnchorRef}
                 draggable
                 onClick={(e) => e.preventDefault()}
               >
@@ -553,7 +563,7 @@ export function ImportsTab() {
             </Button>
             <Button asChild variant="secondary">
               <a
-                href={captureBookmarklets.apple}
+                ref={appleAnchorRef}
                 draggable
                 onClick={(e) => e.preventDefault()}
               >
