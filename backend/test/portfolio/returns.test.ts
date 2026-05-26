@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeTwr, type DailyPoint } from '../../src/portfolio/returns';
+import { computeXirr, type IrrCashFlow } from '../../src/portfolio/returns';
 
 function approxEqual(actual: number, expected: number, eps = 1e-2): void {
   assert.ok(Math.abs(actual - expected) < eps, `expected ~${expected}, got ${actual}`);
@@ -57,4 +58,57 @@ test('computeTwr — multi-period chain', () => {
     { date: '2026-01-03', marketValueCad: 2000, cashFlowCad: 800 },
   ];
   approxEqual(computeTwr(points), 20, 0.1);
+});
+
+test('computeXirr — single deposit + 1Y final value of 1.10x → ~10%', () => {
+  const cf: IrrCashFlow[] = [
+    { date: '2025-01-01', amount: -1000 },
+    { date: '2026-01-01', amount: 1100 },
+  ];
+  const r = computeXirr(cf);
+  assert.ok(r !== null);
+  approxEqual(r as number, 10, 0.5);
+});
+
+test('computeXirr — single deposit + same-year doubling → ~100%', () => {
+  const cf: IrrCashFlow[] = [
+    { date: '2025-01-01', amount: -1000 },
+    { date: '2026-01-01', amount: 2000 },
+  ];
+  const r = computeXirr(cf);
+  assert.ok(r !== null);
+  approxEqual(r as number, 100, 1);
+});
+
+test('computeXirr — multi-deposit DCA pattern returns finite number', () => {
+  const cf: IrrCashFlow[] = [
+    { date: '2025-01-01', amount: -1000 },
+    { date: '2025-07-01', amount: -1000 },
+    { date: '2026-01-01', amount: 2300 },
+  ];
+  const r = computeXirr(cf);
+  assert.ok(r !== null);
+  assert.ok(Number.isFinite(r as number));
+});
+
+test('computeXirr — no cash flows returns null', () => {
+  assert.equal(computeXirr([]), null);
+});
+
+test('computeXirr — only positive flows (no investment) returns null', () => {
+  const cf: IrrCashFlow[] = [
+    { date: '2025-01-01', amount: 100 },
+    { date: '2026-01-01', amount: 200 },
+  ];
+  assert.equal(computeXirr(cf), null);
+});
+
+test('computeXirr — negative return', () => {
+  const cf: IrrCashFlow[] = [
+    { date: '2025-01-01', amount: -1000 },
+    { date: '2026-01-01', amount: 500 },
+  ];
+  const r = computeXirr(cf);
+  assert.ok(r !== null);
+  assert.ok((r as number) < 0);
 });
