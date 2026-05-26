@@ -13,6 +13,11 @@ import {
   AUDIT_ENTITY_TYPES,
   recordAudit,
 } from '../audit/log';
+import {
+  FINANCE_EVENT_TYPES,
+  FINANCE_EVENT_ENTITY_TYPES,
+  recordFinanceEvent,
+} from '../events/financeEvents';
 
 const router = Router();
 
@@ -239,6 +244,25 @@ router.post('/', async (req, res, next) => {
       },
     });
 
+    // Domain event for the stream (issue #238). Independent of the
+    // audit-log write above; payload is the canonical settlement input
+    // (no contact-name dereference — the consumer can resolve from
+    // contactId if needed).
+    await recordFinanceEvent({
+      req,
+      type: FINANCE_EVENT_TYPES.SettlementCreated,
+      entityType: FINANCE_EVENT_ENTITY_TYPES.Settlement,
+      entityId: row.id,
+      payload: {
+        contactId: contact.id,
+        direction: result.value.direction,
+        currency: result.value.currency,
+        amount: result.value.amount,
+        settledDate: result.value.settledDate,
+        notes: result.value.notes,
+      },
+    });
+
     const contactNames = new Map<number, string>([[contact.id, contact.name]]);
     res.status(201).json(serializeSettlement(row, contactNames));
   } catch (e) {
@@ -277,6 +301,13 @@ router.delete('/:id', async (req, res, next) => {
       entityId: settlementId,
       summary: `Deleted settlement #${settlementId}`,
       before: snapshot,
+    });
+    await recordFinanceEvent({
+      req,
+      type: FINANCE_EVENT_TYPES.SettlementDeleted,
+      entityType: FINANCE_EVENT_ENTITY_TYPES.Settlement,
+      entityId: settlementId,
+      payload: snapshot,
     });
     res.status(204).send();
   } catch (e) {
