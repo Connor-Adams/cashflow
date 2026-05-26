@@ -1589,12 +1589,7 @@ export function DashboardPage() {
           rows={merchantReportData.slice(0, 6)}
           rowKey={(r) => `${r.currency}:${r.merchant}`}
           onRowClick={(r) =>
-            navigate(
-              transactionsUrl(
-                { merchant: r.merchant },
-                { currency, dateFrom, dateTo }
-              )
-            )
+            navigate(`/merchants/${encodeURIComponent(r.merchant)}`)
           }
           viewAllLabel="All merchants in Reports"
           viewAllHref="/reports#merchants"

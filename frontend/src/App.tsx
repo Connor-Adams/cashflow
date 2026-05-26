@@ -21,6 +21,7 @@ import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
+import { MerchantPage } from './pages/MerchantPage'
 import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
 import { AmazonPage } from './pages/AmazonPage'
@@ -63,6 +64,7 @@ function AppRoutes() {
           <Route path="review" element={<ReviewInboxPage />} />
           <Route path="refunds" element={<RefundsReviewPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="merchants/:name" element={<MerchantPage />} />
           <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
           <Route path="import" element={<ImportPage />} />
