@@ -4,6 +4,7 @@ Cashflow runs a self-hosted observability stack on Railway:
 
 - `otel-collector` — receives OTLP from the backend, forwards to Loki.
 - `loki` — log storage, 30-day retention, 10GB filesystem volume.
+- `grafana` — self-hosted Grafana for querying Loki (and future Tempo) via private networking.
 
 Phase 3 will add a Tempo service for traces.
 
@@ -29,7 +30,7 @@ Then run the backend dev server with OTLP pointed at the local collector:
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 yarn workspace cashflow-backend run dev
 ```
 
-Exercise the API a bit, then query Loki:
+Exercise the API a bit, then query Loki directly or open Grafana at http://localhost:3000 (admin/admin):
 
 ```bash
 curl -sG http://localhost:3100/loki/api/v1/query_range \
@@ -67,24 +68,40 @@ To onboard:
    - Expose port 4318 publicly (for browser OTLP later) AND internally (for the backend).
    - Deploy.
 
-3. **Add the two service IDs to `.github/workflows/promote-to-production.yml`** so future releases auto-redeploy them. Copy the IDs from the Railway dashboard URL of each service. Open a follow-up PR with the two `env:` values filled in.
+3. **Add the service IDs to `.github/workflows/promote-to-production.yml`** so future releases auto-redeploy them. Copy the IDs from the Railway dashboard URL of each service. Open a follow-up PR with the `env:` values filled in.
 
 4. **Update `cashflow-backend` env vars.**
    - `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.railway.internal:4318`
    - `GIT_SHA=${{RAILWAY_GIT_COMMIT_SHA}}`
    - Redeploy.
 
-## Grafana Cloud datasource
+## Grafana service
 
-1. Sign up for the Grafana Cloud free tier.
-2. Add a Loki datasource pointing at the public Loki URL Railway gives you for the `loki` service (port 3100).
-3. Put basic-auth in front of the public endpoint — Loki's `auth_enabled` flag in `infra/loki/config.yaml` is currently `false` for internal-only access. To expose publicly, either:
-   - Flip `auth_enabled: true` and configure a tenant, or
-   - Front Loki with a small auth proxy service on Railway.
+The cashflow stack includes a self-hosted Grafana instance for querying Loki (and future Tempo). Grafana runs as a Railway service at `ghcr.io/connor-adams/cashflow-grafana`. Datasources auto-provision on boot from `infra/grafana/provisioning/`.
+
+### One-time Railway setup
+
+1. Create the `grafana` service.
+   - New Service → Deploy from Docker image → `ghcr.io/connor-adams/cashflow-grafana:main`
+   - Add a persistent volume mounted at `/var/lib/grafana` (5GB).
+   - Set env vars:
+     - `GF_SECURITY_ADMIN_USER=admin`
+     - `GF_SECURITY_ADMIN_PASSWORD=<strong-password>`
+     - `PORT=3000`
+   - Generate a public domain forwarding port 3000.
+2. Add the service ID to `.github/workflows/promote-to-production.yml` (`RAILWAY_GRAFANA_SERVICE_ID`).
+
+### Login
+
+Open the Grafana public URL. Log in with the admin credentials. Navigate to Explore → Loki, query `{service_name="cashflow-backend"}`.
+
+### Loki access from Grafana
+
+Loki stays on Railway private networking (`loki.railway.internal:3100`). Grafana queries it via its provisioned datasource. No public Loki URL needed. The `loki-production-b81e.up.railway.app` public domain on the loki service can now be removed.
 
 ## Verification
 
-In Grafana Cloud Explore, switch to the Loki datasource and run:
+In Grafana Explore, switch to the Loki datasource and run:
 
 ```
 {service_name="cashflow-backend"} |= "http_request"
