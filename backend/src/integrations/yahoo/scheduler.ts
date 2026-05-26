@@ -264,38 +264,35 @@ let activeTask: ScheduledTask | null = null;
 
 export function startQuoteScheduler(): ScheduledTask | null {
   if (!env.quoteSchedulerEnabled) {
-    logger.info('quote_scheduler_disabled', { reason: 'flag_off' });
+    logger.info({ reason: 'flag_off' }, 'quote_scheduler_disabled');
     return null;
   }
   if (activeTask) {
-    logger.warn('quote_scheduler_already_running');
+    logger.warn({}, 'quote_scheduler_already_running');
     return activeTask;
   }
   if (!cron.validate(env.quoteTickCron)) {
-    logger.error('quote_scheduler_invalid_cron', { expression: env.quoteTickCron });
+    logger.error({ expression: env.quoteTickCron }, 'quote_scheduler_invalid_cron');
     return null;
   }
 
   activeTask = cron.schedule(env.quoteTickCron, async () => {
     if (runningTick) {
-      logger.debug('quote_scheduler_tick_skipped_reentrant');
+      logger.debug({}, 'quote_scheduler_tick_skipped_reentrant');
       return;
     }
     runningTick = true;
     try {
       const result = await runQuoteSchedulerTick();
-      logger.info('quote_scheduler_tick', result as unknown as Record<string, unknown>);
+      logger.info(result as unknown as Record<string, unknown>, 'quote_scheduler_tick');
     } catch (err) {
-      logger.error('quote_scheduler_tick_unhandled', {}, err);
+      logger.error({ err }, 'quote_scheduler_tick_unhandled');
     } finally {
       runningTick = false;
     }
   });
 
-  logger.info('quote_scheduler_started', {
-    cron: env.quoteTickCron,
-    minAgeHours: env.quoteMinAgeHours,
-  });
+  logger.info({ cron: env.quoteTickCron, minAgeHours: env.quoteMinAgeHours }, 'quote_scheduler_started');
   return activeTask;
 }
 
