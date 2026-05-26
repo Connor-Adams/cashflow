@@ -30,7 +30,7 @@ before(async () => {
     updated_at: { type: DataTypes.DATE, allowNull: false },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260605000050-create-vault-documents.js');
+  migration = require('../../src/migrations/20260605000070-create-vault-documents.js');
 });
 
 after(async () => {
