@@ -992,3 +992,54 @@ export type PortfolioForwardIncome = {
     holdingsWithoutHistory: PortfolioForwardIncomeHoldingWithoutHistory[];
   };
 };
+
+export type PortfolioPerformanceRange = '1M' | '3M' | 'YTD' | '1Y' | 'All' | 'custom';
+
+export type PortfolioPerformancePoint = {
+  date: string;
+  portfolioValueCad: number;
+  benchmarkValueCad: number;
+  isPartial: boolean;
+};
+
+export type PortfolioPerformanceStats = {
+  twrPct: number;
+  mwrPct: number | null;
+  benchmarkTwrPct: number;
+  vsBenchmarkDeltaPct: number;
+  startDate: string;
+  endDate: string;
+  startValueCad: number;
+  endValueCad: number;
+  netCashFlowCad: number;
+};
+
+export type PortfolioPerformanceByAccount = {
+  accountId: number;
+  accountName: string;
+  twrPct: number;
+  endValueCad: number;
+  weightInPortfolioPct: number;
+};
+
+export type PortfolioPerformanceCaveats = {
+  partialDaysCount: number;
+  missingDataReasons: string[];
+  benchmarkSymbol: string;
+  benchmarkIsPartial: boolean;
+};
+
+export type PortfolioPerformance = {
+  range: PortfolioPerformanceRange;
+  stats: PortfolioPerformanceStats;
+  presetStats: {
+    '1M': PortfolioPerformanceStats;
+    '3M': PortfolioPerformanceStats;
+    'YTD': PortfolioPerformanceStats;
+    '1Y': PortfolioPerformanceStats;
+    'All': PortfolioPerformanceStats;
+  };
+  series: PortfolioPerformancePoint[];
+  byAccount: PortfolioPerformanceByAccount[];
+  caveats: PortfolioPerformanceCaveats;
+};
