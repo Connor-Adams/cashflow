@@ -2,6 +2,45 @@ import { Router } from 'express';
 import { Rule, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
+import { scheduleInternalBackfill } from '../import/backfillCoordinator';
+
+/**
+ * Map a rule's shape to the InternalBackfillRequest parameters. Regex
+ * patterns can't be expressed as SQL LIKE so we drop the merchant filter
+ * and re-enrich the whole effective-date range — correct but heavier.
+ * Exported for unit tests; the route uses it via scheduleRuleBackfill below.
+ */
+export function ruleToBackfillScope(rule: {
+  merchantPattern: string;
+  matchKind: string;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+}): { merchantPattern: string | null; dateFrom: string | null; dateTo: string | null } {
+  const merchantPattern =
+    rule.matchKind === 'regex' || !rule.merchantPattern ? null : rule.merchantPattern;
+  return {
+    merchantPattern,
+    dateFrom: rule.effectiveFrom,
+    dateTo: rule.effectiveTo,
+  };
+}
+
+function scheduleRuleBackfill(
+  householdId: number,
+  rule: {
+    merchantPattern: string;
+    matchKind: string;
+    effectiveFrom: string | null;
+    effectiveTo: string | null;
+  },
+  source: string,
+): void {
+  scheduleInternalBackfill({
+    householdId,
+    ...ruleToBackfillScope(rule),
+    source,
+  });
+}
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -91,6 +130,16 @@ router.post('/', async (req, res, next) => {
       effectiveFrom: fromParsed.value,
       effectiveTo: toParsed.value,
     });
+    scheduleRuleBackfill(
+      household.id,
+      {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+      },
+      'rule-create',
+    );
     res.status(201).json(row);
   } catch (e) {
     next(e);
@@ -105,6 +154,16 @@ router.patch('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    // Snapshot pre-edit shape so we can re-enrich anything the OLD pattern
+    // matched, in addition to whatever the NEW pattern will match. Without
+    // this, narrowing a rule (e.g. "AMAZON" → "AMAZON PRIME") would leave
+    // formerly-matched txns stuck on the old categorisation.
+    const previous = {
+      merchantPattern: row.merchantPattern,
+      matchKind: row.matchKind,
+      effectiveFrom: row.effectiveFrom,
+      effectiveTo: row.effectiveTo,
+    };
     const b = (req.body || {}) as Record<string, unknown>;
     if (Object.prototype.hasOwnProperty.call(b, 'effectiveFrom')) {
       const p = parseEffectiveDate(b.effectiveFrom);
@@ -143,6 +202,18 @@ router.patch('/:id', async (req, res, next) => {
       if (Object.prototype.hasOwnProperty.call(b, f)) row.set(f, b[f] as never);
     }
     await row.save();
+    const { household } = currentAuth(req);
+    scheduleRuleBackfill(household.id, previous, 'rule-update-prev');
+    scheduleRuleBackfill(
+      household.id,
+      {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+      },
+      'rule-update-next',
+    );
     res.json(row);
   } catch (e) {
     next(e);
@@ -157,7 +228,15 @@ router.delete('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    const snapshot = {
+      merchantPattern: row.merchantPattern,
+      matchKind: row.matchKind,
+      effectiveFrom: row.effectiveFrom,
+      effectiveTo: row.effectiveTo,
+    };
+    const { household } = currentAuth(req);
     await row.destroy();
+    scheduleRuleBackfill(household.id, snapshot, 'rule-delete');
     res.status(204).send();
   } catch (e) {
     next(e);
