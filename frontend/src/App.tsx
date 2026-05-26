@@ -25,6 +25,7 @@ import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
 import { AuditLogPage } from './pages/AuditLogPage'
+import { SyncPage } from './pages/SyncPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
@@ -46,6 +47,7 @@ import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
+import { CfoBriefingPage } from './pages/CfoBriefingPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AskCashflowPage } from './pages/AskCashflowPage'
@@ -90,6 +92,7 @@ function AppRoutes() {
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="audit-log" element={<AuditLogPage />} />
+          <Route path="sync" element={<SyncPage />} />
           <Route path="reports/explain-month" element={<ExplainMonthPage />} />
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
@@ -112,6 +115,7 @@ function AppRoutes() {
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />
+          <Route path="cfo/briefings" element={<CfoBriefingPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<AskCashflowPage />} />

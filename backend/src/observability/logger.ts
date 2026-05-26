@@ -1,12 +1,8 @@
 // backend/src/observability/logger.ts
 import pino, { type LoggerOptions } from 'pino';
-import { join } from 'node:path';
 import { context as otelContext, trace } from '@opentelemetry/api';
 import { als } from './requestContext';
-
-// Absolute path to the CJS wrapper that surfaces worker-internal errors.
-// __dirname resolves to dist/observability/ at runtime (after tsc + cp).
-const OTLP_WRAPPER_PATH = join(__dirname, 'otlp-wrapper.cjs');
+import { createOtlpDestination } from './otlpDestination';
 
 const isDev = process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
@@ -19,6 +15,8 @@ const baseOptions: LoggerOptions = {
     env: process.env.NODE_ENV ?? 'development',
   },
   formatters: {
+    // Emit `level: "info"` instead of pino's numeric default — matches OTel
+    // `severity_text` convention and Loki's expectations.
     level: (label) => ({ level: label }),
   },
   mixin() {
@@ -48,94 +46,6 @@ const baseOptions: LoggerOptions = {
   timestamp: pino.stdTimeFunctions.isoTime,
 };
 
-function buildOtlpTransport() {
-  if (!otlpEnabled) return undefined;
-  try {
-    const transport = pino.transport({
-      target: OTLP_WRAPPER_PATH,
-      options: {
-        loggerName: 'cashflow-backend',
-        serviceVersion: process.env.GIT_SHA ?? 'dev',
-        resourceAttributes: {
-          'service.name': 'cashflow-backend',
-          'deployment.environment': process.env.NODE_ENV ?? 'development',
-          'service.version': process.env.GIT_SHA ?? 'dev',
-        },
-        logRecordProcessorOptions: {
-          recordProcessorType: 'batch',
-          exporterOptions: {
-            protocol: 'http/protobuf',
-            protobufExporterOptions: {
-              url: `${otlpEndpoint!.replace(/\/$/, '')}/v1/logs`,
-            },
-          },
-        },
-      },
-    });
-
-    transport.on('error', (err: Error) => {
-      // eslint-disable-next-line no-console
-      console.error('[observability][diag] stream error:', err && err.message);
-    });
-
-    // Stream lifecycle events.
-    for (const ev of ['end', 'finish', 'close', 'drain'] as const) {
-      transport.on(ev, () => {
-        // eslint-disable-next-line no-console
-        console.error(`[observability][diag] stream event '${ev}' fired. trace:\n${new Error().stack}`);
-      });
-    }
-
-    // Monkey-patch .end() and .destroy() to capture call sites.
-    const originalEnd = transport.end.bind(transport);
-    transport.end = function patchedEnd(this: typeof transport, ...args: unknown[]) {
-      // eslint-disable-next-line no-console
-      console.error(`[observability][diag] transport.end() CALLED. trace:\n${new Error().stack}`);
-      // @ts-expect-error - forwarding args
-      return originalEnd(...args);
-    } as typeof transport.end;
-
-    const transportAny = transport as unknown as Record<string, unknown>;
-    const originalDestroy = typeof transportAny['destroy'] === 'function'
-      ? (transportAny['destroy'] as (...a: unknown[]) => unknown).bind(transport)
-      : undefined;
-    if (originalDestroy) {
-      transportAny['destroy'] = function patchedDestroy(...args: unknown[]) {
-        // eslint-disable-next-line no-console
-        console.error(`[observability][diag] transport.destroy() CALLED. trace:\n${new Error().stack}`);
-        return originalDestroy(...args);
-      };
-    }
-
-    // Underlying worker_threads.Worker events.
-    const worker = (transport as unknown as { worker?: import('node:worker_threads').Worker }).worker;
-    if (worker) {
-      worker.on('exit', (code: number) => {
-        // eslint-disable-next-line no-console
-        console.error(`[observability][diag] WORKER EXIT code=${code}`);
-      });
-      worker.on('error', (err: Error) => {
-        // eslint-disable-next-line no-console
-        console.error('[observability][diag] WORKER ERROR:', err && err.message);
-        // eslint-disable-next-line no-console
-        if (err && err.stack) console.error(err.stack);
-      });
-      worker.on('message', (msg: unknown) => {
-        if (msg && typeof msg === 'object' && 'code' in msg) {
-          // eslint-disable-next-line no-console
-          console.error('[observability][diag] WORKER MSG:', JSON.stringify(msg));
-        }
-      });
-    }
-
-    return transport;
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[observability][diag] init threw:', err);
-    return undefined;
-  }
-}
-
 let logger: pino.Logger;
 
 if (isDev) {
@@ -154,12 +64,21 @@ if (isDev) {
   });
 } else {
   // Prod / test: stdout is always written synchronously via the destination
-  // arg. OTLP is added in parallel via pino.multistream so a transport failure
-  // never kills stdout.
-  const otlpTransport = buildOtlpTransport();
+  // arg. OTLP is added in parallel via pino.multistream so a destination
+  // failure never kills stdout. All work happens on the main event loop —
+  // no worker threads, no thread-stream.
+  const otlpDestination = otlpEnabled
+    ? createOtlpDestination({
+        endpoint: otlpEndpoint!,
+        serviceName: 'cashflow-backend',
+        serviceVersion: process.env.GIT_SHA ?? 'dev',
+        environment: process.env.NODE_ENV ?? 'development',
+      })
+    : undefined;
+
   const streams: Parameters<typeof pino.multistream>[0] = [
     { level: 'trace', stream: process.stdout },
-    ...(otlpTransport ? [{ level: 'trace' as const, stream: otlpTransport }] : []),
+    ...(otlpDestination ? [{ level: 'trace' as const, stream: otlpDestination }] : []),
   ];
   logger = pino(baseOptions, pino.multistream(streams));
 }
