@@ -286,6 +286,73 @@ router.post('/:id/fork', async (req, res, next) => {
   }
 });
 
+// POST /api/tax/personal-scenarios/:id/project-next-year — create a
+// projection_root scenario for year+1 chained to `:id` via `next_year_id`.
+// Idempotent: if a projection_root already exists for the same entity+next
+// year, returns 409 with the existing scenario so callers can recover the
+// link without creating a duplicate.
+router.post('/:id/project-next-year', async (req, res, next) => {
+  try {
+    const result = await loadAndAuthorize(req, Number(req.params.id));
+    if ('error' in result) {
+      res.status(result.error === 'not_found' ? 404 : 403).json({ error: result.error });
+      return;
+    }
+    if (result.scenario.kind === 'projection_root') {
+      // Block chaining two projection_root scenarios in a single hop — the
+      // resolver requires a baseline (or fork) as the year-N anchor.
+      res.status(400).json({
+        error: 'already_projection_root',
+        message:
+          'Cannot project from a projection_root scenario; project from a baseline or fork.',
+      });
+      return;
+    }
+    const nextYear = result.scenario.year + 1;
+    const existing = await Scenario.findOne({
+      where: {
+        entityId: result.scenario.entityId,
+        year: nextYear,
+        kind: 'projection_root',
+      },
+    });
+    if (existing) {
+      res.status(409).json({
+        error: 'projection_already_exists',
+        message: `A projection_root scenario already exists for entity ${result.scenario.entityId} year ${nextYear}.`,
+        scenario: existing,
+      });
+      return;
+    }
+    const name =
+      typeof req.body?.name === 'string' && req.body.name.trim() !== ''
+        ? req.body.name
+        : `Projection ${nextYear}`;
+    const assumptions =
+      req.body?.assumptions && typeof req.body.assumptions === 'object'
+        ? req.body.assumptions
+        : {};
+    const projection = await Scenario.create({
+      parentId: result.scenario.id,
+      householdPlanId: result.scenario.householdPlanId,
+      entityId: result.scenario.entityId,
+      year: nextYear,
+      name,
+      kind: 'projection_root',
+      overrides: {},
+      assumptions,
+      nextYearId: null,
+      notes: null,
+    });
+    // Link the chain forward: parent.nextYearId now points at the new
+    // projection so GET /:id/chain (Task 5) can walk year N → N+1.
+    await result.scenario.update({ nextYearId: projection.id });
+    res.status(201).json({ scenario: projection });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/tax/personal-scenarios/:id/compute — force a recompute, bypassing
 // the facts-hash cache. Always writes a fresh ScenarioReturn row.
 router.post('/:id/compute', async (req, res, next) => {
