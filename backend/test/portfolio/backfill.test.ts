@@ -259,6 +259,17 @@ function makeOverview(partial: Partial<OverviewFixture>): OverviewFixture {
     trailingReturn5y: null,
     trailingReturn10y: null,
     trailingReturnYtd: null,
+    nextEarningsDate: null,
+    nextEarningsIsEstimate: null,
+    earningsEpsAvg: null,
+    earningsEpsLow: null,
+    earningsEpsHigh: null,
+    earningsRevenueAvg: null,
+    earningsRevenueLow: null,
+    earningsRevenueHigh: null,
+    earningsHistory: null,
+    recommendationTrend: null,
+    upgradeDowngradeHistory: null,
     raw: {},
   };
   return { ...base, ...partial };

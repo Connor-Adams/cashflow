@@ -348,8 +348,53 @@ export type PortfolioSecurityOverview = {
   trailingReturn5y: number | null;
   trailingReturn10y: number | null;
   trailingReturnYtd: number | null;
+  // Earnings forecast
+  nextEarningsDate: string | null;
+  nextEarningsIsEstimate: boolean | null;
+  earningsEpsAvg: number | null;
+  earningsEpsLow: number | null;
+  earningsEpsHigh: number | null;
+  earningsRevenueAvg: number | null;
+  earningsRevenueLow: number | null;
+  earningsRevenueHigh: number | null;
+  earningsHistory: Array<{
+    period: string | null;
+    quarter: string | null;
+    epsActual: number | null;
+    epsEstimate: number | null;
+    epsDifference: number | null;
+    surprisePercent: number | null;
+  }> | null;
+  recommendationTrend: Array<{
+    period: string | null;
+    strongBuy: number | null;
+    buy: number | null;
+    hold: number | null;
+    sell: number | null;
+    strongSell: number | null;
+  }> | null;
+  upgradeDowngradeHistory: Array<{
+    date: string | null;
+    firm: string | null;
+    fromGrade: string | null;
+    toGrade: string | null;
+    action: string | null;
+  }> | null;
   metadataFetchedAt: string | null;
   backfill: BackfillStatus;
+};
+
+export type PortfolioSecurityNews = {
+  securityId: number;
+  items: Array<{
+    uuid: string;
+    title: string;
+    publisher: string;
+    link: string;
+    publishedAt: string;
+    thumbnailUrl: string | null;
+    relatedTickers: string[];
+  }>;
 };
 
 export type NetWorthBreakdownRow = {

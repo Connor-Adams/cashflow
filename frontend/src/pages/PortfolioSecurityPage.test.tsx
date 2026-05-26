@@ -34,6 +34,8 @@ const baseDivs = {
   backfill: { status: 'fresh', lastFetchedAt: null, nextRetryAt: null, coverageDays: 0 },
 }
 
+const baseNews = { securityId: 1, items: [] }
+
 function mockApi(mapping: Record<string, unknown>) {
   vi.spyOn(api, 'getJson').mockImplementation(async (url: string) => {
     for (const [k, v] of Object.entries(mapping)) {
@@ -55,6 +57,7 @@ describe('PortfolioSecurityPage', () => {
       '/api/portfolio/security/1/overview': baseOverview,
       '/api/portfolio/security/1/prices': basePrices,
       '/api/portfolio/security/1/dividends': baseDivs,
+      '/api/portfolio/security/1/news': baseNews,
       '/api/portfolio/security/1': baseDetail,
     })
     const { findByText } = render(
@@ -77,6 +80,7 @@ describe('PortfolioSecurityPage', () => {
       if (url.endsWith('/api/portfolio/security/1')) return baseDetail as never
       if (url.includes('/prices')) return basePrices as never
       if (url.includes('/dividends')) return baseDivs as never
+      if (url.includes('/news')) return baseNews as never
       throw new Error(`unmocked ${url}`)
     })
     const { findByText } = render(

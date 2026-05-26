@@ -212,6 +212,7 @@ export async function seedSecurityMetadata(
     metadata: {
       marketCap: null,
       fundExpenseRatio: null,
+      nextEarningsDate: null,
       ...metadata,
     } as never,
     metadataFetchedAt: new Date(),

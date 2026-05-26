@@ -78,6 +78,17 @@ export function overviewToMetadata(overview: OverviewResult): SecurityMetadata {
     trailingReturn5y: overview.trailingReturn5y,
     trailingReturn10y: overview.trailingReturn10y,
     trailingReturnYtd: overview.trailingReturnYtd,
+    nextEarningsDate: overview.nextEarningsDate,
+    nextEarningsIsEstimate: overview.nextEarningsIsEstimate,
+    earningsEpsAvg: overview.earningsEpsAvg,
+    earningsEpsLow: overview.earningsEpsLow,
+    earningsEpsHigh: overview.earningsEpsHigh,
+    earningsRevenueAvg: overview.earningsRevenueAvg,
+    earningsRevenueLow: overview.earningsRevenueLow,
+    earningsRevenueHigh: overview.earningsRevenueHigh,
+    earningsHistory: overview.earningsHistory,
+    recommendationTrend: overview.recommendationTrend,
+    upgradeDowngradeHistory: overview.upgradeDowngradeHistory,
     raw: overview.raw,
   };
 }
