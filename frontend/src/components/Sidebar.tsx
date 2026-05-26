@@ -9,7 +9,6 @@ import {
   Coins,
   Globe,
   Package,
-  PackageCheck,
   PackageSearch,
   CreditCard,
   ClipboardCheck,
@@ -23,6 +22,7 @@ import {
   ReceiptText,
   Repeat,
   RefreshCw,
+  RotateCcw,
   ArrowLeftRight,
   Search,
   Settings,
@@ -36,6 +36,7 @@ import {
   Undo2,
   Upload,
   Users,
+  Waypoints,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,7 +62,6 @@ const navItems: NavItem[] = [
   { to: '/transactions', label: 'Transactions', icon: ReceiptText },
   { to: '/transfers', label: 'Transfers', icon: ArrowLeftRight },
   { to: '/items', label: 'Items', icon: Package },
-  { to: '/purchases', label: 'Purchases', icon: PackageCheck },
   { to: '/import', label: 'Import', icon: Upload },
   { to: '/portfolio', label: 'Portfolio', icon: LineChart },
   { to: '/net-worth', label: 'Net worth', icon: Coins },
@@ -72,6 +72,7 @@ const navItems: NavItem[] = [
   { to: '/forecast', label: 'Forecast', icon: TrendingUp },
   { to: '/recurring', label: 'Recurring', icon: Repeat },
   { to: '/subscriptions', label: 'Subscriptions', icon: RefreshCw },
+  { to: '/return-warranty', label: 'Returns & warranties', icon: RotateCcw },
   { to: '/money-leaks', label: 'Money leaks', icon: Droplet },
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
@@ -82,6 +83,7 @@ const navItems: NavItem[] = [
   { to: '/ask', label: 'Ask Cashflow', icon: Search },
   { to: '/partner', label: 'Partner', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/sankey', label: 'Cashflow', icon: Waypoints },
   { to: '/currency', label: 'Currency', icon: Globe },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },

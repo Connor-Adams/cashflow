@@ -7,6 +7,7 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { SankeyPage } from './pages/SankeyPage'
 import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
@@ -25,7 +26,6 @@ import { TransactionsPage } from './pages/TransactionsPage'
 import { MerchantPage } from './pages/MerchantPage'
 import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
-import { PurchasesPage } from './pages/PurchasesPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
@@ -41,6 +41,7 @@ import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { NotificationsTab } from './pages/settings/tabs/NotificationsTab'
 import { TaxPage } from './pages/TaxPage'
+import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
 import { InsightsPage } from './pages/InsightsPage'
@@ -70,7 +71,6 @@ function AppRoutes() {
           <Route path="merchants/:name" element={<MerchantPage />} />
           <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
-          <Route path="purchases" element={<PurchasesPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
@@ -87,8 +87,10 @@ function AppRoutes() {
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="tax" element={<TaxPage />} />
+          <Route path="return-warranty" element={<ReturnWarrantyPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
             <Route element={<SettingsTabLayout />}>

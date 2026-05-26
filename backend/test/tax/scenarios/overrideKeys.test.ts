@@ -117,3 +117,49 @@ test('apply: pensionSplit.transferAmount stamps synthetic pensionSplit field on 
   assert.ok(facts.pensionSplit, 'pensionSplit should be set');
   assert.equal(facts.pensionSplit!.transferAmount.toFixed(2), '15000.00');
 });
+
+test('apply: income.pensionIncome double-stamps facts.pensionIncome AND employmentIncome[]', () => {
+  const entry = getOverrideKey('income.pensionIncome')!;
+  assert.equal(entry.kind, 'personal');
+  entry.validate(50000);
+  // Seed with existing pension + employment to verify additive behavior.
+  const base = emptyFacts();
+  base.pensionIncome = D('1000');
+  base.employmentIncome = [{ source: 'slip:T4', amount: D('80000'), cadAmount: D('80000') }];
+  const facts = entry.apply(base, 50000);
+  // facts.pensionIncome adds rather than replaces
+  assert.equal(facts.pensionIncome!.toFixed(2), '51000.00');
+  // employmentIncome[] gets the new item appended (not replaced)
+  assert.equal(facts.employmentIncome.length, 2);
+  assert.equal(facts.employmentIncome[0].source, 'slip:T4');
+  assert.equal(facts.employmentIncome[1].source, 'override:income.pensionIncome');
+  assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '50000.00');
+});
+
+test('apply: income.cppRetirement appends to employmentIncome[] only (no pensionIncome touch)', () => {
+  const entry = getOverrideKey('income.cppRetirement')!;
+  assert.equal(entry.kind, 'personal');
+  entry.validate(16000);
+  const base = emptyFacts();
+  base.employmentIncome = [{ source: 'slip:T4', amount: D('80000'), cadAmount: D('80000') }];
+  const facts = entry.apply(base, 16000);
+  // pensionIncome left untouched (undefined in base)
+  assert.equal(facts.pensionIncome, undefined);
+  // appended, not replaced
+  assert.equal(facts.employmentIncome.length, 2);
+  assert.equal(facts.employmentIncome[1].source, 'override:income.cppRetirement');
+  assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '16000.00');
+});
+
+test('apply: income.oasRetirement appends to employmentIncome[] only (no pensionIncome touch)', () => {
+  const entry = getOverrideKey('income.oasRetirement')!;
+  assert.equal(entry.kind, 'personal');
+  entry.validate(8500);
+  const base = emptyFacts();
+  base.employmentIncome = [{ source: 'slip:T4', amount: D('80000'), cadAmount: D('80000') }];
+  const facts = entry.apply(base, 8500);
+  assert.equal(facts.pensionIncome, undefined);
+  assert.equal(facts.employmentIncome.length, 2);
+  assert.equal(facts.employmentIncome[1].source, 'override:income.oasRetirement');
+  assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '8500.00');
+});

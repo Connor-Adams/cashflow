@@ -2,6 +2,7 @@ import { Router, type Request } from 'express';
 import { Op, type WhereOptions } from 'sequelize';
 import { PlannedEvent } from '../models/PlannedEvent';
 import { Account, Transaction } from '../models';
+import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
@@ -15,6 +16,7 @@ import {
 import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
 import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
+import { computeSafeToSpend } from '../cashflow/safeToSpend';
 
 const router = Router();
 
@@ -407,6 +409,53 @@ router.get('/', async (req, res, next) => {
       dailyPoints: result.dailyPoints,
       events: sortedEvents.map(serializeOccurrence),
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/forecast/safe-to-spend — single "how much can I spend without
+ * dipping into required funds" number, plus the full breakdown so the UI
+ * can render the explanation without a follow-up call.
+ *
+ * Query parameters:
+ *   - currency (3-letter ISO, optional — defaults to the household's
+ *     largest cash currency)
+ *   - asOfDate (YYYY-MM-DD, optional — defaults to today)
+ *
+ * Routed off the forecast router because the underlying math reuses the
+ * forecast engine (planned events + recurrence expansion) and the UI
+ * groups it with other forecast-derived numbers.
+ */
+router.get('/safe-to-spend', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const asOfDate = req.query.asOfDate
+      ? String(req.query.asOfDate)
+      : todayIso();
+    if (!ISO_DATE_RE.test(asOfDate)) {
+      res.status(400).json({ error: 'asOfDate must be YYYY-MM-DD' });
+      return;
+    }
+
+    let currency: string | null = null;
+    if (req.query.currency !== undefined && req.query.currency !== '') {
+      const raw = String(req.query.currency).trim().toUpperCase();
+      if (raw.length !== 3) {
+        res.status(400).json({ error: 'currency must be a 3-letter ISO code' });
+        return;
+      }
+      currency = raw;
+    }
+
+    const result = await computeSafeToSpend({
+      userId: user.id,
+      householdId: household.id,
+      currency,
+      asOfDate,
+    });
+    res.json(result);
   } catch (e) {
     next(e);
   }

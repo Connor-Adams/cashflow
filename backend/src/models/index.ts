@@ -38,6 +38,10 @@ import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
 import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
+import {
+  TransactionReturnMetadata,
+  initTransactionReturnMetadata,
+} from './TransactionReturnMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
@@ -63,6 +67,7 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
+import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
@@ -114,6 +119,7 @@ initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
 initTransactionTaxMetadata(sequelize);
+initTransactionReturnMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
@@ -136,6 +142,7 @@ initAiReviewRun(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initPurchase(sequelize);
+initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
 
@@ -168,6 +175,17 @@ Transaction.hasOne(TransactionTaxMetadata, {
   hooks: true,
 });
 TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
+Transaction.hasOne(TransactionReturnMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'returnMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionReturnMetadata.belongsTo(Transaction, {
   foreignKey: 'transaction_id',
   as: 'transaction',
 });
@@ -523,6 +541,19 @@ Purchase.belongsTo(User, {
   as: 'markedByUser',
 });
 
+// CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
+// the DB level; we surface the relationship as hasOne so callers can eager
+// load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
+User.hasOne(CashflowSettings, {
+  foreignKey: 'user_id',
+  as: 'cashflowSettings',
+  onDelete: 'CASCADE',
+});
+CashflowSettings.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -564,6 +595,7 @@ export {
   TaxCategory,
   TaxTag,
   TransactionTaxMetadata,
+  TransactionReturnMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,
@@ -584,6 +616,7 @@ export {
   MoneyLeakDismissal,
   TaxReserveSetting,
   Purchase,
+  CashflowSettings,
   Notification,
   NotificationPreference,
 };

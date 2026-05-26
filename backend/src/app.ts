@@ -10,6 +10,7 @@ import transfersRouter from './routes/transfers';
 import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
+import sankeyRouter from './routes/sankey';
 import merchantsRouter from './routes/merchants';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
@@ -35,6 +36,7 @@ import goalsRouter from './routes/goals';
 import notificationsRouter from './routes/notifications';
 import notificationPreferencesRouter from './routes/notificationPreferences';
 import forecastRouter from './routes/forecast';
+import cashflowSettingsRouter from './routes/cashflowSettings';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
@@ -44,6 +46,7 @@ import fxRouter from './routes/fx';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
 import businessTaxRouter from './routes/businessTax';
+import returnWarrantyRouter from './routes/returnWarranty';
 import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
@@ -124,7 +127,12 @@ app.use('/api/goals', goalsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/notification-preferences', notificationPreferencesRouter);
 app.use('/api/forecast', forecastRouter);
+app.use('/api/settings/cashflow', cashflowSettingsRouter);
 app.use('/api/import', importRouter);
+// sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins
+// against any future /:id-style routes added to summaryRouter. The
+// remainder of /api/summary/* keeps flowing to summaryRouter below.
+app.use('/api/summary/sankey', sankeyRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/merchants', merchantsRouter);
 app.use('/api/recurring', recurringRouter);
@@ -153,6 +161,10 @@ app.use('/api/tax', taxRouter);
 // businessTaxRouter mounts /business/*, /exports/tax, /tax-tags, and
 // /transactions/:id/tax under /api. Keep it BEFORE other catch-all /api mounts.
 app.use('/api', businessTaxRouter);
+// returnWarrantyRouter mounts /return-warranty/* and
+// /transactions/:id/return-warranty under /api. Keep BEFORE other catch-all
+// mounts so its specific paths win.
+app.use('/api', returnWarrantyRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
 app.use('/api', purchasesRouter);
