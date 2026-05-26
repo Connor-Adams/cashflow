@@ -33,7 +33,7 @@ type UploadResult = {
   skipped?: boolean
   reason?: string | null
   message?: string | null
-  parseErrors?: { rowIndex?: number; message: string }[]
+  parseErrors?: { rowIndex: number; message: string }[]
   error?: string | null
 }
 
