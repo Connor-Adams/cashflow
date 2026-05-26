@@ -68,6 +68,11 @@ import {
   initMoneyLeakDismissal,
 } from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
+import {
+  MonthlyClosePeriod,
+  initMonthlyClosePeriod,
+} from './MonthlyClosePeriod';
+import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -129,6 +134,8 @@ initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
+initMonthlyClosePeriod(sequelize);
+initMonthlyCloseTask(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -472,6 +479,41 @@ TaxReserveSetting.belongsTo(Household, {
   as: 'household',
 });
 
+// Monthly close (issue #227). Period cascades to tasks; deleting a
+// household removes its periods and (via the period→task cascade) tasks.
+Household.hasMany(MonthlyClosePeriod, {
+  foreignKey: 'household_id',
+  as: 'monthlyClosePeriods',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+MonthlyClosePeriod.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(MonthlyClosePeriod, {
+  foreignKey: 'user_id',
+  as: 'monthlyClosePeriods',
+});
+MonthlyClosePeriod.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+MonthlyClosePeriod.hasMany(MonthlyCloseTask, {
+  foreignKey: 'period_id',
+  as: 'tasks',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+MonthlyCloseTask.belongsTo(MonthlyClosePeriod, {
+  foreignKey: 'period_id',
+  as: 'period',
+});
+MonthlyCloseTask.belongsTo(User, {
+  foreignKey: 'completed_by_user_id',
+  as: 'completedByUser',
+});
+
 export {
   sequelize,
   User,
@@ -532,4 +574,6 @@ export {
   AiReviewRun,
   MoneyLeakDismissal,
   TaxReserveSetting,
+  MonthlyClosePeriod,
+  MonthlyCloseTask,
 };
