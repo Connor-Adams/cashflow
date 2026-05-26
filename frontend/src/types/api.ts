@@ -384,6 +384,59 @@ export type PartnerSettlementRecommendationResponse = {
   recommendations: PartnerSettlementRecommendation[]
 }
 
+// ---- Sankey visualization (issue #224) ---------------------------------
+
+/** Classification of a node in the Sankey diagram — drives coloring. */
+export type SankeyNodeKind =
+  | 'income'
+  | 'category'
+  | 'business'
+  | 'savings'
+  | 'uncategorized'
+
+export type SankeyNode = {
+  name: string
+  kind: SankeyNodeKind
+}
+
+export type SankeyLink = {
+  source: number
+  target: number
+  value: number
+}
+
+/** Response shape for GET /api/summary/sankey. */
+export type SankeyResponse = {
+  currency: string | null
+  totalIncome: number
+  totalSpend: number
+  transactionCount: number
+  nodes: SankeyNode[]
+  links: SankeyLink[]
+  /** Every currency the household has at least one visible txn in. */
+  availableCurrencies: string[]
+  dateRange: { from: string | null; to: string | null }
+}
+
+export type SankeyDrilldownTransaction = {
+  id: number
+  date: string
+  currency: string
+  amount: number
+  merchant: string
+  finalCategory: string | null
+  finalBusiness: boolean
+  txnType: string | null
+}
+
+/** Response shape for GET /api/summary/sankey/source-transactions. */
+export type SankeyDrilldownResponse = {
+  edge: { source: number; target: number }
+  transactionCount: number
+  truncated: boolean
+  transactions: SankeyDrilldownTransaction[]
+}
+
 /**
  * Filter shape accepted by POST /api/transactions/bulk-patch-filter. Mirrors
  * the subset of GET /api/transactions query params relevant for narrowing

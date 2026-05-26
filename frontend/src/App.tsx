@@ -8,6 +8,7 @@ import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { ExplainMonthPage } from './pages/ExplainMonthPage'
+import { SankeyPage } from './pages/SankeyPage'
 import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
@@ -88,6 +89,7 @@ function AppRoutes() {
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="reports/explain-month" element={<ExplainMonthPage />} />
+          <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="return-warranty" element={<ReturnWarrantyPage />} />
