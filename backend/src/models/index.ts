@@ -41,6 +41,7 @@ import { TaxReturn, initTaxReturn } from './TaxReturn';
 import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
+import { Job, initJob } from './Job';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -97,6 +98,7 @@ initTaxReturn(sequelize);
 initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
+initJob(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -335,6 +337,7 @@ export {
   ShareholderLoan,
   InstalmentPayment,
   ProviderJobLog,
+  Job,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
   Scenario,
