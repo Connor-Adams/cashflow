@@ -529,9 +529,12 @@ git commit -m "infra: add docker-compose for local observability stack verificat
 
 **Files:** none modified (this is a verification task)
 
+> **Prereq — install deps first.** Phase 2 adds `pino-opentelemetry-transport`, `@opentelemetry/api-logs`, and `pino-pretty` to `backend/package.json`. A fresh checkout or newly created git worktree will not have these in `node_modules` until you run `yarn install` at the repo root. Skipping this will fail the smoke test with `Cannot find module 'pino-opentelemetry-transport'` (or pino will fall back to stdout-only and no logs will reach Loki).
+
 - [ ] **Step 1: Boot local stack + dev server**
 
 ```bash
+yarn install                                                       # required after checkout/new worktree — phase 2 adds new deps
 cd infra && docker compose up -d
 cd ..
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 LOG_LEVEL=info yarn workspace cashflow-backend run dev
@@ -543,6 +546,8 @@ curl -s http://localhost:3000/api/health
 ```
 
 - [ ] **Step 2: Verify the log landed in Loki**
+
+> **Loki label name is `service_name` (underscore), not `service.name` (dot).** The OTel resource attribute on the wire is `service.name`, but the otel-collector's `loki` exporter rewrites dotted attribute names to underscores when emitting them as Loki stream labels (Loki LabelName grammar forbids `.`). Query Loki with `{service_name="cashflow-backend"}`, never `{service.name="..."}` (the latter parses but matches nothing).
 
 ```bash
 curl -sG http://localhost:3100/loki/api/v1/query_range \
