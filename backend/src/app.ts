@@ -17,6 +17,7 @@ import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
+import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
@@ -116,6 +117,7 @@ app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/data-quality', dataQualityRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai
 // prefix to satisfy the issue's endpoint spec.

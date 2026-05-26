@@ -19,6 +19,7 @@ import { SubscriptionsPage } from './pages/SubscriptionsPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
+import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
@@ -58,6 +59,7 @@ function AppRoutes() {
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="review" element={<ReviewInboxPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
