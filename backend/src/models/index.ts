@@ -45,6 +45,10 @@ import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
 } from './PortfolioForwardProjection';
+import {
+  PortfolioDailySnapshot,
+  initPortfolioDailySnapshot,
+} from './PortfolioDailySnapshot';
 import { registerForwardIncomeStaleHooks } from '../hooks/forwardIncomeStaleHooks';
 
 initUser(sequelize);
@@ -90,6 +94,7 @@ initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
 initPortfolioForwardProjection(sequelize);
+initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
@@ -292,4 +297,5 @@ export {
   InstalmentPayment,
   ProviderJobLog,
   PortfolioForwardProjection,
+  PortfolioDailySnapshot,
 };
