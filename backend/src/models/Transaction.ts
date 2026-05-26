@@ -7,6 +7,7 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
+import { logger } from '../observability/logger';
 
 export class Transaction extends Model<
   InferAttributes<Transaction>,
@@ -316,7 +317,7 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         transaction: options.transaction,
       });
     } catch (e) {
-      console.warn('[ensureCategory] Transaction hook failed', e);
+      logger.warn({ err: e, model: 'Transaction' }, 'ensure_category_hook_failed');
     }
   });
   return Transaction;

@@ -7,6 +7,7 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
+import { logger } from '../observability/logger';
 
 export class Rule extends Model<
   InferAttributes<Rule>,
@@ -108,7 +109,7 @@ export function initRule(sequelize: Sequelize): typeof Rule {
         transaction: options.transaction,
       });
     } catch (e) {
-      console.warn('[ensureCategory] Rule hook failed', e);
+      logger.warn({ err: e, model: 'Rule' }, 'ensure_category_hook_failed');
     }
   });
   return Rule;
