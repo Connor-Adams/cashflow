@@ -1,5 +1,5 @@
 /**
- * Integration tests run in isolation (`yarn test:integration`) so DATABASE_PATH
+ * Integration tests run in isolation (`yarn test:integration`) so DATABASE_URL
  * is set before any Sequelize import.
  *
  * The first registered user becomes superadmin (sees all households via
@@ -9,16 +9,9 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import request from 'supertest';
 import { seedHousehold } from '../helpers/seedHousehold.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-integration-settlements.sqlite');
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
 let primaryAgent: ReturnType<typeof request.agent>;
@@ -26,23 +19,12 @@ let primaryContactId: number;
 
 let otherAgent: ReturnType<typeof request.agent>;
 let otherContactId: number;
+let testDb: PgTestDb;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
 
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: {
-      ...process.env,
-      DATABASE_PATH: dbPath,
-      NODE_ENV: 'development',
-    },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('settlements');
 
   const mod = await import('../../src/app.js');
   app = mod.default;
@@ -68,14 +50,8 @@ before(async () => {
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
-after(() => {
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+after(async () => {
+  await teardownPgTestDb(testDb);
 });
 
 test('POST /api/settlements creates a settlement and joins contact name', async () => {
