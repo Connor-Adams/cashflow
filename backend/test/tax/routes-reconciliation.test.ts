@@ -25,12 +25,13 @@ before(async () => {
   process.env.NODE_ENV = 'test';
 
   const { sequelize } = await import('../../src/db.js');
+  // Import models BEFORE sync so all model tables are registered and created.
+  const models = await import('../../src/models/index.js');
   await sequelize.sync({ force: true });
 
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const models = await import('../../src/models/index.js');
   const { hashPassword, hashToken } = await import('../../src/auth/password.js');
 
   // ---------- Household #1: has personal entity + a reportable txn ----------
