@@ -60,20 +60,52 @@ function buildOtlpTransport() {
           recordProcessorType: 'batch',
           exporterOptions: {
             protocol: 'http/protobuf',
-            url: `${otlpEndpoint!.replace(/\/$/, '')}/v1/logs`,
+            // Per otlp-logger v2 ProtobufExporterOptions, the URL goes inside protobufExporterOptions, not at this level.
+            protobufExporterOptions: {
+              url: `${otlpEndpoint!.replace(/\/$/, '')}/v1/logs`,
+            },
           },
         },
       },
     });
+
+    // Stream-level error: surfaces "the worker has exited" on each emit after worker death.
     transport.on('error', (err: Error) => {
-      // Worker thread failed — surface to stderr so prod logs at least show it.
       // eslint-disable-next-line no-console
-      console.error('[observability] OTLP transport error:', err.message);
+      console.error('[observability][diag] stream error:', err && err.message);
     });
+
+    // Underlying Node worker-thread events: only fire ONCE on actual exit/crash.
+    // thread-stream exposes the worker as `transport.worker`. Hook it before the
+    // worker has a chance to die.
+    const worker = (transport as unknown as { worker?: import('node:worker_threads').Worker }).worker;
+    if (worker) {
+      worker.on('exit', (code: number) => {
+        // eslint-disable-next-line no-console
+        console.error(`[observability][diag] WORKER EXIT code=${code}`);
+      });
+      worker.on('error', (err: Error) => {
+        // eslint-disable-next-line no-console
+        console.error('[observability][diag] WORKER ERROR:', err && err.message);
+        // eslint-disable-next-line no-console
+        if (err && err.stack) console.error(err.stack);
+      });
+      worker.on('message', (msg: unknown) => {
+        // pino-abstract-transport emits 'WARNING' messages on issues like uncaught errors.
+        if (msg && typeof msg === 'object' && 'code' in msg) {
+          // eslint-disable-next-line no-console
+          console.error('[observability][diag] WORKER MSG:', JSON.stringify(msg));
+        }
+      });
+    } else {
+      // eslint-disable-next-line no-console
+      console.error('[observability][diag] no worker reference exposed on transport');
+    }
+
     return transport;
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error('[observability] Failed to init OTLP transport, falling back to stdout-only:', err);
+    console.error('[observability][diag] init threw:', err);
     return undefined;
   }
 }
