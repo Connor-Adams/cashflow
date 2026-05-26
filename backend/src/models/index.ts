@@ -73,6 +73,7 @@ import {
   initMoneyLeakDismissal,
 } from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
+import { Purchase, initPurchase } from './Purchase';
 import { Notification, initNotification } from './Notification';
 import {
   NotificationPreference,
@@ -140,6 +141,7 @@ initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
+initPurchase(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
@@ -512,6 +514,33 @@ TaxReserveSetting.belongsTo(Household, {
   as: 'household',
 });
 
+Transaction.hasOne(Purchase, {
+  foreignKey: 'transaction_id',
+  as: 'purchase',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Purchase.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+Household.hasMany(Purchase, {
+  foreignKey: 'household_id',
+  as: 'purchases',
+});
+Purchase.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(Purchase, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedPurchases',
+});
+Purchase.belongsTo(User, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedByUser',
+});
+
 // CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
 // the DB level; we surface the relationship as hasOne so callers can eager
 // load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
@@ -586,6 +615,7 @@ export {
   AiReviewRun,
   MoneyLeakDismissal,
   TaxReserveSetting,
+  Purchase,
   CashflowSettings,
   Notification,
   NotificationPreference,
