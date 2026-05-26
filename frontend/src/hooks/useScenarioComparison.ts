@@ -9,7 +9,18 @@ interface UseScenarioComparisonResult {
   reload: () => void;
 }
 
-export function useScenarioComparison(ids: number[]): UseScenarioComparisonResult {
+/**
+ * Compare N scenarios via the backend's compare endpoint.
+ *
+ * Pass `endpoint` to override the default `/api/tax/personal-scenarios/compare`
+ * — corp scenarios use `/api/tax/corp-scenarios/compare`. The response shape
+ * (`{ scenarios: ScenarioWithComputed[] }`) is identical across both paths, so
+ * the same hook (and `ComparisonView`) works for either entity kind.
+ */
+export function useScenarioComparison(
+  ids: number[],
+  endpoint = '/api/tax/personal-scenarios/compare',
+): UseScenarioComparisonResult {
   const [data, setData] = useState<ScenarioWithComputed[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +38,7 @@ export function useScenarioComparison(ids: number[]): UseScenarioComparisonResul
     setLoading(true);
     setError(null);
     getJson<{ scenarios: ScenarioWithComputed[] }>(
-      `/api/tax/personal-scenarios/compare?ids=${idsKey}`,
+      `${endpoint}?ids=${idsKey}`,
     )
       .then((d) => { if (!cancelled) { setData(d.scenarios); setLoading(false); } })
       .catch((e: unknown) => {
@@ -38,7 +49,7 @@ export function useScenarioComparison(ids: number[]): UseScenarioComparisonResul
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey, nonce]);
+  }, [idsKey, endpoint, nonce]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
