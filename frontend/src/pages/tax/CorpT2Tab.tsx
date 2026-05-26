@@ -6,10 +6,13 @@ import {
   type CorpScenarioWithComputed,
 } from '../../hooks/useCorpScenarios';
 import { useCorpScenarioDetail } from '../../hooks/useCorpScenarioDetail';
+import { useCorpScenarioChain } from '../../hooks/useCorpScenarioChain';
 import { type CorpTaxLineDto } from '../../hooks/useCorpReturn';
 import { ScenarioTree } from './scenarios/ScenarioTree';
 import { CorpOverrideEditor } from './scenarios/CorpOverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
+import { YearStripNav } from './scenarios/YearStripNav';
+import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import type { Scenario } from '../../hooks/useScenarios';
 
 const CURRENT_YEAR = new Date().getFullYear().toString();
@@ -101,11 +104,28 @@ interface WorkspaceProps {
   year: number;
 }
 
-function CorpT2ScenarioWorkspace({ entityId, year }: WorkspaceProps) {
-  const { scenarios, loading, error, create, patch, fork, remove } = useCorpScenarios(entityId, year);
+function CorpT2ScenarioWorkspace({ entityId, year: yearProp }: WorkspaceProps) {
+  // Local `selectedYear` overlays the prop so the YearStripNav can pivot to a
+  // chained year (year+1 projection, etc.) without round-tripping through
+  // CorpT2Tab's fiscalYear input. When the prop changes (user submits a new
+  // fiscal year via the input) we re-seed local state to match.
+  const [selectedYear, setSelectedYear] = useState(yearProp);
+  useEffect(() => { setSelectedYear(yearProp); }, [yearProp]);
+
+  const {
+    scenarios,
+    loading,
+    error,
+    create,
+    patch,
+    fork,
+    remove,
+    projectNextYear,
+  } = useCorpScenarios(entityId, selectedYear);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [isProjecting, setIsProjecting] = useState(false);
 
   // Auto-create a starter scenario on first load so the baseline materialises
   // and there is something for the user to edit immediately. The POST handler
@@ -146,6 +166,55 @@ function CorpT2ScenarioWorkspace({ entityId, year }: WorkspaceProps) {
   }, [scenarios]);
 
   const active = useCorpScenarioDetail(activeId);
+  // Walk the multi-year chain forward from whichever scenario is active. The
+  // backend resolves to the chain root, so passing any chained scenario id
+  // returns the same year-ordered list.
+  const chain = useCorpScenarioChain(activeId);
+
+  async function handleProjectNextYear() {
+    if (activeId === null) return;
+    setIsProjecting(true);
+    try {
+      const next = await projectNextYear(activeId);
+      // Re-key the scenarios query to the new year and select the new
+      // projection_root. The chain hook will re-fetch via its own effect once
+      // activeId flips.
+      setSelectedYear(next.year);
+      setActiveId(next.id);
+      chain.reload();
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    } finally {
+      setIsProjecting(false);
+    }
+  }
+
+  function handleSelectYear(_year: number, scenarioId: number) {
+    // The chain entry carries the canonical year-N scenario id; switching
+    // years means swapping both the year key (so useCorpScenarios refetches
+    // the right list) and the active scenario id (so the detail pane updates).
+    setSelectedYear(_year);
+    setActiveId(scenarioId);
+  }
+
+  async function handleAssumptionsChange(next: {
+    inflation?: number;
+    investmentReturn?: number;
+  }) {
+    if (!active.data) return;
+    try {
+      // patch's `assumptions` field is typed loosely (Record<string, unknown>);
+      // narrow assumption shape is owned by AssumptionsEditor + the projection
+      // builders. Cast at the boundary, not throughout the component tree.
+      await patch(active.data.scenario.id, {
+        assumptions: next as Record<string, unknown>,
+      });
+      active.reload();
+      chain.reload();
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  }
 
   async function handleForkActive() {
     if (activeId === null) return;
@@ -187,48 +256,67 @@ function CorpT2ScenarioWorkspace({ entityId, year }: WorkspaceProps) {
   if (error) return <p className="error">Failed to load scenarios: {error}</p>;
 
   return (
-    <div className="flex flex-col md:flex-row gap-6">
-      <div className="md:w-64 md:flex-shrink-0">
-        {/* ScenarioTree is entity-kind agnostic — CorpScenario and Scenario
-            share the same shape so the cast is safe. */}
-        <ScenarioTree
-          scenarios={scenarios as unknown as Scenario[]}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onForkActive={handleForkActive}
-          onDeleteActive={handleDeleteActive}
+    <div>
+      <div className="mb-3">
+        <YearStripNav
+          entityId={entityId}
+          activeYear={selectedYear}
+          activeScenarioId={activeId}
+          chain={chain.data ?? []}
+          onSelectYear={handleSelectYear}
+          onProjectNextYear={handleProjectNextYear}
+          isProjecting={isProjecting}
         />
+        {chain.error && (
+          <p className="error" style={{ marginTop: '0.25rem' }}>
+            Failed to load year chain: {chain.error}
+          </p>
+        )}
       </div>
-      <div className="flex-1 min-w-0">
-        {activeId === null ? (
-          <p className="muted">Select a scenario to view details.</p>
-        ) : active.loading ? (
-          <p className="muted">Loading scenario…</p>
-        ) : active.error ? (
-          <p className="error">Failed to load scenario: {active.error}</p>
-        ) : active.data ? (
-          <ActiveCorpScenarioPanel
-            data={active.data}
-            onOverridesChange={handleOverridesChange}
-            onAddToCompare={() => toggleCompare(active.data!.scenario.id)}
-            inCompare={compareIds.includes(active.data.scenario.id)}
+      <div className="flex flex-col md:flex-row gap-6">
+        <div className="md:w-64 md:flex-shrink-0">
+          {/* ScenarioTree is entity-kind agnostic — CorpScenario and Scenario
+              share the same shape so the cast is safe. */}
+          <ScenarioTree
+            scenarios={scenarios as unknown as Scenario[]}
+            activeId={activeId}
+            onSelect={setActiveId}
+            onForkActive={handleForkActive}
+            onDeleteActive={handleDeleteActive}
           />
-        ) : null}
-        {compareIds.length > 0 && (
-          <CompareBar
-            ids={compareIds}
-            scenarios={scenarios}
-            onRemove={toggleCompare}
-            onClear={() => setCompareIds([])}
-          />
-        )}
-        {compareIds.length > 1 && (
-          <ComparisonView
-            ids={compareIds}
-            onClose={() => setCompareIds([])}
-            endpoint="/api/tax/corp-scenarios/compare"
-          />
-        )}
+        </div>
+        <div className="flex-1 min-w-0">
+          {activeId === null ? (
+            <p className="muted">Select a scenario to view details.</p>
+          ) : active.loading ? (
+            <p className="muted">Loading scenario…</p>
+          ) : active.error ? (
+            <p className="error">Failed to load scenario: {active.error}</p>
+          ) : active.data ? (
+            <ActiveCorpScenarioPanel
+              data={active.data}
+              onOverridesChange={handleOverridesChange}
+              onAssumptionsChange={handleAssumptionsChange}
+              onAddToCompare={() => toggleCompare(active.data!.scenario.id)}
+              inCompare={compareIds.includes(active.data.scenario.id)}
+            />
+          ) : null}
+          {compareIds.length > 0 && (
+            <CompareBar
+              ids={compareIds}
+              scenarios={scenarios}
+              onRemove={toggleCompare}
+              onClear={() => setCompareIds([])}
+            />
+          )}
+          {compareIds.length > 1 && (
+            <ComparisonView
+              ids={compareIds}
+              onClose={() => setCompareIds([])}
+              endpoint="/api/tax/corp-scenarios/compare"
+            />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -237,6 +325,7 @@ function CorpT2ScenarioWorkspace({ entityId, year }: WorkspaceProps) {
 interface ActiveCorpScenarioPanelProps {
   data: CorpScenarioWithComputed;
   onOverridesChange: (next: Record<string, unknown>) => void;
+  onAssumptionsChange: (next: { inflation?: number; investmentReturn?: number }) => void;
   onAddToCompare: () => void;
   inCompare: boolean;
 }
@@ -244,6 +333,7 @@ interface ActiveCorpScenarioPanelProps {
 function ActiveCorpScenarioPanel({
   data,
   onOverridesChange,
+  onAssumptionsChange,
   onAddToCompare,
   inCompare,
 }: ActiveCorpScenarioPanelProps) {
@@ -253,6 +343,7 @@ function ActiveCorpScenarioPanel({
   // which collapses Decimal instances to their string form (see
   // computeCorpScenario).
   const lines = (computed.lines ?? []) as CorpTaxLineDto[];
+  const isProjection = scenario.kind === 'projection_root';
   return (
     <div>
       <header style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
@@ -264,6 +355,14 @@ function ActiveCorpScenarioPanel({
           {inCompare ? '✓ In compare' : '+ Add to compare'}
         </button>
       </header>
+      {isProjection && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <AssumptionsEditor
+            assumptions={scenario.assumptions as { inflation?: number; investmentReturn?: number }}
+            onChange={onAssumptionsChange}
+          />
+        </div>
+      )}
       <CorpOverrideEditor overrides={scenario.overrides} onChange={onOverridesChange} />
       <section style={{ marginTop: '1rem' }}>
         <h4>Computed totals</h4>

@@ -84,6 +84,28 @@ test('resolveScenario walks multi-level ancestry (baseline -> fork1 -> fork2)', 
   assert.equal(facts.rrspContribs[0].amount.toFixed(2), '25000.00');
 });
 
+test('resolveScenario(fork on projection_root) layers overrides on projected facts', async () => {
+  const { entity } = await seedEntity();
+  const yearN = await ensureBaselineScenario(entity.id, 2025);
+  const yearN1Root = await Scenario.create({
+    parentId: yearN.id, householdPlanId: null,
+    entityId: entity.id, year: 2026, name: 'Projection', kind: 'projection_root',
+    overrides: {}, assumptions: { inflation: 0.025 }, nextYearId: null, notes: null,
+  });
+  const fork = await Scenario.create({
+    parentId: yearN1Root.id, householdPlanId: null,
+    entityId: entity.id, year: 2026, name: 'High salary 2026', kind: 'fork',
+    overrides: { 'income.employment': 100000 },
+    assumptions: {}, nextYearId: null, notes: null,
+  });
+  const facts = await resolveScenario(fork.id);
+  // override wins, replaces inflated 82k with 100k
+  assert.equal(facts.employmentIncome.length, 1);
+  assert.equal(facts.employmentIncome[0].cadAmount.toFixed(2), '100000.00');
+  // year reflects projection_root year, not parent year
+  assert.equal(facts.year, 2026);
+});
+
 test('resolveScenario throws on cyclic ancestry', async () => {
   // Build a cycle: a -> b -> a (only possible via raw update bypassing our APIs).
   const { entity } = await seedEntity();

@@ -60,6 +60,29 @@ test('resolveCorpScenario(fork) layers corp override on baseline actuals', async
   assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '400000.00');
 });
 
+test('resolveCorpScenario(fork on projection_root) layers overrides on projected facts', async () => {
+  const { entity } = await seedCorp();
+  const yearN = await ensureCorpBaselineScenario(entity.id, 2025);
+  const yearN1Root = await Scenario.create({
+    parentId: yearN.id, householdPlanId: null,
+    entityId: entity.id, year: 2026, name: 'Projection', kind: 'projection_root',
+    overrides: {}, assumptions: { inflation: 0.025 }, nextYearId: null, notes: null,
+  });
+  const fork = await Scenario.create({
+    parentId: yearN1Root.id, householdPlanId: null,
+    entityId: entity.id, year: 2026, name: 'Higher revenue 2026', kind: 'fork',
+    overrides: { 'corp.activeIncome': 400000 },
+    assumptions: {}, nextYearId: null, notes: null,
+  });
+  const facts = await resolveCorpScenario(fork.id);
+  // override wins, replaces inflated 256.25k with 400k
+  assert.equal(facts.activeBusinessIncome.length, 1);
+  assert.equal(facts.activeBusinessIncome[0].cadAmount.toFixed(2), '400000.00');
+  // fiscal year reflects projection_root year, not parent year
+  assert.equal(facts.fiscalYear.startDate, '2026-01-01');
+  assert.equal(facts.fiscalYear.endDate, '2026-12-31');
+});
+
 test('resolveCorpScenario rejects when scenario entity is personal', async () => {
   const household = await Household.create({ name: 'T2' });
   const personal = await Entity.create({
