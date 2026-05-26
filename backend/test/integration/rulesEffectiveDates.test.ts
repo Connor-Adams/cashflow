@@ -1,6 +1,6 @@
 /**
  * Integration tests for /api/rules effectiveFrom / effectiveTo handling.
- * Run in isolation (`yarn test:integration`) so DATABASE_PATH is set before
+ * Run in isolation (`yarn test:integration`) so DATABASE_URL is set before
  * any Sequelize import.
  *
  * Bootstraps a superadmin (first-registered-user shortcut), then seeds a
@@ -8,32 +8,18 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import request from 'supertest';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-integration-rules-eff-dates.sqlite');
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
 let agent: ReturnType<typeof request.agent>;
+let testDb: PgTestDb;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
 
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('rules-eff-dates');
 
   const mod = await import('../../src/app.js');
   app = mod.default;
@@ -76,14 +62,8 @@ before(async () => {
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
 });
 
-after(() => {
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+after(async () => {
+  await teardownPgTestDb(testDb);
 });
 
 test('POST /api/rules accepts effectiveFrom and effectiveTo', async () => {

@@ -12,40 +12,20 @@
  */
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import request from 'supertest';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 import type { StreamEvent } from '../../src/ai/chat/openaiClient';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(
-  backendRoot,
-  'data',
-  'test-integration-chat-message-loop.sqlite'
-);
 
 let app: import('express').Express;
 let agent: ReturnType<typeof request.agent>;
 let models: typeof import('../../src/models/index.js');
 let setStreamChatForTest: typeof import('../../src/ai/chat/loop.js').__setStreamChatForTest;
+let testDb: PgTestDb;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('chat-message-loop');
 
   const appMod = await import('../../src/app.js');
   app = appMod.default;
@@ -101,13 +81,7 @@ before(async () => {
 after(async () => {
   delete process.env.CHAT_MAX_TOOL_CALLS_PER_TURN;
   setStreamChatForTest?.(null);
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+  await teardownPgTestDb(testDb);
 });
 
 beforeEach(async () => {

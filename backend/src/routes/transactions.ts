@@ -374,7 +374,7 @@ router.get('/category-hints', async (_req, res, next) => {
         { replacements, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ label: string; usageCount: string }>(
-        `SELECT TRIM(final_category) AS label, COUNT(*) AS usageCount
+        `SELECT TRIM(final_category) AS label, COUNT(*) AS "usageCount"
          FROM transactions
          WHERE ${txnWhere}
          GROUP BY TRIM(final_category)`,
@@ -437,7 +437,7 @@ router.get('/', async (req, res, next) => {
     if (txnIds.length > 0) {
       const placeholders = txnIds.map(() => '?').join(',');
       const cntRows = await sequelize.query<{ transactionId: number; cnt: string }>(
-        `SELECT transaction_id AS transactionId, COUNT(*) AS cnt FROM receipts WHERE transaction_id IN (${placeholders}) GROUP BY transaction_id`,
+        `SELECT transaction_id AS "transactionId", COUNT(*) AS cnt FROM receipts WHERE transaction_id IN (${placeholders}) GROUP BY transaction_id`,
         { replacements: txnIds, type: QueryTypes.SELECT },
       );
       receiptCountMap = Object.fromEntries(
@@ -451,7 +451,7 @@ router.get('/', async (req, res, next) => {
         transactionId: number;
         extractedNote: string | null;
       }>(
-        `SELECT transaction_id AS transactionId, extracted_note AS extractedNote
+        `SELECT transaction_id AS "transactionId", extracted_note AS "extractedNote"
          FROM receipts
          WHERE transaction_id IN (${placeholders})
            AND extracted_note IS NOT NULL
