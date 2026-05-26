@@ -40,7 +40,23 @@ import {
 } from '../portfolio/tax-buckets';
 import { PortfolioForwardProjection } from '../models/PortfolioForwardProjection';
 import { rebuildForwardProjectionsForHousehold } from '../portfolio/forwardIncomeBuilder';
-import type { PortfolioForwardIncome } from '@cashflow/shared';
+import { PortfolioDailySnapshot } from '../models/PortfolioDailySnapshot';
+import { Household } from '../models/Household';
+import { FxRate } from '../models/FxRate';
+import {
+  computeTwr,
+  computeXirr,
+  buildCashFlowSeries,
+  computeBenchmarkSeries,
+  type DailyPoint,
+  type AggregatedDailySnapshot,
+} from '../portfolio/returns';
+import type {
+  PortfolioForwardIncome,
+  PortfolioPerformance,
+  PortfolioPerformanceRange,
+  PortfolioPerformanceStats,
+} from '@cashflow/shared';
 
 const router = Router();
 const PRICE_CACHE_MS = 60 * 60 * 1000;
@@ -2020,6 +2036,208 @@ router.get('/forward-income', async (req, res, next) => {
       byAssetType,
       upcoming90d: upcoming,
       caveats: { unreliableSecurityIds, holdingsWithoutHistory },
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/performance', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    const householdId = auth.household.id;
+    const householdRow = await Household.findByPk(householdId);
+    const benchmarkSymbol = householdRow?.benchmarkSymbol ?? 'SPY';
+
+    const range = (req.query.range as PortfolioPerformanceRange) || '1Y';
+    const today = new Date().toISOString().slice(0, 10);
+
+    function addDaysIso(iso: string, days: number): string {
+      const d = new Date(iso);
+      d.setDate(d.getDate() + days);
+      return d.toISOString().slice(0, 10);
+    }
+
+    const presetRanges: Record<'1M' | '3M' | 'YTD' | '1Y' | 'All', { from: string; to: string }> = {
+      '1M': { from: addDaysIso(today, -30), to: today },
+      '3M': { from: addDaysIso(today, -90), to: today },
+      'YTD': { from: `${today.slice(0, 4)}-01-01`, to: today },
+      '1Y': { from: addDaysIso(today, -365), to: today },
+      'All': { from: '1970-01-01', to: today },
+    };
+    let selectedRange = { from: '', to: '' };
+    if (range === 'custom') {
+      const from = req.query.from as string | undefined;
+      const to = req.query.to as string | undefined;
+      if (!from || !to) { res.status(400).json({ error: 'from and to required for custom range' }); return; }
+      selectedRange = { from, to };
+    } else {
+      selectedRange = presetRanges[range as keyof typeof presetRanges];
+    }
+
+    const widestFrom = (['1M', '3M', 'YTD', '1Y', 'All'] as const).reduce(
+      (min, k) => (presetRanges[k].from < min ? presetRanges[k].from : min),
+      selectedRange.from || today,
+    );
+
+    const allSnapshots = await PortfolioDailySnapshot.findAll({
+      where: { householdId, date: { [Op.gte]: widestFrom, [Op.lte]: selectedRange.to } },
+      order: [['date', 'ASC']],
+    });
+
+    const computeStats = (from: string, to: string): PortfolioPerformanceStats => {
+      const inRange = allSnapshots.filter((s) => s.date >= from && s.date <= to);
+      const byDate = new Map<string, { mvCad: number; cashFlowCad: number }>();
+      for (const s of inRange) {
+        const cur = byDate.get(s.date) ?? { mvCad: 0, cashFlowCad: 0 };
+        cur.mvCad += Number(s.marketValueCad);
+        cur.cashFlowCad += Number(s.cashFlowCad);
+        byDate.set(s.date, cur);
+      }
+      const points: DailyPoint[] = [...byDate.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, v]) => ({ date, marketValueCad: v.mvCad, cashFlowCad: v.cashFlowCad }));
+      const twrPct = computeTwr(points);
+      const aggSnaps: AggregatedDailySnapshot[] = points.map((p) => ({
+        date: p.date, marketValueCad: p.marketValueCad, cashFlowCad: p.cashFlowCad,
+      }));
+      const finalMv = points.length > 0 ? points[points.length - 1].marketValueCad : 0;
+      const mwrPct = computeXirr(buildCashFlowSeries(aggSnaps, finalMv));
+
+      return {
+        twrPct,
+        mwrPct,
+        benchmarkTwrPct: 0,
+        vsBenchmarkDeltaPct: twrPct,
+        startDate: points[0]?.date ?? from,
+        endDate: points[points.length - 1]?.date ?? to,
+        startValueCad: points[0]?.marketValueCad ?? 0,
+        endValueCad: finalMv,
+        netCashFlowCad: points.reduce((s, p) => s + p.cashFlowCad, 0),
+      };
+    };
+
+    const benchmarkSecurity = await Security.findOne({ where: { householdId, symbol: benchmarkSymbol } });
+    const benchmarkPrices = benchmarkSecurity
+      ? await SecurityDailyPrice.findAll({
+          where: { securityId: benchmarkSecurity.id, date: { [Op.gte]: widestFrom, [Op.lte]: selectedRange.to } },
+          order: [['date', 'ASC']],
+        })
+      : [];
+    const fxByDate = new Map<string, number>();
+    if (benchmarkSecurity && benchmarkSecurity.currency !== 'CAD') {
+      const fxRows = await FxRate.findAll({
+        where: {
+          fromCurrency: benchmarkSecurity.currency,
+          toCurrency: 'CAD',
+          ratedDate: { [Op.gte]: widestFrom, [Op.lte]: selectedRange.to },
+        },
+      });
+      for (const f of fxRows) fxByDate.set(f.ratedDate, Number(f.rate));
+    } else if (benchmarkSecurity) {
+      benchmarkPrices.forEach((p) => fxByDate.set(p.date, 1));
+    }
+    const benchmarkIsPartial = !benchmarkSecurity || benchmarkPrices.length === 0;
+
+    const computeBenchmarkStats = (from: string, to: string, initialCad: number) => {
+      const inRange = benchmarkPrices
+        .filter((p) => p.date >= from && p.date <= to)
+        .map((p) => ({ date: p.date, adjClose: Number(p.adjClose) }));
+      const series = computeBenchmarkSeries(inRange, fxByDate, initialCad);
+      if (series.length < 2) return { twr: 0, series };
+      const points: DailyPoint[] = series.map((s) => ({
+        date: s.date, marketValueCad: s.valueCad, cashFlowCad: 0,
+      }));
+      return { twr: computeTwr(points), series };
+    };
+
+    const fillBenchmark = (stats: PortfolioPerformanceStats, from: string, to: string): PortfolioPerformanceStats => {
+      const { twr } = computeBenchmarkStats(from, to, stats.startValueCad);
+      return { ...stats, benchmarkTwrPct: twr, vsBenchmarkDeltaPct: stats.twrPct - twr };
+    };
+
+    const presetStats = {
+      '1M': fillBenchmark(computeStats(presetRanges['1M'].from, presetRanges['1M'].to), presetRanges['1M'].from, presetRanges['1M'].to),
+      '3M': fillBenchmark(computeStats(presetRanges['3M'].from, presetRanges['3M'].to), presetRanges['3M'].from, presetRanges['3M'].to),
+      'YTD': fillBenchmark(computeStats(presetRanges['YTD'].from, presetRanges['YTD'].to), presetRanges['YTD'].from, presetRanges['YTD'].to),
+      '1Y': fillBenchmark(computeStats(presetRanges['1Y'].from, presetRanges['1Y'].to), presetRanges['1Y'].from, presetRanges['1Y'].to),
+      'All': fillBenchmark(computeStats(presetRanges['All'].from, presetRanges['All'].to), presetRanges['All'].from, presetRanges['All'].to),
+    };
+
+    const selectedStats = fillBenchmark(
+      computeStats(selectedRange.from, selectedRange.to),
+      selectedRange.from, selectedRange.to,
+    );
+
+    const seriesByDate = new Map<string, { mvCad: number; isPartial: boolean }>();
+    for (const s of allSnapshots) {
+      if (s.date < selectedRange.from || s.date > selectedRange.to) continue;
+      const cur = seriesByDate.get(s.date) ?? { mvCad: 0, isPartial: false };
+      cur.mvCad += Number(s.marketValueCad);
+      if (s.isPartial) cur.isPartial = true;
+      seriesByDate.set(s.date, cur);
+    }
+    const benchmarkSelected = computeBenchmarkStats(selectedRange.from, selectedRange.to, selectedStats.startValueCad);
+    const benchmarkByDate = new Map(benchmarkSelected.series.map((s) => [s.date, s.valueCad]));
+    const series = [...seriesByDate.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, v]) => ({
+        date,
+        portfolioValueCad: v.mvCad,
+        benchmarkValueCad: benchmarkByDate.get(date) ?? 0,
+        isPartial: v.isPartial,
+      }));
+
+    const accountIds = [...new Set(allSnapshots
+      .filter((s) => s.date >= selectedRange.from && s.date <= selectedRange.to)
+      .map((s) => s.accountId))];
+    const accountMap = new Map(
+      (await Account.findAll({ where: { id: { [Op.in]: accountIds } } })).map((a) => [a.id, a]),
+    );
+    const totalEnd = selectedStats.endValueCad || 1;
+    const byAccount = accountIds.map((accountId) => {
+      const inRange = allSnapshots.filter((s) => s.accountId === accountId && s.date >= selectedRange.from && s.date <= selectedRange.to);
+      const points: DailyPoint[] = inRange.map((s) => ({
+        date: s.date,
+        marketValueCad: Number(s.marketValueCad),
+        cashFlowCad: Number(s.cashFlowCad),
+      }));
+      const twrPct = computeTwr(points);
+      const endValueCad = points[points.length - 1]?.marketValueCad ?? 0;
+      return {
+        accountId,
+        accountName: accountMap.get(accountId)?.name ?? '',
+        twrPct,
+        endValueCad,
+        weightInPortfolioPct: (endValueCad / totalEnd) * 100,
+      };
+    });
+
+    const partialSnaps = allSnapshots.filter((s) => s.date >= selectedRange.from && s.date <= selectedRange.to && s.isPartial);
+    const partialDaysCount = new Set(partialSnaps.map((s) => s.date)).size;
+    const reasonSet = new Set<string>();
+    for (const s of partialSnaps) {
+      for (const r of s.missingDataReasons ?? []) {
+        if (reasonSet.size >= 20) break;
+        reasonSet.add(r);
+      }
+      if (reasonSet.size >= 20) break;
+    }
+    const caveats = {
+      partialDaysCount,
+      missingDataReasons: [...reasonSet].slice(0, 20),
+      benchmarkSymbol,
+      benchmarkIsPartial,
+    };
+
+    const response: PortfolioPerformance = {
+      range,
+      stats: selectedStats,
+      presetStats,
+      series,
+      byAccount,
+      caveats,
     };
     res.json(response);
   } catch (err) {
