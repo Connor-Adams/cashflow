@@ -7,7 +7,6 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
-import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
@@ -18,11 +17,11 @@ import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
 import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
+import { MonthlyClosePage } from './pages/MonthlyClosePage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
-import { MerchantPage } from './pages/MerchantPage'
 import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
 import { AmazonPage } from './pages/AmazonPage'
@@ -38,12 +37,10 @@ import { ContactsTab } from './pages/settings/tabs/ContactsTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
-import { NotificationsTab } from './pages/settings/tabs/NotificationsTab'
 import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
 import { InsightsPage } from './pages/InsightsPage'
-import { DataQualityPage } from './pages/DataQualityPage'
 import { ChatPage } from './pages/ChatPage'
 import { AskCashflowPage } from './pages/AskCashflowPage'
 import { AuthProvider } from './lib/auth'
@@ -66,7 +63,6 @@ function AppRoutes() {
           <Route path="review" element={<ReviewInboxPage />} />
           <Route path="refunds" element={<RefundsReviewPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
-          <Route path="merchants/:name" element={<MerchantPage />} />
           <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
           <Route path="import" element={<ImportPage />} />
@@ -85,7 +81,7 @@ function AppRoutes() {
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
-          <Route path="currency" element={<CurrencyPage />} />
+          <Route path="monthly-close" element={<MonthlyClosePage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
@@ -100,12 +96,10 @@ function AppRoutes() {
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="jobs" element={<JobsTab />} />
-            <Route path="notifications" element={<NotificationsTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />
           <Route path="insights" element={<InsightsPage />} />
-          <Route path="data-quality" element={<DataQualityPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<AskCashflowPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

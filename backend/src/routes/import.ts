@@ -19,6 +19,11 @@ import { importUploadLimiter } from './importRateLimit';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  recordAudit,
+} from '../audit/log';
+import {
   aggregateBatchHealth,
   aggregateImportHealth,
 } from '../summary/importConfidence';
@@ -237,6 +242,26 @@ router.post('/commit', async (req, res, next) => {
       return;
     }
     const result = await commitStatementImport(preview, user.id, household.id);
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.ImportCommitted,
+      entityType: AUDIT_ENTITY_TYPES.Import,
+      entityId: null,
+      summary: `Imported ${result.inserted} row(s) from ${result.file}`,
+      metadata: {
+        file: result.file,
+        batchLabel: result.batchLabel,
+        inserted: result.inserted,
+        insertedTransactions: result.insertedTransactions,
+        insertedInvestmentActivities: result.insertedInvestmentActivities,
+        insertedHoldings: result.insertedHoldings,
+        skippedDuplicates: result.skippedDuplicates,
+        rowErrors: result.rowErrors,
+        parseErrors: result.parseErrors,
+        usedParser: result.usedParser,
+        usedProfileId: result.usedProfileId,
+      },
+    });
     res.json(result);
   } catch (e) {
     next(e);

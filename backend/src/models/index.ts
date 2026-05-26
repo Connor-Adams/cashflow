@@ -69,6 +69,7 @@ import {
 } from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 import { Notification, initNotification } from './Notification';
+import { AuditLog, initAuditLog } from './AuditLog';
 import {
   NotificationPreference,
   initNotificationPreference,
@@ -136,6 +137,7 @@ initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
+initAuditLog(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -494,6 +496,25 @@ TaxReserveSetting.belongsTo(Household, {
   as: 'household',
 });
 
+Household.hasMany(AuditLog, {
+  foreignKey: 'household_id',
+  as: 'auditLog',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AuditLog.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(AuditLog, {
+  foreignKey: 'actor_user_id',
+  as: 'auditLogEntries',
+});
+AuditLog.belongsTo(User, {
+  foreignKey: 'actor_user_id',
+  as: 'actor',
+});
+
 export {
   sequelize,
   User,
@@ -556,4 +577,5 @@ export {
   TaxReserveSetting,
   Notification,
   NotificationPreference,
+  AuditLog,
 };

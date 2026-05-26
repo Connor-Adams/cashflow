@@ -1658,24 +1658,7 @@ function TransactionRow({
       <TableCell>{t.date}</TableCell>
       <TableCell title={t.merchantRaw}>
         <div className="txnMerchantCell">
-          {(() => {
-            const key =
-              (t.merchantCanonical?.trim() ||
-                t.merchantClean?.trim() ||
-                t.merchantRaw?.trim() ||
-                '').trim()
-            const label = t.merchantClean || t.merchantRaw || '(unknown merchant)'
-            return key ? (
-              <Link
-                to={`/merchants/${encodeURIComponent(key)}`}
-                className="txnMerchantName underline-offset-2 hover:underline"
-              >
-                {label}
-              </Link>
-            ) : (
-              <span className="txnMerchantName">{label}</span>
-            )
-          })()}
+          <span className="txnMerchantName">{t.merchantClean}</span>
           <span className="txnMerchantMeta">
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
           </span>
