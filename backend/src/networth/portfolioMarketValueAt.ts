@@ -52,11 +52,24 @@ export async function portfolioMarketValueAt(
 ): Promise<PortfolioMarketValueResult> {
   if (accountIds.length === 0) return { rows: [], gaps: [] };
 
-  const { HoldingSnapshot, SecurityPrice } = await import('../models');
+  const { Account, HoldingSnapshot, SecurityPrice } = await import('../models');
+
+  // Drop accounts closed on/before asOf — their holdings stop contributing
+  // to market value at that point. Pre-closure history is preserved because
+  // snapshots aren't touched; we just skip them from this aggregation.
+  const activeAccounts = await Account.findAll({
+    where: {
+      id: accountIds,
+      [Op.or]: [{ closedAt: null }, { closedAt: { [Op.gt]: asOf } }],
+    },
+    attributes: ['id'],
+  });
+  const activeIds = activeAccounts.map((a) => a.id);
+  if (activeIds.length === 0) return { rows: [], gaps: [] };
 
   const allHoldings = await HoldingSnapshot.findAll({
     where: {
-      accountId: accountIds,
+      accountId: activeIds,
       statementDate: { [Op.lte]: asOf },
     },
     order: [['statementDate', 'DESC']],
