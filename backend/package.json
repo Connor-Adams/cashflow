@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "sequelize-cli db:migrate && node dist/server.js",
-    "build": "tsc",
+    "build": "tsc && cp src/observability/otlp-wrapper.cjs dist/observability/otlp-wrapper.cjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
