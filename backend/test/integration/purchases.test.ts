@@ -115,6 +115,7 @@ async function createTransaction(
 }
 
 before(async () => {
+  process.env.NODE_ENV = 'test';
   testDb = await setupPgTestDb('purchases');
   const mod = await import('../../src/app.js');
   app = mod.default;
