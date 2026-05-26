@@ -12,27 +12,9 @@ import { Entity, Scenario } from '../models';
 import { validateOverrideMap } from '../tax/scenarios/overrideKeys';
 import { ensureCorpBaselineScenario } from '../tax/scenarios/resolveCorpScenario';
 import { computeCorpScenario } from '../tax/scenarios/computeCorpScenario';
+import { withAuthorizedScenario } from './tax-scenario-routing';
 
 const router = Router();
-
-// Helper: resolve scenario ID + ensure the caller's household owns the
-// underlying entity AND the entity is a corp. Returns either the loaded
-// scenario+entity or an `error` discriminator the caller maps to an HTTP
-// status.
-async function loadAndAuthorize(req: import('express').Request, scenarioId: number) {
-  const { household } = currentAuth(req);
-  if (!Number.isInteger(scenarioId)) return { error: 'not_found' as const };
-  const scenario = await Scenario.findByPk(scenarioId);
-  if (!scenario) return { error: 'not_found' as const };
-  const entity = await Entity.findByPk(scenario.entityId);
-  if (!entity || entity.householdId !== household.id) {
-    return { error: 'forbidden' as const };
-  }
-  if (entity.kind !== 'corp') {
-    return { error: 'not_corp' as const };
-  }
-  return { scenario, entity };
-}
 
 // POST /api/tax/corp-scenarios — create a fork scenario.
 // Baseline is auto-created if not yet present for (entityId, year). New
@@ -212,21 +194,14 @@ router.get('/compare', async (req, res, next) => {
 //   3. Walk forwards via nextYearId from the anchor, collecting each
 //      scenario + its computed return (Task 3 dispatch handles projection
 //      vs baseline transparently).
-router.get('/:id/chain', async (req, res, next) => {
-  try {
-    const result = await loadAndAuthorize(req, Number(req.params.id));
-    if ('error' in result) {
-      const status =
-        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
-
+router.get(
+  '/:id/chain',
+  withAuthorizedScenario('corp', async (_req, res, { scenario }) => {
     // Step 1: walk parentId backwards collecting ancestry root-first.
     const MAX_DEPTH = 32;
     const ancestry: Scenario[] = [];
     const seen = new Set<number>();
-    let cursor: Scenario | null = result.scenario;
+    let cursor: Scenario | null = scenario;
     while (cursor !== null) {
       if (seen.has(cursor.id)) {
         throw new Error(`scenario ancestry cycle detected at id=${cursor.id}`);
@@ -243,7 +218,7 @@ router.get('/:id/chain', async (req, res, next) => {
     // Step 2: find the earliest scenario in ancestry that starts a forward
     // chain (has nextYearId set). If none, the leaf is a single-entry chain.
     const anchor: Scenario =
-      ancestry.find((s) => s.nextYearId !== null) ?? result.scenario;
+      ancestry.find((s) => s.nextYearId !== null) ?? scenario;
 
     // Step 3: walk forwards via nextYearId, collecting + computing.
     const chainScenarios: Scenario[] = [anchor];
@@ -270,40 +245,24 @@ router.get('/:id/chain', async (req, res, next) => {
       })),
     );
     res.json({ chain });
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 // GET /api/tax/corp-scenarios/:id — get a scenario + its computed return
 // (cached on facts hash; recomputed on miss).
-router.get('/:id', async (req, res, next) => {
-  try {
-    const result = await loadAndAuthorize(req, Number(req.params.id));
-    if ('error' in result) {
-      const status =
-        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
-    const computed = await computeCorpScenario(result.scenario.id);
-    res.json({ scenario: result.scenario, computed });
-  } catch (err) {
-    next(err);
-  }
-});
+router.get(
+  '/:id',
+  withAuthorizedScenario('corp', async (_req, res, { scenario }) => {
+    const computed = await computeCorpScenario(scenario.id);
+    res.json({ scenario, computed });
+  }),
+);
 
 // PATCH /api/tax/corp-scenarios/:id — update name / notes / overrides /
 // assumptions. Overrides go through the same validator the POST handler uses.
-router.patch('/:id', async (req, res, next) => {
-  try {
-    const result = await loadAndAuthorize(req, Number(req.params.id));
-    if ('error' in result) {
-      const status =
-        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
+router.patch(
+  '/:id',
+  withAuthorizedScenario('corp', async (req, res, { scenario }) => {
     const updates: Partial<{
       name: string;
       notes: string | null;
@@ -326,31 +285,23 @@ router.patch('/:id', async (req, res, next) => {
       updates.overrides = req.body.overrides;
     }
     if ('assumptions' in req.body) updates.assumptions = req.body.assumptions;
-    await result.scenario.update(updates);
-    res.json({ scenario: result.scenario });
-  } catch (err) {
-    next(err);
-  }
-});
+    await scenario.update(updates);
+    res.json({ scenario });
+  }),
+);
 
 // DELETE /api/tax/corp-scenarios/:id — delete a fork. Refuses baselines
 // (the baseline is the engine's anchor for actuals) and any node that still
 // has children (the foreign key uses RESTRICT, but checking here gives a clear
 // 409 rather than an opaque DB error).
-router.delete('/:id', async (req, res, next) => {
-  try {
-    const result = await loadAndAuthorize(req, Number(req.params.id));
-    if ('error' in result) {
-      const status =
-        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
-    if (result.scenario.kind === 'baseline') {
+router.delete(
+  '/:id',
+  withAuthorizedScenario('corp', async (_req, res, { scenario }) => {
+    if (scenario.kind === 'baseline') {
       res.status(409).json({ error: 'baseline_cannot_be_deleted' });
       return;
     }
-    const childCount = await Scenario.count({ where: { parentId: result.scenario.id } });
+    const childCount = await Scenario.count({ where: { parentId: scenario.id } });
     if (childCount > 0) {
       res.status(409).json({
         error: 'has_children',
@@ -358,35 +309,27 @@ router.delete('/:id', async (req, res, next) => {
       });
       return;
     }
-    await result.scenario.destroy();
+    await scenario.destroy();
     res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 // POST /api/tax/corp-scenarios/:id/fork — create a child scenario whose
 // effective facts inherit from the parent via ancestry resolution. The new
 // scenario starts with an empty override map; inheritance is by walking the
 // parent chain at compute time, not by duplicating overrides.
-router.post('/:id/fork', async (req, res, next) => {
-  try {
-    const result = await loadAndAuthorize(req, Number(req.params.id));
-    if ('error' in result) {
-      const status =
-        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
+router.post(
+  '/:id/fork',
+  withAuthorizedScenario('corp', async (req, res, { scenario }) => {
     const name =
       typeof req.body?.name === 'string' && req.body.name.trim() !== ''
         ? req.body.name
-        : `${result.scenario.name} (fork)`;
+        : `${scenario.name} (fork)`;
     const child = await Scenario.create({
-      parentId: result.scenario.id,
-      householdPlanId: result.scenario.householdPlanId,
-      entityId: result.scenario.entityId,
-      year: result.scenario.year,
+      parentId: scenario.id,
+      householdPlanId: scenario.householdPlanId,
+      entityId: scenario.entityId,
+      year: scenario.year,
       name,
       kind: 'fork',
       overrides: {},
@@ -395,26 +338,18 @@ router.post('/:id/fork', async (req, res, next) => {
       notes: null,
     });
     res.status(201).json({ scenario: child });
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 // POST /api/tax/corp-scenarios/:id/project-next-year — create a
 // projection_root scenario for year+1 chained to `:id` via `next_year_id`.
 // Idempotent: if a projection_root already exists for the same entity+next
 // year, returns 409 with the existing scenario so callers can recover the
 // link without creating a duplicate.
-router.post('/:id/project-next-year', async (req, res, next) => {
-  try {
-    const result = await loadAndAuthorize(req, Number(req.params.id));
-    if ('error' in result) {
-      const status =
-        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
-    if (result.scenario.kind === 'projection_root') {
+router.post(
+  '/:id/project-next-year',
+  withAuthorizedScenario('corp', async (req, res, { scenario }) => {
+    if (scenario.kind === 'projection_root') {
       // Block chaining two projection_root scenarios in a single hop — the
       // resolver requires a baseline (or fork) as the year-N anchor.
       res.status(400).json({
@@ -424,10 +359,10 @@ router.post('/:id/project-next-year', async (req, res, next) => {
       });
       return;
     }
-    const nextYear = result.scenario.year + 1;
+    const nextYear = scenario.year + 1;
     const existing = await Scenario.findOne({
       where: {
-        entityId: result.scenario.entityId,
+        entityId: scenario.entityId,
         year: nextYear,
         kind: 'projection_root',
       },
@@ -435,7 +370,7 @@ router.post('/:id/project-next-year', async (req, res, next) => {
     if (existing) {
       res.status(409).json({
         error: 'projection_already_exists',
-        message: `A projection_root scenario already exists for entity ${result.scenario.entityId} year ${nextYear}.`,
+        message: `A projection_root scenario already exists for entity ${scenario.entityId} year ${nextYear}.`,
         scenario: existing,
       });
       return;
@@ -449,9 +384,9 @@ router.post('/:id/project-next-year', async (req, res, next) => {
         ? req.body.assumptions
         : {};
     const projection = await Scenario.create({
-      parentId: result.scenario.id,
-      householdPlanId: result.scenario.householdPlanId,
-      entityId: result.scenario.entityId,
+      parentId: scenario.id,
+      householdPlanId: scenario.householdPlanId,
+      entityId: scenario.entityId,
       year: nextYear,
       name,
       kind: 'projection_root',
@@ -462,29 +397,19 @@ router.post('/:id/project-next-year', async (req, res, next) => {
     });
     // Link the chain forward: parent.nextYearId now points at the new
     // projection so GET /:id/chain (Task 5) can walk year N → N+1.
-    await result.scenario.update({ nextYearId: projection.id });
+    await scenario.update({ nextYearId: projection.id });
     res.status(201).json({ scenario: projection });
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 // POST /api/tax/corp-scenarios/:id/compute — force a recompute, bypassing
 // the facts-hash cache. Always writes a fresh ScenarioReturn row.
-router.post('/:id/compute', async (req, res, next) => {
-  try {
-    const result = await loadAndAuthorize(req, Number(req.params.id));
-    if ('error' in result) {
-      const status =
-        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
-      res.status(status).json({ error: result.error });
-      return;
-    }
-    const computed = await computeCorpScenario(result.scenario.id, { force: true });
+router.post(
+  '/:id/compute',
+  withAuthorizedScenario('corp', async (_req, res, { scenario }) => {
+    const computed = await computeCorpScenario(scenario.id, { force: true });
     res.json({ computed });
-  } catch (err) {
-    next(err);
-  }
-});
+  }),
+);
 
 export default router;
