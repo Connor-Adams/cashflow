@@ -14,8 +14,9 @@ import {
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
 import { commitStatementImport } from '../import/commitStatementImport';
-import { ImportHistory } from '../models';
+import { Account, ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
+import { aiSuggestLimiter } from './aiRateLimit';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import {
@@ -632,19 +633,142 @@ router.get('/history', async (req, res, next) => {
       currency: null,
       batchLabels,
     });
-    const enriched = rows.map((row) => {
-      const json = row.toJSON() as Record<string, unknown>;
-      const health = batchHealth.get(row.batchLabel);
-      json.cleanCount = health?.clean ?? 0;
-      json.needsReviewCount = health?.needsReview ?? 0;
-      json.unknownCount = health?.unknown ?? 0;
-      return json;
-    });
+    const enriched = rows.map((row) => enrichBatchRow(row, batchHealth));
     res.json(enriched);
   } catch (e) {
     next(e);
   }
 });
+
+/**
+ * GET /api/import/batches?limit=100&offset=0
+ *
+ * Import batch manager list (#231). Returns ImportHistory rows for the active
+ * household, enriched with per-batch confidence counts and ordered most
+ * recent first. Supports paging beyond the 50-row /api/import/history cap so
+ * the batch manager can scroll history end-to-end.
+ *
+ * Each row also exposes the structured account / profile / count fields
+ * captured at import time (NULL on legacy rows).
+ *
+ * Rate-limited with aiSuggestLimiter so an unauthenticated abuse path can't
+ * tag a (otherwise auth'd) household with cheap DB hits. CodeQL flags any
+ * unrate-limited authenticated DB route as high severity.
+ */
+router.get('/batches', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const limit = clampInt(req.query.limit, 50, 1, 200);
+    const offset = clampInt(req.query.offset, 0, 0, 10_000);
+    const total = await ImportHistory.count({ where: householdWhere(req) });
+    const rows = await ImportHistory.findAll({
+      where: householdWhere(req),
+      order: [['startedAt', 'DESC']],
+      limit,
+      offset,
+    });
+    const batchLabels = rows.map((r) => r.batchLabel).filter(Boolean);
+    const batchHealth = await aggregateBatchHealth({
+      householdScope: visibleTransactionWhere(req),
+      currency: null,
+      batchLabels,
+    });
+    const enriched = rows.map((row) => enrichBatchRow(row, batchHealth));
+    res.json({ total, limit, offset, batches: enriched });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/import/batches/:id
+ *
+ * Batch detail endpoint (#231). Returns the full ImportHistory row, account
+ * snapshot, profile id, per-stage counts, and confidence breakdown so the
+ * frontend doesn't have to find-by-label inside the paginated list.
+ *
+ * Rate-limited like /batches above — same CodeQL guidance.
+ */
+router.get('/batches/:id', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id) || id < 1) {
+      res.status(400).json({ error: 'Batch id must be a positive integer' });
+      return;
+    }
+    const row = await ImportHistory.findOne({
+      where: { id, ...householdWhere(req) },
+    });
+    if (!row) {
+      res.status(404).json({ error: 'Batch not found' });
+      return;
+    }
+    const batchHealth = await aggregateBatchHealth({
+      householdScope: visibleTransactionWhere(req),
+      currency: null,
+      batchLabels: [row.batchLabel],
+    });
+    const account = row.accountId
+      ? await Account.findOne({
+          where: { id: row.accountId, ...householdWhere(req) },
+          attributes: ['id', 'name', 'shortCode', 'accountType'],
+        })
+      : null;
+    const enriched = enrichBatchRow(row, batchHealth);
+    enriched.account = account
+      ? {
+          id: account.id,
+          name: account.name,
+          shortCode: account.shortCode,
+          accountType: account.accountType,
+        }
+      : null;
+    res.json(enriched);
+  } catch (e) {
+    next(e);
+  }
+});
+
+type EnrichedBatch = Record<string, unknown> & {
+  cleanCount: number;
+  needsReviewCount: number;
+  unknownCount: number;
+  account?: {
+    id: number;
+    name: string;
+    shortCode: string | null;
+    accountType: string;
+  } | null;
+};
+
+/**
+ * Shared enrichment: ImportHistory.toJSON() + per-batch confidence counts.
+ * Used by /history, /batches, and /batches/:id so the wire shape stays
+ * uniform.
+ */
+function enrichBatchRow(
+  row: ImportHistory,
+  batchHealth: Map<string, { clean: number; needsReview: number; unknown: number }>,
+): EnrichedBatch {
+  const json = row.toJSON() as Record<string, unknown>;
+  const health = batchHealth.get(row.batchLabel);
+  json.cleanCount = health?.clean ?? 0;
+  json.needsReviewCount = health?.needsReview ?? 0;
+  json.unknownCount = health?.unknown ?? 0;
+  return json as EnrichedBatch;
+}
+
+function clampInt(
+  raw: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = parseInt(String(raw ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
 
 /**
  * GET /api/import/health?currency=CAD

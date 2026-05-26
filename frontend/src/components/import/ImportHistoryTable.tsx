@@ -25,11 +25,25 @@ export type ImportHistoryRow = {
   cleanCount?: number
   needsReviewCount?: number
   unknownCount?: number
+  /** Import batch manager metadata (#231). NULL on rows imported before
+   *  #231 landed. */
+  accountId?: number | null
+  profileId?: string | null
+  insertedCount?: number | null
+  skippedDuplicateCount?: number | null
+  rowErrorsCount?: number | null
+  /** Rollback markers (#233). Both NULL on healthy batches; populated when
+   *  the batch has been rolled back. Drives the rolled-back status pill
+   *  in `ImportBatchPage`. */
+  rolledBackAt?: string | null
+  rolledBackByUserId?: number | null
 }
 
 type ImportHistoryTableProps = {
-  /** Fires when the user clicks the action button on a history row. */
-  onRowClick: (batchLabel: string) => void
+  /** Fires when the user clicks the action button on a history row. The
+   *  full row is forwarded so callers can navigate by id (preferred, #231)
+   *  or by batch label (legacy). */
+  onRowClick: (row: ImportHistoryRow) => void
   /** Bump this value (e.g. from an UploadCard `onCommitted` callback) to
    *  trigger a re-fetch of `/api/import/history`. */
   refreshKey?: number
@@ -81,6 +95,7 @@ export function ImportHistoryTable({
               <TableHead>Started</TableHead>
               <TableHead>File</TableHead>
               <TableHead>Batch</TableHead>
+              <TableHead>Profile</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Rows</TableHead>
               <TableHead>Quality</TableHead>
@@ -90,7 +105,7 @@ export function ImportHistoryTable({
           <TableBody>
             {importHistory.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="muted pad">
+                <TableCell colSpan={8} className="muted pad">
                   No import history yet.
                 </TableCell>
               </TableRow>
@@ -104,6 +119,9 @@ export function ImportHistoryTable({
                     <TableCell>{h.startedAt.slice(0, 19).replace('T', ' ')}</TableCell>
                     <TableCell title={h.fileName}>{h.fileName}</TableCell>
                     <TableCell>{h.batchLabel}</TableCell>
+                    <TableCell className="text-xs">
+                      {h.profileId ? <code>{h.profileId}</code> : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell>
                       {h.status}
                       {h.errorMessage ? (
@@ -144,7 +162,7 @@ export function ImportHistoryTable({
                         type="button"
                         variant="link"
                         size="sm"
-                        onClick={() => onRowClick(h.batchLabel)}
+                        onClick={() => onRowClick(h)}
                       >
                         {actionLabel}
                       </Button>
