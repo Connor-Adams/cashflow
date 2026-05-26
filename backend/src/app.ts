@@ -36,6 +36,7 @@ import netWorthRouter from './routes/netWorth';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
 import businessTaxRouter from './routes/businessTax';
+import returnWarrantyRouter from './routes/returnWarranty';
 import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
@@ -138,6 +139,10 @@ app.use('/api/tax', taxRouter);
 // businessTaxRouter mounts /business/*, /exports/tax, /tax-tags, and
 // /transactions/:id/tax under /api. Keep it BEFORE other catch-all /api mounts.
 app.use('/api', businessTaxRouter);
+// returnWarrantyRouter mounts /return-warranty/* and
+// /transactions/:id/return-warranty under /api. Keep BEFORE other catch-all
+// mounts so its specific paths win.
+app.use('/api', returnWarrantyRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
 

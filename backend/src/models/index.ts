@@ -38,6 +38,10 @@ import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
 import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
+import {
+  TransactionReturnMetadata,
+  initTransactionReturnMetadata,
+} from './TransactionReturnMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
@@ -104,6 +108,7 @@ initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
 initTransactionTaxMetadata(sequelize);
+initTransactionReturnMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
@@ -139,6 +144,17 @@ Transaction.hasOne(TransactionTaxMetadata, {
   hooks: true,
 });
 TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
+Transaction.hasOne(TransactionReturnMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'returnMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionReturnMetadata.belongsTo(Transaction, {
   foreignKey: 'transaction_id',
   as: 'transaction',
 });
@@ -489,6 +505,7 @@ export {
   TaxCategory,
   TaxTag,
   TransactionTaxMetadata,
+  TransactionReturnMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,
