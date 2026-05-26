@@ -36,6 +36,7 @@ import {
   Undo2,
   Upload,
   Users,
+  Waypoints,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -82,6 +83,7 @@ const navItems: NavItem[] = [
   { to: '/ask', label: 'Ask Cashflow', icon: Search },
   { to: '/partner', label: 'Partner', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/sankey', label: 'Cashflow', icon: Waypoints },
   { to: '/currency', label: 'Currency', icon: Globe },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },
