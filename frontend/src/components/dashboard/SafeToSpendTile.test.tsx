@@ -2,7 +2,9 @@ import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { SafeToSpendTile } from './SafeToSpendTile'
+// `SafeToSpendTile` is loaded via dynamic `import()` inside each test so the
+// `vi.doMock` calls take effect — the static import is intentionally
+// omitted so lint doesn't flag an unused binding.
 
 function mockSafe(value: number, isNegative = false) {
   return {

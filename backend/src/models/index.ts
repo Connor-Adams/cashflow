@@ -78,6 +78,7 @@ import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
+import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -143,6 +144,7 @@ initTaxReserveSetting(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
+initBudgetAlertState(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -288,6 +290,27 @@ BudgetTarget.hasMany(BudgetExclusion, {
   onDelete: 'CASCADE',
   hooks: true,
 });
+// Cascade alert-state cleanup when a budget is deleted (issue #268, AC #12).
+// Without this association the migration's FK ON DELETE CASCADE still fires
+// at the DB level, but exposing it on the ORM means future eager-loads
+// (e.g. `include: [{ model: BudgetAlertState }]`) work without ad-hoc joins.
+BudgetTarget.hasMany(BudgetAlertState, {
+  foreignKey: 'budget_target_id',
+  as: 'alertStates',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetAlertState.belongsTo(BudgetTarget, {
+  foreignKey: 'budget_target_id',
+  as: 'budget',
+});
+User.hasMany(BudgetAlertState, {
+  foreignKey: 'user_id',
+  as: 'budgetAlertStates',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetAlertState.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 BudgetExclusion.belongsTo(BudgetTarget, {
   foreignKey: 'budget_id',
   as: 'budget',
@@ -589,4 +612,5 @@ export {
   CashflowSettings,
   Notification,
   NotificationPreference,
+  BudgetAlertState,
 };

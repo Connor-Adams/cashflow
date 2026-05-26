@@ -4,6 +4,7 @@ import {
   BudgetTarget,
   BUDGET_TARGET_PERIODS,
   BUDGET_TARGET_SCOPES,
+  BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS,
   type BudgetTargetPeriod,
   type BudgetTargetScope,
 } from '../models/BudgetTarget';
@@ -24,6 +25,7 @@ type NormalizedBudgetInput = {
   scope: BudgetTargetScope;
   rolloverEnabled: boolean;
   excludeRefundedPurchases: boolean;
+  alertThresholds: number[];
 };
 
 type ValidationResult =
@@ -98,6 +100,12 @@ export function validateBudgetInput(
   const rolloverEnabled = parseBooleanFlag(raw.rolloverEnabled);
   const excludeRefundedPurchases = parseBooleanFlag(raw.excludeRefundedPurchases);
 
+  const thresholdsResult = validateAlertThresholds(raw.alertThresholds);
+  if (!thresholdsResult.ok) {
+    return thresholdsResult;
+  }
+  const alertThresholds = thresholdsResult.value;
+
   return {
     ok: true,
     value: {
@@ -108,8 +116,59 @@ export function validateBudgetInput(
       scope,
       rolloverEnabled,
       excludeRefundedPurchases,
+      alertThresholds,
     },
   };
+}
+
+/**
+ * Pure validator for `alertThresholds` (issue #268). Accepts:
+ *   - undefined → return defaults [80, 100, 120]
+ *   - array of integers in 1..500 → return deduped + sorted ascending
+ *   - anything else → 400
+ *
+ * Dedup + sort here so the model + cron both see the same shape regardless
+ * of input ordering, and the column doesn't bloat with `[80, 80, 80]`.
+ */
+export function validateAlertThresholds(
+  raw: unknown,
+):
+  | { ok: true; value: number[] }
+  | { ok: false; status: number; error: string } {
+  if (raw === undefined) {
+    return { ok: true, value: [...BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS] };
+  }
+  if (!Array.isArray(raw)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'alertThresholds must be an array of integers',
+    };
+  }
+  if (raw.length === 0) {
+    // Allow explicit empty list to disable alerts for this budget. The cron
+    // then has nothing to fire — consistent with a user opting out without
+    // touching their Notifications-tab channel preference.
+    return { ok: true, value: [] };
+  }
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const v of raw) {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 500) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'alertThresholds entries must be integers between 1 and 500',
+      };
+    }
+    if (!seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  out.sort((a, b) => a - b);
+  return { ok: true, value: out };
 }
 
 /**
@@ -183,6 +242,12 @@ export function validateBudgetPatch(
     out.excludeRefundedPurchases = parseBooleanFlag(raw.excludeRefundedPurchases);
   }
 
+  if (raw.alertThresholds !== undefined) {
+    const thresholdsResult = validateAlertThresholds(raw.alertThresholds);
+    if (!thresholdsResult.ok) return thresholdsResult;
+    out.alertThresholds = thresholdsResult.value;
+  }
+
   return { ok: true, value: out };
 }
 
@@ -217,6 +282,7 @@ type BudgetResponse = {
   scope: BudgetTargetScope;
   rolloverEnabled: boolean;
   excludeRefundedPurchases: boolean;
+  alertThresholds: number[];
   createdAt: string;
   updatedAt: string;
 };
@@ -232,9 +298,33 @@ function serializeBudget(row: InstanceType<typeof BudgetTarget>): BudgetResponse
     scope: row.scope,
     rolloverEnabled: Boolean(row.rolloverEnabled),
     excludeRefundedPurchases: Boolean(row.excludeRefundedPurchases),
+    alertThresholds: normalizeAlertThresholdsForSerialize(row.alertThresholds),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Defensive coercion for the column value at serialize time. Sqlite returns
+ * the JSON array as a JS array, but a legacy row that was inserted before
+ * the migration's default backfilled could in theory have a string-typed
+ * value; we fall back to the bundled defaults so the response never lies.
+ */
+function normalizeAlertThresholdsForSerialize(raw: unknown): number[] {
+  if (Array.isArray(raw)) {
+    return raw.map((n) => Number(n)).filter((n) => Number.isFinite(n));
+  }
+  if (typeof raw === 'string' && raw.length > 0) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((n) => Number(n)).filter((n) => Number.isFinite(n));
+      }
+    } catch {
+      // Fall through to defaults.
+    }
+  }
+  return [...BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS];
 }
 
 router.get('/', async (req, res, next) => {
@@ -763,6 +853,7 @@ router.post('/', async (req, res, next) => {
       scope: result.value.scope,
       rolloverEnabled: result.value.rolloverEnabled,
       excludeRefundedPurchases: result.value.excludeRefundedPurchases,
+      alertThresholds: result.value.alertThresholds,
     });
     res.status(201).json(serializeBudget(row));
   } catch (e) {
@@ -800,6 +891,8 @@ router.put('/:id', async (req, res, next) => {
       row.set('rolloverEnabled', patch.rolloverEnabled);
     if (patch.excludeRefundedPurchases !== undefined)
       row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
+    if (patch.alertThresholds !== undefined)
+      row.set('alertThresholds', patch.alertThresholds);
     await row.save();
     res.json(serializeBudget(row));
   } catch (e) {
@@ -841,6 +934,8 @@ router.patch('/:id', async (req, res, next) => {
       row.set('rolloverEnabled', patch.rolloverEnabled);
     if (patch.excludeRefundedPurchases !== undefined)
       row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
+    if (patch.alertThresholds !== undefined)
+      row.set('alertThresholds', patch.alertThresholds);
     await row.save();
     res.json(serializeBudget(row));
   } catch (e) {
