@@ -25,6 +25,8 @@ export type EnvConfig = {
   dividendDedupDays: number;
   forwardIncomeEnabled: boolean;
   forwardIncomeCron: string;
+  dailySnapshotEnabled: boolean;
+  dailySnapshotCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -126,6 +128,8 @@ export function loadEnvConfig(
   const dividendDedupDays = parseDividendDedupDays(e.DIVIDEND_DEDUP_DAYS);
   const forwardIncomeEnabled = parseForwardIncomeEnabled(e.FORWARD_INCOME_ENABLED, nodeEnv);
   const forwardIncomeCron = e.FORWARD_INCOME_CRON?.trim() || '0 2 * * *';
+  const dailySnapshotEnabled = parseDailySnapshotEnabled(e.DAILY_SNAPSHOT_ENABLED, nodeEnv);
+  const dailySnapshotCron = e.DAILY_SNAPSHOT_CRON?.trim() || '0 3 * * *';
 
   return {
     csvUploadDir,
@@ -147,6 +151,8 @@ export function loadEnvConfig(
     dividendDedupDays,
     forwardIncomeEnabled,
     forwardIncomeCron,
+    dailySnapshotEnabled,
+    dailySnapshotCron,
   };
 }
 
@@ -208,6 +214,14 @@ export function parseForwardIncomeEnabled(raw: string | undefined, nodeEnv: stri
   return true;
 }
 
+export function parseDailySnapshotEnabled(raw: string | undefined, nodeEnv: string): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -240,6 +254,8 @@ export const dividendReconcileEnabled = resolved.dividendReconcileEnabled;
 export const dividendDedupDays = resolved.dividendDedupDays;
 export const forwardIncomeEnabled = resolved.forwardIncomeEnabled;
 export const forwardIncomeCron = resolved.forwardIncomeCron;
+export const dailySnapshotEnabled = resolved.dailySnapshotEnabled;
+export const dailySnapshotCron = resolved.dailySnapshotCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
