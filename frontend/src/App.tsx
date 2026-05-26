@@ -28,6 +28,7 @@ import { AuditLogPage } from './pages/AuditLogPage'
 import { SyncPage } from './pages/SyncPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { TransfersPage } from './pages/TransfersPage'
+import { StatementsPage } from './pages/StatementsPage'
 import { ItemsPage } from './pages/ItemsPage'
 import { PurchasesPage } from './pages/PurchasesPage'
 import { AmazonPage } from './pages/AmazonPage'
@@ -72,6 +73,7 @@ function AppRoutes() {
           <Route path="refunds" element={<RefundsReviewPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="transfers" element={<TransfersPage />} />
+          <Route path="statements" element={<StatementsPage />} />
           <Route path="items" element={<ItemsPage />} />
           <Route path="purchases" element={<PurchasesPage />} />
           <Route path="import" element={<ImportPage />} />

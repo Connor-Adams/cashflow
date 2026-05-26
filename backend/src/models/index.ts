@@ -89,6 +89,7 @@ import {
   initNotificationPreference,
 } from './NotificationPreference';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
+import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
 
 initUser(sequelize);
@@ -163,6 +164,7 @@ initNotification(sequelize);
 initNotificationPreference(sequelize);
 initAuditLog(sequelize);
 initBudgetAlertState(sequelize);
+initAccountStatement(sequelize);
 initSyncBackup(sequelize);
 
 User.hasMany(Notification, {
@@ -667,6 +669,39 @@ Purchase.belongsTo(User, {
   as: 'markedByUser',
 });
 
+// AccountStatement (issue #242). A statement belongs to one Account; an
+// Account can have many statements over time. Household and creator
+// associations mirror the Account model so authorization checks via
+// visibility + createdByUserId compose cleanly.
+Household.hasMany(AccountStatement, {
+  foreignKey: 'household_id',
+  as: 'accountStatements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Account.hasMany(AccountStatement, {
+  foreignKey: 'account_id',
+  as: 'statements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+User.hasMany(AccountStatement, {
+  foreignKey: 'created_by_user_id',
+  as: 'accountStatements',
+});
+AccountStatement.belongsTo(User, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdByUser',
+});
+
 // CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
 // the DB level; we surface the relationship as hasOne so callers can eager
 // load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
@@ -773,5 +808,6 @@ export {
   NotificationPreference,
   AuditLog,
   BudgetAlertState,
+  AccountStatement,
   SyncBackup,
 };
