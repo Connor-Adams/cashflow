@@ -32,6 +32,7 @@ import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
+import { AskCashflowPage } from './pages/AskCashflowPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
@@ -80,6 +81,7 @@ function AppRoutes() {
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
+          <Route path="ask" element={<AskCashflowPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
