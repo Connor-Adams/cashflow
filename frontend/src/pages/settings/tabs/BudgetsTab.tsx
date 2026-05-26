@@ -20,10 +20,18 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../../../lib/api'
 import { formatMoney } from '../../../lib/formatMoney'
-import type { Budget, BudgetInput, BudgetsResponse } from '../../../types/api'
+import type {
+  Budget,
+  BudgetInput,
+  BudgetPeriod,
+  BudgetScope,
+  BudgetsResponse,
+} from '../../../types/api'
 
 const BUDGET_CATEGORY_OVERALL = ''
 const DEFAULT_BUDGET_CURRENCY = 'CAD'
+const DEFAULT_BUDGET_SCOPE: BudgetScope = 'household'
+const DEFAULT_BUDGET_PERIOD: BudgetPeriod = 'monthly'
 
 type CategoryHint = { label: string; usageCount: number }
 
@@ -31,13 +39,52 @@ type BudgetFormState = {
   category: string
   currency: string
   amount: string
+  scope: BudgetScope
+  period: BudgetPeriod
+  rolloverEnabled: boolean
 }
 
 const emptyBudgetForm: BudgetFormState = {
   category: BUDGET_CATEGORY_OVERALL,
   currency: DEFAULT_BUDGET_CURRENCY,
   amount: '',
+  scope: DEFAULT_BUDGET_SCOPE,
+  period: DEFAULT_BUDGET_PERIOD,
+  rolloverEnabled: false,
 }
+
+/**
+ * Human labels for the scope dropdown. Kept here (not in types/api.ts) so
+ * shared types remain plain data and don't pull in i18n / UI concerns.
+ */
+const SCOPE_OPTIONS: Array<{ value: BudgetScope; label: string; hint: string }> = [
+  {
+    value: 'household',
+    label: 'Household (shared spend)',
+    hint: 'Counts shared transactions across the household.',
+  },
+  {
+    value: 'personal',
+    label: 'Personal (your private spend)',
+    hint: 'Counts your own private, non-business spend only.',
+  },
+  {
+    value: 'partner',
+    label: 'Partner',
+    hint: "Counts a partner's spend.",
+  },
+  {
+    value: 'business',
+    label: 'Business',
+    hint: 'Counts transactions marked as business expenses.',
+  },
+]
+
+const PERIOD_OPTIONS: Array<{ value: BudgetPeriod; label: string }> = [
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'weekly', label: 'Weekly (Mon–Sun)' },
+  { value: 'annual', label: 'Annual' },
+]
 
 /**
  * Wrapper for `fetch` PUT against /api/budgets/:id. The shared `lib/api.ts`
@@ -122,7 +169,14 @@ export function BudgetsTab() {
     const amount = Number(form.amount)
     if (!Number.isFinite(amount) || amount <= 0) return null
     const category = form.category.trim() ? form.category.trim() : null
-    return { category, currency, amount, period: 'monthly' }
+    return {
+      category,
+      currency,
+      amount,
+      period: form.period,
+      scope: form.scope,
+      rolloverEnabled: form.rolloverEnabled,
+    }
   }
 
   async function createBudget(e: FormEvent<HTMLFormElement>) {
@@ -143,7 +197,7 @@ export function BudgetsTab() {
       await loadBudgets()
       showToast({
         title: `Added budget for ${input.category ?? 'Overall'}`,
-        description: `${formatMoney(input.amount, input.currency)} per month`,
+        description: `${formatMoney(input.amount, input.currency)} per ${budgetForm.period}`,
         variant: 'success',
       })
     } catch (e) {
@@ -164,6 +218,9 @@ export function BudgetsTab() {
       category: budget.category ?? BUDGET_CATEGORY_OVERALL,
       currency: budget.currency,
       amount: String(Number(budget.amount)),
+      scope: budget.scope,
+      period: budget.period,
+      rolloverEnabled: budget.rolloverEnabled,
     })
   }
 
@@ -243,22 +300,32 @@ export function BudgetsTab() {
 
   const budgetCategoryDatalistId = 'settings-budget-category-options'
 
+  function scopeLabel(scope: BudgetScope): string {
+    return SCOPE_OPTIONS.find((opt) => opt.value === scope)?.label ?? scope
+  }
+
+  function periodLabel(period: BudgetPeriod): string {
+    return PERIOD_OPTIONS.find((opt) => opt.value === period)?.label ?? period
+  }
+
   return (
     <>
       <Card className="accountsFormCard">
         <div className="accountsCardHeader">
           <div>
-            <h2>Monthly budgets</h2>
+            <h2>Budgets</h2>
             <p className="muted">
-              Set a per-currency target for a single category or an overall
-              cap. Progress appears on the dashboard.
+              Set a target for a single category or an overall cap, per scope
+              (household, personal, partner, business). The dashboard tracks
+              spend against each target plus how much of the period has
+              elapsed.
             </p>
           </div>
         </div>
         {sortedBudgets.length === 0 ? (
           <EmptyState
             title="No budgets yet."
-            description="Add one to track monthly progress."
+            description="Add one to track progress with pacing comparison."
           />
         ) : (
           <div className="tableWrap">
@@ -266,6 +333,8 @@ export function BudgetsTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Category</TableHead>
+                  <TableHead>Scope</TableHead>
+                  <TableHead>Period</TableHead>
                   <TableHead>Currency</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead aria-label="Actions" />
@@ -277,7 +346,7 @@ export function BudgetsTab() {
                   if (isEditing) {
                     return (
                       <TableRow key={budget.id}>
-                        <TableCell colSpan={4}>
+                        <TableCell colSpan={6}>
                           <form onSubmit={saveBudgetEdit}>
                             <div className="formGrid">
                               <Label htmlFor={`settings-budget-edit-category-${budget.id}`}>
@@ -295,6 +364,44 @@ export function BudgetsTab() {
                                   placeholder="Overall"
                                   autoComplete="off"
                                 />
+                              </Label>
+                              <Label htmlFor={`settings-budget-edit-scope-${budget.id}`}>
+                                Scope
+                                <NativeSelect
+                                  id={`settings-budget-edit-scope-${budget.id}`}
+                                  value={budgetEditForm.scope}
+                                  onChange={(e) =>
+                                    setBudgetEditForm((prev) => ({
+                                      ...prev,
+                                      scope: e.target.value as BudgetScope,
+                                    }))
+                                  }
+                                >
+                                  {SCOPE_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                              </Label>
+                              <Label htmlFor={`settings-budget-edit-period-${budget.id}`}>
+                                Period
+                                <NativeSelect
+                                  id={`settings-budget-edit-period-${budget.id}`}
+                                  value={budgetEditForm.period}
+                                  onChange={(e) =>
+                                    setBudgetEditForm((prev) => ({
+                                      ...prev,
+                                      period: e.target.value as BudgetPeriod,
+                                    }))
+                                  }
+                                >
+                                  {PERIOD_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
                               </Label>
                               <Label htmlFor={`settings-budget-edit-currency-${budget.id}`}>
                                 Currency
@@ -329,6 +436,25 @@ export function BudgetsTab() {
                                   required
                                 />
                               </Label>
+                              <Label htmlFor={`settings-budget-edit-rollover-${budget.id}`} className="inline-flex items-center gap-2">
+                                <input
+                                  id={`settings-budget-edit-rollover-${budget.id}`}
+                                  type="checkbox"
+                                  checked={budgetEditForm.rolloverEnabled}
+                                  onChange={(e) =>
+                                    setBudgetEditForm((prev) => ({
+                                      ...prev,
+                                      rolloverEnabled: e.target.checked,
+                                    }))
+                                  }
+                                />
+                                <span>
+                                  Roll unused budget forward
+                                  <span className="muted block text-xs">
+                                    (toggle saved; carry-over behavior is a planned follow-up)
+                                  </span>
+                                </span>
+                              </Label>
                             </div>
                             <div className="row">
                               <Button
@@ -361,6 +487,8 @@ export function BudgetsTab() {
                           {budget.category ?? 'Overall'}
                         </span>
                       </TableCell>
+                      <TableCell>{scopeLabel(budget.scope)}</TableCell>
+                      <TableCell>{periodLabel(budget.period)}</TableCell>
                       <TableCell>{budget.currency}</TableCell>
                       <TableCell>{formatMoney(Number(budget.amount), budget.currency)}</TableCell>
                       <TableCell>
@@ -411,6 +539,44 @@ export function BudgetsTab() {
                 ))}
               </NativeSelect>
             </Label>
+            <Label htmlFor="settings-budget-scope">
+              Scope
+              <NativeSelect
+                id="settings-budget-scope"
+                value={budgetForm.scope}
+                onChange={(e) =>
+                  setBudgetForm((prev) => ({
+                    ...prev,
+                    scope: e.target.value as BudgetScope,
+                  }))
+                }
+              >
+                {SCOPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Label>
+            <Label htmlFor="settings-budget-period">
+              Period
+              <NativeSelect
+                id="settings-budget-period"
+                value={budgetForm.period}
+                onChange={(e) =>
+                  setBudgetForm((prev) => ({
+                    ...prev,
+                    period: e.target.value as BudgetPeriod,
+                  }))
+                }
+              >
+                {PERIOD_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Label>
             <Label htmlFor="settings-budget-currency">
               Currency
               <Input
@@ -442,6 +608,25 @@ export function BudgetsTab() {
                 required
                 placeholder="500.00"
               />
+            </Label>
+            <Label htmlFor="settings-budget-rollover" className="inline-flex items-center gap-2">
+              <input
+                id="settings-budget-rollover"
+                type="checkbox"
+                checked={budgetForm.rolloverEnabled}
+                onChange={(e) =>
+                  setBudgetForm((prev) => ({
+                    ...prev,
+                    rolloverEnabled: e.target.checked,
+                  }))
+                }
+              />
+              <span>
+                Roll unused budget forward
+                <span className="muted block text-xs">
+                  (toggle saved; carry-over behavior is a planned follow-up)
+                </span>
+              </span>
             </Label>
           </div>
           <Button type="submit" disabled={budgetSubmitting}>

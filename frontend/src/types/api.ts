@@ -160,6 +160,16 @@ export type BulkPatchFilterResponse = {
   ids: number[]
 }
 
+/** Supported budget recurrence periods (matches BUDGET_TARGET_PERIODS on the server). */
+export type BudgetPeriod = 'monthly' | 'weekly' | 'annual'
+
+/**
+ * Budget scope vocabulary. Cashflow's transaction model splits these
+ * across visibility / ownership / business flags; the server maps a
+ * `scope` value back to that combination when computing spend.
+ */
+export type BudgetScope = 'personal' | 'partner' | 'business' | 'household'
+
 /**
  * One row from GET /api/budgets. Mirrors the BudgetTarget serializer in
  * backend/src/routes/budgets.ts — `amount` arrives as a string (decimal)
@@ -175,7 +185,9 @@ export type Budget = {
   category: string | null
   currency: string
   amount: string
-  period: 'monthly'
+  period: BudgetPeriod
+  scope: BudgetScope
+  rolloverEnabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -186,9 +198,18 @@ export type BudgetsResponse = {
 }
 
 /**
- * One row from GET /api/budgets/progress — combines a budget with current
- * spend for the active calendar month. Amounts here are pre-coerced to
- * numbers by the backend so UI code can format/compare directly.
+ * The "pacing state" classification surfaced by /api/budgets/status —
+ * compares percentUsed against periodElapsedPercent. See backend
+ * `pacingState` for the thresholds.
+ */
+export type BudgetPacingState = 'on-pace' | 'ahead' | 'behind' | 'over'
+
+/**
+ * One row from GET /api/budgets/progress and /api/budgets/status — combines
+ * a budget with current spend for the active period. Amounts here are
+ * pre-coerced to numbers by the backend so UI code can format/compare
+ * directly. The pacing fields (`periodElapsedPercent` and `pacingState`)
+ * are populated by both endpoints.
  */
 export type BudgetProgress = {
   budgetId: number
@@ -200,6 +221,11 @@ export type BudgetProgress = {
   percentUsed: number
   periodStart: string
   periodEnd: string
+  scope: BudgetScope
+  period: BudgetPeriod
+  rolloverEnabled: boolean
+  periodElapsedPercent: number
+  pacingState: BudgetPacingState
 }
 
 /** Response shape for GET /api/budgets/progress. */
@@ -207,12 +233,29 @@ export type BudgetProgressResponse = {
   items: BudgetProgress[]
 }
 
+/** Response shape for GET /api/budgets/status — identical to /progress. */
+export type BudgetStatusResponse = BudgetProgressResponse
+
 /** POST/PUT /api/budgets body shape. */
 export type BudgetInput = {
   category: string | null
   currency: string
   amount: number
-  period?: 'monthly'
+  period?: BudgetPeriod
+  scope?: BudgetScope
+  rolloverEnabled?: boolean
+}
+
+/** One row in the GET /api/budgets/:id/exclusions response. */
+export type BudgetExclusion = {
+  id: number
+  budgetId: number
+  transactionId: number
+  createdAt: string
+}
+
+export type BudgetExclusionsResponse = {
+  data: BudgetExclusion[]
 }
 
 /**

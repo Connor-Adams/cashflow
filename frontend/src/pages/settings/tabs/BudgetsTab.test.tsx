@@ -9,12 +9,24 @@ vi.stubGlobal('fetch', vi.fn(() =>
 ))
 
 describe('BudgetsTab', () => {
-  it('renders the Monthly budgets heading', () => {
+  it('renders the Budgets heading', () => {
     render(
       <ToastProvider>
         <BudgetsTab />
       </ToastProvider>
     )
-    expect(screen.getByRole('heading', { name: /monthly budgets/i })).toBeInTheDocument()
+    // Heading text is just "Budgets" — the page now supports scope and
+    // period beyond monthly.
+    expect(screen.getByRole('heading', { name: /^budgets$/i })).toBeInTheDocument()
+  })
+
+  it('exposes scope and period selectors in the create form', () => {
+    render(
+      <ToastProvider>
+        <BudgetsTab />
+      </ToastProvider>
+    )
+    expect(screen.getByLabelText(/^scope$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^period$/i)).toBeInTheDocument()
   })
 })
