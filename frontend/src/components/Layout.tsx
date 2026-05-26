@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { Sidebar } from './Sidebar'
+import { NotificationBell } from './notifications/NotificationBell'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -59,6 +60,9 @@ export function Layout() {
             <Menu size={20} aria-hidden="true" />
           </button>
           <span className="topBar__wordmark">Cashflow</span>
+          <div className="topBar__right ml-auto flex items-center gap-2">
+            <NotificationBell />
+          </div>
         </header>
 
         <main className="main" data-layout-width={layoutWidth}>

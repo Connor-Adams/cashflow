@@ -60,7 +60,6 @@ function buildOtlpTransport() {
           recordProcessorType: 'batch',
           exporterOptions: {
             protocol: 'http/protobuf',
-            // Per otlp-logger v2 ProtobufExporterOptions, the URL goes inside protobufExporterOptions, not at this level.
             protobufExporterOptions: {
               url: `${otlpEndpoint!.replace(/\/$/, '')}/v1/logs`,
             },
@@ -69,15 +68,41 @@ function buildOtlpTransport() {
       },
     });
 
-    // Stream-level error: surfaces "the worker has exited" on each emit after worker death.
     transport.on('error', (err: Error) => {
       // eslint-disable-next-line no-console
       console.error('[observability][diag] stream error:', err && err.message);
     });
 
-    // Underlying Node worker-thread events: only fire ONCE on actual exit/crash.
-    // thread-stream exposes the worker as `transport.worker`. Hook it before the
-    // worker has a chance to die.
+    // Stream lifecycle events.
+    for (const ev of ['end', 'finish', 'close', 'drain'] as const) {
+      transport.on(ev, () => {
+        // eslint-disable-next-line no-console
+        console.error(`[observability][diag] stream event '${ev}' fired. trace:\n${new Error().stack}`);
+      });
+    }
+
+    // Monkey-patch .end() and .destroy() to capture call sites.
+    const originalEnd = transport.end.bind(transport);
+    transport.end = function patchedEnd(this: typeof transport, ...args: unknown[]) {
+      // eslint-disable-next-line no-console
+      console.error(`[observability][diag] transport.end() CALLED. trace:\n${new Error().stack}`);
+      // @ts-expect-error - forwarding args
+      return originalEnd(...args);
+    } as typeof transport.end;
+
+    const transportAny = transport as unknown as Record<string, unknown>;
+    const originalDestroy = typeof transportAny['destroy'] === 'function'
+      ? (transportAny['destroy'] as (...a: unknown[]) => unknown).bind(transport)
+      : undefined;
+    if (originalDestroy) {
+      transportAny['destroy'] = function patchedDestroy(...args: unknown[]) {
+        // eslint-disable-next-line no-console
+        console.error(`[observability][diag] transport.destroy() CALLED. trace:\n${new Error().stack}`);
+        return originalDestroy(...args);
+      };
+    }
+
+    // Underlying worker_threads.Worker events.
     const worker = (transport as unknown as { worker?: import('node:worker_threads').Worker }).worker;
     if (worker) {
       worker.on('exit', (code: number) => {
@@ -91,15 +116,11 @@ function buildOtlpTransport() {
         if (err && err.stack) console.error(err.stack);
       });
       worker.on('message', (msg: unknown) => {
-        // pino-abstract-transport emits 'WARNING' messages on issues like uncaught errors.
         if (msg && typeof msg === 'object' && 'code' in msg) {
           // eslint-disable-next-line no-console
           console.error('[observability][diag] WORKER MSG:', JSON.stringify(msg));
         }
       });
-    } else {
-      // eslint-disable-next-line no-console
-      console.error('[observability][diag] no worker reference exposed on transport');
     }
 
     return transport;

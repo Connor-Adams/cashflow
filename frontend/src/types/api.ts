@@ -1058,3 +1058,116 @@ export type SafeToSpendResponse = {
   breakdown: SafeToSpendBreakdown;
   settings: CashflowSettings;
 };
+
+// --- FX & currency intelligence (issue #221) -------------------------------
+
+export type CurrencyExposureRow = {
+  currency: string;
+  transactionCount: number;
+  sumNative: number;
+  absSumNative: number;
+  cadEquivalent: number | null;
+  shareOfTotal: number;
+  fxRate: number | null;
+  ratedDate: string | null;
+};
+
+export type CurrencyExposureResponse = {
+  reportingCurrency: string;
+  asOf: string;
+  totalCadEquivalent: number;
+  byCurrency: CurrencyExposureRow[];
+  gaps: Array<{ currency: string; reason: 'fx_rate_unavailable' }>;
+};
+
+export type FxFeeRow = {
+  transactionId: number;
+  accountId: number;
+  accountName: string | null;
+  date: string;
+  merchant: string;
+  currency: string;
+  amount: number;
+  reason: string;
+  confidence: 'high' | 'medium' | 'low' | null;
+};
+
+export type FxFeesResponse = {
+  fees: FxFeeRow[];
+  total: number;
+  limit: number;
+};
+
+export type EffectiveRateRow = {
+  transactionId: number;
+  accountId: number;
+  date: string;
+  merchant: string;
+  fromCurrency: string;
+  toCurrency: string;
+  nativeAmount: number;
+  effectiveRate: number;
+  source: 'linked_transaction' | 'paired_transfer';
+  counterpartyTransactionId: number;
+};
+
+export type EffectiveRatesResponse = {
+  rates: EffectiveRateRow[];
+  total: number;
+  limit: number;
+};
+
+export type FxReportingMetric = {
+  key: string;
+  normalized: number;
+  partial: boolean;
+  contributions: Array<{
+    currency: string;
+    native: number;
+    normalized: number | null;
+    fxRate: number | null;
+    ratedDate: string | null;
+  }>;
+};
+
+export type FxReportingResponse = {
+  reportingCurrency: string;
+  asOf: string;
+  metrics: FxReportingMetric[];
+  fxRatesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }>;
+  gaps: Array<{ currency: string; reason: 'fx_rate_unavailable' }>;
+  transactionCountByCurrency: Record<string, number>;
+};
+
+// ---- Notifications (issue #266) -----------------------------------------
+
+export type NotificationSeverity = 'info' | 'warn' | 'critical';
+
+export type Notification = {
+  id: number;
+  type: string;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  dataJson: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export type NotificationsListResponse = {
+  data: Notification[];
+};
+
+export type NotificationUnreadCountResponse = {
+  count: number;
+};
+
+export type NotificationPreference = {
+  type: string;
+  channelInApp: boolean;
+  channelEmail: boolean;
+};
+
+export type NotificationPreferencesListResponse = {
+  data: NotificationPreference[];
+};
