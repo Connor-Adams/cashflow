@@ -33,6 +33,16 @@ const DEFAULT_BUDGET_CURRENCY = 'CAD'
 const DEFAULT_BUDGET_SCOPE: BudgetScope = 'household'
 const DEFAULT_BUDGET_PERIOD: BudgetPeriod = 'monthly'
 
+/**
+ * Choices the "Alert me at" multi-select chips offer for budget breach
+ * notifications (issue #268). Picked to match the issue spec — 80% as the
+ * mid-period warning, 100% as the boundary, 120% as the "you blew through
+ * it" callout. Users can still PATCH the server with any 1..500 integer via
+ * the API, but the UI keeps the choices opinionated.
+ */
+const BUDGET_ALERT_THRESHOLD_CHOICES: readonly number[] = [80, 100, 120] as const
+const DEFAULT_BUDGET_ALERT_THRESHOLDS: readonly number[] = [80, 100, 120] as const
+
 type CategoryHint = { label: string; usageCount: number }
 
 type BudgetFormState = {
@@ -42,6 +52,12 @@ type BudgetFormState = {
   scope: BudgetScope
   period: BudgetPeriod
   rolloverEnabled: boolean
+  /**
+   * Set of thresholds the user has chosen for proactive alerts. Stored as
+   * Set<number> in form state for O(1) toggle semantics; serialized to a
+   * sorted array when we POST/PUT.
+   */
+  alertThresholds: Set<number>
 }
 
 const emptyBudgetForm: BudgetFormState = {
@@ -51,6 +67,77 @@ const emptyBudgetForm: BudgetFormState = {
   scope: DEFAULT_BUDGET_SCOPE,
   period: DEFAULT_BUDGET_PERIOD,
   rolloverEnabled: false,
+  alertThresholds: new Set<number>(DEFAULT_BUDGET_ALERT_THRESHOLDS),
+}
+
+/** Map a Set to the sorted-array shape the API contract expects. */
+function thresholdsToArray(set: Set<number>): number[] {
+  return Array.from(set).sort((a, b) => a - b)
+}
+
+/**
+ * Multi-select chips for "Alert me at" (issue #268). Toggling a chip flips
+ * its membership in the parent's `Set<number>`; an unticked chip means the
+ * cron will NOT fire that threshold for this budget.
+ *
+ * The choices live in `BUDGET_ALERT_THRESHOLD_CHOICES` — a literal array
+ * keeps Tailwind JIT happy with the chip classes (no template-string
+ * interpolation needed because all classes are static here).
+ */
+function AlertThresholdChips({
+  idPrefix,
+  selected,
+  onChange,
+}: {
+  idPrefix: string
+  selected: Set<number>
+  onChange: (next: Set<number>) => void
+}) {
+  return (
+    <fieldset className="mt-1">
+      <legend className="text-sm font-medium text-gray-700 dark:text-gray-300">
+        Alert me at
+      </legend>
+      <div className="flex flex-wrap gap-2 mt-1">
+        {BUDGET_ALERT_THRESHOLD_CHOICES.map((threshold) => {
+          const isOn = selected.has(threshold)
+          return (
+            <label
+              key={threshold}
+              htmlFor={`${idPrefix}-threshold-${threshold}`}
+              className={
+                isOn
+                  ? 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 cursor-pointer'
+                  : 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 cursor-pointer'
+              }
+            >
+              <input
+                id={`${idPrefix}-threshold-${threshold}`}
+                type="checkbox"
+                className="sr-only"
+                checked={isOn}
+                aria-label={`Alert at ${threshold}%`}
+                onChange={(e) => {
+                  const next = new Set(selected)
+                  if (e.target.checked) {
+                    next.add(threshold)
+                  } else {
+                    next.delete(threshold)
+                  }
+                  onChange(next)
+                }}
+              />
+              {threshold}%
+            </label>
+          )
+        })}
+      </div>
+      <p className="muted block text-xs mt-1">
+        A daily check sends an in-app notification once spend crosses any
+        selected percent. Untick all chips to silence alerts for this budget.
+      </p>
+    </fieldset>
+  )
 }
 
 /**
@@ -176,6 +263,7 @@ export function BudgetsTab() {
       period: form.period,
       scope: form.scope,
       rolloverEnabled: form.rolloverEnabled,
+      alertThresholds: thresholdsToArray(form.alertThresholds),
     }
   }
 
@@ -221,6 +309,7 @@ export function BudgetsTab() {
       scope: budget.scope,
       period: budget.period,
       rolloverEnabled: budget.rolloverEnabled,
+      alertThresholds: new Set<number>(budget.alertThresholds ?? DEFAULT_BUDGET_ALERT_THRESHOLDS),
     })
   }
 
@@ -455,6 +544,16 @@ export function BudgetsTab() {
                                   </span>
                                 </span>
                               </Label>
+                              <AlertThresholdChips
+                                idPrefix={`settings-budget-edit-${budget.id}`}
+                                selected={budgetEditForm.alertThresholds}
+                                onChange={(next) =>
+                                  setBudgetEditForm((prev) => ({
+                                    ...prev,
+                                    alertThresholds: next,
+                                  }))
+                                }
+                              />
                             </div>
                             <div className="row">
                               <Button
@@ -628,6 +727,16 @@ export function BudgetsTab() {
                 </span>
               </span>
             </Label>
+            <AlertThresholdChips
+              idPrefix="settings-budget-create"
+              selected={budgetForm.alertThresholds}
+              onChange={(next) =>
+                setBudgetForm((prev) => ({
+                  ...prev,
+                  alertThresholds: next,
+                }))
+              }
+            />
           </div>
           <Button type="submit" disabled={budgetSubmitting}>
             <Plus aria-hidden="true" />
