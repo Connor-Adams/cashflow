@@ -61,6 +61,7 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
+import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 
 initUser(sequelize);
@@ -119,6 +120,7 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
+initSubscription(sequelize);
 initAiReviewRun(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
@@ -406,6 +408,14 @@ FinancialGoal.belongsTo(Account, {
   as: 'linkedAccount',
 });
 
+Household.hasMany(Subscription, {
+  foreignKey: 'household_id',
+  as: 'subscriptions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
 Household.hasMany(AiReviewRun, {
   foreignKey: 'household_id',
   as: 'aiReviewRuns',
@@ -481,5 +491,6 @@ export {
   Insight,
   PlannedEvent,
   FinancialGoal,
+  Subscription,
   AiReviewRun,
 };
