@@ -213,3 +213,91 @@ test('DELETE scenario with children is forbidden (409)', async () => {
   // Cleanup so subsequent tests don't see stray children.
   await authed.delete(`/api/tax/personal-scenarios/${fork.body.scenario.id}`);
 });
+
+test('POST /:id/fork creates a child scenario inheriting parent overrides', async () => {
+  const parent = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'ForkParent',
+    overrides: { 'income.employment': 85000 },
+  });
+  const res = await authed.post(`/api/tax/personal-scenarios/${parent.body.scenario.id}/fork`).send({
+    name: 'ForkChild',
+  });
+  assert.equal(res.status, 201, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenario.parentId, parent.body.scenario.id);
+  assert.equal(res.body.scenario.name, 'ForkChild');
+  // Child starts empty — inheritance is via ancestry resolution at compute
+  // time, not by duplicating the parent's override map.
+  assert.deepEqual(res.body.scenario.overrides, {});
+});
+
+test('POST /:id/compute returns fresh computation (bypass cache)', async () => {
+  const create = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'ComputeMe',
+    overrides: { 'income.employment': 70000 },
+  });
+  const r1 = await authed
+    .post(`/api/tax/personal-scenarios/${create.body.scenario.id}/compute`)
+    .send({});
+  assert.equal(r1.status, 200, `expected 200, got ${r1.status}: ${JSON.stringify(r1.body)}`);
+  assert.equal(r1.body.computed.cached, false);
+});
+
+test('GET /compare?ids=... returns a diff payload for N scenarios', async () => {
+  const a = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'CompareA',
+    overrides: { 'income.employment': 60000 },
+  });
+  const b = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'CompareB',
+    overrides: { 'income.employment': 90000 },
+  });
+  const res = await authed.get(
+    `/api/tax/personal-scenarios/compare?ids=${a.body.scenario.id},${b.body.scenario.id}`,
+  );
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.scenarios.length, 2);
+  assert.ok(res.body.scenarios[0].computed);
+  assert.ok(res.body.scenarios[1].computed);
+});
+
+test('GET /compare with mixed ownership returns 403', async () => {
+  // Create a scenario in another household to attempt a cross-household leak.
+  const models = await import('../../src/models/index.js');
+  const otherHousehold = await models.Household.create({ name: 'Other' });
+  const otherEntity = await models.Entity.create({
+    householdId: otherHousehold.id,
+    kind: 'personal',
+    legalName: 'Other P',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  });
+  const otherScenario = await models.Scenario.create({
+    parentId: null,
+    entityId: otherEntity.id,
+    year: 2025,
+    name: 'Other',
+    kind: 'baseline',
+    overrides: {},
+    assumptions: {},
+    nextYearId: null,
+    notes: null,
+  });
+  const mine = await authed.post('/api/tax/personal-scenarios').send({
+    entityId,
+    year: 2025,
+    name: 'Mine',
+    overrides: {},
+  });
+  const res = await authed.get(
+    `/api/tax/personal-scenarios/compare?ids=${mine.body.scenario.id},${otherScenario.id}`,
+  );
+  assert.equal(res.status, 403, `expected 403, got ${res.status}: ${JSON.stringify(res.body)}`);
+});

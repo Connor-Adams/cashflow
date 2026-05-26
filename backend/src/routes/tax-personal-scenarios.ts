@@ -124,6 +124,50 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// GET /api/tax/personal-scenarios/compare?ids=1,2,3 — diff payload for N
+// scenarios. MUST be registered before `GET /:id` so Express doesn't match
+// the literal "compare" as the `:id` param.
+router.get('/compare', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const idsRaw = String(req.query.ids ?? '');
+    const ids = idsRaw
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n));
+    if (ids.length === 0) {
+      res.status(400).json({
+        error: 'invalid_query',
+        message: 'ids query param required (comma-separated)',
+      });
+      return;
+    }
+    const scenarios = await Scenario.findAll({ where: { id: ids } });
+    if (scenarios.length !== ids.length) {
+      res.status(404).json({ error: 'scenario_not_found' });
+      return;
+    }
+    // Authorize: every referenced scenario's entity must live in the caller's
+    // household. One mismatched entity nukes the whole request (403) so a
+    // partial-permission compare can't leak any rows.
+    const entityIds = Array.from(new Set(scenarios.map((s) => s.entityId)));
+    const entities = await Entity.findAll({ where: { id: entityIds } });
+    if (entities.some((e) => e.householdId !== household.id)) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+    const computedAll = await Promise.all(
+      scenarios.map(async (s) => ({
+        scenario: s,
+        computed: await computeScenario(s.id),
+      })),
+    );
+    res.json({ scenarios: computedAll });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/tax/personal-scenarios/:id — get a scenario + its computed return
 // (cached on facts hash; recomputed on miss).
 router.get('/:id', async (req, res, next) => {
@@ -203,6 +247,54 @@ router.delete('/:id', async (req, res, next) => {
     }
     await result.scenario.destroy();
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tax/personal-scenarios/:id/fork — create a child scenario whose
+// effective facts inherit from the parent via ancestry resolution. The new
+// scenario starts with an empty override map; inheritance is by walking the
+// parent chain at compute time, not by duplicating overrides.
+router.post('/:id/fork', async (req, res, next) => {
+  try {
+    const result = await loadAndAuthorize(req, Number(req.params.id));
+    if ('error' in result) {
+      res.status(result.error === 'not_found' ? 404 : 403).json({ error: result.error });
+      return;
+    }
+    const name =
+      typeof req.body?.name === 'string' && req.body.name.trim() !== ''
+        ? req.body.name
+        : `${result.scenario.name} (fork)`;
+    const child = await Scenario.create({
+      parentId: result.scenario.id,
+      entityId: result.scenario.entityId,
+      year: result.scenario.year,
+      name,
+      kind: 'fork',
+      overrides: {},
+      assumptions: {},
+      nextYearId: null,
+      notes: null,
+    });
+    res.status(201).json({ scenario: child });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tax/personal-scenarios/:id/compute — force a recompute, bypassing
+// the facts-hash cache. Always writes a fresh ScenarioReturn row.
+router.post('/:id/compute', async (req, res, next) => {
+  try {
+    const result = await loadAndAuthorize(req, Number(req.params.id));
+    if ('error' in result) {
+      res.status(result.error === 'not_found' ? 404 : 403).json({ error: result.error });
+      return;
+    }
+    const computed = await computeScenario(result.scenario.id, { force: true });
+    res.json({ computed });
   } catch (err) {
     next(err);
   }
