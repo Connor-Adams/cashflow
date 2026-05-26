@@ -35,6 +35,8 @@ import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEma
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
+import { TaxTag, initTaxTag } from './TaxTag';
+import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
@@ -92,6 +94,8 @@ initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
+initTaxTag(sequelize);
+initTransactionTaxMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
@@ -109,6 +113,28 @@ initPlannedEvent(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+Household.hasMany(TaxTag, { foreignKey: 'household_id', as: 'taxTags' });
+TaxTag.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+Transaction.hasOne(TransactionTaxMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'taxMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+TaxTag.hasMany(TransactionTaxMetadata, {
+  foreignKey: 'tax_tag_id',
+  as: 'transactionTaxMetadata',
+});
+TransactionTaxMetadata.belongsTo(TaxTag, {
+  foreignKey: 'tax_tag_id',
+  as: 'taxTag',
+});
 
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
@@ -366,6 +392,8 @@ export {
   UserCaptureToken,
   Entity,
   TaxCategory,
+  TaxTag,
+  TransactionTaxMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,

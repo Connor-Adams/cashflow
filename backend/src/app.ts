@@ -27,6 +27,7 @@ import emailIntegrationsRouter from './routes/emailIntegrations';
 import netWorthRouter from './routes/netWorth';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
+import businessTaxRouter from './routes/businessTax';
 import householdRouter from './routes/household';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
@@ -111,6 +112,9 @@ app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
 app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
 app.use('/api/tax', taxRouter);
+// businessTaxRouter mounts /business/*, /exports/tax, /tax-tags, and
+// /transactions/:id/tax under /api. Keep it BEFORE other catch-all /api mounts.
+app.use('/api', businessTaxRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
 
