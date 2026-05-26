@@ -6,12 +6,20 @@
 // selected, a compact integrated-rate summary card renders alongside the
 // existing single-entity totals so the user can compare "personal-only" tax
 // against the integrated household number.
+//
+// P10 T8 wiring: one `<SpouseLinkPicker>` per personal entity in the household
+// (top section, before the plan picker) plus `<HouseholdRollupCard>` when a
+// plan is active. The rollup card consumes the same `useHouseholdPlanCompute`
+// data the integrated-rate card uses, so both refresh on a single fetch.
 import { useTaxReturn } from '../../hooks/useTaxReturn';
 import {
   useHouseholdPlanCompute,
   type HouseholdPlanComputeResult,
 } from '../../hooks/useHouseholdPlanCompute';
+import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { HouseholdPlanPicker } from './scenarios/HouseholdPlanPicker';
+import { HouseholdRollupCard } from './scenarios/HouseholdRollupCard';
+import { SpouseLinkPicker } from './scenarios/SpouseLinkPicker';
 import { MultiYearCompareCard } from './MultiYearCompareCard';
 import { InstalmentTracker } from './InstalmentTracker';
 import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from './util/format';
@@ -25,9 +33,21 @@ interface Props {
 export function OverviewTab({ year, activePlanId, onPlanChange }: Props) {
   const { data, error, loading } = useTaxReturn(year);
   const planCompute = useHouseholdPlanCompute(activePlanId);
+  const { entities, error: entitiesError, reload: reloadEntities } = useTaxEntities();
+
+  const personalEntities = entities?.filter((e) => e.kind === 'personal') ?? [];
 
   return (
     <div>
+      <section style={{ marginBottom: '1rem' }}>
+        <SpouseLinkSection
+          personalEntities={personalEntities}
+          allEntities={entities}
+          entitiesError={entitiesError}
+          onChange={reloadEntities}
+        />
+      </section>
+
       <section style={{ marginBottom: '1rem' }}>
         <HouseholdPlanPicker activePlanId={activePlanId} onChange={onPlanChange} />
       </section>
@@ -42,7 +62,57 @@ export function OverviewTab({ year, activePlanId, onPlanChange }: Props) {
         </section>
       )}
 
+      {activePlanId !== null && (
+        <section style={{ marginBottom: '1rem' }}>
+          <HouseholdRollupCard planCompute={planCompute.data} />
+        </section>
+      )}
+
       <TaxReturnSection year={year} data={data} loading={loading} error={error} />
+    </div>
+  );
+}
+
+interface SpouseLinkSectionProps {
+  personalEntities: Array<{
+    id: number;
+    legalName: string;
+    spouseEntityId: number | null;
+  }>;
+  allEntities: Array<{ id: number; legalName: string; kind: string }> | null;
+  entitiesError: string | null;
+  onChange: () => void;
+}
+
+// Renders one `<SpouseLinkPicker>` per personal entity so the user can
+// link/unlink any of them. Hidden entirely when no personal entities exist
+// (the rest of OverviewTab already handles that case via the empty-state
+// elsewhere).
+function SpouseLinkSection({
+  personalEntities,
+  allEntities,
+  entitiesError,
+  onChange,
+}: SpouseLinkSectionProps) {
+  if (entitiesError) {
+    return <p className="error">Failed to load entities: {entitiesError}</p>;
+  }
+  if (allEntities === null) return <p className="muted">Loading entities…</p>;
+  if (personalEntities.length === 0) return null;
+  return (
+    <div className="rounded-md border border-gray-200 p-3">
+      <h3 className="mb-2 text-base font-semibold">Spouse links</h3>
+      <ul className="space-y-2">
+        {personalEntities.map((entity) => (
+          <li key={entity.id}>
+            <SpouseLinkPicker
+              entity={entity}
+              candidateEntities={allEntities}
+              onChange={onChange}
+            />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

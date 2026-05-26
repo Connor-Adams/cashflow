@@ -301,6 +301,9 @@ test('POST /api/ai/query scopes by household — does not sum other-household tx
       finalCategory: 'Restaurants',
       finalBusiness: false,
       finalSplitType: 'me',
+      // visibleTransactionWhere requires visibility='shared' OR createdByUserId
+      // match. Mark as shared so the regularAgent sees these in scoped queries.
+      visibility: 'shared',
     } as never);
   }
 

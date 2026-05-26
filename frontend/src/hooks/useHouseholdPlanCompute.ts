@@ -38,6 +38,25 @@ export interface IntegrationResult {
   warnings: IntegrationWarning[];
 }
 
+export interface SpouseRouterWarning {
+  severity: 'warning';
+  entityId: number;
+  message: string;
+}
+
+// Mirrors backend `SpouseRouterOutput['byEntityId'][number]`. Decimals cross
+// the wire as strings — keep them as strings here and re-hydrate at the
+// render boundary.
+export interface SpouseShift {
+  pensionSplitTransferIn: string;
+  pensionSplitTransferOut: string;
+}
+
+export interface SpouseResult {
+  byEntityId: Record<string, SpouseShift>;
+  warnings: SpouseRouterWarning[];
+}
+
 export interface CorpScenarioComputeEntry {
   scenario: CorpScenario;
   computed: CorpComputedReturn;
@@ -53,6 +72,12 @@ export interface HouseholdPlanComputeResult {
   corp: CorpScenarioComputeEntry[];
   personal: PersonalScenarioComputeEntry[];
   integration: IntegrationResult;
+  /**
+   * P10: spouseRouter output (parallel to `integration`). Present in every
+   * compute result; `byEntityId` keys are entity IDs that had a pension-split
+   * shift applied (transferred in or out).
+   */
+  spouse: SpouseResult;
 }
 
 interface UseHouseholdPlanComputeResult {

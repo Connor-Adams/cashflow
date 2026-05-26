@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
@@ -18,22 +17,30 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
+import { PlannedEventFormFields } from '@/components/planned-events/PlannedEventFormFields'
+import {
+  PLANNED_EVENT_STATUS_OPTIONS,
+  STATUS_BADGE,
+  TYPE_TONE,
+  TYPE_TONE_CLASS,
+  buildInput,
+  buildPatch,
+  emptyForm,
+  rowToForm,
+  statusLabel,
+  typeLabel,
+  type FormState,
+} from '@/components/planned-events/plannedEventForm'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   Account,
   PlannedEvent,
-  PlannedEventInput,
   PlannedEventPatch,
   PlannedEventsResponse,
-  PlannedEventSource,
   PlannedEventStatus,
-  PlannedEventType,
 } from '../types/api'
-
-const DEFAULT_CURRENCY = 'CAD'
 
 /**
  * Wrapper for `fetch` PUT against /api/planned-events/:id. The shared
@@ -66,141 +73,6 @@ async function putPlannedEvent(
     throw new Error(message)
   }
   return (await res.json()) as PlannedEvent
-}
-
-const PLANNED_EVENT_TYPE_OPTIONS: Array<{ value: PlannedEventType; label: string }> = [
-  { value: 'income', label: 'Income' },
-  { value: 'expense', label: 'Expense' },
-  { value: 'transfer', label: 'Transfer' },
-  { value: 'settlement', label: 'Settlement' },
-  { value: 'debt_payment', label: 'Debt payment' },
-  { value: 'savings', label: 'Savings' },
-]
-
-const PLANNED_EVENT_STATUS_OPTIONS: Array<{ value: PlannedEventStatus; label: string }> = [
-  { value: 'planned', label: 'Planned' },
-  { value: 'posted', label: 'Posted' },
-  { value: 'skipped', label: 'Skipped' },
-  { value: 'ignored', label: 'Ignored' },
-]
-
-// Tailwind v4 JIT needs literal class names — Sidebar/Theme docs note this.
-// Look up colour classes per status/type via tables instead of building
-// strings dynamically so the bundler keeps them.
-const STATUS_BADGE: Record<PlannedEventStatus, string> = {
-  planned: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-  posted: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  skipped: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  ignored: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
-}
-
-const TYPE_TONE: Record<PlannedEventType, 'inflow' | 'outflow' | 'neutral'> = {
-  income: 'inflow',
-  expense: 'outflow',
-  transfer: 'neutral',
-  settlement: 'neutral',
-  debt_payment: 'outflow',
-  savings: 'outflow',
-}
-
-const TYPE_TONE_CLASS: Record<'inflow' | 'outflow' | 'neutral', string> = {
-  inflow: 'text-emerald-600 dark:text-emerald-300',
-  outflow: 'text-rose-600 dark:text-rose-300',
-  neutral: 'text-zinc-600 dark:text-zinc-300',
-}
-
-function typeLabel(type: PlannedEventType): string {
-  return (
-    PLANNED_EVENT_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type
-  )
-}
-
-function statusLabel(status: PlannedEventStatus): string {
-  return (
-    PLANNED_EVENT_STATUS_OPTIONS.find((o) => o.value === status)?.label ??
-    status
-  )
-}
-
-type FormState = {
-  type: PlannedEventType
-  name: string
-  amount: string
-  currency: string
-  expectedDate: string
-  accountId: string
-  recurrenceRule: string
-  status: PlannedEventStatus
-  notes: string
-}
-
-function emptyForm(currency: string = DEFAULT_CURRENCY): FormState {
-  return {
-    type: 'expense',
-    name: '',
-    amount: '',
-    currency,
-    expectedDate: '',
-    accountId: '',
-    recurrenceRule: '',
-    status: 'planned',
-    notes: '',
-  }
-}
-
-function rowToForm(row: PlannedEvent): FormState {
-  return {
-    type: row.type,
-    name: row.name,
-    amount: String(Number(row.amount)),
-    currency: row.currency,
-    expectedDate: row.expectedDate,
-    accountId: row.accountId == null ? '' : String(row.accountId),
-    recurrenceRule: row.recurrenceRule ?? '',
-    status: row.status,
-    notes: row.notes ?? '',
-  }
-}
-
-function buildInput(
-  form: FormState,
-  source: PlannedEventSource = 'manual',
-): PlannedEventInput | null {
-  const name = form.name.trim()
-  if (!name) return null
-  const amount = Number(form.amount)
-  if (!Number.isFinite(amount) || amount < 0) return null
-  const currency = form.currency.trim().toUpperCase()
-  if (currency.length !== 3) return null
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.expectedDate)) return null
-  const accountId =
-    form.accountId === '' ? null : Number.parseInt(form.accountId, 10)
-  if (accountId != null && !Number.isInteger(accountId)) return null
-  const recurrence = form.recurrenceRule.trim()
-  const notes = form.notes.trim()
-  return {
-    type: form.type,
-    name,
-    amount,
-    currency,
-    expectedDate: form.expectedDate,
-    accountId,
-    recurrenceRule: recurrence ? recurrence : null,
-    status: form.status,
-    source,
-    notes: notes ? notes : null,
-  }
-}
-
-function buildPatch(form: FormState): PlannedEventPatch | null {
-  const input = buildInput(form)
-  if (!input) return null
-  // For edit we don't change `source` (the originating subsystem owns it).
-  // Drop it from the patch so editing a system-managed row does not
-  // accidentally promote it to manual.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { source: _ignored, ...rest } = input
-  return rest
 }
 
 export function PlannedEventsPage() {
@@ -531,163 +403,5 @@ export function PlannedEventsPage() {
       </Card>
       {confirm.dialog}
     </>
-  )
-}
-
-type PlannedEventFormFieldsProps = {
-  form: FormState
-  setForm: (updater: (prev: FormState) => FormState) => void
-  accountOptions: Account[]
-  idPrefix: string
-  showStatus: boolean
-}
-
-function PlannedEventFormFields({
-  form,
-  setForm,
-  accountOptions,
-  idPrefix,
-  showStatus,
-}: PlannedEventFormFieldsProps) {
-  return (
-    <div className="formGrid">
-      <Label htmlFor={`${idPrefix}-type`}>
-        Type
-        <NativeSelect
-          id={`${idPrefix}-type`}
-          value={form.type}
-          onChange={(e) =>
-            setForm((prev) => ({
-              ...prev,
-              type: e.target.value as PlannedEventType,
-            }))
-          }
-        >
-          {PLANNED_EVENT_TYPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </NativeSelect>
-      </Label>
-      <Label htmlFor={`${idPrefix}-name`}>
-        Name
-        <Input
-          id={`${idPrefix}-name`}
-          value={form.name}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, name: e.target.value }))
-          }
-          required
-          maxLength={255}
-          placeholder="Rent, Paycheck, Gym membership…"
-        />
-      </Label>
-      <Label htmlFor={`${idPrefix}-amount`}>
-        Amount
-        <Input
-          id={`${idPrefix}-amount`}
-          type="number"
-          step="0.01"
-          min="0"
-          value={form.amount}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, amount: e.target.value }))
-          }
-          required
-          placeholder="0.00"
-        />
-      </Label>
-      <Label htmlFor={`${idPrefix}-currency`}>
-        Currency
-        <Input
-          id={`${idPrefix}-currency`}
-          value={form.currency}
-          onChange={(e) =>
-            setForm((prev) => ({
-              ...prev,
-              currency: e.target.value.toUpperCase().slice(0, 3),
-            }))
-          }
-          required
-          maxLength={3}
-          autoComplete="off"
-        />
-      </Label>
-      <Label htmlFor={`${idPrefix}-date`}>
-        Expected date
-        <Input
-          id={`${idPrefix}-date`}
-          type="date"
-          value={form.expectedDate}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, expectedDate: e.target.value }))
-          }
-          required
-        />
-      </Label>
-      <Label htmlFor={`${idPrefix}-account`}>
-        Account (optional)
-        <NativeSelect
-          id={`${idPrefix}-account`}
-          value={form.accountId}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, accountId: e.target.value }))
-          }
-        >
-          <option value="">Unassigned</option>
-          {accountOptions.map((a) => (
-            <option key={a.id} value={String(a.id)}>
-              {a.name}
-              {a.defaultCurrency ? ` (${a.defaultCurrency})` : ''}
-            </option>
-          ))}
-        </NativeSelect>
-      </Label>
-      <Label htmlFor={`${idPrefix}-recurrence`}>
-        Recurrence rule (optional)
-        <Input
-          id={`${idPrefix}-recurrence`}
-          value={form.recurrenceRule}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, recurrenceRule: e.target.value }))
-          }
-          placeholder="FREQ=MONTHLY;BYMONTHDAY=1"
-        />
-      </Label>
-      {showStatus ? (
-        <Label htmlFor={`${idPrefix}-status`}>
-          Status
-          <NativeSelect
-            id={`${idPrefix}-status`}
-            value={form.status}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                status: e.target.value as PlannedEventStatus,
-              }))
-            }
-          >
-            {PLANNED_EVENT_STATUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </NativeSelect>
-        </Label>
-      ) : null}
-      <Label htmlFor={`${idPrefix}-notes`}>
-        Notes
-        <Textarea
-          id={`${idPrefix}-notes`}
-          value={form.notes}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, notes: e.target.value }))
-          }
-          rows={2}
-          maxLength={4096}
-        />
-      </Label>
-    </div>
   )
 }

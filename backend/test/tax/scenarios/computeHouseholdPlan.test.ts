@@ -111,3 +111,71 @@ test('computeHouseholdPlan emits integration warnings for over-GRIP eligible div
     `expected a GRIP warning, got: ${JSON.stringify(out.integration.warnings)}`,
   );
 });
+
+test('computeHouseholdPlan applies pension split between two linked spouses', async () => {
+  // Seed a household with two personal entities A + B; link them as spouses.
+  const household = await Household.create({ name: 'SpousePair' });
+  const a = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'A',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const b = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'B',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  await a.update({ spouseEntityId: b.id });
+  await b.update({ spouseEntityId: a.id });
+
+  const plan = await HouseholdPlan.create({
+    householdId: household.id, name: 'PensionSplit', notes: null,
+  });
+
+  // A scenario: $120k employment income + $30k pension split transferred out.
+  // (Engine doesn't distinguish pension from employment in v1; we use
+  // employment as the split source per plan's spec.)
+  const aBaseline = await ensureBaselineScenario(a.id, 2025);
+  await Scenario.create({
+    parentId: aBaseline.id, householdPlanId: plan.id,
+    entityId: a.id, year: 2025, name: 'A with split', kind: 'fork',
+    overrides: {
+      'income.employment': 120000,
+      'pensionSplit.transferAmount': 30000,
+    },
+    assumptions: {}, nextYearId: null, notes: null,
+  });
+
+  // B scenario: plain baseline linked to plan (no overrides).
+  const bBaseline = await ensureBaselineScenario(b.id, 2025);
+  await bBaseline.update({ householdPlanId: plan.id });
+
+  const out = await computeHouseholdPlan(plan.id);
+
+  // No missing-spouse warnings (spouse is linked + present in plan).
+  assert.equal(
+    out.spouse.warnings.length, 0,
+    `expected no spouse warnings, got: ${JSON.stringify(out.spouse.warnings)}`,
+  );
+
+  // spouseRouter output records the shifts cleanly per entity.
+  assert.equal(out.spouse.byEntityId[a.id]?.pensionSplitTransferOut.toFixed(2), '30000.00');
+  assert.equal(out.spouse.byEntityId[a.id]?.pensionSplitTransferIn.toFixed(2), '0.00');
+  assert.equal(out.spouse.byEntityId[b.id]?.pensionSplitTransferOut.toFixed(2), '0.00');
+  assert.equal(out.spouse.byEntityId[b.id]?.pensionSplitTransferIn.toFixed(2), '30000.00');
+
+  // Both personals compute via the integrated (non-cached) path because shifts apply.
+  assert.equal(out.personal.length, 2);
+  const aResult = out.personal.find((p) => p.scenario.entityId === a.id)!;
+  const bResult = out.personal.find((p) => p.scenario.entityId === b.id)!;
+  assert.equal(aResult.computed.factsHash, 'household-integrated');
+  assert.equal(bResult.computed.factsHash, 'household-integrated');
+
+  // A's L10100 = 120k − 30k = 90k after the split shift; B's = 0 + 30k.
+  const aEmp = (aResult.computed.lines as Array<{ code: string; amount: string }>)
+    .find((l) => l.code === 'L10100');
+  const bEmp = (bResult.computed.lines as Array<{ code: string; amount: string }>)
+    .find((l) => l.code === 'L10100');
+  assert.ok(aEmp, 'expected L10100 on A');
+  assert.ok(bEmp, 'expected L10100 on B');
+  assert.equal(aEmp.amount, '90000');
+  assert.equal(bEmp.amount, '30000');
+});

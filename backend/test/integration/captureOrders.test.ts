@@ -209,8 +209,16 @@ test('post-capture backfill enriches a matching transaction', async () => {
     });
   assert.equal(res.status, 200);
 
-  // The backfill runs via setImmediate; await a small delay.
-  await new Promise((r) => setTimeout(r, 300));
+  // Post-capture enrichment is enqueued via `scheduleInternalBackfill`, which
+  // runs the actual backfill on the next tick (`setImmediate(drain)`). Wait
+  // for the coordinator to drain instead of sleeping a fixed window — a 300ms
+  // timeout was tight enough that slow CI workers occasionally raced the
+  // `txn.reload()` and asserted on a not-yet-enriched row.
+  //
+  // Imported lazily so the module load (which transitively pulls
+  // `src/models`) happens after `setupPgTestDb` has set DATABASE_URL.
+  const { waitForBackfillDrain } = await import('../../src/import/backfillCoordinator.js');
+  await waitForBackfillDrain(acc.householdId);
 
   await txn.reload();
   assert.equal(txn.merchantCanonical, 'Amazon');
