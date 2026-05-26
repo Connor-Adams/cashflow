@@ -23,6 +23,7 @@ type NormalizedBudgetInput = {
   period: BudgetTargetPeriod;
   scope: BudgetTargetScope;
   rolloverEnabled: boolean;
+  excludeRefundedPurchases: boolean;
 };
 
 type ValidationResult =
@@ -95,6 +96,7 @@ export function validateBudgetInput(
   }
 
   const rolloverEnabled = parseBooleanFlag(raw.rolloverEnabled);
+  const excludeRefundedPurchases = parseBooleanFlag(raw.excludeRefundedPurchases);
 
   return {
     ok: true,
@@ -105,6 +107,7 @@ export function validateBudgetInput(
       period,
       scope,
       rolloverEnabled,
+      excludeRefundedPurchases,
     },
   };
 }
@@ -176,6 +179,10 @@ export function validateBudgetPatch(
     out.rolloverEnabled = parseBooleanFlag(raw.rolloverEnabled);
   }
 
+  if (raw.excludeRefundedPurchases !== undefined) {
+    out.excludeRefundedPurchases = parseBooleanFlag(raw.excludeRefundedPurchases);
+  }
+
   return { ok: true, value: out };
 }
 
@@ -209,6 +216,7 @@ type BudgetResponse = {
   period: BudgetTargetPeriod;
   scope: BudgetTargetScope;
   rolloverEnabled: boolean;
+  excludeRefundedPurchases: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -223,6 +231,7 @@ function serializeBudget(row: InstanceType<typeof BudgetTarget>): BudgetResponse
     period: row.period,
     scope: row.scope,
     rolloverEnabled: Boolean(row.rolloverEnabled),
+    excludeRefundedPurchases: Boolean(row.excludeRefundedPurchases),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -623,6 +632,7 @@ async function computeStatusForBudgets(
       scope: BudgetTargetScope;
       period: BudgetTargetPeriod;
       rolloverEnabled: boolean;
+      excludeRefundedPurchases: boolean;
       periodElapsedPercent: number;
       pacingState: BudgetPacingState;
     }
@@ -642,7 +652,38 @@ async function computeStatusForBudgets(
         attributes: ['transactionId'],
         raw: true,
       });
-      const excludedIds = excluded.map((row) => row.transactionId);
+      const explicitExcludedIds = excluded.map((row) => row.transactionId);
+
+      // Issue #215: when the budget opts in to excludeRefundedPurchases,
+      // also exclude the `linked_transaction_id` of every refund row in
+      // this household+currency+date window. The refund itself is already
+      // a positive-amount row that aggregateSpendByCategory ignores (it
+      // only counts amount<0). So zeroing out the original purchase is the
+      // only thing left to do for "this charge was refunded — don't count it".
+      let refundOriginalIds: number[] = [];
+      if (budget.excludeRefundedPurchases) {
+        const refunds = await Transaction.findAll({
+          where: {
+            ...householdWhere(req),
+            currency: budget.currency,
+            txnType: 'refund',
+            linkedTransactionId: { [Op.ne]: null },
+            date: {
+              [Op.gte]: bounds.periodStart,
+              [Op.lte]: bounds.periodEnd,
+            },
+          },
+          attributes: ['linkedTransactionId'],
+          raw: true,
+        });
+        refundOriginalIds = refunds
+          .map((r) => r.linkedTransactionId)
+          .filter((v): v is number => typeof v === 'number');
+      }
+
+      const allExcludedIds = Array.from(
+        new Set<number>([...explicitExcludedIds, ...refundOriginalIds])
+      );
 
       const txWhere: WhereOptions = {
         ...householdWhere(req),
@@ -652,8 +693,8 @@ async function computeStatusForBudgets(
           [Op.lte]: bounds.periodEnd,
         },
         ...scopeWhereClause(budget.scope),
-        ...(excludedIds.length > 0
-          ? { id: { [Op.notIn]: excludedIds } }
+        ...(allExcludedIds.length > 0
+          ? { id: { [Op.notIn]: allExcludedIds } }
           : {}),
       } as WhereOptions;
 
@@ -695,6 +736,7 @@ async function computeStatusForBudgets(
         scope: budget.scope,
         period: budget.period,
         rolloverEnabled: Boolean(budget.rolloverEnabled),
+        excludeRefundedPurchases: Boolean(budget.excludeRefundedPurchases),
         periodElapsedPercent: elapsed,
         pacingState: pacingState(progress.percentUsed, elapsed),
       };
@@ -720,6 +762,7 @@ router.post('/', async (req, res, next) => {
       period: result.value.period,
       scope: result.value.scope,
       rolloverEnabled: result.value.rolloverEnabled,
+      excludeRefundedPurchases: result.value.excludeRefundedPurchases,
     });
     res.status(201).json(serializeBudget(row));
   } catch (e) {
@@ -755,6 +798,8 @@ router.put('/:id', async (req, res, next) => {
     if (patch.scope !== undefined) row.set('scope', patch.scope);
     if (patch.rolloverEnabled !== undefined)
       row.set('rolloverEnabled', patch.rolloverEnabled);
+    if (patch.excludeRefundedPurchases !== undefined)
+      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
     await row.save();
     res.json(serializeBudget(row));
   } catch (e) {
@@ -794,6 +839,8 @@ router.patch('/:id', async (req, res, next) => {
     if (patch.scope !== undefined) row.set('scope', patch.scope);
     if (patch.rolloverEnabled !== undefined)
       row.set('rolloverEnabled', patch.rolloverEnabled);
+    if (patch.excludeRefundedPurchases !== undefined)
+      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
     await row.save();
     res.json(serializeBudget(row));
   } catch (e) {

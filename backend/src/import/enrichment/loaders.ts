@@ -95,23 +95,35 @@ export async function loadRelationshipCandidates(
     ? [merchantClean, householdId]
     : [merchantClean];
   const placeholders = householdAccountIds.map(() => '?').join(',');
+  // alreadyLinkedByRefundId is computed in a correlated subquery: for each
+  // candidate row that's a NEGATIVE-amount purchase, look for an existing
+  // refund row whose linked_transaction_id points back at it. The detector
+  // uses this to avoid auto-linking the same original to a second refund.
   const rows = await sequelize.query<{
     id: number;
     accountId: number;
     amount: number;
     date: string;
     merchantClean: string;
+    merchantCanonical: string | null;
     finalCategory: string | null;
     finalBusiness: number;
     sourceReference: string | null;
+    alreadyLinkedByRefundId: number | null;
   }>(
-    `SELECT id, account_id AS "accountId", CAST(amount AS REAL) AS amount, date,
-            merchant_clean AS "merchantClean", final_category AS "finalCategory",
-            final_business AS "finalBusiness",
-            source_reference AS "sourceReference"
-       FROM transactions
-       WHERE account_id IN (${placeholders})
-         AND date BETWEEN ? AND ?
+    `SELECT t.id, t.account_id AS "accountId", CAST(t.amount AS REAL) AS amount, t.date,
+            t.merchant_clean AS "merchantClean",
+            t.merchant_canonical AS "merchantCanonical",
+            t.final_category AS "finalCategory",
+            t.final_business AS "finalBusiness",
+            t.source_reference AS "sourceReference",
+            (SELECT r.id FROM transactions r
+              WHERE r.linked_transaction_id = t.id
+                AND r.txn_type = 'refund'
+              LIMIT 1) AS "alreadyLinkedByRefundId"
+       FROM transactions t
+       WHERE t.account_id IN (${placeholders})
+         AND t.date BETWEEN ? AND ?
          ${householdClause}`,
     {
       replacements: [...householdAccountIds, windowStartStr, windowEndStr, ...householdReplacements],
@@ -124,8 +136,10 @@ export async function loadRelationshipCandidates(
     amount: Number(r.amount),
     date: r.date,
     merchantClean: r.merchantClean,
+    merchantCanonical: r.merchantCanonical ?? null,
     finalCategory: r.finalCategory,
     finalBusiness: Boolean(r.finalBusiness),
     sourceReference: r.sourceReference ?? null,
+    alreadyLinkedByRefundId: r.alreadyLinkedByRefundId ?? null,
   }));
 }

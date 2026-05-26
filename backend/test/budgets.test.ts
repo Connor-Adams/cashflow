@@ -156,6 +156,46 @@ test('validateBudgetPatch: rejects bad currency', () => {
   assert.equal(result.ok, false);
 });
 
+// ---- issue #215: excludeRefundedPurchases ----
+
+test('validateBudgetInput: excludeRefundedPurchases defaults to false', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 100,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.excludeRefundedPurchases, false);
+});
+
+test('validateBudgetInput: excludeRefundedPurchases=true is parsed', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 100,
+    excludeRefundedPurchases: true,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.excludeRefundedPurchases, true);
+});
+
+test('validateBudgetInput: accepts string "true" for excludeRefundedPurchases', () => {
+  const result = validateBudgetInput({
+    category: 'Groceries',
+    currency: 'CAD',
+    amount: 100,
+    excludeRefundedPurchases: 'true',
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.excludeRefundedPurchases, true);
+});
+
+test('validateBudgetPatch: excludeRefundedPurchases=false is recorded explicitly', () => {
+  const result = validateBudgetPatch({ excludeRefundedPurchases: false });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.excludeRefundedPurchases, false);
+});
+
 // ---- aggregateSpendByCategory ------------------------------------------
 
 test('aggregateSpendByCategory: charges are summed as positive spend', () => {

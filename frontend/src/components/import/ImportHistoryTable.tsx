@@ -19,6 +19,12 @@ export type ImportHistoryRow = {
   errorMessage: string | null
   startedAt: string
   finishedAt: string | null
+  /** Per-batch confidence counts (#214). Backend extends each ImportHistory
+   *  row with these so the table can render clean / needs-review badges
+   *  without a second roundtrip. */
+  cleanCount?: number
+  needsReviewCount?: number
+  unknownCount?: number
 }
 
 type ImportHistoryTableProps = {
@@ -77,45 +83,75 @@ export function ImportHistoryTable({
               <TableHead>Batch</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Rows</TableHead>
+              <TableHead>Quality</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {importHistory.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="muted pad">
+                <TableCell colSpan={7} className="muted pad">
                   No import history yet.
                 </TableCell>
               </TableRow>
             ) : (
-              importHistory.map((h) => (
-                <TableRow key={h.id}>
-                  <TableCell>{h.startedAt.slice(0, 19).replace('T', ' ')}</TableCell>
-                  <TableCell title={h.fileName}>{h.fileName}</TableCell>
-                  <TableCell>{h.batchLabel}</TableCell>
-                  <TableCell>
-                    {h.status}
-                    {h.errorMessage ? (
-                      <span className="muted" title={h.errorMessage}>
-                        {' '}
-                        ({h.errorMessage.slice(0, 40)}
-                        {h.errorMessage.length > 40 ? '…' : ''})
-                      </span>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>{h.rowCount ?? '—'}</TableCell>
-                  <TableCell>
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      onClick={() => onRowClick(h.batchLabel)}
-                    >
-                      {actionLabel}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
+              importHistory.map((h) => {
+                const clean = h.cleanCount ?? 0
+                const needsReview = h.needsReviewCount ?? 0
+                const classified = clean + needsReview
+                return (
+                  <TableRow key={h.id}>
+                    <TableCell>{h.startedAt.slice(0, 19).replace('T', ' ')}</TableCell>
+                    <TableCell title={h.fileName}>{h.fileName}</TableCell>
+                    <TableCell>{h.batchLabel}</TableCell>
+                    <TableCell>
+                      {h.status}
+                      {h.errorMessage ? (
+                        <span className="muted" title={h.errorMessage}>
+                          {' '}
+                          ({h.errorMessage.slice(0, 40)}
+                          {h.errorMessage.length > 40 ? '…' : ''})
+                        </span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>{h.rowCount ?? '—'}</TableCell>
+                    <TableCell className="text-xs tabular-nums">
+                      {classified === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className="rounded px-1.5 py-0.5 text-green-700 dark:text-green-300"
+                            style={{ backgroundColor: 'var(--bg2)' }}
+                            title={`${clean} clean`}
+                          >
+                            {clean} clean
+                          </span>
+                          {needsReview > 0 ? (
+                            <span
+                              className="rounded px-1.5 py-0.5 text-amber-700 dark:text-amber-300"
+                              style={{ backgroundColor: 'var(--bg2)' }}
+                              title={`${needsReview} need review`}
+                            >
+                              {needsReview} review
+                            </span>
+                          ) : null}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        onClick={() => onRowClick(h.batchLabel)}
+                      >
+                        {actionLabel}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>
