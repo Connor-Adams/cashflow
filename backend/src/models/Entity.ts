@@ -20,6 +20,7 @@ export class Entity extends Model<
   declare legalName: string;
   declare jurisdiction: CreationOptional<string>;
   declare fiscalYearEnd: string | null;
+  declare spouseEntityId: number | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -41,6 +42,11 @@ export function initEntity(sequelize: Sequelize): typeof Entity {
         field: 'fiscal_year_end',
         allowNull: true,
       },
+      spouseEntityId: {
+        type: DataTypes.INTEGER,
+        field: 'spouse_entity_id',
+        allowNull: true,
+      },
     } as ModelAttributes<Entity>,
     {
       sequelize,
@@ -48,6 +54,7 @@ export function initEntity(sequelize: Sequelize): typeof Entity {
       tableName: 'tax_entities',
       underscored: true,
       timestamps: true,
+      indexes: [{ fields: ['spouse_entity_id'] }],
     }
   );
   return Entity;

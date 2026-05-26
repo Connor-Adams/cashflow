@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
-import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment } from '../models';
+import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, sequelize } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
@@ -24,6 +24,147 @@ router.get('/entities', async (req, res, next) => {
     const { household } = currentAuth(req);
     const entities = await Entity.findAll({ where: { householdId: household.id } });
     res.json({ entities });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tax/entities/:id/spouse — link two personal entities as spouses.
+// Body: { spouseEntityId: number }. Sets both reciprocal directions atomically.
+// Validations:
+//   1. Both entities must belong to caller's household (else 403).
+//   2. Both must be kind === 'personal' (else 400).
+//   3. Idempotent if already linked to the same spouse (200, no-op).
+//   4. 409 if either entity already linked to a DIFFERENT spouse.
+router.post('/entities/:id/spouse', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const entityId = Number(req.params.id);
+    if (!Number.isInteger(entityId)) {
+      res.status(400).json({ error: 'invalid_entity_id' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { spouseEntityId?: unknown };
+    const spouseEntityId = Number(body.spouseEntityId);
+    if (!Number.isInteger(spouseEntityId)) {
+      res.status(400).json({
+        error: 'invalid_body',
+        message: 'spouseEntityId (int) required',
+      });
+      return;
+    }
+
+    if (entityId === spouseEntityId) {
+      res.status(400).json({
+        error: 'invalid_spouse',
+        message: 'Cannot link an entity to itself as spouse',
+      });
+      return;
+    }
+
+    const a = await Entity.findByPk(entityId);
+    if (!a) {
+      res.status(404).json({ error: 'entity_not_found' });
+      return;
+    }
+    if (a.householdId !== household.id) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+
+    const b = await Entity.findByPk(spouseEntityId);
+    if (!b) {
+      res.status(404).json({ error: 'spouse_entity_not_found' });
+      return;
+    }
+    if (b.householdId !== household.id) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+
+    if (a.kind !== 'personal' || b.kind !== 'personal') {
+      res.status(400).json({
+        error: 'invalid_kind',
+        message: 'Both entities must be kind=personal',
+      });
+      return;
+    }
+
+    // Idempotent re-link: if both already point at each other, no-op success.
+    if (a.spouseEntityId === b.id && b.spouseEntityId === a.id) {
+      res.status(200).json({ entity: a });
+      return;
+    }
+
+    // Conflict: either side already linked to someone else.
+    if (a.spouseEntityId !== null && a.spouseEntityId !== b.id) {
+      res.status(409).json({
+        error: 'spouse_conflict',
+        message: `Entity ${a.id} already linked to spouse ${a.spouseEntityId}`,
+      });
+      return;
+    }
+    if (b.spouseEntityId !== null && b.spouseEntityId !== a.id) {
+      res.status(409).json({
+        error: 'spouse_conflict',
+        message: `Entity ${b.id} already linked to spouse ${b.spouseEntityId}`,
+      });
+      return;
+    }
+
+    // Set both directions atomically.
+    await sequelize.transaction(async (t) => {
+      await a.update({ spouseEntityId: b.id }, { transaction: t });
+      await b.update({ spouseEntityId: a.id }, { transaction: t });
+    });
+
+    res.status(200).json({ entity: a });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/tax/entities/:id/spouse — unlink both reciprocal directions.
+// Idempotent: returns 204 even if no spouse is currently set.
+router.delete('/entities/:id/spouse', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const entityId = Number(req.params.id);
+    if (!Number.isInteger(entityId)) {
+      res.status(400).json({ error: 'invalid_entity_id' });
+      return;
+    }
+
+    const a = await Entity.findByPk(entityId);
+    if (!a) {
+      res.status(404).json({ error: 'entity_not_found' });
+      return;
+    }
+    if (a.householdId !== household.id) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+
+    // Idempotent: no spouse set, nothing to do.
+    if (a.spouseEntityId === null) {
+      res.status(204).send();
+      return;
+    }
+
+    const spouseId = a.spouseEntityId;
+    const b = await Entity.findByPk(spouseId);
+
+    await sequelize.transaction(async (t) => {
+      await a.update({ spouseEntityId: null }, { transaction: t });
+      // Only clear the reciprocal side if it actually points back at us;
+      // otherwise leave the stale field alone (defensive against drift).
+      if (b && b.spouseEntityId === a.id) {
+        await b.update({ spouseEntityId: null }, { transaction: t });
+      }
+    });
+
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

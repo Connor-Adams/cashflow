@@ -123,6 +123,7 @@ initAiReviewRun(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Entity.belongsTo(Entity, { foreignKey: 'spouseEntityId', as: 'spouse' });
 
 Household.hasMany(TaxTag, { foreignKey: 'household_id', as: 'taxTags' });
 TaxTag.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });

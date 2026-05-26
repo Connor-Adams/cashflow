@@ -96,6 +96,41 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
   },
   {
     kind: 'personal',
+    key: 'deductions.spousalRrspContrib',
+    label: 'Spousal RRSP contribution (CAD, contributor side)',
+    inputType: 'decimal',
+    validate: (v) => assertNumber(v, 'deductions.spousalRrspContrib'),
+    apply: (facts, value) => {
+      assertNumber(value, 'deductions.spousalRrspContrib');
+      // Same engine treatment as regular RRSP contribution.
+      // Source tagged so reconciliation can surface the spousal flag separately.
+      return {
+        ...facts,
+        rrspContribs: [
+          ...facts.rrspContribs,
+          { source: 'override:deductions.spousalRrspContrib', amount: D(String(value)), date: '' },
+        ],
+      };
+    },
+  },
+  {
+    kind: 'personal',
+    key: 'pensionSplit.transferAmount',
+    label: 'Pension income split — amount transferred to spouse (CAD)',
+    inputType: 'decimal',
+    validate: (v) => assertNumber(v, 'pensionSplit.transferAmount'),
+    apply: (facts, value) => {
+      assertNumber(value, 'pensionSplit.transferAmount');
+      // The split is realised by spouseRouter cross-entity; apply just stamps the
+      // amount onto a synthetic field for the router to read.
+      return {
+        ...facts,
+        pensionSplit: { transferAmount: D(String(value)) },
+      } as unknown as typeof facts;
+    },
+  },
+  {
+    kind: 'personal',
     key: 'capgains.dispositions',
     label: 'Capital gain dispositions',
     inputType: 'array_capgain_dispositions',
