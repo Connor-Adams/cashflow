@@ -1,6 +1,8 @@
+// backend/src/observability/requestLogger.ts
 import { randomUUID } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { logger } from './logger';
+import { withContext } from './requestContext';
 
 function headerValue(req: Request, name: string): string | undefined {
   const value = req.headers[name.toLowerCase()];
@@ -16,18 +18,25 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
     const statusCode = res.statusCode;
-    const level = statusCode >= 500 ? 'error' : statusCode >= 400 ? 'warn' : 'info';
-    logger[level]('http_request', {
-      requestId,
-      method: req.method,
-      path: req.originalUrl || req.url,
-      statusCode,
-      durationMs: Math.round(durationMs),
-      userId: req.auth?.user.id,
-      householdId: req.auth?.household.id,
-      role: req.auth?.role,
-    });
+    const level: 'info' | 'warn' | 'error' =
+      statusCode >= 500 ? 'error' : statusCode >= 400 ? 'warn' : 'info';
+    logger[level](
+      {
+        method: req.method,
+        path: req.originalUrl || req.url,
+        statusCode,
+        durationMs: Math.round(durationMs),
+        // requestId, userId, householdId, role are auto-attached via ALS mixin
+      },
+      'http_request',
+    );
   });
 
-  next();
+  withContext(
+    {
+      requestId,
+      route: req.route?.path,
+    },
+    () => next(),
+  );
 }
