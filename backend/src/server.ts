@@ -14,6 +14,7 @@ import './jobs/definitions/enrichmentBackfill';
 import './jobs/definitions/usdCadBackfill';
 import './jobs/definitions/weeklyDigest';
 import './jobs/definitions/budgetBreachCheck';
+import './jobs/definitions/jobRunCleanup';
 import { startAllJobs } from './jobs';
 
 const lookupAsync = promisify(lookup);

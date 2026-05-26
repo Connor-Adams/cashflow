@@ -1,0 +1,25 @@
+problem: issue-303-jobs-observability
+authority:
+  source_of_truth:
+    - GitHub issue #303 acceptance criteria
+    - Existing Cashflow job registry/runner API
+    - Wander Design System components when available
+constraints:
+  - id: owner-only
+    text: Jobs API and Settings Jobs tab must be accessible to household owners and not require global superadmin.
+  - id: no-cron-editor
+    text: Cron editing, pause/disable workflow expansion, websockets, alert preferences, and queue depth metrics are out of scope.
+  - id: tdd
+    text: Add failing backend/frontend tests before implementation changes.
+  - id: job-run-ledger
+    text: Use a generic JobRun model/table because ProviderJobLog is provider-attempt-specific.
+  - id: retention
+    text: Retain most recent 100 job_runs per job and prune older rows.
+  - id: manual-run-conflict
+    text: A manual run while the same job is running must return 409 JOB_ALREADY_RUNNING.
+  - id: failure-notification
+    text: Each failed run may enqueue one notification per owner recipient; do not duplicate notifications for a single failed run.
+verification:
+  - backend migration test for job_runs up/down/indexes
+  - backend integration tests for list, history, manual run, 409, owner-only auth, retention, notification
+  - frontend JobsTab tests for table/status/history, run-now feedback, auto-refresh
