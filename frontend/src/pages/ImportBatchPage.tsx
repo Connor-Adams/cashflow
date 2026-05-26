@@ -74,6 +74,11 @@ export function ImportBatchPage() {
     batchRow.status,
   ].join(' · ')
 
+  const cleanCount = batchRow.cleanCount ?? 0
+  const needsReviewCount = batchRow.needsReviewCount ?? 0
+  const unknownCount = batchRow.unknownCount ?? 0
+  const classified = cleanCount + needsReviewCount
+
   return (
     <div className="page">
       <PageHeader title={`Import ${batchRow.batchLabel}`} description={description} />
@@ -91,6 +96,30 @@ export function ImportBatchPage() {
                 </>
               ) : null}
             </p>
+            {/* Per-batch import-confidence breakdown (#214). Renders a small
+                green/amber summary when the batch was classified; quiet when
+                the batch predates the classifier. */}
+            {classified > 0 || unknownCount > 0 ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded px-2 py-0.5 font-semibold text-green-700 dark:text-green-300" style={{ backgroundColor: 'var(--bg2)' }}>
+                  {cleanCount} clean
+                </span>
+                {needsReviewCount > 0 ? (
+                  <Link
+                    to={`/review?confidenceFlag=needs_review`}
+                    className="rounded px-2 py-0.5 font-semibold text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
+                    style={{ backgroundColor: 'var(--bg2)' }}
+                  >
+                    {needsReviewCount} need review
+                  </Link>
+                ) : null}
+                {unknownCount > 0 ? (
+                  <span className="text-muted-foreground">
+                    {unknownCount} legacy (not classified)
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <Link
             to={`/transactions?${transactionsQuery.toString()}`}

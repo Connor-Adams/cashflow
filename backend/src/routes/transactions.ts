@@ -109,6 +109,21 @@ export function buildTransactionFilterWhere(
     // -1 matches nothing; auto-increment ids start at 1, so this returns empty when all entries are invalid.
     where.id = ids.length === 0 ? -1 : ids;
   }
+  if (source.importConfidence) {
+    const v = String(source.importConfidence);
+    if (v === 'clean' || v === 'needs_review') {
+      where.importConfidence = v;
+    }
+  }
+  // confidenceFlag uses LIKE on the JSON-encoded TEXT column. The classifier
+  // serializes tokens as a JSON array (e.g. ["needs_review","missing_category"])
+  // so `'%"missing_category"%'` matches deterministically. This avoids needing
+  // a JSONB column + GIN index for what is effectively a small enum filter.
+  if (typeof source.confidenceFlag === 'string' && source.confidenceFlag.length > 0) {
+    where.importConfidenceFlags = {
+      [Op.like]: `%"${source.confidenceFlag.replace(/[^a-z_]/gi, '')}"%`,
+    };
+  }
   return where;
 }
 
