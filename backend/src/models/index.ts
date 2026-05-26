@@ -88,6 +88,7 @@ import {
   initNotificationPreference,
 } from './NotificationPreference';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
+import { SavedSearch, initSavedSearch } from './SavedSearch';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -160,6 +161,7 @@ initNotification(sequelize);
 initNotificationPreference(sequelize);
 initAuditLog(sequelize);
 initBudgetAlertState(sequelize);
+initSavedSearch(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -655,6 +657,16 @@ CashflowSettings.belongsTo(User, {
   as: 'user',
 });
 
+// SavedSearch (issue #235). One row per user-named query string; cascades
+// on user delete so we never orphan rows when a user is removed.
+User.hasMany(SavedSearch, {
+  foreignKey: 'user_id',
+  as: 'savedSearches',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedSearch.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 export {
   sequelize,
   User,
@@ -726,4 +738,5 @@ export {
   NotificationPreference,
   AuditLog,
   BudgetAlertState,
+  SavedSearch,
 };
