@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { Job } from '../models';
+import { Job, JobRun } from '../models';
+import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
 import { withContext } from '../observability/requestContext';
 import { resolveJobConfig } from './configResolver';
 import { withAdvisoryLock } from './pgLock';
+import { pruneJobRuns } from './runRetention';
 import type { JobDefinition, JobStatus } from './types';
 
 const runningTicks = new Set<string>();
@@ -50,15 +52,84 @@ async function upsertState(
 export interface TickOutcome {
   status: JobStatus;
   durationMs: number;
+  jobName: string;
+  runId?: number;
+  queuedAt?: string;
   result?: Record<string, unknown>;
   error?: string;
 }
 
-export async function tick(def: JobDefinition): Promise<TickOutcome> {
-  return withContext({ jobName: def.name, tickId: randomUUID() }, () => tickInner(def));
+export interface TickOptions {
+  failureNotificationUserIds?: number[];
 }
 
-async function tickInner(def: JobDefinition): Promise<TickOutcome> {
+export async function tick(def: JobDefinition, opts: TickOptions = {}): Promise<TickOutcome> {
+  return withContext({ jobName: def.name, tickId: randomUUID() }, () => tickInner(def, opts));
+}
+
+async function createRun(jobName: string, startedAt: Date): Promise<JobRun | null> {
+  try {
+    return await JobRun.create({
+      jobName,
+      startedAt,
+      finishedAt: null,
+      status: 'running',
+      durationMs: null,
+      errorMessage: null,
+    });
+  } catch (err) {
+    logger.error({ err, name: jobName }, 'job_run_create_failed');
+    return null;
+  }
+}
+
+async function finishRun(
+  run: JobRun | null,
+  patch: { status: 'success' | 'failed' | 'skipped'; durationMs: number; errorMessage?: string | null },
+): Promise<void> {
+  if (!run) return;
+  try {
+    await run.update({
+      finishedAt: new Date(),
+      status: patch.status,
+      durationMs: patch.durationMs,
+      errorMessage: patch.errorMessage ?? null,
+    });
+  } catch (err) {
+    logger.error({ err, runId: run.id, name: run.jobName }, 'job_run_update_failed');
+  }
+}
+
+async function pruneRuns(jobName: string, keep = 100): Promise<void> {
+  try {
+    await pruneJobRuns(jobName, keep);
+  } catch (err) {
+    logger.error({ err, name: jobName }, 'job_run_prune_failed');
+  }
+}
+
+async function notifyFailure(
+  def: JobDefinition,
+  run: JobRun | null,
+  message: string,
+  userIds: number[] | undefined,
+): Promise<void> {
+  if (!run || !userIds?.length) return;
+  await Promise.all(userIds.map(async (userId) => {
+    try {
+      await enqueueNotification(userId, 'job.failed', {
+        severity: 'critical',
+        title: `${def.name} failed`,
+        body: message,
+        dataJson: { jobName: def.name, runId: run.id },
+      });
+    } catch (err) {
+      logger.error({ err, name: def.name, userId, runId: run.id }, 'job_failure_notification_failed');
+    }
+  }));
+}
+
+async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOutcome> {
   const startedAt = new Date();
   const cfg = await resolveJobConfig(def);
   if (!cfg.enabled) {
@@ -69,7 +140,7 @@ async function tickInner(def: JobDefinition): Promise<TickOutcome> {
       lastDurationMs: 0,
       lastError: null,
     });
-    return { status: 'skipped_disabled', durationMs: 0 };
+    return { status: 'skipped_disabled', durationMs: 0, jobName: def.name };
   }
 
   if (runningTicks.has(def.name)) {
@@ -80,10 +151,16 @@ async function tickInner(def: JobDefinition): Promise<TickOutcome> {
       lastDurationMs: 0,
       lastError: null,
     });
-    return { status: 'skipped_reentrant', durationMs: 0 };
+    return { status: 'skipped_reentrant', durationMs: 0, jobName: def.name };
   }
   runningTicks.add(def.name);
   await upsertState(def.name, { lastRunAt: startedAt });
+  const run = await createRun(def.name, startedAt);
+  const runMeta = {
+    jobName: def.name,
+    runId: run?.id,
+    queuedAt: startedAt.toISOString(),
+  };
 
   const t0 = Date.now();
   try {
@@ -96,7 +173,9 @@ async function tickInner(def: JobDefinition): Promise<TickOutcome> {
         lastDurationMs: durationMs,
         lastError: null,
       });
-      return { status: 'skipped_locked', durationMs };
+      await finishRun(run, { status: 'skipped', durationMs });
+      await pruneRuns(def.name);
+      return { status: 'skipped_locked', durationMs, ...runMeta };
     }
     const handlerResult = lockResult.value;
     const summary =
@@ -113,8 +192,10 @@ async function tickInner(def: JobDefinition): Promise<TickOutcome> {
       lastError: null,
       lastResultJson,
     });
+    await finishRun(run, { status: 'success', durationMs });
+    await pruneRuns(def.name);
     logger.info({ name: def.name, durationMs }, 'job_tick_ok');
-    return { status: 'ok', durationMs, result: summary };
+    return { status: 'ok', durationMs, result: summary, ...runMeta };
   } catch (err) {
     const durationMs = Date.now() - t0;
     const message = err instanceof Error ? err.message : String(err);
@@ -124,8 +205,12 @@ async function tickInner(def: JobDefinition): Promise<TickOutcome> {
       lastDurationMs: durationMs,
       lastError: truncate(message, ERROR_MAX),
     });
+    const truncated = truncate(message, ERROR_MAX);
+    await finishRun(run, { status: 'failed', durationMs, errorMessage: truncated });
+    await notifyFailure(def, run, truncated, opts.failureNotificationUserIds);
+    await pruneRuns(def.name);
     logger.error({ err, name: def.name, durationMs }, 'job_tick_failed');
-    return { status: 'error', durationMs, error: message };
+    return { status: 'error', durationMs, error: message, ...runMeta };
   } finally {
     runningTicks.delete(def.name);
   }

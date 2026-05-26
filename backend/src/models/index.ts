@@ -50,6 +50,7 @@ import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
 import { Job, initJob } from './Job';
+import { JobRun, initJobRun } from './JobRun';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -130,6 +131,7 @@ initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
 initJob(sequelize);
+initJobRun(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -640,6 +642,7 @@ export {
   InstalmentPayment,
   ProviderJobLog,
   Job,
+  JobRun,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
   Scenario,

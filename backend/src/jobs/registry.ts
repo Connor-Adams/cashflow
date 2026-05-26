@@ -1,10 +1,10 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import { CronExpressionParser } from 'cron-parser';
-import { Job } from '../models';
+import { Job, JobRun } from '../models';
 import { logger } from '../observability/logger';
 import { resolveJobConfig } from './configResolver';
-import { tick, type TickOutcome } from './runner';
-import type { JobDefinition, JobStatusView } from './types';
+import { tick, type TickOptions, type TickOutcome } from './runner';
+import type { JobDefinition, JobRunView, JobStatusView } from './types';
 
 const definitions = new Map<string, JobDefinition>();
 const scheduled = new Map<string, { task: ScheduledTask; cron: string; enabled: boolean }>();
@@ -54,10 +54,28 @@ export async function listJobs(): Promise<JobStatusView[]> {
   return out;
 }
 
-export async function runJobByName(name: string): Promise<TickOutcome> {
+export async function listJobRuns(name: string, limit = 10): Promise<JobRunView[]> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const rows = await JobRun.findAll({
+    where: { jobName: name },
+    order: [['startedAt', 'DESC'], ['id', 'DESC']],
+    limit: safeLimit,
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    jobName: row.jobName,
+    startedAt: row.startedAt.toISOString(),
+    finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
+    status: row.status,
+    durationMs: row.durationMs,
+    errorMessage: row.errorMessage,
+  }));
+}
+
+export async function runJobByName(name: string, opts: TickOptions = {}): Promise<TickOutcome> {
   const def = definitions.get(name);
   if (!def) throw new Error(`unknown job: ${name}`);
-  return tick(def);
+  return tick(def, opts);
 }
 
 async function applyConfig(def: JobDefinition): Promise<void> {
