@@ -34,7 +34,11 @@ import { formatMoney } from '../lib/formatMoney'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
-import { toDateInputValue } from '../lib/dateInput'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '../lib/dateInput'
 import { useSessionState } from '../lib/useSessionState'
 import {
   formatCompactMoney,
@@ -191,24 +195,12 @@ const CHART_TOOLTIP_CURSOR = {
   fill: 'color-mix(in oklch, var(--accent) 30%, transparent)',
 }
 
-function parseDateInput(value: string): Date | null {
-  const parts = value.split('-').map((p) => Number(p))
-  if (parts.length !== 3) return null
-  const [y, m, d] = parts
-  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
-    return null
-  }
-  const out = new Date(y, m - 1, d)
-  if (Number.isNaN(out.getTime())) return null
-  return out
-}
-
 function getPreviousRange(
   dateFrom: string,
   dateTo: string
 ): { from: string; to: string } | null {
-  const from = parseDateInput(dateFrom)
-  const to = parseDateInput(dateTo)
+  const from = fromDateInputValue(dateFrom)
+  const to = fromDateInputValue(dateTo)
   if (!from || !to || from > to) return null
   const dayMs = 24 * 60 * 60 * 1000
   const spanDays = Math.floor((to.getTime() - from.getTime()) / dayMs) + 1
@@ -217,23 +209,32 @@ function getPreviousRange(
   return { from: toDateInputValue(prevFrom), to: toDateInputValue(prevTo) }
 }
 
+/**
+ * Anchor for default-range calculations: UTC midnight of the user's local
+ * calendar day. Routing all default-range math through this anchor keeps the
+ * derived YYYY-MM-DD strings stable regardless of the user's timezone.
+ */
+function localTodayUtcMidnight(): Date {
+  return fromDateInputValue(todayDateInputValue())!
+}
+
 function getDefaultDashboardRange(): { from: string; to: string } {
-  const to = new Date()
+  const to = localTodayUtcMidnight()
   const from = new Date(to)
-  from.setDate(from.getDate() - 30)
+  from.setUTCDate(from.getUTCDate() - 30)
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getRollingMonthRange(months: number): { from: string; to: string } {
-  const to = new Date()
+  const to = localTodayUtcMidnight()
   const from = new Date(to)
-  from.setMonth(from.getMonth() - months)
+  from.setUTCMonth(from.getUTCMonth() - months)
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDateRange(): { from: string; to: string } {
-  const to = new Date()
-  const from = new Date(to.getFullYear(), 0, 1)
+  const to = localTodayUtcMidnight()
+  const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
@@ -335,7 +336,7 @@ export function DashboardPage() {
       try {
         const insightQs = new URLSearchParams({
           currency,
-          period: (dateTo || new Date().toISOString()).slice(0, 7),
+          period: (dateTo || todayDateInputValue()).slice(0, 7),
         })
         insightQs.set('dateFrom', dateFrom)
         insightQs.set('dateTo', dateTo)
