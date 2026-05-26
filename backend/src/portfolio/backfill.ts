@@ -69,11 +69,11 @@ function enqueue(key: string, work: () => Promise<void>): void {
   if (inFlight.has(key)) return;
   const p = work()
     .catch((err) => {
-      logger.warn('backfill_failed', {
+      logger.warn({
         key,
         provider: defaultYahoo.YAHOO_PROVIDER,
         error: err instanceof Error ? err.message : String(err),
-      });
+      }, 'backfill_failed');
     })
     .finally(() => {
       inFlight.delete(key);

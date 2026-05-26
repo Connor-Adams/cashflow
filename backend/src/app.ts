@@ -154,13 +154,13 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     householdId: _req.auth?.household.id,
   };
   if (responseStatus >= 500) {
-    logger.error('request_failed', requestContext, err);
+    logger.error({ ...requestContext, err }, 'request_failed');
   } else {
-    logger.warn('request_failed', {
+    logger.warn({
       ...requestContext,
       errorName: err instanceof Error ? err.name : undefined,
       errorMessage: err instanceof Error ? err.message : undefined,
-    });
+    }, 'request_failed');
   }
   if (code === 'LIMIT_FILE_SIZE') {
     res.status(400).json({ error: 'File too large (max 15MB)' });

@@ -323,8 +323,8 @@ export async function seedDemoData(): Promise<void> {
     }
   });
 
-  logger.info('demo_seed_complete', {
+  logger.info({
     email: DEMO_EMAIL,
     enabled: true,
-  });
+  }, 'demo_seed_complete');
 }
