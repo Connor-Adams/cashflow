@@ -19,6 +19,7 @@ import reportsRouter from './routes/reports';
 import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
+import cfoBriefingsRouter from './routes/cfoBriefings';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
@@ -151,6 +152,8 @@ app.use('/api/reports', reportsRouter);
 // /reviews/* paths win against any future overlap. Both share the /api/ai
 // prefix to satisfy the issue's endpoint spec.
 app.use('/api/ai', aiReviewRouter);
+// Personal CFO briefings (issue #236).
+app.use('/api/cfo', cfoBriefingsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);
