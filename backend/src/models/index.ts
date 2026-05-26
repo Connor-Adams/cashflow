@@ -36,6 +36,8 @@ import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEma
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
+import { TaxTag, initTaxTag } from './TaxTag';
+import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
@@ -58,6 +60,7 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { Subscription, initSubscription } from './Subscription';
+import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -96,6 +99,8 @@ initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
+initTaxTag(sequelize);
+initTransactionTaxMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
@@ -112,9 +117,32 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initSubscription(sequelize);
+initAiReviewRun(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+Household.hasMany(TaxTag, { foreignKey: 'household_id', as: 'taxTags' });
+TaxTag.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+Transaction.hasOne(TransactionTaxMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'taxMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+TaxTag.hasMany(TransactionTaxMetadata, {
+  foreignKey: 'tax_tag_id',
+  as: 'transactionTaxMetadata',
+});
+TransactionTaxMetadata.belongsTo(TaxTag, {
+  foreignKey: 'tax_tag_id',
+  as: 'taxTag',
+});
 
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
@@ -356,6 +384,25 @@ Household.hasMany(Subscription, {
 });
 Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
+Household.hasMany(AiReviewRun, {
+  foreignKey: 'household_id',
+  as: 'aiReviewRuns',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AiReviewRun.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(AiReviewRun, {
+  foreignKey: 'user_id',
+  as: 'aiReviewRuns',
+});
+AiReviewRun.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -395,6 +442,8 @@ export {
   UserCaptureToken,
   Entity,
   TaxCategory,
+  TaxTag,
+  TransactionTaxMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,
@@ -409,4 +458,5 @@ export {
   Insight,
   PlannedEvent,
   Subscription,
+  AiReviewRun,
 };

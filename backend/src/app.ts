@@ -12,6 +12,7 @@ import summaryRouter from './routes/summary';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
 import aiRouter from './routes/ai';
+import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
@@ -19,9 +20,11 @@ import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
 import settlementsRouter from './routes/settlements';
+import partnerRouter from './routes/partner';
 import budgetsRouter from './routes/budgets';
 import insightsRouter from './routes/insights';
 import plannedEventsRouter from './routes/plannedEvents';
+import forecastRouter from './routes/forecast';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
@@ -29,6 +32,7 @@ import emailIntegrationsRouter from './routes/emailIntegrations';
 import netWorthRouter from './routes/netWorth';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
+import businessTaxRouter from './routes/businessTax';
 import householdRouter from './routes/household';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
@@ -96,13 +100,19 @@ app.use('/api/rules', rulesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/settlements', settlementsRouter);
+app.use('/api/partner', partnerRouter);
 app.use('/api/budgets', budgetsRouter);
 app.use('/api/insights', insightsRouter);
 app.use('/api/planned-events', plannedEventsRouter);
+app.use('/api/forecast', forecastRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+// AI review router (issue #210) mounted BEFORE aiRouter so its /review and
+// /reviews/* paths win against any future overlap. Both share the /api/ai
+// prefix to satisfy the issue's endpoint spec.
+app.use('/api/ai', aiReviewRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/amazon', amazonRouter);
@@ -115,6 +125,9 @@ app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
 app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
 app.use('/api/tax', taxRouter);
+// businessTaxRouter mounts /business/*, /exports/tax, /tax-tags, and
+// /transactions/:id/tax under /api. Keep it BEFORE other catch-all /api mounts.
+app.use('/api', businessTaxRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
 
