@@ -1,7 +1,12 @@
 // backend/src/observability/logger.ts
 import pino, { type LoggerOptions } from 'pino';
+import { join } from 'node:path';
 import { context as otelContext, trace } from '@opentelemetry/api';
 import { als } from './requestContext';
+
+// Absolute path to the CJS wrapper that surfaces worker-internal errors.
+// __dirname resolves to dist/observability/ at runtime (after tsc + cp).
+const OTLP_WRAPPER_PATH = join(__dirname, 'otlp-wrapper.cjs');
 
 const isDev = process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
@@ -47,7 +52,7 @@ function buildOtlpTransport() {
   if (!otlpEnabled) return undefined;
   try {
     const transport = pino.transport({
-      target: 'pino-opentelemetry-transport',
+      target: OTLP_WRAPPER_PATH,
       options: {
         loggerName: 'cashflow-backend',
         serviceVersion: process.env.GIT_SHA ?? 'dev',

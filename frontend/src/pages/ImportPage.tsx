@@ -51,8 +51,15 @@ export function ImportPage() {
       />
       <ImportHistoryTable
         refreshKey={historyRefreshKey}
-        onRowClick={(batchLabel) =>
-          navigate(`/import/${encodeURIComponent(batchLabel)}`)
+        onRowClick={(row) =>
+          // #231: navigate by id when present (preferred — drives the /api/import/batches/:id
+          // detail endpoint). Fall back to the legacy label-shaped URL for rows that
+          // somehow lack an id (shouldn't happen in practice; defensive).
+          navigate(
+            row.id != null
+              ? `/import/${row.id}`
+              : `/import/${encodeURIComponent(row.batchLabel)}`,
+          )
         }
       />
     </div>

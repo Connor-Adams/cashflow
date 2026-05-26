@@ -23,9 +23,12 @@ import { HeroTile } from '@/components/dashboard/HeroTile'
 import { KpiStack } from '@/components/dashboard/KpiStack'
 import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
+import { SafeToSpendTile } from '@/components/dashboard/SafeToSpendTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
+import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
+import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { useInsightsSeen } from '@/hooks/useInsightsSeen'
@@ -1091,6 +1094,12 @@ export function DashboardPage() {
           </BentoTile>
         )}
 
+        {/* Status-pill card (issue #268). Sits alongside the pacing tile —
+            pacing reflects time-elapsed; status reflects the same 80/100
+            thresholds the daily breach-check cron uses, so what the user
+            sees here matches what they'd be alerted about. */}
+        <BudgetStatusCard currency={currency || 'CAD'} />
+
         <BentoTile
           span={8}
           rows={2}
@@ -1165,6 +1174,8 @@ export function DashboardPage() {
         </BentoTile>
 
         <NetWorthTile />
+
+        <SafeToSpendTile currency={currency || null} />
 
         <BentoTile
           span={8}
@@ -1628,6 +1639,8 @@ export function DashboardPage() {
         />
 
         <ReceiptCoverageTile currency={currency || null} />
+
+        <ImportHealthTile currency={currency || null} />
 
         <TableTile
           span={12}

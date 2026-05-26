@@ -7,6 +7,9 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { ExplainMonthPage } from './pages/ExplainMonthPage'
+import { SankeyPage } from './pages/SankeyPage'
+import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
@@ -17,13 +20,14 @@ import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
 import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
-import { MonthlyClosePage } from './pages/MonthlyClosePage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
+import { AuditLogPage } from './pages/AuditLogPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
+import { PurchasesPage } from './pages/PurchasesPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
@@ -38,6 +42,7 @@ import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { TaxPage } from './pages/TaxPage'
+import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
 import { InsightsPage } from './pages/InsightsPage'
@@ -65,6 +70,7 @@ function AppRoutes() {
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
+          <Route path="purchases" element={<PurchasesPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
@@ -81,8 +87,12 @@ function AppRoutes() {
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
-          <Route path="monthly-close" element={<MonthlyClosePage />} />
+          <Route path="audit-log" element={<AuditLogPage />} />
+          <Route path="reports/explain-month" element={<ExplainMonthPage />} />
+          <Route path="sankey" element={<SankeyPage />} />
+          <Route path="currency" element={<CurrencyPage />} />
           <Route path="tax" element={<TaxPage />} />
+          <Route path="return-warranty" element={<ReturnWarrantyPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
             <Route element={<SettingsTabLayout />}>
