@@ -155,7 +155,7 @@ export function TopGrowersTile({
   return (
     <BentoTile
       span={6}
-      rows={2}
+      rows={1}
       aria-busy={loading}
       label="Top growers"
       description="Categories with the biggest change vs previous period."

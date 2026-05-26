@@ -1187,7 +1187,7 @@ export function DashboardPage() {
 
         <BentoTile
           span={8}
-          rows={2}
+          rows={1}
           aria-busy={loading}
           label="Net spend by category"
           description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
@@ -1221,7 +1221,7 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <BarChart data={chartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -1368,7 +1368,7 @@ export function DashboardPage() {
 
         <BentoTile
           span={6}
-          rows={2}
+          rows={1}
           aria-busy={loading}
           label="Monthly flow"
           description="Gross spend, refunds / credits, and payments / transfers by month."
@@ -1378,7 +1378,7 @@ export function DashboardPage() {
               <p className="emptyState">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <BarChart data={monthlyBreakdownData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -1428,14 +1428,14 @@ export function DashboardPage() {
 
         <BentoTile
           span={6}
-          rows={2}
+          rows={1}
           label="Activity by month"
           description="One line per currency using signed monthly totals, excluding payments and transfers."
         >
           {monthlyChartData.length === 0 ? (
             !loading ? <p className="muted">No transactions in this range.</p> : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis

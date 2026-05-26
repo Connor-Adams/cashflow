@@ -1,28 +1,22 @@
 /**
  * Integration tests for /api/categories. Run in isolation
- * (`yarn test:integration`) so DATABASE_PATH is set before any Sequelize import.
+ * (`yarn test:integration`) so DATABASE_URL is set before any Sequelize import.
  *
  * Mirrors budgets.test.ts: bootstrap a superadmin, then seed two non-superadmin
  * households so cross-household isolation can be exercised via real session cookies.
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import request from 'supertest';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-integration-categories.sqlite');
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
 let primaryAgent: ReturnType<typeof request.agent>;
 let primaryHouseholdId: number;
 let otherAgent: ReturnType<typeof request.agent>;
 let otherHouseholdId: number;
+let testDb: PgTestDb;
 
 type Seeded = { token: string; householdId: number; userId: number };
 
@@ -55,17 +49,7 @@ async function seed(emailPrefix: string): Promise<Seeded> {
 }
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('categories');
 
   const mod = await import('../../src/app.js');
   app = mod.default;
@@ -89,10 +73,8 @@ before(async () => {
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
-after(() => {
-  if (fs.existsSync(dbPath)) {
-    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
-  }
+after(async () => {
+  await teardownPgTestDb(testDb);
 });
 
 async function seedCategory(householdId: number, name: string, icon: string | null = null) {

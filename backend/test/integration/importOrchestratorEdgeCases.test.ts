@@ -10,15 +10,9 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-orchestrator-edge.sqlite');
-
+let testDb: PgTestDb;
 let models: typeof import('../../src/models/index.js');
 let importCsvFile: typeof import('../../src/import/runImport.js').importCsvFile;
 let rowFingerprint: typeof import('../../src/import/fingerprint.js').rowFingerprint;
@@ -32,15 +26,7 @@ let amazonHouseholdId: number;
 let amazonUserId: number;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('orchestrator-edge');
   models = await import('../../src/models/index.js');
   importCsvFile = (await import('../../src/import/runImport.js')).importCsvFile;
   isSequelizeUniqueLike = (await import('../../src/import/runImport.js')).isSequelizeUniqueLike;
@@ -67,8 +53,7 @@ before(async () => {
 });
 
 after(async () => {
-  await models?.sequelize.close();
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  await teardownPgTestDb(testDb);
 });
 
 async function makeAccount(name: string) {
@@ -457,11 +442,11 @@ test('applyAmazonItemCategorySuggestions: updates inferredCategory + stringifies
   const fresh = await models.ExternalOrderItem.findByPk(item.id);
   assert.ok(fresh);
   assert.equal(fresh!.inferredCategory, 'Office Equipment');
-  // DECIMAL columns are written as strings by the production code; the read
-  // value's runtime type depends on dialect (string on Postgres, number on
-  // SQLite). Stringify both to make this dialect-agnostic.
-  assert.equal(String(fresh!.businessUsePercent), '80');
-  assert.equal(String(fresh!.confidence), '90');
+  // DECIMAL(5,2) columns: Postgres returns "80.00" (full scale), SQLite
+  // returned the bare integer string. Normalize via Number() so the assert
+  // is dialect-agnostic.
+  assert.equal(Number(fresh!.businessUsePercent), 80);
+  assert.equal(Number(fresh!.confidence), 90);
 });
 
 // ─── categorizeAmazonItemsWithAi: openaiCaller injection ───────────────────

@@ -52,13 +52,6 @@ export function enforceBulkPatchCap(
 }
 
 /**
- * Build the Sequelize `where` clause for transaction listings/filtered bulk
- * operations. Reads the same fields the GET handler reads from the request
- * (query params for GET, body.filter for filtered bulk patch). Keeping this
- * in one place ensures the bulk-patch-filter endpoint operates on exactly
- * the same set the user sees in the table.
- */
-/**
  * Validates a `dateFrom` / `dateTo` query param. Empty/missing means "no
  * filter" (returns true). Otherwise the value must look like an ISO date
  * (YYYY-MM-DD) or be parseable by `new Date(...)` to a non-NaN timestamp.
@@ -72,6 +65,13 @@ export function isValidDateFilter(raw: unknown): boolean {
   return !Number.isNaN(new Date(s).getTime());
 }
 
+/**
+ * Build the Sequelize `where` clause for transaction listings/filtered bulk
+ * operations. Reads the same fields the GET handler reads from the request
+ * (query params for GET, body.filter for filtered bulk patch). Keeping this
+ * in one place ensures the bulk-patch-filter endpoint operates on exactly
+ * the same set the user sees in the table.
+ */
 export function buildTransactionFilterWhere(
   req: import('express').Request,
   source: Record<string, unknown>
@@ -388,7 +388,7 @@ router.get('/category-hints', async (_req, res, next) => {
         { replacements, type: QueryTypes.SELECT },
       ),
       sequelize.query<{ label: string; usageCount: string }>(
-        `SELECT TRIM(final_category) AS label, COUNT(*) AS usageCount
+        `SELECT TRIM(final_category) AS label, COUNT(*) AS "usageCount"
          FROM transactions
          WHERE ${txnWhere}
          GROUP BY TRIM(final_category)`,
@@ -460,7 +460,7 @@ router.get('/', async (req, res, next) => {
     if (txnIds.length > 0) {
       const placeholders = txnIds.map(() => '?').join(',');
       const cntRows = await sequelize.query<{ transactionId: number; cnt: string }>(
-        `SELECT transaction_id AS transactionId, COUNT(*) AS cnt FROM receipts WHERE transaction_id IN (${placeholders}) GROUP BY transaction_id`,
+        `SELECT transaction_id AS "transactionId", COUNT(*) AS cnt FROM receipts WHERE transaction_id IN (${placeholders}) GROUP BY transaction_id`,
         { replacements: txnIds, type: QueryTypes.SELECT },
       );
       receiptCountMap = Object.fromEntries(
@@ -474,7 +474,7 @@ router.get('/', async (req, res, next) => {
         transactionId: number;
         extractedNote: string | null;
       }>(
-        `SELECT transaction_id AS transactionId, extracted_note AS extractedNote
+        `SELECT transaction_id AS "transactionId", extracted_note AS "extractedNote"
          FROM receipts
          WHERE transaction_id IN (${placeholders})
            AND extracted_note IS NOT NULL

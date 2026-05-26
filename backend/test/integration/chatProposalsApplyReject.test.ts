@@ -14,24 +14,14 @@
  */
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import request from 'supertest';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(
-  backendRoot,
-  'data',
-  'test-integration-chat-proposals-apply-reject.sqlite'
-);
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
 let models: typeof import('../../src/models/index.js');
 let proposalsMod: typeof import('../../src/ai/chat/proposals.js');
+let testDb: PgTestDb;
 
 interface UserAgentBundle {
   agent: ReturnType<typeof request.agent>;
@@ -44,17 +34,7 @@ let user1: UserAgentBundle;
 let user2: UserAgentBundle;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('chat-proposals-apply-reject');
 
   const appMod = await import('../../src/app.js');
   app = appMod.default;
@@ -119,13 +99,7 @@ before(async () => {
 
 after(async () => {
   delete process.env.CHAT_PROPOSAL_DRIFT_PCT;
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+  await teardownPgTestDb(testDb);
 });
 
 beforeEach(() => {
@@ -163,7 +137,7 @@ async function newThread(
 /**
  * Seed a transaction whose merchantClean contains `merchantTag`. Each test
  * uses a unique tag so its bulk_patch filter only matches its own rows (the
- * sqlite DB is shared across tests in this file and never wiped, so we don't
+ * test DB is shared across tests in this file and never wiped, so we don't
  * accidentally inflate the matched count from sibling tests).
  */
 async function seedMatchingTxn(

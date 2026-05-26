@@ -10,35 +10,19 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import request from 'supertest';
 import { seedHousehold } from '../helpers/seedHousehold.js';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-integration-items.sqlite');
-
+let testDb: PgTestDb;
 let app: import('express').Express;
 let superAgent: ReturnType<typeof request.agent>;
 let agentA: ReturnType<typeof request.agent>;
 let agentB: ReturnType<typeof request.agent>;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('items');
 
   const mod = await import('../../src/app.js');
   app = mod.default;
@@ -60,14 +44,8 @@ before(async () => {
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 });
 
-after(() => {
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+after(async () => {
+  await teardownPgTestDb(testDb);
 });
 
 test('GET /api/items returns empty list for new household', async () => {
