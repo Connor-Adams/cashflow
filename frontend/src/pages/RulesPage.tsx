@@ -21,7 +21,19 @@ type CategoryHint = {
   usageCount: number
 }
 
-type RuleProposal = {
+type RuleAutoSuggestionEvidence = {
+  id: number
+  date: string
+  merchantClean: string
+  amount: string
+  currency: string
+  finalCategory: string | null
+  finalBusiness: boolean
+  finalSplitType: string
+}
+
+type RuleAutoSuggestion = {
+  id: string
   merchantPattern: string
   category: string | null
   isBusiness: boolean
@@ -30,6 +42,15 @@ type RuleProposal = {
   pctPartner: string | null
   supportCount: number
   exampleTransactionIds: number[]
+  confidence: 'high' | 'medium' | 'low'
+  reasoning: string
+  evidence: RuleAutoSuggestionEvidence[]
+}
+
+const CONFIDENCE_BADGE_CLASS: Record<RuleAutoSuggestion['confidence'], string> = {
+  high: 'inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700',
+  medium: 'inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700',
+  low: 'inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700',
 }
 
 export function RulesPage() {
@@ -49,10 +70,13 @@ export function RulesPage() {
     focusedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [focusedId, rules.length])
 
-  const [proposals, setProposals] = useState<RuleProposal[]>([])
+  const [suggestions, setSuggestions] = useState<RuleAutoSuggestion[]>([])
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [expandedSuggestionId, setExpandedSuggestionId] = useState<string | null>(
+    null
+  )
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -66,12 +90,12 @@ export function RulesPage() {
     setErr(null)
     try {
       const nextRules = await getJson<Rule[]>('/api/rules')
-      const nextProposals = await getJson<{ proposals: RuleProposal[] }>(
-        '/api/ai/rule-proposals'
+      const nextSuggestions = await getJson<{ suggestions: RuleAutoSuggestion[] }>(
+        '/api/rules/auto-suggestions'
       )
       if (loadRequestRef.current === requestId) {
         setRules(nextRules)
-        setProposals(nextProposals.proposals)
+        setSuggestions(nextSuggestions.suggestions)
       }
     } catch (e) {
       if (loadRequestRef.current === requestId) {
@@ -165,16 +189,32 @@ export function RulesPage() {
     }
   }
 
-  async function approveProposal(proposal: RuleProposal) {
+  async function acceptSuggestion(suggestion: RuleAutoSuggestion) {
     setErr(null)
     try {
-      await postJson(
-        `/api/ai/rule-proposals/${encodeURIComponent(proposal.merchantPattern)}/approve`,
-        proposal
-      )
+      await postJson(`/api/rules/auto-suggestions/${suggestion.id}/accept`)
+      showToast({
+        title: `Created rule for ${suggestion.merchantPattern}`,
+        variant: 'success',
+        durationMs: 4000,
+      })
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not approve proposal')
+      setErr(e instanceof Error ? e.message : 'Could not accept suggestion')
+    }
+  }
+
+  async function dismissSuggestion(suggestion: RuleAutoSuggestion) {
+    setErr(null)
+    try {
+      await postJson(`/api/rules/auto-suggestions/${suggestion.id}/dismiss`)
+      showToast({
+        title: `Dismissed suggestion for ${suggestion.merchantPattern}`,
+        durationMs: 4000,
+      })
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not dismiss suggestion')
     }
   }
 
@@ -250,49 +290,117 @@ export function RulesPage() {
         <button type="submit">Add rule</button>
       </form>
 
-      {proposals.length > 0 && (
+      {suggestions.length > 0 && (
         <section className="card rulesTableCard">
           <div className="rulesCardHeader">
             <div>
-              <h2>AI rule proposals</h2>
+              <h2>Auto-suggested rules</h2>
               <p className="muted">
-                Repeated reviewed merchants that look stable enough to automate.
+                Repeated reviewed merchants we think are stable enough to automate.
+                Review the reasoning before accepting.
               </p>
             </div>
-            <span className="transactionsPanelBadge">{proposals.length} proposals</span>
+            <span className="transactionsPanelBadge">
+              {suggestions.length} suggestions
+            </span>
           </div>
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Pattern</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Biz</TableHead>
-                  <TableHead>Split</TableHead>
-                  <TableHead>Support</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {proposals.map((p) => (
-                  <TableRow key={`${p.merchantPattern}-${p.category}-${p.splitType}`}>
-                    <TableCell>{p.merchantPattern}</TableCell>
-                    <TableCell>{p.category ?? '—'}</TableCell>
-                    <TableCell>{p.isBusiness ? 'yes' : ''}</TableCell>
-                    <TableCell>{p.splitType}</TableCell>
-                    <TableCell>
-                      {p.supportCount} rows #{p.exampleTransactionIds.join(', #')}
-                    </TableCell>
-                    <TableCell>
-                      <button type="button" onClick={() => void approveProposal(p)}>
-                        Approve
+          <ul className="autoSuggestionList flex flex-col gap-3">
+            {suggestions.map((s) => {
+              const isExpanded = expandedSuggestionId === s.id
+              return (
+                <li
+                  key={s.id}
+                  className="autoSuggestionCard rounded-lg border border-slate-200 bg-white p-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{s.merchantPattern}</span>
+                        <span className="text-slate-400">→</span>
+                        <span className="text-slate-700">
+                          {s.category ?? 'uncategorized'}
+                        </span>
+                        {s.isBusiness && (
+                          <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                            business
+                          </span>
+                        )}
+                        {s.splitType !== 'me' && (
+                          <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
+                            split: {s.splitType}
+                          </span>
+                        )}
+                        <span className={CONFIDENCE_BADGE_CLASS[s.confidence]}>
+                          {s.confidence} confidence
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {s.supportCount} reviewed
+                        </span>
+                      </div>
+                      <p className="muted mt-2 text-sm">{s.reasoning}</p>
+                    </div>
+                    <div className="autoSuggestionActions flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void acceptSuggestion(s)}
+                      >
+                        Accept
                       </button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                      <button
+                        type="button"
+                        onClick={() => void dismissSuggestion(s)}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedSuggestionId((cur) =>
+                            cur === s.id ? null : s.id
+                          )
+                        }
+                        aria-expanded={isExpanded}
+                      >
+                        {isExpanded ? 'Hide evidence' : 'Show evidence'}
+                      </button>
+                    </div>
+                  </div>
+                  {isExpanded && s.evidence.length > 0 && (
+                    <div className="autoSuggestionEvidence mt-3 rounded-md bg-slate-50 p-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Evidence ({s.evidence.length}
+                        {s.evidence.length < s.supportCount
+                          ? ` of ${s.supportCount}`
+                          : ''}
+                        )
+                      </h3>
+                      <ul className="mt-2 flex flex-col gap-1 text-sm">
+                        {s.evidence.map((ev) => (
+                          <li
+                            key={ev.id}
+                            className="flex flex-wrap items-center gap-2 text-slate-600"
+                          >
+                            <span className="font-mono text-xs text-slate-500">
+                              #{ev.id}
+                            </span>
+                            <span>{ev.date}</span>
+                            <span className="text-slate-400">·</span>
+                            <span>{ev.merchantClean}</span>
+                            <span className="text-slate-400">·</span>
+                            <span>
+                              {ev.amount} {ev.currency}
+                            </span>
+                            <span className="text-slate-400">·</span>
+                            <span>{ev.finalCategory ?? 'uncategorized'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
         </section>
       )}
 

@@ -1,8 +1,13 @@
 import { Router } from 'express';
 import { Rule, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere, visibleTransactionWhere } from '../auth/scope';
+import { householdWhere, isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
+import {
+  findAutoSuggestionById,
+  findAutoSuggestions,
+} from '../ai/ruleProposals';
+import { createTrackedSuggestion } from '../ai/suggestionStore';
 
 /**
  * Map a rule's shape to the InternalBackfillRequest parameters. Regex
@@ -141,6 +146,90 @@ router.post('/', async (req, res, next) => {
       'rule-create',
     );
     res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Auto-suggestion endpoints — surface deterministic rule recommendations
+ * mined from the user's own reviewed transactions. Issue #211. Mounted
+ * before /:id routes so the literal "auto-suggestions" path takes
+ * priority over the numeric-id capture.
+ */
+router.get('/auto-suggestions', async (req, res, next) => {
+  try {
+    const suggestions = await findAutoSuggestions(
+      isSuperadmin(req) ? null : currentAuth(req).household.id,
+    );
+    res.json({ suggestions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/auto-suggestions/:id/accept', async (req, res, next) => {
+  try {
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const suggestion = await findAutoSuggestionById(householdId, req.params.id);
+    if (!suggestion) {
+      res.status(404).json({ error: 'Auto-suggestion not found' });
+      return;
+    }
+    const { user, household } = currentAuth(req);
+    const row = await Rule.create({
+      merchantPattern: suggestion.merchantPattern,
+      householdId: household.id,
+      createdByUserId: user.id,
+      matchKind: 'substring',
+      priority: 0,
+      category: suggestion.category,
+      isBusiness: suggestion.isBusiness,
+      splitType: suggestion.splitType,
+      pctMe: suggestion.pctMe,
+      pctPartner: suggestion.pctPartner,
+    });
+    // Trigger a backfill so any previously-reviewed transactions for this
+    // merchant adopt the new rule's appliedRuleId, matching the behavior
+    // of POST /api/rules.
+    scheduleRuleBackfill(
+      household.id,
+      {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+      },
+      'rule-auto-suggestion-accept',
+    );
+    res.status(201).json({ rule: row, suggestionId: suggestion.id });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/auto-suggestions/:id/dismiss', async (req, res, next) => {
+  try {
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const suggestion = await findAutoSuggestionById(householdId, req.params.id);
+    if (!suggestion) {
+      res.status(404).json({ error: 'Auto-suggestion not found' });
+      return;
+    }
+    // Persist the rejection via the existing ai_suggestions store so the
+    // proposal stays hidden on subsequent GETs. Mirrors the schema written
+    // by POST /api/ai/rule-proposals/:pattern/dismiss to keep both
+    // endpoints interoperable.
+    const row = await createTrackedSuggestion({
+      req,
+      kind: 'rule_proposal',
+      inputSnapshot: { merchantPattern: suggestion.merchantPattern },
+      output: null,
+      status: 'rejected',
+      model: 'deterministic',
+      promptVersion: 'rule-auto-suggestion-dismiss-v1',
+    });
+    res.status(201).json({ ok: true, dismissalId: row.id, suggestionId: suggestion.id });
   } catch (e) {
     next(e);
   }
