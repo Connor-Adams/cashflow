@@ -37,6 +37,10 @@ export class ImportHistory extends Model<
   declare skippedDuplicateCount: CreationOptional<number | null>;
   /** Rows that failed parsing/mapping during import (#231). */
   declare rowErrorsCount: CreationOptional<number | null>;
+  /** When this batch was rolled back (#233). NULL on healthy batches. */
+  declare rolledBackAt: CreationOptional<Date | null>;
+  /** Actor who executed the rollback (#233). NULL on healthy batches. */
+  declare rolledBackByUserId: CreationOptional<number | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -119,6 +123,16 @@ export function initImportHistory(sequelize: Sequelize): typeof ImportHistory {
       rowErrorsCount: {
         type: DataTypes.INTEGER,
         field: 'row_errors_count',
+        allowNull: true,
+      },
+      rolledBackAt: {
+        type: DataTypes.DATE,
+        field: 'rolled_back_at',
+        allowNull: true,
+      },
+      rolledBackByUserId: {
+        type: DataTypes.INTEGER,
+        field: 'rolled_back_by_user_id',
         allowNull: true,
       },
     } as ModelAttributes<ImportHistory>,
