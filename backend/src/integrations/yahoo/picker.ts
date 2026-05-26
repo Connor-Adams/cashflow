@@ -46,17 +46,25 @@ const DEFAULT_TARGET_AGE_SECONDS: Record<YahooWorkFunction, number> = {
 const DEFAULT_FUNCTIONS: YahooWorkFunction[] = ['QUOTE', 'DIVIDENDS', 'OVERVIEW'];
 
 async function eligibleSecurities(): Promise<
-  Array<{ id: number; symbol: string; currency: string }>
+  Array<{
+    id: number;
+    symbol: string;
+    currency: string;
+    assetType: string | null;
+    name: string | null;
+  }>
 > {
   const rows = await Security.findAll({
     where: { symbol: { [Op.ne]: '' } },
-    attributes: ['id', 'symbol', 'currency'],
+    attributes: ['id', 'symbol', 'currency', 'assetType', 'name'],
     order: [['id', 'ASC']],
   });
   return rows.map((r) => ({
     id: r.id,
     symbol: r.symbol,
     currency: r.currency,
+    assetType: r.assetType,
+    name: r.name,
   }));
 }
 
@@ -104,14 +112,14 @@ export async function pickNext(opts: PickerOptions): Promise<WorkItem | null> {
 
   const securities = await eligibleSecurities();
   if (securities.length === 0) return null;
-  const yahooSymbols = Array.from(
-    new Set(securities.map((s) => toYahooSymbol(s.symbol, s.currency))),
-  );
+  const primaryFor = (s: (typeof securities)[number]) =>
+    toYahooSymbol(s.symbol, s.currency, { assetType: s.assetType, name: s.name });
+  const yahooSymbols = Array.from(new Set(securities.map(primaryFor)));
   const latest = await latestSuccessfulFetchByPair(yahooSymbols, functions);
 
   let best: WorkItem | null = null;
   for (const s of securities) {
-    const yahooSymbol = toYahooSymbol(s.symbol, s.currency);
+    const yahooSymbol = primaryFor(s);
     for (const fnName of functions) {
       const last = latest.get(fnName)?.get(yahooSymbol) ?? null;
       const ageSeconds = last

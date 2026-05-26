@@ -28,7 +28,7 @@ import {
   fetchQuote,
 } from '../integrations/yahoo/client';
 import { recordCall } from '../integrations/yahoo/jobLog';
-import { toYahooSymbol } from '../integrations/yahoo/symbol';
+import { enumerateYahooSymbols } from '../integrations/yahoo/symbol';
 import {
   TAX_STATUS_LABELS,
   TAX_STATUS_ORDER,
@@ -1772,55 +1772,69 @@ router.post('/prices/refresh', async (req, res, next) => {
         });
         continue;
       }
-      const yahooSymbol = toYahooSymbol(security.symbol, security.currency);
-      try {
-        const quote = await fetchQuote(yahooSymbol);
-        if (!quote) {
+      const candidates = enumerateYahooSymbols(security.symbol, {
+        currency: security.currency,
+        assetType: security.assetType,
+        name: security.name,
+      });
+      let quoteSettled = false;
+      for (let i = 0; i < candidates.length && !quoteSettled; i++) {
+        const yahooSymbol = candidates[i];
+        const isLast = i === candidates.length - 1;
+        try {
+          const quote = await fetchQuote(yahooSymbol);
+          if (!quote) {
+            await recordCall({
+              function: 'QUOTE',
+              symbol: yahooSymbol,
+              status: 'not_found',
+            });
+            if (isLast) {
+              results.push({ symbol: security.symbol, status: 'not_found' });
+              quoteSettled = true;
+            }
+            continue;
+          }
+          const row = await SecurityPrice.create({
+            securityId: security.id,
+            provider: YAHOO_PROVIDER,
+            symbol: security.symbol,
+            pricedAt: quote.pricedAt,
+            price: String(quote.price),
+            currency: security.currency,
+            fetchedAt: new Date(),
+          });
           await recordCall({
             function: 'QUOTE',
             symbol: yahooSymbol,
-            status: 'not_found',
+            status: 'ok',
           });
-          results.push({ symbol: security.symbol, status: 'not_found' });
-          continue;
+          results.push({
+            symbol: security.symbol,
+            status: 'refreshed',
+            price: quote.price,
+            fetchedAt: row.fetchedAt.toISOString(),
+          });
+          quoteSettled = true;
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Quote refresh failed';
+          const isProviderErr = e instanceof YahooFinanceError;
+          const isRateLimit =
+            isProviderErr && (e.httpStatus === 429 || /rate.?limit/i.test(e.message));
+          await recordCall({
+            function: 'QUOTE',
+            symbol: yahooSymbol,
+            status: isRateLimit ? 'rate_limited' : 'error',
+            httpStatus: isProviderErr ? e.httpStatus : null,
+            errorMessage: message.slice(0, 1024),
+          });
+          results.push({
+            symbol: security.symbol,
+            status: isRateLimit ? 'rate_limited' : 'error',
+            error: message,
+          });
+          quoteSettled = true;
         }
-        const row = await SecurityPrice.create({
-          securityId: security.id,
-          provider: YAHOO_PROVIDER,
-          symbol: security.symbol,
-          pricedAt: quote.pricedAt,
-          price: String(quote.price),
-          currency: security.currency,
-          fetchedAt: new Date(),
-        });
-        await recordCall({
-          function: 'QUOTE',
-          symbol: yahooSymbol,
-          status: 'ok',
-        });
-        results.push({
-          symbol: security.symbol,
-          status: 'refreshed',
-          price: quote.price,
-          fetchedAt: row.fetchedAt.toISOString(),
-        });
-      } catch (e) {
-        const message = e instanceof Error ? e.message : 'Quote refresh failed';
-        const isProviderErr = e instanceof YahooFinanceError;
-        const isRateLimit =
-          isProviderErr && (e.httpStatus === 429 || /rate.?limit/i.test(e.message));
-        await recordCall({
-          function: 'QUOTE',
-          symbol: yahooSymbol,
-          status: isRateLimit ? 'rate_limited' : 'error',
-          httpStatus: isProviderErr ? e.httpStatus : null,
-          errorMessage: message.slice(0, 1024),
-        });
-        results.push({
-          symbol: security.symbol,
-          status: isRateLimit ? 'rate_limited' : 'error',
-          error: message,
-        });
       }
     }
     res.json({ provider: YAHOO_PROVIDER, results });

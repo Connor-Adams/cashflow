@@ -38,7 +38,7 @@ import {
   type QuoteResult,
 } from './client';
 import { pickNext, type YahooWorkFunction } from './picker';
-import { toYahooSymbol } from './symbol';
+import { enumerateYahooSymbols, toYahooSymbol } from './symbol';
 
 export interface TickResult {
   status:
@@ -69,7 +69,13 @@ let runningTick = false;
 
 async function securitiesForYahooSymbol(yahooSymbol: string): Promise<Security[]> {
   const all = await Security.findAll({ where: {} });
-  return all.filter((s) => toYahooSymbol(s.symbol, s.currency) === yahooSymbol);
+  return all.filter(
+    (s) =>
+      toYahooSymbol(s.symbol, s.currency, {
+        assetType: s.assetType,
+        name: s.name,
+      }) === yahooSymbol,
+  );
 }
 
 async function persistQuote(yahooSymbol: string, quote: QuoteResult): Promise<void> {
@@ -164,49 +170,75 @@ const HANDLERS: Record<YahooWorkFunction, FunctionHandler<unknown>> = {
 
 async function dispatch(
   fnName: YahooWorkFunction,
-  yahooSymbol: string,
+  primaryYahooSymbol: string,
 ): Promise<TickResult> {
   const handler = HANDLERS[fnName];
-  try {
-    const result = await handler.fetch(yahooSymbol);
-    const isEmptyArrayOk =
-      handler.notFoundIsEmptyArray && Array.isArray(result) && result.length === 0;
-    if (result == null) {
-      await recordCall({ function: fnName, symbol: yahooSymbol, status: 'not_found' });
-      return { status: 'not_found', symbol: yahooSymbol, function: fnName };
-    }
-    if (!isEmptyArrayOk) {
-      await handler.persist(yahooSymbol, result);
-    }
-    await recordCall({ function: fnName, symbol: yahooSymbol, status: 'ok' });
-    return { status: 'refreshed', symbol: yahooSymbol, function: fnName };
-  } catch (err) {
-    if (err instanceof YahooFinanceError) {
-      const isRateLimit =
-        err.httpStatus === 429 || /rate.?limit/i.test(err.message);
+  // Resolve the candidate list from any Security row that maps to the
+  // primary symbol the picker selected. All rows sharing a primary
+  // candidate also share the same alternate suffixes (mapper is pure on
+  // symbol/currency/assetType/name and `securitiesForYahooSymbol` already
+  // matches on the primary candidate).
+  const matchedSecs = await securitiesForYahooSymbol(primaryYahooSymbol);
+  const candidates =
+    matchedSecs[0] != null
+      ? enumerateYahooSymbols(matchedSecs[0].symbol, {
+          currency: matchedSecs[0].currency,
+          assetType: matchedSecs[0].assetType,
+          name: matchedSecs[0].name,
+        })
+      : [primaryYahooSymbol];
+  if (candidates.length === 0) {
+    return { status: 'not_found', symbol: primaryYahooSymbol, function: fnName };
+  }
+
+  for (let i = 0; i < candidates.length; i++) {
+    const symbol = candidates[i];
+    const isLast = i === candidates.length - 1;
+    try {
+      const result = await handler.fetch(symbol);
+      const isEmptyArrayOk =
+        handler.notFoundIsEmptyArray && Array.isArray(result) && result.length === 0;
+      if (result == null) {
+        await recordCall({ function: fnName, symbol, status: 'not_found' });
+        if (isLast) {
+          return { status: 'not_found', symbol, function: fnName };
+        }
+        continue;
+      }
+      if (!isEmptyArrayOk) {
+        await handler.persist(symbol, result);
+      }
+      await recordCall({ function: fnName, symbol, status: 'ok' });
+      return { status: 'refreshed', symbol, function: fnName };
+    } catch (err) {
+      if (err instanceof YahooFinanceError) {
+        const isRateLimit =
+          err.httpStatus === 429 || /rate.?limit/i.test(err.message);
+        await recordCall({
+          function: fnName,
+          symbol,
+          status: isRateLimit ? 'rate_limited' : 'error',
+          httpStatus: err.httpStatus,
+          errorMessage: err.message.slice(0, 1024),
+        });
+        return {
+          status: isRateLimit ? 'rate_limited' : 'error',
+          symbol,
+          function: fnName,
+          error: err.message,
+        };
+      }
+      const message = err instanceof Error ? err.message : 'unknown error';
       await recordCall({
         function: fnName,
-        symbol: yahooSymbol,
-        status: isRateLimit ? 'rate_limited' : 'error',
-        httpStatus: err.httpStatus,
-        errorMessage: err.message.slice(0, 1024),
+        symbol,
+        status: 'error',
+        errorMessage: message.slice(0, 1024),
       });
-      return {
-        status: isRateLimit ? 'rate_limited' : 'error',
-        symbol: yahooSymbol,
-        function: fnName,
-        error: err.message,
-      };
+      return { status: 'error', symbol, function: fnName, error: message };
     }
-    const message = err instanceof Error ? err.message : 'unknown error';
-    await recordCall({
-      function: fnName,
-      symbol: yahooSymbol,
-      status: 'error',
-      errorMessage: message.slice(0, 1024),
-    });
-    return { status: 'error', symbol: yahooSymbol, function: fnName, error: message };
   }
+  return { status: 'not_found', symbol: primaryYahooSymbol, function: fnName };
 }
 
 export async function runQuoteSchedulerTick(

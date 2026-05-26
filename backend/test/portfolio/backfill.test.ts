@@ -107,6 +107,57 @@ test('ensureDailyPrices appends .TO for CAD-listed securities', async () => {
   assert.ok(okLog, 'job log should record the Yahoo-mapped symbol');
 });
 
+test('ensureDailyPrices falls back to .V when .TO returns no data (TSXV)', async () => {
+  const sec = await models.Security.create({
+    householdId: 1, symbol: 'PLUR', name: 'Plurilock Security Inc.', assetType: 'equity', currency: 'CAD',
+  });
+  const observedSymbols: string[] = [];
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async (symbol) => {
+      observedSymbols.push(symbol);
+      if (symbol === 'PLUR.TO') return null;
+      return [{ date: '2026-05-21', open: 0.2, high: 0.21, low: 0.19, close: 0.2, adjClose: 0.2, volume: 1000 }];
+    },
+    fetchDividends: async () => [],
+    fetchOverview: async () => null,
+  });
+
+  await backfill.ensureDailyPrices(sec.id);
+  await new Promise((r) => setTimeout(r, 60));
+
+  assert.deepEqual(observedSymbols, ['PLUR.TO', 'PLUR.V']);
+  const notFound = await models.ProviderJobLog.findOne({
+    where: { function: 'DAILY_HISTORY', symbol: 'PLUR.TO', status: 'not_found' },
+  });
+  assert.ok(notFound, '.TO attempt should be recorded as not_found');
+  const ok = await models.ProviderJobLog.findOne({
+    where: { function: 'DAILY_HISTORY', symbol: 'PLUR.V', status: 'ok' },
+  });
+  assert.ok(ok, '.V fallback should be recorded as ok');
+});
+
+test('ensureDailyPrices uses BTC-CAD for cryptocurrency assetType', async () => {
+  const sec = await models.Security.create({
+    householdId: 1, symbol: 'BTC', name: 'Bitcoin', assetType: 'cryptocurrency', currency: 'CAD',
+  });
+  let observedSymbol: string | null = null;
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async (symbol) => {
+      observedSymbol = symbol;
+      return [{ date: '2026-05-21', open: 80000, high: 82000, low: 79000, close: 81000, adjClose: 81000, volume: 0 }];
+    },
+    fetchDividends: async () => [],
+    fetchOverview: async () => null,
+  });
+
+  await backfill.ensureDailyPrices(sec.id);
+  await new Promise((r) => setTimeout(r, 60));
+
+  assert.equal(observedSymbol, 'BTC-CAD');
+});
+
 test('concurrent ensureDailyPrices for same security dedupes', async () => {
   const sec = await models.Security.create({
     householdId: 1, symbol: 'TST2', name: 'Test', assetType: 'EQUITY', currency: 'USD',

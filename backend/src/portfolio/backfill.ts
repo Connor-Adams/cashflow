@@ -17,10 +17,18 @@ import { Security, SecurityDailyPrice, SecurityDividend } from '../models';
 import * as defaultYahoo from '../integrations/yahoo/client';
 import { YahooFinanceError } from '../integrations/yahoo/client';
 import { recordCall } from '../integrations/yahoo/jobLog';
-import { toYahooSymbol } from '../integrations/yahoo/symbol';
+import { enumerateYahooSymbols } from '../integrations/yahoo/symbol';
 import * as env from '../config/env';
 import { logger } from '../observability/logger';
 import { reconcileDividendsForSecurity } from './reconcileDividends';
+
+function symbolCandidates(sec: Security): string[] {
+  return enumerateYahooSymbols(sec.symbol, {
+    currency: sec.currency,
+    assetType: sec.assetType,
+    name: sec.name,
+  });
+}
 
 export type BackfillStatus = {
   status: 'fresh' | 'stale' | 'never' | 'in_progress' | 'rate_limited';
@@ -73,47 +81,58 @@ function enqueue(key: string, work: () => Promise<void>): void {
   inFlight.set(key, p);
 }
 
+type YahooFnName = 'DAILY_HISTORY' | 'DIVIDENDS' | 'OVERVIEW' | 'QUOTE';
+
 /**
- * Wraps a Yahoo fetch + DB upsert in unified call logging:
- *   - Records `ok` on a successful fetch that returned usable data.
- *   - Records `not_found` when Yahoo returned no data for the symbol.
- *   - Records `rate_limited` or `error` based on the underlying error.
+ * Walks a candidate symbol list and stops on the first one that returns
+ * usable data. Each attempt is logged to `provider_job_log` so the
+ * staleness picker can see what was tried. Errors surface from the first
+ * failing attempt and abort the chain — we only retry on `null` (the
+ * "Yahoo returned successfully but had no data" path), not on transport
+ * or rate-limit failures.
  */
 async function runTrackedFetch<T>(
-  fnName: 'DAILY_HISTORY' | 'DIVIDENDS' | 'OVERVIEW' | 'QUOTE',
-  symbol: string,
-  fetcher: () => Promise<T | null>,
-  persist: (result: T) => Promise<void>,
+  fnName: YahooFnName,
+  candidates: string[],
+  fetcher: (symbol: string) => Promise<T | null>,
+  persist: (symbol: string, result: T) => Promise<void>,
 ): Promise<void> {
-  try {
-    const result = await fetcher();
-    if (result == null) {
-      await recordCall({ function: fnName, symbol, status: 'not_found' });
+  if (candidates.length === 0) return;
+  for (let i = 0; i < candidates.length; i++) {
+    const symbol = candidates[i];
+    const isLast = i === candidates.length - 1;
+    try {
+      const result = await fetcher(symbol);
+      if (result == null) {
+        await recordCall({ function: fnName, symbol, status: 'not_found' });
+        if (isLast) return;
+        continue;
+      }
+      await persist(symbol, result);
+      await recordCall({ function: fnName, symbol, status: 'ok' });
       return;
+    } catch (err) {
+      if (err instanceof YahooFinanceError) {
+        const isRateLimit =
+          err.httpStatus === 429 || /rate.?limit/i.test(err.message);
+        await recordCall({
+          function: fnName,
+          symbol,
+          status: isRateLimit ? 'rate_limited' : 'error',
+          httpStatus: err.httpStatus,
+          errorMessage: err.message.slice(0, 1024),
+        });
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        await recordCall({
+          function: fnName,
+          symbol,
+          status: 'error',
+          errorMessage: message.slice(0, 1024),
+        });
+      }
+      throw err;
     }
-    await persist(result);
-    await recordCall({ function: fnName, symbol, status: 'ok' });
-  } catch (err) {
-    if (err instanceof YahooFinanceError) {
-      const isRateLimit =
-        err.httpStatus === 429 || /rate.?limit/i.test(err.message);
-      await recordCall({
-        function: fnName,
-        symbol,
-        status: isRateLimit ? 'rate_limited' : 'error',
-        httpStatus: err.httpStatus,
-        errorMessage: err.message.slice(0, 1024),
-      });
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      await recordCall({
-        function: fnName,
-        symbol,
-        status: 'error',
-        errorMessage: message.slice(0, 1024),
-      });
-    }
-    throw err;
   }
 }
 
@@ -140,34 +159,33 @@ export async function ensureDailyPrices(securityId: number): Promise<BackfillSta
   }
 
   if (rowCount === 0) {
-    enqueue(key, () => backfillDaily(sec.id, sec.symbol, sec.currency, 'full'));
+    enqueue(key, () => backfillDaily(sec, 'full'));
     return { status: 'never', lastFetchedAt, nextRetryAt: null, coverageDays: 0 };
   }
   if (latest && latest.date < yesterdayISODate()) {
-    enqueue(key, () => backfillDaily(sec.id, sec.symbol, sec.currency, 'compact'));
+    enqueue(key, () => backfillDaily(sec, 'compact'));
     return { status: 'stale', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
   }
   return { status: 'fresh', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
 }
 
 async function backfillDaily(
-  securityId: number,
-  symbol: string,
-  currency: string,
+  sec: Security,
   outputsize: 'compact' | 'full',
 ): Promise<void> {
-  const yahooSymbol = toYahooSymbol(symbol, currency);
+  const candidates = symbolCandidates(sec);
+  if (candidates.length === 0) return;
   const period1 =
     outputsize === 'full'
       ? new Date(Date.now() - DAILY_HISTORY_PERIOD1_MS)
       : new Date(Date.now() - 120 * 86400000);
   await runTrackedFetch(
     'DAILY_HISTORY',
-    yahooSymbol,
-    () => yahoo.fetchDailyHistory(yahooSymbol, { period1 }),
-    async (bars) => {
+    candidates,
+    (symbol) => yahoo.fetchDailyHistory(symbol, { period1 }),
+    async (_symbol, bars) => {
       if (bars.length === 0) return;
-      await upsertBars(securityId, bars);
+      await upsertBars(sec.id, bars);
     },
   );
 }
@@ -220,13 +238,13 @@ export async function ensureDividends(securityId: number): Promise<BackfillStatu
     latest != null && Date.now() - latest.fetchedAt.getTime() > DIVIDENDS_STALE_MS;
 
   if (rowCount === 0 || isStale) {
-    const yahooSymbol = toYahooSymbol(sec.symbol, sec.currency);
+    const candidates = symbolCandidates(sec);
     enqueue(key, async () => {
       await runTrackedFetch(
         'DIVIDENDS',
-        yahooSymbol,
-        () => yahoo.fetchDividends(yahooSymbol),
-        async (events) => {
+        candidates,
+        (symbol) => yahoo.fetchDividends(symbol),
+        async (_symbol, events) => {
           if (events.length === 0) return;
           const now = new Date();
           for (const ev of events) {
@@ -273,13 +291,13 @@ export async function ensureOverview(securityId: number): Promise<BackfillStatus
     return { status: 'in_progress', lastFetchedAt, nextRetryAt: null, coverageDays: isNever ? 0 : 1 };
   }
   if (isNever || isStale) {
-    const yahooSymbol = toYahooSymbol(sec.symbol, sec.currency);
+    const candidates = symbolCandidates(sec);
     enqueue(key, () =>
       runTrackedFetch(
         'OVERVIEW',
-        yahooSymbol,
-        () => yahoo.fetchOverview(yahooSymbol),
-        async (overview) => {
+        candidates,
+        (symbol) => yahoo.fetchOverview(symbol),
+        async (_symbol, overview) => {
           await sec.update({
             metadata: {
               sector: overview.sector,

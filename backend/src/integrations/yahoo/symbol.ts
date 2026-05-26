@@ -1,20 +1,76 @@
 /**
- * Map a stored security symbol + currency to a Yahoo Finance ticker.
+ * Map a stored security symbol to one or more candidate Yahoo Finance
+ * tickers.
  *
- * Yahoo uses suffixes for non-US exchanges (.TO for TSX, .V for TSXV,
- * .CN for CSE, etc.). The portfolio importer stores the bare local
- * symbol (e.g. "XEQT") and the listing currency. CAD-quoted equities
- * are TSX-listed in virtually every retail case, so we map CAD → .TO
- * and accept that fringe CSE/NEO listings need their suffix written
- * into the stored symbol directly (e.g. "FOO.NE").
+ * Yahoo uses different conventions per market:
+ *   - Crypto pairs: `BTC-USD`, `BTC-CAD`
+ *   - Canadian Depositary Receipts (CDRs): `NVDA.NE` (NEO/Cboe Canada)
+ *   - TSX-listed: `XEQT.TO`
+ *   - TSXV-listed small caps: `PLUR.V`
+ *   - US-listed: bare symbol
  *
- * Symbols already carrying an exchange suffix or a dash (crypto pairs
- * like BTC-USD) are passed through untouched.
+ * The importer stores the bare local symbol plus a `currency`, `assetType`,
+ * and `name`. We use those three to enumerate the most-likely candidate
+ * Yahoo tickers in order. The backfill layer tries each in turn and stops
+ * on the first non-null result. Symbols already carrying an explicit
+ * exchange suffix or a dash (crypto pairs) are passed through untouched.
  */
-export function toYahooSymbol(symbol: string, currency: string): string {
+
+export interface SymbolContext {
+  currency: string;
+  assetType: string | null;
+  name: string | null;
+}
+
+const CDR_NAME_RE = /\bCDR\b/i;
+
+export function enumerateYahooSymbols(
+  symbol: string,
+  ctx: SymbolContext,
+): string[] {
   const trimmed = symbol.trim();
-  if (trimmed === '') return trimmed;
-  if (trimmed.includes('.') || trimmed.includes('-')) return trimmed;
-  if (currency.trim().toUpperCase() === 'CAD') return `${trimmed}.TO`;
-  return trimmed;
+  if (trimmed === '') return [];
+  if (trimmed.includes('.') || trimmed.includes('-')) return [trimmed];
+
+  const currency = ctx.currency.trim().toUpperCase();
+  const assetType = ctx.assetType?.toLowerCase() ?? null;
+  const isCrypto = assetType === 'cryptocurrency';
+  const isCdr = ctx.name != null && CDR_NAME_RE.test(ctx.name);
+
+  if (isCrypto) {
+    // Yahoo uses `<COIN>-<QUOTE>`; CAD pairs exist for the majors, USD pairs
+    // exist for everything. Try the listing currency first, fall back to USD.
+    if (currency === 'USD') return [`${trimmed}-USD`];
+    return [`${trimmed}-${currency}`, `${trimmed}-USD`];
+  }
+
+  if (isCdr) {
+    // CDRs trade on NEO/Cboe Canada (`.NE`). A handful also trade on TSX,
+    // so list `.NE` first and fall back to `.TO`.
+    return [`${trimmed}.NE`, `${trimmed}.TO`];
+  }
+
+  if (currency === 'CAD') {
+    // TSX primary, TSXV/CSE as fallbacks for small caps.
+    return [`${trimmed}.TO`, `${trimmed}.V`, `${trimmed}.CN`];
+  }
+
+  return [trimmed];
+}
+
+/**
+ * Convenience wrapper returning only the primary candidate. Retained for
+ * call sites that don't yet thread `assetType` / `name` through.
+ */
+export function toYahooSymbol(
+  symbol: string,
+  currency: string,
+  ctx: Partial<Omit<SymbolContext, 'currency'>> = {},
+): string {
+  const candidates = enumerateYahooSymbols(symbol, {
+    currency,
+    assetType: ctx.assetType ?? null,
+    name: ctx.name ?? null,
+  });
+  return candidates[0] ?? symbol.trim();
 }
