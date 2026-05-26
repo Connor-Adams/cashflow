@@ -8,7 +8,6 @@
  * coordinator's per-household lock prevents the cron from racing manual
  * runs or internal triggers, so the tick is safe even on a hot system.
  */
-import cron, { type ScheduledTask } from 'node-cron';
 import { logger } from '../observability/logger';
 import * as env from '../config/env';
 import { Household } from '../models';
@@ -30,9 +29,6 @@ export interface EnrichmentBackfillTickConfig {
 function configFromEnv(): EnrichmentBackfillTickConfig {
   return { enabled: env.enrichmentBackfillEnabled };
 }
-
-let runningTick = false;
-let activeTask: ScheduledTask | null = null;
 
 export async function runEnrichmentBackfillTick(
   configOverride?: Partial<EnrichmentBackfillTickConfig>,
@@ -80,7 +76,7 @@ export async function runEnrichmentBackfillTick(
         householdsProcessed += 1;
       } catch (err) {
         logger.error(
-          { err: err instanceof Error ? err : new Error(String(err)), householdId: hh.id },
+          { err, householdId: hh.id },
           'enrichment_backfill_cron_household_failed',
         );
       }
@@ -93,50 +89,3 @@ export async function runEnrichmentBackfillTick(
   }
 }
 
-export function startEnrichmentBackfillScheduler(): ScheduledTask | null {
-  if (!env.enrichmentBackfillEnabled) {
-    logger.info('enrichment_backfill_scheduler_disabled');
-    return null;
-  }
-  if (activeTask) {
-    logger.warn('enrichment_backfill_scheduler_already_running');
-    return activeTask;
-  }
-  if (!cron.validate(env.enrichmentBackfillCron)) {
-    logger.error(
-      { expression: env.enrichmentBackfillCron },
-      'enrichment_backfill_scheduler_invalid_cron',
-    );
-    return null;
-  }
-  activeTask = cron.schedule(env.enrichmentBackfillCron, async () => {
-    if (runningTick) {
-      logger.debug('enrichment_backfill_tick_skipped_reentrant');
-      return;
-    }
-    runningTick = true;
-    try {
-      const r = await runEnrichmentBackfillTick();
-      logger.info(r as unknown as Record<string, unknown>, 'enrichment_backfill_cron_tick');
-    } catch (err) {
-      logger.error(
-        { err: err instanceof Error ? err : new Error(String(err)) },
-        'enrichment_backfill_cron_unhandled',
-      );
-    } finally {
-      runningTick = false;
-    }
-  });
-  logger.info(
-    { cron: env.enrichmentBackfillCron },
-    'enrichment_backfill_scheduler_started',
-  );
-  return activeTask;
-}
-
-export function stopEnrichmentBackfillScheduler(): void {
-  if (!activeTask) return;
-  activeTask.stop();
-  activeTask = null;
-  runningTick = false;
-}

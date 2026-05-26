@@ -118,6 +118,86 @@ export type PartnerSettlementInput = {
   notes?: string | null
 }
 
+// ---------- Partner Fairness Dashboard (GET /api/partner/*) -----------------
+// Mirrors backend/src/summary/partnerFairness.ts. The backend uses the
+// single-payer model where `partnerShare` on each transaction is what the
+// partner owes me back; `balance` follows the same sign convention as
+// /api/summary/partner: positive → partner owes me, negative → I owe partner.
+
+/** One bucket of the per-currency category breakdown. */
+export type PartnerFairnessCategoryBreakdown = {
+  category: string
+  sharedSpend: number
+  myShare: number
+  partnerShare: number
+  transactionCount: number
+}
+
+/** One of the largest shared transactions surfaced by /partner/fairness. */
+export type PartnerFairnessLargestTransaction = {
+  txnId: number
+  date: string
+  merchant: string
+  category: string | null
+  amount: number
+  myShare: number
+  partnerShare: number
+  ownershipType: string
+  ownershipContactId: number | null
+  contactName: string | null
+}
+
+/** Per-currency fairness summary. */
+export type PartnerFairnessByCurrency = {
+  currency: string
+  sharedSpendTotal: number
+  myShareTotal: number
+  partnerShareTotal: number
+  sharedTransactionCount: number
+  currentMonthSharedSpend: number
+  balance: number
+  direction: 'partner_owes_me' | 'i_owe_partner' | 'even'
+  paidMore: { youCovered: number; partnerCovered: number }
+  categoryBreakdown: PartnerFairnessCategoryBreakdown[]
+  largestShared: PartnerFairnessLargestTransaction[]
+}
+
+/** Response shape for GET /api/partner/fairness. */
+export type PartnerFairnessResponse = {
+  byCurrency: PartnerFairnessByCurrency[]
+}
+
+/** One point in the historical fairness trend. */
+export type PartnerFairnessMonthlyPoint = {
+  /** YYYY-MM */
+  month: string
+  currency: string
+  sharedSpend: number
+  myShare: number
+  partnerShare: number
+  settlementDelta: number
+  netDelta: number
+  cumulativeBalance: number
+}
+
+/** Response shape for GET /api/partner/monthly. */
+export type PartnerFairnessMonthlyResponse = {
+  points: PartnerFairnessMonthlyPoint[]
+}
+
+/** One settlement recommendation per currency. */
+export type PartnerSettlementRecommendation = {
+  currency: string
+  amount: number
+  direction: 'partner_pays_you' | 'you_pay_partner' | 'none'
+  outstandingBalance: number
+}
+
+/** Response shape for GET /api/partner/settlement-recommendation. */
+export type PartnerSettlementRecommendationResponse = {
+  recommendations: PartnerSettlementRecommendation[]
+}
+
 /**
  * Filter shape accepted by POST /api/transactions/bulk-patch-filter. Mirrors
  * the subset of GET /api/transactions query params relevant for narrowing
@@ -340,6 +420,88 @@ export type PlannedEventInput = {
 
 /** PUT /api/planned-events/:id body shape — every field optional. */
 export type PlannedEventPatch = Partial<PlannedEventInput>
+
+/**
+ * Financial goal lifecycle (issue #203). Mirrors backend FinancialGoalStatus.
+ * - active: in progress, contributions count
+ * - paused: user temporarily disabled contributions
+ * - completed: archived, hidden from active views by default
+ */
+export type FinancialGoalStatus = 'active' | 'paused' | 'completed'
+
+/**
+ * One row from GET /api/goals. Mirrors the FinancialGoal serializer in
+ * `backend/src/routes/goals.ts` — `targetAmount`, `currentAmount`, and
+ * `monthlyContribution` arrive as strings (DECIMAL(14,4)) for lossless
+ * transport; coerce with `Number(...)` for arithmetic.
+ */
+export type FinancialGoal = {
+  id: number
+  userId: number
+  householdId: number
+  name: string
+  targetAmount: string
+  currentAmount: string
+  currency: string
+  /** YYYY-MM-DD or null when no deadline. */
+  targetDate: string | null
+  /** User-declared monthly contribution intent; null = derive required. */
+  monthlyContribution: string | null
+  linkedAccountId: number | null
+  priority: number
+  status: FinancialGoalStatus
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/goals. */
+export type FinancialGoalsResponse = {
+  data: FinancialGoal[]
+}
+
+/** POST /api/goals body shape. */
+export type FinancialGoalInput = {
+  name: string
+  targetAmount: number
+  currentAmount?: number
+  currency: string
+  targetDate?: string | null
+  monthlyContribution?: number | null
+  linkedAccountId?: number | null
+  priority?: number
+  status?: FinancialGoalStatus
+  notes?: string | null
+}
+
+/** PUT /api/goals/:id body shape — every field optional. */
+export type FinancialGoalPatch = Partial<FinancialGoalInput>
+
+/**
+ * GET /api/goals/:id/projection response. `requiredMonthlyContribution`
+ * is the suggested monthly amount to hit `targetDate`; null when the goal
+ * has no target_date or is already completed. `projectedCompletionDate` is
+ * derived from the user's monthly_contribution intent.
+ */
+export type GoalProjectionStatus =
+  | 'completed'
+  | 'on_track'
+  | 'ahead'
+  | 'behind'
+  | 'unfunded'
+  | 'active'
+
+export type GoalProjectionResponse = {
+  goalId: number
+  /** YYYY-MM-DD — the date the projection was computed against. */
+  today: string
+  remainingAmount: string
+  progressPercent: number
+  monthsRemaining: number | null
+  requiredMonthlyContribution: string | null
+  projectedCompletionDate: string | null
+  status: GoalProjectionStatus
+}
 
 /**
  * Direction of a forecast occurrence — drives sign + colour in the UI.

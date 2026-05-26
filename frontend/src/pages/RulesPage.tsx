@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { RulesHealthSection } from '../components/RulesHealthSection'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
 
@@ -78,12 +79,14 @@ export function RulesPage() {
       )
       // Auto-rule suggestions endpoint may not exist on older backends; fall
       // back to an empty list if it 404s instead of breaking the whole page.
+      // Also defend against a 200 with a malformed body (e.g. `{}` from a
+      // test stub) by coalescing missing/undefined `suggestions` to [].
       let nextAuto: AutoRuleSuggestion[] = []
       try {
-        const r = await getJson<{ suggestions: AutoRuleSuggestion[] }>(
+        const r = await getJson<{ suggestions?: AutoRuleSuggestion[] }>(
           '/api/rules/auto-suggestions'
         )
-        nextAuto = r.suggestions
+        nextAuto = r.suggestions ?? []
       } catch {
         nextAuto = []
       }
@@ -238,6 +241,7 @@ export function RulesPage() {
         description="Match merchants on import so category, business, and split defaults land in the right place."
       />
       {err && <span className="error">{err}</span>}
+      <RulesHealthSection onAfterCreate={() => void load()} />
       <form className="card rulesFormCard" onSubmit={onCreate}>
         <div className="rulesCardHeader">
           <div>

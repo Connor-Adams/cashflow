@@ -36,12 +36,15 @@ import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEma
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
+import { TaxTag, initTaxTag } from './TaxTag';
+import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
 import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
+import { Job, initJob } from './Job';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -57,6 +60,8 @@ import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
+import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
+import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -95,12 +100,15 @@ initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
+initTaxTag(sequelize);
+initTransactionTaxMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
 initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
+initJob(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -110,9 +118,33 @@ initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
+initFinancialGoal(sequelize);
+initAiReviewRun(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+Household.hasMany(TaxTag, { foreignKey: 'household_id', as: 'taxTags' });
+TaxTag.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+Transaction.hasOne(TransactionTaxMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'taxMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+TaxTag.hasMany(TransactionTaxMetadata, {
+  foreignKey: 'tax_tag_id',
+  as: 'transactionTaxMetadata',
+});
+TransactionTaxMetadata.belongsTo(TaxTag, {
+  foreignKey: 'tax_tag_id',
+  as: 'taxTag',
+});
 
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
@@ -346,6 +378,52 @@ PlannedEvent.belongsTo(Transaction, {
   as: 'linkedTransaction',
 });
 
+Household.hasMany(FinancialGoal, {
+  foreignKey: 'household_id',
+  as: 'financialGoals',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialGoal.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinancialGoal, {
+  foreignKey: 'user_id',
+  as: 'financialGoals',
+});
+FinancialGoal.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+Account.hasMany(FinancialGoal, {
+  foreignKey: 'linked_account_id',
+  as: 'financialGoals',
+});
+FinancialGoal.belongsTo(Account, {
+  foreignKey: 'linked_account_id',
+  as: 'linkedAccount',
+});
+
+Household.hasMany(AiReviewRun, {
+  foreignKey: 'household_id',
+  as: 'aiReviewRuns',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AiReviewRun.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(AiReviewRun, {
+  foreignKey: 'user_id',
+  as: 'aiReviewRuns',
+});
+AiReviewRun.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -385,12 +463,15 @@ export {
   UserCaptureToken,
   Entity,
   TaxCategory,
+  TaxTag,
+  TransactionTaxMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,
   ShareholderLoan,
   InstalmentPayment,
   ProviderJobLog,
+  Job,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
   Scenario,
@@ -398,4 +479,6 @@ export {
   HouseholdPlan,
   Insight,
   PlannedEvent,
+  FinancialGoal,
+  AiReviewRun,
 };

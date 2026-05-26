@@ -7,6 +7,7 @@ import { ReconciliationTab } from './tax/ReconciliationTab'
 import { CorpT2Tab } from './tax/CorpT2Tab'
 import { ShareholderLoanTab } from './tax/ShareholderLoanTab'
 import { OwnerCompPlannerTab } from './tax/OwnerCompPlannerTab'
+import { TaxHygieneTab } from './tax/TaxHygieneTab'
 import { useTaxYears } from '../hooks/useTaxYears'
 
 const TABS = [
@@ -17,6 +18,7 @@ const TABS = [
   { value: 'corp', label: 'Corp T2' },
   { value: 'shareholder-loans', label: 'Shareholder Loans' },
   { value: 'planner', label: 'Owner Comp' },
+  { value: 'hygiene', label: 'Business Hygiene' },
 ]
 
 function pickDefaultYear(years: number[]): number {
@@ -76,6 +78,7 @@ export function TaxPage() {
           {tab === 'corp' && <CorpT2Tab />}
           {tab === 'shareholder-loans' && <ShareholderLoanTab />}
           {tab === 'planner' && <OwnerCompPlannerTab activePlanId={activePlanId} />}
+          {tab === 'hygiene' && <TaxHygieneTab year={year} />}
         </>
       )}
     </section>
