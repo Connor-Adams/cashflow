@@ -11,6 +11,7 @@
  * testable without network and to let env/feature-flag checks live at the
  * call site.
  */
+import { logger } from '../../observability/logger';
 import type { Confidence } from './types';
 
 export type AiBatchSuggestion = {
@@ -283,8 +284,7 @@ async function safeBatch(
   try {
     return await tryBatch(candidates, categoryHints, caller);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn('[enrichment] ai-batch failed, falling back to per-row', toError(err).message);
+    logger.warn({ err, module: 'enrichment_ai_batch' }, 'ai_batch_failed_fallback_per_row');
     return null;
   }
 }
