@@ -11,6 +11,7 @@
  *
  * Caller-supplied flags control filtering and write behaviour.
  */
+import { logger } from '../observability/logger';
 import { Op } from 'sequelize';
 import { sequelize, Transaction, TransactionSignal } from '../models';
 import { loadAllRules } from './applyRules';
@@ -132,7 +133,7 @@ export async function runBackfill(
   }
 
   const total = await Transaction.count({ where });
-  console.log(`[backfill] ${total} transactions match filter`);
+  logger.info({ total, module: 'enrichment_backfill' }, 'backfill_started');
 
   let processed = 0;
   let updated = 0;
@@ -216,8 +217,21 @@ export async function runBackfill(
         }
 
         if (flags.verbose) {
-          console.log(
-            `[backfill] txn ${txn.id} (${txn.date} "${txn.merchantRaw}") -> clean="${f.merchantClean}" canonical=${f.merchantCanonical ?? '-'} type=${f.txnType} source=${f.autoSource ?? '-'} conf=${f.autoConfidence ?? '-'} signals=${enriched.signals.length}${willClearReview ? ' clearReview' : ''}`,
+          logger.debug(
+            {
+              txnId: txn.id,
+              date: txn.date,
+              merchantRaw: txn.merchantRaw,
+              merchantClean: f.merchantClean,
+              merchantCanonical: f.merchantCanonical ?? null,
+              txnType: f.txnType,
+              autoSource: f.autoSource ?? null,
+              autoConfidence: f.autoConfidence ?? null,
+              signalsCount: enriched.signals.length,
+              willClearReview,
+              module: 'enrichment_backfill',
+            },
+            'backfill_txn_enriched',
           );
         }
 
@@ -302,7 +316,7 @@ export async function runBackfill(
       } catch (err) {
         skipped++;
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[backfill] txn ${txn.id} failed:`, err);
+        logger.error({ err, txnId: txn.id, module: 'enrichment_backfill' }, 'backfill_txn_failed');
         callbacks.onError?.({ txnId: txn.id, message });
       }
     }
@@ -310,8 +324,17 @@ export async function runBackfill(
     offset += txns.length;
 
     if (processed % 100 === 0 || processed === total) {
-      console.log(
-        `[backfill] progress ${processed}/${total} updated=${updated} reviewCleared=${reviewFlagCleared} skipped=${skipped}${flags.dryRun ? ' (DRY)' : ''}`,
+      logger.info(
+        {
+          processed,
+          total,
+          updated,
+          reviewFlagCleared,
+          skipped,
+          dryRun: flags.dryRun,
+          module: 'enrichment_backfill',
+        },
+        'backfill_progress',
       );
     }
   }

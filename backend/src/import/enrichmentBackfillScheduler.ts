@@ -80,9 +80,8 @@ export async function runEnrichmentBackfillTick(
         householdsProcessed += 1;
       } catch (err) {
         logger.error(
+          { err: err instanceof Error ? err : new Error(String(err)), householdId: hh.id },
           'enrichment_backfill_cron_household_failed',
-          { householdId: hh.id },
-          err instanceof Error ? err : new Error(String(err)),
         );
       }
     }
@@ -104,9 +103,10 @@ export function startEnrichmentBackfillScheduler(): ScheduledTask | null {
     return activeTask;
   }
   if (!cron.validate(env.enrichmentBackfillCron)) {
-    logger.error('enrichment_backfill_scheduler_invalid_cron', {
-      expression: env.enrichmentBackfillCron,
-    });
+    logger.error(
+      { expression: env.enrichmentBackfillCron },
+      'enrichment_backfill_scheduler_invalid_cron',
+    );
     return null;
   }
   activeTask = cron.schedule(env.enrichmentBackfillCron, async () => {
@@ -117,16 +117,20 @@ export function startEnrichmentBackfillScheduler(): ScheduledTask | null {
     runningTick = true;
     try {
       const r = await runEnrichmentBackfillTick();
-      logger.info('enrichment_backfill_cron_tick', r as unknown as Record<string, unknown>);
+      logger.info(r as unknown as Record<string, unknown>, 'enrichment_backfill_cron_tick');
     } catch (err) {
-      logger.error('enrichment_backfill_cron_unhandled', {}, err instanceof Error ? err : new Error(String(err)));
+      logger.error(
+        { err: err instanceof Error ? err : new Error(String(err)) },
+        'enrichment_backfill_cron_unhandled',
+      );
     } finally {
       runningTick = false;
     }
   });
-  logger.info('enrichment_backfill_scheduler_started', {
-    cron: env.enrichmentBackfillCron,
-  });
+  logger.info(
+    { cron: env.enrichmentBackfillCron },
+    'enrichment_backfill_scheduler_started',
+  );
   return activeTask;
 }
 

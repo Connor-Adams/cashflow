@@ -13,6 +13,7 @@
 
 import { Op } from 'sequelize';
 import { FxRate } from '../models/FxRate';
+import { logger } from '../observability/logger';
 
 /** Days back from asOfDate that ensureFxRate considers a cached row "fresh enough". */
 export const ENSURE_FX_CACHE_WINDOW_DAYS = 7;
@@ -63,7 +64,7 @@ export async function fetchBoCRate(
   // BoC only has CAD-cross rates. If `to` is not CAD we'd need to chain,
   // but for now this module only supports X→CAD.
   if (to !== 'CAD') {
-    console.error(`[bankOfCanada] Only X→CAD is supported, got ${from}→${to}`);
+    logger.error({ from, to, module: 'bankOfCanada' }, 'fx_unsupported_pair');
     return null;
   }
 
@@ -75,18 +76,18 @@ export async function fetchBoCRate(
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      console.error(`[bankOfCanada] HTTP ${response.status} for ${url}`);
+      logger.error({ status: response.status, url, module: 'bankOfCanada' }, 'fx_http_error');
       return null;
     }
     data = (await response.json()) as BoCResponse;
   } catch (err) {
-    console.error('[bankOfCanada] fetch error', err);
+    logger.error({ err, url, module: 'bankOfCanada' }, 'fx_fetch_failed');
     return null;
   }
 
   const observations = data.observations;
   if (!observations || observations.length === 0) {
-    console.error(`[bankOfCanada] No observations for ${series} in window ${start}..${asOfDate}`);
+    logger.error({ series, start, asOfDate, module: 'bankOfCanada' }, 'fx_no_observations');
     return null;
   }
 
@@ -94,13 +95,13 @@ export async function fetchBoCRate(
   const last = observations[observations.length - 1];
   const seriesValue = last[series];
   if (!seriesValue || typeof seriesValue !== 'object' || !('v' in seriesValue)) {
-    console.error('[bankOfCanada] Unexpected observation shape', last);
+    logger.error({ observation: last, module: 'bankOfCanada' }, 'fx_bad_observation_shape');
     return null;
   }
 
   const rate = Number(seriesValue.v);
   if (!Number.isFinite(rate)) {
-    console.error('[bankOfCanada] Non-numeric rate value', seriesValue.v);
+    logger.error({ value: seriesValue.v, module: 'bankOfCanada' }, 'fx_non_numeric_rate');
     return null;
   }
 
@@ -152,7 +153,7 @@ export async function ensureFxRate(
     });
   } catch (err) {
     // Persist failure is non-fatal — we already have the rate in memory.
-    console.warn('[bankOfCanada] Failed to cache FxRate row', err);
+    logger.warn({ err, module: 'bankOfCanada' }, 'fx_cache_persist_failed');
   }
 
   return result;

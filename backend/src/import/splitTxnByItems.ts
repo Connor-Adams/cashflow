@@ -146,12 +146,12 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
 
   const drift = txnAbs - allocated;
   if (Math.abs(drift) >= 0.005) {
-    logger.info('split_txn_drift', {
+    logger.info({
       txnId: txn.id,
       expected: txnAbs,
       computed: allocated,
       drift,
-    });
+    }, 'split_txn_drift');
     add(txn.finalCategory, drift * sign, 0);
   }
 

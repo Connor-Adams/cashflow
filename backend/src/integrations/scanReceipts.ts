@@ -219,10 +219,10 @@ export async function disconnect(userId: number): Promise<void> {
       : null;
     if (refresh) await revokeToken(refresh);
   } catch (err) {
-    logger.warn('gmail_revoke_failed', {
+    logger.warn({
       userId,
       message: err instanceof Error ? err.message : String(err),
-    });
+    }, 'gmail_revoke_failed');
   }
   await integ.destroy();
 }
@@ -361,10 +361,10 @@ export async function scanInbox(
       } as never);
     } catch (err) {
       // Don't let the audit-log fail bring down a scan.
-      logger.warn('processed_email_log_failed', {
+      logger.warn({
         messageId: opts2.messageId,
         error: err instanceof Error ? err.message : String(err),
-      });
+      }, 'processed_email_log_failed');
     }
   }
 
