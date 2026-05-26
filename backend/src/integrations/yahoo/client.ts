@@ -108,7 +108,88 @@ export interface OverviewResult {
   numberOfAnalystOpinions: number | null;
   /** Currency this issuer reports in (often differs from listing currency). */
   financialCurrency: string | null;
+  /** Crypto-only fields — `summaryDetail` for cryptocurrency symbols. */
+  circulatingSupply: number | null;
+  volume24Hr: number | null;
+  cryptoStartDate: string | null;
+  fromCurrency: string | null;
+  /**
+   * Fund / ETF fields — `fundProfile`, `topHoldings`, `fundPerformance`.
+   * `null` outside the fund domain (most equities, all crypto).
+   */
+  fundFamily: string | null;
+  fundCategory: string | null;
+  fundLegalType: string | null;
+  fundExpenseRatio: number | null;
+  fundTotalAssets: number | null;
+  fundYield: number | null;
+  topHoldings: TopHoldingEntry[] | null;
+  sectorWeightings: Record<string, number> | null;
+  bondPosition: number | null;
+  stockPosition: number | null;
+  cashPosition: number | null;
+  /** Trailing total return windows from `fundPerformance.trailingReturns`. */
+  trailingReturn1y: number | null;
+  trailingReturn3y: number | null;
+  trailingReturn5y: number | null;
+  trailingReturn10y: number | null;
+  trailingReturnYtd: number | null;
+  /** Earnings forecast + history — `calendarEvents` + `earningsHistory`. */
+  nextEarningsDate: string | null;
+  nextEarningsIsEstimate: boolean | null;
+  earningsEpsAvg: number | null;
+  earningsEpsLow: number | null;
+  earningsEpsHigh: number | null;
+  earningsRevenueAvg: number | null;
+  earningsRevenueLow: number | null;
+  earningsRevenueHigh: number | null;
+  earningsHistory: EarningsHistoryEntry[] | null;
+  /** Analyst sentiment — `recommendationTrend` + `upgradeDowngradeHistory`. */
+  recommendationTrend: RecommendationTrendEntry[] | null;
+  upgradeDowngradeHistory: UpgradeDowngradeEntry[] | null;
   raw: Record<string, unknown>;
+}
+
+export interface TopHoldingEntry {
+  symbol: string | null;
+  name: string | null;
+  percent: number | null;
+}
+
+export interface EarningsHistoryEntry {
+  period: string | null;
+  quarter: string | null;
+  epsActual: number | null;
+  epsEstimate: number | null;
+  epsDifference: number | null;
+  surprisePercent: number | null;
+}
+
+export interface RecommendationTrendEntry {
+  period: string | null;
+  strongBuy: number | null;
+  buy: number | null;
+  hold: number | null;
+  sell: number | null;
+  strongSell: number | null;
+}
+
+export interface UpgradeDowngradeEntry {
+  date: string | null;
+  firm: string | null;
+  fromGrade: string | null;
+  toGrade: string | null;
+  action: string | null;
+}
+
+export interface NewsItem {
+  uuid: string;
+  title: string;
+  publisher: string;
+  link: string;
+  publishedAt: string;
+  thumbnailUrl: string | null;
+  relatedTickers: string[];
 }
 
 export class YahooFinanceError extends Error {
@@ -132,6 +213,10 @@ export interface YahooClient {
     symbol: string,
     opts: { modules: string[] },
   ): Promise<QuoteSummaryResult>;
+  search(
+    query: string,
+    opts: { newsCount: number; quotesCount: number },
+  ): Promise<unknown>;
 }
 
 export interface ChartQueryOptions {
@@ -211,6 +296,7 @@ function getClient(): YahooClient {
       },
       quoteSummary: (s, o) =>
         instance.quoteSummary(s, { modules: o.modules as never }) as Promise<QuoteSummaryResult>,
+      search: (q, o) => instance.search(q, o) as Promise<unknown>,
     };
   }
   return singleton;
@@ -396,6 +482,16 @@ export async function fetchOverview(
         'summaryDetail',
         'defaultKeyStatistics',
         'financialData',
+        // Fund-only modules — silently absent for equities/crypto, populated
+        // for ETFs and mutual funds.
+        'fundProfile',
+        'topHoldings',
+        'fundPerformance',
+        // Earnings + analyst — silently absent for crypto/non-covered names.
+        'calendarEvents',
+        'earningsHistory',
+        'recommendationTrend',
+        'upgradeDowngradeHistory',
       ],
     });
   } catch (err) {
@@ -408,6 +504,13 @@ export async function fetchOverview(
   const detail = summary.summaryDetail as Record<string, unknown> | undefined;
   const stats = summary.defaultKeyStatistics as Record<string, unknown> | undefined;
   const fin = summary.financialData as Record<string, unknown> | undefined;
+  const fundProfile = summary.fundProfile as Record<string, unknown> | undefined;
+  const topHoldingsMod = summary.topHoldings as Record<string, unknown> | undefined;
+  const fundPerf = summary.fundPerformance as Record<string, unknown> | undefined;
+  const calendar = summary.calendarEvents as Record<string, unknown> | undefined;
+  const earningsHistMod = summary.earningsHistory as Record<string, unknown> | undefined;
+  const recTrendMod = summary.recommendationTrend as Record<string, unknown> | undefined;
+  const upgradeMod = summary.upgradeDowngradeHistory as Record<string, unknown> | undefined;
   const sector =
     asString(asset?.['sector']) ?? asString(summaryProfile?.['sector']);
   const industry =
@@ -483,14 +586,277 @@ export async function fetchOverview(
     recommendationKey: asString(fin?.['recommendationKey']),
     numberOfAnalystOpinions: asNumber(fin?.['numberOfAnalystOpinions']),
     financialCurrency: asString(fin?.['financialCurrency']),
+    circulatingSupply: asNumber(detail?.['circulatingSupply']),
+    volume24Hr: asNumber(detail?.['volume24Hr']),
+    cryptoStartDate: asDateString(detail?.['startDate']),
+    fromCurrency: asString(detail?.['fromCurrency']),
+    fundFamily: asString(fundProfile?.['family']),
+    fundCategory: asString(fundProfile?.['categoryName']),
+    fundLegalType: asString(fundProfile?.['legalType']),
+    fundExpenseRatio: extractExpenseRatio(fundProfile),
+    fundTotalAssets:
+      extractFromFees(fundProfile, 'totalNetAssets') ??
+      asNumber(detail?.['totalAssets']),
+    fundYield: asNumber(detail?.['yield']),
+    topHoldings: extractTopHoldings(topHoldingsMod),
+    sectorWeightings: extractSectorWeightings(topHoldingsMod),
+    bondPosition: asNumber(topHoldingsMod?.['bondPosition']),
+    stockPosition: asNumber(topHoldingsMod?.['stockPosition']),
+    cashPosition: asNumber(topHoldingsMod?.['cashPosition']),
+    trailingReturn1y: extractTrailingReturn(fundPerf, 'oneYear'),
+    trailingReturn3y: extractTrailingReturn(fundPerf, 'threeYear'),
+    trailingReturn5y: extractTrailingReturn(fundPerf, 'fiveYear'),
+    trailingReturn10y: extractTrailingReturn(fundPerf, 'tenYear'),
+    trailingReturnYtd: extractTrailingReturn(fundPerf, 'ytd'),
+    nextEarningsDate: extractNextEarningsDate(calendar),
+    nextEarningsIsEstimate: extractEarningsIsEstimate(calendar),
+    earningsEpsAvg: extractCalEarnings(calendar, 'earningsAverage'),
+    earningsEpsLow: extractCalEarnings(calendar, 'earningsLow'),
+    earningsEpsHigh: extractCalEarnings(calendar, 'earningsHigh'),
+    earningsRevenueAvg: extractCalEarnings(calendar, 'revenueAverage'),
+    earningsRevenueLow: extractCalEarnings(calendar, 'revenueLow'),
+    earningsRevenueHigh: extractCalEarnings(calendar, 'revenueHigh'),
+    earningsHistory: extractEarningsHistory(earningsHistMod),
+    recommendationTrend: extractRecommendationTrend(recTrendMod),
+    upgradeDowngradeHistory: extractUpgradeDowngrade(upgradeMod),
     raw: summary as unknown as Record<string, unknown>,
   };
 
   const hasAnySignal = Object.entries(result).some(([k, v]) => {
     if (k === 'raw') return false;
-    return v !== null;
+    if (v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === 'object') return Object.keys(v).length > 0;
+    return true;
   });
   return hasAnySignal ? result : null;
+}
+
+function extractFromFees(
+  fundProfile: Record<string, unknown> | undefined,
+  key: string,
+): number | null {
+  if (!fundProfile) return null;
+  const fees = fundProfile['feesExpensesInvestment'] as
+    | Record<string, unknown>
+    | undefined;
+  return asNumber(fees?.[key]);
+}
+
+function extractExpenseRatio(
+  fundProfile: Record<string, unknown> | undefined,
+): number | null {
+  // Prefer net (what the investor actually pays); fall back to gross then
+  // the annual report ratio. Yahoo populates whichever it has.
+  return (
+    extractFromFees(fundProfile, 'netExpRatio') ??
+    extractFromFees(fundProfile, 'grossExpRatio') ??
+    extractFromFees(fundProfile, 'annualReportExpenseRatio')
+  );
+}
+
+function extractTopHoldings(
+  topHoldingsMod: Record<string, unknown> | undefined,
+): TopHoldingEntry[] | null {
+  const arr = topHoldingsMod?.['holdings'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const out: TopHoldingEntry[] = [];
+  for (const h of arr) {
+    if (!h || typeof h !== 'object') continue;
+    const rec = h as Record<string, unknown>;
+    const symbol = asString(rec['symbol']);
+    const name = asString(rec['holdingName']);
+    const percent = asNumber(rec['holdingPercent']);
+    if (symbol == null && name == null) continue;
+    out.push({ symbol, name, percent });
+  }
+  return out.length === 0 ? null : out;
+}
+
+function extractSectorWeightings(
+  topHoldingsMod: Record<string, unknown> | undefined,
+): Record<string, number> | null {
+  const arr = topHoldingsMod?.['sectorWeightings'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const out: Record<string, number> = {};
+  for (const entry of arr) {
+    if (!entry || typeof entry !== 'object') continue;
+    for (const [k, v] of Object.entries(entry as Record<string, unknown>)) {
+      const n = asNumber(v);
+      if (n != null) out[k] = n;
+    }
+  }
+  return Object.keys(out).length === 0 ? null : out;
+}
+
+function extractTrailingReturn(
+  fundPerf: Record<string, unknown> | undefined,
+  field: string,
+): number | null {
+  if (!fundPerf) return null;
+  const trailing = fundPerf['trailingReturns'] as
+    | Record<string, unknown>
+    | undefined;
+  return asNumber(trailing?.[field]);
+}
+
+function extractNextEarningsDate(
+  calendar: Record<string, unknown> | undefined,
+): string | null {
+  const earnings = calendar?.['earnings'] as Record<string, unknown> | undefined;
+  const dates = earnings?.['earningsDate'];
+  if (Array.isArray(dates) && dates.length > 0) {
+    return asDateString(dates[0]);
+  }
+  return null;
+}
+
+function extractEarningsIsEstimate(
+  calendar: Record<string, unknown> | undefined,
+): boolean | null {
+  const earnings = calendar?.['earnings'] as Record<string, unknown> | undefined;
+  const v = earnings?.['isEarningsDateEstimate'];
+  return typeof v === 'boolean' ? v : null;
+}
+
+function extractCalEarnings(
+  calendar: Record<string, unknown> | undefined,
+  field: string,
+): number | null {
+  const earnings = calendar?.['earnings'] as Record<string, unknown> | undefined;
+  return asNumber(earnings?.[field]);
+}
+
+function extractEarningsHistory(
+  mod: Record<string, unknown> | undefined,
+): EarningsHistoryEntry[] | null {
+  const rows = mod?.['history'];
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const out: EarningsHistoryEntry[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    const rec = r as Record<string, unknown>;
+    out.push({
+      period: asString(rec['period']),
+      quarter: asDateString(rec['quarter']),
+      epsActual: asNumber(rec['epsActual']),
+      epsEstimate: asNumber(rec['epsEstimate']),
+      epsDifference: asNumber(rec['epsDifference']),
+      surprisePercent: asNumber(rec['surprisePercent']),
+    });
+  }
+  return out.length === 0 ? null : out;
+}
+
+function extractRecommendationTrend(
+  mod: Record<string, unknown> | undefined,
+): RecommendationTrendEntry[] | null {
+  const rows = mod?.['trend'];
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const out: RecommendationTrendEntry[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    const rec = r as Record<string, unknown>;
+    const period = asString(rec['period']);
+    const strongBuy = asNumber(rec['strongBuy']);
+    const buy = asNumber(rec['buy']);
+    const hold = asNumber(rec['hold']);
+    const sell = asNumber(rec['sell']);
+    const strongSell = asNumber(rec['strongSell']);
+    // Skip all-zero / all-null rows (Yahoo emits placeholders).
+    if (
+      (strongBuy ?? 0) === 0 &&
+      (buy ?? 0) === 0 &&
+      (hold ?? 0) === 0 &&
+      (sell ?? 0) === 0 &&
+      (strongSell ?? 0) === 0
+    ) {
+      continue;
+    }
+    out.push({ period, strongBuy, buy, hold, sell, strongSell });
+  }
+  return out.length === 0 ? null : out;
+}
+
+function extractUpgradeDowngrade(
+  mod: Record<string, unknown> | undefined,
+): UpgradeDowngradeEntry[] | null {
+  const rows = mod?.['history'];
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const out: UpgradeDowngradeEntry[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    const rec = r as Record<string, unknown>;
+    out.push({
+      date: asDateString(rec['epochGradeDate']),
+      firm: asString(rec['firm']),
+      fromGrade: asString(rec['fromGrade']),
+      toGrade: asString(rec['toGrade']),
+      action: asString(rec['action']),
+    });
+  }
+  // Sort newest first; cap to 15 to keep the payload small.
+  out.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  return out.length === 0 ? null : out.slice(0, 15);
+}
+
+/**
+ * News articles via `yahooFinance.search()`. Separate from `fetchOverview`
+ * because news goes stale fast — we fetch live on demand rather than caching
+ * in `Security.metadata`.
+ */
+export async function fetchNews(
+  yahooSymbol: string,
+  opts: { count?: number } = {},
+  client: YahooClient = getClient(),
+): Promise<NewsItem[] | null> {
+  const count = opts.count ?? 10;
+  let raw;
+  try {
+    raw = await client.search(yahooSymbol, { newsCount: count, quotesCount: 0 });
+  } catch (err) {
+    wrapError(err, `news(${yahooSymbol}) failed`);
+  }
+  const news = (raw as { news?: unknown[] } | null)?.news;
+  if (!Array.isArray(news) || news.length === 0) return null;
+  const out: NewsItem[] = [];
+  for (const n of news) {
+    if (!n || typeof n !== 'object') continue;
+    const rec = n as Record<string, unknown>;
+    const title = asString(rec['title']);
+    const link = asString(rec['link']);
+    const uuid = asString(rec['uuid']);
+    if (!title || !link) continue;
+    const publisher = asString(rec['publisher']) ?? '';
+    const publishedAtRaw = rec['providerPublishTime'];
+    const publishedAt =
+      publishedAtRaw instanceof Date
+        ? publishedAtRaw.toISOString()
+        : typeof publishedAtRaw === 'number' && Number.isFinite(publishedAtRaw)
+          ? new Date(publishedAtRaw * 1000).toISOString()
+          : typeof publishedAtRaw === 'string'
+            ? publishedAtRaw
+            : '';
+    const thumb = rec['thumbnail'] as Record<string, unknown> | undefined;
+    const resolutions = thumb?.['resolutions'] as Array<Record<string, unknown>> | undefined;
+    const thumbnailUrl =
+      Array.isArray(resolutions) && resolutions[0]
+        ? asString(resolutions[0]['url'])
+        : null;
+    const relatedTickers = Array.isArray(rec['relatedTickers'])
+      ? (rec['relatedTickers'] as unknown[]).filter((t): t is string => typeof t === 'string')
+      : [];
+    out.push({
+      uuid: uuid ?? `${title}-${publishedAt}`,
+      title,
+      publisher,
+      link,
+      publishedAt,
+      thumbnailUrl,
+      relatedTickers,
+    });
+  }
+  return out.length === 0 ? null : out;
 }
 
 /** Test seam — swaps the underlying client. Pass null to restore the singleton. */

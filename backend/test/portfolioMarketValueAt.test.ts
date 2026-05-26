@@ -191,3 +191,29 @@ test('portfolioMarketValueAt: gaps only when neither quote nor imported marketVa
   assert.deepEqual(result.rows, []);
   assert.equal(result.gaps.length, 1);
 });
+
+test('portfolioMarketValueAt: excludes accounts closed on or before asOf', async () => {
+  const acc = await seedAccount('Closed');
+  const sec = await seedSecurity('VFV');
+  await seedHolding(acc.id, sec.id, '2026-01-01', 10);
+  await seedPrice(sec.id, '2026-01-01T16:00:00Z', 100);
+  acc.set('closedAt', '2026-01-15');
+  await acc.save();
+
+  const result = await mod.portfolioMarketValueAt('2026-02-01', [acc.id]);
+  assert.deepEqual(result.rows, []);
+  assert.deepEqual(result.gaps, []);
+});
+
+test('portfolioMarketValueAt: includes accounts closed after asOf', async () => {
+  const acc = await seedAccount('Active');
+  const sec = await seedSecurity('VFV');
+  await seedHolding(acc.id, sec.id, '2026-01-01', 10);
+  await seedPrice(sec.id, '2026-01-01T16:00:00Z', 100);
+  acc.set('closedAt', '2026-03-01');
+  await acc.save();
+
+  const result = await mod.portfolioMarketValueAt('2026-02-01', [acc.id]);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].marketValue, 1000);
+});

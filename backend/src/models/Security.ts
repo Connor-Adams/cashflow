@@ -65,6 +65,65 @@ export type SecurityMetadata = {
   recommendationKey?: string | null;
   numberOfAnalystOpinions?: number | null;
   financialCurrency?: string | null;
+  // Crypto fields
+  circulatingSupply?: number | null;
+  volume24Hr?: number | null;
+  cryptoStartDate?: string | null;
+  fromCurrency?: string | null;
+  // Fund / ETF fields
+  fundFamily?: string | null;
+  fundCategory?: string | null;
+  fundLegalType?: string | null;
+  fundExpenseRatio?: number | null;
+  fundTotalAssets?: number | null;
+  fundYield?: number | null;
+  topHoldings?: Array<{
+    symbol: string | null;
+    name: string | null;
+    percent: number | null;
+  }> | null;
+  sectorWeightings?: Record<string, number> | null;
+  bondPosition?: number | null;
+  stockPosition?: number | null;
+  cashPosition?: number | null;
+  trailingReturn1y?: number | null;
+  trailingReturn3y?: number | null;
+  trailingReturn5y?: number | null;
+  trailingReturn10y?: number | null;
+  trailingReturnYtd?: number | null;
+  // Earnings forecast + history
+  nextEarningsDate?: string | null;
+  nextEarningsIsEstimate?: boolean | null;
+  earningsEpsAvg?: number | null;
+  earningsEpsLow?: number | null;
+  earningsEpsHigh?: number | null;
+  earningsRevenueAvg?: number | null;
+  earningsRevenueLow?: number | null;
+  earningsRevenueHigh?: number | null;
+  earningsHistory?: Array<{
+    period: string | null;
+    quarter: string | null;
+    epsActual: number | null;
+    epsEstimate: number | null;
+    epsDifference: number | null;
+    surprisePercent: number | null;
+  }> | null;
+  // Analyst sentiment
+  recommendationTrend?: Array<{
+    period: string | null;
+    strongBuy: number | null;
+    buy: number | null;
+    hold: number | null;
+    sell: number | null;
+    strongSell: number | null;
+  }> | null;
+  upgradeDowngradeHistory?: Array<{
+    date: string | null;
+    firm: string | null;
+    fromGrade: string | null;
+    toGrade: string | null;
+    action: string | null;
+  }> | null;
   // Raw passthrough — full quoteSummary for forensics / future fields.
   [key: string]: unknown;
 };

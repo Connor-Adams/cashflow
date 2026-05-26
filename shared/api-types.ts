@@ -10,6 +10,7 @@ export type Account = {
   accountType: AccountType
   shortCode: string | null
   defaultCurrency: string | null
+  closedAt: string | null
 }
 
 export type AccountType =

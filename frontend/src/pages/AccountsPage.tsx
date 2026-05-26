@@ -45,6 +45,7 @@ export function AccountsPage() {
   const [editCurrency, setEditCurrency] = useState('')
   const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
+  const [editClosedAt, setEditClosedAt] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -180,6 +181,7 @@ export function AccountsPage() {
         defaultCurrency,
         accountType: editAccountType,
         visibility: editVisibility,
+        closedAt: editClosedAt.trim() || null,
       })
       setEditingId(null)
       setEditName('')
@@ -188,6 +190,7 @@ export function AccountsPage() {
       setEditCurrency('')
       setEditAccountType('checking')
       setEditVisibility('private')
+      setEditClosedAt('')
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -202,6 +205,7 @@ export function AccountsPage() {
     setEditCurrency('')
     setEditAccountType('checking')
     setEditVisibility('private')
+    setEditClosedAt('')
   }
 
   function startEdit(account: Account) {
@@ -212,6 +216,7 @@ export function AccountsPage() {
     setEditCurrency((account.defaultCurrency ?? 'CAD').toUpperCase())
     setEditAccountType(account.accountType ?? 'checking')
     setEditVisibility(account.visibility ?? 'private')
+    setEditClosedAt(account.closedAt ?? '')
   }
 
   const accountCount = accounts.length
@@ -368,17 +373,18 @@ export function AccountsPage() {
                 <TableHead>Short code</TableHead>
                 <TableHead>Default currency</TableHead>
                 <TableHead>Visibility</TableHead>
+                <TableHead>Closed</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
-                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={7} />
+                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={8} />
                 ))
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id}>
+                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -465,6 +471,20 @@ export function AccountsPage() {
                         </select>
                       ) : (
                         a.visibility
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {editingId === a.id ? (
+                        <Input
+                          type="date"
+                          value={editClosedAt}
+                          onChange={(e) => setEditClosedAt(e.target.value)}
+                          placeholder="YYYY-MM-DD"
+                        />
+                      ) : a.closedAt ? (
+                        <Badge variant="secondary">Closed {a.closedAt}</Badge>
+                      ) : (
+                        '—'
                       )}
                     </TableCell>
                     <TableCell>
