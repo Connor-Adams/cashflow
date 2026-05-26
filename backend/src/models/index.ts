@@ -57,6 +57,7 @@ import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
+import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -110,6 +111,7 @@ initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
+initAiReviewRun(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -346,6 +348,25 @@ PlannedEvent.belongsTo(Transaction, {
   as: 'linkedTransaction',
 });
 
+Household.hasMany(AiReviewRun, {
+  foreignKey: 'household_id',
+  as: 'aiReviewRuns',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AiReviewRun.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(AiReviewRun, {
+  foreignKey: 'user_id',
+  as: 'aiReviewRuns',
+});
+AiReviewRun.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -398,4 +419,5 @@ export {
   HouseholdPlan,
   Insight,
   PlannedEvent,
+  AiReviewRun,
 };

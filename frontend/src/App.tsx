@@ -30,6 +30,7 @@ import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
+import { AiReviewsPage } from './pages/AiReviewsPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AuthProvider } from './lib/auth'
@@ -78,6 +79,7 @@ function AppRoutes() {
             <Route path="categories" element={<CategoriesTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
+          <Route path="ai/reviews" element={<AiReviewsPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

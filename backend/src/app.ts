@@ -11,6 +11,7 @@ import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
 import recurringRouter from './routes/recurring';
 import aiRouter from './routes/ai';
+import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
@@ -103,6 +104,10 @@ app.use('/api/forecast', forecastRouter);
 app.use('/api/import', importRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
+// AI review router (issue #210) mounted BEFORE aiRouter so its /review and
+// /reviews/* paths win against any future overlap. Both share the /api/ai
+// prefix to satisfy the issue's endpoint spec.
+app.use('/api/ai', aiReviewRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/amazon', amazonRouter);
