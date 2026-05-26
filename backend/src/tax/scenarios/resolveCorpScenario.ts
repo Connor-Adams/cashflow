@@ -2,6 +2,7 @@
 import { Entity, Scenario } from '../../models';
 import { buildCorpFacts } from '../builders/buildCorpFacts';
 import { applyOverrides } from './applyOverrides';
+import { projectCorpFactsFromPrevYear } from './projectCorpFactsFromPrevYear';
 import type { OverrideMap } from './types';
 import type { CorpTaxYearFacts } from '../engine/types';
 
@@ -52,15 +53,23 @@ export async function resolveCorpScenario(scenarioId: number): Promise<CorpTaxYe
   if (entity.kind !== 'corp') {
     throw new Error(`scenario id=${scenarioId} references entity kind=${entity.kind}, not corp`);
   }
-  const baseFacts = await buildCorpFacts(root.entityId, {
-    startDate: `${root.year}-01-01`,
-    endDate: `${root.year}-12-31`,
-  });
+  const baseFacts = root.kind === 'projection_root'
+    ? await projectCorpFactsFromPrevYear(root.id)
+    : await buildCorpFacts(root.entityId, {
+      startDate: `${root.year}-01-01`,
+      endDate: `${root.year}-12-31`,
+    });
   const overrideChain: OverrideMap[] = ancestry.map((s) => s.overrides as OverrideMap);
   return applyOverrides(baseFacts, overrideChain, 'corp');
 }
 
-/** Walk parentId chain from given scenario back to root. Returns root-first array. */
+/**
+ * Walk parentId chain from given scenario back to root. Returns root-first array.
+ *
+ * A `projection_root` scenario terminates the walk: it acts as a year boundary
+ * (its parent lives in a different year so overrides above it must not layer
+ * onto the projected facts).
+ */
 async function loadAncestry(leafId: number): Promise<Scenario[]> {
   const reverse: Scenario[] = [];
   const seen = new Set<number>();
@@ -76,6 +85,7 @@ async function loadAncestry(leafId: number): Promise<Scenario[]> {
     const node: Scenario | null = await Scenario.findByPk(currentId);
     if (!node) throw new Error(`scenario id=${currentId} not found while walking ancestry`);
     reverse.push(node);
+    if (node.kind === 'projection_root') break;
     currentId = node.parentId;
   }
   return reverse.reverse(); // root-first

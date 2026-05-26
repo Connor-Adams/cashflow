@@ -6,10 +6,13 @@ import {
   type Scenario,
   type ScenarioWithComputed,
 } from '../../hooks/useScenarios';
+import { useScenarioChain } from '../../hooks/useScenarioChain';
 import { type TaxLineDto } from '../../hooks/useTaxReturn';
 import { ScenarioTree } from './scenarios/ScenarioTree';
 import { OverrideEditor } from './scenarios/OverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
+import { YearStripNav } from './scenarios/YearStripNav';
+import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 
 export function PersonalT1Tab({ year }: { year: number }) {
   const { entities, error: entitiesError } = useTaxEntities();
@@ -34,11 +37,28 @@ interface WorkspaceProps {
   entityId: number;
 }
 
-function PersonalT1ScenarioWorkspace({ year, entityId }: WorkspaceProps) {
-  const { scenarios, loading, error, create, patch, fork, remove } = useScenarios(entityId, year);
+function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProps) {
+  // Local `selectedYear` overlays the prop so the YearStripNav can pivot to a
+  // chained year (year+1 projection, etc.) without round-tripping through
+  // TaxPage's year selector. When the prop changes (user picks a year in the
+  // top-level selector) we re-seed local state to match.
+  const [selectedYear, setSelectedYear] = useState(yearProp);
+  useEffect(() => { setSelectedYear(yearProp); }, [yearProp]);
+
+  const {
+    scenarios,
+    loading,
+    error,
+    create,
+    patch,
+    fork,
+    remove,
+    projectNextYear,
+  } = useScenarios(entityId, selectedYear);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [isProjecting, setIsProjecting] = useState(false);
 
   // Auto-create a starter scenario on first load so the baseline materialises
   // and there is something for the user to edit immediately. The POST handler
@@ -80,6 +100,55 @@ function PersonalT1ScenarioWorkspace({ year, entityId }: WorkspaceProps) {
   }, [scenarios]);
 
   const active = useScenarioDetail(activeId);
+  // Walk the multi-year chain forward from whichever scenario is active. The
+  // backend resolves to the chain root, so passing any chained scenario id
+  // returns the same year-ordered list.
+  const chain = useScenarioChain(activeId);
+
+  async function handleProjectNextYear() {
+    if (activeId === null) return;
+    setIsProjecting(true);
+    try {
+      const next = await projectNextYear(activeId);
+      // Re-key the scenarios query to the new year and select the new
+      // projection_root. The chain hook will re-fetch via its own effect once
+      // activeId flips.
+      setSelectedYear(next.year);
+      setActiveId(next.id);
+      chain.reload();
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    } finally {
+      setIsProjecting(false);
+    }
+  }
+
+  function handleSelectYear(_year: number, scenarioId: number) {
+    // The chain entry carries the canonical year-N scenario id; switching
+    // years means swapping both the year key (so useScenarios refetches the
+    // right list) and the active scenario id (so the detail pane updates).
+    setSelectedYear(_year);
+    setActiveId(scenarioId);
+  }
+
+  async function handleAssumptionsChange(next: {
+    inflation?: number;
+    investmentReturn?: number;
+  }) {
+    if (!active.data) return;
+    try {
+      // patch's `assumptions` field is typed loosely (Record<string, unknown>);
+      // narrow assumption shape is owned by AssumptionsEditor + the projection
+      // builders. Cast at the boundary, not throughout the component tree.
+      await patch(active.data.scenario.id, {
+        assumptions: next as Record<string, unknown>,
+      });
+      active.reload();
+      chain.reload();
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  }
 
   async function handleForkActive() {
     if (activeId === null) return;
@@ -123,13 +192,29 @@ function PersonalT1ScenarioWorkspace({ year, entityId }: WorkspaceProps) {
   return (
     <div>
       <header style={{ marginBottom: '0.75rem' }}>
-        <h2>Personal T1 — {year}</h2>
+        <h2>Personal T1 — {selectedYear}</h2>
         <p className="muted">
           Each scenario layers overrides on top of actuals. Edit overrides on the
           right to see recomputed totals; add scenarios to the compare bar to see
           them side-by-side.
         </p>
       </header>
+      <div className="mb-3">
+        <YearStripNav
+          entityId={entityId}
+          activeYear={selectedYear}
+          activeScenarioId={activeId}
+          chain={chain.data ?? []}
+          onSelectYear={handleSelectYear}
+          onProjectNextYear={handleProjectNextYear}
+          isProjecting={isProjecting}
+        />
+        {chain.error && (
+          <p className="error" style={{ marginTop: '0.25rem' }}>
+            Failed to load year chain: {chain.error}
+          </p>
+        )}
+      </div>
       <div className="flex flex-col md:flex-row gap-6">
         <div className="md:w-64 md:flex-shrink-0">
           <ScenarioTree
@@ -151,6 +236,7 @@ function PersonalT1ScenarioWorkspace({ year, entityId }: WorkspaceProps) {
             <ActiveScenarioPanel
               data={active.data}
               onOverridesChange={handleOverridesChange}
+              onAssumptionsChange={handleAssumptionsChange}
               onAddToCompare={() => toggleCompare(active.data!.scenario.id)}
               inCompare={compareIds.includes(active.data.scenario.id)}
             />
@@ -175,6 +261,7 @@ function PersonalT1ScenarioWorkspace({ year, entityId }: WorkspaceProps) {
 interface ActiveScenarioPanelProps {
   data: ScenarioWithComputed;
   onOverridesChange: (next: Record<string, unknown>) => void;
+  onAssumptionsChange: (next: { inflation?: number; investmentReturn?: number }) => void;
   onAddToCompare: () => void;
   inCompare: boolean;
 }
@@ -182,6 +269,7 @@ interface ActiveScenarioPanelProps {
 function ActiveScenarioPanel({
   data,
   onOverridesChange,
+  onAssumptionsChange,
   onAddToCompare,
   inCompare,
 }: ActiveScenarioPanelProps) {
@@ -190,6 +278,7 @@ function ActiveScenarioPanel({
   // computed lines come back through `JSON.parse(JSON.stringify(...))` which
   // collapses the Decimal instances to their string form (see computeScenario).
   const lines = (computed.lines ?? []) as TaxLineDto[];
+  const isProjection = scenario.kind === 'projection_root';
   return (
     <div>
       <header style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
@@ -201,6 +290,14 @@ function ActiveScenarioPanel({
           {inCompare ? '✓ In compare' : '+ Add to compare'}
         </button>
       </header>
+      {isProjection && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <AssumptionsEditor
+            assumptions={scenario.assumptions as { inflation?: number; investmentReturn?: number }}
+            onChange={onAssumptionsChange}
+          />
+        </div>
+      )}
       <OverrideEditor overrides={scenario.overrides} onChange={onOverridesChange} />
       <section style={{ marginTop: '1rem' }}>
         <h4>Computed totals</h4>

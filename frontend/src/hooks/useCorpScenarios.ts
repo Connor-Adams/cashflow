@@ -61,6 +61,11 @@ export type PatchCorpScenarioInput = Partial<
   Pick<CorpScenario, 'name' | 'notes' | 'overrides' | 'assumptions'>
 >;
 
+export interface ProjectNextCorpYearInput {
+  name?: string;
+  assumptions?: Record<string, unknown>;
+}
+
 interface UseCorpScenariosResult {
   scenarios: CorpScenario[];
   loading: boolean;
@@ -70,6 +75,7 @@ interface UseCorpScenariosResult {
   patch: (id: number, body: PatchCorpScenarioInput) => Promise<CorpScenario>;
   fork: (id: number, name?: string) => Promise<CorpScenario>;
   remove: (id: number) => Promise<void>;
+  projectNextYear: (id: number, input?: ProjectNextCorpYearInput) => Promise<CorpScenario>;
 }
 
 export function useCorpScenarios(entityId: number, year: number): UseCorpScenariosResult {
@@ -141,5 +147,31 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
     [reload],
   );
 
-  return { scenarios, loading, error, reload, create, patch, fork, remove };
+  // Mirrors `fork`: POSTs to `/:id/project-next-year`, reloads the scenarios
+  // list (the freshly-created projection_root lives in year+1 — the caller is
+  // responsible for re-keying any year-scoped hooks to surface it), and returns
+  // the new scenario so the caller can select it.
+  const projectNextYear = useCallback<UseCorpScenariosResult['projectNextYear']>(
+    async (id, input) => {
+      const body = await postJson<{ scenario: CorpScenario }>(
+        `/api/tax/corp-scenarios/${id}/project-next-year`,
+        input ?? {},
+      );
+      reload();
+      return body.scenario;
+    },
+    [reload],
+  );
+
+  return {
+    scenarios,
+    loading,
+    error,
+    reload,
+    create,
+    patch,
+    fork,
+    remove,
+    projectNextYear,
+  };
 }

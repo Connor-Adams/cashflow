@@ -45,6 +45,11 @@ export type PatchScenarioInput = Partial<
   Pick<Scenario, 'name' | 'notes' | 'overrides' | 'assumptions'>
 >;
 
+export interface ProjectNextYearInput {
+  name?: string;
+  assumptions?: Record<string, unknown>;
+}
+
 interface UseScenariosResult {
   scenarios: Scenario[];
   loading: boolean;
@@ -54,6 +59,7 @@ interface UseScenariosResult {
   patch: (id: number, body: PatchScenarioInput) => Promise<Scenario>;
   fork: (id: number, name?: string) => Promise<Scenario>;
   remove: (id: number) => Promise<void>;
+  projectNextYear: (id: number, input?: ProjectNextYearInput) => Promise<Scenario>;
 }
 
 export function useScenarios(entityId: number, year: number): UseScenariosResult {
@@ -125,7 +131,33 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
     [reload],
   );
 
-  return { scenarios, loading, error, reload, create, patch, fork, remove };
+  // Mirrors `fork`: POSTs to `/:id/project-next-year`, reloads the scenarios
+  // list (the freshly-created projection_root lives in year+1 — the caller is
+  // responsible for re-keying any year-scoped hooks to surface it), and returns
+  // the new scenario so the caller can select it.
+  const projectNextYear = useCallback<UseScenariosResult['projectNextYear']>(
+    async (id, input) => {
+      const body = await postJson<{ scenario: Scenario }>(
+        `/api/tax/personal-scenarios/${id}/project-next-year`,
+        input ?? {},
+      );
+      reload();
+      return body.scenario;
+    },
+    [reload],
+  );
+
+  return {
+    scenarios,
+    loading,
+    error,
+    reload,
+    create,
+    patch,
+    fork,
+    remove,
+    projectNextYear,
+  };
 }
 
 interface UseScenarioDetailResult {

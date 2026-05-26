@@ -35,6 +35,7 @@ import {
   type IntegrationWarning,
   type PersonalScenarioComputeEntry,
 } from '@/hooks/useHouseholdPlanCompute';
+import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from '../util/format';
 
 const FIELDS = [
   { key: 'salary', label: 'Salary' },
@@ -51,6 +52,9 @@ const SLIDER_MAX = 200_000;
 const SLIDER_STEP = 1_000;
 const PATCH_DEBOUNCE_MS = 200;
 
+const OWNER_COMP_KEY_RE =
+  /^ownerComp\.(\d+)\.(salary|bonus|eligibleDividend|nonEligibleDividend|capitalDividend)$/;
+
 interface Props {
   corpScenarioId: number;
   corpEntityId: number;
@@ -59,18 +63,11 @@ interface Props {
   shareholderEntityIds: number[];
 }
 
-type SliderValues = Record<number, Record<FieldKey, number>>;
+type ShareholderRow = Record<FieldKey, number>;
+type SliderValues = Record<number, ShareholderRow>;
 
-function fmtCurrency(value: string | number | undefined | null): string {
-  if (value === undefined || value === null) return '—';
-  const n = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(n)) return '—';
-  return `$${n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmtPct(value: number): string {
-  if (!Number.isFinite(value)) return '—';
-  return `${(value * 100).toFixed(2)}%`;
+function emptyShareholderRow(): ShareholderRow {
+  return { salary: 0, bonus: 0, eligibleDividend: 0, nonEligibleDividend: 0, capitalDividend: 0 };
 }
 
 function ownerCompKey(shareholderId: number, field: FieldKey): string {
@@ -87,19 +84,14 @@ function readOwnerCompFromOverrides(
   shareholderIds: number[],
 ): SliderValues {
   const out: SliderValues = {};
-  for (const id of shareholderIds) {
-    out[id] = { salary: 0, bonus: 0, eligibleDividend: 0, nonEligibleDividend: 0, capitalDividend: 0 };
-  }
+  for (const id of shareholderIds) out[id] = emptyShareholderRow();
   for (const [k, v] of Object.entries(overrides)) {
-    const m = k.match(/^ownerComp\.(\d+)\.(salary|bonus|eligibleDividend|nonEligibleDividend|capitalDividend)$/);
+    const m = k.match(OWNER_COMP_KEY_RE);
     if (!m) continue;
     const id = Number(m[1]);
     const field = m[2] as FieldKey;
-    const n = typeof v === 'number' ? v : Number(v);
-    if (!out[id]) {
-      out[id] = { salary: 0, bonus: 0, eligibleDividend: 0, nonEligibleDividend: 0, capitalDividend: 0 };
-    }
-    out[id][field] = Number.isFinite(n) ? n : 0;
+    out[id] = out[id] ?? emptyShareholderRow();
+    out[id][field] = numericOrZero(v as string | number | undefined | null);
   }
   return out;
 }
@@ -129,15 +121,12 @@ function mergeOwnerCompIntoOverrides(
 
 function sliderValuesEqual(a: SliderValues, b: SliderValues): boolean {
   const ids = new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const id of ids) {
+  return Array.from(ids).every((id) => {
     const ra = a[Number(id)];
     const rb = b[Number(id)];
     if (!ra || !rb) return false;
-    for (const field of FIELDS) {
-      if (ra[field.key] !== rb[field.key]) return false;
-    }
-  }
-  return true;
+    return FIELDS.every((f) => ra[f.key] === rb[f.key]);
+  });
 }
 
 export function OwnerCompLeverSurface({
@@ -208,13 +197,7 @@ export function OwnerCompLeverSurface({
       const clamped = Number.isFinite(raw) ? Math.max(0, raw) : 0;
       setValues((prev) => {
         if (!prev) return prev;
-        const existing = prev[shareholderId] ?? {
-          salary: 0,
-          bonus: 0,
-          eligibleDividend: 0,
-          nonEligibleDividend: 0,
-          capitalDividend: 0,
-        };
+        const existing = prev[shareholderId] ?? emptyShareholderRow();
         if (existing[field] === clamped) return prev;
         return { ...prev, [shareholderId]: { ...existing, [field]: clamped } };
       });
@@ -223,14 +206,10 @@ export function OwnerCompLeverSurface({
   );
 
   if (corpDetail.error) {
-    return (
-      <p className="text-red-600">Failed to load corp scenario: {corpDetail.error}</p>
-    );
+    return <p className="text-red-600">Failed to load corp scenario: {corpDetail.error}</p>;
   }
   if (planCompute.error) {
-    return (
-      <p className="text-red-600">Failed to load household compute: {planCompute.error}</p>
-    );
+    return <p className="text-red-600">Failed to load household compute: {planCompute.error}</p>;
   }
   if (corpDetail.loading || !corpDetail.data || !values) {
     return <p className="text-gray-500">Loading owner comp surface…</p>;
@@ -259,15 +238,7 @@ export function OwnerCompLeverSurface({
             <ShareholderCard
               key={shId}
               shareholderEntityId={shId}
-              values={
-                values[shId] ?? {
-                  salary: 0,
-                  bonus: 0,
-                  eligibleDividend: 0,
-                  nonEligibleDividend: 0,
-                  capitalDividend: 0,
-                }
-              }
+              values={values[shId] ?? emptyShareholderRow()}
               onChange={(field, value) => handleFieldChange(shId, field, value)}
             />
           ))
@@ -287,21 +258,17 @@ export function OwnerCompLeverSurface({
 
 interface ShareholderCardProps {
   shareholderEntityId: number;
-  values: Record<FieldKey, number>;
+  values: ShareholderRow;
   onChange: (field: FieldKey, value: number) => void;
 }
 
 function ShareholderCard({ shareholderEntityId, values, onChange }: ShareholderCardProps) {
+  const total = FIELDS.reduce((sum, f) => sum + (values[f.key] ?? 0), 0);
   return (
     <section className="rounded-md border border-gray-200 p-4">
       <header className="mb-3 flex items-baseline justify-between">
         <h4 className="font-medium">Shareholder #{shareholderEntityId}</h4>
-        <span className="text-xs text-gray-500">
-          Total:{' '}
-          {fmtCurrency(
-            FIELDS.reduce((sum, f) => sum + (values[f.key] ?? 0), 0),
-          )}
-        </span>
+        <span className="text-xs text-gray-500">Total: {fmtCurrency(total)}</span>
       </header>
       <div className="flex flex-col gap-2">
         {FIELDS.map((f) => (
@@ -360,26 +327,35 @@ interface IntegratedSummaryProps {
 
 function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSummaryProps) {
   if (loading && !data) {
-    return (
-      <section className="rounded-md border border-gray-200 p-4">
-        <p className="text-sm text-gray-500">Computing integrated totals…</p>
-      </section>
-    );
+    return <IntegratedSummaryShell>Computing integrated totals…</IntegratedSummaryShell>;
   }
   if (!data) {
-    return (
-      <section className="rounded-md border border-gray-200 p-4">
-        <p className="text-sm text-gray-500">No integrated compute yet.</p>
-      </section>
-    );
+    return <IntegratedSummaryShell>No integrated compute yet.</IntegratedSummaryShell>;
   }
+  return <IntegratedSummaryReady data={data} shareholderEntityIds={shareholderEntityIds} />;
+}
 
+function IntegratedSummaryShell({ children }: { children: React.ReactNode }) {
+  return (
+    <section className="rounded-md border border-gray-200 p-4">
+      <p className="text-sm text-gray-500">{children}</p>
+    </section>
+  );
+}
+
+function IntegratedSummaryReady({
+  data,
+  shareholderEntityIds,
+}: {
+  data: HouseholdPlanComputeResult;
+  shareholderEntityIds: number[];
+}) {
   // Aggregate corp totals across all corp scenarios in the plan. v1: assume a
   // single corp; if multiple, we sum (and surface as a single row).
-  const corpFederal = sumStrings(data.corp.map((c) => c.computed.totals.federalTax));
-  const corpProvincial = sumStrings(data.corp.map((c) => c.computed.totals.provincialTax));
-  const corpDividendRefund = sumStrings(data.corp.map((c) => c.computed.totals.dividendRefund));
-  const corpNetTax = sumStrings(data.corp.map((c) => c.computed.totals.netTaxPayable));
+  const corpFederal = sumNumeric(data.corp.map((c) => c.computed.totals.federalTax));
+  const corpProvincial = sumNumeric(data.corp.map((c) => c.computed.totals.provincialTax));
+  const corpDividendRefund = sumNumeric(data.corp.map((c) => c.computed.totals.dividendRefund));
+  const corpNetTax = sumNumeric(data.corp.map((c) => c.computed.totals.netTaxPayable));
 
   // Per-shareholder rows pulled from `data.personal` (the entity id matches the
   // shareholder id by design). We also pull routed additions from
@@ -390,21 +366,12 @@ function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSu
 
   // Integration row: total earned (gross owner comp routed), total tax (corp
   // net + personal totalPayable), take-home (gross - tax), integrated rate.
-  const totalRouted = shareholderEntityIds.reduce((sum, id) => {
-    const a = data.integration.byShareholder[id];
-    if (!a) return sum;
-    return (
-      sum +
-      Number(a.employmentIncome) +
-      Number(a.eligibleDividends) +
-      Number(a.nonEligibleDividends) +
-      Number(a.capitalDividendsReceived)
-    );
-  }, 0);
-  const personalTotalPayable = sumStrings(
-    Array.from(personalByEntity.values()).map(
-      (p) => p.computed.totals.totalPayable as string | number | undefined,
-    ),
+  const totalRouted = shareholderEntityIds.reduce(
+    (sum, id) => sum + shareholderRoutedTotal(data, id),
+    0,
+  );
+  const personalTotalPayable = sumNumeric(
+    Array.from(personalByEntity.values()).map((p) => p.computed.totals.totalPayable),
   );
   const totalTax = corpNetTax + personalTotalPayable;
   const takeHome = totalRouted - totalTax;
@@ -421,11 +388,7 @@ function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSu
             <SummaryRow label="T2 federal tax" value={fmtCurrency(corpFederal)} />
             <SummaryRow label="T2 provincial tax" value={fmtCurrency(corpProvincial)} />
             <SummaryRow label="Dividend refund" value={fmtCurrency(corpDividendRefund)} />
-            <SummaryRow
-              label="Net corp tax payable"
-              value={fmtCurrency(corpNetTax)}
-              strong
-            />
+            <SummaryRow label="Net corp tax payable" value={fmtCurrency(corpNetTax)} strong />
           </tbody>
         </table>
       </div>
@@ -435,47 +398,11 @@ function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSu
         {shareholderEntityIds.length === 0 ? (
           <p className="text-xs text-gray-500">No shareholders.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-gray-500">
-                <th className="py-1 pr-2">Shareholder</th>
-                <th className="py-1 pr-2">Employment</th>
-                <th className="py-1 pr-2">Dividends</th>
-                <th className="py-1 pr-2">Fed tax</th>
-                <th className="py-1 pr-2">Prov tax</th>
-                <th className="py-1 pr-2">CPP</th>
-                <th className="py-1 pr-2">Net to shareholder</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shareholderEntityIds.map((id) => {
-                const additions = data.integration.byShareholder[id];
-                const personal = personalByEntity.get(id);
-                const emp = additions ? Number(additions.employmentIncome) : 0;
-                const eligDiv = additions ? Number(additions.eligibleDividends) : 0;
-                const nonEligDiv = additions ? Number(additions.nonEligibleDividends) : 0;
-                const capDiv = additions ? Number(additions.capitalDividendsReceived) : 0;
-                const dividends = eligDiv + nonEligDiv + capDiv;
-                const t = personal?.computed.totals ?? {};
-                const fedTax = numericTotal(t.federalTax);
-                const provTax = numericTotal(t.provincialTax);
-                const cpp = numericTotal(t.cppContrib);
-                const totalPayable = numericTotal(t.totalPayable);
-                const netToShareholder = emp + dividends - totalPayable;
-                return (
-                  <tr key={id}>
-                    <td className="py-1 pr-2">#{id}</td>
-                    <td className="py-1 pr-2">{fmtCurrency(emp)}</td>
-                    <td className="py-1 pr-2">{fmtCurrency(dividends)}</td>
-                    <td className="py-1 pr-2">{fmtCurrency(fedTax)}</td>
-                    <td className="py-1 pr-2">{fmtCurrency(provTax)}</td>
-                    <td className="py-1 pr-2">{fmtCurrency(cpp)}</td>
-                    <td className="py-1 pr-2 font-medium">{fmtCurrency(netToShareholder)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <PersonalSideTable
+            data={data}
+            shareholderEntityIds={shareholderEntityIds}
+            personalByEntity={personalByEntity}
+          />
         )}
       </div>
 
@@ -491,6 +418,86 @@ function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSu
         </table>
       </div>
     </section>
+  );
+}
+
+function shareholderRoutedTotal(data: HouseholdPlanComputeResult, id: number): number {
+  const a = data.integration.byShareholder[id];
+  if (!a) return 0;
+  return (
+    numericOrZero(a.employmentIncome) +
+    numericOrZero(a.eligibleDividends) +
+    numericOrZero(a.nonEligibleDividends) +
+    numericOrZero(a.capitalDividendsReceived)
+  );
+}
+
+interface PersonalSideTableProps {
+  data: HouseholdPlanComputeResult;
+  shareholderEntityIds: number[];
+  personalByEntity: Map<number, PersonalScenarioComputeEntry>;
+}
+
+function PersonalSideTable({
+  data,
+  shareholderEntityIds,
+  personalByEntity,
+}: PersonalSideTableProps) {
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-xs text-gray-500">
+          <th className="py-1 pr-2">Shareholder</th>
+          <th className="py-1 pr-2">Employment</th>
+          <th className="py-1 pr-2">Dividends</th>
+          <th className="py-1 pr-2">Fed tax</th>
+          <th className="py-1 pr-2">Prov tax</th>
+          <th className="py-1 pr-2">CPP</th>
+          <th className="py-1 pr-2">Net to shareholder</th>
+        </tr>
+      </thead>
+      <tbody>
+        {shareholderEntityIds.map((id) => (
+          <PersonalSideRow
+            key={id}
+            id={id}
+            additions={data.integration.byShareholder[id]}
+            personal={personalByEntity.get(id)}
+          />
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+interface PersonalSideRowProps {
+  id: number;
+  additions: HouseholdPlanComputeResult['integration']['byShareholder'][number] | undefined;
+  personal: PersonalScenarioComputeEntry | undefined;
+}
+
+function PersonalSideRow({ id, additions, personal }: PersonalSideRowProps) {
+  const emp = numericOrZero(additions?.employmentIncome);
+  const eligDiv = numericOrZero(additions?.eligibleDividends);
+  const nonEligDiv = numericOrZero(additions?.nonEligibleDividends);
+  const capDiv = numericOrZero(additions?.capitalDividendsReceived);
+  const dividends = eligDiv + nonEligDiv + capDiv;
+  const t = personal?.computed.totals ?? {};
+  const fedTax = numericOrZero(t.federalTax);
+  const provTax = numericOrZero(t.provincialTax);
+  const cpp = numericOrZero(t.cppContrib);
+  const totalPayable = numericOrZero(t.totalPayable);
+  const netToShareholder = emp + dividends - totalPayable;
+  return (
+    <tr>
+      <td className="py-1 pr-2">#{id}</td>
+      <td className="py-1 pr-2">{fmtCurrency(emp)}</td>
+      <td className="py-1 pr-2">{fmtCurrency(dividends)}</td>
+      <td className="py-1 pr-2">{fmtCurrency(fedTax)}</td>
+      <td className="py-1 pr-2">{fmtCurrency(provTax)}</td>
+      <td className="py-1 pr-2">{fmtCurrency(cpp)}</td>
+      <td className="py-1 pr-2 font-medium">{fmtCurrency(netToShareholder)}</td>
+    </tr>
   );
 }
 
@@ -540,20 +547,4 @@ function WarningsList({ warnings }: WarningsListProps) {
       </ul>
     </section>
   );
-}
-
-function sumStrings(values: Array<string | number | undefined | null>): number {
-  let total = 0;
-  for (const v of values) {
-    if (v === undefined || v === null) continue;
-    const n = typeof v === 'number' ? v : Number(v);
-    if (Number.isFinite(n)) total += n;
-  }
-  return total;
-}
-
-function numericTotal(v: string | number | undefined): number {
-  if (v === undefined || v === null) return 0;
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? n : 0;
 }

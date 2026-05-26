@@ -14,6 +14,7 @@ import {
 import { HouseholdPlanPicker } from './scenarios/HouseholdPlanPicker';
 import { MultiYearCompareCard } from './MultiYearCompareCard';
 import { InstalmentTracker } from './InstalmentTracker';
+import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from './util/format';
 
 interface Props {
   year: number;
@@ -41,39 +42,55 @@ export function OverviewTab({ year, activePlanId, onPlanChange }: Props) {
         </section>
       )}
 
-      {loading ? (
-        <p className="muted">Computing…</p>
-      ) : error ? (
-        <p className="error">Error: {error}</p>
-      ) : !data ? null : (
-        <>
-          <h2>Year {year} — Estimated total payable</h2>
-          <p className="big-number">${data.totals.totalPayable}</p>
-          <ul>
-            <li>Federal tax: ${data.totals.federalTax}</li>
-            <li>Ontario tax (incl. surtax + OHP): ${data.totals.provincialTax}</li>
-            <li>CPP: ${data.totals.cppContrib}</li>
-            <li>EI: ${data.totals.eiPremium}</li>
-          </ul>
-          {data.warnings.length > 0 && (
-            <section>
-              <h3>Warnings</h3>
-              <ul>{data.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
-            </section>
-          )}
-          <p className="muted">
-            {data.cached ? 'Cached snapshot' : 'Freshly computed'} at{' '}
-            {new Date(data.computedAt).toLocaleString()}
-          </p>
-          <section>
-            <MultiYearCompareCard from={year - 2} to={year} />
-          </section>
-          <section>
-            <InstalmentTracker year={year} />
-          </section>
-        </>
-      )}
+      <TaxReturnSection year={year} data={data} loading={loading} error={error} />
     </div>
+  );
+}
+
+interface TaxReturnSectionProps {
+  year: number;
+  data: ReturnType<typeof useTaxReturn>['data'];
+  loading: boolean;
+  error: string | null;
+}
+
+// Renders the year/total/lines block + multi-year + instalments. Pulled out
+// of OverviewTab so the parent component is just composition.
+function TaxReturnSection({ year, data, loading, error }: TaxReturnSectionProps) {
+  if (loading) return <p className="muted">Computing…</p>;
+  if (error) return <p className="error">Error: {error}</p>;
+  if (!data) return null;
+  return (
+    <>
+      <h2>Year {year} — Estimated total payable</h2>
+      <p className="big-number">${data.totals.totalPayable}</p>
+      <ul>
+        <li>Federal tax: ${data.totals.federalTax}</li>
+        <li>Ontario tax (incl. surtax + OHP): ${data.totals.provincialTax}</li>
+        <li>CPP: ${data.totals.cppContrib}</li>
+        <li>EI: ${data.totals.eiPremium}</li>
+      </ul>
+      {data.warnings.length > 0 && (
+        <section>
+          <h3>Warnings</h3>
+          <ul>
+            {data.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <p className="muted">
+        {data.cached ? 'Cached snapshot' : 'Freshly computed'} at{' '}
+        {new Date(data.computedAt).toLocaleString()}
+      </p>
+      <section>
+        <MultiYearCompareCard from={year - 2} to={year} />
+      </section>
+      <section>
+        <InstalmentTracker year={year} />
+      </section>
+    </>
   );
 }
 
@@ -83,52 +100,104 @@ interface IntegratedRateCardProps {
   data: HouseholdPlanComputeResult | null;
 }
 
+type IntegratedRateState =
+  | { kind: 'error'; message: string }
+  | { kind: 'loading' }
+  | { kind: 'empty' }
+  | { kind: 'ready'; computed: IntegratedRateComputed; data: HouseholdPlanComputeResult };
+
+interface IntegratedRateComputed {
+  corpNetTax: number;
+  personalTotalPayable: number;
+  totalRouted: number;
+  totalTax: number;
+  takeHome: number;
+  integratedRate: number | null;
+  warningCount: number;
+}
+
+function deriveIntegratedRate(data: HouseholdPlanComputeResult): IntegratedRateComputed {
+  const corpNetTax = sumNumeric(data.corp.map((c) => c.computed.totals.netTaxPayable));
+  const personalTotalPayable = sumNumeric(
+    data.personal.map((p) => p.computed.totals.totalPayable),
+  );
+  // Total routed = the gross owner-comp money that crossed the integration
+  // router. Used as the denominator for the integrated rate.
+  const totalRouted = Object.values(data.integration.byShareholder).reduce(
+    (sum, add) =>
+      sum +
+      numericOrZero(add.employmentIncome) +
+      numericOrZero(add.eligibleDividends) +
+      numericOrZero(add.nonEligibleDividends) +
+      numericOrZero(add.capitalDividendsReceived),
+    0,
+  );
+  const totalTax = corpNetTax + personalTotalPayable;
+  const takeHome = totalRouted - totalTax;
+  const integratedRate = totalRouted > 0 ? totalTax / totalRouted : null;
+  return {
+    corpNetTax,
+    personalTotalPayable,
+    totalRouted,
+    totalTax,
+    takeHome,
+    integratedRate,
+    warningCount: data.integration.warnings.length,
+  };
+}
+
+function integratedRateState({
+  loading,
+  error,
+  data,
+}: IntegratedRateCardProps): IntegratedRateState {
+  if (error) return { kind: 'error', message: error };
+  if (!data) return loading ? { kind: 'loading' } : { kind: 'empty' };
+  return { kind: 'ready', data, computed: deriveIntegratedRate(data) };
+}
+
 /**
  * Compact integrated-rate summary for the active household plan. Sums corp
  * `netTaxPayable` + personal `totalPayable` and divides by the total routed
  * owner-comp gross so the user sees the all-in tax rate at a glance. The
  * detailed per-shareholder breakdown lives on the Owner Comp tab.
  */
-function IntegratedRateCard({ loading, error, data }: IntegratedRateCardProps) {
-  if (error) {
+function IntegratedRateCard(props: IntegratedRateCardProps) {
+  const state = integratedRateState(props);
+  if (state.kind === 'error') {
     return (
       <div className="rounded-md border border-red-300 bg-red-50 p-3">
         <p className="text-sm text-red-700">
-          Failed to load integrated household compute: {error}
+          Failed to load integrated household compute: {state.message}
         </p>
       </div>
     );
   }
-  if (loading && !data) {
+  if (state.kind === 'loading') {
     return (
       <div className="rounded-md border border-gray-200 p-3">
         <p className="text-sm text-gray-500">Computing integrated household totals…</p>
       </div>
     );
   }
-  if (!data) return null;
+  if (state.kind === 'empty') return null;
+  return <IntegratedRateCardReady data={state.data} computed={state.computed} />;
+}
 
-  const corpNetTax = sumNumeric(data.corp.map((c) => c.computed.totals.netTaxPayable));
-  const personalTotalPayable = sumNumeric(
-    data.personal.map((p) => p.computed.totals.totalPayable),
-  );
+interface IntegratedRateCardReadyProps {
+  data: HouseholdPlanComputeResult;
+  computed: IntegratedRateComputed;
+}
 
-  // Total routed = the gross owner-comp money that crossed the integration
-  // router. Used as the denominator for the integrated rate.
-  const totalRouted = Object.values(data.integration.byShareholder).reduce(
-    (sum, add) =>
-      sum +
-      Number(add.employmentIncome) +
-      Number(add.eligibleDividends) +
-      Number(add.nonEligibleDividends) +
-      Number(add.capitalDividendsReceived),
-    0,
-  );
-  const totalTax = corpNetTax + personalTotalPayable;
-  const takeHome = totalRouted - totalTax;
-  const integratedRate = totalRouted > 0 ? totalTax / totalRouted : null;
-  const warningCount = data.integration.warnings.length;
-
+function IntegratedRateCardReady({ data, computed }: IntegratedRateCardReadyProps) {
+  const {
+    corpNetTax,
+    personalTotalPayable,
+    totalRouted,
+    takeHome,
+    integratedRate,
+    warningCount,
+  } = computed;
   return (
     <div className="rounded-md border border-gray-200 p-4">
       <header className="mb-2 flex items-baseline justify-between">
@@ -171,24 +240,4 @@ function Metric({
       <div className={strong ? 'font-semibold' : ''}>{value}</div>
     </div>
   );
-}
-
-function fmtCurrency(n: number): string {
-  if (!Number.isFinite(n)) return '—';
-  return `$${n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmtPct(n: number): string {
-  if (!Number.isFinite(n)) return '—';
-  return `${(n * 100).toFixed(2)}%`;
-}
-
-function sumNumeric(values: Array<string | number | undefined | null>): number {
-  let total = 0;
-  for (const v of values) {
-    if (v === undefined || v === null) continue;
-    const n = typeof v === 'number' ? v : Number(v);
-    if (Number.isFinite(n)) total += n;
-  }
-  return total;
 }

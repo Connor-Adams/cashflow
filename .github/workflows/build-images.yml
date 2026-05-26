@@ -23,7 +23,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [backend, frontend]
+        include:
+          - name: backend
+            context: .
+            file: backend/Dockerfile
+            needs_app_args: 'true'
+          - name: frontend
+            context: .
+            file: frontend/Dockerfile
+            needs_app_args: 'true'
+          - name: otel-collector
+            context: infra/otel-collector
+            file: infra/otel-collector/Dockerfile
+            needs_app_args: 'false'
+          - name: loki
+            context: infra/loki
+            file: infra/loki/Dockerfile
+            needs_app_args: 'false'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,15 +62,15 @@ jobs:
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           SHA_SHORT=$(git rev-parse --short HEAD)
           APP_VERSION=$(git describe --tags --always --dirty)
-          echo "image=ghcr.io/${REPO_LC}-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${REPO_LC}-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
           echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
           echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push ${{ matrix.service }}
+      - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ${{ matrix.service }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: true
           tags: |
             ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.sha_short }}
@@ -62,5 +78,5 @@ jobs:
           build-args: |
             VITE_API_BASE=${{ secrets.VITE_API_BASE }}
             APP_VERSION=${{ steps.meta.outputs.app_version }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

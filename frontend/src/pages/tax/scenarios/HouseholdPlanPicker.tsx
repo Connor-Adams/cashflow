@@ -13,40 +13,54 @@
 //  - On delete, we clear activePlanId so the parent doesn't dangle a stale id.
 import { useHouseholdPlans } from '@/hooks/useHouseholdPlans';
 
+type Plan = { id: number; name: string };
+
 interface Props {
   activePlanId: number | null;
   onChange: (planId: number | null) => void;
 }
 
+// Validate-and-trim a window.prompt response. Returns null when the user
+// cancelled, entered whitespace only, or entered the same value they were
+// editing. Lets the callers stay branch-free.
+function readPromptName(message: string, current: string | null = null): string | null {
+  const raw = window.prompt(message, current ?? undefined);
+  if (raw === null) return null;
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  if (current !== null && trimmed === current) return null;
+  return trimmed;
+}
+
+function reportError(err: unknown): void {
+  alert((err as Error).message);
+}
+
 export function HouseholdPlanPicker({ activePlanId, onChange }: Props) {
   const { plans, loading, error, create, patch, remove } = useHouseholdPlans();
 
-  const activePlan =
+  const activePlan: Plan | null =
     activePlanId !== null ? plans.find((p) => p.id === activePlanId) ?? null : null;
 
   async function handleNewPlan() {
-    const name = window.prompt('Name the new household plan:');
+    const name = readPromptName('Name the new household plan:');
     if (name === null) return;
-    const trimmed = name.trim();
-    if (trimmed === '') return;
     try {
-      const plan = await create({ name: trimmed });
+      const plan = await create({ name });
       onChange(plan.id);
     } catch (err: unknown) {
-      alert((err as Error).message);
+      reportError(err);
     }
   }
 
   async function handleRename() {
     if (activePlan === null) return;
-    const next = window.prompt('Rename plan:', activePlan.name);
+    const next = readPromptName('Rename plan:', activePlan.name);
     if (next === null) return;
-    const trimmed = next.trim();
-    if (trimmed === '' || trimmed === activePlan.name) return;
     try {
-      await patch(activePlan.id, { name: trimmed });
+      await patch(activePlan.id, { name: next });
     } catch (err: unknown) {
-      alert((err as Error).message);
+      reportError(err);
     }
   }
 
@@ -57,7 +71,7 @@ export function HouseholdPlanPicker({ activePlanId, onChange }: Props) {
       await remove(activePlan.id);
       onChange(null);
     } catch (err: unknown) {
-      alert((err as Error).message);
+      reportError(err);
     }
   }
 
@@ -71,30 +85,59 @@ export function HouseholdPlanPicker({ activePlanId, onChange }: Props) {
       <label htmlFor="household-plan-picker">
         <strong>Household plan:</strong>
       </label>
-      <select
-        id="household-plan-picker"
-        value={activePlanId ?? ''}
-        onChange={handleSelectChange}
+      <PlanSelect
+        plans={plans}
+        activePlanId={activePlanId}
         disabled={loading}
-      >
-        <option value="">— None —</option>
-        {plans.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
+        onChange={handleSelectChange}
+      />
       <button onClick={handleNewPlan} disabled={loading}>
         + New
       </button>
       {activePlan !== null && (
-        <>
-          <button onClick={handleRename}>Rename</button>
-          <button onClick={handleDelete}>Delete</button>
-        </>
+        <PlanActions onRename={handleRename} onDelete={handleDelete} />
       )}
       {loading && <span className="muted">Loading…</span>}
       {error && <span className="error">Failed to load plans: {error}</span>}
     </div>
+  );
+}
+
+interface PlanSelectProps {
+  plans: Plan[];
+  activePlanId: number | null;
+  disabled: boolean;
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+}
+
+function PlanSelect({ plans, activePlanId, disabled, onChange }: PlanSelectProps) {
+  return (
+    <select
+      id="household-plan-picker"
+      value={activePlanId ?? ''}
+      onChange={onChange}
+      disabled={disabled}
+    >
+      <option value="">— None —</option>
+      {plans.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+interface PlanActionsProps {
+  onRename: () => void;
+  onDelete: () => void;
+}
+
+function PlanActions({ onRename, onDelete }: PlanActionsProps) {
+  return (
+    <>
+      <button onClick={onRename}>Rename</button>
+      <button onClick={onDelete}>Delete</button>
+    </>
   );
 }
