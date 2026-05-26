@@ -115,6 +115,61 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
   },
   {
     kind: 'personal',
+    key: 'income.pensionIncome',
+    label: 'Pension income (RRIF, employer pension, etc.) — CAD',
+    inputType: 'decimal',
+    validate: (v) => assertNumber(v, 'income.pensionIncome'),
+    apply: (facts, value) => {
+      assertNumber(value, 'income.pensionIncome');
+      const d = D(String(value));
+      return {
+        ...facts,
+        pensionIncome: (facts.pensionIncome ?? D('0')).plus(d),
+        employmentIncome: [
+          ...facts.employmentIncome,
+          { source: 'override:income.pensionIncome', amount: d, cadAmount: d },
+        ],
+      };
+    },
+  },
+  {
+    kind: 'personal',
+    key: 'income.cppRetirement',
+    label: 'CPP retirement benefit — CAD',
+    inputType: 'decimal',
+    validate: (v) => assertNumber(v, 'income.cppRetirement'),
+    apply: (facts, value) => {
+      assertNumber(value, 'income.cppRetirement');
+      const d = D(String(value));
+      return {
+        ...facts,
+        employmentIncome: [
+          ...facts.employmentIncome,
+          { source: 'override:income.cppRetirement', amount: d, cadAmount: d },
+        ],
+      };
+    },
+  },
+  {
+    kind: 'personal',
+    key: 'income.oasRetirement',
+    label: 'OAS retirement benefit — CAD',
+    inputType: 'decimal',
+    validate: (v) => assertNumber(v, 'income.oasRetirement'),
+    apply: (facts, value) => {
+      assertNumber(value, 'income.oasRetirement');
+      const d = D(String(value));
+      return {
+        ...facts,
+        employmentIncome: [
+          ...facts.employmentIncome,
+          { source: 'override:income.oasRetirement', amount: d, cadAmount: d },
+        ],
+      };
+    },
+  },
+  {
+    kind: 'personal',
     key: 'pensionSplit.transferAmount',
     label: 'Pension income split — amount transferred to spouse (CAD)',
     inputType: 'decimal',

@@ -30,6 +30,7 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
+import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
 import { RefundBadge } from '../components/RefundBadge'
 import type { ReceiptWithItems } from '../../../shared/api-types'
@@ -181,6 +182,8 @@ export function TransactionsPage() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [aiEnabled, setAiEnabled] = useState(false)
   const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
+  // Issue #229: per-transaction edit history viewer + restore.
+  const [revisionsDialogTxnId, setRevisionsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [itemsDrawer, setItemsDrawer] = useState<{ txnId: number; receipts: ReceiptWithItems[] } | null>(null)
@@ -1475,6 +1478,7 @@ export function TransactionsPage() {
                     onViewItems={(id) => void openItemsDrawer(id)}
                     onError={(msg) => setErr(msg)}
                     onOpenSignals={(id) => setSignalsDialogTxnId(id)}
+                    onOpenRevisions={(id) => setRevisionsDialogTxnId(id)}
                   />
                 ))
               )}
@@ -1545,6 +1549,22 @@ export function TransactionsPage() {
           )
         }}
       />
+      <TransactionRevisionsDialog
+        transactionId={revisionsDialogTxnId}
+        onClose={() => setRevisionsDialogTxnId(null)}
+        onRestored={(updated) => {
+          setRes((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  data: prev.data.map((r) =>
+                    r.id === updated.id ? ({ ...r, ...updated } as Transaction) : r,
+                  ),
+                }
+              : prev,
+          )
+        }}
+      />
     </div>
   )
 }
@@ -1561,6 +1581,7 @@ function TransactionRow({
   onViewItems,
   onError,
   onOpenSignals,
+  onOpenRevisions,
 }: {
   t: Transaction
   categoryOptions: string[]
@@ -1573,6 +1594,7 @@ function TransactionRow({
   onViewItems: (transactionId: number) => void
   onError: (message: string) => void
   onOpenSignals: (id: number) => void
+  onOpenRevisions: (id: number) => void
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
@@ -1658,7 +1680,24 @@ function TransactionRow({
       <TableCell>{t.date}</TableCell>
       <TableCell title={t.merchantRaw}>
         <div className="txnMerchantCell">
-          <span className="txnMerchantName">{t.merchantClean}</span>
+          {(() => {
+            const key =
+              (t.merchantCanonical?.trim() ||
+                t.merchantClean?.trim() ||
+                t.merchantRaw?.trim() ||
+                '').trim()
+            const label = t.merchantClean || t.merchantRaw || '(unknown merchant)'
+            return key ? (
+              <Link
+                to={`/merchants/${encodeURIComponent(key)}`}
+                className="txnMerchantName underline-offset-2 hover:underline"
+              >
+                {label}
+              </Link>
+            ) : (
+              <span className="txnMerchantName">{label}</span>
+            )
+          })()}
           <span className="txnMerchantMeta">
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
           </span>
@@ -1821,6 +1860,15 @@ function TransactionRow({
             title="Show enrichment signals for this transaction"
           >
             Why?
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenRevisions(t.id)}
+            title="Show edit history for this transaction"
+          >
+            History
           </Button>
           {aiEnabled ? (
             <Button

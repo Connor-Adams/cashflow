@@ -10,7 +10,12 @@ import {
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { getJson, postJson } from '../lib/api'
-import type { EnrichmentSignal, Transaction } from '../types/api'
+import type {
+  EnrichmentSignal,
+  Transaction,
+  TransactionExplanation,
+} from '../types/api'
+import { ExplanationPanel } from './ExplanationPanel'
 
 type Props = {
   transactionId: number | null
@@ -44,6 +49,7 @@ export function EnrichmentSignalsDialog({
   onReenriched,
 }: Props) {
   const [signals, setSignals] = useState<EnrichmentSignal[] | null>(null)
+  const [explanation, setExplanation] = useState<TransactionExplanation | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reenriching, setReenriching] = useState(false)
@@ -51,18 +57,30 @@ export function EnrichmentSignalsDialog({
   useEffect(() => {
     if (transactionId == null) {
       setSignals(null)
+      setExplanation(null)
       setError(null)
       return
     }
     let cancelled = false
     setLoading(true)
     setError(null)
-    getJson<EnrichmentSignal[]>(`/api/transactions/${transactionId}/signals`)
-      .then((rows) => {
-        if (!cancelled) setSignals(rows)
+    // Fire both requests in parallel — the explanation panel is the primary
+    // surface (issue #230) and signals stay as the "advanced" view below.
+    Promise.all([
+      getJson<EnrichmentSignal[]>(`/api/transactions/${transactionId}/signals`),
+      getJson<TransactionExplanation>(
+        `/api/transactions/${transactionId}/explanation`,
+      ),
+    ])
+      .then(([sigRows, ex]) => {
+        if (!cancelled) {
+          setSignals(sigRows)
+          setExplanation(ex)
+        }
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load signals')
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : 'Failed to load explanation')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -83,9 +101,15 @@ export function EnrichmentSignalsDialog({
       // (A dedicated POST /:id/enrich is a future enhancement.)
       const updated = await postJson<Transaction>(`/api/transactions/${transactionId}/re-enrich`, {})
       onReenriched?.(updated)
-      // refresh signals
-      const rows = await getJson<EnrichmentSignal[]>(`/api/transactions/${transactionId}/signals`)
+      // refresh signals + explanation
+      const [rows, ex] = await Promise.all([
+        getJson<EnrichmentSignal[]>(`/api/transactions/${transactionId}/signals`),
+        getJson<TransactionExplanation>(
+          `/api/transactions/${transactionId}/explanation`,
+        ),
+      ])
       setSignals(rows)
+      setExplanation(ex)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Re-enrich failed')
     } finally {
@@ -123,33 +147,43 @@ export function EnrichmentSignalsDialog({
           </div>
         )}
 
-        {loading && <p className="muted">Loading signals…</p>}
+        {loading && <p className="muted">Loading explanation…</p>}
         {error && <p className="error" role="alert">{error}</p>}
-        {!loading && !error && signals && signals.length === 0 && (
+
+        {explanation && (
+          <ExplanationPanel explanation={explanation} />
+        )}
+
+        {!loading && !error && signals && signals.length === 0 && !explanation && (
           <p className="muted">No enrichment signals recorded for this transaction yet.</p>
         )}
         {signals && signals.length > 0 && (
-          <ol style={{ paddingLeft: '1.25rem', margin: 0 }}>
-            {signals.map((s) => (
-              <li key={s.id} style={{ marginBottom: '0.5rem' }}>
-                <div className="row" style={{ gap: '0.35rem', flexWrap: 'wrap' }}>
-                  <Badge variant="secondary">{s.source}</Badge>
-                  <Badge variant={CONFIDENCE_VARIANT[s.confidence] ?? 'muted'}>
-                    {s.confidence}
-                  </Badge>
-                </div>
-                {s.rationale && <div className="muted" style={{ marginTop: '0.2rem' }}>{s.rationale}</div>}
-                {Object.keys(s.fields).length > 0 && (
-                  <details style={{ marginTop: '0.2rem' }}>
-                    <summary className="muted" style={{ cursor: 'pointer' }}>fields ({Object.keys(s.fields).length})</summary>
-                    <pre style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', marginTop: '0.25rem' }}>
-                      {JSON.stringify(s.fields, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </li>
-            ))}
-          </ol>
+          <details style={{ marginTop: '1rem' }}>
+            <summary className="muted" style={{ cursor: 'pointer' }}>
+              Show raw enrichment signals ({signals.length})
+            </summary>
+            <ol style={{ paddingLeft: '1.25rem', margin: '0.5rem 0 0' }}>
+              {signals.map((s) => (
+                <li key={s.id} style={{ marginBottom: '0.5rem' }}>
+                  <div className="row" style={{ gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <Badge variant="secondary">{s.source}</Badge>
+                    <Badge variant={CONFIDENCE_VARIANT[s.confidence] ?? 'muted'}>
+                      {s.confidence}
+                    </Badge>
+                  </div>
+                  {s.rationale && <div className="muted" style={{ marginTop: '0.2rem' }}>{s.rationale}</div>}
+                  {Object.keys(s.fields).length > 0 && (
+                    <details style={{ marginTop: '0.2rem' }}>
+                      <summary className="muted" style={{ cursor: 'pointer' }}>fields ({Object.keys(s.fields).length})</summary>
+                      <pre style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', marginTop: '0.25rem' }}>
+                        {JSON.stringify(s.fields, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </details>
         )}
       </DialogBody>
       <DialogFooter>

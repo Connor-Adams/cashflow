@@ -162,6 +162,105 @@ export type EnrichmentSignal = {
   createdAt: string
 }
 
+/**
+ * Per-field explanation of why a transaction has its current category, split,
+ * business flag, notes, and review state. Issue #230.
+ *
+ * The backend route GET /api/transactions/:id/explanation returns this shape.
+ * Dates are serialized as ISO-8601 strings over the wire (JSON has no Date).
+ */
+export type ExplanationSource =
+  | 'rule'
+  | 'manual'
+  | 'ai'
+  | 'import-default'
+  | 'fallback'
+
+export type ManualEditAttribution = {
+  /** ISO-8601 timestamp of the row's most recent update. */
+  at: string
+  actorUserId: number | null
+  actorDisplayName: string | null
+}
+
+export type AiSuggestionAttribution = {
+  id: number
+  /** ISO-8601 timestamp the suggestion was generated. */
+  createdAt: string
+  status: 'accepted' | 'edited'
+  model: string | null
+}
+
+export type AppliedRuleAttribution = {
+  id: number
+  merchantPattern: string
+  category: string | null
+}
+
+export type CategoryExplanation = {
+  source: ExplanationSource
+  value: string | null
+  message: string
+  autoValue?: string | null
+  overrideValue?: string | null
+  appliedRule?: AppliedRuleAttribution
+  aiSuggestion?: AiSuggestionAttribution
+  manualEdit?: ManualEditAttribution
+  /** Human-readable autoSource token when source is 'import-default'. */
+  autoSourceLabel?: string
+  /** Free-text rationale carried from the underlying enrichment signal. */
+  signalRationale?: string
+}
+
+export type SplitExplanation = {
+  source: ExplanationSource
+  value: string
+  message: string
+  autoValue?: string | null
+  overrideValue?: string | null
+  appliedRule?: AppliedRuleAttribution
+  aiSuggestion?: AiSuggestionAttribution
+  manualEdit?: ManualEditAttribution
+  autoSourceLabel?: string
+  signalRationale?: string
+}
+
+export type BusinessExplanation = {
+  source: ExplanationSource
+  value: boolean
+  message: string
+  autoValue?: string | null
+  overrideValue?: string | null
+  appliedRule?: AppliedRuleAttribution
+  aiSuggestion?: AiSuggestionAttribution
+  manualEdit?: ManualEditAttribution
+  autoSourceLabel?: string
+  signalRationale?: string
+}
+
+export type NotesExplanation = {
+  source: 'manual' | 'none'
+  value: string | null
+  message: string
+  manualEdit?: ManualEditAttribution
+}
+
+export type ReviewExplanation = {
+  state: 'cleared' | 'needs-review' | 'never-flagged'
+  /** ISO-8601 timestamp of the last review-state change, or null. */
+  lastChangedAt: string | null
+  message: string
+}
+
+export type TransactionExplanation = {
+  transactionId: number
+  category: CategoryExplanation
+  split: SplitExplanation
+  business: BusinessExplanation
+  notes: NotesExplanation
+  review: ReviewExplanation
+}
+
 export type EnrichmentStats = {
   total: number
   reviewFlagTrue: number

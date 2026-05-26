@@ -23,6 +23,7 @@ import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
+import { TransactionRevision, initTransactionRevision } from './TransactionRevision';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
@@ -38,6 +39,10 @@ import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
 import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
+import {
+  TransactionReturnMetadata,
+  initTransactionReturnMetadata,
+} from './TransactionReturnMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
@@ -63,16 +68,19 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
+import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
 } from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
+import { Purchase, initPurchase } from './Purchase';
 import { Notification, initNotification } from './Notification';
 import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
+import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -98,6 +106,7 @@ initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
+initTransactionRevision(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
@@ -113,6 +122,7 @@ initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
 initTransactionTaxMetadata(sequelize);
+initTransactionReturnMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
@@ -134,8 +144,11 @@ initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
+initPurchase(sequelize);
+initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
+initBudgetAlertState(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -166,6 +179,17 @@ Transaction.hasOne(TransactionTaxMetadata, {
   hooks: true,
 });
 TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
+Transaction.hasOne(TransactionReturnMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'returnMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionReturnMetadata.belongsTo(Transaction, {
   foreignKey: 'transaction_id',
   as: 'transaction',
 });
@@ -270,6 +294,27 @@ BudgetTarget.hasMany(BudgetExclusion, {
   onDelete: 'CASCADE',
   hooks: true,
 });
+// Cascade alert-state cleanup when a budget is deleted (issue #268, AC #12).
+// Without this association the migration's FK ON DELETE CASCADE still fires
+// at the DB level, but exposing it on the ORM means future eager-loads
+// (e.g. `include: [{ model: BudgetAlertState }]`) work without ad-hoc joins.
+BudgetTarget.hasMany(BudgetAlertState, {
+  foreignKey: 'budget_target_id',
+  as: 'alertStates',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetAlertState.belongsTo(BudgetTarget, {
+  foreignKey: 'budget_target_id',
+  as: 'budget',
+});
+User.hasMany(BudgetAlertState, {
+  foreignKey: 'user_id',
+  as: 'budgetAlertStates',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetAlertState.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 BudgetExclusion.belongsTo(BudgetTarget, {
   foreignKey: 'budget_id',
   as: 'budget',
@@ -340,6 +385,17 @@ Transaction.hasMany(TransactionSignal, {
   as: 'enrichmentSignals',
 });
 TransactionSignal.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
+Transaction.hasMany(TransactionRevision, {
+  foreignKey: 'transaction_id',
+  as: 'revisions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionRevision.belongsTo(Transaction, {
   foreignKey: 'transaction_id',
   as: 'transaction',
 });
@@ -494,6 +550,46 @@ TaxReserveSetting.belongsTo(Household, {
   as: 'household',
 });
 
+Transaction.hasOne(Purchase, {
+  foreignKey: 'transaction_id',
+  as: 'purchase',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Purchase.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+Household.hasMany(Purchase, {
+  foreignKey: 'household_id',
+  as: 'purchases',
+});
+Purchase.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(Purchase, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedPurchases',
+});
+Purchase.belongsTo(User, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedByUser',
+});
+
+// CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
+// the DB level; we surface the relationship as hasOne so callers can eager
+// load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
+User.hasOne(CashflowSettings, {
+  foreignKey: 'user_id',
+  as: 'cashflowSettings',
+  onDelete: 'CASCADE',
+});
+CashflowSettings.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -520,6 +616,7 @@ export {
   ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
+  TransactionRevision,
   Security,
   InvestmentActivity,
   HoldingSnapshot,
@@ -535,6 +632,7 @@ export {
   TaxCategory,
   TaxTag,
   TransactionTaxMetadata,
+  TransactionReturnMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,
@@ -554,6 +652,9 @@ export {
   AiReviewRun,
   MoneyLeakDismissal,
   TaxReserveSetting,
+  Purchase,
+  CashflowSettings,
   Notification,
   NotificationPreference,
+  BudgetAlertState,
 };
