@@ -27,53 +27,50 @@ interface Props {
   activePlanId: number | null;
 }
 
+function EmptyState({
+  tone = 'muted',
+  children,
+}: {
+  tone?: 'muted' | 'error';
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <h2>Owner Comp</h2>
+      <p className={tone}>{children}</p>
+    </div>
+  );
+}
+
 export function OwnerCompPlannerTab({ activePlanId }: Props) {
   const planCompute = useHouseholdPlanCompute(activePlanId);
 
   if (activePlanId === null) {
     return (
-      <div>
-        <h2>Owner Comp</h2>
-        <p className="muted">
-          Select a household plan in the Overview tab to start tuning owner
-          compensation. Each plan groups one corp + at least one personal
-          scenario so the salary-vs-dividend mix can be evaluated as a single
-          integrated number.
-        </p>
-      </div>
+      <EmptyState>
+        Select a household plan in the Overview tab to start tuning owner
+        compensation. Each plan groups one corp + at least one personal
+        scenario so the salary-vs-dividend mix can be evaluated as a single
+        integrated number.
+      </EmptyState>
     );
   }
-
   if (planCompute.error) {
-    return (
-      <div>
-        <h2>Owner Comp</h2>
-        <p className="error">Failed to load household plan: {planCompute.error}</p>
-      </div>
-    );
+    return <EmptyState tone="error">Failed to load household plan: {planCompute.error}</EmptyState>;
   }
-
   if (!planCompute.data) {
-    return (
-      <div>
-        <h2>Owner Comp</h2>
-        <p className="muted">Loading household plan…</p>
-      </div>
-    );
+    return <EmptyState>Loading household plan…</EmptyState>;
   }
 
   const { corp, personal } = planCompute.data;
 
   if (corp.length === 0) {
     return (
-      <div>
-        <h2>Owner Comp</h2>
-        <p className="muted">
-          This household plan has no corp scenarios linked. Add a corp scenario
-          to the plan (Corp T2 tab → set its household plan) so distributions
-          can be routed.
-        </p>
-      </div>
+      <EmptyState>
+        This household plan has no corp scenarios linked. Add a corp scenario
+        to the plan (Corp T2 tab → set its household plan) so distributions
+        can be routed.
+      </EmptyState>
     );
   }
 
