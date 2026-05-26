@@ -6,7 +6,6 @@ import { backfillUsdCadHistory } from './fx/backfillUsdCadHistory';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 import { startForwardIncomeScheduler } from './portfolio/forwardIncomeScheduler';
-import { startDailySnapshotScheduler } from './portfolio/dailySnapshotScheduler';
 import { startEnrichmentBackfillScheduler } from './import/enrichmentBackfillScheduler';
 
 const uploadDir = env.csvUploadDir;
@@ -39,7 +38,6 @@ async function start() {
   });
 
   startForwardIncomeScheduler();
-  startDailySnapshotScheduler();
   startEnrichmentBackfillScheduler();
 }
 
