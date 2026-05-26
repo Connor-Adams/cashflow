@@ -29,7 +29,7 @@ describe('SettingsPage shell', () => {
     expect(screen.getByRole('heading', { name: /settings/i })).toBeInTheDocument()
   })
 
-  it('renders six top tabs', () => {
+  it('renders the non-superadmin top tabs in expected order', () => {
     renderAt('/settings/display')
     const tabs = screen.getAllByRole('tab')
     expect(tabs.map((t) => t.textContent)).toEqual([
@@ -39,6 +39,7 @@ describe('SettingsPage shell', () => {
       'Contacts',
       'Budgets',
       'Categories',
+      'Notifications',
     ])
   })
 

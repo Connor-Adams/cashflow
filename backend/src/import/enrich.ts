@@ -61,6 +61,13 @@ function pickMerchantClean(signals: Signal[]): string {
   return '';
 }
 
+function pickMerchantCanonical(signals: Signal[]): string | null {
+  for (const s of signals) {
+    if (s.fields.merchantCanonical !== undefined) return s.fields.merchantCanonical;
+  }
+  return null;
+}
+
 export async function enrichTransaction(input: EnrichInputs): Promise<EnrichmentResult> {
   const signals: Signal[] = [];
 
@@ -122,9 +129,11 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
   }), []));
 
   // Stage 7: detect-relationships
+  const merchantCanonical = pickMerchantCanonical(signals);
   signals.push(...safeStage('detect-relationships', () => runDetectRelationshipsStage({
     txnType,
     merchantClean,
+    merchantCanonical,
     amount: input.raw.amount,
     date: input.raw.date,
     accountId: input.accountId,

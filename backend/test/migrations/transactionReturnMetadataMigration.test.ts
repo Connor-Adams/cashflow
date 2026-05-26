@@ -1,6 +1,6 @@
 /**
  * Round-trip test for migration
- *   20260603000001-transaction-return-metadata
+ *   20260603000003-transaction-return-metadata
  *
  * Mirrors the pattern in taxTagsMigration.test.ts: spin up an in-memory
  * SQLite DB, stub the parent `transactions` table, then run `up` + assert +
@@ -21,7 +21,7 @@ before(async () => {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260603000001-transaction-return-metadata.js');
+  migration = require('../../src/migrations/20260603000003-transaction-return-metadata.js');
 });
 
 after(async () => {
