@@ -9,7 +9,7 @@ import { useCorpScenarioDetail } from '../../hooks/useCorpScenarioDetail';
 import { useCorpScenarioChain } from '../../hooks/useCorpScenarioChain';
 import { type CorpTaxLineDto } from '../../hooks/useCorpReturn';
 import { ScenarioTree } from './scenarios/ScenarioTree';
-import { CorpOverrideEditor } from './scenarios/CorpOverrideEditor';
+import { CorpOverrideEditor, type OtherCorpOption } from './scenarios/CorpOverrideEditor';
 import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
@@ -56,6 +56,15 @@ export function CorpT2Tab() {
   }
 
   const corpEntity = entities.find((e) => e.kind === 'corp');
+  // Other corp entities in the household, surfaced to CorpOverrideEditor so
+  // users can pick intercorp dividend recipients by legal name instead of
+  // entity id. P11a v1 doesn't filter by "in active HouseholdPlan" — the
+  // backend router validates plan membership and warns at compute time.
+  const otherCorps: OtherCorpOption[] = corpEntity
+    ? entities
+        .filter((e) => e.kind === 'corp' && e.id !== corpEntity.id)
+        .map((e) => ({ id: e.id, legalName: e.legalName }))
+    : [];
   const yearInt = parseYearInt(fiscalYear);
 
   return (
@@ -93,6 +102,7 @@ export function CorpT2Tab() {
           key={`${corpEntity.id}:${yearInt}`}
           entityId={corpEntity.id}
           year={yearInt}
+          otherCorps={otherCorps}
         />
       )}
     </div>
@@ -102,9 +112,10 @@ export function CorpT2Tab() {
 interface WorkspaceProps {
   entityId: number;
   year: number;
+  otherCorps: OtherCorpOption[];
 }
 
-function CorpT2ScenarioWorkspace({ entityId, year: yearProp }: WorkspaceProps) {
+function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: WorkspaceProps) {
   // Local `selectedYear` overlays the prop so the YearStripNav can pivot to a
   // chained year (year+1 projection, etc.) without round-tripping through
   // CorpT2Tab's fiscalYear input. When the prop changes (user submits a new
@@ -295,6 +306,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp }: WorkspaceProps) {
           ) : active.data ? (
             <ActiveCorpScenarioPanel
               data={active.data}
+              otherCorps={otherCorps}
               onOverridesChange={handleOverridesChange}
               onAssumptionsChange={handleAssumptionsChange}
               onAddToCompare={() => toggleCompare(active.data!.scenario.id)}
@@ -324,6 +336,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp }: WorkspaceProps) {
 
 interface ActiveCorpScenarioPanelProps {
   data: CorpScenarioWithComputed;
+  otherCorps: OtherCorpOption[];
   onOverridesChange: (next: Record<string, unknown>) => void;
   onAssumptionsChange: (next: { inflation?: number; investmentReturn?: number }) => void;
   onAddToCompare: () => void;
@@ -332,6 +345,7 @@ interface ActiveCorpScenarioPanelProps {
 
 function ActiveCorpScenarioPanel({
   data,
+  otherCorps,
   onOverridesChange,
   onAssumptionsChange,
   onAddToCompare,
@@ -363,7 +377,11 @@ function ActiveCorpScenarioPanel({
           />
         </div>
       )}
-      <CorpOverrideEditor overrides={scenario.overrides} onChange={onOverridesChange} />
+      <CorpOverrideEditor
+        overrides={scenario.overrides}
+        onChange={onOverridesChange}
+        otherCorps={otherCorps}
+      />
       <section style={{ marginTop: '1rem' }}>
         <h4>Computed totals</h4>
         <ul>

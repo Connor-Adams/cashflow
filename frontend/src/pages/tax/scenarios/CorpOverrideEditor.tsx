@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 interface KeyDef {
   key: string;
@@ -21,15 +21,71 @@ const KEY_DEFS: KeyDef[] = [
   { key: 'corp.openingCda', label: 'Opening CDA (CAD)', inputType: 'decimal' },
 ];
 
+const INTERCORP_FIELDS = ['eligible', 'nonEligible', 'capital'] as const;
+type IntercorpField = (typeof INTERCORP_FIELDS)[number];
+
+const INTERCORP_FIELD_LABELS: Record<IntercorpField, string> = {
+  eligible: 'Eligible dividend (CAD)',
+  nonEligible: 'Non-eligible dividend (CAD)',
+  capital: 'Capital dividend (CAD)',
+};
+
+// Matches backend `INTERCORP_RE` in backend/src/tax/scenarios/overrideKeys.ts (P11a T1).
+// Keep these in sync — backend is the source of truth for the registry shape.
+const INTERCORP_KEY_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital)$/;
+
+function intercorpKeyFor(receiverEntityId: number, field: IntercorpField): string {
+  return `intercorp.${receiverEntityId}.${field}`;
+}
+
+export interface OtherCorpOption {
+  /** Entity.id of the *other* corp (receiver candidate). */
+  id: number;
+  /** Display name; the user picks recipients by legal name, not id. */
+  legalName: string;
+}
+
 interface Props {
   overrides: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+  /**
+   * Other corp entities in this household that can receive intercorp dividends.
+   * Caller (e.g. CorpT2Tab) computes this from `useTaxEntities()` minus the
+   * currently-edited corp's own entityId. When omitted or empty, the intercorp
+   * section falls back to a free-text "receiver entity id" input so the wiring
+   * still lands even without plan context. The router validates membership
+   * server-side and surfaces a warning if the receiver isn't in the active plan.
+   */
+  otherCorps?: OtherCorpOption[];
 }
 
-export function CorpOverrideEditor({ overrides, onChange }: Props) {
+export function CorpOverrideEditor({ overrides, onChange, otherCorps }: Props) {
   const [pendingKey, setPendingKey] = useState<string>(KEY_DEFS[0].key);
-  const present = Object.keys(overrides);
-  const available = KEY_DEFS.filter((d) => !present.includes(d.key));
+  // Partition existing override keys into the flat KEY_DEFS list vs the dynamic
+  // intercorp.<id>.<field> family so each gets its own UI section. Keys not
+  // matched by either are still rendered raw in the flat list with their key as
+  // the label so nothing silently disappears.
+  const { flatKeys, intercorpByReceiver } = useMemo(() => {
+    const flat: string[] = [];
+    const byReceiver: Record<string, Partial<Record<IntercorpField, number>>> = {};
+    for (const k of Object.keys(overrides)) {
+      const m = k.match(INTERCORP_KEY_RE);
+      if (m) {
+        const receiverId = m[1];
+        const field = m[2] as IntercorpField;
+        const v = overrides[k];
+        byReceiver[receiverId] = {
+          ...(byReceiver[receiverId] ?? {}),
+          [field]: typeof v === 'number' ? v : 0,
+        };
+      } else {
+        flat.push(k);
+      }
+    }
+    return { flatKeys: flat, intercorpByReceiver: byReceiver };
+  }, [overrides]);
+
+  const available = KEY_DEFS.filter((d) => !flatKeys.includes(d.key));
 
   function setValue(key: string, value: unknown) {
     onChange({ ...overrides, [key]: value });
@@ -45,30 +101,57 @@ export function CorpOverrideEditor({ overrides, onChange }: Props) {
     setValue(def.key, 0);
   }
 
+  function setIntercorpField(receiverId: string, field: IntercorpField, value: number) {
+    const id = Number(receiverId);
+    if (!Number.isInteger(id) || id <= 0) return;
+    setValue(intercorpKeyFor(id, field), value);
+  }
+  function removeIntercorpReceiver(receiverId: string) {
+    const next = { ...overrides };
+    for (const field of INTERCORP_FIELDS) {
+      delete next[intercorpKeyFor(Number(receiverId), field)];
+    }
+    onChange(next);
+  }
+
+  const presentCount = flatKeys.length + Object.keys(intercorpByReceiver).length;
+
   return (
     <section>
-      <h3>Overrides ({present.length})</h3>
-      {present.length === 0 ? (
+      <h3>Overrides ({presentCount})</h3>
+      {presentCount === 0 ? (
         <p className="muted">No overrides — using actuals.</p>
       ) : (
-        <ul>
-          {present.map((k) => {
-            const def = KEY_DEFS.find((d) => d.key === k);
-            const v = overrides[k];
-            return (
-              <li key={k} style={{ marginBottom: '0.5rem' }}>
-                <strong>{def?.label ?? k}</strong>{' '}
-                <input
-                  type="number"
-                  step="0.01"
-                  value={typeof v === 'number' ? v : 0}
-                  onChange={(e) => setValue(k, Number(e.target.value))}
-                />
-                <button onClick={() => removeKey(k)} style={{ marginLeft: '0.5rem' }}>×</button>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {flatKeys.length > 0 && (
+            <ul>
+              {flatKeys.map((k) => {
+                const def = KEY_DEFS.find((d) => d.key === k);
+                const v = overrides[k];
+                return (
+                  <li key={k} style={{ marginBottom: '0.5rem' }}>
+                    <strong>{def?.label ?? k}</strong>{' '}
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={typeof v === 'number' ? v : 0}
+                      onChange={(e) => setValue(k, Number(e.target.value))}
+                    />
+                    <button onClick={() => removeKey(k)} style={{ marginLeft: '0.5rem' }}>×</button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {Object.keys(intercorpByReceiver).length > 0 && (
+            <IntercorpReceiverList
+              intercorpByReceiver={intercorpByReceiver}
+              otherCorps={otherCorps}
+              onFieldChange={setIntercorpField}
+              onRemove={removeIntercorpReceiver}
+            />
+          )}
+        </>
       )}
       {available.length > 0 && (
         <div style={{ marginTop: '0.5rem' }}>
@@ -80,6 +163,168 @@ export function CorpOverrideEditor({ overrides, onChange }: Props) {
           <button onClick={addKey} style={{ marginLeft: '0.5rem' }}>+ Add override</button>
         </div>
       )}
+      <IntercorpDistributionAdder
+        existingReceiverIds={Object.keys(intercorpByReceiver)}
+        otherCorps={otherCorps}
+        onAdd={(receiverId) => {
+          // Seed all 3 fields at 0 so the receiver row is fully editable on first
+          // render — UX parity with the flat KEY_DEFS "add" which also stamps a 0.
+          const next = { ...overrides };
+          for (const field of INTERCORP_FIELDS) {
+            next[intercorpKeyFor(receiverId, field)] = 0;
+          }
+          onChange(next);
+        }}
+      />
     </section>
+  );
+}
+
+interface IntercorpReceiverListProps {
+  intercorpByReceiver: Record<string, Partial<Record<IntercorpField, number>>>;
+  otherCorps?: OtherCorpOption[];
+  onFieldChange: (receiverId: string, field: IntercorpField, value: number) => void;
+  onRemove: (receiverId: string) => void;
+}
+
+function IntercorpReceiverList({
+  intercorpByReceiver,
+  otherCorps,
+  onFieldChange,
+  onRemove,
+}: IntercorpReceiverListProps) {
+  const nameById = new Map((otherCorps ?? []).map((c) => [String(c.id), c.legalName]));
+  return (
+    <div style={{ marginTop: '0.75rem' }}>
+      <h4 style={{ margin: '0 0 0.25rem' }}>Intercorp dividend distribution</h4>
+      <p className="muted" style={{ margin: '0 0 0.5rem' }}>
+        Dividends routed from this corp to another corp in the same household
+        plan. Recipients receive Part IV tax treatment automatically; the
+        household-plan compute warns if the receiver has no scenario in the
+        active plan.
+      </p>
+      <ul>
+        {Object.entries(intercorpByReceiver).map(([receiverId, fields]) => {
+          const name = nameById.get(receiverId);
+          const label = name ? `${name} (entity #${receiverId})` : `Entity #${receiverId}`;
+          return (
+            <li key={receiverId} style={{ marginBottom: '0.75rem' }}>
+              <div>
+                <strong>→ {label}</strong>
+                <button onClick={() => onRemove(receiverId)} style={{ marginLeft: '0.5rem' }}>×</button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.25rem' }}>
+                {INTERCORP_FIELDS.map((field) => (
+                  <label key={field} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <span>{INTERCORP_FIELD_LABELS[field]}</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={fields[field] ?? 0}
+                      onChange={(e) => onFieldChange(receiverId, field, Number(e.target.value))}
+                    />
+                  </label>
+                ))}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+interface IntercorpDistributionAdderProps {
+  existingReceiverIds: string[];
+  otherCorps?: OtherCorpOption[];
+  onAdd: (receiverId: number) => void;
+}
+
+function IntercorpDistributionAdder({
+  existingReceiverIds,
+  otherCorps,
+  onAdd,
+}: IntercorpDistributionAdderProps) {
+  const existing = new Set(existingReceiverIds);
+  // Plan-context path: caller knows the household's other corps. Show a select
+  // by legal name. Filter out receivers that already have a row so each receiver
+  // appears at most once.
+  const selectableCorps = (otherCorps ?? []).filter((c) => !existing.has(String(c.id)));
+  const hasPlanContext = (otherCorps ?? []).length > 0;
+  const [pendingReceiverId, setPendingReceiverId] = useState<string>('');
+  const [freeTextReceiverId, setFreeTextReceiverId] = useState<string>('');
+
+  // Seed the select default once corps load so a click-to-add doesn't no-op on
+  // the empty initial value. Re-derive whenever the available list changes.
+  const defaultReceiverId = selectableCorps[0]?.id ? String(selectableCorps[0].id) : '';
+  const effectivePendingReceiverId = pendingReceiverId || defaultReceiverId;
+
+  if (hasPlanContext) {
+    if (selectableCorps.length === 0) {
+      return (
+        <p className="muted" style={{ marginTop: '0.5rem' }}>
+          All other corps in this household already have intercorp distributions.
+        </p>
+      );
+    }
+    return (
+      <div style={{ marginTop: '0.5rem' }}>
+        <label>
+          Route dividend to:{' '}
+          <select
+            value={effectivePendingReceiverId}
+            onChange={(e) => setPendingReceiverId(e.target.value)}
+          >
+            {selectableCorps.map((c) => (
+              <option key={c.id} value={String(c.id)}>
+                {c.legalName} (entity #{c.id})
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={() => {
+            const id = Number(effectivePendingReceiverId);
+            if (!Number.isInteger(id) || id <= 0) return;
+            onAdd(id);
+            // Reset to default so subsequent adds pick the next available corp.
+            setPendingReceiverId('');
+          }}
+          style={{ marginLeft: '0.5rem' }}
+        >
+          + Add intercorp distribution
+        </button>
+      </div>
+    );
+  }
+
+  // Fallback path: no household context wired in. Users with multiple corps
+  // can still set up intercorp routing by typing the receiver entity id.
+  return (
+    <div style={{ marginTop: '0.5rem' }}>
+      <label>
+        Intercorp receiver entity id:{' '}
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={freeTextReceiverId}
+          onChange={(e) => setFreeTextReceiverId(e.target.value)}
+          placeholder="e.g. 7"
+        />
+      </label>
+      <button
+        onClick={() => {
+          const id = Number(freeTextReceiverId);
+          if (!Number.isInteger(id) || id <= 0) return;
+          if (existing.has(String(id))) return;
+          onAdd(id);
+          setFreeTextReceiverId('');
+        }}
+        style={{ marginLeft: '0.5rem' }}
+      >
+        + Add intercorp distribution
+      </button>
+    </div>
   );
 }
