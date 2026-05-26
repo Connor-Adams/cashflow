@@ -19,11 +19,9 @@
  * fetch is slow and the next cron fires.
  */
 
-import cron, { type ScheduledTask } from 'node-cron';
 import { Security } from '../../models/Security';
 import { SecurityDividend } from '../../models/SecurityDividend';
 import { SecurityPrice } from '../../models/SecurityPrice';
-import { logger } from '../../observability/logger';
 import * as env from '../../config/env';
 import { reconcileDividendsForSecurity } from '../../portfolio/reconcileDividends';
 import { recordCall } from './jobLog';
@@ -65,8 +63,6 @@ function configFromEnv(): TickConfig {
     minAgeHours: env.quoteMinAgeHours,
   };
 }
-
-let runningTick = false;
 
 async function securitiesForYahooSymbol(yahooSymbol: string): Promise<Security[]> {
   const all = await Security.findAll({ where: {} });
@@ -254,47 +250,3 @@ export async function runQuoteSchedulerTick(
   return dispatch(item.function, item.yahooSymbol);
 }
 
-let activeTask: ScheduledTask | null = null;
-
-export function startQuoteScheduler(): ScheduledTask | null {
-  if (!env.quoteSchedulerEnabled) {
-    logger.info('quote_scheduler_disabled', { reason: 'flag_off' });
-    return null;
-  }
-  if (activeTask) {
-    logger.warn('quote_scheduler_already_running');
-    return activeTask;
-  }
-  if (!cron.validate(env.quoteTickCron)) {
-    logger.error('quote_scheduler_invalid_cron', { expression: env.quoteTickCron });
-    return null;
-  }
-
-  activeTask = cron.schedule(env.quoteTickCron, async () => {
-    if (runningTick) {
-      logger.debug('quote_scheduler_tick_skipped_reentrant');
-      return;
-    }
-    runningTick = true;
-    try {
-      const result = await runQuoteSchedulerTick();
-      logger.info('quote_scheduler_tick', result as unknown as Record<string, unknown>);
-    } catch (err) {
-      logger.error('quote_scheduler_tick_unhandled', {}, err);
-    } finally {
-      runningTick = false;
-    }
-  });
-
-  logger.info('quote_scheduler_started', {
-    cron: env.quoteTickCron,
-    minAgeHours: env.quoteMinAgeHours,
-  });
-  return activeTask;
-}
-
-export function stopQuoteScheduler(): void {
-  if (!activeTask) return;
-  activeTask.stop();
-  activeTask = null;
-}
