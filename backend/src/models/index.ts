@@ -50,6 +50,7 @@ import {
   initPortfolioDailySnapshot,
 } from './PortfolioDailySnapshot';
 import { registerForwardIncomeStaleHooks } from '../hooks/forwardIncomeStaleHooks';
+import { registerDailySnapshotStaleHooks } from '../hooks/dailySnapshotStaleHooks';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -96,6 +97,7 @@ initProviderJobLog(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
+registerDailySnapshotStaleHooks(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
