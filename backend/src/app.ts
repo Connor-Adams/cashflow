@@ -12,6 +12,7 @@ import summaryRouter from './routes/summary';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
 import aiRouter from './routes/ai';
+import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
@@ -120,6 +121,7 @@ app.use('/api/subscriptions', subscriptionsRouter);
 // prefix to satisfy the issue's endpoint spec.
 app.use('/api/ai', aiReviewRouter);
 app.use('/api/ai', aiRouter);
+app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/amazon', amazonRouter);
 app.use('/api/external-orders', externalOrdersRouter);

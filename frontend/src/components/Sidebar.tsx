@@ -19,6 +19,7 @@ import {
   ReceiptText,
   Repeat,
   RefreshCw,
+  Search,
   Settings,
   Shield,
   Sparkles,
@@ -67,6 +68,7 @@ const navItems: NavItem[] = [
   { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
   { to: '/insights', label: 'Insights', icon: Lightbulb },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/ask', label: 'Ask Cashflow', icon: Search },
   { to: '/partner', label: 'Partner', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
@@ -100,7 +102,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   // closed and hide the nav entry rather than leading users to a broken page.
   const filteredItems = useMemo(() => {
     if (aiStatus?.openai === true) return navItems
-    return navItems.filter((i) => i.to !== '/chat')
+    return navItems.filter((i) => i.to !== '/chat' && i.to !== '/ask')
   }, [aiStatus])
 
   return (
