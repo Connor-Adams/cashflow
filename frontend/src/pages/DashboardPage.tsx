@@ -829,14 +829,15 @@ export function DashboardPage() {
     },
   ]
 
-  // Banners share the top row when both fire (8 + 4 = 12). When only one
-  // is visible, stretch it to full width so the grid doesn't open a
-  // half-empty row at the top.
+  // Review banner pins to 8 cols so it lines up with the HeroTile beneath
+  // it instead of sprawling full-width across an empty middle. The AI
+  // action banner takes the remaining 4 cols when both fire, otherwise
+  // stretches across the full row.
   const showReviewBanner = summaryStats.reviewCount > 0
   const showAiActionBanner = hasActionSeverity
   const bannerCount =
     (showReviewBanner ? 1 : 0) + (showAiActionBanner ? 1 : 0)
-  const reviewBannerSpan: BentoSpan = bannerCount === 2 ? 8 : 12
+  const reviewBannerSpan: BentoSpan = 8
   const aiBannerSpan: BentoSpan = bannerCount === 2 ? 4 : 12
 
   return (
@@ -934,11 +935,13 @@ export function DashboardPage() {
             label={`${summaryStats.reviewCount} transaction${
               summaryStats.reviewCount === 1 ? '' : 's'
             } flagged for review`}
-            description="Waiting on category, split, or business decisions before they roll into your totals."
-            actions={
-              <Link to="/review" className="text-sm font-semibold underline">
-                Open Review Inbox
-              </Link>
+            description={
+              <>
+                Waiting on category, split, or business decisions before they roll into your totals.{' '}
+                <Link to="/review" className="font-semibold underline">
+                  Open Review Inbox
+                </Link>
+              </>
             }
           />
         )}
@@ -1187,7 +1190,7 @@ export function DashboardPage() {
 
         <BentoTile
           span={8}
-          rows={2}
+          rows={1}
           aria-busy={loading}
           label="Net spend by category"
           description="Click a bar to open those transactions with the current filters applied. Payments and transfers are excluded."
@@ -1221,7 +1224,7 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <BarChart data={chartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -1368,7 +1371,7 @@ export function DashboardPage() {
 
         <BentoTile
           span={6}
-          rows={2}
+          rows={1}
           aria-busy={loading}
           label="Monthly flow"
           description="Gross spend, refunds / credits, and payments / transfers by month."
@@ -1378,7 +1381,7 @@ export function DashboardPage() {
               <p className="emptyState">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <BarChart data={monthlyBreakdownData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
@@ -1428,14 +1431,14 @@ export function DashboardPage() {
 
         <BentoTile
           span={6}
-          rows={2}
+          rows={1}
           label="Activity by month"
           description="One line per currency using signed monthly totals, excluding payments and transfers."
         >
           {monthlyChartData.length === 0 ? (
             !loading ? <p className="muted">No transactions in this range.</p> : null
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={110}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis

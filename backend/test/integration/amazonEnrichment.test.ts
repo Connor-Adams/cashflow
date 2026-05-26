@@ -1,30 +1,16 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import request from 'supertest';
 import { rowFingerprint, stableIdentityFingerprint } from '../../src/import/fingerprint';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-amazon.sqlite');
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
 let models: typeof import('../../src/models/index.js');
+let testDb: PgTestDb;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('amazon');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
   authed = request.agent(app);
@@ -43,8 +29,7 @@ before(async () => {
 });
 
 after(async () => {
-  await models?.sequelize.close();
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  await teardownPgTestDb(testDb);
 });
 
 async function createTxn(merchant: string, amount: number, date = '2026-05-05') {

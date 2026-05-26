@@ -387,7 +387,7 @@ router.get('/import-cleanup', async (req, res, next) => {
       source: row.appliedRuleId ? 'rule' : 'merchant_memory',
     }));
     const batches = await sequelize.query<{ importBatch: string; count: string }>(
-      `SELECT import_batch AS importBatch, COUNT(*) AS count
+      `SELECT import_batch AS "importBatch", COUNT(*) AS count
        FROM transactions
        WHERE ${isSuperadmin(req) ? '1=1' : 'household_id = ?'}
        GROUP BY import_batch

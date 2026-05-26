@@ -12,17 +12,10 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import request from 'supertest';
 import { seedHousehold } from '../helpers/seedHousehold.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-integration-transactions.sqlite');
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
 let superAgent: ReturnType<typeof request.agent>;
@@ -36,6 +29,7 @@ let contactAId: number;
 let contactBId: number;
 let accountAId: number;
 let accountBId: number;
+let testDb: PgTestDb;
 
 type TxnSeed = {
   householdId: number;
@@ -112,17 +106,7 @@ async function createTxn(seed: TxnSeed): Promise<number> {
 }
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('transactions');
 
   const mod = await import('../../src/app.js');
   app = mod.default;
@@ -174,14 +158,8 @@ before(async () => {
   accountBId = acctB.id;
 });
 
-after(() => {
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+after(async () => {
+  await teardownPgTestDb(testDb);
 });
 
 // ---------------- buildTransactionFilterWhere risk surface ----------------
@@ -279,21 +257,17 @@ test('GET /: ?dateFrom= (empty string) is ignored and returns all rows', async (
   );
 });
 
-test('GET /: ?dateFrom=null (literal string) documents current SQLite behavior', async () => {
-  // CURRENT BEHAVIOR: the route builds where.date = { [Op.gte]: "null" }.
-  // In SQLite, ISO date strings ("2026-02-01" etc) are lexicographically
-  // LESS than "null" (digits sort before letters), so the comparison
-  // matches nothing — endpoint returns 200 with zero rows. This is a
-  // latent footgun (any literal string passed as dateFrom acts as a
-  // silent filter rather than a 400); follow-up could either validate
-  // or coerce. We assert current behavior so we know if it changes.
+test('GET /: ?dateFrom=null (literal string) is rejected with 400', async () => {
+  // Route validates dateFrom/dateTo before they reach Sequelize. Junk strings
+  // like "null" fail `new Date(s)` (NaN), so the route responds 400 rather
+  // than letting Postgres reject the bad input with a 500.
   const res = await agentA.get('/api/transactions').query({ dateFrom: 'null' });
-  assert.equal(res.status, 200, `unexpected status ${res.status}: ${JSON.stringify(res.body)}`);
-  assert.equal(
-    (res.body.data as unknown[]).length,
-    0,
-    'literal "null" passed as dateFrom silently filters everything; if this changes, decide whether to validate or coerce',
-  );
+  assert.equal(res.status, 400, `unexpected status ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.error, 'invalid dateFrom');
+
+  const toRes = await agentA.get('/api/transactions').query({ dateTo: 'null' });
+  assert.equal(toRes.status, 400);
+  assert.equal(toRes.body.error, 'invalid dateTo');
 });
 
 // ---------------- Pagination ----------------

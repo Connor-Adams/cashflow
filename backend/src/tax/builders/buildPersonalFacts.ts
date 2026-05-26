@@ -3,7 +3,6 @@ import {
   Account,
   Carryforward,
   Entity,
-  FxRate,
   HouseholdMember,
   InvestmentActivity,
   InstalmentPayment,
@@ -22,6 +21,7 @@ import type {
   TaxYearFacts,
 } from '../engine/types';
 import { computeAcb } from '../../portfolio/acb';
+import { toCad } from '../../fx/toCad';
 
 export async function buildPersonalFacts(entityId: number, year: number): Promise<TaxYearFacts> {
   const entity = await Entity.findByPk(entityId);
@@ -49,7 +49,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const fhsaContribs: RrspContrib[] = [];
 
   for (const t of txns) {
-    const cad = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
+    const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
     const item: IncomeItem = {
       source: `Txn #${t.id} ${(t as any).finalCategory ?? ''}`,
       amount: D(t.amount as unknown as string),
@@ -85,7 +85,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const nonEligibleDividends: IncomeItem[] = [];
 
   for (const a of activity) {
-    const cad = await toCad(D(a.amount as unknown as string), (a as any).currency ?? 'CAD', a.tradeDate as unknown as string);
+    const { cad } = await toCad(D(a.amount as unknown as string), (a as any).currency ?? 'CAD', a.tradeDate as unknown as string);
     const item: IncomeItem = {
       source: `${(a as any).security?.symbol ?? '?'} ${a.activityType} ${a.tradeDate}`,
       amount: D(a.amount as unknown as string),
@@ -191,14 +191,4 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     carryforwards,
     ageAtYearEnd,
   };
-}
-
-async function toCad(amount: import('../util/decimal').Decimal, currency: string, date: string) {
-  if (currency === 'CAD') return amount;
-  const rate = await FxRate.findOne({
-    where: { fromCurrency: currency, toCurrency: 'CAD', ratedDate: { [Op.lte]: date } },
-    order: [['ratedDate', 'DESC']],
-  });
-  if (!rate) throw new Error(`FX rate missing for ${currency}→CAD on/before ${date}`);
-  return amount.times(rate.rate as unknown as string);
 }

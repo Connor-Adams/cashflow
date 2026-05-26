@@ -1,50 +1,37 @@
 /**
- * Integration tests run in isolation (`yarn test:integration`) so DATABASE_PATH
+ * Integration tests run in isolation (`yarn test:integration`) so DATABASE_URL
  * is set before any Sequelize import.
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'path';
 import fs from 'fs';
-import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 let models: typeof import('../../src/models/index.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-integration.sqlite');
 const fixturesDir = path.join(backendRoot, 'test', 'fixtures', 'pdf');
 const hasFixtures = fs.existsSync(path.join(fixturesDir, 'cibc-costco-2026-01-12.pdf'));
 const skipNoFixtures = hasFixtures ? undefined : 'PDF fixtures not present (gitignored — see backend/test/fixtures/pdf/)';
 const csvUploadDir = path.join(backendRoot, 'uploads', 'test-integration-csv');
 const receiptsUploadDir = path.join(backendRoot, 'uploads', 'test-integration-receipts');
 
+let testDb: PgTestDb;
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   fs.mkdirSync(csvUploadDir, { recursive: true });
   fs.rmSync(receiptsUploadDir, { recursive: true, force: true });
   fs.mkdirSync(receiptsUploadDir, { recursive: true });
 
-  process.env.DATABASE_PATH = dbPath;
   process.env.CSV_UPLOAD_DIR = csvUploadDir;
   process.env.RECEIPTS_UPLOAD_DIR = receiptsUploadDir;
-  process.env.NODE_ENV = 'test';
 
-  // sequelize.config.cjs uses :memory: when NODE_ENV=test; use development so migrations hit DATABASE_PATH.
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: {
-      ...process.env,
-      DATABASE_PATH: dbPath,
-      NODE_ENV: 'development',
-    },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('upload');
 
   models = await import('../../src/models/index.js');
   const mod = await import('../../src/app.js');
@@ -58,14 +45,8 @@ before(async () => {
   assert.equal(register.status, 201);
 });
 
-after(() => {
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
-  }
+after(async () => {
+  await teardownPgTestDb(testDb);
   fs.rmSync(receiptsUploadDir, { recursive: true, force: true });
 });
 

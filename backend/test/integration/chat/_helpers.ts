@@ -1,60 +1,43 @@
 /**
  * Shared test helpers for the chat integration tests.
  *
- * Each test file calls `setupChatTestDb()` in `before()` with a unique
- * sqlite filename, then calls the seed helpers within tests to build a
- * household + users + transactions/rules + a thread + message.
+ * Each test file calls `setupChatTestDb()` in `before()` with a legacy
+ * sqlite-style basename ("test-integration-X.sqlite"); the helper strips the
+ * prefix/suffix to derive a short test name, then provisions a per-file
+ * Postgres database via setupPgTestDb. The `dbPath` returned to callers is
+ * the Postgres database name — name kept for callsite compatibility.
  *
  * Why not in test/integration/ root: the `*.test.ts` glob in package.json's
  * `test:integration` script would treat any file there as a test. The chat/
  * subdir keeps shared helpers out of that glob.
  */
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from '../_setup/pgTestDb.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..', '..');
+const activeDbs = new Map<string, PgTestDb>();
 
 export interface ChatTestModels {
   models: typeof import('../../../src/models/index.js');
 }
 
-/**
- * Spin up a fresh sqlite database for an integration test file: deletes any
- * stale sqlite, runs migrations, then dynamically imports the models module
- * so the sequelize singleton picks up the new DATABASE_PATH.
- */
 export async function setupChatTestDb(dbBasename: string): Promise<{
   models: typeof import('../../../src/models/index.js');
   dbPath: string;
 }> {
-  const dbPath = path.join(backendRoot, 'data', dbBasename);
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  const name = dbBasename.replace(/^test-integration-/, '').replace(/\.sqlite$/, '');
+  const pg = await setupPgTestDb(name);
+  activeDbs.set(pg.databaseName, pg);
   const models = await import('../../../src/models/index.js');
-  return { models, dbPath };
+  return { models, dbPath: pg.databaseName };
 }
 
 export async function teardownChatTestDb(
-  models: typeof import('../../../src/models/index.js') | undefined,
-  dbPath: string
+  _models: typeof import('../../../src/models/index.js') | undefined,
+  dbPath: string,
 ): Promise<void> {
-  await models?.sequelize.close();
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-    } catch {
-      /* ignore */
-    }
+  const pg = activeDbs.get(dbPath);
+  if (pg) {
+    await teardownPgTestDb(pg);
+    activeDbs.delete(dbPath);
   }
 }
 

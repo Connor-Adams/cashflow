@@ -9,30 +9,16 @@
  */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
-import fs from 'fs';
-import { execFileSync } from 'child_process';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.join(__dirname, '..', '..');
-const dbPath = path.join(backendRoot, 'data', 'test-dedup.sqlite');
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let models: typeof import('../../src/models/index.js');
 let findExistingForDedup: typeof import('../../src/import/dedupExisting.js').findExistingForDedup;
 let rowFingerprint: typeof import('../../src/import/fingerprint.js').rowFingerprint;
 let stableIdentityFingerprint: typeof import('../../src/import/fingerprint.js').stableIdentityFingerprint;
+let testDb: PgTestDb;
 
 before(async () => {
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  process.env.DATABASE_PATH = dbPath;
-  process.env.NODE_ENV = 'test';
-  execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },
-    stdio: 'pipe',
-  });
+  testDb = await setupPgTestDb('dedup');
   models = await import('../../src/models/index.js');
   const fp = await import('../../src/import/fingerprint.js');
   findExistingForDedup = (await import('../../src/import/dedupExisting.js')).findExistingForDedup;
@@ -42,7 +28,7 @@ before(async () => {
 
 after(async () => {
   await models?.sequelize.close();
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  await teardownPgTestDb(testDb);
 });
 
 async function seedTransaction(opts: {
