@@ -76,7 +76,46 @@ export type Transaction = {
   receiptCount?: number
   /** Receipt extraction mismatches that need review */
   receiptWarnings?: string[]
+  /**
+   * Deterministic post-import confidence state (#214). NULL on legacy rows
+   * imported before the classifier; one of 'clean' | 'needs_review' when
+   * populated.
+   */
+  importConfidence?: 'clean' | 'needs_review' | null
+  /**
+   * JSON-encoded array of flag tokens fired by the classifier
+   * (e.g. ["missing_category","needs_review"]). NULL when no flags fired.
+   */
+  importConfidenceFlags?: string | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
+}
+
+/**
+ * Discrete flag tokens emitted by computeImportConfidence (#214). Frontend
+ * uses these to render filter chips in the Review Inbox + tile breakdown on
+ * the dashboard.
+ */
+export const IMPORT_CONFIDENCE_FLAG_TOKENS = [
+  'needs_review',
+  'missing_category',
+  'missing_split',
+  'likely_duplicate',
+  'possible_refund_pair',
+  'missing_receipt',
+] as const
+
+export type ImportConfidenceFlagToken =
+  (typeof IMPORT_CONFIDENCE_FLAG_TOKENS)[number]
+
+export type ImportHealthResponse = {
+  total: number
+  clean: number
+  needsReview: number
+  unknown: number
+  /** 0..1 — share of CLASSIFIED rows that are clean. 0 when no classified rows. */
+  cleanPercent: number
+  byFlag: Partial<Record<ImportConfidenceFlagToken, number>>
+  currency: string | null
 }
 
 export type EnrichmentSignal = {
