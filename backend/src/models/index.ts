@@ -54,6 +54,7 @@ import { registerDailySnapshotStaleHooks } from '../hooks/dailySnapshotStaleHook
 import { Scenario, initScenario } from './Scenario';
 import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
+import { Insight, initInsight } from './Insight';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -104,6 +105,7 @@ registerDailySnapshotStaleHooks(sequelize);
 initScenario(sequelize);
 initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
+initInsight(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -340,4 +342,5 @@ export {
   Scenario,
   ScenarioReturn,
   HouseholdPlan,
+  Insight,
 };
