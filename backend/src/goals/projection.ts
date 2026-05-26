@@ -1,0 +1,215 @@
+/**
+ * Pure projection math for financial goals (issue #203).
+ *
+ * Inputs all come from the DB row (strings for DECIMALs, dates as
+ * YYYY-MM-DD or null). Outputs are JSON-safe primitives ready for the
+ * API response.
+ *
+ * Conventions:
+ * - Today is an injected parameter (YYYY-MM-DD) so callers — including
+ *   tests — can pin the date. Production callers pass new Date().toISOString().slice(0,10).
+ * - All money values returned as 4-decimal-place strings to match the
+ *   DECIMAL(14,4) precision used elsewhere.
+ * - Months between dates are calendar-month deltas (date1.year*12 + date1.month
+ *   - date0.year*12 - date0.month). We always floor at 1 to avoid divide-by-zero
+ *   and to keep "due this month" goals from collapsing to 0 months.
+ *
+ * Status semantics (when both target_date AND monthly_contribution are set):
+ * - on_track:  monthly_contribution is within ±10% of required
+ * - ahead:     monthly_contribution >= required * 1.1
+ * - behind:    monthly_contribution <  required * 0.9
+ *
+ * When only one (or neither) is set:
+ * - completed: current_amount >= target_amount (regardless of dates)
+ * - no_target_date + has_monthly_contribution: status='active', projection
+ *   includes a projectedCompletionDate
+ * - has_target_date + no_monthly_contribution: status='unfunded', projection
+ *   includes a requiredMonthlyContribution suggestion
+ * - neither: status='active', no projection
+ */
+
+export type ProjectionStatus =
+  | 'completed'
+  | 'on_track'
+  | 'ahead'
+  | 'behind'
+  | 'unfunded'
+  | 'active';
+
+export type GoalProjection = {
+  /** Money remaining to reach the target, as a 4-decimal string. */
+  remainingAmount: string;
+  /** 0–100, two-decimal-place number for UI progress bars. */
+  progressPercent: number;
+  /**
+   * Months from `today` to `target_date`, rounded down. Null when
+   * target_date is null.
+   */
+  monthsRemaining: number | null;
+  /**
+   * Suggested monthly contribution to hit target_date. Null when
+   * target_date is null OR when target is already reached.
+   */
+  requiredMonthlyContribution: string | null;
+  /**
+   * Projected completion date (YYYY-MM-DD) based on monthly_contribution.
+   * Null when monthly_contribution is null/zero or target is already reached.
+   */
+  projectedCompletionDate: string | null;
+  /** Derived status — see file-level comment. */
+  status: ProjectionStatus;
+};
+
+export type GoalProjectionInput = {
+  /** DECIMAL string, e.g. '5000.0000'. */
+  targetAmount: string;
+  /** DECIMAL string, e.g. '500.0000'. */
+  currentAmount: string;
+  /** YYYY-MM-DD or null. */
+  targetDate: string | null;
+  /** DECIMAL string or null. */
+  monthlyContribution: string | null;
+  /** YYYY-MM-DD — the date the projection is computed against. */
+  today: string;
+};
+
+/** Parse a YYYY-MM-DD string into [year, monthIndex0-11, dayOfMonth]. */
+function parseISODate(s: string): { year: number; month: number; day: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 0 ||
+    month > 11 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return null;
+  }
+  return { year, month, day };
+}
+
+/** Format a JS Date as YYYY-MM-DD (UTC year-month-day). */
+function formatISODate(year: number, monthIndex: number, day: number): string {
+  // Normalize via Date so month/day overflow wraps correctly.
+  const d = new Date(Date.UTC(year, monthIndex, day));
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+/**
+ * Calendar-month delta between two YYYY-MM-DD dates: `(b - a)` in months,
+ * dropping the day-of-month for simplicity. Always >= 0; returns 0 when
+ * `b <= a` calendar-month-wise.
+ */
+function monthsBetween(a: { year: number; month: number }, b: { year: number; month: number }): number {
+  const delta = (b.year - a.year) * 12 + (b.month - a.month);
+  return Math.max(0, delta);
+}
+
+/** Round a number to 4 decimals as a fixed-precision string. */
+function toMoney(n: number): string {
+  if (!Number.isFinite(n)) return '0.0000';
+  return n.toFixed(4);
+}
+
+export function projectGoal(input: GoalProjectionInput): GoalProjection {
+  const target = Number(input.targetAmount);
+  const current = Number(input.currentAmount);
+  const safeTarget = Number.isFinite(target) ? target : 0;
+  const safeCurrent = Number.isFinite(current) ? current : 0;
+  const remaining = Math.max(0, safeTarget - safeCurrent);
+
+  // Progress percent — clamp [0, 100] to handle data quirks (negative
+  // current, or over-contribution past target).
+  let progressPercent = 0;
+  if (safeTarget > 0) {
+    progressPercent = Math.max(
+      0,
+      Math.min(100, (safeCurrent / safeTarget) * 100),
+    );
+    // Two decimals max for clean UI display.
+    progressPercent = Math.round(progressPercent * 100) / 100;
+  }
+
+  const today = parseISODate(input.today);
+  const targetDateParsed = input.targetDate ? parseISODate(input.targetDate) : null;
+  const monthlyContribution = input.monthlyContribution != null
+    ? Number(input.monthlyContribution)
+    : null;
+  const safeMonthly = monthlyContribution != null && Number.isFinite(monthlyContribution)
+    ? Math.max(0, monthlyContribution)
+    : null;
+
+  // Early-out: already completed.
+  if (remaining <= 0) {
+    return {
+      remainingAmount: '0.0000',
+      progressPercent,
+      monthsRemaining: targetDateParsed && today
+        ? monthsBetween(today, targetDateParsed)
+        : null,
+      requiredMonthlyContribution: null,
+      projectedCompletionDate: null,
+      status: 'completed',
+    };
+  }
+
+  // Compute monthsRemaining (null when no target_date).
+  let monthsRemaining: number | null = null;
+  let requiredMonthly: number | null = null;
+  if (targetDateParsed && today) {
+    monthsRemaining = monthsBetween(today, targetDateParsed);
+    // Use Math.max(1, ...) for the divisor to avoid /0 and to keep
+    // "this month" goals from showing 0 required (they need the full amount).
+    const divisor = Math.max(1, monthsRemaining);
+    requiredMonthly = remaining / divisor;
+  }
+
+  // Compute projectedCompletionDate when monthly_contribution > 0.
+  let projectedCompletion: string | null = null;
+  if (safeMonthly != null && safeMonthly > 0 && today) {
+    const monthsToFinish = Math.ceil(remaining / safeMonthly);
+    projectedCompletion = formatISODate(
+      today.year,
+      today.month + monthsToFinish,
+      today.day,
+    );
+  }
+
+  // Derive status.
+  let status: ProjectionStatus;
+  if (requiredMonthly != null && safeMonthly != null && safeMonthly > 0) {
+    // Both target_date and monthly_contribution are set.
+    if (safeMonthly >= requiredMonthly * 1.1) {
+      status = 'ahead';
+    } else if (safeMonthly < requiredMonthly * 0.9) {
+      status = 'behind';
+    } else {
+      status = 'on_track';
+    }
+  } else if (requiredMonthly != null && (safeMonthly == null || safeMonthly === 0)) {
+    // Has deadline but no contribution intent.
+    status = 'unfunded';
+  } else {
+    // No deadline, or no contribution intent — just "active".
+    status = 'active';
+  }
+
+  return {
+    remainingAmount: toMoney(remaining),
+    progressPercent,
+    monthsRemaining,
+    requiredMonthlyContribution:
+      requiredMonthly != null ? toMoney(requiredMonthly) : null,
+    projectedCompletionDate: projectedCompletion,
+    status,
+  };
+}

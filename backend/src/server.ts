@@ -2,13 +2,15 @@ import fs from 'fs';
 import app from './app';
 import * as env from './config/env';
 import { seedDemoData } from './demo/seedDemoData';
-import { backfillUsdCadHistory } from './fx/backfillUsdCadHistory';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
-import { startQuoteScheduler } from './integrations/yahoo/scheduler';
-import { startForwardIncomeScheduler } from './portfolio/forwardIncomeScheduler';
-import { startDailySnapshotScheduler } from './portfolio/dailySnapshotScheduler';
-import { startEnrichmentBackfillScheduler } from './import/enrichmentBackfillScheduler';
+// Register job definitions (side-effect imports).
+import './jobs/definitions/yahooQuote';
+import './jobs/definitions/dailySnapshot';
+import './jobs/definitions/forwardIncome';
+import './jobs/definitions/enrichmentBackfill';
+import './jobs/definitions/usdCadBackfill';
+import { startAllJobs } from './jobs';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -27,22 +29,7 @@ async function start() {
     }, 'server_started');
   });
 
-  // Backfill USD→CAD daily noon rates for the last 5 years. Idempotent: skips
-  // existing rows. Runs in the background; failures are non-fatal (logged).
-  const today = new Date().toISOString().slice(0, 10);
-  const fiveYearsAgo = (() => {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() - 5);
-    return d.toISOString().slice(0, 10);
-  })();
-  backfillUsdCadHistory({ startDate: fiveYearsAgo, endDate: today }).catch((err) => {
-    logger.warn({ err }, 'boot_usd_cad_backfill_failed');
-  });
-
-  startQuoteScheduler();
-  startForwardIncomeScheduler();
-  startDailySnapshotScheduler();
-  startEnrichmentBackfillScheduler();
+  await startAllJobs();
 }
 
 start().catch((err) => {
