@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "entry": [
+    "backend/src/server.ts",
+    "backend/src/migrations/**/*.js",
+    "backend/test/**/*.test.ts",
+    "backend/test/setup.ts",
+    "backend/scripts/**/*.{ts,cjs,js}",
+    "backend/sequelize.config.cjs",
+    "frontend/src/bookmarklets/amazon.ts",
+    "frontend/src/bookmarklets/apple.ts",
+    "frontend/src/**/*.test.{ts,tsx}",
+    "frontend/test/**/*.test.{ts,tsx}",
+    "scripts/**/*.cjs",
+    "test/**/*.test.cjs"
+  ],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/build/**",
+    "**/coverage/**",
+    "**/.next/**"
+  ],
+  "ignoreDependencies": [
+    "@aws-sdk/client-s3",
+    "@cashflow/shared",
+    "@radix-ui/react-slot",
+    "react-is"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "usedClassMembers": [
+    { "extends": "Model", "members": ["*"] }
+  ]
+}
