@@ -2,6 +2,7 @@
 import { Scenario } from '../../models';
 import { buildPersonalFacts } from '../builders/buildPersonalFacts';
 import { applyOverrides } from './applyOverrides';
+import { projectPersonalFactsFromPrevYear } from './projectPersonalFactsFromPrevYear';
 import type { OverrideMap } from './types';
 import type { TaxYearFacts } from '../engine/types';
 
@@ -43,12 +44,20 @@ export async function ensureBaselineScenario(
 export async function resolveScenario(scenarioId: number): Promise<TaxYearFacts> {
   const ancestry = await loadAncestry(scenarioId);
   const root = ancestry[0];
-  const baseFacts = await buildPersonalFacts(root.entityId, root.year);
+  const baseFacts = root.kind === 'projection_root'
+    ? await projectPersonalFactsFromPrevYear(root.id)
+    : await buildPersonalFacts(root.entityId, root.year);
   const overrideChain: OverrideMap[] = ancestry.map((s) => s.overrides as OverrideMap);
   return applyOverrides(baseFacts, overrideChain, 'personal');
 }
 
-/** Walk parentId chain from given scenario back to root. Returns root-first array. */
+/**
+ * Walk parentId chain from given scenario back to root. Returns root-first array.
+ *
+ * A `projection_root` scenario terminates the walk: it acts as a year boundary
+ * (its parent lives in a different year so overrides above it must not layer
+ * onto the projected facts).
+ */
 async function loadAncestry(leafId: number): Promise<Scenario[]> {
   const reverse: Scenario[] = [];
   const seen = new Set<number>();
@@ -64,6 +73,7 @@ async function loadAncestry(leafId: number): Promise<Scenario[]> {
     const node: Scenario | null = await Scenario.findByPk(currentId);
     if (!node) throw new Error(`scenario id=${currentId} not found while walking ancestry`);
     reverse.push(node);
+    if (node.kind === 'projection_root') break;
     currentId = node.parentId;
   }
   return reverse.reverse(); // root-first
