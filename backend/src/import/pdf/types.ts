@@ -48,6 +48,20 @@ export type PdfStatementHeader = {
   periodStart: string;
   /** ISO yyyy-mm-dd. */
   periodEnd: string;
+  /**
+   * 3-letter ISO currency code (e.g. "CAD", "USD"). Surfaced by parsers that
+   * produce multi-currency statements (Wise) so the bundle importer can set
+   * Account.defaultCurrency from the body rather than defaulting to CAD.
+   * Omit when the parser only handles single-currency statements.
+   */
+  currency?: string;
+  /**
+   * Legal account-holder name as printed on the statement (e.g. "CDG Labs Inc."
+   * or "Connor Adams"). Used by the bundle importer to find-or-create the
+   * matching Entity and decide corp-vs-personal routing. Omit when the parser
+   * cannot reliably extract a holder.
+   */
+  accountHolder?: string;
 };
 
 export type PdfParseResult = {
