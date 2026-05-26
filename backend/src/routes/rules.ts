@@ -4,7 +4,14 @@ import { Rule, Transaction, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
-import { findRuleProposals } from '../ai/ruleProposals';
+import {
+  findAutoRuleSuggestions,
+  findRuleProposals,
+  merchantPatternFor,
+  type AutoRuleSuggestion,
+} from '../ai/ruleProposals';
+import { createTrackedSuggestion } from '../ai/suggestionStore';
+import { aiSuggestLimiter } from './aiRateLimit';
 
 /**
  * Map a rule's shape to the InternalBackfillRequest parameters. Regex
@@ -217,6 +224,29 @@ router.patch('/:id', async (req, res, next) => {
       'rule-update-next',
     );
     res.json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/rules/auto-suggestions
+ *
+ * Issue #211 — surface behavioural pattern-based rule suggestions for the
+ * household: cases where the user has manually categorised the same merchant
+ * 3+ times in a consistent way, and there is no existing rule for it. Each
+ * suggestion carries a confidence score and a human-readable reasoning
+ * string so the user can decide whether to accept (create the rule) or
+ * dismiss (suppress until evidence changes).
+ *
+ * Rate-limited because the suggestion query can be expensive on large
+ * histories — CodeQL flags this as authorisation without rate limiting.
+ */
+router.get('/auto-suggestions', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const suggestions = await findAutoRuleSuggestions(householdId);
+    res.json({ suggestions });
   } catch (e) {
     next(e);
   }
@@ -440,6 +470,91 @@ router.get('/suggestions', async (req, res, next) => {
       isSuperadmin(req) ? null : currentAuth(req).household.id,
     );
     res.json({ suggestions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Look up the (current) auto-rule suggestion the caller refers to by `:id`.
+ * Suggestions are derived (not stored), so this re-queries and matches the
+ * stable hash. Returns null if the suggestion is no longer surfaced — caller
+ * should respond with 404.
+ */
+async function findAutoSuggestionById(
+  householdId: number | null,
+  id: string,
+): Promise<AutoRuleSuggestion | null> {
+  const all = await findAutoRuleSuggestions(householdId);
+  return all.find((s) => s.id === id) ?? null;
+}
+
+router.post('/auto-suggestions/:id/accept', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const id = req.params.id;
+    const suggestion = await findAutoSuggestionById(
+      isSuperadmin(req) ? null : household.id,
+      id,
+    );
+    if (!suggestion) {
+      res.status(404).json({ error: 'Auto-rule suggestion not found' });
+      return;
+    }
+    const row = await Rule.create({
+      merchantPattern: suggestion.merchantPattern,
+      householdId: household.id,
+      createdByUserId: user.id,
+      matchKind: 'substring',
+      priority: 0,
+      category: suggestion.category,
+      isBusiness: suggestion.isBusiness,
+      splitType: suggestion.splitType,
+      pctMe: suggestion.pctMe,
+      pctPartner: suggestion.pctPartner,
+    });
+    scheduleRuleBackfill(
+      household.id,
+      {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+      },
+      'rule-auto-suggestion-accept',
+    );
+    res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/auto-suggestions/:id/dismiss', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const suggestion = await findAutoSuggestionById(
+      isSuperadmin(req) ? null : currentAuth(req).household.id,
+      id,
+    );
+    if (!suggestion) {
+      res.status(404).json({ error: 'Auto-rule suggestion not found' });
+      return;
+    }
+    const merchantPattern = merchantPatternFor(suggestion.merchantPattern);
+    if (!merchantPattern) {
+      res.status(400).json({ error: 'merchantPattern is required' });
+      return;
+    }
+    await createTrackedSuggestion({
+      req,
+      kind: 'rule_proposal',
+      inputSnapshot: { merchantPattern },
+      output: null,
+      status: 'rejected',
+      model: 'deterministic',
+      promptVersion: 'rule-auto-suggestion-dismiss-v1',
+    });
+    res.status(201).json({ ok: true });
   } catch (e) {
     next(e);
   }

@@ -10,11 +10,29 @@ const SAMPLE_RULES = [
   { id: 2, merchantPattern: 'uber', matchKind: 'substring', priority: 0, category: 'Transport', isBusiness: false, splitType: 'me', pctMe: null, pctPartner: null, usageCount: 312 },
 ]
 
-function mockFetch(rules: typeof SAMPLE_RULES) {
+type MockOverrides = {
+  /**
+   * Override the auto-suggestions endpoint body. Useful for asserting
+   * defensive behaviour when the backend returns a malformed payload (e.g.
+   * `{}` without a `suggestions` field).
+   */
+  autoSuggestionsBody?: unknown
+}
+
+function mockFetch(rules: typeof SAMPLE_RULES, overrides: MockOverrides = {}) {
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo) => {
     const url = String(input)
     if (url.endsWith('/api/rules')) return Promise.resolve({ ok: true, json: () => Promise.resolve(rules) } as Response)
     if (url.endsWith('/api/ai/rule-proposals')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ proposals: [] }) } as Response)
+    if (url.endsWith('/api/rules/auto-suggestions')) return Promise.resolve({
+      ok: true,
+      json: () =>
+        Promise.resolve(
+          overrides.autoSuggestionsBody !== undefined
+            ? overrides.autoSuggestionsBody
+            : { suggestions: [] },
+        ),
+    } as Response)
     if (url.endsWith('/api/rules/health')) return Promise.resolve({ ok: true, json: () => Promise.resolve({
       windowDays: 90,
       totalRules: rules.length,
@@ -78,6 +96,26 @@ describe('RulesPage', () => {
       await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
       const row = screen.getByText('amazon').closest('tr')!
       expect(row.className).not.toContain('isFocused')
+    })
+  })
+
+  describe('auto-suggestions resilience', () => {
+    it('renders rules when /api/rules/auto-suggestions returns body without a suggestions field', async () => {
+      // Regression: prior implementation read `r.suggestions` unconditionally
+      // and then called `.length` on it, crashing the page when the backend
+      // (or a test stub) returned `{}` instead of `{ suggestions: [] }`.
+      mockFetch(SAMPLE_RULES, { autoSuggestionsBody: {} })
+      render(
+        <MemoryRouter initialEntries={['/rules']}>
+          <ToastProvider>
+            <RulesPage />
+          </ToastProvider>
+        </MemoryRouter>,
+      )
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+      // Sanity: the auto-suggestions section header should not appear when
+      // there are no suggestions to surface.
+      expect(screen.queryByText(/Auto-rule suggestions/i)).toBeNull()
     })
   })
 })
