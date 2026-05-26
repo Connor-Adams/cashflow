@@ -17,6 +17,12 @@ import {
   readReceiptObject,
   saveReceiptObject,
 } from '../storage/receiptStorage';
+import {
+  aggregateReceiptCompleteness,
+  listMissingReceipts,
+  parseFilter,
+  RECEIPT_COMPLETENESS_FILTERS,
+} from '../summary/receiptCompleteness';
 
 const router = Router();
 
@@ -38,6 +44,77 @@ const upload = multer({
     cb(null, true);
   },
 });
+
+/**
+ * GET /api/receipts/completeness?filter=all|business|tax-relevant&currency=CAD
+ *
+ * Receipt-completeness score for the active household (#209). Returns coverage
+ * by COUNT and by absolute dollar AMOUNT, optionally narrowed by filter and
+ * currency. The dashboard tile + #208's business-tax dashboard both consume
+ * this; `filter` is the coordination point.
+ */
+router.get('/receipts/completeness', async (req, res, next) => {
+  try {
+    const filter = parseFilter(req.query.filter);
+    if (filter == null) {
+      res.status(400).json({
+        error: `filter must be one of: ${RECEIPT_COMPLETENESS_FILTERS.join(', ')}`,
+      });
+      return;
+    }
+    const currency = normalizeCurrency(req.query.currency);
+    const result = await aggregateReceiptCompleteness({
+      householdScope: visibleTransactionWhere(req),
+      filter,
+      currency,
+    });
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/receipts/missing?filter=all|business|tax-relevant&currency=CAD&limit=N
+ *
+ * Spend transactions without a receipt, sorted by absolute amount desc so the
+ * largest dollar-impact gaps appear first. Drives the missing-receipt queue.
+ */
+router.get('/receipts/missing', async (req, res, next) => {
+  try {
+    const filter = parseFilter(req.query.filter);
+    if (filter == null) {
+      res.status(400).json({
+        error: `filter must be one of: ${RECEIPT_COMPLETENESS_FILTERS.join(', ')}`,
+      });
+      return;
+    }
+    const currency = normalizeCurrency(req.query.currency);
+    const limit = parseLimit(req.query.limit);
+    const items = await listMissingReceipts({
+      householdScope: visibleTransactionWhere(req),
+      filter,
+      currency,
+      limit,
+    });
+    res.json({ items, filter, currency });
+  } catch (e) {
+    next(e);
+  }
+});
+
+function normalizeCurrency(raw: unknown): string | null {
+  if (raw == null || raw === '') return null;
+  const v = String(raw).trim().toUpperCase();
+  return v.length === 3 ? v : null;
+}
+
+function parseLimit(raw: unknown): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.min(Math.floor(n), 500);
+}
 
 /** POST /api/transactions/:transactionId/receipts */
 router.post(
