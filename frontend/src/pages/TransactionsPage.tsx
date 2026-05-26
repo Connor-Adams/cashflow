@@ -257,10 +257,28 @@ export function TransactionsPage() {
       .catch(() => setCategoryHints([]))
   }, [])
 
+  // Per-issue-262: detect an impossible date range and surface inline guidance.
+  // Apply-style actions are gated on this so users don't chase missing data
+  // caused by a bad filter.
+  const dateRangeInvalid = useMemo(() => {
+    const from = dateFrom.trim()
+    const to = dateTo.trim()
+    if (!from || !to) return false
+    return from > to
+  }, [dateFrom, dateTo])
+
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current
     setLoading(true)
     setErr(null)
+    // Skip the load when the date range is impossible — return zero results
+    // would just confuse the user. The inline error under the To input tells
+    // them what to fix.
+    if (dateRangeInvalid) {
+      setRes({ data: [], page, pageSize: 25, total: 0 })
+      setLoading(false)
+      return
+    }
     try {
       const qs = new URLSearchParams({
         page: String(page),
@@ -288,7 +306,7 @@ export function TransactionsPage() {
         setLoading(false)
       }
     }
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, dateRangeInvalid])
 
   useEffect(() => {
     void load()
@@ -939,11 +957,22 @@ export function TransactionsPage() {
             <Input
               type="date"
               value={dateTo}
+              aria-invalid={dateRangeInvalid ? true : undefined}
+              aria-describedby={dateRangeInvalid ? 'transactions-date-range-error' : undefined}
               onChange={(e) => {
                 setPage(1)
                 setDateTo(e.target.value)
               }}
             />
+            {dateRangeInvalid && (
+              <span
+                id="transactions-date-range-error"
+                className="error"
+                role="alert"
+              >
+                End date must be on or after start date.
+              </span>
+            )}
           </Label>
           <Label>
             Import batch
@@ -1321,7 +1350,8 @@ export function TransactionsPage() {
               bulkApplying ||
               bulkAllApplying ||
               !buildBulkPatch() ||
-              selectedIds.size === 0
+              selectedIds.size === 0 ||
+              dateRangeInvalid
             }
             onClick={() => void applyBulk()}
           >
@@ -1334,11 +1364,14 @@ export function TransactionsPage() {
               bulkApplying ||
               bulkAllApplying ||
               !buildBulkPatch() ||
-              totalCount === 0
+              totalCount === 0 ||
+              dateRangeInvalid
             }
             onClick={() => void applyBulkToAllMatching()}
             title={
-              totalCount === 0
+              dateRangeInvalid
+                ? 'Fix the date range before applying'
+                : totalCount === 0
                 ? 'No transactions match the active filter'
                 : `Apply the bulk patch to every transaction matching the current filter (${totalCount})`
             }
