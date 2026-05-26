@@ -32,6 +32,7 @@ import configRouter from './routes/config';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
+import { withContext } from './observability/requestContext';
 
 const app = express();
 
@@ -61,6 +62,20 @@ app.use(
 app.use(requestLogger);
 app.use(express.json({ limit: '2mb' }));
 app.use(attachAuth);
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  if (req.auth) {
+    withContext(
+      {
+        userId: String(req.auth.user.id),
+        householdId: String(req.auth.household.id),
+        role: req.auth.role,
+      },
+      () => next(),
+    );
+  } else {
+    next();
+  }
+});
 
 app.use('/api/health', healthRouter);
 app.use('/api/version', versionRouter);
