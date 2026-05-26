@@ -1,5 +1,5 @@
 // backend/src/tax/scenarios/overrideKeys.ts
-import { D } from '../util/decimal';
+import { D, type Decimal } from '../util/decimal';
 import type { CapGainEvent, IncomeItem, RrspContrib, TaxYearFacts } from '../engine/types';
 import type { OverrideKeyDef, OverrideMap } from './types';
 
@@ -127,8 +127,49 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
 
 const indexByKey = new Map(overrideKeyRegistry.map((k) => [k.key, k]));
 
+/**
+ * Dynamic owner-comp override key shape: `ownerComp.<shareholderEntityId>.<field>`.
+ * Shareholder IDs are not known at module-load time, so these keys are matched by
+ * regex in `getOverrideKey` + `validateOverrideMap` rather than statically registered.
+ *
+ * Apply stamps onto a structured `ownerComp` map on corp facts:
+ *   corp.ownerComp[shareholderId][field] = Decimal
+ *
+ * The integration router (T4) reads this map to route distributions into personal additions.
+ */
+const OWNER_COMP_RE =
+  /^ownerComp\.(\d+)\.(salary|bonus|eligibleDividend|nonEligibleDividend|capitalDividend)$/;
+
+function ownerCompEntryFor(key: string): OverrideKeyDef | undefined {
+  const m = key.match(OWNER_COMP_RE);
+  if (!m) return undefined;
+  const shareholderId = m[1];
+  const field = m[2];
+  return {
+    kind: 'corp',
+    key,
+    label: `Owner comp - ${field} (shareholder ${shareholderId})`,
+    inputType: 'decimal',
+    validate: (v) => assertNumber(v, key),
+    apply: (facts, value) => {
+      assertNumber(value, key);
+      const corp = facts as unknown as Record<string, unknown> & {
+        ownerComp?: Record<string, Record<string, Decimal>>;
+      };
+      const existing = (corp.ownerComp ?? {}) as Record<string, Record<string, Decimal>>;
+      const forShareholder: Record<string, Decimal> = { ...(existing[shareholderId] ?? {}) };
+      forShareholder[field] = D(String(value));
+      const next = {
+        ...corp,
+        ownerComp: { ...existing, [shareholderId]: forShareholder },
+      };
+      return next as unknown as typeof facts;
+    },
+  };
+}
+
 export function getOverrideKey(key: string): OverrideKeyDef | undefined {
-  return indexByKey.get(key);
+  return indexByKey.get(key) ?? ownerCompEntryFor(key);
 }
 
 /** Returns the subset of the registry that applies to a given entity kind. */
@@ -143,8 +184,17 @@ export function getOverrideKeysForKind(kind: 'personal' | 'corp'): OverrideKeyDe
  */
 export function validateOverrideMap(map: OverrideMap, kind: 'personal' | 'corp'): void {
   for (const [key, value] of Object.entries(map)) {
-    const entry = indexByKey.get(key);
-    if (!entry) throw new Error(`unknown override key: ${key}`);
+    const entry = getOverrideKey(key);
+    if (!entry) {
+      // Surface a more helpful error for ownerComp keys that *almost* match the prefix
+      // but use a malformed shape — common during hand-editing of overrides.
+      if (key.startsWith('ownerComp.')) {
+        throw new Error(
+          `invalid ownerComp key shape: ${key} (expected ownerComp.<shareholderId>.<field> where field ∈ {salary, bonus, eligibleDividend, nonEligibleDividend, capitalDividend})`,
+        );
+      }
+      throw new Error(`unknown override key: ${key}`);
+    }
     if (entry.kind !== kind) {
       throw new Error(`override key ${key} is for ${entry.kind} scenarios, not ${kind}`);
     }
