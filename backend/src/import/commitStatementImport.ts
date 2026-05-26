@@ -467,6 +467,13 @@ export async function commitStatementImport(
         finishedAt: new Date(),
         householdId: account.householdId,
         createdByUserId: userId ?? account.ownerUserId,
+        // #231: structured batch metadata. usedProfileId / accountId come
+        // from the preview record (CSV preview path) or are null for PDF.
+        accountId: account.id,
+        profileId: preview.usedProfileId ?? null,
+        insertedCount: inserted,
+        skippedDuplicateCount: skippedDuplicates,
+        rowErrorsCount: preview.rowErrors,
       },
       { transaction: t }
     );

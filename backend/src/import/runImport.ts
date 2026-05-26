@@ -551,6 +551,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         finishedAt: new Date(),
         householdId: opts.householdId ?? account.householdId ?? null,
         createdByUserId: opts.userId ?? account.ownerUserId ?? null,
+        // #231: structured batch metadata so the batch detail view can
+        // surface account + profile + per-stage counts without rebuilding
+        // them from the wire.
+        accountId: account.id,
+        profileId,
+        insertedCount: inserted,
+        skippedDuplicateCount: skippedDup,
+        rowErrorsCount: rowErrors,
       },
       { transaction: t }
     );
@@ -1387,6 +1395,14 @@ export async function importWsHoldingsFile(opts: {
         finishedAt: new Date(),
         householdId: opts.householdId,
         createdByUserId: opts.userId,
+        // #231: holdings imports target many accounts in a single batch; we
+        // capture skippedUnknownAccount as the duplicate-equivalent and
+        // leave accountId NULL because no single account owns the batch.
+        accountId: null,
+        profileId: null,
+        insertedCount: inserted + updated,
+        skippedDuplicateCount: skippedUnknownAccount,
+        rowErrorsCount: errors.length,
       },
       { transaction: t },
     );

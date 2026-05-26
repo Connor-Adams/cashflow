@@ -24,6 +24,19 @@ export class ImportHistory extends Model<
   declare errorMessage: string | null;
   declare startedAt: Date;
   declare finishedAt: Date | null;
+  /** Account this batch targeted (#231). NULL for legacy rows or batches
+   *  that did not resolve an account (e.g. bad-filename failures). */
+  declare accountId: CreationOptional<number | null>;
+  /** CSV profile used (`generic_simple`, `auto`, etc., #231). NULL for
+   *  non-CSV imports or legacy rows. */
+  declare profileId: CreationOptional<string | null>;
+  /** How many transactions were actually inserted in this run (#231).
+   *  Mirrors the per-run `inserted` value. NULL for legacy rows. */
+  declare insertedCount: CreationOptional<number | null>;
+  /** Rows skipped because they matched an existing transaction (#231). */
+  declare skippedDuplicateCount: CreationOptional<number | null>;
+  /** Rows that failed parsing/mapping during import (#231). */
+  declare rowErrorsCount: CreationOptional<number | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -81,6 +94,31 @@ export function initImportHistory(sequelize: Sequelize): typeof ImportHistory {
       finishedAt: {
         type: DataTypes.DATE,
         field: 'finished_at',
+        allowNull: true,
+      },
+      accountId: {
+        type: DataTypes.INTEGER,
+        field: 'account_id',
+        allowNull: true,
+      },
+      profileId: {
+        type: DataTypes.STRING(64),
+        field: 'profile_id',
+        allowNull: true,
+      },
+      insertedCount: {
+        type: DataTypes.INTEGER,
+        field: 'inserted_count',
+        allowNull: true,
+      },
+      skippedDuplicateCount: {
+        type: DataTypes.INTEGER,
+        field: 'skipped_duplicate_count',
+        allowNull: true,
+      },
+      rowErrorsCount: {
+        type: DataTypes.INTEGER,
+        field: 'row_errors_count',
         allowNull: true,
       },
     } as ModelAttributes<ImportHistory>,
