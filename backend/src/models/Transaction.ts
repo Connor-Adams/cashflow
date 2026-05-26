@@ -69,6 +69,21 @@ export class Transaction extends Model<
 
   declare reviewFlag: boolean;
   declare reviewedAt: Date | null;
+
+  /**
+   * Deterministic post-import confidence state assigned by
+   * computeImportConfidence (#214). NULL on legacy rows that predate the
+   * classifier — aggregator treats NULL as "unknown" so backfill is
+   * incremental. One of 'clean' | 'needs_review' when populated.
+   */
+  declare importConfidence: string | null;
+  /**
+   * JSON-encoded array of import-confidence flag tokens (e.g.
+   * ["missing_category", "needs_review"]). NULL when no flags fired.
+   * Stored as TEXT for SQLite-compat in migration round-trip tests.
+   */
+  declare importConfidenceFlags: string | null;
+
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -310,6 +325,17 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       reviewedAt: {
         type: DataTypes.DATE,
         field: 'reviewed_at',
+        allowNull: true,
+      },
+
+      importConfidence: {
+        type: DataTypes.STRING(16),
+        field: 'import_confidence',
+        allowNull: true,
+      },
+      importConfidenceFlags: {
+        type: DataTypes.TEXT,
+        field: 'import_confidence_flags',
         allowNull: true,
       },
     } as ModelAttributes<Transaction>,

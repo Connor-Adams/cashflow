@@ -1106,3 +1106,36 @@ export type FxReportingResponse = {
   gaps: Array<{ currency: string; reason: 'fx_rate_unavailable' }>;
   transactionCountByCurrency: Record<string, number>;
 };
+
+// ---- Notifications (issue #266) -----------------------------------------
+
+export type NotificationSeverity = 'info' | 'warn' | 'critical';
+
+export type Notification = {
+  id: number;
+  type: string;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  dataJson: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export type NotificationsListResponse = {
+  data: Notification[];
+};
+
+export type NotificationUnreadCountResponse = {
+  count: number;
+};
+
+export type NotificationPreference = {
+  type: string;
+  channelInApp: boolean;
+  channelEmail: boolean;
+};
+
+export type NotificationPreferencesListResponse = {
+  data: NotificationPreference[];
+};

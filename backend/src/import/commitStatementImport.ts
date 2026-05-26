@@ -18,6 +18,10 @@ import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
 import {
+  computeImportConfidence,
+  serializeFlags,
+} from './computeImportConfidence';
+import {
   enrichmentRecurringMinSupport,
   enrichmentAmazonLinkThreshold,
   enrichmentRefundWindowDays,
@@ -298,12 +302,28 @@ export async function commitStatementImport(
       // wealthsimpleTxnType.ts for the mapping and root-cause analysis in
       // backend/scripts/backfill-ws-txn-types.ts.
       const effectiveTxnType = row.overrideTxnType ?? f.txnType;
+      const accountVisibility: 'private' | 'shared' =
+        account.visibility === 'shared' ? 'shared' : 'private';
+      const confidence = computeImportConfidence({
+        reviewFlag: f.reviewFlag,
+        finalCategory: f.autoCategory,
+        autoCategory: f.autoCategory,
+        autoSplitType: f.autoSplitType,
+        finalSplitType:
+          f.autoSplitType === 'partner' || f.autoSplitType === 'shared'
+            ? f.autoSplitType
+            : 'me',
+        txnType: effectiveTxnType,
+        accountVisibility,
+        linkedTransactionId: f.linkedTransactionId,
+        amount: row.amount,
+      });
 
       const txn = Transaction.build({
         accountId: account.id,
         householdId: account.householdId ?? null,
         createdByUserId: userId ?? account.ownerUserId,
-        visibility: account.visibility === 'shared' ? 'shared' : 'private',
+        visibility: accountVisibility,
         ownershipType:
           f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
@@ -336,6 +356,8 @@ export async function commitStatementImport(
         isRecurring: f.isRecurring,
         reviewFlag: f.reviewFlag,
         reviewedAt: null,
+        importConfidence: confidence.state,
+        importConfidenceFlags: serializeFlags(confidence.flags),
       });
       recomputeTransactionAmounts(txn);
       // SAVEPOINT around the per-row insert + its signal sidecar. On
