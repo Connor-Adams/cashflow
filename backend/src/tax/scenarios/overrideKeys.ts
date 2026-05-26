@@ -168,8 +168,48 @@ function ownerCompEntryFor(key: string): OverrideKeyDef | undefined {
   };
 }
 
+/**
+ * Dynamic intercorp-distribution override key shape: `intercorp.<receiverCorpEntityId>.<field>`.
+ * Receiver corp entity IDs are not known at module-load time, so these keys are matched by
+ * regex in `getOverrideKey` + `validateOverrideMap` rather than statically registered.
+ *
+ * Apply stamps onto a structured `intercorp` map on corp facts:
+ *   corp.intercorp[receiverCorpEntityId][field] = Decimal
+ *
+ * The intercorp router (P11a T2) reads this map to emit per-receiver-corp received-div additions.
+ */
+const INTERCORP_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital)$/;
+
+function intercorpEntryFor(key: string): OverrideKeyDef | undefined {
+  const m = key.match(INTERCORP_RE);
+  if (!m) return undefined;
+  const receiverId = m[1];
+  const field = m[2];
+  return {
+    kind: 'corp',
+    key,
+    label: `Intercorp - ${field} dividend -> corp ${receiverId} (CAD)`,
+    inputType: 'decimal',
+    validate: (v) => assertNumber(v, key),
+    apply: (facts, value) => {
+      assertNumber(value, key);
+      const corp = facts as unknown as Record<string, unknown> & {
+        intercorp?: Record<string, Record<string, Decimal>>;
+      };
+      const existing = (corp.intercorp ?? {}) as Record<string, Record<string, Decimal>>;
+      const forReceiver: Record<string, Decimal> = { ...(existing[receiverId] ?? {}) };
+      forReceiver[field] = D(String(value));
+      const next = {
+        ...corp,
+        intercorp: { ...existing, [receiverId]: forReceiver },
+      };
+      return next as unknown as typeof facts;
+    },
+  };
+}
+
 export function getOverrideKey(key: string): OverrideKeyDef | undefined {
-  return indexByKey.get(key) ?? ownerCompEntryFor(key);
+  return indexByKey.get(key) ?? intercorpEntryFor(key) ?? ownerCompEntryFor(key);
 }
 
 /** Returns the subset of the registry that applies to a given entity kind. */
@@ -191,6 +231,13 @@ export function validateOverrideMap(map: OverrideMap, kind: 'personal' | 'corp')
       if (key.startsWith('ownerComp.')) {
         throw new Error(
           `invalid ownerComp key shape: ${key} (expected ownerComp.<shareholderId>.<field> where field ∈ {salary, bonus, eligibleDividend, nonEligibleDividend, capitalDividend})`,
+        );
+      }
+      // Surface a more helpful error for intercorp keys that *almost* match the prefix
+      // but use a malformed shape — common during hand-editing of overrides.
+      if (key.startsWith('intercorp.')) {
+        throw new Error(
+          `invalid intercorp key shape: ${key} (expected intercorp.<receiverCorpEntityId>.<field> where field ∈ {eligible, nonEligible, capital})`,
         );
       }
       throw new Error(`unknown override key: ${key}`);
