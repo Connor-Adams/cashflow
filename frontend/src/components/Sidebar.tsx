@@ -19,6 +19,7 @@ import {
   Settings,
   Shield,
   Sparkles,
+  Stethoscope,
   Sun,
   Moon,
   Upload,
@@ -52,6 +53,7 @@ const navItems: NavItem[] = [
   { to: '/recurring', label: 'Recurring', icon: Repeat },
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
+  { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
