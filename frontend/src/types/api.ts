@@ -200,6 +200,77 @@ export type MoneyLeakDismissedResponse = {
   items: MoneyLeakDismissal[]
 }
 
+// -------- Explain this month report (GET /api/reports/explain-month) ----
+// Mirrors backend/src/summary/explainMonth.ts. The deterministic engine
+// produces a month-over-month breakdown by currency plus a flat list of
+// findings (spend changes, missing receipts, subscription changes, review
+// backlog, business summary). The aiSummary field is filled in by the
+// route when `ai=true` and OpenAI is configured; otherwise it stays null.
+
+export type ExplainMonthFindingKind =
+  | 'spend_change'
+  | 'missing_receipt'
+  | 'subscription_change'
+  | 'review_needed'
+  | 'business_summary'
+
+export type ExplainMonthSeverity = 'low' | 'medium' | 'high'
+
+/** Filter payload backing each finding — the page translates it into the
+ *  TransactionsPage URL params it natively understands. */
+export type ExplainMonthTransactionFilter = {
+  dateFrom?: string
+  dateTo?: string
+  category?: string
+  merchant?: string
+  businessOnly?: boolean
+  reviewFlag?: boolean
+  currency?: string
+}
+
+export type ExplainMonthFinding = {
+  id: string
+  kind: ExplainMonthFindingKind
+  title: string
+  summary: string
+  currency: string
+  monthlyImpact: number
+  severity: ExplainMonthSeverity
+  supportingTransactionIds: number[]
+  transactionFilter: ExplainMonthTransactionFilter
+  meta: Record<string, unknown>
+}
+
+export type ExplainMonthCategoryDelta = {
+  category: string
+  current: number
+  previous: number
+  delta: number
+  deltaPct: number | null
+}
+
+export type ExplainMonthMonthOverMonth = {
+  currency: string
+  currentSpend: number
+  previousSpend: number
+  spendDelta: number
+  currentIncome: number
+  previousIncome: number
+  incomeDelta: number
+  netCurrent: number
+  netPrevious: number
+  netDelta: number
+  byCategory: ExplainMonthCategoryDelta[]
+}
+
+export type ExplainMonthResponse = {
+  month: string
+  previousMonth: string
+  monthOverMonth: ExplainMonthMonthOverMonth[]
+  findings: ExplainMonthFinding[]
+  aiSummary: string | null
+}
+
 /** Direction of a partner-balance settlement record. */
 export type PartnerSettlementDirection = 'i_paid_partner' | 'partner_paid_me'
 
@@ -311,6 +382,59 @@ export type PartnerSettlementRecommendation = {
 /** Response shape for GET /api/partner/settlement-recommendation. */
 export type PartnerSettlementRecommendationResponse = {
   recommendations: PartnerSettlementRecommendation[]
+}
+
+// ---- Sankey visualization (issue #224) ---------------------------------
+
+/** Classification of a node in the Sankey diagram — drives coloring. */
+export type SankeyNodeKind =
+  | 'income'
+  | 'category'
+  | 'business'
+  | 'savings'
+  | 'uncategorized'
+
+export type SankeyNode = {
+  name: string
+  kind: SankeyNodeKind
+}
+
+export type SankeyLink = {
+  source: number
+  target: number
+  value: number
+}
+
+/** Response shape for GET /api/summary/sankey. */
+export type SankeyResponse = {
+  currency: string | null
+  totalIncome: number
+  totalSpend: number
+  transactionCount: number
+  nodes: SankeyNode[]
+  links: SankeyLink[]
+  /** Every currency the household has at least one visible txn in. */
+  availableCurrencies: string[]
+  dateRange: { from: string | null; to: string | null }
+}
+
+export type SankeyDrilldownTransaction = {
+  id: number
+  date: string
+  currency: string
+  amount: number
+  merchant: string
+  finalCategory: string | null
+  finalBusiness: boolean
+  txnType: string | null
+}
+
+/** Response shape for GET /api/summary/sankey/source-transactions. */
+export type SankeyDrilldownResponse = {
+  edge: { source: number; target: number }
+  transactionCount: number
+  truncated: boolean
+  transactions: SankeyDrilldownTransaction[]
 }
 
 /**
@@ -1025,6 +1149,38 @@ export type NetWorthSeries = {
   points: NetWorthSeriesPoint[];
   partial: boolean;
   gaps: NetWorthGap[];
+};
+
+/**
+ * Per-user safe-to-spend knobs (issue #199). Returned by both GET and
+ * PATCH /api/settings/cashflow.
+ */
+export type CashflowSettings = {
+  /** DECIMAL(14,4) string. */
+  minimumCashBuffer: string;
+  safeToSpendWindowDays: number;
+  includeCreditCardBalance: boolean;
+  includeGoalContributions: boolean;
+};
+
+export type SafeToSpendBreakdown = {
+  currentCash: number;
+  upcomingRequiredExpenses: number;
+  requiredSavingsContributions: number;
+  expectedCreditCardPayments: number;
+  minimumBuffer: number;
+};
+
+/** Response shape for GET /api/forecast/safe-to-spend. */
+export type SafeToSpendResponse = {
+  currency: string;
+  asOfDate: string;
+  windowDays: number;
+  windowEndDate: string;
+  value: number;
+  isNegative: boolean;
+  breakdown: SafeToSpendBreakdown;
+  settings: CashflowSettings;
 };
 
 // --- FX & currency intelligence (issue #221) -------------------------------
