@@ -63,6 +63,7 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
+import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -122,6 +123,7 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
+initTaxReserveSetting(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -435,6 +437,17 @@ AiReviewRun.belongsTo(User, {
   as: 'user',
 });
 
+Household.hasMany(TaxReserveSetting, {
+  foreignKey: 'household_id',
+  as: 'taxReserveSettings',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TaxReserveSetting.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
 export {
   sequelize,
   User,
@@ -493,4 +506,5 @@ export {
   FinancialGoal,
   Subscription,
   AiReviewRun,
+  TaxReserveSetting,
 };
