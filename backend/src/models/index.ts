@@ -84,6 +84,7 @@ import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 import { Purchase, initPurchase } from './Purchase';
 import { Notification, initNotification } from './Notification';
 import { AuditLog, initAuditLog } from './AuditLog';
+import { FinanceEvent, initFinanceEvent } from './FinanceEvent';
 import {
   NotificationPreference,
   initNotificationPreference,
@@ -163,6 +164,7 @@ initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
 initAuditLog(sequelize);
+initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
@@ -607,6 +609,28 @@ AuditLog.belongsTo(User, {
   as: 'actor',
 });
 
+// Finance domain events (issue #238) — append-only stream parallel to
+// audit_log. Cascade on household delete so removing a household
+// removes its event stream too.
+Household.hasMany(FinanceEvent, {
+  foreignKey: 'household_id',
+  as: 'financeEvents',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinanceEvent.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinanceEvent, {
+  foreignKey: 'actor_user_id',
+  as: 'financeEventsEmitted',
+});
+FinanceEvent.belongsTo(User, {
+  foreignKey: 'actor_user_id',
+  as: 'actor',
+});
+
 // Monthly close (issue #227). Period cascades to tasks; deleting a
 // household removes its periods and (via the period→task cascade) tasks.
 Household.hasMany(MonthlyClosePeriod, {
@@ -807,6 +831,7 @@ export {
   Notification,
   NotificationPreference,
   AuditLog,
+  FinanceEvent,
   BudgetAlertState,
   AccountStatement,
   SyncBackup,
