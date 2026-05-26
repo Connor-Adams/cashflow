@@ -52,7 +52,7 @@ export function initSecurityDailyPrice(
       source: {
         type: DataTypes.STRING(32),
         allowNull: false,
-        defaultValue: 'alpha_vantage',
+        defaultValue: 'yahoo',
       },
       fetchedAt: {
         type: DataTypes.DATE,

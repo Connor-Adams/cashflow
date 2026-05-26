@@ -13,7 +13,6 @@ let testDb: PgTestDb;
 
 before(async () => {
   process.env.NODE_ENV = 'test';
-  process.env.ALPHA_VANTAGE_API_KEY = 'av_test_key';
   testDb = await setupPgTestDb('portfolio-prices');
 
   const mod = await import('../../src/app.js');

@@ -60,7 +60,7 @@ export function initSecurityDividend(sequelize: Sequelize): typeof SecurityDivid
       source: {
         type: DataTypes.STRING(32),
         allowNull: false,
-        defaultValue: 'alpha_vantage',
+        defaultValue: 'yahoo',
       },
       fetchedAt: {
         type: DataTypes.DATE,

@@ -47,22 +47,20 @@ describe('PriceChartCard', () => {
     expect(await findByText(/History loading/i)).not.toBeNull()
   })
 
-  it('shows rate-limited banner with literal "midnight UTC" phrasing (AC10)', async () => {
+  it('shows rate-limited banner when provider is rate-limiting', async () => {
     vi.spyOn(api, 'getJson').mockResolvedValue({
       securityId: 1, symbol: 'X', currency: 'CAD', range: '1y', rows: [], trades: [],
       backfill: { status: 'rate_limited', lastFetchedAt: null, nextRetryAt: '2026-05-25T00:00:00.000Z', coverageDays: 0 },
     })
-    const { findByText, container } = render(<PriceChartCard securityId={1} currency="CAD" />)
-    expect(await findByText(/quota exhausted/i)).not.toBeNull()
-    // Spec AC10: literal phrase, not locale-formatted datetime.
-    expect(container.textContent).toContain('retry after midnight UTC')
+    const { findByText } = render(<PriceChartCard securityId={1} currency="CAD" />)
+    expect(await findByText(/rate-limiting/i)).not.toBeNull()
   })
 
-  it('shows config-prompt placeholder when AV key is unset (AC7) and does NOT fetch', async () => {
+  it('shows not-configured placeholder when provider is unavailable and does NOT fetch', async () => {
     window.__APP_CONFIG__ = { logoDevToken: null, quoteProviderConfigured: false }
     const spy = vi.spyOn(api, 'getJson')
     const { findByText } = render(<PriceChartCard securityId={1} currency="CAD" />)
-    expect(await findByText(/ALPHA_VANTAGE_API_KEY/i)).not.toBeNull()
+    expect(await findByText(/quote provider is not configured/i)).not.toBeNull()
     expect(spy).not.toHaveBeenCalled()
   })
 })

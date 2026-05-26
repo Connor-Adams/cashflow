@@ -9,7 +9,7 @@ let authed: ReturnType<typeof request.agent>;
 let xeqtId: number;
 
 before(async () => {
-  process.env.ALPHA_VANTAGE_API_KEY = 'av_test_key';
+  process.env.NODE_ENV = 'test';
   testDb = await setupPgTestDb('divs');
   const mod = await import('../../src/app.js');
   app = mod.default;

@@ -19,18 +19,16 @@ import {
 } from '../portfolio/metrics';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
-import * as env from '../config/env';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
 import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
 import {
-  AlphaVantageError,
-  fetchGlobalQuote,
-} from '../integrations/alphaVantage/client';
-import {
-  checkBudget,
-  recordCall,
-} from '../integrations/alphaVantage/budget';
+  YAHOO_PROVIDER,
+  YahooFinanceError,
+  fetchQuote,
+} from '../integrations/yahoo/client';
+import { recordCall } from '../integrations/yahoo/jobLog';
+import { toYahooSymbol } from '../integrations/yahoo/symbol';
 import {
   TAX_STATUS_LABELS,
   TAX_STATUS_ORDER,
@@ -320,8 +318,8 @@ router.get('/', async (req, res, next) => {
             : null,
         };
       }),
-      quoteProvider: env.quoteProvider,
-      quoteConfigured: Boolean(env.alphaVantageApiKey),
+      quoteProvider: YAHOO_PROVIDER,
+      quoteConfigured: true,
     });
   } catch (e) {
     next(e);
@@ -1750,14 +1748,6 @@ router.get('/by-account-type', async (req, res, next) => {
 router.post('/prices/refresh', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
-    if (env.quoteProvider !== 'alpha_vantage') {
-      res.status(400).json({ error: `Unsupported quote provider: ${env.quoteProvider}` });
-      return;
-    }
-    if (!env.alphaVantageApiKey) {
-      res.status(400).json({ error: 'ALPHA_VANTAGE_API_KEY is not configured' });
-      return;
-    }
     const securities = await Security.findAll({
       where: {
         householdId: household.id,
@@ -1767,7 +1757,6 @@ router.post('/prices/refresh', async (req, res, next) => {
     });
     const latest = await latestPricesBySecurity(securities.map((s) => s.id));
     const results = [];
-    let budget = await checkBudget(env.quoteDailyBudget);
 
     for (const security of securities) {
       const cached = latest.get(security.id);
@@ -1783,34 +1772,21 @@ router.post('/prices/refresh', async (req, res, next) => {
         });
         continue;
       }
-      if (!budget.ok) {
-        results.push({
-          symbol: security.symbol,
-          status: 'budget_exhausted',
-          budget: { used: budget.used, limit: budget.limit },
-        });
-        await recordCall({
-          function: 'GLOBAL_QUOTE',
-          symbol: security.symbol,
-          status: 'budget_exceeded',
-        });
-        continue;
-      }
+      const yahooSymbol = toYahooSymbol(security.symbol, security.currency);
       try {
-        const quote = await fetchGlobalQuote(security.symbol);
+        const quote = await fetchQuote(yahooSymbol);
         if (!quote) {
           await recordCall({
-            function: 'GLOBAL_QUOTE',
-            symbol: security.symbol,
+            function: 'QUOTE',
+            symbol: yahooSymbol,
             status: 'not_found',
           });
           results.push({ symbol: security.symbol, status: 'not_found' });
-          budget = await checkBudget(env.quoteDailyBudget);
           continue;
         }
         const row = await SecurityPrice.create({
           securityId: security.id,
-          provider: 'alpha_vantage',
+          provider: YAHOO_PROVIDER,
           symbol: security.symbol,
           pricedAt: quote.pricedAt,
           price: String(quote.price),
@@ -1818,8 +1794,8 @@ router.post('/prices/refresh', async (req, res, next) => {
           fetchedAt: new Date(),
         });
         await recordCall({
-          function: 'GLOBAL_QUOTE',
-          symbol: security.symbol,
+          function: 'QUOTE',
+          symbol: yahooSymbol,
           status: 'ok',
         });
         results.push({
@@ -1830,11 +1806,12 @@ router.post('/prices/refresh', async (req, res, next) => {
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Quote refresh failed';
-        const isProviderErr = e instanceof AlphaVantageError;
-        const isRateLimit = isProviderErr && e.providerNote != null;
+        const isProviderErr = e instanceof YahooFinanceError;
+        const isRateLimit =
+          isProviderErr && (e.httpStatus === 429 || /rate.?limit/i.test(e.message));
         await recordCall({
-          function: 'GLOBAL_QUOTE',
-          symbol: security.symbol,
+          function: 'QUOTE',
+          symbol: yahooSymbol,
           status: isRateLimit ? 'rate_limited' : 'error',
           httpStatus: isProviderErr ? e.httpStatus : null,
           errorMessage: message.slice(0, 1024),
@@ -1845,9 +1822,8 @@ router.post('/prices/refresh', async (req, res, next) => {
           error: message,
         });
       }
-      budget = await checkBudget(env.quoteDailyBudget);
     }
-    res.json({ provider: 'alpha_vantage', results });
+    res.json({ provider: YAHOO_PROVIDER, results });
   } catch (e) {
     next(e);
   }

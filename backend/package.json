@@ -28,7 +28,8 @@
     "pdfjs-dist": "^5.7.284",
     "pg": "^8.20.0",
     "sequelize": "^6.37.5",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "yahoo-finance2": "^3.14.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

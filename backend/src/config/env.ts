@@ -14,11 +14,8 @@ export type EnvConfig = {
   defaultCurrency: string;
   corsOrigin: string;
   nodeEnv: string;
-  alphaVantageApiKey: string | null;
-  quoteProvider: string;
   logoDevToken: string | null;
   quoteSchedulerEnabled: boolean;
-  quoteDailyBudget: number;
   quoteTickCron: string;
   quoteMinAgeHours: number;
   dividendReconcileEnabled: boolean;
@@ -110,15 +107,11 @@ export function loadEnvConfig(
   const corsOrigin = assertCorsOrigin(e.CORS_ORIGIN);
   const nodeEnv = e.NODE_ENV || 'development';
   const trustProxy = parseTrustProxy(e.TRUST_PROXY, nodeEnv);
-  const alphaVantageApiKey = e.ALPHA_VANTAGE_API_KEY?.trim() || null;
-  const quoteProvider = e.QUOTE_PROVIDER?.trim() || 'alpha_vantage';
   const logoDevToken = e.LOGO_DEV_TOKEN?.trim() || null;
   const quoteSchedulerEnabled = parseQuoteSchedulerEnabled(
     e.QUOTE_SCHEDULER_ENABLED,
     nodeEnv,
-    alphaVantageApiKey,
   );
-  const quoteDailyBudget = parseQuoteDailyBudget(e.QUOTE_DAILY_BUDGET);
   const quoteTickCron = e.QUOTE_TICK_CRON?.trim() || '*/4 * * * *';
   const quoteMinAgeHours = parseQuoteMinAgeHours(e.QUOTE_MIN_AGE_HOURS);
   const dividendReconcileEnabled = parseDividendReconcileEnabled(
@@ -140,11 +133,8 @@ export function loadEnvConfig(
     defaultCurrency,
     corsOrigin,
     nodeEnv,
-    alphaVantageApiKey,
-    quoteProvider,
     logoDevToken,
     quoteSchedulerEnabled,
-    quoteDailyBudget,
     quoteTickCron,
     quoteMinAgeHours,
     dividendReconcileEnabled,
@@ -162,24 +152,12 @@ const QUOTE_FALSY = new Set(['false', '0', 'no']);
 export function parseQuoteSchedulerEnabled(
   raw: string | undefined,
   nodeEnv: string,
-  apiKey: string | null,
 ): boolean {
   const trimmed = raw?.trim().toLowerCase();
   if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
   if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
   if (nodeEnv === 'test') return false;
-  return apiKey != null;
-}
-
-export function parseQuoteDailyBudget(raw: string | undefined): number {
-  if (raw == null || raw.trim() === '') return 22;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n > 25) {
-    throw new Error(
-      `QUOTE_DAILY_BUDGET must be an integer between 1 and 25 (Alpha Vantage free tier ceiling), got: ${raw}`,
-    );
-  }
-  return n;
+  return true;
 }
 
 export function parseQuoteMinAgeHours(raw: string | undefined): number {
@@ -243,11 +221,8 @@ export const trustProxy = resolved.trustProxy;
 export const defaultCurrency = resolved.defaultCurrency;
 export const corsOrigin = resolved.corsOrigin;
 export const nodeEnv = resolved.nodeEnv;
-export const alphaVantageApiKey = resolved.alphaVantageApiKey;
-export const quoteProvider = resolved.quoteProvider;
 export const logoDevToken = resolved.logoDevToken;
 export const quoteSchedulerEnabled = resolved.quoteSchedulerEnabled;
-export const quoteDailyBudget = resolved.quoteDailyBudget;
 export const quoteTickCron = resolved.quoteTickCron;
 export const quoteMinAgeHours = resolved.quoteMinAgeHours;
 export const dividendReconcileEnabled = resolved.dividendReconcileEnabled;
