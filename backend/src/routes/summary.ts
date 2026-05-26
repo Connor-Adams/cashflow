@@ -58,6 +58,7 @@ router.get('/dashboard', async (req, res, next) => {
           'businessAmount',
           'reviewFlag',
           'txnType',
+          'linkedTransactionId',
         ],
         raw: true,
       }),

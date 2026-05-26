@@ -31,6 +31,7 @@ import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
+import { RefundBadge } from '../components/RefundBadge'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import {
   getJson,
@@ -1661,6 +1662,13 @@ function TransactionRow({
           <span className="txnMerchantMeta">
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
           </span>
+          {t.txnType === 'refund' && (
+            <RefundBadge
+              transactionId={t.id}
+              linkedTransactionId={t.linkedTransactionId}
+              currency={t.currency}
+            />
+          )}
         </div>
       </TableCell>
       <TableCell>

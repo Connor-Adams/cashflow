@@ -16,9 +16,12 @@ import { GoalsPage } from './pages/GoalsPage'
 import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
+import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
+import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
+import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
 import { AmazonPage } from './pages/AmazonPage'
 import { AuthPage } from './pages/AuthPage'
@@ -57,7 +60,9 @@ function AppRoutes() {
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="review" element={<ReviewInboxPage />} />
+          <Route path="refunds" element={<RefundsReviewPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
@@ -71,6 +76,7 @@ function AppRoutes() {
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
+          <Route path="money-leaks" element={<MoneyLeaksPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
