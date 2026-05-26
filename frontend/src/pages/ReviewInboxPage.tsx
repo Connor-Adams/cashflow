@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Check,
   Keyboard,
@@ -8,6 +9,8 @@ import {
   ShieldCheck,
   Wand2,
 } from 'lucide-react'
+import type { ImportConfidenceFlagToken } from '@cashflow/shared'
+import { IMPORT_CONFIDENCE_FLAG_TOKENS } from '@cashflow/shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -105,7 +108,31 @@ function buildRevertPatch(
   return revert
 }
 
+// Filter chips for the import-confidence flag tokens (#214). Excludes
+// 'needs_review' because that's the inbox default — every loaded row already
+// has reviewFlag=true. The remaining tokens narrow the queue by the reason
+// the row landed here.
+const CONFIDENCE_FLAG_CHIPS: Array<{
+  token: ImportConfidenceFlagToken
+  label: string
+}> = IMPORT_CONFIDENCE_FLAG_TOKENS.filter((t) => t !== 'needs_review').map(
+  (t) => ({
+    token: t,
+    label:
+      t === 'missing_category'
+        ? 'Missing category'
+        : t === 'missing_split'
+          ? 'Missing split'
+          : t === 'likely_duplicate'
+            ? 'Likely duplicate'
+            : t === 'possible_refund_pair'
+              ? 'Refund pair'
+              : 'Missing receipt',
+  }),
+)
+
 export function ReviewInboxPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [rows, setRows] = useState<Transaction[]>([])
   const [total, setTotal] = useState(0)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
@@ -115,6 +142,17 @@ export function ReviewInboxPage() {
   const [splitType, setSplitType] = useState('')
   const [merchantFilter, setMerchantFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
+  const confidenceFlag =
+    (searchParams.get('confidenceFlag') as ImportConfidenceFlagToken | null) ?? null
+  const setConfidenceFlag = useCallback(
+    (next: ImportConfidenceFlagToken | null) => {
+      const params = new URLSearchParams(searchParams)
+      if (next) params.set('confidenceFlag', next)
+      else params.delete('confidenceFlag')
+      setSearchParams(params, { replace: true })
+    },
+    [searchParams, setSearchParams],
+  )
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -133,6 +171,7 @@ export function ReviewInboxPage() {
         reviewFlag: 'true',
         pageSize: String(PAGE_SIZE),
       })
+      if (confidenceFlag) qs.set('confidenceFlag', confidenceFlag)
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`
       )
@@ -144,7 +183,7 @@ export function ReviewInboxPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [confidenceFlag])
 
   useEffect(() => {
     void load()
@@ -557,6 +596,46 @@ export function ReviewInboxPage() {
               <Keyboard aria-hidden="true" />
               Shortcuts
             </Button>
+          </div>
+
+          {/* Import-confidence flag chips (#214). Selecting a chip narrows the
+              inbox to rows whose import_confidence_flags include that token.
+              Clicking the active chip clears the filter. URL-bound so deep
+              links from the dashboard survive a refresh. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-semibold text-muted-foreground">
+              Filter:
+            </span>
+            {CONFIDENCE_FLAG_CHIPS.map((chip) => {
+              const active = confidenceFlag === chip.token
+              return (
+                <button
+                  key={chip.token}
+                  type="button"
+                  onClick={() =>
+                    setConfidenceFlag(active ? null : chip.token)
+                  }
+                  className={
+                    active
+                      ? 'rounded-full border border-foreground bg-foreground px-2.5 py-0.5 text-xs font-semibold text-background'
+                      : 'rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground'
+                  }
+                  aria-pressed={active}
+                  data-testid={`confidence-chip-${chip.token}`}
+                >
+                  {chip.label}
+                </button>
+              )
+            })}
+            {confidenceFlag ? (
+              <button
+                type="button"
+                onClick={() => setConfidenceFlag(null)}
+                className="text-xs text-muted-foreground underline hover:text-foreground"
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
 
           <p className="reviewInboxShortcutsHint" aria-hidden="true">

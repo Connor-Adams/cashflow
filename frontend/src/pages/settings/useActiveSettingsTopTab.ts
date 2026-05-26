@@ -7,6 +7,7 @@ export type SettingsTopTab =
   | 'contacts'
   | 'budgets'
   | 'categories'
+  | 'notifications'
   | 'jobs'
 
 export function useActiveSettingsTopTab(): SettingsTopTab {
@@ -18,6 +19,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isContacts = useMatch('/settings/contacts')
   const isBudgets = useMatch('/settings/budgets')
   const isCategories = useMatch('/settings/categories')
+  const isNotifications = useMatch('/settings/notifications')
   const isJobs = useMatch('/settings/jobs')
 
   if (isDisplay || isGmail || isPartnerInvite) return 'settings'
@@ -26,6 +28,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   if (isContacts) return 'contacts'
   if (isBudgets) return 'budgets'
   if (isCategories) return 'categories'
+  if (isNotifications) return 'notifications'
   if (isJobs) return 'jobs'
   return 'settings'
 }

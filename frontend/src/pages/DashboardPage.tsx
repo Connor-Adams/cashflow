@@ -26,6 +26,7 @@ import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
+import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { useInsightsSeen } from '@/hooks/useInsightsSeen'
@@ -1588,12 +1589,7 @@ export function DashboardPage() {
           rows={merchantReportData.slice(0, 6)}
           rowKey={(r) => `${r.currency}:${r.merchant}`}
           onRowClick={(r) =>
-            navigate(
-              transactionsUrl(
-                { merchant: r.merchant },
-                { currency, dateFrom, dateTo }
-              )
-            )
+            navigate(`/merchants/${encodeURIComponent(r.merchant)}`)
           }
           viewAllLabel="All merchants in Reports"
           viewAllHref="/reports#merchants"
@@ -1628,6 +1624,8 @@ export function DashboardPage() {
         />
 
         <ReceiptCoverageTile currency={currency || null} />
+
+        <ImportHealthTile currency={currency || null} />
 
         <TableTile
           span={12}
