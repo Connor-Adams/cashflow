@@ -32,11 +32,6 @@ export type ImportHistoryRow = {
   insertedCount?: number | null
   skippedDuplicateCount?: number | null
   rowErrorsCount?: number | null
-  /** Rollback markers (#233). Both NULL on healthy batches; populated when
-   *  the batch has been rolled back. Drives the rolled-back status pill
-   *  in `ImportBatchPage`. */
-  rolledBackAt?: string | null
-  rolledBackByUserId?: number | null
 }
 
 type ImportHistoryTableProps = {
