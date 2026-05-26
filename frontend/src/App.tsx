@@ -47,6 +47,7 @@ import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
+import { CfoBriefingPage } from './pages/CfoBriefingPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AskCashflowPage } from './pages/AskCashflowPage'
@@ -113,6 +114,7 @@ function AppRoutes() {
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />
+          <Route path="cfo/briefings" element={<CfoBriefingPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<AskCashflowPage />} />
