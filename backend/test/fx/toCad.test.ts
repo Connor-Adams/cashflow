@@ -40,8 +40,9 @@ test('uses cached recent FxRate when available', async () => {
   const result = await toCad(D('100'), 'USD', '2025-06-15');
   assert.equal(result.cad.toFixed(2), '136.00');
   assert.equal(result.rate, 1.36);
-  // Source should be 'cached' or 'fetched' — both come from ensureFxRate.
-  assert.ok(['cached', 'fetched'].includes(result.source));
+  // Network is stubbed to throw, so ensureFxRate must hit the cached row
+  // (a fetch would fail). Lock down the cache-hit path specifically.
+  assert.equal(result.source, 'cached');
 });
 
 test('falls back to nearest historical row when ensureFxRate cannot find one', async () => {

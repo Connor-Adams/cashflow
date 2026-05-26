@@ -14,6 +14,9 @@
 import { Op } from 'sequelize';
 import { FxRate } from '../models/FxRate';
 
+/** Days back from asOfDate that ensureFxRate considers a cached row "fresh enough". */
+export const ENSURE_FX_CACHE_WINDOW_DAYS = 7;
+
 /**
  * Compute the start date for the BoC observation window.
  * We look back 10 calendar days to ensure we always capture a published rate
@@ -120,7 +123,7 @@ export async function ensureFxRate(
   if (from === to) return { rate: 1, ratedDate: asOfDate };
 
   // Check DB for a recent cached row.
-  const sevenDaysAgo = subtractDays(asOfDate, 7);
+  const sevenDaysAgo = subtractDays(asOfDate, ENSURE_FX_CACHE_WINDOW_DAYS);
   const cached = await FxRate.findOne({
     where: {
       fromCurrency: from,

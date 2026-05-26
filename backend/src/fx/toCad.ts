@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import type { Decimal } from '../tax/util/decimal';
 import { FxRate } from '../models/FxRate';
-import { ensureFxRate } from './bankOfCanada';
+import { ensureFxRate, ENSURE_FX_CACHE_WINDOW_DAYS } from './bankOfCanada';
 
 export type ToCadSource =
   | 'cad_identity'
@@ -46,7 +46,7 @@ export async function toCad(
 
   // Snapshot the existing cached row (if any) so we can tell `cached` from
   // `fetched` after ensureFxRate returns.
-  const sevenDaysAgo = subtractDays(date, 7);
+  const sevenDaysAgo = subtractDays(date, ENSURE_FX_CACHE_WINDOW_DAYS);
   const preExisting = await FxRate.findOne({
     where: {
       fromCurrency: currency,
@@ -83,7 +83,7 @@ export async function toCad(
   });
   if (nearest) {
     return {
-      cad: amount.times(nearest.rate as unknown as string),
+      cad: amount.times(String(nearest.rate)),
       rate: Number(nearest.rate),
       ratedDate: nearest.ratedDate,
       source: 'fallback_nearest',
@@ -97,7 +97,7 @@ export async function toCad(
   });
   if (any) {
     return {
-      cad: amount.times(any.rate as unknown as string),
+      cad: amount.times(String(any.rate)),
       rate: Number(any.rate),
       ratedDate: any.ratedDate,
       source: 'fallback_any',
