@@ -33,11 +33,11 @@ describe('DividendHistoryCard', () => {
     expect(await findByText(/No dividends recorded/i)).not.toBeNull()
   })
 
-  it('shows config-prompt placeholder when AV key is unset (AC7) and does NOT fetch', async () => {
+  it('shows config-prompt placeholder when quote provider is unconfigured and does NOT fetch', async () => {
     window.__APP_CONFIG__ = { logoDevToken: null, quoteProviderConfigured: false }
     const spy = vi.spyOn(api, 'getJson')
     const { findByText } = render(<DividendHistoryCard securityId={1} currency="CAD" />)
-    expect(await findByText(/ALPHA_VANTAGE_API_KEY/i)).not.toBeNull()
+    expect(await findByText(/Quote provider is not configured/i)).not.toBeNull()
     expect(spy).not.toHaveBeenCalled()
   })
 })

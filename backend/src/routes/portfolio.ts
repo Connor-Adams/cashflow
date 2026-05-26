@@ -1158,6 +1158,71 @@ router.get('/security/:id/dividends', async (req, res, next) => {
   }
 });
 
+const OVERVIEW_NUMBER_FIELDS = [
+  'regularMarketPrice',
+  'previousClose',
+  'marketCap',
+  'trailingPE',
+  'forwardPE',
+  'trailingEps',
+  'forwardEps',
+  'beta',
+  'dayLow',
+  'dayHigh',
+  'fiftyTwoWeekLow',
+  'fiftyTwoWeekHigh',
+  'fiftyDayAverage',
+  'twoHundredDayAverage',
+  'volume',
+  'averageVolume',
+  'averageVolume10days',
+  'sharesOutstanding',
+  'priceToBook',
+  'bookValue',
+  'dividendRate',
+  'dividendYield',
+  'fiveYearAvgDividendYield',
+  'payoutRatio',
+  'totalRevenue',
+  'revenuePerShare',
+  'grossMargins',
+  'operatingMargins',
+  'profitMargins',
+  'ebitdaMargins',
+  'returnOnAssets',
+  'returnOnEquity',
+  'totalCash',
+  'totalDebt',
+  'debtToEquity',
+  'freeCashflow',
+  'operatingCashflow',
+  'targetMeanPrice',
+  'targetHighPrice',
+  'targetLowPrice',
+  'recommendationMean',
+  'numberOfAnalystOpinions',
+] as const;
+
+const OVERVIEW_STRING_FIELDS = [
+  'sector',
+  'industry',
+  'country',
+  'exchange',
+  'description',
+  'exDividendDate',
+  'recommendationKey',
+  'financialCurrency',
+] as const;
+
+function pickNumber(m: Record<string, unknown>, key: string): number | null {
+  const v = m[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+function pickString(m: Record<string, unknown>, key: string): string | null {
+  const v = m[key];
+  return typeof v === 'string' && v.trim() !== '' ? v : null;
+}
+
 router.get('/security/:id/overview', async (req, res, next) => {
   try {
     const scoped = await loadSecurityScoped(req, req.params.id);
@@ -1168,16 +1233,14 @@ router.get('/security/:id/overview', async (req, res, next) => {
     const { security } = scoped;
     const m = (security.metadata ?? {}) as Record<string, unknown>;
     const backfill = await ensureOverview(security.id);
-    res.json({
+    const payload: Record<string, unknown> = {
       securityId: security.id,
-      sector: m['sector'] ?? null,
-      industry: m['industry'] ?? null,
-      country: m['country'] ?? null,
-      exchange: m['exchange'] ?? null,
-      description: m['description'] ?? null,
       metadataFetchedAt: security.metadataFetchedAt?.toISOString() ?? null,
       backfill,
-    });
+    };
+    for (const key of OVERVIEW_STRING_FIELDS) payload[key] = pickString(m, key);
+    for (const key of OVERVIEW_NUMBER_FIELDS) payload[key] = pickNumber(m, key);
+    res.json(payload);
   } catch (e) {
     next(e);
   }
