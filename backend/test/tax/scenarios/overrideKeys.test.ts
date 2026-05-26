@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { D } from '../../../src/tax/util/decimal';
 import {
-  overrideKeyRegistry, getOverrideKey, validateOverrideMap,
+  overrideKeyRegistry, getOverrideKey, getOverrideKeysForKind, validateOverrideMap,
 } from '../../../src/tax/scenarios/overrideKeys';
 import type { TaxYearFacts } from '../../../src/tax/engine/types';
 
@@ -55,7 +55,7 @@ test('validateOverrideMap throws when value fails per-key validator', () => {
 });
 
 test('all existing P7 keys have kind=personal', () => {
-  for (const entry of overrideKeyRegistry) {
+  for (const entry of getOverrideKeysForKind('personal')) {
     assert.equal(entry.kind, 'personal', `${entry.key} should be tagged personal`);
   }
 });

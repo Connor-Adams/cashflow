@@ -151,3 +151,24 @@ export function validateOverrideMap(map: OverrideMap, kind: 'personal' | 'corp')
     entry.validate(value);
   }
 }
+
+/**
+ * Register additional override keys at module load time. Used by `corpOverrideKeys.ts`
+ * to extend the registry without circular imports.
+ */
+export function registerOverrideKeys(entries: OverrideKeyDef[]): void {
+  for (const e of entries) {
+    if (indexByKey.has(e.key)) {
+      throw new Error(`override key ${e.key} already registered`);
+    }
+    overrideKeyRegistry.push(e);
+    indexByKey.set(e.key, e);
+  }
+}
+
+// Self-register corp keys when this module loads (any consumer imports
+// overrideKeys.ts, so corp keys are always present). Use require() rather than
+// `import` so the call runs AFTER `indexByKey` is initialized — ES `import`
+// statements get hoisted to the top of the compiled file and trigger TDZ.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+require('./corpOverrideKeys');
