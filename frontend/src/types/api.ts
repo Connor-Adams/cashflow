@@ -200,6 +200,77 @@ export type MoneyLeakDismissedResponse = {
   items: MoneyLeakDismissal[]
 }
 
+// -------- Explain this month report (GET /api/reports/explain-month) ----
+// Mirrors backend/src/summary/explainMonth.ts. The deterministic engine
+// produces a month-over-month breakdown by currency plus a flat list of
+// findings (spend changes, missing receipts, subscription changes, review
+// backlog, business summary). The aiSummary field is filled in by the
+// route when `ai=true` and OpenAI is configured; otherwise it stays null.
+
+export type ExplainMonthFindingKind =
+  | 'spend_change'
+  | 'missing_receipt'
+  | 'subscription_change'
+  | 'review_needed'
+  | 'business_summary'
+
+export type ExplainMonthSeverity = 'low' | 'medium' | 'high'
+
+/** Filter payload backing each finding — the page translates it into the
+ *  TransactionsPage URL params it natively understands. */
+export type ExplainMonthTransactionFilter = {
+  dateFrom?: string
+  dateTo?: string
+  category?: string
+  merchant?: string
+  businessOnly?: boolean
+  reviewFlag?: boolean
+  currency?: string
+}
+
+export type ExplainMonthFinding = {
+  id: string
+  kind: ExplainMonthFindingKind
+  title: string
+  summary: string
+  currency: string
+  monthlyImpact: number
+  severity: ExplainMonthSeverity
+  supportingTransactionIds: number[]
+  transactionFilter: ExplainMonthTransactionFilter
+  meta: Record<string, unknown>
+}
+
+export type ExplainMonthCategoryDelta = {
+  category: string
+  current: number
+  previous: number
+  delta: number
+  deltaPct: number | null
+}
+
+export type ExplainMonthMonthOverMonth = {
+  currency: string
+  currentSpend: number
+  previousSpend: number
+  spendDelta: number
+  currentIncome: number
+  previousIncome: number
+  incomeDelta: number
+  netCurrent: number
+  netPrevious: number
+  netDelta: number
+  byCategory: ExplainMonthCategoryDelta[]
+}
+
+export type ExplainMonthResponse = {
+  month: string
+  previousMonth: string
+  monthOverMonth: ExplainMonthMonthOverMonth[]
+  findings: ExplainMonthFinding[]
+  aiSummary: string | null
+}
+
 /** Direction of a partner-balance settlement record. */
 export type PartnerSettlementDirection = 'i_paid_partner' | 'partner_paid_me'
 
