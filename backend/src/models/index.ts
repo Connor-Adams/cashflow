@@ -109,6 +109,7 @@ initPlannedEvent(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Entity.belongsTo(Entity, { foreignKey: 'spouseEntityId', as: 'spouse' });
 
 Household.hasMany(ProcessedEmailMessage, {
   foreignKey: 'household_id',
