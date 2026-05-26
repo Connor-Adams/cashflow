@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { useToast } from '@/components/ui/toast'
 import { AICleanupPanel } from '../components/import/AICleanupPanel'
 import type { ImportHistoryRow } from '../components/import/ImportHistoryTable'
+import { RollbackDialog } from '../components/import/RollbackDialog'
 import { getJson } from '../lib/api'
 
 const DEFAULT_IMPORT_BATCH_CURRENCY = 'CAD'
@@ -45,33 +48,38 @@ export function ImportBatchPage() {
   const rawParam = decodeURIComponent(params.batchId ?? '')
   const numericId = /^\d+$/.test(rawParam) ? Number(rawParam) : null
   const [row, setRow] = useState<BatchDetailRow | null | undefined>(undefined)
+  const [rollbackOpen, setRollbackOpen] = useState(false)
+  const { showToast } = useToast()
+
+  const load = useCallback(async () => {
+    try {
+      if (numericId != null) {
+        const detail = await getJson<BatchDetailRow>(
+          `/api/import/batches/${numericId}`,
+        )
+        setRow(detail)
+        return
+      }
+      // Legacy label-shaped URL: scan the history list and pick the row
+      // whose label matches. Keeps existing bookmarks working without a
+      // new server-side index.
+      const list = await getJson<ImportHistoryRow[]>('/api/import/history')
+      const match = list.find((r) => r.batchLabel === rawParam) ?? null
+      setRow(match)
+    } catch {
+      setRow(null)
+    }
+  }, [numericId, rawParam])
 
   useEffect(() => {
     let cancelled = false
-    async function load() {
-      try {
-        if (numericId != null) {
-          const detail = await getJson<BatchDetailRow>(
-            `/api/import/batches/${numericId}`,
-          )
-          if (!cancelled) setRow(detail)
-          return
-        }
-        // Legacy label-shaped URL: scan the history list and pick the row
-        // whose label matches. Keeps existing bookmarks working without a
-        // new server-side index.
-        const list = await getJson<ImportHistoryRow[]>('/api/import/history')
-        const match = list.find((r) => r.batchLabel === rawParam) ?? null
-        if (!cancelled) setRow(match)
-      } catch {
-        if (!cancelled) setRow(null)
-      }
-    }
-    void load()
+    void load().catch(() => {
+      if (!cancelled) setRow(null)
+    })
     return () => {
       cancelled = true
     }
-  }, [numericId, rawParam])
+  }, [load])
 
   // Resolve a stable label for the AICleanupPanel: prefer the actual batch
   // label from the loaded row; fall back to the URL slug while loading.
@@ -121,6 +129,7 @@ export function ImportBatchPage() {
   const needsReviewCount = row.needsReviewCount ?? 0
   const unknownCount = row.unknownCount ?? 0
   const classified = cleanCount + needsReviewCount
+  const isRolledBack = row.status === 'rolled_back'
 
   const insertedCount = row.insertedCount
   const skippedDuplicateCount = row.skippedDuplicateCount
@@ -157,6 +166,16 @@ export function ImportBatchPage() {
                 </>
               ) : null}
             </p>
+            {/* Rollback marker (#233). Rendered when the batch carries
+                rolled_back state — preserves audit trail on the page. */}
+            {isRolledBack && row.rolledBackAt ? (
+              <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                Rolled back at{' '}
+                {row.rolledBackAt.slice(0, 19).replace('T', ' ')}.
+                Transactions were deleted; the row is kept for the audit
+                trail.
+              </p>
+            ) : null}
             {/* Per-stage import counts (#231). Renders only when the row
                 actually has counts captured — legacy rows show nothing
                 here. */}
@@ -216,20 +235,46 @@ export function ImportBatchPage() {
               </div>
             ) : null}
           </div>
-          <Link
-            to={`/transactions?${transactionsQuery.toString()}`}
-            className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
-            style={{
-              backgroundColor: 'var(--bg2)',
-              color: 'var(--fg)',
-              borderColor: 'var(--border)',
-            }}
-          >
-            View transactions →
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to={`/transactions?${transactionsQuery.toString()}`}
+              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--bg2)',
+                color: 'var(--fg)',
+                borderColor: 'var(--border)',
+              }}
+            >
+              View transactions →
+            </Link>
+            {!isRolledBack ? (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => setRollbackOpen(true)}
+                aria-label={`Roll back import batch ${row.batchLabel}`}
+              >
+                Roll back batch
+              </Button>
+            ) : null}
+          </div>
         </div>
       </section>
       <AICleanupPanel batchId={batchLabel} currency={DEFAULT_IMPORT_BATCH_CURRENCY} />
+      <RollbackDialog
+        open={rollbackOpen}
+        batchLabel={row.batchLabel}
+        onClose={() => setRollbackOpen(false)}
+        onRolledBack={(result) => {
+          showToast({
+            title: 'Batch rolled back',
+            description: `Removed ${result.deletedTransactions} transaction${
+              result.deletedTransactions === 1 ? '' : 's'
+            }.`,
+          })
+          void load()
+        }}
+      />
     </div>
   )
 }

@@ -14,6 +14,11 @@ import {
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
 import { commitStatementImport } from '../import/commitStatementImport';
+import {
+  executeRollback,
+  previewRollback,
+  RollbackBlockedError,
+} from '../import/rollbackImportBatch';
 import { Account, ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
 import { aiSuggestLimiter } from './aiRateLimit';
@@ -796,5 +801,101 @@ function normalizeImportHealthCurrency(raw: unknown): string | null {
   const s = String(raw).trim().toUpperCase().slice(0, 3);
   return /^[A-Z]{3}$/.test(s) ? s : null;
 }
+
+/**
+ * GET /api/import/history/:batchLabel/rollback-preview
+ *
+ * Returns the impact of rolling back a single batch (#233): affected
+ * transaction count, dependent-record counts, a small sample, and a list of
+ * blockers explaining why the rollback is unsafe (if any). The frontend
+ * confirmation dialog renders this payload before the user clicks Rollback.
+ *
+ * The `:batchLabel` path segment must be URI-encoded by the caller — batch
+ * labels can contain slashes and spaces.
+ *
+ * Rate-limited via `importUploadLimiter` (same per-IP bucket the other
+ * destructive import routes use) so an authenticated user cannot abuse this
+ * read endpoint to fingerprint batch contents at scale. CodeQL flags any
+ * authenticated route with DB reads scoped by user input as needing a limit.
+ */
+router.get(
+  '/history/:batchLabel/rollback-preview',
+  importUploadLimiter,
+  async (req, res, next) => {
+    try {
+      const batchLabel = decodeURIComponent(req.params.batchLabel ?? '');
+      if (!batchLabel) {
+        res.status(400).json({ error: 'batchLabel is required' });
+        return;
+      }
+      const impact = await previewRollback({
+        batchLabel,
+        householdScope: householdWhere(req),
+        transactionScope: visibleTransactionWhere(req),
+      });
+      res.json(impact);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+/**
+ * POST /api/import/history/:batchLabel/rollback
+ *
+ * Executes the rollback: deletes the batch's transactions + dependent
+ * records, flips the ImportHistory row to status='rolled_back', and stamps
+ * `rolled_back_at` / `rolled_back_by_user_id` for the audit trail (#233).
+ *
+ * Responds 409 with the blocker payload if the rollback is blocked. The
+ * service re-validates blockers inside its own SQL transaction so a racing
+ * edit between preview and execute cannot create a dependent row we would
+ * silently destroy.
+ *
+ * Rate-limited via `importUploadLimiter` — destructive route on
+ * authenticated DB writes, exactly the shape CodeQL flags as needing a limit.
+ */
+router.post(
+  '/history/:batchLabel/rollback',
+  importUploadLimiter,
+  async (req, res, next) => {
+    try {
+      const { user } = currentAuth(req);
+      const batchLabel = decodeURIComponent(req.params.batchLabel ?? '');
+      if (!batchLabel) {
+        res.status(400).json({ error: 'batchLabel is required' });
+        return;
+      }
+      logImportEvent('rollback_started', {
+        batchLabel,
+        userId: user.id,
+      });
+      const result = await executeRollback({
+        batchLabel,
+        householdScope: householdWhere(req),
+        transactionScope: visibleTransactionWhere(req),
+        userId: user.id,
+      });
+      logImportEvent('rollback_completed', {
+        batchLabel,
+        userId: user.id,
+        deletedTransactions: result.deletedTransactions,
+        deletedReceipts: result.deletedReceipts,
+        deletedAiSuggestions: result.deletedAiSuggestions,
+      });
+      res.json(result);
+    } catch (e) {
+      if (e instanceof RollbackBlockedError) {
+        res.status(409).json({
+          error: 'rollback_blocked',
+          batchLabel: e.batchLabel,
+          blockers: e.blockers,
+        });
+        return;
+      }
+      next(e);
+    }
+  },
+);
 
 export default router;
