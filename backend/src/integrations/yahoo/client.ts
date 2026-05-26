@@ -91,12 +91,60 @@ export interface ChartQueryOptions {
   return?: 'array';
 }
 
+/**
+ * yahoo-finance2 logs invalid-options validation failures via
+ * `logger.error(headline)` immediately followed by `logger.info(JSON.stringify(...))`
+ * (the latter through its internal logObj helper on non-TTY runtimes).
+ *
+ * In Railway these surface as `level=error`, drowning out genuine errors when a
+ * scheduler iterates many symbols. The validator still throws InvalidOptionsError
+ * either way, so the call site already learns about the failure. Demote the
+ * companion log lines to `warn` so they remain searchable without polluting
+ * the error stream. The synchronous error→info pairing inside `validate()` is
+ * safe to track with a module-level flag because Node's event loop never
+ * interleaves synchronous JS between the two calls.
+ */
+function createDemotingLogger() {
+  let pendingOptionsDump = false;
+  const isOptionsErrorHeadline = (args: unknown[]): boolean => {
+    const first = args[0];
+    return (
+      typeof first === 'string' &&
+      first.startsWith('[yahooFinance.') &&
+      first.includes('Invalid options')
+    );
+  };
+  return {
+    info: (...args: unknown[]) => {
+      if (pendingOptionsDump) {
+        pendingOptionsDump = false;
+        console.warn(...args);
+        return;
+      }
+      console.log(...args);
+    },
+    warn: (...args: unknown[]) => console.warn(...args),
+    error: (...args: unknown[]) => {
+      if (isOptionsErrorHeadline(args)) {
+        pendingOptionsDump = true;
+        console.warn(...args);
+        return;
+      }
+      console.error(...args);
+    },
+    debug: (..._args: unknown[]) => {},
+    dir: (item: unknown, options?: unknown) =>
+      console.dir(item, options as Parameters<typeof console.dir>[1]),
+  };
+}
+
 let singleton: YahooClient | null = null;
 function getClient(): YahooClient {
   if (!singleton) {
     const instance = new YahooFinance({
       suppressNotices: ['yahooSurvey', 'ripHistorical'],
-      validation: { logOptionsErrors: false },
+      validation: { logOptionsErrors: true },
+      logger: createDemotingLogger(),
     });
     singleton = {
       quote: (s) => instance.quote(s) as Promise<Quote | Quote[] | null>,
