@@ -143,11 +143,17 @@ export function MarketDataCard({ overview, currency }: MarketDataCardProps) {
   if (overview.targetHighPrice != null) analyst.push({ label: 'Target (high)', value: formatMoney(overview.targetHighPrice, currency) })
   if (overview.targetLowPrice != null) analyst.push({ label: 'Target (low)', value: formatMoney(overview.targetLowPrice, currency) })
 
+  const supply: StatRow[] = []
+  if (overview.circulatingSupply != null) supply.push({ label: 'Circulating supply', value: formatCompactNumber(overview.circulatingSupply) })
+  if (overview.volume24Hr != null) supply.push({ label: '24h volume', value: formatCompactNumber(overview.volume24Hr, fxCurrency) })
+  if (overview.cryptoStartDate) supply.push({ label: 'Started', value: overview.cryptoStartDate })
+
   const allEmpty =
     market.length === 0 &&
     dividends.length === 0 &&
     fundamentals.length === 0 &&
     analyst.length === 0 &&
+    supply.length === 0 &&
     overview.fiftyTwoWeekLow == null &&
     overview.fiftyTwoWeekHigh == null
 
@@ -179,6 +185,7 @@ export function MarketDataCard({ overview, currency }: MarketDataCardProps) {
 
       <div className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
         {market.length > 0 && <StatGroup title="Market" rows={market} />}
+        {supply.length > 0 && <StatGroup title="Supply" rows={supply} />}
         {dividends.length > 0 && <StatGroup title="Dividends" rows={dividends} />}
         {fundamentals.length > 0 && <StatGroup title="Fundamentals" rows={fundamentals} />}
         {analyst.length > 0 && <StatGroup title="Analysts" rows={analyst} />}

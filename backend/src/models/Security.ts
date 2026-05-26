@@ -65,6 +65,32 @@ export type SecurityMetadata = {
   recommendationKey?: string | null;
   numberOfAnalystOpinions?: number | null;
   financialCurrency?: string | null;
+  // Crypto fields
+  circulatingSupply?: number | null;
+  volume24Hr?: number | null;
+  cryptoStartDate?: string | null;
+  fromCurrency?: string | null;
+  // Fund / ETF fields
+  fundFamily?: string | null;
+  fundCategory?: string | null;
+  fundLegalType?: string | null;
+  fundExpenseRatio?: number | null;
+  fundTotalAssets?: number | null;
+  fundYield?: number | null;
+  topHoldings?: Array<{
+    symbol: string | null;
+    name: string | null;
+    percent: number | null;
+  }> | null;
+  sectorWeightings?: Record<string, number> | null;
+  bondPosition?: number | null;
+  stockPosition?: number | null;
+  cashPosition?: number | null;
+  trailingReturn1y?: number | null;
+  trailingReturn3y?: number | null;
+  trailingReturn5y?: number | null;
+  trailingReturn10y?: number | null;
+  trailingReturnYtd?: number | null;
   // Raw passthrough — full quoteSummary for forensics / future fields.
   [key: string]: unknown;
 };
