@@ -2,6 +2,7 @@
 import { Entity, HouseholdPlan, Scenario } from '../../models';
 import { D, type Decimal } from '../util/decimal';
 import { computeCorpScenario, type ComputeCorpScenarioResult } from './computeCorpScenario';
+import { computeGroupAaii } from './computeGroupAaii';
 import { computeScenario, type ComputeScenarioResult } from './computeScenario';
 import {
   integrationRouter,
@@ -230,49 +231,73 @@ function computeIntegratedPersonalFromFacts(
   };
 }
 
-// Inject intercorpRouter-emitted received-dividend IncomeItems into a corp's
-// resolved investmentIncome facts. Capital divs are tax-free pass-through —
-// surfaced on `intercorp` output but not added to taxable investment income.
-// P11b T6: also stamps `openingGripBoost` from the router so the engine adds
-// the routed GRIP designation (Σ eligible × ownership%/100) to gripEnding.
-function buildIntercorpCorpFacts(
+// Inject intercorpRouter-emitted received-dividend IncomeItems and/or
+// associated-group AAII into a corp's resolved facts before T2.
+//
+// Capital divs are tax-free pass-through — surfaced on the `intercorp` output
+// but not added to taxable investment income.
+//
+// P11b T6: when `received` is non-null, stamps `openingGripBoost` from the
+// router so the engine adds the routed GRIP designation (Σ eligible ×
+// ownership%/100) to gripEnding.
+//
+// P11b T8: when `groupAaii` is non-null, stamps `facts.groupAaii` so the
+// engine's SBD grind uses the group total (s.125(5.1)) instead of the per-corp
+// AAII. The group-aware path is reached even when `received` is null — that's
+// the Opco case in the canonical Opco+Holdco group: Opco pays dividends OUT
+// (not a receiver) but still needs the group-wide grind applied to its SBD.
+function buildIntegratedCorpFacts(
   baseFacts: CorpTaxYearFacts,
-  received: CorpReceivedDivs,
+  received: CorpReceivedDivs | null,
+  groupAaii: Decimal | null,
 ): CorpTaxYearFacts {
-  return {
-    ...baseFacts,
-    investmentIncome: {
-      ...baseFacts.investmentIncome,
-      eligibleDividends: [
-        ...baseFacts.investmentIncome.eligibleDividends,
-        ...received.eligibleDividends,
-      ],
-      nonEligibleDividends: [
-        ...baseFacts.investmentIncome.nonEligibleDividends,
-        ...received.nonEligibleDividends,
-      ],
-    },
-    openingGripBoost: received.gripBoost,
-  };
+  let facts: CorpTaxYearFacts = baseFacts;
+  if (received) {
+    facts = {
+      ...facts,
+      investmentIncome: {
+        ...facts.investmentIncome,
+        eligibleDividends: [
+          ...facts.investmentIncome.eligibleDividends,
+          ...received.eligibleDividends,
+        ],
+        nonEligibleDividends: [
+          ...facts.investmentIncome.nonEligibleDividends,
+          ...received.nonEligibleDividends,
+        ],
+      },
+      openingGripBoost: received.gripBoost,
+    };
+  }
+  if (groupAaii) {
+    facts = { ...facts, groupAaii };
+  }
+  return facts;
 }
 
-// Corp scenarios that receive intercorp dividends skip the scenario_returns
-// cache (same rationale as the personal-integration path — facts depend on
-// plan-wide state). Build T2 directly with the merged facts and synthesize a
-// ComputeCorpScenarioResult around the engine output.
-function computeIntercorpReceiverCorp(
+// Corp scenarios with any plan-scoped injection (received intercorp divs OR
+// group AAII) skip the scenario_returns cache because the merged facts depend
+// on plan-wide state (which corps are linked + their `intercorp.*` overrides +
+// which corps share an associatedGroupId). Build T2 directly with the merged
+// facts and synthesize a ComputeCorpScenarioResult around the engine output.
+//
+// Sentinel `factsHash` is `'household-intercorp'` for backward compatibility
+// with intercorpE2E / computeHouseholdPlan tests — the same sentinel covers
+// both intercorp-receiver and group-AAII bypass paths since both reasons
+// share the same cache-skipping rationale.
+function computeIntegratedCorp(
   scenario: Scenario,
   baseFacts: CorpTaxYearFacts,
-  received: CorpReceivedDivs,
+  received: CorpReceivedDivs | null,
+  groupAaii: Decimal | null,
 ): ComputeCorpScenarioResult {
-  const factsPlus = buildIntercorpCorpFacts(baseFacts, received);
+  const factsPlus = buildIntegratedCorpFacts(baseFacts, received, groupAaii);
   const engineReturn = buildT2(
     factsPlus,
     ratesFor(Number(factsPlus.fiscalYear.startDate.slice(0, 4))),
   );
   return {
     scenarioId: scenario.id,
-    // Sentinel hash — intercorp-integrated result is plan-scoped, not cached.
     factsHash: 'household-intercorp',
     computedAt: new Date().toISOString(),
     lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
@@ -293,14 +318,17 @@ function computeIntercorpReceiverCorp(
  * injected into its facts.
  *
  * Cache behavior — intentional asymmetry vs `computeScenario` / `computeCorpScenario`:
- *  - Corp scenarios that DON'T receive routed intercorp divs go through
- *    `computeCorpScenario`, which uses the `scenario_returns` cache keyed on
- *    (scenarioId, factsHash).
- *  - Corp scenarios that DO receive routed intercorp divs skip the cache and
- *    call `buildT2` directly — the merged facts depend on plan-wide state
- *    (which other corps are linked + their `intercorp.*` overrides) so the
- *    facts hash wouldn't capture it. `computed.cached` is always false; the
- *    `factsHash` sentinel is `'household-intercorp'`.
+ *  - Corp scenarios with NO plan-scoped injection (no routed intercorp divs
+ *    AND not in an associated group) go through `computeCorpScenario`, which
+ *    uses the `scenario_returns` cache keyed on (scenarioId, factsHash).
+ *  - Corp scenarios with ANY plan-scoped injection (received intercorp divs
+ *    OR associated-group AAII rollup) skip the cache and call `buildT2`
+ *    directly — the merged facts depend on plan-wide state (which other
+ *    corps are linked, their `intercorp.*` overrides, and which corps share
+ *    an `associatedGroupId`) so the facts hash wouldn't capture it.
+ *    `computed.cached` is always false; the `factsHash` sentinel is
+ *    `'household-intercorp'` for both reasons (chosen for backward
+ *    compatibility with the P11a sentinel).
  *  - Personal scenarios with NO routed additions AND no spouse shifts use the
  *    cache via `computeScenario` (cheap, deterministic on facts).
  *  - Personal scenarios WITH integration additions OR spouse shifts skip the
@@ -373,17 +401,49 @@ export async function computeHouseholdPlan(
   }
   const intercorp = intercorpRouter({ distributions, corpEntityIdsInPlan });
 
-  // 3. Compute corp scenarios. Receivers of routed intercorp divs build T2
-  //    directly with the merged facts (cache-skipping path). Non-receivers
-  //    use the cached `computeCorpScenario` path.
+  // 2b. P11b T8: roll up per-corp AAII into group-wide AAII for any associated
+  //     group spanning two or more corps in this plan. The map is keyed by
+  //     `associatedGroupId` and is consumed in step 3 when injecting
+  //     `facts.groupAaii` into the engine. Corps whose entity has a null
+  //     `associatedGroupId` are not in any group and are skipped — they use
+  //     their own per-corp AAII for the SBD grind.
+  //
+  //     Rates are year-dependent; in a multi-year plan each fiscal year would
+  //     ideally have its own rate table. v1 assumes all corps in a group share
+  //     a fiscal year (the same assumption embedded in the rest of the
+  //     orchestrator); we use the first corp's start-year for rate lookup.
+  //     Multi-year-group support is deferred — flagged in plan risks.
+  const corpFactsByEntityId = new Map<number, CorpTaxYearFacts>();
+  for (const s of corpScenarios) {
+    const facts = corpBaseFactsByScenarioId.get(s.id);
+    if (facts) corpFactsByEntityId.set(s.entityId, facts);
+  }
+  const firstCorpFacts = corpScenarios.length > 0
+    ? corpBaseFactsByScenarioId.get(corpScenarios[0].id)
+    : undefined;
+  const groupAaiiRates = firstCorpFacts
+    ? ratesFor(Number(firstCorpFacts.fiscalYear.startDate.slice(0, 4)))
+    : null;
+  const groupAaiiByGroupId = groupAaiiRates
+    ? computeGroupAaii(corpFactsByEntityId, entityById, groupAaiiRates)
+    : new Map<string, Decimal>();
+
+  // 3. Compute corp scenarios. Cache-bypass path is taken when EITHER the corp
+  //    receives routed intercorp dividends OR the corp is in an associated
+  //    group with a non-null `groupAaii` rollup. Both injections feed into the
+  //    same `computeIntegratedCorp` helper. Plain corps (no group, no received
+  //    divs) take the cached `computeCorpScenario` path.
   const corp = await Promise.all(
     corpScenarios.map<Promise<CorpResult>>(async (s) => {
-      const received = intercorp.byReceiverEntityId[s.entityId];
-      if (received) {
+      const received = intercorp.byReceiverEntityId[s.entityId] ?? null;
+      const entity = entityById.get(s.entityId);
+      const groupId = entity?.associatedGroupId ?? null;
+      const groupAaii = groupId ? groupAaiiByGroupId.get(groupId) ?? null : null;
+      if (received || groupAaii) {
         const baseFacts = corpBaseFactsByScenarioId.get(s.id)!;
         return {
           scenario: s,
-          computed: computeIntercorpReceiverCorp(s, baseFacts, received),
+          computed: computeIntegratedCorp(s, baseFacts, received, groupAaii),
         };
       }
       return {
