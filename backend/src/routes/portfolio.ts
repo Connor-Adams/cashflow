@@ -133,8 +133,13 @@ async function loadVisibleLatestHoldings(req: Request): Promise<{
   accounts: Account[];
   latestHoldings: HoldingSnapshot[];
 }> {
+  const today = new Date().toISOString().slice(0, 10);
   const accounts = await Account.findAll({
-    where: { ...visibleAccountWhere(req), accountType: 'investment' },
+    where: {
+      ...visibleAccountWhere(req),
+      accountType: 'investment',
+      [Op.or]: [{ closedAt: null }, { closedAt: { [Op.gt]: today } }],
+    },
     order: [['name', 'ASC']],
   });
   const accountIds = accounts.map((row) => row.id);

@@ -122,7 +122,15 @@ export async function buildNetWorthAt(
   }
 
   const { Account, Transaction } = await import('../models');
-  const accounts = await Account.findAll({ where: { id: accountIds } });
+  const allAccounts = await Account.findAll({ where: { id: accountIds } });
+  // Closed accounts contribute zero from closed_at onward. Pre-closure
+  // snapshots/txns remain intact; the account simply drops out of any
+  // net-worth calc with asOf >= closed_at. Leaves the door open to
+  // reopening (clear closed_at) without touching historical data.
+  const accounts = allAccounts.filter(
+    (a) => !a.closedAt || a.closedAt > asOf
+  );
+  const activeAccountIds = accounts.map((a) => a.id);
 
   for (const acc of accounts) {
     const kind = accountKind(acc.accountType);
@@ -170,7 +178,7 @@ export async function buildNetWorthAt(
 
   // Portfolio market-value contributions (the canonical source for
   // investment accounts; ignored for non-investment accounts).
-  const portfolio = await portfolioMarketValueAt(asOf, accountIds);
+  const portfolio = await portfolioMarketValueAt(asOf, activeAccountIds);
   const portfolioByAcc = new Map<
     string,
     { accountId: number; currency: string; total: number }

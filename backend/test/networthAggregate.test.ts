@@ -185,6 +185,74 @@ test('buildNetWorthAt: openingBalanceSet=false when implicit zero and txns exist
   assert.equal(row.openingBalanceSet, false);
 });
 
+test('buildNetWorthAt: skips closed account when closed_at <= asOf (cash account)', async () => {
+  const acc = await seedAcc({ accountType: 'checking', opening: 1000 });
+  await seedTxn(acc.id, '2026-01-01', 500);
+  acc.set('closedAt', '2026-01-15');
+  await acc.save();
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  assert.equal(result.assetsTotal, 0);
+  assert.equal(result.total, 0);
+  assert.ok(
+    !result.breakdown.assets.some((r) => r.accountId === acc.id),
+    'closed account should not appear in breakdown'
+  );
+});
+
+test('buildNetWorthAt: includes closed account in history before closed_at', async () => {
+  const acc = await seedAcc({ accountType: 'checking', opening: 1000 });
+  await seedTxn(acc.id, '2026-01-01', 500);
+  acc.set('closedAt', '2026-02-15');
+  await acc.save();
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  assert.equal(result.assetsTotal, 1500);
+  assert.equal(result.total, 1500);
+});
+
+test('buildNetWorthAt: skips closed investment account from portfolio aggregation', async () => {
+  const acc = await seedAcc({ accountType: 'investment' });
+  const sec = await models.Security.create({ symbol: 'VFV', name: 'VFV', currency: 'CAD' } as never);
+  await models.HoldingSnapshot.create({
+    accountId: acc.id, securityId: sec.id,
+    statementDate: '2026-01-01', quantity: '10', currency: 'CAD',
+    sourceRowFingerprint: 'h-closed', importBatch: 'test',
+  } as never);
+  await models.SecurityPrice.create({
+    securityId: sec.id, provider: 'test', symbol: 'VFV',
+    pricedAt: new Date('2026-01-01T16:00:00Z'),
+    price: '100', currency: 'CAD',
+    fetchedAt: new Date('2026-01-01T16:00:00Z'),
+  } as never);
+  acc.set('closedAt', '2026-01-10');
+  await acc.save();
+
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  assert.equal(result.assetsTotal, 0);
+  assert.equal(result.total, 0);
+  assert.ok(!result.breakdown.assets.some((r) => r.source === 'portfolio'));
+});
+
+test('buildNetWorthAt: closed_at after asOf still includes portfolio market value', async () => {
+  const acc = await seedAcc({ accountType: 'investment' });
+  const sec = await models.Security.create({ symbol: 'X', name: 'X', currency: 'CAD' } as never);
+  await models.HoldingSnapshot.create({
+    accountId: acc.id, securityId: sec.id,
+    statementDate: '2026-01-01', quantity: '5', currency: 'CAD',
+    sourceRowFingerprint: 'h-future-close', importBatch: 'test',
+  } as never);
+  await models.SecurityPrice.create({
+    securityId: sec.id, provider: 'test', symbol: 'X',
+    pricedAt: new Date('2026-01-01T16:00:00Z'),
+    price: '200', currency: 'CAD',
+    fetchedAt: new Date('2026-01-01T16:00:00Z'),
+  } as never);
+  acc.set('closedAt', '2026-03-01');
+  await acc.save();
+
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  assert.equal(result.assetsTotal, 1000);
+});
+
 test('buildNetWorthAt: openingBalanceSet=true when opening set or no txns', async () => {
   const accWithOpening = await seedAcc({ accountType: 'checking', opening: 1000 });
   await seedTxn(accWithOpening.id, '2026-01-01', 50);

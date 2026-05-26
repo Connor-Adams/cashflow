@@ -7,6 +7,8 @@ export async function balanceAtDate(
   account: Account,
   asOf: string
 ): Promise<CurrencyAmount[]> {
+  if (account.closedAt && account.closedAt <= asOf) return [];
+
   // Lazy import to avoid circular model loading at module-init time
   const { Transaction } = await import('../models');
 
