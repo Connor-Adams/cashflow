@@ -20,6 +20,7 @@ import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
+import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
@@ -126,6 +127,7 @@ app.use('/api/summary', summaryRouter);
 app.use('/api/merchants', merchantsRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/data-quality', dataQualityRouter);
 app.use('/api/money-leaks', moneyLeaksRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai

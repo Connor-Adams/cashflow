@@ -42,6 +42,7 @@ import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
 import { InsightsPage } from './pages/InsightsPage'
+import { DataQualityPage } from './pages/DataQualityPage'
 import { ChatPage } from './pages/ChatPage'
 import { AskCashflowPage } from './pages/AskCashflowPage'
 import { AuthProvider } from './lib/auth'
@@ -102,6 +103,7 @@ function AppRoutes() {
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />
           <Route path="insights" element={<InsightsPage />} />
+          <Route path="data-quality" element={<DataQualityPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<AskCashflowPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
