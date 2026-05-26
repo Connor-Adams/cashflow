@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
+import { RulesHealthSection } from '../components/RulesHealthSection'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
 
@@ -186,6 +187,7 @@ export function RulesPage() {
         description="Match merchants on import so category, business, and split defaults land in the right place."
       />
       {err && <span className="error">{err}</span>}
+      <RulesHealthSection onAfterCreate={() => void load()} />
       <form className="card rulesFormCard" onSubmit={onCreate}>
         <div className="rulesCardHeader">
           <div>
