@@ -23,7 +23,12 @@ import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestD
 
 let app: import('express').Express;
 let authed: ReturnType<typeof request.agent>;
+/** Non-superadmin agent used for household-scoping assertions. The first
+ *  registered user becomes superadmin (sees all households), which would
+ *  defeat any scoping test against `authed`. */
+let regularAgent: ReturnType<typeof request.agent>;
 let householdId: number;
+let regularHouseholdId: number;
 let otherHouseholdId: number;
 let testDb: PgTestDb;
 
@@ -39,7 +44,16 @@ beforeEach(() => {
   lastStubbedRequestBody = null;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.startsWith('https://api.openai.com')) {
+    // Match by full hostname (CodeQL js/incomplete-url-substring-sanitization)
+    // rather than `startsWith`, which is bypassable by URLs like
+    // `https://api.openai.com.attacker.com/`.
+    let host = '';
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      host = '';
+    }
+    if (host === 'api.openai.com') {
       if (init?.body) {
         try {
           lastStubbedRequestBody = JSON.parse(String(init.body));
@@ -86,7 +100,39 @@ before(async () => {
   assert.equal(register.status, 201);
   householdId = (register.body.user.household?.id ?? register.body.user.householdId) as number;
 
-  const { Household } = await import('../../src/models/index.js');
+  // Create a non-superadmin user via the model layer so scoping tests can
+  // assert the user only sees their own household's data. The first
+  // registered user (`authed`) becomes superadmin and bypasses the
+  // household filter, so we need a regular user for that path.
+  const { Household, User: UserModel, HouseholdMember, Session: SessionModel } =
+    await import('../../src/models/index.js');
+  const { hashPassword, hashToken } = await import('../../src/auth/password.js');
+  const pwd = await hashPassword('password123');
+  const regularUser = await UserModel.create({
+    email: 'nlquery-regular@example.com',
+    displayName: 'NL Regular',
+    globalRole: 'user',
+    passwordHash: pwd.hash,
+    passwordSalt: pwd.salt,
+    passwordParams: pwd.params,
+  });
+  const regularHousehold = await Household.create({ name: 'NL Regular Household' });
+  regularHouseholdId = regularHousehold.id;
+  await HouseholdMember.create({
+    householdId: regularHouseholdId,
+    userId: regularUser.id,
+    role: 'owner',
+  });
+  const cryptoMod = await import('crypto');
+  const rawToken = cryptoMod.randomBytes(32).toString('hex');
+  await SessionModel.create({
+    userId: regularUser.id,
+    tokenHash: hashToken(rawToken),
+    expiresAt: new Date(Date.now() + 86400 * 1000),
+  });
+  regularAgent = request.agent(app);
+  regularAgent.jar.setCookie(`cashflow_session=${rawToken}; Path=/`);
+
   const otherHousehold = await Household.create({ name: 'Other Household' });
   otherHouseholdId = otherHousehold.id;
 });
@@ -225,9 +271,39 @@ test('POST /api/ai/query happy path: transaction_summary across seeded txns', as
 });
 
 test('POST /api/ai/query scopes by household — does not sum other-household txns', async () => {
+  // Uses regularAgent (non-superadmin). Superadmin would bypass household
+  // scoping via visibleTransactionWhere returning {}, so we MUST run this
+  // assertion as a regular user. Seeds matching txns in regularHouseholdId
+  // and a high-value distractor in otherHouseholdId; only the former should
+  // be reflected in the response total.
   process.env.OPENAI_API_KEY = 'sk-test';
   const { Transaction, Account } = await import('../../src/models/index.js');
   const crypto = await import('crypto');
+
+  const ownAccount = await Account.create({
+    householdId: regularHouseholdId,
+    name: 'Regular Account',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+  } as never);
+  for (let i = 0; i < 2; i += 1) {
+    await Transaction.create({
+      householdId: regularHouseholdId,
+      accountId: ownAccount.id,
+      currency: 'CAD',
+      date: `2026-05-0${i + 1}`,
+      merchantRaw: `OWN RESTO ${i}`,
+      merchantClean: `Own Resto ${i}`,
+      importBatch: 'scope-own-test',
+      sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+      amount: '-25.00',
+      finalCategory: 'Restaurants',
+      finalBusiness: false,
+      finalSplitType: 'me',
+    } as never);
+  }
+
   const otherAccount = await Account.create({
     householdId: otherHouseholdId,
     name: 'Other Hh Account',
@@ -257,16 +333,15 @@ test('POST /api/ai/query scopes by household — does not sum other-household tx
     },
   };
 
-  // The previous test seeded 3 Restaurants txns @ -25 in the user's household.
-  // The cross-household -9999 txn must NOT appear.
-  const r = await authed
+  const r = await regularAgent
     .post('/api/ai/query')
     .send({ question: 'restaurants' });
   assert.equal(r.status, 200);
-  const cad = (r.body.answer.totalsByCurrency as Array<{ currency: string; total: number }>)
+  const cad = (r.body.answer.totalsByCurrency as Array<{ currency: string; total: number; count: number }>)
     .find((t) => t.currency === 'CAD');
   assert.ok(cad);
-  assert.equal(Math.round(cad.total * 100) / 100, -75); // unchanged from prior seed
+  assert.equal(cad.count, 2);
+  assert.equal(Math.round(cad.total * 100) / 100, -50);
 });
 
 test('POST /api/ai/query happy path: partner_balance returns balances and respects scoping', async () => {
