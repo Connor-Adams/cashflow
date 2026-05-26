@@ -31,7 +31,11 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { buildCsv, downloadCsv } from '../lib/csv'
-import { toDateInputValue } from '../lib/dateInput'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { deleteReq, getJson, postJson } from '../lib/api'
@@ -107,16 +111,25 @@ type DashboardSummarySubset = {
 
 const DEFAULT_REPORTS_CURRENCY = 'CAD'
 
+/**
+ * Anchor for default-range calculations: UTC midnight of the user's local
+ * calendar day. Keeps the derived YYYY-MM-DD strings stable across timezones
+ * (issue #280).
+ */
+function localTodayUtcMidnight(): Date {
+  return fromDateInputValue(todayDateInputValue())!
+}
+
 function getRelativeDateRange(days: number): { from: string; to: string } {
-  const to = new Date()
+  const to = localTodayUtcMidnight()
   const from = new Date(to)
-  from.setDate(from.getDate() - days)
+  from.setUTCDate(from.getUTCDate() - days)
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDateRange(): { from: string; to: string } {
-  const to = new Date()
-  const from = new Date(to.getFullYear(), 0, 1)
+  const to = localTodayUtcMidnight()
+  const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
@@ -344,7 +357,7 @@ export function ReportsPage() {
     setFormDirection('i_paid_partner')
     setFormCurrency(currency || DEFAULT_REPORTS_CURRENCY)
     setFormAmount('')
-    setFormDate(toDateInputValue(new Date()))
+    setFormDate(todayDateInputValue())
     setFormNotes('')
     setDialogOpen(true)
   }
@@ -410,10 +423,11 @@ export function ReportsPage() {
 
   // Build a "{from}-to-{to}" stub for the filename. Falls back to "all-dates"
   // and uses today's date as a leg when only one bound is set, so filenames
-  // still sort sensibly on disk. Uses toDateInputValue for the today stub.
+  // still sort sensibly on disk. Uses todayDateInputValue so the leg reflects
+  // the user's local calendar day, not a TZ-shifted UTC day.
   const exportDateStub = useMemo(() => {
     if (!dateFrom && !dateTo) return 'all-dates'
-    const today = toDateInputValue(new Date())
+    const today = todayDateInputValue()
     return `${dateFrom || 'earliest'}-to-${dateTo || today}`
   }, [dateFrom, dateTo])
   const currencyStub = currency ? currency.toLowerCase() : 'all'

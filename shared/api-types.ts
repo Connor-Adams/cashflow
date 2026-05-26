@@ -13,6 +13,32 @@ export type Account = {
   closedAt: string | null
 }
 
+/**
+ * Classified business purpose of a transfer pair (issue #222).
+ *
+ * - `owner_draw`: money moved from a business/corp account to a personal account
+ *   for the owner's personal use. Treated as draws, not expenses.
+ * - `owner_contribution`: money moved from a personal account into a
+ *   business/corp account. Equity contribution, not income.
+ * - `reimbursement`: business reimbursing a personal account for an
+ *   out-of-pocket business expense.
+ * - `investment`: cash moving to/from an investment account (e.g. brokerage
+ *   funding). Does not contribute to spend or income.
+ * - `internal`: money moving between accounts owned by the same entity
+ *   (e.g. chequing → savings within the same person/corp).
+ * - `income`: money from outside the household landing as a "transfer" by
+ *   shape — payroll, dividend received from an external entity, etc. Only
+ *   the inbound leg has a counterpart; this is the rare case where the user
+ *   forces income classification on a money-movement event.
+ */
+export type TransferPurpose =
+  | 'owner_draw'
+  | 'owner_contribution'
+  | 'reimbursement'
+  | 'investment'
+  | 'internal'
+  | 'income'
+
 export type AccountType =
   | 'checking'
   | 'savings'
@@ -70,13 +96,60 @@ export type Transaction = {
   autoConfidence: 'high' | 'medium' | 'low' | null
   /** Linked sibling transaction id (refund→original, transfer→sibling) */
   linkedTransactionId: number | null
+  /**
+   * Classified business purpose of a transfer pair. Set on both sides of a
+   * linked transfer. Null until a user (or rule) classifies it.
+   * @see issue #222
+   */
+  transferPurpose: TransferPurpose | null
+  /** When the transfer pair was linked (manually or by enrichment). */
+  transferLinkedAt: string | null
   /** True when the detect-recurring stage flagged this as a recurring/subscription charge */
   isRecurring: boolean
   /** Count of attached receipt files */
   receiptCount?: number
   /** Receipt extraction mismatches that need review */
   receiptWarnings?: string[]
+  /**
+   * Deterministic post-import confidence state (#214). NULL on legacy rows
+   * imported before the classifier; one of 'clean' | 'needs_review' when
+   * populated.
+   */
+  importConfidence?: 'clean' | 'needs_review' | null
+  /**
+   * JSON-encoded array of flag tokens fired by the classifier
+   * (e.g. ["missing_category","needs_review"]). NULL when no flags fired.
+   */
+  importConfidenceFlags?: string | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
+}
+
+/**
+ * Discrete flag tokens emitted by computeImportConfidence (#214). Frontend
+ * uses these to render filter chips in the Review Inbox + tile breakdown on
+ * the dashboard.
+ */
+export const IMPORT_CONFIDENCE_FLAG_TOKENS = [
+  'needs_review',
+  'missing_category',
+  'missing_split',
+  'likely_duplicate',
+  'possible_refund_pair',
+  'missing_receipt',
+] as const
+
+export type ImportConfidenceFlagToken =
+  (typeof IMPORT_CONFIDENCE_FLAG_TOKENS)[number]
+
+export type ImportHealthResponse = {
+  total: number
+  clean: number
+  needsReview: number
+  unknown: number
+  /** 0..1 — share of CLASSIFIED rows that are clean. 0 when no classified rows. */
+  cleanPercent: number
+  byFlag: Partial<Record<ImportConfidenceFlagToken, number>>
+  currency: string | null
 }
 
 export type EnrichmentSignal = {

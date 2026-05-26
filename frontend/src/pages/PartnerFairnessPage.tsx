@@ -13,7 +13,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { getJson } from '../lib/api'
-import { toDateInputValue } from '../lib/dateInput'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { useSessionState } from '../lib/useSessionState'
@@ -28,17 +32,26 @@ import type {
 
 const DEFAULT_PARTNER_CURRENCY = 'CAD'
 
+/**
+ * Anchor for default-range calculations: UTC midnight of the user's local
+ * calendar day. Keeps the derived YYYY-MM-DD strings stable across timezones
+ * (issue #280).
+ */
+function localTodayUtcMidnight(): Date {
+  return fromDateInputValue(todayDateInputValue())!
+}
+
 /** Compute first/last day of a relative window for the FilterBar. */
 function getRelativeRange(days: number): { from: string; to: string } {
-  const to = new Date()
+  const to = localTodayUtcMidnight()
   const from = new Date(to)
-  from.setDate(from.getDate() - days)
+  from.setUTCDate(from.getUTCDate() - days)
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDate(): { from: string; to: string } {
-  const to = new Date()
-  const from = new Date(to.getFullYear(), 0, 1)
+  const to = localTodayUtcMidnight()
+  const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 

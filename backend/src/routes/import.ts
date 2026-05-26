@@ -17,7 +17,11 @@ import { commitStatementImport } from '../import/commitStatementImport';
 import { ImportHistory } from '../models';
 import { importUploadLimiter } from './importRateLimit';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere } from '../auth/scope';
+import { householdWhere, visibleTransactionWhere } from '../auth/scope';
+import {
+  aggregateBatchHealth,
+  aggregateImportHealth,
+} from '../summary/importConfidence';
 import type { LogFields } from '../observability/logger';
 import { logger } from '../observability/logger';
 
@@ -618,10 +622,55 @@ router.get('/history', async (req, res, next) => {
       order: [['startedAt', 'DESC']],
       limit: 50,
     });
-    res.json(rows);
+    // Enrich each ImportHistory row with per-batch confidence counts (#214)
+    // so the history table can render clean / needs-review badges without a
+    // second round-trip per batch. A single grouped query over
+    // `import_batch + import_confidence` keeps this O(rows-in-scope).
+    const batchLabels = rows.map((r) => r.batchLabel).filter(Boolean);
+    const batchHealth = await aggregateBatchHealth({
+      householdScope: visibleTransactionWhere(req),
+      currency: null,
+      batchLabels,
+    });
+    const enriched = rows.map((row) => {
+      const json = row.toJSON() as Record<string, unknown>;
+      const health = batchHealth.get(row.batchLabel);
+      json.cleanCount = health?.clean ?? 0;
+      json.needsReviewCount = health?.needsReview ?? 0;
+      json.unknownCount = health?.unknown ?? 0;
+      return json;
+    });
+    res.json(enriched);
   } catch (e) {
     next(e);
   }
 });
+
+/**
+ * GET /api/import/health?currency=CAD
+ *
+ * Aggregate import-confidence health for the active household (#214). Returns
+ * the count of 'clean', 'needs_review', and legacy 'unknown' transactions, the
+ * clean-percent ratio, and per-flag counts. Drives the ImportHealthTile on
+ * the dashboard.
+ */
+router.get('/health', async (req, res, next) => {
+  try {
+    const currency = normalizeImportHealthCurrency(req.query.currency);
+    const result = await aggregateImportHealth({
+      householdScope: visibleTransactionWhere(req),
+      currency,
+    });
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+function normalizeImportHealthCurrency(raw: unknown): string | null {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim().toUpperCase().slice(0, 3);
+  return /^[A-Z]{3}$/.test(s) ? s : null;
+}
 
 export default router;

@@ -6,11 +6,13 @@ import healthRouter from './routes/health';
 import versionRouter from './routes/version';
 import accountsRouter from './routes/accounts';
 import transactionsRouter from './routes/transactions';
+import transfersRouter from './routes/transfers';
 import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
+import moneyLeaksRouter from './routes/moneyLeaks';
 import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
@@ -37,6 +39,7 @@ import netWorthRouter from './routes/netWorth';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
 import businessTaxRouter from './routes/businessTax';
+import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
@@ -102,6 +105,7 @@ app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/transactions', transactionsRouter);
+app.use('/api/transfers', transfersRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/categories', categoriesRouter);
@@ -118,6 +122,7 @@ app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
 app.use('/api/data-quality', dataQualityRouter);
+app.use('/api/money-leaks', moneyLeaksRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai
 // prefix to satisfy the issue's endpoint spec.
@@ -134,6 +139,7 @@ app.use('/api/net-worth', netWorthRouter);
 app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
 app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
+app.use('/api/tax/reserve', taxReserveRouter);
 app.use('/api/tax', taxRouter);
 // businessTaxRouter mounts /business/*, /exports/tax, /tax-tags, and
 // /transactions/:id/tax under /api. Keep it BEFORE other catch-all /api mounts.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useTaxEntities } from '../../hooks/useTaxEntities';
+import { useTaxEntities, type TaxEntity } from '../../hooks/useTaxEntities';
 import {
   useCorpScenarios,
   type CorpScenario,
@@ -14,6 +14,7 @@ import { ComparisonView } from './scenarios/ComparisonView';
 import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import type { Scenario } from '../../hooks/useScenarios';
+import { patchJson } from '../../lib/api';
 
 const CURRENT_YEAR = new Date().getFullYear().toString();
 
@@ -31,7 +32,7 @@ function parseYearInt(fiscalYear: string): number | null {
 export function CorpT2Tab() {
   const [fiscalYear, setFiscalYear] = useState<string>(CURRENT_YEAR);
   const [inputValue, setInputValue] = useState<string>(CURRENT_YEAR);
-  const { entities, error: entitiesError } = useTaxEntities();
+  const { entities, error: entitiesError, reload: reloadEntities } = useTaxEntities();
 
   function handleApply() {
     const trimmed = inputValue.trim();
@@ -98,13 +99,88 @@ export function CorpT2Tab() {
       ) : yearInt === null ? (
         <p className="error">Fiscal year must start with a 4-digit year (e.g. 2024 or 2024-01-01/2024-12-31).</p>
       ) : (
-        <CorpT2ScenarioWorkspace
-          key={`${corpEntity.id}:${yearInt}`}
-          entityId={corpEntity.id}
-          year={yearInt}
-          otherCorps={otherCorps}
-        />
+        <>
+          <AssociatedGroupInput corpEntity={corpEntity} onSaved={reloadEntities} />
+          <CorpT2ScenarioWorkspace
+            key={`${corpEntity.id}:${yearInt}`}
+            entityId={corpEntity.id}
+            year={yearInt}
+            otherCorps={otherCorps}
+          />
+        </>
       )}
+    </div>
+  );
+}
+
+interface AssociatedGroupInputProps {
+  corpEntity: TaxEntity;
+  onSaved: () => void;
+}
+
+/**
+ * Free-text input bound to `corpEntity.associatedGroupId`. Commits on blur or
+ * Enter via PATCH /api/tax/entities/:id. Corps sharing the same string are
+ * treated as an associated group for the shared $500k SBD limit + $50k AAII
+ * threshold (P11b T1-T3).
+ *
+ * v1 UI choice: free-text rather than a dropdown of existing group ids — the
+ * graph of "which corps are grouped" is small enough that typing the same
+ * tag in two corps is faster than scaffolding a separate picker.
+ */
+function AssociatedGroupInput({ corpEntity, onSaved }: AssociatedGroupInputProps) {
+  // Local state mirrors the server value so the input is fully controlled and
+  // doesn't reset mid-typing; commit on blur or Enter then reload entities.
+  const [draft, setDraft] = useState<string>(corpEntity.associatedGroupId ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-seed the draft when the active corp changes (or its persisted group
+  // updates from outside) so the input stays in sync with server truth.
+  useEffect(() => {
+    setDraft(corpEntity.associatedGroupId ?? '');
+  }, [corpEntity.id, corpEntity.associatedGroupId]);
+
+  async function commit() {
+    const trimmed = draft.trim();
+    const next = trimmed === '' ? null : trimmed;
+    // No-op if unchanged — avoids spurious PATCH on every blur.
+    if (next === (corpEntity.associatedGroupId ?? null)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await patchJson(`/api/tax/entities/${corpEntity.id}`, {
+        associatedGroupId: next,
+      });
+      onSaved();
+    } catch (err: unknown) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: '0.75rem' }}>
+      <label>
+        Associated group{' '}
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          placeholder="e.g. ABCorp (blank = no group)"
+          disabled={saving}
+          style={{ width: '16rem' }}
+        />
+      </label>
+      {saving && <span className="muted" style={{ marginLeft: '0.5rem' }}>Saving…</span>}
+      {error && <span className="error" style={{ marginLeft: '0.5rem' }}>Failed: {error}</span>}
+      <p className="muted" style={{ margin: '0.25rem 0 0' }}>
+        Corps sharing the same group tag share a $500k SBD limit and $50k AAII
+        threshold. Leave blank for unaffiliated corps.
+      </p>
     </div>
   );
 }

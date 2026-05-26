@@ -692,3 +692,234 @@ test('GET /enrichment/stats: superadmin gets 200 with correct shape, non-superad
   assert.ok(superMerchants.includes('STATS_A_MERCHANT'));
   assert.ok(superMerchants.includes('STATS_B_MERCHANT'));
 });
+
+// ---------------- Issue #215: refund-link manual endpoints ----------------
+
+test('POST /:id/refund-link: links a refund to its original purchase', async () => {
+  const originalId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-01',
+    amount: -100,
+    merchantClean: 'BEST BUY',
+    finalCategory: 'Electronics',
+    txnType: 'purchase',
+    createdByUserId: userAId,
+  });
+  const refundId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: 100,
+    merchantClean: 'BEST BUY',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  const res = await agentA
+    .post(`/api/transactions/${refundId}/refund-link`)
+    .send({ originalTransactionId: originalId });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.linkedTransactionId, originalId);
+  assert.equal(res.body.txnType, 'refund');
+  assert.equal(res.body.autoSource, 'refund-link');
+  assert.equal(res.body.autoConfidence, 'high');
+  assert.equal(res.body.reviewFlag, false);
+  void contactAId;
+  void contactBId;
+});
+
+test('POST /:id/refund-link: rejects when currencies differ', async () => {
+  const originalId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-01',
+    amount: -100,
+    currency: 'USD',
+    merchantClean: 'BEST BUY USD',
+    txnType: 'purchase',
+    createdByUserId: userAId,
+  });
+  const refundId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: 100,
+    currency: 'CAD',
+    merchantClean: 'BEST BUY CAD',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  const res = await agentA
+    .post(`/api/transactions/${refundId}/refund-link`)
+    .send({ originalTransactionId: originalId });
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error), /currencies must match/i);
+});
+
+test('POST /:id/refund-link: rejects when refund row is itself negative', async () => {
+  const originalId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-01',
+    amount: -100,
+    merchantClean: 'NEGATIVE-REFUND-CASE',
+    txnType: 'purchase',
+    createdByUserId: userAId,
+  });
+  // Pretend a misclassified "refund" with a negative amount.
+  const refundId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: -50,
+    merchantClean: 'NEGATIVE-REFUND-CASE',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  const res = await agentA
+    .post(`/api/transactions/${refundId}/refund-link`)
+    .send({ originalTransactionId: originalId });
+  assert.equal(res.status, 400);
+});
+
+test('POST /:id/refund-link: cross-household original returns 404', async () => {
+  const originalIdB = await createTxn({
+    householdId: householdBId,
+    accountId: accountBId,
+    date: '2026-05-01',
+    amount: -100,
+    merchantClean: 'FOREIGN PURCHASE',
+    txnType: 'purchase',
+    createdByUserId: userBId,
+  });
+  const refundIdA = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: 100,
+    merchantClean: 'LOCAL REFUND',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  const res = await agentA
+    .post(`/api/transactions/${refundIdA}/refund-link`)
+    .send({ originalTransactionId: originalIdB });
+  assert.equal(res.status, 404);
+});
+
+test('DELETE /:id/refund-link: clears linkedTransactionId', async () => {
+  const originalId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-01',
+    amount: -100,
+    merchantClean: 'UNLINK TEST',
+    txnType: 'purchase',
+    createdByUserId: userAId,
+  });
+  const refundId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: 100,
+    merchantClean: 'UNLINK TEST',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  // Link, then unlink.
+  await agentA
+    .post(`/api/transactions/${refundId}/refund-link`)
+    .send({ originalTransactionId: originalId });
+  const res = await agentA.delete(`/api/transactions/${refundId}/refund-link`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.linkedTransactionId, null);
+});
+
+test('GET /:id/refund-details: returns hydrated original + partial flag for partial refund', async () => {
+  const originalId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-01',
+    amount: -200,
+    merchantClean: 'PARTIAL CASE',
+    finalCategory: 'Electronics',
+    txnType: 'purchase',
+    createdByUserId: userAId,
+  });
+  const refundId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: 50,
+    merchantClean: 'PARTIAL CASE',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  await agentA
+    .post(`/api/transactions/${refundId}/refund-link`)
+    .send({ originalTransactionId: originalId });
+
+  const res = await agentA.get(`/api/transactions/${refundId}/refund-details`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.linked, true);
+  assert.equal(res.body.partial, true);
+  assert.equal(res.body.original.id, originalId);
+  assert.equal(res.body.original.finalCategory, 'Electronics');
+  assert.equal(res.body.original.amount, -200);
+});
+
+test('GET /:id/refund-details: linked=false when no link exists', async () => {
+  const refundId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: 25,
+    merchantClean: 'NO LINK YET',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  const res = await agentA.get(`/api/transactions/${refundId}/refund-details`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.linked, false);
+  assert.equal(res.body.original, null);
+});
+
+test('GET /refund-suggestions: surfaces unreviewed auto-linked refunds', async () => {
+  const originalId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-01',
+    amount: -75,
+    merchantClean: 'SUGGEST QUEUE',
+    finalCategory: 'Shopping',
+    txnType: 'purchase',
+    createdByUserId: userAId,
+  });
+  const refundId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-05-10',
+    amount: 75,
+    merchantClean: 'SUGGEST QUEUE',
+    txnType: 'refund',
+    createdByUserId: userAId,
+  });
+  // Manually mark this refund as auto-linked + unreviewed so it shows in queue.
+  const models = await import('../../src/models');
+  await models.Transaction.update(
+    {
+      linkedTransactionId: originalId,
+      autoSource: 'refund-link',
+      autoConfidence: 'high',
+      reviewedAt: null,
+    },
+    { where: { id: refundId } }
+  );
+
+  const res = await agentA.get('/api/transactions/refund-suggestions');
+  assert.equal(res.status, 200);
+  const rows = res.body.data as Array<{ refundId: number; linkedOriginal: { id: number } | null }>;
+  const ours = rows.find((r) => r.refundId === refundId);
+  assert.ok(ours, 'refund should appear in the suggestions queue');
+  assert.equal(ours!.linkedOriginal?.id, originalId);
+});

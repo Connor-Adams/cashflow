@@ -109,6 +109,21 @@ export function buildTransactionFilterWhere(
     // -1 matches nothing; auto-increment ids start at 1, so this returns empty when all entries are invalid.
     where.id = ids.length === 0 ? -1 : ids;
   }
+  if (source.importConfidence) {
+    const v = String(source.importConfidence);
+    if (v === 'clean' || v === 'needs_review') {
+      where.importConfidence = v;
+    }
+  }
+  // confidenceFlag uses LIKE on the JSON-encoded TEXT column. The classifier
+  // serializes tokens as a JSON array (e.g. ["needs_review","missing_category"])
+  // so `'%"missing_category"%'` matches deterministically. This avoids needing
+  // a JSONB column + GIN index for what is effectively a small enum filter.
+  if (typeof source.confidenceFlag === 'string' && source.confidenceFlag.length > 0) {
+    where.importConfidenceFlags = {
+      [Op.like]: `%"${source.confidenceFlag.replace(/[^a-z_]/gi, '')}"%`,
+    };
+  }
   return where;
 }
 
@@ -698,6 +713,350 @@ router.post('/:id/re-enrich', async (req, res, next) => {
       include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
     });
     res.json(serializeTransaction(txn));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/refund-suggestions
+ *
+ * Issue #215: review queue for refund matches.
+ *
+ * Returns rows from the caller's household where either:
+ *   - The detector emitted a `refund-link-suggested` medium-confidence signal
+ *     (canonical-brand match but cleaned merchants differ — needs human
+ *     confirmation).
+ *   - A refund already has an auto-linked original via the high-confidence
+ *     `refund-link` path but the row remains unreviewed — so the user can
+ *     audit the auto-links if desired.
+ *
+ * Suggestions are scoped to the visible-transaction set (so cross-household
+ * leakage is impossible). Each row hydrates the linked original's merchant,
+ * date and amount so the frontend can render a "Refund of $X at <merchant>
+ * on <date>" preview without a second round-trip.
+ */
+router.get('/refund-suggestions', async (req, res, next) => {
+  try {
+    const { TransactionSignal } = await import('../models');
+    // First pass: every refund row visible to the caller that's either
+    // a) auto-linked but unreviewed, or b) has a suggested-link signal.
+    const refunds = await Transaction.findAll({
+      where: {
+        ...visibleTransactionWhere(req),
+        txnType: 'refund',
+      },
+      attributes: [
+        'id',
+        'date',
+        'merchantClean',
+        'merchantCanonical',
+        'amount',
+        'currency',
+        'linkedTransactionId',
+        'autoSource',
+        'autoConfidence',
+        'reviewFlag',
+        'reviewedAt',
+      ],
+      order: [['date', 'DESC']],
+      limit: 200,
+      raw: true,
+    });
+    if (refunds.length === 0) {
+      res.json({ data: [] });
+      return;
+    }
+    const refundIds = refunds.map((r) => r.id);
+
+    // Pull every refund-link-suggested signal for the matching refund ids
+    // in one query so we can map them onto the rows.
+    const suggestedSignals = await TransactionSignal.findAll({
+      where: {
+        transactionId: refundIds,
+        source: 'refund-link-suggested',
+      },
+      raw: true,
+    });
+    const suggestedByRefundId = new Map<number, Array<{ linkedTransactionId: number | null; rationale: string | null }>>();
+    for (const s of suggestedSignals) {
+      const list = suggestedByRefundId.get(s.transactionId) ?? [];
+      const fields = (s.fields ?? {}) as Record<string, unknown>;
+      list.push({
+        linkedTransactionId:
+          typeof fields.linkedTransactionId === 'number' ? fields.linkedTransactionId : null,
+        rationale: s.rationale ?? null,
+      });
+      suggestedByRefundId.set(s.transactionId, list);
+    }
+
+    // Collect every original id we may need to hydrate (auto-linked + suggested).
+    const originalIds = new Set<number>();
+    for (const r of refunds) {
+      if (r.linkedTransactionId != null) originalIds.add(r.linkedTransactionId);
+    }
+    for (const list of suggestedByRefundId.values()) {
+      for (const s of list) {
+        if (s.linkedTransactionId != null) originalIds.add(s.linkedTransactionId);
+      }
+    }
+    const originals = originalIds.size === 0
+      ? []
+      : await Transaction.findAll({
+          where: { id: Array.from(originalIds), ...visibleTransactionWhere(req) },
+          attributes: [
+            'id',
+            'date',
+            'merchantClean',
+            'merchantCanonical',
+            'amount',
+            'currency',
+            'finalCategory',
+          ],
+          raw: true,
+        });
+    const originalById = new Map<number, (typeof originals)[number]>(
+      originals.map((o) => [o.id, o]),
+    );
+
+    const out = refunds
+      // A refund only appears in the queue when there's something to confirm:
+      //   - it carries an auto-link via the detector AND remains unreviewed, OR
+      //   - it has at least one suggested-link signal in the SQL fetch above
+      .filter((r) => {
+        const isAutoLink =
+          r.linkedTransactionId != null && r.autoSource === 'refund-link' && !r.reviewedAt;
+        const hasSuggestion = (suggestedByRefundId.get(r.id) ?? []).length > 0;
+        return isAutoLink || hasSuggestion;
+      })
+      .map((r) => {
+        const linkedOriginal =
+          r.linkedTransactionId != null
+            ? originalById.get(r.linkedTransactionId) ?? null
+            : null;
+        const suggestions = (suggestedByRefundId.get(r.id) ?? [])
+          .map((s) => {
+            const orig =
+              s.linkedTransactionId != null ? originalById.get(s.linkedTransactionId) ?? null : null;
+            if (!orig) return null;
+            return {
+              originalId: orig.id,
+              originalDate: orig.date,
+              originalMerchantClean: orig.merchantClean,
+              originalAmount: Number(orig.amount),
+              originalCurrency: orig.currency,
+              originalFinalCategory: orig.finalCategory,
+              rationale: s.rationale,
+            };
+          })
+          .filter((s): s is NonNullable<typeof s> => s != null);
+        return {
+          refundId: r.id,
+          refundDate: r.date,
+          refundMerchantClean: r.merchantClean,
+          refundAmount: Number(r.amount),
+          refundCurrency: r.currency,
+          autoSource: r.autoSource,
+          autoConfidence: r.autoConfidence,
+          reviewFlag: r.reviewFlag,
+          linkedOriginal: linkedOriginal
+            ? {
+                id: linkedOriginal.id,
+                date: linkedOriginal.date,
+                merchantClean: linkedOriginal.merchantClean,
+                amount: Number(linkedOriginal.amount),
+                currency: linkedOriginal.currency,
+                finalCategory: linkedOriginal.finalCategory,
+              }
+            : null,
+          suggestions,
+        };
+      });
+    res.json({ data: out });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/:id/refund-link
+ *
+ * Issue #215: manually link a refund to its original purchase. The route
+ * enforces:
+ *   - both txns visible to the caller via `visibleTransactionWhere`
+ *   - both txns share the same currency (a $50 USD refund can't offset a
+ *     $50 CAD purchase)
+ *   - the source (`:id`) is a refund (positive amount or txnType='refund')
+ *   - the original (body.originalTransactionId) is a negative-amount purchase
+ *
+ * When successful, sets `linkedTransactionId` on the refund and stamps
+ * `txnType='refund'` if the row was mis-classified. Returns the updated
+ * serialized refund row.
+ */
+router.post('/:id/refund-link', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const body = (req.body || {}) as { originalTransactionId?: unknown };
+    const originalId = Number(body.originalTransactionId);
+    if (!Number.isInteger(originalId) || originalId <= 0) {
+      res.status(400).json({ error: 'originalTransactionId must be a positive integer' });
+      return;
+    }
+    if (originalId === id) {
+      res.status(400).json({ error: 'A transaction cannot link to itself' });
+      return;
+    }
+    const refund = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!refund) {
+      res.status(404).json({ error: 'Refund not found' });
+      return;
+    }
+    const original = await Transaction.findOne({
+      where: { id: originalId, ...visibleTransactionWhere(req) },
+    });
+    if (!original) {
+      res.status(404).json({ error: 'Original transaction not found' });
+      return;
+    }
+    if (refund.currency !== original.currency) {
+      res.status(400).json({ error: 'Refund and original currencies must match' });
+      return;
+    }
+    const refundAmount = Number(refund.amount);
+    const originalAmount = Number(original.amount);
+    if (!(refundAmount >= 0)) {
+      res.status(400).json({
+        error: 'Refund row must have a non-negative amount (got ' + String(refund.amount) + ')',
+      });
+      return;
+    }
+    if (!(originalAmount < 0)) {
+      res.status(400).json({
+        error:
+          'Original row must have a negative amount (got ' + String(original.amount) + ')',
+      });
+      return;
+    }
+    refund.linkedTransactionId = original.id;
+    if (refund.txnType !== 'refund') refund.txnType = 'refund';
+    // Manual links are user-confirmed → clear the review flag and stamp
+    // reviewedAt so the row drops out of the queue immediately.
+    refund.autoSource = 'refund-link';
+    refund.autoConfidence = 'high';
+    refund.reviewFlag = false;
+    refund.reviewedAt = new Date();
+    await refund.save();
+    await refund.reload({
+      include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
+    });
+    res.json(serializeTransaction(refund));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/transactions/:id/refund-link
+ *
+ * Issue #215: tear a refund off its linked original. Idempotent — succeeds
+ * with the current row state even if the link was already null. The row's
+ * `txnType` is preserved (still a refund, just unlinked).
+ */
+router.delete('/:id/refund-link', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const refund = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!refund) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    refund.linkedTransactionId = null;
+    refund.autoSource = null;
+    refund.autoConfidence = null;
+    refund.reviewedAt = new Date();
+    await refund.save();
+    await refund.reload({
+      include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
+    });
+    res.json(serializeTransaction(refund));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/:id/refund-details
+ *
+ * Issue #215: returns hydrated info about the original purchase linked from a
+ * refund row, plus a derived "partial" flag (true when refund |amount| <
+ * original |amount|). The frontend uses this to render the "Refund of $X at
+ * <merchant>" inline badge.
+ */
+router.get('/:id/refund-details', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const refund = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!refund) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (refund.linkedTransactionId == null) {
+      res.json({
+        refundId: refund.id,
+        linked: false,
+        original: null,
+        partial: null,
+      });
+      return;
+    }
+    const original = await Transaction.findOne({
+      where: { id: refund.linkedTransactionId, ...visibleTransactionWhere(req) },
+    });
+    if (!original) {
+      // Linked row exists but lies outside the caller's visible scope; report
+      // "linked but inaccessible" rather than leak data via 404.
+      res.json({
+        refundId: refund.id,
+        linked: true,
+        original: null,
+        partial: null,
+      });
+      return;
+    }
+    const refundAmount = Math.abs(Number(refund.amount));
+    const originalAmount = Math.abs(Number(original.amount));
+    res.json({
+      refundId: refund.id,
+      linked: true,
+      partial: refundAmount < originalAmount,
+      original: {
+        id: original.id,
+        date: original.date,
+        merchantClean: original.merchantClean,
+        merchantCanonical: original.merchantCanonical,
+        amount: Number(original.amount),
+        currency: original.currency,
+        finalCategory: original.finalCategory,
+      },
+    });
   } catch (e) {
     next(e);
   }

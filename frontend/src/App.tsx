@@ -7,6 +7,7 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
@@ -16,7 +17,9 @@ import { GoalsPage } from './pages/GoalsPage'
 import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
+import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
+import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { TransfersPage } from './pages/TransfersPage'
@@ -58,6 +61,7 @@ function AppRoutes() {
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="review" element={<ReviewInboxPage />} />
+          <Route path="refunds" element={<RefundsReviewPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
@@ -73,9 +77,11 @@ function AppRoutes() {
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
+          <Route path="money-leaks" element={<MoneyLeaksPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="currency" element={<CurrencyPage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
