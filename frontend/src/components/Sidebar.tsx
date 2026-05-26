@@ -7,6 +7,7 @@ import {
   CalendarClock,
   CalendarDays,
   Coins,
+  Globe,
   Package,
   PackageSearch,
   CreditCard,
@@ -79,6 +80,7 @@ const navItems: NavItem[] = [
   { to: '/ask', label: 'Ask Cashflow', icon: Search },
   { to: '/partner', label: 'Partner', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/currency', label: 'Currency', icon: Globe },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },
   { to: '/settings', label: 'Settings', icon: Settings },
