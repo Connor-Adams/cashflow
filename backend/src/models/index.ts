@@ -38,6 +38,10 @@ import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
 import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
+import {
+  TransactionReturnMetadata,
+  initTransactionReturnMetadata,
+} from './TransactionReturnMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
@@ -63,6 +67,7 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
+import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
@@ -73,6 +78,11 @@ import {
   initMonthlyClosePeriod,
 } from './MonthlyClosePeriod';
 import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
+import { Notification, initNotification } from './Notification';
+import {
+  NotificationPreference,
+  initNotificationPreference,
+} from './NotificationPreference';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -113,6 +123,7 @@ initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
 initTransactionTaxMetadata(sequelize);
+initTransactionReturnMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
@@ -136,6 +147,24 @@ initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
+initCashflowSettings(sequelize);
+initNotification(sequelize);
+initNotificationPreference(sequelize);
+
+User.hasMany(Notification, {
+  foreignKey: 'user_id',
+  as: 'notifications',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(NotificationPreference, {
+  foreignKey: 'user_id',
+  as: 'notificationPreferences',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+NotificationPreference.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -151,6 +180,17 @@ Transaction.hasOne(TransactionTaxMetadata, {
   hooks: true,
 });
 TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
+Transaction.hasOne(TransactionReturnMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'returnMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionReturnMetadata.belongsTo(Transaction, {
   foreignKey: 'transaction_id',
   as: 'transaction',
 });
@@ -514,6 +554,19 @@ MonthlyCloseTask.belongsTo(User, {
   as: 'completedByUser',
 });
 
+// CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
+// the DB level; we surface the relationship as hasOne so callers can eager
+// load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
+User.hasOne(CashflowSettings, {
+  foreignKey: 'user_id',
+  as: 'cashflowSettings',
+  onDelete: 'CASCADE',
+});
+CashflowSettings.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -555,6 +608,7 @@ export {
   TaxCategory,
   TaxTag,
   TransactionTaxMetadata,
+  TransactionReturnMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,
@@ -576,4 +630,7 @@ export {
   TaxReserveSetting,
   MonthlyClosePeriod,
   MonthlyCloseTask,
+  CashflowSettings,
+  Notification,
+  NotificationPreference,
 };

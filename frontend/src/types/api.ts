@@ -313,6 +313,59 @@ export type PartnerSettlementRecommendationResponse = {
   recommendations: PartnerSettlementRecommendation[]
 }
 
+// ---- Sankey visualization (issue #224) ---------------------------------
+
+/** Classification of a node in the Sankey diagram — drives coloring. */
+export type SankeyNodeKind =
+  | 'income'
+  | 'category'
+  | 'business'
+  | 'savings'
+  | 'uncategorized'
+
+export type SankeyNode = {
+  name: string
+  kind: SankeyNodeKind
+}
+
+export type SankeyLink = {
+  source: number
+  target: number
+  value: number
+}
+
+/** Response shape for GET /api/summary/sankey. */
+export type SankeyResponse = {
+  currency: string | null
+  totalIncome: number
+  totalSpend: number
+  transactionCount: number
+  nodes: SankeyNode[]
+  links: SankeyLink[]
+  /** Every currency the household has at least one visible txn in. */
+  availableCurrencies: string[]
+  dateRange: { from: string | null; to: string | null }
+}
+
+export type SankeyDrilldownTransaction = {
+  id: number
+  date: string
+  currency: string
+  amount: number
+  merchant: string
+  finalCategory: string | null
+  finalBusiness: boolean
+  txnType: string | null
+}
+
+/** Response shape for GET /api/summary/sankey/source-transactions. */
+export type SankeyDrilldownResponse = {
+  edge: { source: number; target: number }
+  transactionCount: number
+  truncated: boolean
+  transactions: SankeyDrilldownTransaction[]
+}
+
 /**
  * Filter shape accepted by POST /api/transactions/bulk-patch-filter. Mirrors
  * the subset of GET /api/transactions query params relevant for narrowing
@@ -390,6 +443,13 @@ export type Budget = {
    * window contributes $0 to the budget.
    */
   excludeRefundedPurchases: boolean
+  /**
+   * Percentages (1–500) at which the daily `budget_breach_check` cron fires
+   * a proactive in-app notification (issue #268). Defaults to
+   * `[80, 100, 120]`; an empty array disables alerts entirely for this
+   * budget. Validated server-side: integers, 1≤n≤500, dedup+sort ascending.
+   */
+  alertThresholds: number[]
   createdAt: string
   updatedAt: string
 }
@@ -449,6 +509,11 @@ export type BudgetInput = {
   scope?: BudgetScope
   rolloverEnabled?: boolean
   excludeRefundedPurchases?: boolean
+  /**
+   * See `Budget.alertThresholds` for the contract. Omitting the field keeps
+   * the existing value on update, or applies server defaults on create.
+   */
+  alertThresholds?: number[]
 }
 
 /** One row in the GET /api/budgets/:id/exclusions response. */
@@ -1025,4 +1090,149 @@ export type NetWorthSeries = {
   points: NetWorthSeriesPoint[];
   partial: boolean;
   gaps: NetWorthGap[];
+};
+
+/**
+ * Per-user safe-to-spend knobs (issue #199). Returned by both GET and
+ * PATCH /api/settings/cashflow.
+ */
+export type CashflowSettings = {
+  /** DECIMAL(14,4) string. */
+  minimumCashBuffer: string;
+  safeToSpendWindowDays: number;
+  includeCreditCardBalance: boolean;
+  includeGoalContributions: boolean;
+};
+
+export type SafeToSpendBreakdown = {
+  currentCash: number;
+  upcomingRequiredExpenses: number;
+  requiredSavingsContributions: number;
+  expectedCreditCardPayments: number;
+  minimumBuffer: number;
+};
+
+/** Response shape for GET /api/forecast/safe-to-spend. */
+export type SafeToSpendResponse = {
+  currency: string;
+  asOfDate: string;
+  windowDays: number;
+  windowEndDate: string;
+  value: number;
+  isNegative: boolean;
+  breakdown: SafeToSpendBreakdown;
+  settings: CashflowSettings;
+};
+
+// --- FX & currency intelligence (issue #221) -------------------------------
+
+export type CurrencyExposureRow = {
+  currency: string;
+  transactionCount: number;
+  sumNative: number;
+  absSumNative: number;
+  cadEquivalent: number | null;
+  shareOfTotal: number;
+  fxRate: number | null;
+  ratedDate: string | null;
+};
+
+export type CurrencyExposureResponse = {
+  reportingCurrency: string;
+  asOf: string;
+  totalCadEquivalent: number;
+  byCurrency: CurrencyExposureRow[];
+  gaps: Array<{ currency: string; reason: 'fx_rate_unavailable' }>;
+};
+
+export type FxFeeRow = {
+  transactionId: number;
+  accountId: number;
+  accountName: string | null;
+  date: string;
+  merchant: string;
+  currency: string;
+  amount: number;
+  reason: string;
+  confidence: 'high' | 'medium' | 'low' | null;
+};
+
+export type FxFeesResponse = {
+  fees: FxFeeRow[];
+  total: number;
+  limit: number;
+};
+
+export type EffectiveRateRow = {
+  transactionId: number;
+  accountId: number;
+  date: string;
+  merchant: string;
+  fromCurrency: string;
+  toCurrency: string;
+  nativeAmount: number;
+  effectiveRate: number;
+  source: 'linked_transaction' | 'paired_transfer';
+  counterpartyTransactionId: number;
+};
+
+export type EffectiveRatesResponse = {
+  rates: EffectiveRateRow[];
+  total: number;
+  limit: number;
+};
+
+export type FxReportingMetric = {
+  key: string;
+  normalized: number;
+  partial: boolean;
+  contributions: Array<{
+    currency: string;
+    native: number;
+    normalized: number | null;
+    fxRate: number | null;
+    ratedDate: string | null;
+  }>;
+};
+
+export type FxReportingResponse = {
+  reportingCurrency: string;
+  asOf: string;
+  metrics: FxReportingMetric[];
+  fxRatesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }>;
+  gaps: Array<{ currency: string; reason: 'fx_rate_unavailable' }>;
+  transactionCountByCurrency: Record<string, number>;
+};
+
+// ---- Notifications (issue #266) -----------------------------------------
+
+export type NotificationSeverity = 'info' | 'warn' | 'critical';
+
+export type Notification = {
+  id: number;
+  type: string;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  dataJson: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export type NotificationsListResponse = {
+  data: Notification[];
+};
+
+export type NotificationUnreadCountResponse = {
+  count: number;
+};
+
+export type NotificationPreference = {
+  type: string;
+  channelInApp: boolean;
+  channelEmail: boolean;
+};
+
+export type NotificationPreferencesListResponse = {
+  data: NotificationPreference[];
 };
