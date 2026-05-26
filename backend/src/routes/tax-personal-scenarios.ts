@@ -65,7 +65,7 @@ router.post('/', async (req, res, next) => {
     }
 
     try {
-      validateOverrideMap(overrides);
+      validateOverrideMap(overrides, 'personal');
     } catch (err) {
       res
         .status(400)
@@ -205,7 +205,7 @@ router.patch('/:id', async (req, res, next) => {
     }
     if ('overrides' in req.body) {
       try {
-        validateOverrideMap(req.body.overrides);
+        validateOverrideMap(req.body.overrides, 'personal');
       } catch (err) {
         res
           .status(400)

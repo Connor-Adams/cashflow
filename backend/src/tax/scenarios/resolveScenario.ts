@@ -44,7 +44,7 @@ export async function resolveScenario(scenarioId: number): Promise<TaxYearFacts>
   const root = ancestry[0];
   const baseFacts = await buildPersonalFacts(root.entityId, root.year);
   const overrideChain: OverrideMap[] = ancestry.map((s) => s.overrides as OverrideMap);
-  return applyOverrides(baseFacts, overrideChain);
+  return applyOverrides(baseFacts, overrideChain, 'personal');
 }
 
 /** Walk parentId chain from given scenario back to root. Returns root-first array. */

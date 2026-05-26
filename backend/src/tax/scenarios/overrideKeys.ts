@@ -30,6 +30,7 @@ function singletonRrsp(source: string, amount: number): RrspContrib {
 
 export const overrideKeyRegistry: OverrideKeyDef[] = [
   {
+    kind: 'personal',
     key: 'income.employment',
     label: 'Employment income (CAD)',
     inputType: 'decimal',
@@ -37,6 +38,7 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     apply: replaceIncomeArray('employmentIncome', 'income.employment'),
   },
   {
+    kind: 'personal',
     key: 'income.eligibleDividends',
     label: 'Eligible dividends (CAD)',
     inputType: 'decimal',
@@ -44,6 +46,7 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     apply: replaceIncomeArray('eligibleDividends', 'income.eligibleDividends'),
   },
   {
+    kind: 'personal',
     key: 'income.nonEligibleDividends',
     label: 'Non-eligible dividends (CAD)',
     inputType: 'decimal',
@@ -51,6 +54,7 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     apply: replaceIncomeArray('nonEligibleDividends', 'income.nonEligibleDividends'),
   },
   {
+    kind: 'personal',
     key: 'income.interest',
     label: 'Interest income (CAD)',
     inputType: 'decimal',
@@ -58,6 +62,7 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     apply: replaceIncomeArray('interestIncome', 'income.interest'),
   },
   {
+    kind: 'personal',
     key: 'deductions.rrspContrib',
     label: 'RRSP contribution (CAD)',
     inputType: 'decimal',
@@ -68,6 +73,7 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     },
   },
   {
+    kind: 'personal',
     key: 'deductions.fhsaContrib',
     label: 'FHSA contribution (CAD)',
     inputType: 'decimal',
@@ -78,6 +84,7 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     },
   },
   {
+    kind: 'personal',
     key: 'deductions.donations',
     label: 'Donations (CAD)',
     inputType: 'decimal',
@@ -88,6 +95,7 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     },
   },
   {
+    kind: 'personal',
     key: 'capgains.dispositions',
     label: 'Capital gain dispositions',
     inputType: 'array_capgain_dispositions',
@@ -123,14 +131,23 @@ export function getOverrideKey(key: string): OverrideKeyDef | undefined {
   return indexByKey.get(key);
 }
 
+/** Returns the subset of the registry that applies to a given entity kind. */
+export function getOverrideKeysForKind(kind: 'personal' | 'corp'): OverrideKeyDef[] {
+  return overrideKeyRegistry.filter((k) => k.kind === kind);
+}
+
 /**
- * Validates a complete override map: rejects unknown keys, runs per-key validators.
+ * Validates a complete override map: rejects unknown keys, runs per-key validators,
+ * and rejects cross-kind usage (personal key on corp scenario or vice versa).
  * Throws on any failure with a message identifying the offending key.
  */
-export function validateOverrideMap(map: OverrideMap): void {
+export function validateOverrideMap(map: OverrideMap, kind: 'personal' | 'corp'): void {
   for (const [key, value] of Object.entries(map)) {
     const entry = indexByKey.get(key);
     if (!entry) throw new Error(`unknown override key: ${key}`);
+    if (entry.kind !== kind) {
+      throw new Error(`override key ${key} is for ${entry.kind} scenarios, not ${kind}`);
+    }
     entry.validate(value);
   }
 }

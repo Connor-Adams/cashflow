@@ -1,7 +1,6 @@
 // backend/src/tax/scenarios/applyOverrides.ts
 import { getOverrideKey, validateOverrideMap } from './overrideKeys';
 import type { OverrideMap } from './types';
-import type { TaxYearFacts } from '../engine/types';
 
 /**
  * Layers a chain of override maps onto a starting facts struct. Maps are applied
@@ -11,18 +10,23 @@ import type { TaxYearFacts } from '../engine/types';
  * entry's `apply` function. The function is pure — returns a new facts struct,
  * does not mutate the input.
  *
- * Throws on any unknown key or value that fails its per-key validator.
+ * Generic in `F` so it works for both personal (`TaxYearFacts`) and corp
+ * (`CorpTaxYearFacts`) scenarios. The `kind` argument scopes which registry
+ * entries are valid; cross-kind usage rejects at the validator.
+ *
+ * Throws on any unknown key, cross-kind key, or value that fails its per-key validator.
  */
-export function applyOverrides(
-  baseFacts: TaxYearFacts,
+export function applyOverrides<F>(
+  baseFacts: F,
   overrideChain: OverrideMap[],
-): TaxYearFacts {
+  kind: 'personal' | 'corp',
+): F {
   let facts = baseFacts;
   for (const map of overrideChain) {
-    validateOverrideMap(map);
+    validateOverrideMap(map, kind);
     for (const [key, value] of Object.entries(map)) {
       const entry = getOverrideKey(key)!; // validated above
-      facts = entry.apply(facts, value);
+      facts = entry.apply(facts as never, value) as F;
     }
   }
   return facts;

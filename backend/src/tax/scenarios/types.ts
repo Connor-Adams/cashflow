@@ -13,6 +13,8 @@ export type OverrideApplier = (facts: TaxYearFacts, value: unknown) => TaxYearFa
 
 /** Registry entry describing one valid override key. */
 export interface OverrideKeyDef {
+  /** Which entity kind this override applies to. Personal scenarios reject corp keys and vice versa. */
+  kind: 'personal' | 'corp';
   /** Dotted key, e.g. "income.employment". */
   key: string;
   /** Human-readable label for UI. */

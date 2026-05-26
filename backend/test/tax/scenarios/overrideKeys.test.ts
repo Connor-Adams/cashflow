@@ -42,15 +42,28 @@ test('getOverrideKey returns undefined for an unknown key', () => {
 
 test('validateOverrideMap throws on unknown key', () => {
   assert.throws(
-    () => validateOverrideMap({ 'totally.fake': 1 }),
+    () => validateOverrideMap({ 'totally.fake': 1 }, 'personal'),
     /unknown override key/i,
   );
 });
 
 test('validateOverrideMap throws when value fails per-key validator', () => {
   assert.throws(
-    () => validateOverrideMap({ 'income.employment': 'not a number' }),
+    () => validateOverrideMap({ 'income.employment': 'not a number' }, 'personal'),
     /income.employment/,
+  );
+});
+
+test('all existing P7 keys have kind=personal', () => {
+  for (const entry of overrideKeyRegistry) {
+    assert.equal(entry.kind, 'personal', `${entry.key} should be tagged personal`);
+  }
+});
+
+test('validateOverrideMap rejects a personal key on a corp scenario', () => {
+  assert.throws(
+    () => validateOverrideMap({ 'income.employment': 95000 }, 'corp'),
+    /personal scenarios/,
   );
 });
 
