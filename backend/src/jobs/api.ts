@@ -2,11 +2,16 @@ import { Router, type Request, type Response } from 'express';
 import cron from 'node-cron';
 import { HouseholdMember, Job } from '../models';
 import { currentAuth } from '../auth/middleware';
+import { aiSuggestLimiter } from '../routes/aiRateLimit';
 import { isTickRunning } from './runner';
 import { listJobs, runJobByName, listDefinitions, listJobRuns } from './registry';
 
 const router = Router();
 const manualRuns = new Set<string>();
+
+// Authenticated operator endpoints can trigger backend work, so rate-limit
+// the router per CodeQL guidance. The limiter skips NODE_ENV=test.
+router.use(aiSuggestLimiter);
 
 router.use((req: Request, res: Response, next) => {
   const auth = currentAuth(req);
