@@ -7,6 +7,7 @@ import {
   Calculator,
   CalendarClock,
   CalendarDays,
+  CheckSquare,
   Coins,
   Package,
   PackageCheck,
@@ -88,6 +89,7 @@ const navItems: NavItem[] = [
   { to: '/reports/explain-month', label: 'Explain month', icon: BookOpen },
   { to: '/sankey', label: 'Cashflow', icon: Waypoints },
   { to: '/currency', label: 'Currency', icon: Globe },
+  { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },
   { to: '/settings', label: 'Settings', icon: Settings },
