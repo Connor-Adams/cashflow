@@ -192,6 +192,89 @@ router.get('/compare', async (req, res, next) => {
   }
 });
 
+// GET /api/tax/corp-scenarios/:id/chain — walk the multi-year chain a
+// scenario belongs to, returning all scenarios in year order along with their
+// computed returns.
+//
+// The chain represents year-to-year progression (baseline year N → projection
+// year N+1 → ...). Forks within a single year are siblings, not part of the
+// chain; calling /chain on a fork returns the year-chain that fork's parent
+// belongs to (if any), or the fork itself as a single-entry chain.
+//
+// MUST be registered before `GET /:id` so Express doesn't match the literal
+// "chain" as the `:id` param. Same pattern as `/compare`.
+//
+// Algorithm:
+//   1. Walk parentId backwards collecting ancestry (root-first).
+//   2. Find the earliest ancestor whose `nextYearId` is non-null — that's the
+//      year-N anchor of the chain. If no ancestor has nextYearId, the leaf
+//      itself is the entire chain (single entry).
+//   3. Walk forwards via nextYearId from the anchor, collecting each
+//      scenario + its computed return (Task 3 dispatch handles projection
+//      vs baseline transparently).
+router.get('/:id/chain', async (req, res, next) => {
+  try {
+    const result = await loadAndAuthorize(req, Number(req.params.id));
+    if ('error' in result) {
+      const status =
+        result.error === 'not_found' ? 404 : result.error === 'forbidden' ? 403 : 400;
+      res.status(status).json({ error: result.error });
+      return;
+    }
+
+    // Step 1: walk parentId backwards collecting ancestry root-first.
+    const MAX_DEPTH = 32;
+    const ancestry: Scenario[] = [];
+    const seen = new Set<number>();
+    let cursor: Scenario | null = result.scenario;
+    while (cursor !== null) {
+      if (seen.has(cursor.id)) {
+        throw new Error(`scenario ancestry cycle detected at id=${cursor.id}`);
+      }
+      seen.add(cursor.id);
+      if (ancestry.length >= MAX_DEPTH) {
+        throw new Error(`scenario ancestry exceeds max depth ${MAX_DEPTH}`);
+      }
+      ancestry.unshift(cursor);
+      cursor =
+        cursor.parentId !== null ? await Scenario.findByPk(cursor.parentId) : null;
+    }
+
+    // Step 2: find the earliest scenario in ancestry that starts a forward
+    // chain (has nextYearId set). If none, the leaf is a single-entry chain.
+    const anchor: Scenario =
+      ancestry.find((s) => s.nextYearId !== null) ?? result.scenario;
+
+    // Step 3: walk forwards via nextYearId, collecting + computing.
+    const chainScenarios: Scenario[] = [anchor];
+    const seenForward = new Set<number>([anchor.id]);
+    let fwd: Scenario | null = anchor;
+    while (fwd && fwd.nextYearId !== null) {
+      if (chainScenarios.length >= MAX_DEPTH) {
+        throw new Error(`scenario chain exceeds max depth ${MAX_DEPTH}`);
+      }
+      if (seenForward.has(fwd.nextYearId)) {
+        throw new Error(`scenario chain cycle detected at id=${fwd.nextYearId}`);
+      }
+      const nextNode: Scenario | null = await Scenario.findByPk(fwd.nextYearId);
+      if (!nextNode) break;
+      seenForward.add(nextNode.id);
+      chainScenarios.push(nextNode);
+      fwd = nextNode;
+    }
+
+    const chain = await Promise.all(
+      chainScenarios.map(async (s) => ({
+        scenario: s,
+        computed: await computeCorpScenario(s.id),
+      })),
+    );
+    res.json({ chain });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/tax/corp-scenarios/:id — get a scenario + its computed return
 // (cached on facts hash; recomputed on miss).
 router.get('/:id', async (req, res, next) => {
