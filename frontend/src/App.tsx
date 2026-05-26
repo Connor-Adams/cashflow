@@ -25,6 +25,7 @@ import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
 import { AuditLogPage } from './pages/AuditLogPage'
+import { SyncPage } from './pages/SyncPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { TransfersPage } from './pages/TransfersPage'
 import { ItemsPage } from './pages/ItemsPage'
@@ -90,6 +91,7 @@ function AppRoutes() {
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="audit-log" element={<AuditLogPage />} />
+          <Route path="sync" element={<SyncPage />} />
           <Route path="reports/explain-month" element={<ExplainMonthPage />} />
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />

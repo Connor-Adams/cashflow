@@ -89,6 +89,7 @@ import {
   initNotificationPreference,
 } from './NotificationPreference';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
+import { SyncBackup, initSyncBackup } from './SyncBackup';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -162,6 +163,7 @@ initNotification(sequelize);
 initNotificationPreference(sequelize);
 initAuditLog(sequelize);
 initBudgetAlertState(sequelize);
+initSyncBackup(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -678,6 +680,27 @@ CashflowSettings.belongsTo(User, {
   as: 'user',
 });
 
+// Sync backups (issue #239). No CASCADE on household delete: the audit
+// history is useful diagnostic context, so we keep the rows around even
+// if the household is later removed. The intentionally-loose FK (no
+// constraint) matches the migration.
+Household.hasMany(SyncBackup, {
+  foreignKey: 'household_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(SyncBackup, {
+  foreignKey: 'user_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -750,4 +773,5 @@ export {
   NotificationPreference,
   AuditLog,
   BudgetAlertState,
+  SyncBackup,
 };
