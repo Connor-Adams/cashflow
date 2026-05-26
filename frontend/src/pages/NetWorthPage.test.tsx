@@ -104,4 +104,63 @@ describe('NetWorthPage', () => {
       expect.objectContaining({ openingBalance: 2500 }),
     )
   })
+
+  it('rejects a negative opening balance on an asset account', async () => {
+    vi.mocked(updateOpeningBalance).mockClear()
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /opening balances/i }))
+    const input = await screen.findByLabelText(/opening balance for chq/i)
+    await userEvent.clear(input)
+    await userEvent.type(input, '-100')
+    await userEvent.click(screen.getByRole('button', { name: /save chq/i }))
+    await waitFor(() =>
+      expect(
+        screen.getByText(/opening balance for an asset account can't be negative/i),
+      ).toBeInTheDocument(),
+    )
+    expect(updateOpeningBalance).not.toHaveBeenCalled()
+  })
+
+  it('allows a negative opening balance on a non-asset (liability) account', async () => {
+    vi.mocked(updateOpeningBalance).mockClear()
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /opening balances/i }))
+    const input = await screen.findByLabelText(/opening balance for visa/i)
+    await userEvent.clear(input)
+    await userEvent.type(input, '-2100')
+    await userEvent.click(screen.getByRole('button', { name: /save visa/i }))
+    expect(updateOpeningBalance).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ openingBalance: -2100 }),
+    )
+    expect(
+      screen.queryByText(/opening balance for an asset account can't be negative/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('allows zero opening balance on an asset account', async () => {
+    vi.mocked(updateOpeningBalance).mockClear()
+    render(
+      <MemoryRouter>
+        <NetWorthPage />
+      </MemoryRouter>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /opening balances/i }))
+    const input = await screen.findByLabelText(/opening balance for chq/i)
+    await userEvent.clear(input)
+    await userEvent.type(input, '0')
+    await userEvent.click(screen.getByRole('button', { name: /save chq/i }))
+    expect(updateOpeningBalance).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ openingBalance: 0 }),
+    )
+  })
 })
