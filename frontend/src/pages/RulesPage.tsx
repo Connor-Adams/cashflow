@@ -32,6 +32,12 @@ type RuleProposal = {
   exampleTransactionIds: number[]
 }
 
+type AutoRuleSuggestion = RuleProposal & {
+  id: string
+  confidence: number
+  reasoning: string
+}
+
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([])
   const [searchParams] = useSearchParams()
@@ -50,6 +56,7 @@ export function RulesPage() {
   }, [focusedId, rules.length])
 
   const [proposals, setProposals] = useState<RuleProposal[]>([])
+  const [autoSuggestions, setAutoSuggestions] = useState<AutoRuleSuggestion[]>([])
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -69,9 +76,21 @@ export function RulesPage() {
       const nextProposals = await getJson<{ proposals: RuleProposal[] }>(
         '/api/ai/rule-proposals'
       )
+      // Auto-rule suggestions endpoint may not exist on older backends; fall
+      // back to an empty list if it 404s instead of breaking the whole page.
+      let nextAuto: AutoRuleSuggestion[] = []
+      try {
+        const r = await getJson<{ suggestions: AutoRuleSuggestion[] }>(
+          '/api/rules/auto-suggestions'
+        )
+        nextAuto = r.suggestions
+      } catch {
+        nextAuto = []
+      }
       if (loadRequestRef.current === requestId) {
         setRules(nextRules)
         setProposals(nextProposals.proposals)
+        setAutoSuggestions(nextAuto)
       }
     } catch (e) {
       if (loadRequestRef.current === requestId) {
@@ -178,6 +197,39 @@ export function RulesPage() {
     }
   }
 
+  async function acceptAutoSuggestion(suggestion: AutoRuleSuggestion) {
+    setErr(null)
+    try {
+      await postJson(
+        `/api/rules/auto-suggestions/${encodeURIComponent(suggestion.id)}/accept`
+      )
+      await load()
+      showToast({
+        title: `Created rule for ${suggestion.merchantPattern}`,
+        variant: 'success',
+        durationMs: 4000,
+      })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not accept suggestion')
+    }
+  }
+
+  async function dismissAutoSuggestion(suggestion: AutoRuleSuggestion) {
+    setErr(null)
+    try {
+      await postJson(
+        `/api/rules/auto-suggestions/${encodeURIComponent(suggestion.id)}/dismiss`
+      )
+      await load()
+      showToast({
+        title: `Dismissed ${suggestion.merchantPattern}`,
+        durationMs: 4000,
+      })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not dismiss suggestion')
+    }
+  }
+
   return (
     <>
     <div className="page">
@@ -249,6 +301,72 @@ export function RulesPage() {
         </div>
         <button type="submit">Add rule</button>
       </form>
+
+      {autoSuggestions.length > 0 && (
+        <section className="card rulesTableCard">
+          <div className="rulesCardHeader">
+            <div>
+              <h2>Auto-rule suggestions</h2>
+              <p className="muted">
+                Patterns we spotted in your recent reviews. Accept to create a
+                rule; dismiss to hide the suggestion.
+              </p>
+            </div>
+            <span className="transactionsPanelBadge">
+              {autoSuggestions.length} suggestion{autoSuggestions.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="tableWrap">
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Pattern</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Biz</TableHead>
+                  <TableHead>Split</TableHead>
+                  <TableHead>Confidence</TableHead>
+                  <TableHead>Why</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {autoSuggestions.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell>{s.merchantPattern}</TableCell>
+                    <TableCell>{s.category ?? '—'}</TableCell>
+                    <TableCell>{s.isBusiness ? 'yes' : ''}</TableCell>
+                    <TableCell>{s.splitType}</TableCell>
+                    <TableCell>
+                      <span className="transactionsPanelBadge">
+                        {Math.round(s.confidence * 100)}%
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="muted">{s.reasoning}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void acceptAutoSuggestion(s)}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void dismissAutoSuggestion(s)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </section>
+      )}
 
       {proposals.length > 0 && (
         <section className="card rulesTableCard">
