@@ -60,6 +60,7 @@ import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
+import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 
 initUser(sequelize);
@@ -117,6 +118,7 @@ initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
+initFinancialGoal(sequelize);
 initAiReviewRun(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
@@ -376,6 +378,33 @@ PlannedEvent.belongsTo(Transaction, {
   as: 'linkedTransaction',
 });
 
+Household.hasMany(FinancialGoal, {
+  foreignKey: 'household_id',
+  as: 'financialGoals',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialGoal.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinancialGoal, {
+  foreignKey: 'user_id',
+  as: 'financialGoals',
+});
+FinancialGoal.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+Account.hasMany(FinancialGoal, {
+  foreignKey: 'linked_account_id',
+  as: 'financialGoals',
+});
+FinancialGoal.belongsTo(Account, {
+  foreignKey: 'linked_account_id',
+  as: 'linkedAccount',
+});
+
 Household.hasMany(AiReviewRun, {
   foreignKey: 'household_id',
   as: 'aiReviewRuns',
@@ -450,5 +479,6 @@ export {
   HouseholdPlan,
   Insight,
   PlannedEvent,
+  FinancialGoal,
   AiReviewRun,
 };
