@@ -20,6 +20,14 @@ export class User extends Model<
   declare passwordSalt: string;
   declare passwordParams: string;
   declare dob: string | null;
+  /**
+   * Last successful weekly-digest delivery (issue #267). NULL = never sent.
+   * Updated only after the job has both (a) finished aggregation without
+   * throwing and (b) — when channelEmail=true — gotten an OK from the mailer
+   * or the noop driver. Failure paths leave it untouched so the next tick
+   * retries.
+   */
+  declare lastDigestSentAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -56,6 +64,12 @@ export function initUser(sequelize: Sequelize): typeof User {
         allowNull: false,
       },
       dob: { type: DataTypes.STRING(10), allowNull: true },
+      lastDigestSentAt: {
+        type: DataTypes.DATE,
+        field: 'last_digest_sent_at',
+        allowNull: true,
+        defaultValue: null,
+      },
     } as ModelAttributes<User>,
     {
       sequelize,

@@ -48,6 +48,16 @@ function defaultsFor(type: string): SerializedNotificationPreference {
   };
 }
 
+/**
+ * Notification types that the Settings UI should ALWAYS show, even before
+ * the first notification of that type has fired for a user. Lets users
+ * opt-in (or opt-out) ahead of time. New entries here must be the same
+ * string the `enqueueNotification` call-sites pass as `type`.
+ */
+export const WELL_KNOWN_NOTIFICATION_TYPES: readonly string[] = [
+  'digest.weekly',
+];
+
 /** Validator exported for unit testing. */
 export function validateNotificationPreferencePatch(
   raw: Record<string, unknown>,
@@ -99,6 +109,15 @@ router.get('/', async (req, res, next) => {
       if (!seenTypes.has(n.type)) {
         byType.set(n.type, defaultsFor(n.type));
         seenTypes.add(n.type);
+      }
+    }
+
+    // Always include curated well-known types so users can opt in/out
+    // before the first notification of that type fires.
+    for (const t of WELL_KNOWN_NOTIFICATION_TYPES) {
+      if (!seenTypes.has(t)) {
+        byType.set(t, defaultsFor(t));
+        seenTypes.add(t);
       }
     }
 
