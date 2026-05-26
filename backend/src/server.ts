@@ -5,7 +5,6 @@ import { seedDemoData } from './demo/seedDemoData';
 import { backfillUsdCadHistory } from './fx/backfillUsdCadHistory';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
-import { startEnrichmentBackfillScheduler } from './import/enrichmentBackfillScheduler';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -36,7 +35,6 @@ async function start() {
     console.error('[boot] USD/CAD backfill failed (non-fatal):', err);
   });
 
-  startEnrichmentBackfillScheduler();
 }
 
 start().catch((err) => {
