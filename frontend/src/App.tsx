@@ -5,12 +5,14 @@ import { AccountsPage } from './pages/AccountsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
+import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { NetWorthPage } from './pages/NetWorthPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
 import { PlannedEventsPage } from './pages/PlannedEventsPage'
 import { CalendarPage } from './pages/CalendarPage'
+import { ForecastPage } from './pages/ForecastPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RulesPage } from './pages/RulesPage'
@@ -30,6 +32,7 @@ import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { TaxPage } from './pages/TaxPage'
 import { AiInboxPage } from './pages/AiInboxPage'
+import { AiReviewsPage } from './pages/AiReviewsPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AuthProvider } from './lib/auth'
@@ -60,8 +63,10 @@ function AppRoutes() {
           <Route path="amazon" element={<AmazonPage />} />
           <Route path="planned" element={<PlannedEventsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
+          <Route path="forecast" element={<ForecastPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="rules" element={<RulesPage />} />
+          <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="settings" element={<SettingsPage />}>
@@ -78,6 +83,7 @@ function AppRoutes() {
             <Route path="categories" element={<CategoriesTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
+          <Route path="ai/reviews" element={<AiReviewsPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

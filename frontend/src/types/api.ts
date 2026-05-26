@@ -118,6 +118,86 @@ export type PartnerSettlementInput = {
   notes?: string | null
 }
 
+// ---------- Partner Fairness Dashboard (GET /api/partner/*) -----------------
+// Mirrors backend/src/summary/partnerFairness.ts. The backend uses the
+// single-payer model where `partnerShare` on each transaction is what the
+// partner owes me back; `balance` follows the same sign convention as
+// /api/summary/partner: positive → partner owes me, negative → I owe partner.
+
+/** One bucket of the per-currency category breakdown. */
+export type PartnerFairnessCategoryBreakdown = {
+  category: string
+  sharedSpend: number
+  myShare: number
+  partnerShare: number
+  transactionCount: number
+}
+
+/** One of the largest shared transactions surfaced by /partner/fairness. */
+export type PartnerFairnessLargestTransaction = {
+  txnId: number
+  date: string
+  merchant: string
+  category: string | null
+  amount: number
+  myShare: number
+  partnerShare: number
+  ownershipType: string
+  ownershipContactId: number | null
+  contactName: string | null
+}
+
+/** Per-currency fairness summary. */
+export type PartnerFairnessByCurrency = {
+  currency: string
+  sharedSpendTotal: number
+  myShareTotal: number
+  partnerShareTotal: number
+  sharedTransactionCount: number
+  currentMonthSharedSpend: number
+  balance: number
+  direction: 'partner_owes_me' | 'i_owe_partner' | 'even'
+  paidMore: { youCovered: number; partnerCovered: number }
+  categoryBreakdown: PartnerFairnessCategoryBreakdown[]
+  largestShared: PartnerFairnessLargestTransaction[]
+}
+
+/** Response shape for GET /api/partner/fairness. */
+export type PartnerFairnessResponse = {
+  byCurrency: PartnerFairnessByCurrency[]
+}
+
+/** One point in the historical fairness trend. */
+export type PartnerFairnessMonthlyPoint = {
+  /** YYYY-MM */
+  month: string
+  currency: string
+  sharedSpend: number
+  myShare: number
+  partnerShare: number
+  settlementDelta: number
+  netDelta: number
+  cumulativeBalance: number
+}
+
+/** Response shape for GET /api/partner/monthly. */
+export type PartnerFairnessMonthlyResponse = {
+  points: PartnerFairnessMonthlyPoint[]
+}
+
+/** One settlement recommendation per currency. */
+export type PartnerSettlementRecommendation = {
+  currency: string
+  amount: number
+  direction: 'partner_pays_you' | 'you_pay_partner' | 'none'
+  outstandingBalance: number
+}
+
+/** Response shape for GET /api/partner/settlement-recommendation. */
+export type PartnerSettlementRecommendationResponse = {
+  recommendations: PartnerSettlementRecommendation[]
+}
+
 /**
  * Filter shape accepted by POST /api/transactions/bulk-patch-filter. Mirrors
  * the subset of GET /api/transactions query params relevant for narrowing
@@ -400,6 +480,53 @@ export const CALENDAR_EVENT_DOT_CLASS: Record<PlannedEventType, string> = {
   settlement: 'bg-amber-500',
   debt_payment: 'bg-orange-500',
   savings: 'bg-violet-500',
+}
+
+/**
+ * Direction of a forecast occurrence — drives sign + colour in the UI.
+ * 'neutral' covers intra-household transfers / partner settlements that
+ * net to zero at the household level.
+ */
+export type ForecastEventDirection = 'in' | 'out' | 'neutral'
+
+/**
+ * Source of a forecast occurrence row in GET /api/forecast.events.
+ * 'planned_event' came from the planned_events table; 'recurring_detection'
+ * was inferred from transaction history.
+ */
+export type ForecastEventSource = 'planned_event' | 'recurring_detection'
+
+/** One projected occurrence inside the forecast window. */
+export type ForecastEvent = {
+  date: string
+  /** Always non-negative; sign comes from `direction`. */
+  amount: number
+  direction: ForecastEventDirection
+  sourceType: ForecastEventSource
+  sourceId: number
+  sourceName: string
+  accountId: number | null
+}
+
+/** One daily point on the projected balance line. */
+export type ForecastDailyPoint = {
+  date: string
+  balance: number
+}
+
+/** Response shape for GET /api/forecast. */
+export type ForecastResponse = {
+  currency: string
+  /** YYYY-MM-DD inclusive. */
+  dateFrom: string
+  /** YYYY-MM-DD inclusive. */
+  dateTo: string
+  openingBalance: number
+  projectedClosingBalance: number
+  lowestProjectedBalance: number
+  lowestProjectedBalanceDate: string | null
+  dailyPoints: ForecastDailyPoint[]
+  events: ForecastEvent[]
 }
 
 export type AppConfig = {

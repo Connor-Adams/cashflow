@@ -1,0 +1,425 @@
+/**
+ * Pure aggregation helpers for the Partner Fairness dashboard (issue #207).
+ *
+ * Single-payer model recap (see partnerMath.ts for full rationale):
+ *   - The uploader ("me") is the only payer on every imported transaction.
+ *   - `partnerShareAmount` on each row is what the partner owes me back —
+ *     it is the only "debt" component. `myShareAmount` is my own portion
+ *     and is NOT a debt.
+ *   - A "shared" transaction is one where the partner has a non-zero share,
+ *     i.e. `partnerShareAmount !== 0`. Both true joint ('shared' split) and
+ *     contact-tagged rows show up here. Sign matches `amount` sign
+ *     (negative for purchases, positive for refunds).
+ *
+ * Settlement signs match `partnerMath.applySettlements`:
+ *   - `i_paid_partner` REDUCES what I owe → +balance for "partner owes me"
+ *   - `partner_paid_me` REDUCES what partner owes me → -balance
+ *
+ * All numeric values are JS numbers (sub-cent rounding handled at the
+ * "direction" boundary so values like `0.001` don't get rendered as a
+ * one-cent debt).
+ */
+
+/** Raw aggregated row keyed by (currency, month, category). */
+export type SharedTxnRow = {
+  /** YYYY-MM-DD */
+  date: string;
+  currency: string;
+  /** May be null when the txn was never categorized — surfaces as "Uncategorized". */
+  category: string | null;
+  merchant: string;
+  /** Signed transaction amount (negative for purchases). */
+  amount: number;
+  /** Signed: positive when I covered some of the cost (purchase). */
+  myShare: number;
+  /** Signed: positive when partner owes me, negative on refunds against shared items. */
+  partnerShare: number;
+  /** Transaction id — used for "largest shared transactions" deep-link. */
+  txnId: number;
+  ownershipType: string;
+  ownershipContactId: number | null;
+  contactName: string | null;
+};
+
+/** Settlement summary keyed by (contactId, currency). Mirrors `partnerMath.SettlementSummary`. */
+export type SettlementTotals = {
+  contactId: number;
+  currency: string;
+  /** Sum of `i_paid_partner` rows in this scope. */
+  iPaid: number;
+  /** Sum of `partner_paid_me` rows in this scope. */
+  partnerPaid: number;
+};
+
+/** One bucket of the category breakdown. */
+export type FairnessCategoryBreakdown = {
+  category: string;
+  sharedSpend: number;
+  myShare: number;
+  partnerShare: number;
+  transactionCount: number;
+};
+
+/** One of the largest shared transactions (top-N). */
+export type FairnessLargestTransaction = {
+  txnId: number;
+  date: string;
+  merchant: string;
+  category: string | null;
+  amount: number;
+  myShare: number;
+  partnerShare: number;
+  ownershipType: string;
+  ownershipContactId: number | null;
+  contactName: string | null;
+};
+
+/** "Who paid more" — pure who-covered-shared-spend rollup per currency. */
+export type FairnessPaidMore = {
+  /** What I covered out-of-pocket (sum |myShare| for shared rows). */
+  youCovered: number;
+  /** What partner has covered via settlements (sum partnerPaid - iPaid, floored at 0). */
+  partnerCovered: number;
+};
+
+/**
+ * Per-currency fairness summary, suitable for direct JSON return.
+ * `balance` follows the sign convention from partnerMath:
+ *    > 0 → partner owes me, < 0 → I owe partner, == 0 → even (after sub-cent round).
+ */
+export type FairnessByCurrency = {
+  currency: string;
+  /**
+   * Sum of `partnerShare` across every shared row in the scope. This is the
+   * gross "what partner owes me" before settlements.
+   */
+  sharedSpendTotal: number;
+  /** Sum of `myShare` across every shared row. My out-of-pocket portion of shared spend. */
+  myShareTotal: number;
+  /** Sum of `partnerShare` across every shared row. Same as sharedSpendTotal but named for symmetry. */
+  partnerShareTotal: number;
+  /** Number of distinct shared transactions. */
+  sharedTransactionCount: number;
+  /**
+   * Current-month shared spend (purchases only, sign flipped to positive for
+   * display: sum of |amount| where partnerShare !== 0 and amount < 0).
+   * Refunds reduce this; we floor at 0 so a refund-heavy month never goes
+   * negative in the headline metric.
+   */
+  currentMonthSharedSpend: number;
+  /**
+   * Cumulative settlement-adjusted balance: gross + (iPaid - partnerPaid).
+   * Positive: partner owes me. Negative: I owe partner.
+   */
+  balance: number;
+  /** Direction is computed at sub-cent precision so 0.001 renders as "even". */
+  direction: 'partner_owes_me' | 'i_owe_partner' | 'even';
+  /** "Who paid more" rollup. */
+  paidMore: FairnessPaidMore;
+  /** Top categories by absolute shared spend. */
+  categoryBreakdown: FairnessCategoryBreakdown[];
+  /** Top-N largest shared transactions by |amount|. */
+  largestShared: FairnessLargestTransaction[];
+};
+
+/** One point of the historical fairness trend. */
+export type FairnessMonthlyPoint = {
+  /** YYYY-MM */
+  month: string;
+  currency: string;
+  /** Signed sum of shared-row amount (purchases negative, refunds positive). */
+  sharedSpend: number;
+  myShare: number;
+  partnerShare: number;
+  /** Total settlement movement in this month (iPaid - partnerPaid). */
+  settlementDelta: number;
+  /** Net change to outstanding balance in this month: partnerShare + settlementDelta. */
+  netDelta: number;
+  /** Running cumulative balance through the END of this month. */
+  cumulativeBalance: number;
+};
+
+/** Settlement recommendation per currency. */
+export type SettlementRecommendation = {
+  currency: string;
+  /** Absolute amount, formatted with 2 decimal places at the JSON boundary. */
+  amount: number;
+  /** Who should pay whom to bring the balance to zero. `none` when balance is sub-cent even. */
+  direction: 'partner_pays_you' | 'you_pay_partner' | 'none';
+  /** The raw signed balance the recommendation is settling. Useful for tooltips. */
+  outstandingBalance: number;
+};
+
+const TOP_CATEGORY_LIMIT = 8;
+const TOP_LARGEST_LIMIT = 10;
+
+function directionFromBalance(
+  balance: number,
+): 'partner_owes_me' | 'i_owe_partner' | 'even' {
+  const rounded = Math.round(balance * 100) / 100;
+  if (rounded > 0) return 'partner_owes_me';
+  if (rounded < 0) return 'i_owe_partner';
+  return 'even';
+}
+
+/**
+ * Slice rows to those whose date falls within `currentMonthStart` (inclusive)
+ * and `nextMonthStart` (exclusive). `currentMonthStart` is a YYYY-MM-DD with
+ * day=01.
+ */
+function isInCurrentMonth(
+  date: string,
+  currentMonthStart: string,
+  nextMonthStart: string,
+): boolean {
+  return date >= currentMonthStart && date < nextMonthStart;
+}
+
+/**
+ * Group rows by category and sort descending by absolute sharedSpend.
+ * "Uncategorized" is a sentinel label used for null categories so the UI
+ * never renders an empty cell. Top-N limit (8) keeps the chart legible.
+ */
+export function aggregateCategoryBreakdown(
+  rows: SharedTxnRow[],
+): FairnessCategoryBreakdown[] {
+  const byCategory = new Map<string, FairnessCategoryBreakdown>();
+  for (const r of rows) {
+    if (r.partnerShare === 0) continue;
+    const key = r.category ?? 'Uncategorized';
+    const bucket =
+      byCategory.get(key) ??
+      ({
+        category: key,
+        sharedSpend: 0,
+        myShare: 0,
+        partnerShare: 0,
+        transactionCount: 0,
+      } satisfies FairnessCategoryBreakdown);
+    bucket.sharedSpend += r.amount;
+    bucket.myShare += r.myShare;
+    bucket.partnerShare += r.partnerShare;
+    bucket.transactionCount += 1;
+    byCategory.set(key, bucket);
+  }
+  return Array.from(byCategory.values())
+    .sort((a, b) => Math.abs(b.sharedSpend) - Math.abs(a.sharedSpend))
+    .slice(0, TOP_CATEGORY_LIMIT);
+}
+
+/**
+ * Top-N largest shared transactions by absolute amount.
+ *
+ * Refunds (positive amounts) are included intentionally: a $200 refund on a
+ * shared purchase is just as informative as a $200 purchase when figuring
+ * out who paid for what.
+ */
+export function topLargestShared(
+  rows: SharedTxnRow[],
+): FairnessLargestTransaction[] {
+  return rows
+    .filter((r) => r.partnerShare !== 0)
+    .slice()
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+    .slice(0, TOP_LARGEST_LIMIT)
+    .map((r) => ({
+      txnId: r.txnId,
+      date: r.date,
+      merchant: r.merchant,
+      category: r.category,
+      amount: r.amount,
+      myShare: r.myShare,
+      partnerShare: r.partnerShare,
+      ownershipType: r.ownershipType,
+      ownershipContactId: r.ownershipContactId,
+      contactName: r.contactName,
+    }));
+}
+
+/**
+ * Build the per-currency fairness summary used by `GET /api/partner/fairness`.
+ *
+ * @param rows           Raw shared transaction rows (already scoped to household + date filter)
+ * @param settlements    Pre-aggregated settlement totals scoped to the same date filter
+ * @param currentMonthStart YYYY-MM-DD of the first day of the current month (caller passes today's month, or any reference month)
+ * @param nextMonthStart YYYY-MM-DD of the first day of the month AFTER currentMonthStart
+ */
+export function buildFairnessByCurrency(
+  rows: SharedTxnRow[],
+  settlements: SettlementTotals[],
+  currentMonthStart: string,
+  nextMonthStart: string,
+): FairnessByCurrency[] {
+  const byCurrency = new Map<string, FairnessByCurrency>();
+
+  // Bucket shared rows per currency.
+  const rowsByCurrency = new Map<string, SharedTxnRow[]>();
+  for (const r of rows) {
+    if (r.partnerShare === 0) continue;
+    const list = rowsByCurrency.get(r.currency) ?? [];
+    list.push(r);
+    rowsByCurrency.set(r.currency, list);
+  }
+
+  // Bucket settlements per currency (sum across contacts).
+  const settlementByCurrency = new Map<string, { iPaid: number; partnerPaid: number }>();
+  for (const s of settlements) {
+    const cur = settlementByCurrency.get(s.currency) ?? { iPaid: 0, partnerPaid: 0 };
+    cur.iPaid += s.iPaid;
+    cur.partnerPaid += s.partnerPaid;
+    settlementByCurrency.set(s.currency, cur);
+  }
+
+  // Union currencies across rows and settlements so a currency with only a
+  // settlement still surfaces.
+  const allCurrencies = new Set<string>([
+    ...rowsByCurrency.keys(),
+    ...settlementByCurrency.keys(),
+  ]);
+
+  for (const currency of allCurrencies) {
+    const list = rowsByCurrency.get(currency) ?? [];
+    const settlement = settlementByCurrency.get(currency) ?? { iPaid: 0, partnerPaid: 0 };
+    let sharedSpendTotal = 0;
+    let myShareTotal = 0;
+    let partnerShareTotal = 0;
+    let currentMonthSharedSpend = 0;
+    for (const r of list) {
+      sharedSpendTotal += r.amount;
+      myShareTotal += r.myShare;
+      partnerShareTotal += r.partnerShare;
+      // Headline "current month spend" is a positive-display purchase count:
+      // sum |amount| for purchase rows (amount < 0) in this month.
+      if (
+        r.amount < 0 &&
+        isInCurrentMonth(r.date, currentMonthStart, nextMonthStart)
+      ) {
+        currentMonthSharedSpend += Math.abs(r.amount);
+      }
+    }
+    const balance = partnerShareTotal + (settlement.iPaid - settlement.partnerPaid);
+    const paidMore: FairnessPaidMore = {
+      // What I covered = my-share on shared rows (purchases). Positive number for display.
+      youCovered: Math.max(0, -myShareTotal),
+      // Partner covered via settlements (net partnerPaid in - iPaid out).
+      partnerCovered: Math.max(0, settlement.partnerPaid - settlement.iPaid),
+    };
+    byCurrency.set(currency, {
+      currency,
+      sharedSpendTotal,
+      myShareTotal,
+      partnerShareTotal,
+      sharedTransactionCount: list.length,
+      currentMonthSharedSpend,
+      balance,
+      direction: directionFromBalance(balance),
+      paidMore,
+      categoryBreakdown: aggregateCategoryBreakdown(list),
+      largestShared: topLargestShared(list),
+    });
+  }
+
+  return Array.from(byCurrency.values()).sort((a, b) =>
+    a.currency.localeCompare(b.currency),
+  );
+}
+
+/**
+ * Build the historical fairness trend.
+ *
+ * Months without any activity (no shared txn + no settlement) are omitted —
+ * the chart treats absent months as zero-delta and connects the dots
+ * visually. The `cumulativeBalance` is a running total from the EARLIEST
+ * month in the dataset through each emitted month; callers passing a
+ * narrowed date range still get a balance relative to that range, NOT the
+ * lifetime balance. Pass an unfiltered range for the lifetime view.
+ */
+export function buildFairnessMonthly(
+  rows: SharedTxnRow[],
+  settlements: Array<SettlementTotals & { /** YYYY-MM */ month: string }>,
+): FairnessMonthlyPoint[] {
+  type Acc = {
+    sharedSpend: number;
+    myShare: number;
+    partnerShare: number;
+    settlementDelta: number;
+  };
+  const byKey = new Map<string, Acc>(); // key: `${currency}\0${month}`
+
+  for (const r of rows) {
+    if (r.partnerShare === 0) continue;
+    const month = r.date.slice(0, 7); // YYYY-MM
+    const key = `${r.currency}\0${month}`;
+    const acc =
+      byKey.get(key) ??
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0 } satisfies Acc);
+    acc.sharedSpend += r.amount;
+    acc.myShare += r.myShare;
+    acc.partnerShare += r.partnerShare;
+    byKey.set(key, acc);
+  }
+
+  for (const s of settlements) {
+    const key = `${s.currency}\0${s.month}`;
+    const acc =
+      byKey.get(key) ??
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0 } satisfies Acc);
+    acc.settlementDelta += s.iPaid - s.partnerPaid;
+    byKey.set(key, acc);
+  }
+
+  // Sort by (currency, month) so running cumulative is computed in order.
+  const entries: Array<{ currency: string; month: string; acc: Acc }> = [];
+  for (const [k, acc] of byKey.entries()) {
+    const [currency, month] = k.split('\0');
+    entries.push({ currency, month, acc });
+  }
+  entries.sort((a, b) =>
+    a.currency === b.currency
+      ? a.month.localeCompare(b.month)
+      : a.currency.localeCompare(b.currency),
+  );
+
+  const runningByCurrency = new Map<string, number>();
+  const points: FairnessMonthlyPoint[] = [];
+  for (const { currency, month, acc } of entries) {
+    const netDelta = acc.partnerShare + acc.settlementDelta;
+    const running = (runningByCurrency.get(currency) ?? 0) + netDelta;
+    runningByCurrency.set(currency, running);
+    points.push({
+      month,
+      currency,
+      sharedSpend: acc.sharedSpend,
+      myShare: acc.myShare,
+      partnerShare: acc.partnerShare,
+      settlementDelta: acc.settlementDelta,
+      netDelta,
+      cumulativeBalance: running,
+    });
+  }
+  return points;
+}
+
+/**
+ * Derive a settlement recommendation from the per-currency outstanding
+ * balance. Sub-cent balances collapse to `direction: 'none'` so the UI
+ * doesn't suggest paying a fraction of a cent.
+ */
+export function buildSettlementRecommendation(
+  fairness: FairnessByCurrency[],
+): SettlementRecommendation[] {
+  return fairness.map((f) => {
+    const rounded = Math.round(f.balance * 100) / 100;
+    const amount = Math.abs(rounded);
+    let direction: SettlementRecommendation['direction'];
+    if (rounded > 0) direction = 'partner_pays_you';
+    else if (rounded < 0) direction = 'you_pay_partner';
+    else direction = 'none';
+    return {
+      currency: f.currency,
+      amount,
+      direction,
+      outstandingBalance: f.balance,
+    };
+  });
+}

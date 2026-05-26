@@ -49,6 +49,7 @@ import type {
   TransactionFilterPayload,
 } from '../types/api'
 import { useSessionState } from '../lib/useSessionState'
+import { notifyReceiptsChanged } from '@/hooks/useReceiptCompleteness'
 
 type CategoryHint = {
   label: string
@@ -525,6 +526,7 @@ export function TransactionsPage() {
       const fd = new FormData()
       fd.append('file', file)
       await postFormData<{ id: number }>(`/api/transactions/${tid}/receipts`, fd)
+      notifyReceiptsChanged()
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Receipt upload failed')

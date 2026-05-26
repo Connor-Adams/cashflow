@@ -21,9 +21,12 @@ import {
   Settings,
   Shield,
   Sparkles,
+  Stethoscope,
   Sun,
   Moon,
+  TrendingUp,
   Upload,
+  Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -53,11 +56,14 @@ const navItems: NavItem[] = [
   { to: '/amazon', label: 'Amazon', icon: PackageSearch },
   { to: '/planned', label: 'Planned', icon: CalendarClock },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+  { to: '/forecast', label: 'Forecast', icon: TrendingUp },
   { to: '/recurring', label: 'Recurring', icon: Repeat },
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
+  { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
   { to: '/insights', label: 'Insights', icon: Lightbulb },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/partner', label: 'Partner', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   // TODO: swap Calculator for a dedicated tax icon when one is available in lucide-react
   { to: '/tax', label: 'Tax', icon: Calculator },
