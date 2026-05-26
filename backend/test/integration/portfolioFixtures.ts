@@ -202,8 +202,13 @@ export async function seedSecurityMetadata(
 ): Promise<void> {
   const sec = await models.Security.findByPk(securityId);
   if (!sec) throw new Error(`Security ${securityId} not found`);
+  // Seed with the structured key `marketCap: null` even when callers only
+  // care about the legacy fields. ensureOverview treats metadata lacking
+  // `marketCap` as schema-stale (pre-expanded-modules rollout) and forces
+  // a refresh, which makes integration tests that just want a "cached"
+  // payload flap to status:'stale'.
   await sec.update({
-    metadata: metadata as never,
+    metadata: { marketCap: null, ...metadata } as never,
     metadataFetchedAt: new Date(),
   });
 }

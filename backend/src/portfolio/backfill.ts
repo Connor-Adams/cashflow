@@ -17,6 +17,7 @@ import { Security, SecurityDailyPrice, SecurityDividend } from '../models';
 import * as defaultYahoo from '../integrations/yahoo/client';
 import { YahooFinanceError } from '../integrations/yahoo/client';
 import { recordCall } from '../integrations/yahoo/jobLog';
+import { overviewToMetadata } from '../integrations/yahoo/overviewMetadata';
 import { enumerateYahooSymbols } from '../integrations/yahoo/symbol';
 import * as env from '../config/env';
 import { logger } from '../observability/logger';
@@ -158,6 +159,9 @@ export async function ensureDailyPrices(securityId: number): Promise<BackfillSta
     };
   }
 
+  if (symbolCandidates(sec).length === 0) {
+    return { status: 'fresh', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
+  }
   if (rowCount === 0) {
     enqueue(key, () => backfillDaily(sec, 'full'));
     return { status: 'never', lastFetchedAt, nextRetryAt: null, coverageDays: 0 };
@@ -237,8 +241,12 @@ export async function ensureDividends(securityId: number): Promise<BackfillStatu
   const isStale =
     latest != null && Date.now() - latest.fetchedAt.getTime() > DIVIDENDS_STALE_MS;
 
+  const candidates = symbolCandidates(sec);
+  if (candidates.length === 0) {
+    return { status: 'fresh', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
+  }
+
   if (rowCount === 0 || isStale) {
-    const candidates = symbolCandidates(sec);
     enqueue(key, async () => {
       await runTrackedFetch(
         'DIVIDENDS',
@@ -284,14 +292,23 @@ export async function ensureOverview(securityId: number): Promise<BackfillStatus
   }
   const fetched = sec.metadataFetchedAt;
   const lastFetchedAt = fetched?.toISOString() ?? null;
-  const isStale = fetched != null && Date.now() - fetched.getTime() > OVERVIEW_STALE_MS;
+  const ageStale = fetched != null && Date.now() - fetched.getTime() > OVERVIEW_STALE_MS;
+  // Schema-stale: rows persisted before the expanded-modules rollout lack
+  // structured market-data keys. Force a refresh so the user sees fundamentals
+  // on first visit instead of waiting for the 90-day staleness window.
+  const schemaStale =
+    sec.metadata != null && !('marketCap' in (sec.metadata as Record<string, unknown>));
+  const isStale = ageStale || schemaStale;
   const isNever = sec.metadata == null;
 
   if (inFlight.has(key)) {
     return { status: 'in_progress', lastFetchedAt, nextRetryAt: null, coverageDays: isNever ? 0 : 1 };
   }
+  const candidates = symbolCandidates(sec);
+  if (candidates.length === 0) {
+    return { status: 'fresh', lastFetchedAt, nextRetryAt: null, coverageDays: isNever ? 0 : 1 };
+  }
   if (isNever || isStale) {
-    const candidates = symbolCandidates(sec);
     enqueue(key, () =>
       runTrackedFetch(
         'OVERVIEW',
@@ -299,14 +316,7 @@ export async function ensureOverview(securityId: number): Promise<BackfillStatus
         (symbol) => yahoo.fetchOverview(symbol),
         async (_symbol, overview) => {
           await sec.update({
-            metadata: {
-              sector: overview.sector,
-              industry: overview.industry,
-              country: overview.country,
-              exchange: overview.exchange,
-              description: overview.description,
-              ...overview.raw,
-            },
+            metadata: overviewToMetadata(overview),
             metadataFetchedAt: new Date(),
           });
         },

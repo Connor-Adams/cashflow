@@ -183,6 +183,67 @@ test('concurrent ensureDailyPrices for same security dedupes', async () => {
   assert.ok(['never', 'in_progress'].includes(a.status));
 });
 
+type OverviewFixture = NonNullable<
+  Awaited<ReturnType<typeof import('../../src/integrations/yahoo/client').fetchOverview>>
+>;
+
+function makeOverview(partial: Partial<OverviewFixture>): OverviewFixture {
+  const base: OverviewFixture = {
+    sector: null,
+    industry: null,
+    country: null,
+    exchange: null,
+    description: null,
+    regularMarketPrice: null,
+    previousClose: null,
+    marketCap: null,
+    trailingPE: null,
+    forwardPE: null,
+    trailingEps: null,
+    forwardEps: null,
+    beta: null,
+    dayLow: null,
+    dayHigh: null,
+    fiftyTwoWeekLow: null,
+    fiftyTwoWeekHigh: null,
+    fiftyDayAverage: null,
+    twoHundredDayAverage: null,
+    volume: null,
+    averageVolume: null,
+    averageVolume10days: null,
+    sharesOutstanding: null,
+    priceToBook: null,
+    bookValue: null,
+    dividendRate: null,
+    dividendYield: null,
+    fiveYearAvgDividendYield: null,
+    payoutRatio: null,
+    exDividendDate: null,
+    totalRevenue: null,
+    revenuePerShare: null,
+    grossMargins: null,
+    operatingMargins: null,
+    profitMargins: null,
+    ebitdaMargins: null,
+    returnOnAssets: null,
+    returnOnEquity: null,
+    totalCash: null,
+    totalDebt: null,
+    debtToEquity: null,
+    freeCashflow: null,
+    operatingCashflow: null,
+    targetMeanPrice: null,
+    targetHighPrice: null,
+    targetLowPrice: null,
+    recommendationMean: null,
+    recommendationKey: null,
+    numberOfAnalystOpinions: null,
+    financialCurrency: null,
+    raw: {},
+  };
+  return { ...base, ...partial };
+}
+
 test('ensureOverview persists metadata + logs ok', async () => {
   const sec = await models.Security.create({
     householdId: 1, symbol: 'AAPL', name: 'Apple', assetType: 'EQUITY', currency: 'USD',
@@ -191,12 +252,15 @@ test('ensureOverview persists metadata + logs ok', async () => {
     fetchQuote: async () => null,
     fetchDailyHistory: async () => [],
     fetchDividends: async () => [],
-    fetchOverview: async () => ({
+    fetchOverview: async () => makeOverview({
       sector: 'Technology',
       industry: 'Consumer Electronics',
       country: 'United States',
       exchange: 'NMS',
       description: 'Designs phones.',
+      marketCap: 3_000_000_000_000,
+      trailingPE: 32.5,
+      dividendYield: 0.005,
       raw: { symbol: 'AAPL' },
     }),
   });
@@ -208,6 +272,9 @@ test('ensureOverview persists metadata + logs ok', async () => {
   const refreshed = await models.Security.findByPk(sec.id);
   assert.ok(refreshed);
   assert.equal(refreshed.metadata?.sector, 'Technology');
+  assert.equal(refreshed.metadata?.marketCap, 3_000_000_000_000);
+  assert.equal(refreshed.metadata?.trailingPE, 32.5);
+  assert.equal(refreshed.metadata?.dividendYield, 0.005);
   assert.ok(refreshed.metadataFetchedAt instanceof Date);
 
   const okLog = await models.ProviderJobLog.findOne({
@@ -217,6 +284,33 @@ test('ensureOverview persists metadata + logs ok', async () => {
 
   const second = await backfill.ensureOverview(sec.id);
   assert.equal(second.status, 'fresh');
+});
+
+test('ensureOverview skips Yahoo for cash-placeholder symbols', async () => {
+  const sec = await models.Security.create({
+    householdId: 1, symbol: 'USD', name: 'US Cash', assetType: 'CASH', currency: 'USD',
+  });
+  let called = false;
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async () => [],
+    fetchDividends: async () => [],
+    fetchOverview: async () => {
+      called = true;
+      return null;
+    },
+  });
+
+  const status = await backfill.ensureOverview(sec.id);
+  await new Promise((r) => setTimeout(r, 60));
+
+  assert.equal(status.status, 'fresh', 'cash positions should short-circuit, not poll Yahoo');
+  assert.equal(called, false, 'Yahoo fetcher must not be invoked for cash placeholders');
+
+  const logs = await models.ProviderJobLog.findAll({
+    where: { function: 'OVERVIEW' },
+  });
+  assert.equal(logs.length, 0, 'no provider_job_log row should be recorded');
 });
 
 test('ensureDividends rate-limit response is recorded as rate_limited', async () => {

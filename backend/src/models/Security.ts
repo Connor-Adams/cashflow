@@ -16,7 +16,56 @@ export type SecurityMetadata = {
   country?: string | null;
   exchange?: string | null;
   description?: string | null;
-  // Raw passthrough; later slices may surface more fields.
+  // Market data
+  regularMarketPrice?: number | null;
+  previousClose?: number | null;
+  marketCap?: number | null;
+  trailingPE?: number | null;
+  forwardPE?: number | null;
+  trailingEps?: number | null;
+  forwardEps?: number | null;
+  beta?: number | null;
+  dayLow?: number | null;
+  dayHigh?: number | null;
+  fiftyTwoWeekLow?: number | null;
+  fiftyTwoWeekHigh?: number | null;
+  fiftyDayAverage?: number | null;
+  twoHundredDayAverage?: number | null;
+  volume?: number | null;
+  averageVolume?: number | null;
+  averageVolume10days?: number | null;
+  sharesOutstanding?: number | null;
+  priceToBook?: number | null;
+  bookValue?: number | null;
+  // Dividend stats
+  dividendRate?: number | null;
+  dividendYield?: number | null;
+  fiveYearAvgDividendYield?: number | null;
+  payoutRatio?: number | null;
+  exDividendDate?: string | null;
+  // Fundamentals
+  totalRevenue?: number | null;
+  revenuePerShare?: number | null;
+  grossMargins?: number | null;
+  operatingMargins?: number | null;
+  profitMargins?: number | null;
+  ebitdaMargins?: number | null;
+  returnOnAssets?: number | null;
+  returnOnEquity?: number | null;
+  totalCash?: number | null;
+  totalDebt?: number | null;
+  debtToEquity?: number | null;
+  freeCashflow?: number | null;
+  operatingCashflow?: number | null;
+  // Analyst targets
+  targetMeanPrice?: number | null;
+  targetHighPrice?: number | null;
+  targetLowPrice?: number | null;
+  recommendationMean?: number | null;
+  recommendationKey?: string | null;
+  numberOfAnalystOpinions?: number | null;
+  financialCurrency?: string | null;
+  // Raw passthrough — full quoteSummary for forensics / future fields.
   [key: string]: unknown;
 };
 

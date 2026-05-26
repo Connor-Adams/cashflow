@@ -57,6 +57,57 @@ export interface OverviewResult {
   country: string | null;
   exchange: string | null;
   description: string | null;
+  /** Snapshot quote data from the `price` module. */
+  regularMarketPrice: number | null;
+  previousClose: number | null;
+  /** Market data — `summaryDetail` + `defaultKeyStatistics`. */
+  marketCap: number | null;
+  trailingPE: number | null;
+  forwardPE: number | null;
+  trailingEps: number | null;
+  forwardEps: number | null;
+  beta: number | null;
+  dayLow: number | null;
+  dayHigh: number | null;
+  fiftyTwoWeekLow: number | null;
+  fiftyTwoWeekHigh: number | null;
+  fiftyDayAverage: number | null;
+  twoHundredDayAverage: number | null;
+  volume: number | null;
+  averageVolume: number | null;
+  averageVolume10days: number | null;
+  sharesOutstanding: number | null;
+  priceToBook: number | null;
+  bookValue: number | null;
+  /** Dividend stats — `summaryDetail`. */
+  dividendRate: number | null;
+  dividendYield: number | null;
+  fiveYearAvgDividendYield: number | null;
+  payoutRatio: number | null;
+  exDividendDate: string | null;
+  /** Fundamentals — `financialData`. */
+  totalRevenue: number | null;
+  revenuePerShare: number | null;
+  grossMargins: number | null;
+  operatingMargins: number | null;
+  profitMargins: number | null;
+  ebitdaMargins: number | null;
+  returnOnAssets: number | null;
+  returnOnEquity: number | null;
+  totalCash: number | null;
+  totalDebt: number | null;
+  debtToEquity: number | null;
+  freeCashflow: number | null;
+  operatingCashflow: number | null;
+  /** Analyst data — `financialData`. */
+  targetMeanPrice: number | null;
+  targetHighPrice: number | null;
+  targetLowPrice: number | null;
+  recommendationMean: number | null;
+  recommendationKey: string | null;
+  numberOfAnalystOpinions: number | null;
+  /** Currency this issuer reports in (often differs from listing currency). */
+  financialCurrency: string | null;
   raw: Record<string, unknown>;
 }
 
@@ -302,6 +353,35 @@ export async function fetchDividends(
   return out;
 }
 
+/**
+ * Yahoo `quoteSummary` values often arrive as either a bare number or as
+ * `{ raw: number, fmt: string }`. Coerce both shapes to a plain finite number,
+ * dropping anything else (null, NaN, strings, etc.).
+ */
+function asNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (value && typeof value === 'object' && 'raw' in value) {
+    const raw = (value as { raw: unknown }).raw;
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  }
+  return null;
+}
+
+function asDateString(value: unknown): string | null {
+  if (value instanceof Date) return isoDate(value);
+  if (typeof value === 'string' && value.trim() !== '') return value.slice(0, 10);
+  if (value && typeof value === 'object' && 'raw' in value) {
+    const raw = (value as { raw: unknown }).raw;
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return isoDate(new Date(raw * 1000));
+    }
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return isoDate(new Date(value * 1000));
+  }
+  return null;
+}
+
 export async function fetchOverview(
   yahooSymbol: string,
   client: YahooClient = getClient(),
@@ -309,46 +389,108 @@ export async function fetchOverview(
   let summary;
   try {
     summary = await client.quoteSummary(yahooSymbol, {
-      modules: ['assetProfile', 'summaryProfile', 'price'],
+      modules: [
+        'assetProfile',
+        'summaryProfile',
+        'price',
+        'summaryDetail',
+        'defaultKeyStatistics',
+        'financialData',
+      ],
     });
   } catch (err) {
     wrapError(err, `quoteSummary(${yahooSymbol}) failed`);
   }
   if (!summary) return null;
-  const asset = summary.assetProfile;
-  const summaryProfile = summary.summaryProfile;
+  const asset = summary.assetProfile as Record<string, unknown> | undefined;
+  const summaryProfile = summary.summaryProfile as Record<string, unknown> | undefined;
   const price = summary.price as Record<string, unknown> | undefined;
-  const sector = asString(asset?.sector) ?? asString(summaryProfile?.sector);
+  const detail = summary.summaryDetail as Record<string, unknown> | undefined;
+  const stats = summary.defaultKeyStatistics as Record<string, unknown> | undefined;
+  const fin = summary.financialData as Record<string, unknown> | undefined;
+  const sector =
+    asString(asset?.['sector']) ?? asString(summaryProfile?.['sector']);
   const industry =
-    asString(asset?.industry) ?? asString(summaryProfile?.industry);
+    asString(asset?.['industry']) ?? asString(summaryProfile?.['industry']);
   const country =
-    asString(asset?.country) ?? asString(summaryProfile?.country);
+    asString(asset?.['country']) ?? asString(summaryProfile?.['country']);
   const exchange =
-    asString(price?.fullExchangeName) ??
-    asString(price?.exchangeName) ??
-    asString(price?.exchange);
+    asString(price?.['fullExchangeName']) ??
+    asString(price?.['exchangeName']) ??
+    asString(price?.['exchange']);
   const description =
-    asString(asset?.longBusinessSummary) ??
-    asString(summaryProfile?.longBusinessSummary) ??
-    asString(asset?.description) ??
-    asString(summaryProfile?.description);
-  if (
-    sector == null &&
-    industry == null &&
-    country == null &&
-    exchange == null &&
-    description == null
-  ) {
-    return null;
-  }
-  return {
+    asString(asset?.['longBusinessSummary']) ??
+    asString(summaryProfile?.['longBusinessSummary']) ??
+    asString(asset?.['description']) ??
+    asString(summaryProfile?.['description']);
+
+  const result: OverviewResult = {
     sector,
     industry,
     country,
     exchange,
     description,
+    regularMarketPrice:
+      asNumber(price?.['regularMarketPrice']) ??
+      asNumber(fin?.['currentPrice']) ??
+      asNumber(detail?.['regularMarketPrice']),
+    previousClose:
+      asNumber(detail?.['previousClose']) ??
+      asNumber(price?.['regularMarketPreviousClose']),
+    marketCap:
+      asNumber(detail?.['marketCap']) ?? asNumber(price?.['marketCap']),
+    trailingPE: asNumber(detail?.['trailingPE']),
+    forwardPE: asNumber(detail?.['forwardPE']) ?? asNumber(stats?.['forwardPE']),
+    trailingEps: asNumber(stats?.['trailingEps']),
+    forwardEps: asNumber(stats?.['forwardEps']),
+    beta: asNumber(detail?.['beta']) ?? asNumber(stats?.['beta']),
+    dayLow: asNumber(detail?.['dayLow']) ?? asNumber(price?.['regularMarketDayLow']),
+    dayHigh: asNumber(detail?.['dayHigh']) ?? asNumber(price?.['regularMarketDayHigh']),
+    fiftyTwoWeekLow: asNumber(detail?.['fiftyTwoWeekLow']) ?? asNumber(stats?.['fiftyTwoWeekLow']),
+    fiftyTwoWeekHigh: asNumber(detail?.['fiftyTwoWeekHigh']) ?? asNumber(stats?.['fiftyTwoWeekHigh']),
+    fiftyDayAverage: asNumber(detail?.['fiftyDayAverage']),
+    twoHundredDayAverage: asNumber(detail?.['twoHundredDayAverage']),
+    volume: asNumber(detail?.['volume']) ?? asNumber(price?.['regularMarketVolume']),
+    averageVolume: asNumber(detail?.['averageVolume']),
+    averageVolume10days: asNumber(detail?.['averageVolume10days']),
+    sharesOutstanding: asNumber(stats?.['sharesOutstanding']),
+    priceToBook: asNumber(stats?.['priceToBook']) ?? asNumber(detail?.['priceToBook']),
+    bookValue: asNumber(stats?.['bookValue']),
+    dividendRate:
+      asNumber(detail?.['dividendRate']) ?? asNumber(detail?.['trailingAnnualDividendRate']),
+    dividendYield:
+      asNumber(detail?.['dividendYield']) ?? asNumber(detail?.['trailingAnnualDividendYield']),
+    fiveYearAvgDividendYield: asNumber(detail?.['fiveYearAvgDividendYield']),
+    payoutRatio: asNumber(detail?.['payoutRatio']),
+    exDividendDate: asDateString(detail?.['exDividendDate']),
+    totalRevenue: asNumber(fin?.['totalRevenue']),
+    revenuePerShare: asNumber(fin?.['revenuePerShare']),
+    grossMargins: asNumber(fin?.['grossMargins']),
+    operatingMargins: asNumber(fin?.['operatingMargins']),
+    profitMargins: asNumber(fin?.['profitMargins']) ?? asNumber(stats?.['profitMargins']),
+    ebitdaMargins: asNumber(fin?.['ebitdaMargins']),
+    returnOnAssets: asNumber(fin?.['returnOnAssets']),
+    returnOnEquity: asNumber(fin?.['returnOnEquity']),
+    totalCash: asNumber(fin?.['totalCash']),
+    totalDebt: asNumber(fin?.['totalDebt']),
+    debtToEquity: asNumber(fin?.['debtToEquity']),
+    freeCashflow: asNumber(fin?.['freeCashflow']),
+    operatingCashflow: asNumber(fin?.['operatingCashflow']),
+    targetMeanPrice: asNumber(fin?.['targetMeanPrice']),
+    targetHighPrice: asNumber(fin?.['targetHighPrice']),
+    targetLowPrice: asNumber(fin?.['targetLowPrice']),
+    recommendationMean: asNumber(fin?.['recommendationMean']),
+    recommendationKey: asString(fin?.['recommendationKey']),
+    numberOfAnalystOpinions: asNumber(fin?.['numberOfAnalystOpinions']),
+    financialCurrency: asString(fin?.['financialCurrency']),
     raw: summary as unknown as Record<string, unknown>,
   };
+
+  const hasAnySignal = Object.entries(result).some(([k, v]) => {
+    if (k === 'raw') return false;
+    return v !== null;
+  });
+  return hasAnySignal ? result : null;
 }
 
 /** Test seam — swaps the underlying client. Pass null to restore the singleton. */

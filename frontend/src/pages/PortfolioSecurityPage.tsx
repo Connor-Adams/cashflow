@@ -34,6 +34,7 @@ import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { AboutCard } from './portfolio-security/AboutCard'
 import { DividendHistoryCard } from './portfolio-security/DividendHistoryCard'
+import { MarketDataCard } from './portfolio-security/MarketDataCard'
 import { PriceChartCard } from './portfolio-security/PriceChartCard'
 import { SecurityHeader } from './portfolio-security/SecurityHeader'
 import type {
@@ -155,6 +156,10 @@ export function PortfolioSecurityPage() {
           hint="Weighted-average ACB"
         />
       </section>
+
+      <div className="mt-4">
+        <MarketDataCard overview={overview} currency={combined.currency} />
+      </div>
 
       <div className="mt-4">
         <PriceChartCard securityId={security.id} currency={combined.currency} />

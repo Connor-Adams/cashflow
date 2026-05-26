@@ -114,11 +114,13 @@ export async function pickNext(opts: PickerOptions): Promise<WorkItem | null> {
   if (securities.length === 0) return null;
   const primaryFor = (s: (typeof securities)[number]) =>
     toYahooSymbol(s.symbol, s.currency, { assetType: s.assetType, name: s.name });
-  const yahooSymbols = Array.from(new Set(securities.map(primaryFor)));
+  const resolvable = securities.filter((s) => primaryFor(s) !== '');
+  if (resolvable.length === 0) return null;
+  const yahooSymbols = Array.from(new Set(resolvable.map(primaryFor)));
   const latest = await latestSuccessfulFetchByPair(yahooSymbols, functions);
 
   let best: WorkItem | null = null;
-  for (const s of securities) {
+  for (const s of resolvable) {
     const yahooSymbol = primaryFor(s);
     for (const fnName of functions) {
       const last = latest.get(fnName)?.get(yahooSymbol) ?? null;

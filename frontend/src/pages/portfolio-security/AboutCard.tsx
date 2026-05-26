@@ -49,7 +49,7 @@ export function AboutCard({ overview }: AboutCardProps) {
       )}
       {overview.metadataFetchedAt && (
         <p className="muted text-xs mt-3">
-          Data from Alpha Vantage · refreshed {overview.metadataFetchedAt.slice(0, 10)}
+          Data from Yahoo Finance · refreshed {overview.metadataFetchedAt.slice(0, 10)}
         </p>
       )}
     </Card>
