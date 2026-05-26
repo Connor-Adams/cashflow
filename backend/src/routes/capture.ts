@@ -9,6 +9,7 @@ import { captureAuth } from '../auth/captureAuth';
 import { captureOrders } from '../import/vendorCapture';
 import { runBackfill } from '../import/runEnrichmentBackfill';
 import { backfillRunning } from '../import/backfillCoordinator';
+import { logger } from '../observability/logger';
 
 const router = Router();
 
@@ -235,7 +236,7 @@ router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (re
           dateFrom,
           dateTo,
         })
-          .catch((err) => console.error('[capture] post-capture backfill failed', err))
+          .catch((err) => logger.error({ err, module: 'capture' }, 'post_capture_backfill_failed'))
           .finally(() => backfillRunning.delete(household.id));
       });
     }

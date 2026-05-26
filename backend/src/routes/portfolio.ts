@@ -1,5 +1,6 @@
 import { Router, type Request } from 'express';
 import { Op } from 'sequelize';
+import { logger } from '../observability/logger';
 import {
   Account,
   HoldingSnapshot,
@@ -104,8 +105,9 @@ async function buildUnifiedCadTotal(
     const fxResult = await ensureFxRate(row.currency, 'CAD', asOfDate);
     if (!fxResult) {
       // Hard failure on any currency — abort and return null.
-      console.warn(
-        `[portfolio] buildUnifiedCadTotal: no FX rate for ${row.currency}→CAD on ${asOfDate}`
+      logger.warn(
+        { fromCurrency: row.currency, toCurrency: 'CAD', asOfDate, module: 'portfolio' },
+        'portfolio_unified_cad_total_missing_fx_rate',
       );
       return null;
     }
