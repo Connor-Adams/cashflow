@@ -44,6 +44,7 @@ import { TaxReturn, initTaxReturn } from './TaxReturn';
 import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
+import { Job, initJob } from './Job';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -59,6 +60,7 @@ import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
+import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 
@@ -107,6 +109,7 @@ initTaxReturn(sequelize);
 initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
+initJob(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -116,6 +119,7 @@ initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
+initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
 
@@ -376,6 +380,33 @@ PlannedEvent.belongsTo(Transaction, {
   as: 'linkedTransaction',
 });
 
+Household.hasMany(FinancialGoal, {
+  foreignKey: 'household_id',
+  as: 'financialGoals',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialGoal.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinancialGoal, {
+  foreignKey: 'user_id',
+  as: 'financialGoals',
+});
+FinancialGoal.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+Account.hasMany(FinancialGoal, {
+  foreignKey: 'linked_account_id',
+  as: 'financialGoals',
+});
+FinancialGoal.belongsTo(Account, {
+  foreignKey: 'linked_account_id',
+  as: 'linkedAccount',
+});
+
 Household.hasMany(Subscription, {
   foreignKey: 'household_id',
   as: 'subscriptions',
@@ -450,6 +481,7 @@ export {
   ShareholderLoan,
   InstalmentPayment,
   ProviderJobLog,
+  Job,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
   Scenario,
@@ -457,6 +489,7 @@ export {
   HouseholdPlan,
   Insight,
   PlannedEvent,
+  FinancialGoal,
   Subscription,
   AiReviewRun,
 };
