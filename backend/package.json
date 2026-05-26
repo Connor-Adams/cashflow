@@ -17,6 +17,7 @@
     "@aws-sdk/client-s3": "^3.1045.0",
     "@cashflow/shared": "*",
     "cors": "^2.8.5",
+    "cron-parser": "^5.5.0",
     "csv-parse": "^5.6.0",
     "date-fns": "^4.1.0",
     "decimal.js": "^10.4.3",
