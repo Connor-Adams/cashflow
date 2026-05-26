@@ -341,6 +341,67 @@ export type PlannedEventInput = {
 /** PUT /api/planned-events/:id body shape — every field optional. */
 export type PlannedEventPatch = Partial<PlannedEventInput>
 
+/**
+ * One event row from GET /api/calendar/events. Mirrors `CalendarEventResponse`
+ * in `backend/src/routes/calendar.ts`. A single `id` may appear multiple
+ * times when its `recurrenceRule` produces multiple occurrences inside the
+ * requested window — each occurrence has its own `eventDate`.
+ */
+export type CalendarEvent = {
+  id: number
+  /** Concrete YYYY-MM-DD this occurrence lands on. */
+  eventDate: string
+  type: PlannedEventType
+  /** Human-readable label e.g. "Debt payment". */
+  kindLabel: string
+  /** Tailwind palette key e.g. "emerald". */
+  categoryColor: string
+  name: string
+  /** DECIMAL string — coerce with Number() for arithmetic. */
+  amount: string
+  currency: string
+  status: PlannedEventStatus
+  /** Original anchor date; same as eventDate for non-recurring rows. */
+  anchorDate: string
+  recurrenceRule: string | null
+  accountId: number | null
+  linkedTransactionId: number | null
+  notes: string | null
+}
+
+/** Response shape for GET /api/calendar/events. */
+export type CalendarEventsResponse = {
+  /** Echoed YYYY-MM-DD window start (clamped/defaulted server-side). */
+  from: string
+  /** Echoed YYYY-MM-DD window end. */
+  to: string
+  events: CalendarEvent[]
+}
+
+/**
+ * Frontend mirror of backend `EVENT_CATEGORY_COLOR`. Tailwind v4 JIT needs
+ * literal class names, so we store fully qualified Tailwind classes per
+ * type for backgrounds, text, and dot accents. Backend ships the palette
+ * key (`emerald`); we map it to ready-to-use class strings here.
+ */
+export const CALENDAR_EVENT_BG_CLASS: Record<PlannedEventType, string> = {
+  income: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
+  expense: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-100',
+  transfer: 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-100',
+  settlement: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
+  debt_payment: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100',
+  savings: 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-100',
+}
+
+export const CALENDAR_EVENT_DOT_CLASS: Record<PlannedEventType, string> = {
+  income: 'bg-emerald-500',
+  expense: 'bg-rose-500',
+  transfer: 'bg-sky-500',
+  settlement: 'bg-amber-500',
+  debt_payment: 'bg-orange-500',
+  savings: 'bg-violet-500',
+}
+
 export type AppConfig = {
   logoDevToken: string | null;
   quoteProviderConfigured: boolean;
