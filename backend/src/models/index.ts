@@ -41,6 +41,8 @@ import { TaxReturn, initTaxReturn } from './TaxReturn';
 import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
+import { Scenario, initScenario } from './Scenario';
+import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -84,6 +86,8 @@ initTaxReturn(sequelize);
 initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
+initScenario(sequelize);
+initScenarioReturn(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -240,6 +244,17 @@ TransactionSignal.belongsTo(Transaction, {
   as: 'transaction',
 });
 
+Scenario.hasMany(ScenarioReturn, {
+  foreignKey: 'scenario_id',
+  as: 'returns',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+ScenarioReturn.belongsTo(Scenario, {
+  foreignKey: 'scenario_id',
+  as: 'scenario',
+});
+
 export {
   sequelize,
   User,
@@ -284,4 +299,6 @@ export {
   ShareholderLoan,
   InstalmentPayment,
   ProviderJobLog,
+  Scenario,
+  ScenarioReturn,
 };
