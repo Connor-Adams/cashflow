@@ -215,6 +215,89 @@ export type BudgetInput = {
   period?: 'monthly'
 }
 
+/**
+ * Planned financial event kind. Mirrors `PlannedEventType` in the backend
+ * model. Drives forecast direction (income flows in, expense/debt_payment
+ * flow out, transfer/settlement are intra-system, savings is goal-directed).
+ */
+export type PlannedEventType =
+  | 'income'
+  | 'expense'
+  | 'transfer'
+  | 'settlement'
+  | 'debt_payment'
+  | 'savings'
+
+/**
+ * Where a planned event came from. `manual` is user-authored; the others
+ * are system-generated and should typically be treated as read-only in the
+ * UI until the originating subsystem is refactored.
+ */
+export type PlannedEventSource =
+  | 'manual'
+  | 'recurring_detection'
+  | 'settlement'
+  | 'debt'
+  | 'goal'
+  | 'system'
+
+/**
+ * Lifecycle. `planned` is the default; `posted` means the event has been
+ * matched to an actual transaction via `linkedTransactionId`; `skipped` and
+ * `ignored` distinguish one-time skip from a hard dismiss.
+ */
+export type PlannedEventStatus = 'planned' | 'posted' | 'skipped' | 'ignored'
+
+/**
+ * One row from GET /api/planned-events. Mirrors the PlannedEvent serializer
+ * in `backend/src/routes/plannedEvents.ts` — `amount` arrives as a string
+ * (DECIMAL(14,4)) for lossless transport; coerce with `Number(...)` for
+ * arithmetic.
+ */
+export type PlannedEvent = {
+  id: number
+  userId: number
+  householdId: number
+  accountId: number | null
+  type: PlannedEventType
+  name: string
+  amount: string
+  currency: string
+  /** YYYY-MM-DD. */
+  expectedDate: string
+  /** Optional RRULE or JSON blob; null = one-off. */
+  recurrenceRule: string | null
+  source: PlannedEventSource
+  status: PlannedEventStatus
+  linkedTransactionId: number | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/planned-events. */
+export type PlannedEventsResponse = {
+  data: PlannedEvent[]
+}
+
+/** POST /api/planned-events body shape. */
+export type PlannedEventInput = {
+  type: PlannedEventType
+  name: string
+  amount: number
+  currency: string
+  expectedDate: string
+  accountId?: number | null
+  recurrenceRule?: string | null
+  source?: PlannedEventSource
+  status?: PlannedEventStatus
+  linkedTransactionId?: number | null
+  notes?: string | null
+}
+
+/** PUT /api/planned-events/:id body shape — every field optional. */
+export type PlannedEventPatch = Partial<PlannedEventInput>
+
 export type AppConfig = {
   logoDevToken: string | null;
   quoteProviderConfigured: boolean;

@@ -54,6 +54,7 @@ import { registerDailySnapshotStaleHooks } from '../hooks/dailySnapshotStaleHook
 import { Scenario, initScenario } from './Scenario';
 import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
+import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -104,6 +105,7 @@ registerDailySnapshotStaleHooks(sequelize);
 initScenario(sequelize);
 initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
+initPlannedEvent(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -291,6 +293,41 @@ HouseholdPlan.hasMany(Scenario, {
   as: 'scenarios',
 });
 
+Household.hasMany(PlannedEvent, {
+  foreignKey: 'household_id',
+  as: 'plannedEvents',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+PlannedEvent.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(PlannedEvent, {
+  foreignKey: 'user_id',
+  as: 'plannedEvents',
+});
+PlannedEvent.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+Account.hasMany(PlannedEvent, {
+  foreignKey: 'account_id',
+  as: 'plannedEvents',
+});
+PlannedEvent.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+Transaction.hasMany(PlannedEvent, {
+  foreignKey: 'linked_transaction_id',
+  as: 'plannedEvents',
+});
+PlannedEvent.belongsTo(Transaction, {
+  foreignKey: 'linked_transaction_id',
+  as: 'linkedTransaction',
+});
+
 export {
   sequelize,
   User,
@@ -340,4 +377,5 @@ export {
   Scenario,
   ScenarioReturn,
   HouseholdPlan,
+  PlannedEvent,
 };
