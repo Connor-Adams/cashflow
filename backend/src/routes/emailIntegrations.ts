@@ -76,7 +76,7 @@ router.get('/callback/google', async (req, res, next) => {
     const errorParam = typeof req.query.error === 'string' ? req.query.error : '';
 
     if (errorParam) {
-      logger.warn('gmail_oauth_consent_denied', { error: errorParam });
+      logger.warn({ error: errorParam }, 'gmail_oauth_consent_denied');
       res.redirect(`${corsOrigin}/settings?gmail=denied`);
       return;
     }
@@ -87,17 +87,17 @@ router.get('/callback/google', async (req, res, next) => {
     const stateUserId = parseStateUserId(state);
     const { user } = currentAuth(req);
     if (stateUserId !== user.id) {
-      logger.warn('gmail_oauth_state_mismatch', { stateUserId, sessionUserId: user.id });
+      logger.warn({ stateUserId, sessionUserId: user.id }, 'gmail_oauth_state_mismatch');
       res.status(400).send('OAuth state mismatch — restart the flow from Settings');
       return;
     }
 
     const integ = await completeConnection({ userId: user.id, code });
-    logger.info('gmail_connected', {
+    logger.info({
       userId: user.id,
       integrationId: integ.id,
       accountEmail: integ.accountEmail,
-    });
+    }, 'gmail_connected');
     res.redirect(`${corsOrigin}/settings?gmail=connected`);
   } catch (e) {
     next(e);
@@ -143,12 +143,12 @@ router.post('/scan/google', async (req, res, next) => {
         maxMessages,
         sinceDateOverride,
       });
-      logger.info('gmail_scan_completed', {
+      logger.info({
         userId: user.id,
         ...result,
         messages: undefined,
         messageCount: result.messages.length,
-      });
+      }, 'gmail_scan_completed');
       res.json(result);
       return;
     }
@@ -176,12 +176,12 @@ router.post('/scan/google', async (req, res, next) => {
           onMessage: (m) => emit({ kind: 'message', ...m }),
         },
       );
-      logger.info('gmail_scan_completed', {
+      logger.info({
         userId: user.id,
         ...result,
         messages: undefined,
         messageCount: result.messages.length,
-      });
+      }, 'gmail_scan_completed');
       emit({
         kind: 'summary',
         ...result,
@@ -191,7 +191,7 @@ router.post('/scan/google', async (req, res, next) => {
       res.end();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('gmail_scan_failed', { userId: user.id, message });
+      logger.error({ userId: user.id, message }, 'gmail_scan_failed');
       emit({ kind: 'error', message });
       res.end();
     }

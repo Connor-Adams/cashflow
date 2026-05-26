@@ -112,7 +112,7 @@ function logTransactionEvent(
   event: string,
   details: Record<string, string | number | boolean | null | undefined>
 ): void {
-  logger.info(`transactions_${event}`, details);
+  logger.info(details, `transactions_${event}`);
 }
 
 const PATCHABLE_KEYS = [
@@ -613,11 +613,11 @@ router.post('/:id/re-enrich', async (req, res, next) => {
       dateFrom: null,
       dateTo: null,
     });
-    logger.info('enrichment_single_reenrich', {
+    logger.info({
       householdId: txn.householdId,
       transactionId: id,
       ...result,
-    });
+    }, 'enrichment_single_reenrich');
     await txn.reload({
       include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
     });
@@ -828,14 +828,14 @@ router.post('/enrichment/backfill', async (req, res, next) => {
 
     backfillRunning.add(household.id);
     const startedAt = Date.now();
-    logger.info('enrichment_backfill_started', {
+    logger.info({
       householdId: household.id,
       dryRun: flags.dryRun,
       noReviewFlag: flags.noReviewFlag,
       reviewOnly: flags.reviewOnly,
       limit: flags.limit,
       streaming: wantsStream,
-    });
+    }, 'enrichment_backfill_started');
 
     if (wantsStream) {
       res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -850,16 +850,16 @@ router.post('/enrichment/backfill', async (req, res, next) => {
           onError: (e) => emit({ kind: 'error', ...e }),
         });
         const durationMs = Date.now() - startedAt;
-        logger.info('enrichment_backfill_completed', {
+        logger.info({
           householdId: household.id,
           durationMs,
           ...result,
-        });
+        }, 'enrichment_backfill_completed');
         emit({ kind: 'summary', ...result, durationMs, dryRun: flags.dryRun });
         res.end();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error('enrichment_backfill_failed', { householdId: household.id, message });
+        logger.error({ householdId: household.id, message }, 'enrichment_backfill_failed');
         emit({ kind: 'error', message });
         res.end();
       } finally {
@@ -872,15 +872,15 @@ router.post('/enrichment/backfill', async (req, res, next) => {
     try {
       const result = await runBackfill(flags);
       const durationMs = Date.now() - startedAt;
-      logger.info('enrichment_backfill_completed', {
+      logger.info({
         householdId: household.id,
         durationMs,
         ...result,
-      });
+      }, 'enrichment_backfill_completed');
       res.json({ ...result, durationMs, dryRun: flags.dryRun });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('enrichment_backfill_failed', { householdId: household.id, message });
+      logger.error({ householdId: household.id, message }, 'enrichment_backfill_failed');
       next(err);
     } finally {
       backfillRunning.delete(household.id);

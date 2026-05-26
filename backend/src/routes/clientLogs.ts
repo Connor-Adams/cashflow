@@ -52,7 +52,7 @@ router.post('/', clientLogLimiter, (req, res) => {
   const requestId = cleanString(body.requestId, 80);
   const fields = cleanFields(body.fields);
 
-  logger[level]('client_log', {
+  logger[level]({
     requestId: req.requestId,
     clientRequestId: requestId,
     clientEvent: event,
@@ -61,7 +61,7 @@ router.post('/', clientLogLimiter, (req, res) => {
     userId: req.auth?.user.id,
     householdId: req.auth?.household.id,
     ...fields,
-  });
+  }, event);
 
   res.status(204).end();
 });

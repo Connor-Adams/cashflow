@@ -156,14 +156,14 @@ router.post('/import-text', aiSuggestLimiter, async (req, res, next) => {
       source: 'email-paste',
     });
 
-    logger.info('external_order_imported', {
+    logger.info({
       source: 'email-paste',
       orderId: order.id,
       created,
       vendor: extracted.vendor,
       items: extracted.items.length,
       householdId: auth.household.id,
-    });
+    }, 'external_order_imported');
 
     res.json({ order: order.toJSON(), created, extracted });
   } catch (e) {
@@ -198,14 +198,14 @@ router.post(
         householdId: auth.household.id,
         source: 'image-upload',
       });
-      logger.info('external_order_imported', {
+      logger.info({
         source: 'image-upload',
         orderId: order.id,
         created,
         vendor: extracted.vendor,
         items: extracted.items.length,
         householdId: auth.household.id,
-      });
+      }, 'external_order_imported');
       res.json({ order: order.toJSON(), created, extracted });
     } catch (e) {
       next(e);
@@ -266,7 +266,7 @@ router.post(
         }
       }
 
-      logger.info('external_order_csv_imported', {
+      logger.info({
         source: `${vendor}-csv`,
         vendor,
         totalRows: parsed.totalRows,
@@ -276,7 +276,7 @@ router.post(
         duplicates,
         errored: errors.length,
         householdId: auth.household.id,
-      });
+      }, 'external_order_csv_imported');
 
       res.json({
         vendor,
@@ -342,7 +342,7 @@ router.post(
           })
         : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
 
-      logger.info('external_order_imported', {
+      logger.info({
         source: `${parser.id}-pdf`,
         orderId: order.id,
         created,
@@ -353,7 +353,7 @@ router.post(
         linksCreated: matchSummary.created,
         linksUpdated: matchSummary.updated,
         householdId: auth.household.id,
-      });
+      }, 'external_order_imported');
 
       res.json({
         order: order.toJSON(),
