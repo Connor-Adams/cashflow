@@ -52,6 +52,32 @@ function npvDerivative(rate: number, cashFlows: IrrCashFlow[], anchor: string): 
   return total;
 }
 
+export interface AggregatedDailySnapshot {
+  date: string;
+  marketValueCad: number;
+  cashFlowCad: number;
+}
+
+export function buildCashFlowSeries(
+  snapshots: AggregatedDailySnapshot[],
+  finalMvCad: number,
+): IrrCashFlow[] {
+  if (snapshots.length === 0) return [];
+  const out: IrrCashFlow[] = [];
+  const sorted = [...snapshots].sort((a, b) => a.date.localeCompare(b.date));
+
+  out.push({ date: sorted[0].date, amount: -sorted[0].marketValueCad });
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].cashFlowCad !== 0) {
+      out.push({ date: sorted[i].date, amount: -sorted[i].cashFlowCad });
+    }
+  }
+
+  out.push({ date: sorted[sorted.length - 1].date, amount: finalMvCad });
+  return out;
+}
+
 export function computeXirr(cashFlows: IrrCashFlow[], guess = 0.1): number | null {
   if (cashFlows.length < 2) return null;
   const hasNegative = cashFlows.some((cf) => cf.amount < 0);

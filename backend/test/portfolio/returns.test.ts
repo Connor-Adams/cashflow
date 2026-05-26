@@ -112,3 +112,36 @@ test('computeXirr — negative return', () => {
   assert.ok(r !== null);
   assert.ok((r as number) < 0);
 });
+
+import { buildCashFlowSeries, type AggregatedDailySnapshot } from '../../src/portfolio/returns';
+
+test('buildCashFlowSeries — minimal: 1 day initial + final', () => {
+  const snaps: AggregatedDailySnapshot[] = [
+    { date: '2026-01-01', marketValueCad: 1000, cashFlowCad: 0 },
+    { date: '2026-12-31', marketValueCad: 1100, cashFlowCad: 0 },
+  ];
+  const cf = buildCashFlowSeries(snaps, 1100);
+  assert.equal(cf.length, 2);
+  assert.equal(cf[0].amount, -1000);
+  assert.equal(cf[0].date, '2026-01-01');
+  assert.equal(cf[1].amount, 1100);
+  assert.equal(cf[1].date, '2026-12-31');
+});
+
+test('buildCashFlowSeries — includes mid-stream deposits/withdrawals', () => {
+  const snaps: AggregatedDailySnapshot[] = [
+    { date: '2026-01-01', marketValueCad: 1000, cashFlowCad: 0 },
+    { date: '2026-06-15', marketValueCad: 1500, cashFlowCad: 400 },
+    { date: '2026-12-31', marketValueCad: 1700, cashFlowCad: 0 },
+  ];
+  const cf = buildCashFlowSeries(snaps, 1700);
+  assert.equal(cf.length, 3);
+  assert.equal(cf[0].amount, -1000);
+  assert.equal(cf[1].amount, -400);
+  assert.equal(cf[1].date, '2026-06-15');
+  assert.equal(cf[2].amount, 1700);
+});
+
+test('buildCashFlowSeries — empty snapshots returns empty array', () => {
+  assert.deepEqual(buildCashFlowSeries([], 0), []);
+});
