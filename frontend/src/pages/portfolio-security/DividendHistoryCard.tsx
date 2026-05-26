@@ -34,9 +34,7 @@ export function DividendHistoryCard({ securityId, currency }: DividendHistoryCar
             <h2 className="text-base">Dividend history</h2>
           </div>
         </div>
-        <p className="muted">
-          Set <code>ALPHA_VANTAGE_API_KEY</code> to enable dividend history.
-        </p>
+        <p className="muted">Quote provider is not configured.</p>
       </Card>
     )
   }

@@ -14,6 +14,12 @@
  * Yahoo tickers in order. The backfill layer tries each in turn and stops
  * on the first non-null result. Symbols already carrying an explicit
  * exchange suffix or a dash (crypto pairs) are passed through untouched.
+ *
+ * Cash placeholders cannot resolve on Yahoo. They produce an empty candidate
+ * list so callers can short-circuit instead of burning round trips against a
+ * symbol that will never resolve. A symbol is treated as a cash placeholder
+ * when it equals its own currency code (e.g. symbol "USD", currency "USD")
+ * or matches a well-known cash sentinel (CASH, $$, $$$).
  */
 
 export interface SymbolContext {
@@ -23,6 +29,14 @@ export interface SymbolContext {
 }
 
 const CDR_NAME_RE = /\bCDR\b/i;
+const CASH_SENTINELS = new Set(['CASH', '$$', '$$$']);
+
+export function isCashPlaceholder(symbol: string, currency: string): boolean {
+  const upperSymbol = symbol.trim().toUpperCase();
+  if (upperSymbol === '') return false;
+  if (CASH_SENTINELS.has(upperSymbol)) return true;
+  return upperSymbol === currency.trim().toUpperCase();
+}
 
 export function enumerateYahooSymbols(
   symbol: string,
@@ -30,6 +44,7 @@ export function enumerateYahooSymbols(
 ): string[] {
   const trimmed = symbol.trim();
   if (trimmed === '') return [];
+  if (isCashPlaceholder(trimmed, ctx.currency)) return [];
   if (trimmed.includes('.') || trimmed.includes('-')) return [trimmed];
 
   const currency = ctx.currency.trim().toUpperCase();
@@ -59,7 +74,8 @@ export function enumerateYahooSymbols(
 }
 
 /**
- * Convenience wrapper returning only the primary candidate. Retained for
+ * Convenience wrapper returning only the primary candidate, or '' when no
+ * Yahoo lookup should be attempted (empty / cash placeholder). Retained for
  * call sites that don't yet thread `assetType` / `name` through.
  */
 export function toYahooSymbol(
@@ -72,5 +88,5 @@ export function toYahooSymbol(
     assetType: ctx.assetType ?? null,
     name: ctx.name ?? null,
   });
-  return candidates[0] ?? symbol.trim();
+  return candidates[0] ?? '';
 }

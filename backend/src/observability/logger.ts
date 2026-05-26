@@ -49,7 +49,7 @@ const prettyTransport: LoggerOptions['transport'] | undefined = isDev
       target: 'pino-pretty',
       options: {
         colorize: true,
-        translateTime: 'SYS:HH:MM:ss.l',
+        translateTime: 'SYS:HH:mm:ss.l',
         ignore: 'pid,hostname,service,env',
       },
     }

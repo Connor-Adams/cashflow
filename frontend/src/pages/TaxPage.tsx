@@ -29,6 +29,12 @@ export function TaxPage() {
   const [tab, setTab] = useState('overview')
   const { years, error: yearsError } = useTaxYears()
   const [year, setYear] = useState<number | null>(null)
+  // Active household plan id is lifted here so the picker on Overview and the
+  // OwnerCompPlannerTab consumer stay in sync without prop-drilling through
+  // a context. TaxPage already keeps tab + year state with `useState`, so a
+  // local `useState` here matches the prevailing pattern (URL query params
+  // would be cleaner if tab state already used them, but it doesn't).
+  const [activePlanId, setActivePlanId] = useState<number | null>(null)
 
   useEffect(() => {
     if (year === null && years && years.length > 0) {
@@ -57,13 +63,19 @@ export function TaxPage() {
         <p className="muted">Loading…</p>
       ) : (
         <>
-          {tab === 'overview' && <OverviewTab year={year} />}
+          {tab === 'overview' && (
+            <OverviewTab
+              year={year}
+              activePlanId={activePlanId}
+              onPlanChange={setActivePlanId}
+            />
+          )}
           {tab === 'personal' && <PersonalT1Tab year={year} />}
           {tab === 'slips' && <SlipsTab year={year} />}
           {tab === 'reconciliation' && <ReconciliationTab year={year} />}
           {tab === 'corp' && <CorpT2Tab />}
           {tab === 'shareholder-loans' && <ShareholderLoanTab />}
-          {tab === 'planner' && <OwnerCompPlannerTab />}
+          {tab === 'planner' && <OwnerCompPlannerTab activePlanId={activePlanId} />}
         </>
       )}
     </section>

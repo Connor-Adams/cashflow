@@ -16,7 +16,115 @@ export type SecurityMetadata = {
   country?: string | null;
   exchange?: string | null;
   description?: string | null;
-  // Raw passthrough; later slices may surface more fields.
+  // Market data
+  regularMarketPrice?: number | null;
+  previousClose?: number | null;
+  marketCap?: number | null;
+  trailingPE?: number | null;
+  forwardPE?: number | null;
+  trailingEps?: number | null;
+  forwardEps?: number | null;
+  beta?: number | null;
+  dayLow?: number | null;
+  dayHigh?: number | null;
+  fiftyTwoWeekLow?: number | null;
+  fiftyTwoWeekHigh?: number | null;
+  fiftyDayAverage?: number | null;
+  twoHundredDayAverage?: number | null;
+  volume?: number | null;
+  averageVolume?: number | null;
+  averageVolume10days?: number | null;
+  sharesOutstanding?: number | null;
+  priceToBook?: number | null;
+  bookValue?: number | null;
+  // Dividend stats
+  dividendRate?: number | null;
+  dividendYield?: number | null;
+  fiveYearAvgDividendYield?: number | null;
+  payoutRatio?: number | null;
+  exDividendDate?: string | null;
+  // Fundamentals
+  totalRevenue?: number | null;
+  revenuePerShare?: number | null;
+  grossMargins?: number | null;
+  operatingMargins?: number | null;
+  profitMargins?: number | null;
+  ebitdaMargins?: number | null;
+  returnOnAssets?: number | null;
+  returnOnEquity?: number | null;
+  totalCash?: number | null;
+  totalDebt?: number | null;
+  debtToEquity?: number | null;
+  freeCashflow?: number | null;
+  operatingCashflow?: number | null;
+  // Analyst targets
+  targetMeanPrice?: number | null;
+  targetHighPrice?: number | null;
+  targetLowPrice?: number | null;
+  recommendationMean?: number | null;
+  recommendationKey?: string | null;
+  numberOfAnalystOpinions?: number | null;
+  financialCurrency?: string | null;
+  // Crypto fields
+  circulatingSupply?: number | null;
+  volume24Hr?: number | null;
+  cryptoStartDate?: string | null;
+  fromCurrency?: string | null;
+  // Fund / ETF fields
+  fundFamily?: string | null;
+  fundCategory?: string | null;
+  fundLegalType?: string | null;
+  fundExpenseRatio?: number | null;
+  fundTotalAssets?: number | null;
+  fundYield?: number | null;
+  topHoldings?: Array<{
+    symbol: string | null;
+    name: string | null;
+    percent: number | null;
+  }> | null;
+  sectorWeightings?: Record<string, number> | null;
+  bondPosition?: number | null;
+  stockPosition?: number | null;
+  cashPosition?: number | null;
+  trailingReturn1y?: number | null;
+  trailingReturn3y?: number | null;
+  trailingReturn5y?: number | null;
+  trailingReturn10y?: number | null;
+  trailingReturnYtd?: number | null;
+  // Earnings forecast + history
+  nextEarningsDate?: string | null;
+  nextEarningsIsEstimate?: boolean | null;
+  earningsEpsAvg?: number | null;
+  earningsEpsLow?: number | null;
+  earningsEpsHigh?: number | null;
+  earningsRevenueAvg?: number | null;
+  earningsRevenueLow?: number | null;
+  earningsRevenueHigh?: number | null;
+  earningsHistory?: Array<{
+    period: string | null;
+    quarter: string | null;
+    epsActual: number | null;
+    epsEstimate: number | null;
+    epsDifference: number | null;
+    surprisePercent: number | null;
+  }> | null;
+  // Analyst sentiment
+  recommendationTrend?: Array<{
+    period: string | null;
+    strongBuy: number | null;
+    buy: number | null;
+    hold: number | null;
+    sell: number | null;
+    strongSell: number | null;
+  }> | null;
+  upgradeDowngradeHistory?: Array<{
+    date: string | null;
+    firm: string | null;
+    fromGrade: string | null;
+    toGrade: string | null;
+    action: string | null;
+  }> | null;
+  // Raw passthrough — full quoteSummary for forensics / future fields.
   [key: string]: unknown;
 };
 

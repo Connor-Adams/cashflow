@@ -7,9 +7,7 @@ import { currentAuth } from '../auth/middleware';
 import { hashCaptureToken, mintCaptureTokenPlaintext } from '../auth/captureToken';
 import { captureAuth } from '../auth/captureAuth';
 import { captureOrders } from '../import/vendorCapture';
-import { runBackfill } from '../import/runEnrichmentBackfill';
-import { backfillRunning } from '../import/backfillCoordinator';
-import { logger } from '../observability/logger';
+import { scheduleInternalBackfill } from '../import/backfillCoordinator';
 
 const router = Router();
 
@@ -140,8 +138,8 @@ router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (re
       res.status(400).json({ error: 'orders must be a non-empty array' });
       return;
     }
-    if (ordersRaw.length > 200) {
-      res.status(400).json({ error: 'orders cap is 200 per request' });
+    if (ordersRaw.length > 1000) {
+      res.status(400).json({ error: 'orders cap is 1000 per request' });
       return;
     }
 
@@ -216,28 +214,11 @@ router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (re
     res.json(result);
 
     if (dateFrom && dateTo) {
-      setImmediate(() => {
-        if (backfillRunning.has(household.id)) {
-          // Another backfill is in flight for this household — skip this one;
-          // its date window will be covered by the in-flight call or a
-          // subsequent one. Prevents thundering-herd on rapid bookmarklet clicks.
-          return;
-        }
-        backfillRunning.add(household.id);
-        runBackfill({
-          dryRun: false,
-          noReviewFlag: false,
-          reviewOnly: false,
-          verbose: false,
-          accountId: null,
-          householdId: household.id,
-          limit: null,
-          batchSize: 50,
-          dateFrom,
-          dateTo,
-        })
-          .catch((err) => logger.error({ err, module: 'capture' }, 'post_capture_backfill_failed'))
-          .finally(() => backfillRunning.delete(household.id));
+      scheduleInternalBackfill({
+        householdId: household.id,
+        dateFrom,
+        dateTo,
+        source: `capture-${vendor}`,
       });
     }
   } catch (e) {

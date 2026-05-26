@@ -51,6 +51,9 @@ import {
 } from './PortfolioDailySnapshot';
 import { registerForwardIncomeStaleHooks } from '../hooks/forwardIncomeStaleHooks';
 import { registerDailySnapshotStaleHooks } from '../hooks/dailySnapshotStaleHooks';
+import { Scenario, initScenario } from './Scenario';
+import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
+import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -98,6 +101,9 @@ initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
 registerDailySnapshotStaleHooks(sequelize);
+initScenario(sequelize);
+initScenarioReturn(sequelize);
+initHouseholdPlan(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -254,6 +260,37 @@ TransactionSignal.belongsTo(Transaction, {
   as: 'transaction',
 });
 
+Scenario.hasMany(ScenarioReturn, {
+  foreignKey: 'scenario_id',
+  as: 'returns',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+ScenarioReturn.belongsTo(Scenario, {
+  foreignKey: 'scenario_id',
+  as: 'scenario',
+});
+
+Household.hasMany(HouseholdPlan, {
+  foreignKey: 'household_id',
+  as: 'householdPlans',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+HouseholdPlan.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
+Scenario.belongsTo(HouseholdPlan, {
+  foreignKey: 'householdPlanId',
+  as: 'householdPlan',
+});
+HouseholdPlan.hasMany(Scenario, {
+  foreignKey: 'householdPlanId',
+  as: 'scenarios',
+});
+
 export {
   sequelize,
   User,
@@ -300,4 +337,7 @@ export {
   ProviderJobLog,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
+  Scenario,
+  ScenarioReturn,
+  HouseholdPlan,
 };

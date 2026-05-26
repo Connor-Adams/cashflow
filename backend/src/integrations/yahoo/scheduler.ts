@@ -39,6 +39,7 @@ import {
   type OverviewResult,
   type QuoteResult,
 } from './client';
+import { overviewToMetadata } from './overviewMetadata';
 import { pickNext, type YahooWorkFunction } from './picker';
 import { enumerateYahooSymbols, toYahooSymbol } from './symbol';
 
@@ -103,14 +104,7 @@ async function persistOverview(yahooSymbol: string, overview: OverviewResult): P
   const securities = await securitiesForYahooSymbol(yahooSymbol);
   if (securities.length === 0) return;
   const now = new Date();
-  const metadata = {
-    sector: overview.sector,
-    industry: overview.industry,
-    country: overview.country,
-    exchange: overview.exchange,
-    description: overview.description,
-    ...overview.raw,
-  };
+  const metadata = overviewToMetadata(overview);
   await Promise.all(
     securities.map((security) =>
       security.update({ metadata, metadataFetchedAt: now }),

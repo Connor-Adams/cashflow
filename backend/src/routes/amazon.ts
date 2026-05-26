@@ -22,6 +22,7 @@ import { getOpenAiConfig } from '../config/openai';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { loadCategoryHints } from '../ai/suggestTransaction';
+import { scheduleInternalBackfill } from '../import/backfillCoordinator';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -204,12 +205,32 @@ router.patch('/orders/:id/items/:itemId', async (req, res, next) => {
 
 router.post('/match/run', async (req, res, next) => {
   try {
-    const result = await runAmazonMatching({ householdId: currentAuth(req).household.id });
+    const { household } = currentAuth(req);
+    const result = await runAmazonMatching({ householdId: household.id });
+    if (result.matchedDateFrom && result.matchedDateTo) {
+      // Mirror the post-capture window so the matched txns get re-enriched
+      // and pick up the new item-link signal (vendor canonical, notes, etc.).
+      // ±14d matches the bookmarklet path in routes/capture.ts.
+      const dateFrom = shiftDate(result.matchedDateFrom, -14);
+      const dateTo = shiftDate(result.matchedDateTo, 14);
+      scheduleInternalBackfill({
+        householdId: household.id,
+        dateFrom,
+        dateTo,
+        source: 'amazon-match',
+      });
+    }
     res.json(result);
   } catch (e) {
     next(e);
   }
 });
+
+function shiftDate(yyyyMmDd: string, days: number): string {
+  const d = new Date(`${yyyyMmDd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 router.post('/categorize/run', aiSuggestLimiter, async (req, res, next) => {
   try {

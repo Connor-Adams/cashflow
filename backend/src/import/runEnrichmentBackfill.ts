@@ -16,6 +16,7 @@ import { Op } from 'sequelize';
 import { sequelize, Transaction, TransactionSignal } from '../models';
 import { loadAllRules } from './applyRules';
 import { findMerchantMemory } from '../ai/merchantMemory';
+import { caseInsensitiveLikeOp } from '../ai/chat/_common';
 import { enrichTransaction } from './enrich';
 import {
   loadAmazonOrdersCache,
@@ -46,6 +47,13 @@ export interface BackfillFlags {
   dateFrom: string | null;
   /** Inclusive upper bound on Transaction.date (YYYY-MM-DD). */
   dateTo: string | null;
+  /**
+   * Optional case-insensitive substring filter on merchantClean OR merchantRaw.
+   * Cheap pre-filter for rule/memory-triggered backfills so we don't sweep the
+   * whole household when only one merchant changed. Pipeline still re-evaluates
+   * every loaded row, so over-selection is safe — under-selection is not.
+   */
+  merchantPattern?: string | null;
 }
 
 export interface BackfillResult {
@@ -113,6 +121,15 @@ export async function runBackfill(
     where.date = { [Op.gte]: flags.dateFrom };
   } else if (flags.dateTo) {
     where.date = { [Op.lte]: flags.dateTo };
+  }
+
+  if (flags.merchantPattern && flags.merchantPattern.trim().length > 0) {
+    const likeOp = caseInsensitiveLikeOp();
+    const needle = `%${flags.merchantPattern.trim()}%`;
+    where[Op.or as unknown as string] = [
+      { merchantClean: { [likeOp]: needle } },
+      { merchantRaw: { [likeOp]: needle } },
+    ];
   }
 
   const total = await Transaction.count({ where });

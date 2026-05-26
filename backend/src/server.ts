@@ -8,6 +8,7 @@ import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 import { startQuoteScheduler } from './integrations/yahoo/scheduler';
 import { startForwardIncomeScheduler } from './portfolio/forwardIncomeScheduler';
 import { startDailySnapshotScheduler } from './portfolio/dailySnapshotScheduler';
+import { startEnrichmentBackfillScheduler } from './import/enrichmentBackfillScheduler';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -41,6 +42,7 @@ async function start() {
   startQuoteScheduler();
   startForwardIncomeScheduler();
   startDailySnapshotScheduler();
+  startEnrichmentBackfillScheduler();
 }
 
 start().catch((err) => {

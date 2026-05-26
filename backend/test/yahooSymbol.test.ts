@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   enumerateYahooSymbols,
+  isCashPlaceholder,
   toYahooSymbol,
 } from '../src/integrations/yahoo/symbol';
 
@@ -85,6 +86,12 @@ test('empty / whitespace-only symbols return empty list', () => {
   assert.deepEqual(enumerateYahooSymbols('   ', { currency: 'USD', assetType: null, name: null }), []);
 });
 
+test('cash placeholders return empty candidate list', () => {
+  assert.deepEqual(enumerateYahooSymbols('USD', { currency: 'USD', assetType: 'cash', name: null }), []);
+  assert.deepEqual(enumerateYahooSymbols('CAD', { currency: 'CAD', assetType: 'cash', name: null }), []);
+  assert.deepEqual(enumerateYahooSymbols('CASH', { currency: 'USD', assetType: 'cash', name: null }), []);
+});
+
 test('toYahooSymbol returns the primary candidate', () => {
   assert.equal(toYahooSymbol('XEQT', 'CAD'), 'XEQT.TO');
   assert.equal(
@@ -96,4 +103,25 @@ test('toYahooSymbol returns the primary candidate', () => {
     'NVDA.NE',
   );
   assert.equal(toYahooSymbol('NVDA', 'USD'), 'NVDA');
+});
+
+test('cash placeholders resolve to empty string (Yahoo cannot fetch them)', () => {
+  assert.equal(toYahooSymbol('USD', 'USD'), '');
+  assert.equal(toYahooSymbol('CAD', 'CAD'), '');
+  assert.equal(toYahooSymbol('CASH', 'USD'), '');
+  assert.equal(toYahooSymbol('$$', 'USD'), '');
+  assert.equal(toYahooSymbol('$$$', 'USD'), '');
+});
+
+test('real 3-letter tickers are NOT treated as cash', () => {
+  assert.equal(toYahooSymbol('AMD', 'USD'), 'AMD');
+  assert.equal(toYahooSymbol('NKE', 'USD'), 'NKE');
+  assert.equal(toYahooSymbol('MMM', 'USD'), 'MMM');
+});
+
+test('isCashPlaceholder identifies cash-like symbols', () => {
+  assert.equal(isCashPlaceholder('USD', 'USD'), true);
+  assert.equal(isCashPlaceholder('CASH', 'USD'), true);
+  assert.equal(isCashPlaceholder('AMD', 'USD'), false);
+  assert.equal(isCashPlaceholder('', 'USD'), false);
 });

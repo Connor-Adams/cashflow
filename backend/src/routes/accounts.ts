@@ -75,7 +75,7 @@ router.patch('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -111,6 +111,18 @@ router.patch('/:id', async (req, res, next) => {
     }
     if (accountType !== undefined) {
       account.set('accountType', normalizeAccountType(accountType));
+    }
+    if (closedAt !== undefined) {
+      if (closedAt === null || closedAt === '') {
+        account.set('closedAt', null);
+      } else {
+        const raw = String(closedAt).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+          res.status(400).json({ error: 'closedAt must be YYYY-MM-DD or null' });
+          return;
+        }
+        account.set('closedAt', raw);
+      }
     }
     await account.save();
     res.json(account);

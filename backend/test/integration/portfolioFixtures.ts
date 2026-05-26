@@ -202,8 +202,19 @@ export async function seedSecurityMetadata(
 ): Promise<void> {
   const sec = await models.Security.findByPk(securityId);
   if (!sec) throw new Error(`Security ${securityId} not found`);
+  // Seed with the schema-canary keys (`marketCap`, `fundExpenseRatio`) even
+  // when callers only care about the legacy fields. ensureOverview treats
+  // metadata lacking any canary as schema-stale (pre-rollout shape) and
+  // forces a refresh, which makes integration tests that just want a
+  // "cached" payload flap to status:'stale'. Bump this list whenever
+  // backfill.ts adds new canary keys.
   await sec.update({
-    metadata: metadata as never,
+    metadata: {
+      marketCap: null,
+      fundExpenseRatio: null,
+      nextEarningsDate: null,
+      ...metadata,
+    } as never,
     metadataFetchedAt: new Date(),
   });
 }

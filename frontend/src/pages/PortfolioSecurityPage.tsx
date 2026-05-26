@@ -33,7 +33,12 @@ import {
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { AboutCard } from './portfolio-security/AboutCard'
+import { AnalystRecCard } from './portfolio-security/AnalystRecCard'
 import { DividendHistoryCard } from './portfolio-security/DividendHistoryCard'
+import { EarningsCard } from './portfolio-security/EarningsCard'
+import { FundFactsCard } from './portfolio-security/FundFactsCard'
+import { MarketDataCard } from './portfolio-security/MarketDataCard'
+import { NewsCard } from './portfolio-security/NewsCard'
 import { PriceChartCard } from './portfolio-security/PriceChartCard'
 import { SecurityHeader } from './portfolio-security/SecurityHeader'
 import type {
@@ -157,11 +162,31 @@ export function PortfolioSecurityPage() {
       </section>
 
       <div className="mt-4">
+        <MarketDataCard overview={overview} currency={combined.currency} />
+      </div>
+
+      <div className="mt-4">
+        <EarningsCard overview={overview} />
+      </div>
+
+      <div className="mt-4">
+        <AnalystRecCard overview={overview} />
+      </div>
+
+      <div className="mt-4">
+        <FundFactsCard overview={overview} currency={combined.currency} />
+      </div>
+
+      <div className="mt-4">
         <PriceChartCard securityId={security.id} currency={combined.currency} />
       </div>
 
       <div className="mt-4">
         <DividendHistoryCard securityId={security.id} currency={combined.currency} />
+      </div>
+
+      <div className="mt-4">
+        <NewsCard securityId={security.id} />
       </div>
 
       <div className="mt-4">
