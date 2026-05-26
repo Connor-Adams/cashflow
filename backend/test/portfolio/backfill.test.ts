@@ -1,8 +1,8 @@
 /**
- * Unit tests for the lazy backfill module. AV HTTP layer is replaced with
- * stubs via the exposed `__setAvClient` test seam; the daily call budget is
- * shrunk via `__setBudgetCap` so we can exhaust it with a handful of seeded
- * `provider_job_log` rows rather than 22+ real fetches.
+ * Unit tests for the lazy backfill module. The Yahoo Finance HTTP layer is
+ * replaced with stubs via the `__setYahooFetchers` test seam. Yahoo has no
+ * per-key quota so there is no budget gate to exercise — rate-limit handling
+ * is verified by having the stub throw `YahooFinanceError`.
  */
 import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,7 +24,6 @@ before(async () => {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
-  process.env.ALPHA_VANTAGE_API_KEY = 'test_av_key';
 
   execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
     cwd: backendRoot,
@@ -60,9 +59,9 @@ test('ensureDailyPrices returns never when no rows and enqueues a backfill', asy
   twoDaysAgo.setUTCDate(twoDaysAgo.getUTCDate() - 2);
   const tdStr = twoDaysAgo.toISOString().slice(0, 10);
 
-  backfill.__setAvClient({
-    fetchGlobalQuote: async () => null,
-    fetchDailyAdjusted: async () => [
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async () => [
       { date: tdStr, open: 1, high: 2, low: 0.5, close: 1.5, adjClose: 1.5, volume: 1000 },
       { date: yStr, open: 1.5, high: 2.5, low: 1, close: 2, adjClose: 2, volume: 2000 },
     ],
@@ -78,9 +77,34 @@ test('ensureDailyPrices returns never when no rows and enqueues a backfill', asy
   assert.equal(second.status, 'fresh');
 
   const okLog = await models.ProviderJobLog.findOne({
-    where: { function: 'TIME_SERIES_DAILY_ADJUSTED', symbol: 'TST', status: 'ok' },
+    where: { function: 'DAILY_HISTORY', symbol: 'TST', status: 'ok' },
   });
   assert.ok(okLog, 'a provider_job_log row should be recorded for the successful fetch');
+});
+
+test('ensureDailyPrices appends .TO for CAD-listed securities', async () => {
+  const sec = await models.Security.create({
+    householdId: 1, symbol: 'XEQT', name: 'iShares Core Equity', assetType: 'EQUITY', currency: 'CAD',
+  });
+  let observedSymbol: string | null = null;
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async (symbol) => {
+      observedSymbol = symbol;
+      return [{ date: '2026-05-21', open: 44, high: 45, low: 43, close: 44.5, adjClose: 44.5, volume: 100 }];
+    },
+    fetchDividends: async () => [],
+    fetchOverview: async () => null,
+  });
+
+  await backfill.ensureDailyPrices(sec.id);
+  await new Promise((r) => setTimeout(r, 60));
+
+  assert.equal(observedSymbol, 'XEQT.TO', 'Yahoo client should be called with the .TO-suffixed symbol');
+  const okLog = await models.ProviderJobLog.findOne({
+    where: { function: 'DAILY_HISTORY', symbol: 'XEQT.TO', status: 'ok' },
+  });
+  assert.ok(okLog, 'job log should record the Yahoo-mapped symbol');
 });
 
 test('concurrent ensureDailyPrices for same security dedupes', async () => {
@@ -88,9 +112,9 @@ test('concurrent ensureDailyPrices for same security dedupes', async () => {
     householdId: 1, symbol: 'TST2', name: 'Test', assetType: 'EQUITY', currency: 'USD',
   });
   let calls = 0;
-  backfill.__setAvClient({
-    fetchGlobalQuote: async () => null,
-    fetchDailyAdjusted: async () => {
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async () => {
       calls += 1;
       await new Promise((r) => setTimeout(r, 30));
       return [{ date: '2026-05-21', open: 1, high: 2, low: 0.5, close: 1.5, adjClose: 1.5, volume: 100 }];
@@ -104,50 +128,25 @@ test('concurrent ensureDailyPrices for same security dedupes', async () => {
     backfill.ensureDailyPrices(sec.id),
   ]);
   await new Promise((r) => setTimeout(r, 80));
-  assert.equal(calls, 1, 'AV called exactly once for concurrent requests');
+  assert.equal(calls, 1, 'Yahoo called exactly once for concurrent requests');
   assert.ok(['never', 'in_progress'].includes(a.status));
-});
-
-test('ensureDailyPrices reports rate_limited when shared DB budget is exhausted', async () => {
-  const sec = await models.Security.create({
-    householdId: 1, symbol: 'TST3', name: 'Test', assetType: 'EQUITY', currency: 'USD',
-  });
-  backfill.__setAvClient({
-    fetchGlobalQuote: async () => null,
-    fetchDailyAdjusted: async () => [],
-    fetchDividends: async () => [],
-    fetchOverview: async () => null,
-  });
-  backfill.__setBudgetCap(2);
-  for (let i = 0; i < 2; i++) {
-    await models.ProviderJobLog.create({
-      provider: 'alpha_vantage',
-      function: 'GLOBAL_QUOTE',
-      symbol: 'OTHER',
-      status: 'ok',
-      fetchedAt: new Date(),
-    });
-  }
-  const result = await backfill.ensureDailyPrices(sec.id);
-  assert.equal(result.status, 'rate_limited');
-  assert.ok(typeof result.nextRetryAt === 'string' && result.nextRetryAt.length > 0);
 });
 
 test('ensureOverview persists metadata + logs ok', async () => {
   const sec = await models.Security.create({
     householdId: 1, symbol: 'AAPL', name: 'Apple', assetType: 'EQUITY', currency: 'USD',
   });
-  backfill.__setAvClient({
-    fetchGlobalQuote: async () => null,
-    fetchDailyAdjusted: async () => [],
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async () => [],
     fetchDividends: async () => [],
     fetchOverview: async () => ({
       sector: 'Technology',
       industry: 'Consumer Electronics',
-      country: 'USA',
-      exchange: 'NASDAQ',
+      country: 'United States',
+      exchange: 'NMS',
       description: 'Designs phones.',
-      raw: { Symbol: 'AAPL', PERatio: '30.5' },
+      raw: { symbol: 'AAPL' },
     }),
   });
 
@@ -173,12 +172,12 @@ test('ensureDividends rate-limit response is recorded as rate_limited', async ()
   const sec = await models.Security.create({
     householdId: 1, symbol: 'DVT', name: 'Div Test', assetType: 'EQUITY', currency: 'USD',
   });
-  const { AlphaVantageError } = await import('../../src/integrations/alphaVantage/client');
-  backfill.__setAvClient({
-    fetchGlobalQuote: async () => null,
-    fetchDailyAdjusted: async () => [],
+  const { YahooFinanceError } = await import('../../src/integrations/yahoo/client');
+  backfill.__setYahooFetchers({
+    fetchQuote: async () => null,
+    fetchDailyHistory: async () => [],
     fetchDividends: async () => {
-      throw new AlphaVantageError('rate limit reached', 200, 'rate limit reached');
+      throw new YahooFinanceError('rate limited by upstream', 429);
     },
     fetchOverview: async () => null,
   });

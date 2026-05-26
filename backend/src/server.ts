@@ -4,7 +4,7 @@ import * as env from './config/env';
 import { seedDemoData } from './demo/seedDemoData';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
-import { startQuoteScheduler } from './integrations/alphaVantage/scheduler';
+import { startQuoteScheduler } from './integrations/yahoo/scheduler';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {

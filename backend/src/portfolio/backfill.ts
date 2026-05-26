@@ -1,5 +1,5 @@
 /**
- * Lazy + user-triggered Alpha Vantage backfill orchestration.
+ * Lazy + user-triggered Yahoo Finance backfill orchestration.
  *
  * Each `ensureX` function:
  *   1. Checks current freshness in the DB.
@@ -8,27 +8,16 @@
  *   3. Returns the current `BackfillStatus` immediately so callers do not
  *      block on the network round-trip.
  *
- * The shared Alpha Vantage daily call budget lives in the `provider_job_log`
- * table (see `../integrations/alphaVantage/budget`). Both the background
- * scheduler and these lazy ensure-* paths consult the same counter, so the
- * total number of AV calls per UTC day stays under the free-tier ceiling
- * regardless of which subsystem triggered the work.
- *
- * Trade-off: budget checks are optimistic — a burst of concurrent calls can
- * race past the cap before any of them have written their `ok` row. In
- * practice the per-(endpoint, security) in-flight dedupe and the 4-minute
- * scheduler cadence keep the overshoot bounded to a handful of calls per
- * day, which is comfortably inside the 3-call headroom the 22/25 default
- * budget leaves.
+ * Yahoo's public API has no documented per-key quota, so unlike the
+ * previous Alpha Vantage implementation we do not gate work on a daily
+ * budget counter. Every call is still recorded in `provider_job_log` for
+ * diagnostics, retry/stale logic, and rate-limit detection.
  */
 import { Security, SecurityDailyPrice, SecurityDividend } from '../models';
-import * as defaultAv from '../integrations/alphaVantage/client';
-import {
-  ALPHA_VANTAGE_PROVIDER,
-  checkBudget,
-  recordCall,
-} from '../integrations/alphaVantage/budget';
-import { AlphaVantageError } from '../integrations/alphaVantage/client';
+import * as defaultYahoo from '../integrations/yahoo/client';
+import { YahooFinanceError } from '../integrations/yahoo/client';
+import { recordCall } from '../integrations/yahoo/jobLog';
+import { toYahooSymbol } from '../integrations/yahoo/symbol';
 import * as env from '../config/env';
 import { logger } from '../observability/logger';
 import { reconcileDividendsForSecurity } from './reconcileDividends';
@@ -40,35 +29,26 @@ export type BackfillStatus = {
   coverageDays: number;
 };
 
-type AvClient = Pick<
-  typeof defaultAv,
-  'fetchDailyAdjusted' | 'fetchDividends' | 'fetchOverview' | 'fetchGlobalQuote'
+type YahooFetchers = Pick<
+  typeof defaultYahoo,
+  'fetchDailyHistory' | 'fetchDividends' | 'fetchOverview' | 'fetchQuote'
 >;
 
-let av: AvClient = defaultAv;
-let budgetCapOverride: number | null = null;
+let yahoo: YahooFetchers = defaultYahoo;
 const inFlight = new Map<string, Promise<void>>();
 
 const OVERVIEW_STALE_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 const DIVIDENDS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const DAILY_HISTORY_PERIOD1_MS = 5 * 365 * 24 * 60 * 60 * 1000; // 5 years
 
-/** Test seam — replaces the AV client with a stub. */
-export function __setAvClient(stub: AvClient): void {
-  av = stub;
+/** Test seam — replaces the Yahoo client with a stub. */
+export function __setYahooFetchers(stub: YahooFetchers): void {
+  yahoo = stub;
 }
-/** Test seam — overrides the daily budget cap so tests don't need to seed 22 rows. */
-export function __setBudgetCap(cap: number | null): void {
-  budgetCapOverride = cap;
-}
-/** Test seam — clears in-flight map + restores default client + clears cap override. */
+/** Test seam — clears in-flight map + restores default client. */
 export function __resetForTests(): void {
   inFlight.clear();
-  av = defaultAv;
-  budgetCapOverride = null;
-}
-
-function activeBudgetCap(): number {
-  return budgetCapOverride ?? env.quoteDailyBudget;
+  yahoo = defaultYahoo;
 }
 
 function yesterdayISODate(): string {
@@ -77,27 +57,13 @@ function yesterdayISODate(): string {
   return d.toISOString().slice(0, 10);
 }
 
-function nextUtcMidnight(now: Date = new Date()): Date {
-  return new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + 1,
-      0,
-      0,
-      0,
-      0,
-    ),
-  );
-}
-
 function enqueue(key: string, work: () => Promise<void>): void {
   if (inFlight.has(key)) return;
   const p = work()
     .catch((err) => {
       logger.warn('backfill_failed', {
         key,
-        provider: ALPHA_VANTAGE_PROVIDER,
+        provider: defaultYahoo.YAHOO_PROVIDER,
         error: err instanceof Error ? err.message : String(err),
       });
     })
@@ -107,27 +73,14 @@ function enqueue(key: string, work: () => Promise<void>): void {
   inFlight.set(key, p);
 }
 
-function makeRateLimited(): BackfillStatus {
-  return {
-    status: 'rate_limited',
-    lastFetchedAt: null,
-    nextRetryAt: nextUtcMidnight().toISOString(),
-    coverageDays: 0,
-  };
-}
-
 /**
- * Wraps an AV fetch + DB upsert in unified budget accounting:
+ * Wraps a Yahoo fetch + DB upsert in unified call logging:
  *   - Records `ok` on a successful fetch that returned usable data.
- *   - Records `not_found` when AV returned no data for the symbol.
- *   - Records `rate_limited` or `error` based on `AlphaVantageError` shape.
- *
- * The fetch itself is not guarded by `checkBudget` here — callers must do
- * that synchronously before `enqueue()` to keep the budget pre-check tight
- * around the work item that consumes the slot.
+ *   - Records `not_found` when Yahoo returned no data for the symbol.
+ *   - Records `rate_limited` or `error` based on the underlying error.
  */
 async function runTrackedFetch<T>(
-  fnName: 'TIME_SERIES_DAILY_ADJUSTED' | 'DIVIDENDS' | 'OVERVIEW' | 'GLOBAL_QUOTE',
+  fnName: 'DAILY_HISTORY' | 'DIVIDENDS' | 'OVERVIEW' | 'QUOTE',
   symbol: string,
   fetcher: () => Promise<T | null>,
   persist: (result: T) => Promise<void>,
@@ -141,8 +94,9 @@ async function runTrackedFetch<T>(
     await persist(result);
     await recordCall({ function: fnName, symbol, status: 'ok' });
   } catch (err) {
-    if (err instanceof AlphaVantageError) {
-      const isRateLimit = err.providerNote != null;
+    if (err instanceof YahooFinanceError) {
+      const isRateLimit =
+        err.httpStatus === 429 || /rate.?limit/i.test(err.message);
       await recordCall({
         function: fnName,
         symbol,
@@ -186,15 +140,11 @@ export async function ensureDailyPrices(securityId: number): Promise<BackfillSta
   }
 
   if (rowCount === 0) {
-    const budget = await checkBudget(activeBudgetCap());
-    if (!budget.ok) return makeRateLimited();
-    enqueue(key, () => backfillDaily(sec.id, sec.symbol, 'full'));
+    enqueue(key, () => backfillDaily(sec.id, sec.symbol, sec.currency, 'full'));
     return { status: 'never', lastFetchedAt, nextRetryAt: null, coverageDays: 0 };
   }
   if (latest && latest.date < yesterdayISODate()) {
-    const budget = await checkBudget(activeBudgetCap());
-    if (!budget.ok) return makeRateLimited();
-    enqueue(key, () => backfillDaily(sec.id, sec.symbol, 'compact'));
+    enqueue(key, () => backfillDaily(sec.id, sec.symbol, sec.currency, 'compact'));
     return { status: 'stale', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
   }
   return { status: 'fresh', lastFetchedAt, nextRetryAt: null, coverageDays: rowCount };
@@ -203,12 +153,18 @@ export async function ensureDailyPrices(securityId: number): Promise<BackfillSta
 async function backfillDaily(
   securityId: number,
   symbol: string,
+  currency: string,
   outputsize: 'compact' | 'full',
 ): Promise<void> {
+  const yahooSymbol = toYahooSymbol(symbol, currency);
+  const period1 =
+    outputsize === 'full'
+      ? new Date(Date.now() - DAILY_HISTORY_PERIOD1_MS)
+      : new Date(Date.now() - 120 * 86400000);
   await runTrackedFetch(
-    'TIME_SERIES_DAILY_ADJUSTED',
-    symbol,
-    () => av.fetchDailyAdjusted(symbol, outputsize),
+    'DAILY_HISTORY',
+    yahooSymbol,
+    () => yahoo.fetchDailyHistory(yahooSymbol, { period1 }),
     async (bars) => {
       if (bars.length === 0) return;
       await upsertBars(securityId, bars);
@@ -218,7 +174,7 @@ async function backfillDaily(
 
 async function upsertBars(
   securityId: number,
-  bars: Awaited<ReturnType<typeof av.fetchDailyAdjusted>>,
+  bars: Awaited<ReturnType<typeof yahoo.fetchDailyHistory>>,
 ): Promise<void> {
   if (!bars) return;
   const now = new Date();
@@ -232,7 +188,7 @@ async function upsertBars(
       close: String(bar.close),
       adjClose: String(bar.adjClose),
       volume: bar.volume,
-      source: ALPHA_VANTAGE_PROVIDER,
+      source: defaultYahoo.YAHOO_PROVIDER,
       fetchedAt: now,
     });
   }
@@ -264,13 +220,12 @@ export async function ensureDividends(securityId: number): Promise<BackfillStatu
     latest != null && Date.now() - latest.fetchedAt.getTime() > DIVIDENDS_STALE_MS;
 
   if (rowCount === 0 || isStale) {
-    const budget = await checkBudget(activeBudgetCap());
-    if (!budget.ok) return makeRateLimited();
+    const yahooSymbol = toYahooSymbol(sec.symbol, sec.currency);
     enqueue(key, async () => {
       await runTrackedFetch(
         'DIVIDENDS',
-        sec.symbol,
-        () => av.fetchDividends(sec.symbol),
+        yahooSymbol,
+        () => yahoo.fetchDividends(yahooSymbol),
         async (events) => {
           if (events.length === 0) return;
           const now = new Date();
@@ -283,7 +238,7 @@ export async function ensureDividends(securityId: number): Promise<BackfillStatu
               paymentDate: ev.paymentDate,
               amount: String(ev.amount),
               currency: ev.currency,
-              source: ALPHA_VANTAGE_PROVIDER,
+              source: defaultYahoo.YAHOO_PROVIDER,
               fetchedAt: now,
             });
           }
@@ -318,13 +273,12 @@ export async function ensureOverview(securityId: number): Promise<BackfillStatus
     return { status: 'in_progress', lastFetchedAt, nextRetryAt: null, coverageDays: isNever ? 0 : 1 };
   }
   if (isNever || isStale) {
-    const budget = await checkBudget(activeBudgetCap());
-    if (!budget.ok) return makeRateLimited();
+    const yahooSymbol = toYahooSymbol(sec.symbol, sec.currency);
     enqueue(key, () =>
       runTrackedFetch(
         'OVERVIEW',
-        sec.symbol,
-        () => av.fetchOverview(sec.symbol),
+        yahooSymbol,
+        () => yahoo.fetchOverview(yahooSymbol),
         async (overview) => {
           await sec.update({
             metadata: {

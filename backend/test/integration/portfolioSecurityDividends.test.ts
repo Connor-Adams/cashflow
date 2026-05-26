@@ -19,7 +19,6 @@ before(async () => {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
-  process.env.ALPHA_VANTAGE_API_KEY = 'av_test_key';
   execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
     cwd: backendRoot,
     env: { ...process.env, DATABASE_PATH: dbPath, NODE_ENV: 'development' },

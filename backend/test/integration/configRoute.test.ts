@@ -22,7 +22,6 @@ before(async () => {
   process.env.DATABASE_PATH = dbPath;
   process.env.NODE_ENV = 'test';
   process.env.LOGO_DEV_TOKEN = 'pk_test_logo';
-  process.env.ALPHA_VANTAGE_API_KEY = 'av_test';
 
   execFileSync('yarn', ['run', 'sequelize-cli', 'db:migrate'], {
     cwd: backendRoot,
@@ -45,5 +44,5 @@ test('returns publishable config without leaking secrets', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.logoDevToken, 'pk_test_logo');
   assert.equal(res.body.quoteProviderConfigured, true);
-  assert.equal(res.body.alphaVantageApiKey, undefined, 'must not leak AV key');
+  assert.equal(res.body.alphaVantageApiKey, undefined, 'must not surface AV key field');
 });

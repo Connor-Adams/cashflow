@@ -701,10 +701,6 @@ DATA:OFXSGML
   assert.ok(holding, JSON.stringify(portfolio.body.holdings));
   assert.equal(holding.quantity, 2);
   assert.equal(holding.marketValue, 420);
-
-  const refresh = await authed.post('/api/portfolio/prices/refresh').send({});
-  assert.equal(refresh.status, 400);
-  assert.ok(String(refresh.body.error).includes('ALPHA_VANTAGE_API_KEY'));
 });
 
 test('POST /api/import/preview: 400 when accountId missing', async () => {
