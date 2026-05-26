@@ -1498,12 +1498,12 @@
   }
 
   .heroTile__sparkline {
-    @apply mt-1 block w-full;
+    @apply mt-1 block w-full max-w-md;
     height: 48px;
   }
 
   .heroTile__subMetrics {
-    @apply mt-auto m-0 grid gap-1.5 pt-3;
+    @apply mt-auto m-0 grid max-w-md gap-1.5 pt-3;
     border-top: 1px solid var(--border);
   }
 

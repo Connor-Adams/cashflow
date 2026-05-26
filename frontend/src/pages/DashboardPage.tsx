@@ -829,14 +829,15 @@ export function DashboardPage() {
     },
   ]
 
-  // Banners share the top row when both fire (8 + 4 = 12). When only one
-  // is visible, stretch it to full width so the grid doesn't open a
-  // half-empty row at the top.
+  // Review banner pins to 8 cols so it lines up with the HeroTile beneath
+  // it instead of sprawling full-width across an empty middle. The AI
+  // action banner takes the remaining 4 cols when both fire, otherwise
+  // stretches across the full row.
   const showReviewBanner = summaryStats.reviewCount > 0
   const showAiActionBanner = hasActionSeverity
   const bannerCount =
     (showReviewBanner ? 1 : 0) + (showAiActionBanner ? 1 : 0)
-  const reviewBannerSpan: BentoSpan = bannerCount === 2 ? 8 : 12
+  const reviewBannerSpan: BentoSpan = 8
   const aiBannerSpan: BentoSpan = bannerCount === 2 ? 4 : 12
 
   return (
@@ -934,11 +935,13 @@ export function DashboardPage() {
             label={`${summaryStats.reviewCount} transaction${
               summaryStats.reviewCount === 1 ? '' : 's'
             } flagged for review`}
-            description="Waiting on category, split, or business decisions before they roll into your totals."
-            actions={
-              <Link to="/review" className="text-sm font-semibold underline">
-                Open Review Inbox
-              </Link>
+            description={
+              <>
+                Waiting on category, split, or business decisions before they roll into your totals.{' '}
+                <Link to="/review" className="font-semibold underline">
+                  Open Review Inbox
+                </Link>
+              </>
             }
           />
         )}
