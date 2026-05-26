@@ -64,6 +64,11 @@ import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
+import { Notification, initNotification } from './Notification';
+import {
+  NotificationPreference,
+  initNotificationPreference,
+} from './NotificationPreference';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -124,6 +129,23 @@ initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initTaxReserveSetting(sequelize);
+initNotification(sequelize);
+initNotificationPreference(sequelize);
+
+User.hasMany(Notification, {
+  foreignKey: 'user_id',
+  as: 'notifications',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(NotificationPreference, {
+  foreignKey: 'user_id',
+  as: 'notificationPreferences',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+NotificationPreference.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -507,4 +529,6 @@ export {
   Subscription,
   AiReviewRun,
   TaxReserveSetting,
+  Notification,
+  NotificationPreference,
 };
