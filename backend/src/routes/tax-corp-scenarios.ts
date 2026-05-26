@@ -91,6 +91,7 @@ router.post('/', async (req, res, next) => {
 
     const scenario = await Scenario.create({
       parentId: effectiveParentId,
+      householdPlanId: null,
       entityId,
       year,
       name,
@@ -300,6 +301,7 @@ router.post('/:id/fork', async (req, res, next) => {
         : `${result.scenario.name} (fork)`;
     const child = await Scenario.create({
       parentId: result.scenario.id,
+      householdPlanId: result.scenario.householdPlanId,
       entityId: result.scenario.entityId,
       year: result.scenario.year,
       name,

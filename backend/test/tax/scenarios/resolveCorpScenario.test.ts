@@ -50,7 +50,7 @@ test('resolveCorpScenario(fork) layers corp override on baseline actuals', async
   const { entity } = await seedCorp();
   const baseline = await ensureCorpBaselineScenario(entity.id, 2025);
   const fork = await Scenario.create({
-    parentId: baseline.id, entityId: entity.id, year: 2025,
+    parentId: baseline.id, householdPlanId: null, entityId: entity.id, year: 2025,
     name: 'Higher revenue', kind: 'fork',
     overrides: { 'corp.activeIncome': 400000 },
     assumptions: {}, nextYearId: null, notes: null,
@@ -67,7 +67,7 @@ test('resolveCorpScenario rejects when scenario entity is personal', async () =>
     jurisdiction: 'CA-ON', fiscalYearEnd: null,
   });
   const scenario = await Scenario.create({
-    parentId: null, entityId: personal.id, year: 2025,
+    parentId: null, householdPlanId: null, entityId: personal.id, year: 2025,
     name: 'Wrong kind', kind: 'baseline',
     overrides: {}, assumptions: {}, nextYearId: null, notes: null,
   });

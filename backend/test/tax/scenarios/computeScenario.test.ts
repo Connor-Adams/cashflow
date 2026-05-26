@@ -63,7 +63,7 @@ test('computeScenario recomputes when overrides change (different facts_hash)', 
   const { entity } = await seedEntity();
   const baseline = await ensureBaselineScenario(entity.id, 2025);
   const fork = await Scenario.create({
-    parentId: baseline.id, entityId: entity.id, year: 2025,
+    parentId: baseline.id, householdPlanId: null, entityId: entity.id, year: 2025,
     name: 'F', kind: 'fork',
     overrides: { 'income.employment': 120000 },
     assumptions: {}, nextYearId: null, notes: null,
