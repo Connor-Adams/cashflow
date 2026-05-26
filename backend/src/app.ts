@@ -10,6 +10,7 @@ import transfersRouter from './routes/transfers';
 import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
+import sankeyRouter from './routes/sankey';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
 import moneyLeaksRouter from './routes/moneyLeaks';
@@ -117,6 +118,10 @@ app.use('/api/calendar', calendarRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/forecast', forecastRouter);
 app.use('/api/import', importRouter);
+// sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins
+// against any future /:id-style routes added to summaryRouter. The
+// remainder of /api/summary/* keeps flowing to summaryRouter below.
+app.use('/api/summary/sankey', sankeyRouter);
 app.use('/api/summary', summaryRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
