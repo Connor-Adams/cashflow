@@ -1,0 +1,115 @@
+import { describe, it, expect } from 'vitest'
+import {
+  toDateInputValue,
+  fromDateInputValue,
+  todayDateInputValue,
+} from './dateInput'
+
+/**
+ * Timezone-safety tests for the date-input helpers (issue #280).
+ *
+ * Node's `TZ` env variable is read once at startup, so we can't reliably swap
+ * timezones at runtime within a single test process. Instead these tests
+ * exercise the absolute-UTC contract directly: a Date constructed from a UTC
+ * ISO string must round-trip through the helpers without drift, regardless of
+ * the process TZ. The helpers use UTC accessors internally; as long as that
+ * holds, the result is invariant to local TZ.
+ */
+describe('toDateInputValue', () => {
+  it('formats a UTC-midnight Date as YYYY-MM-DD (AC #1)', () => {
+    expect(toDateInputValue(new Date('2026-05-26T00:00:00Z'))).toBe('2026-05-26')
+  })
+
+  it('formats a UTC-midnight date at year boundary', () => {
+    expect(toDateInputValue(new Date('2026-01-01T00:00:00Z'))).toBe('2026-01-01')
+    expect(toDateInputValue(new Date('2025-12-31T00:00:00Z'))).toBe('2025-12-31')
+  })
+
+  it('pads single-digit months and days', () => {
+    expect(toDateInputValue(new Date('2026-03-04T00:00:00Z'))).toBe('2026-03-04')
+  })
+
+  it('uses UTC accessors so a late-evening local instant in a behind-UTC TZ does not shift the date', () => {
+    // 23:30 UTC on 2026-05-26 — for a user in UTC-8 this is 15:30 local on
+    // the same day. The helper must report 2026-05-26 (UTC), not 2026-05-27.
+    expect(toDateInputValue(new Date('2026-05-26T23:30:00Z'))).toBe('2026-05-26')
+  })
+
+  it('uses UTC accessors so an early-morning local instant in an ahead-UTC TZ does not shift the date', () => {
+    // 00:30 UTC on 2026-05-26 — for a user in UTC+13 (Pacific/Auckland with DST)
+    // this is 13:30 local on the same calendar day. The helper must report
+    // 2026-05-26, which is what the server treats as "the picked date".
+    expect(toDateInputValue(new Date('2026-05-26T00:30:00Z'))).toBe('2026-05-26')
+  })
+})
+
+describe('fromDateInputValue', () => {
+  it('parses YYYY-MM-DD as UTC midnight (AC #2)', () => {
+    expect(fromDateInputValue('2026-05-26').toISOString()).toBe(
+      '2026-05-26T00:00:00.000Z',
+    )
+  })
+
+  it('parses a year-boundary date as UTC midnight', () => {
+    expect(fromDateInputValue('2026-01-01').toISOString()).toBe(
+      '2026-01-01T00:00:00.000Z',
+    )
+    expect(fromDateInputValue('2025-12-31').toISOString()).toBe(
+      '2025-12-31T00:00:00.000Z',
+    )
+  })
+
+  it('returns null for malformed input', () => {
+    expect(fromDateInputValue('')).toBeNull()
+    expect(fromDateInputValue('not-a-date')).toBeNull()
+    expect(fromDateInputValue('2026-13-01')).toBeNull()
+    expect(fromDateInputValue('2026-02-30')).toBeNull()
+    expect(fromDateInputValue('2026-5-6')).toBeNull()
+    expect(fromDateInputValue('2026/05/26')).toBeNull()
+  })
+})
+
+describe('round-trip stability (AC #3)', () => {
+  const samples = [
+    '2026-05-26',
+    '2026-01-01',
+    '2025-12-31',
+    '2024-02-29', // leap year
+    '2026-03-08', // U.S. DST spring-forward
+    '2026-11-01', // U.S. DST fall-back
+  ]
+
+  for (const s of samples) {
+    it(`preserves ${s} across fromDateInputValue → toDateInputValue`, () => {
+      const parsed = fromDateInputValue(s)
+      expect(parsed).not.toBeNull()
+      expect(toDateInputValue(parsed!)).toBe(s)
+    })
+  }
+})
+
+describe('todayDateInputValue', () => {
+  it('snaps `now` to UTC midnight of the local calendar day so the returned string matches the user-visible "today"', () => {
+    // Construct a fake "now" that is late-evening local (in any TZ) and pass it
+    // through. The helper must format the local calendar day, not the UTC day.
+    // We can only verify by reading the value back: it must equal the local
+    // YYYY-MM-DD of `now`, not a shifted day.
+    const now = new Date()
+    const localY = now.getFullYear()
+    const localM = String(now.getMonth() + 1).padStart(2, '0')
+    const localD = String(now.getDate()).padStart(2, '0')
+    expect(todayDateInputValue(now)).toBe(`${localY}-${localM}-${localD}`)
+  })
+
+  it('defaults to `new Date()` when no argument is given', () => {
+    const result = todayDateInputValue()
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('round-trips through fromDateInputValue cleanly', () => {
+    const s = todayDateInputValue(new Date('2026-05-26T23:30:00Z'))
+    const back = fromDateInputValue(s)
+    expect(back).not.toBeNull()
+    expect(toDateInputValue(back!)).toBe(s)
+  })
+})

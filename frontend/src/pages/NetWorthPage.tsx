@@ -22,6 +22,11 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import { formatMoney } from '@/lib/formatMoney'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '@/lib/dateInput'
 
 type Range = '1M' | '3M' | '1Y' | 'All'
 
@@ -30,15 +35,18 @@ function rangeToParams(range: Range): {
   to: string
   granularity: 'monthly' | 'daily'
 } {
-  const today = new Date()
-  const to = today.toISOString().slice(0, 10)
+  // Anchor at UTC midnight of the user's local calendar day so the picked
+  // date matches what the user sees (issue #280). All date math uses UTC
+  // setters to stay TZ-invariant.
+  const todayUtc = fromDateInputValue(todayDateInputValue())!
+  const to = toDateInputValue(todayUtc)
   const from = (() => {
-    const d = new Date(today)
+    const d = new Date(todayUtc)
     if (range === '1M') d.setUTCDate(d.getUTCDate() - 31)
     else if (range === '3M') d.setUTCDate(d.getUTCDate() - 92)
     else if (range === '1Y') d.setUTCDate(d.getUTCDate() - 365)
     else d.setUTCFullYear(d.getUTCFullYear() - 20)
-    return d.toISOString().slice(0, 10)
+    return toDateInputValue(d)
   })()
   const granularity: 'monthly' | 'daily' =
     range === '1M' || range === '3M' ? 'daily' : 'monthly'

@@ -38,7 +38,11 @@ import {
   postFormData,
   postJson,
 } from '../lib/api'
-import { toDateInputValue } from '../lib/dateInput'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   BulkPatchFilterResponse,
@@ -115,16 +119,25 @@ function formatAiSuggestion(suggestion: AiSuggestion): string {
 
 const DEFAULT_TRANSACTION_CURRENCY = 'CAD'
 
+/**
+ * Anchor for default-range calculations: UTC midnight of the user's local
+ * calendar day. Keeps the derived YYYY-MM-DD strings stable across timezones
+ * (issue #280).
+ */
+function localTodayUtcMidnight(): Date {
+  return fromDateInputValue(todayDateInputValue())!
+}
+
 function getRelativeDateRange(days: number): { from: string; to: string } {
-  const to = new Date()
+  const to = localTodayUtcMidnight()
   const from = new Date(to)
-  from.setDate(from.getDate() - days)
+  from.setUTCDate(from.getUTCDate() - days)
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDateRange(): { from: string; to: string } {
-  const to = new Date()
-  const from = new Date(to.getFullYear(), 0, 1)
+  const to = localTodayUtcMidnight()
+  const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
