@@ -442,11 +442,11 @@ test('applyAmazonItemCategorySuggestions: updates inferredCategory + stringifies
   const fresh = await models.ExternalOrderItem.findByPk(item.id);
   assert.ok(fresh);
   assert.equal(fresh!.inferredCategory, 'Office Equipment');
-  // DECIMAL columns are written as strings by the production code; the read
-  // value's runtime type depends on dialect (string on Postgres, number on
-  // SQLite). Stringify both to make this dialect-agnostic.
-  assert.equal(String(fresh!.businessUsePercent), '80');
-  assert.equal(String(fresh!.confidence), '90');
+  // DECIMAL(5,2) columns: Postgres returns "80.00" (full scale), SQLite
+  // returned the bare integer string. Normalize via Number() so the assert
+  // is dialect-agnostic.
+  assert.equal(Number(fresh!.businessUsePercent), 80);
+  assert.equal(Number(fresh!.confidence), 90);
 });
 
 // ─── categorizeAmazonItemsWithAi: openaiCaller injection ───────────────────
