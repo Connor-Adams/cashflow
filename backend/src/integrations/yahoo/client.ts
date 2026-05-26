@@ -17,6 +17,7 @@
 import YahooFinance from 'yahoo-finance2';
 import type {
   ChartEventDividend,
+  ChartOptionsWithReturnArray,
   ChartResultArray,
 } from 'yahoo-finance2/script/src/modules/chart';
 import type { Quote } from 'yahoo-finance2/script/src/modules/quote';
@@ -95,17 +96,20 @@ function getClient(): YahooClient {
   if (!singleton) {
     const instance = new YahooFinance({
       suppressNotices: ['yahooSurvey', 'ripHistorical'],
+      validation: { logOptionsErrors: false },
     });
     singleton = {
       quote: (s) => instance.quote(s) as Promise<Quote | Quote[] | null>,
-      chart: (s, o) =>
-        instance.chart(s, {
+      chart: (s, o) => {
+        const chartOpts: ChartOptionsWithReturnArray = {
           period1: o.period1,
-          period2: o.period2,
           interval: o.interval,
           events: o.events,
           return: 'array',
-        }) as Promise<ChartResultArray>,
+        };
+        if (o.period2 !== undefined) chartOpts.period2 = o.period2;
+        return instance.chart(s, chartOpts) as Promise<ChartResultArray>;
+      },
       quoteSummary: (s, o) =>
         instance.quoteSummary(s, { modules: o.modules as never }) as Promise<QuoteSummaryResult>,
     };
