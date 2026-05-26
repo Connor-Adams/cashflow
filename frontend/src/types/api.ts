@@ -298,6 +298,53 @@ export type PlannedEventInput = {
 /** PUT /api/planned-events/:id body shape — every field optional. */
 export type PlannedEventPatch = Partial<PlannedEventInput>
 
+/**
+ * Direction of a forecast occurrence — drives sign + colour in the UI.
+ * 'neutral' covers intra-household transfers / partner settlements that
+ * net to zero at the household level.
+ */
+export type ForecastEventDirection = 'in' | 'out' | 'neutral'
+
+/**
+ * Source of a forecast occurrence row in GET /api/forecast.events.
+ * 'planned_event' came from the planned_events table; 'recurring_detection'
+ * was inferred from transaction history.
+ */
+export type ForecastEventSource = 'planned_event' | 'recurring_detection'
+
+/** One projected occurrence inside the forecast window. */
+export type ForecastEvent = {
+  date: string
+  /** Always non-negative; sign comes from `direction`. */
+  amount: number
+  direction: ForecastEventDirection
+  sourceType: ForecastEventSource
+  sourceId: number
+  sourceName: string
+  accountId: number | null
+}
+
+/** One daily point on the projected balance line. */
+export type ForecastDailyPoint = {
+  date: string
+  balance: number
+}
+
+/** Response shape for GET /api/forecast. */
+export type ForecastResponse = {
+  currency: string
+  /** YYYY-MM-DD inclusive. */
+  dateFrom: string
+  /** YYYY-MM-DD inclusive. */
+  dateTo: string
+  openingBalance: number
+  projectedClosingBalance: number
+  lowestProjectedBalance: number
+  lowestProjectedBalanceDate: string | null
+  dailyPoints: ForecastDailyPoint[]
+  events: ForecastEvent[]
+}
+
 export type AppConfig = {
   logoDevToken: string | null;
   quoteProviderConfigured: boolean;

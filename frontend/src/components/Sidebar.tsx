@@ -21,6 +21,7 @@ import {
   Sparkles,
   Sun,
   Moon,
+  TrendingUp,
   Upload,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -49,6 +50,7 @@ const navItems: NavItem[] = [
   { to: '/net-worth', label: 'Net worth', icon: Coins },
   { to: '/amazon', label: 'Amazon', icon: PackageSearch },
   { to: '/planned', label: 'Planned', icon: CalendarClock },
+  { to: '/forecast', label: 'Forecast', icon: TrendingUp },
   { to: '/recurring', label: 'Recurring', icon: Repeat },
   { to: '/rules', label: 'Rules', icon: BookOpenCheck },
   { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
