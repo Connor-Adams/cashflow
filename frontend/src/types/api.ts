@@ -63,6 +63,7 @@ export type {
   SecurityPrice,
   StatementPreview,
   Transaction,
+  TransferPurpose,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */

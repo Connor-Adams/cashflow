@@ -13,6 +13,32 @@ export type Account = {
   closedAt: string | null
 }
 
+/**
+ * Classified business purpose of a transfer pair (issue #222).
+ *
+ * - `owner_draw`: money moved from a business/corp account to a personal account
+ *   for the owner's personal use. Treated as draws, not expenses.
+ * - `owner_contribution`: money moved from a personal account into a
+ *   business/corp account. Equity contribution, not income.
+ * - `reimbursement`: business reimbursing a personal account for an
+ *   out-of-pocket business expense.
+ * - `investment`: cash moving to/from an investment account (e.g. brokerage
+ *   funding). Does not contribute to spend or income.
+ * - `internal`: money moving between accounts owned by the same entity
+ *   (e.g. chequing → savings within the same person/corp).
+ * - `income`: money from outside the household landing as a "transfer" by
+ *   shape — payroll, dividend received from an external entity, etc. Only
+ *   the inbound leg has a counterpart; this is the rare case where the user
+ *   forces income classification on a money-movement event.
+ */
+export type TransferPurpose =
+  | 'owner_draw'
+  | 'owner_contribution'
+  | 'reimbursement'
+  | 'investment'
+  | 'internal'
+  | 'income'
+
 export type AccountType =
   | 'checking'
   | 'savings'
@@ -70,6 +96,14 @@ export type Transaction = {
   autoConfidence: 'high' | 'medium' | 'low' | null
   /** Linked sibling transaction id (refund→original, transfer→sibling) */
   linkedTransactionId: number | null
+  /**
+   * Classified business purpose of a transfer pair. Set on both sides of a
+   * linked transfer. Null until a user (or rule) classifies it.
+   * @see issue #222
+   */
+  transferPurpose: TransferPurpose | null
+  /** When the transfer pair was linked (manually or by enrichment). */
+  transferLinkedAt: string | null
   /** True when the detect-recurring stage flagged this as a recurring/subscription charge */
   isRecurring: boolean
   /** Count of attached receipt files */

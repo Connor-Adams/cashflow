@@ -39,6 +39,8 @@ export class Transaction extends Model<
   declare autoSource: string | null;
   declare autoConfidence: string | null;
   declare linkedTransactionId: number | null;
+  declare transferPurpose: string | null;
+  declare transferLinkedAt: Date | null;
   declare isRecurring: CreationOptional<boolean>;
 
   declare autoCategory: string | null;
@@ -280,6 +282,16 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       linkedTransactionId: {
         type: DataTypes.INTEGER,
         field: 'linked_transaction_id',
+        allowNull: true,
+      },
+      transferPurpose: {
+        type: DataTypes.STRING(32),
+        field: 'transfer_purpose',
+        allowNull: true,
+      },
+      transferLinkedAt: {
+        type: DataTypes.DATE,
+        field: 'transfer_linked_at',
         allowNull: true,
       },
       isRecurring: {
