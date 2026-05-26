@@ -12,6 +12,12 @@ import {
 } from '../ai/ruleProposals';
 import { createTrackedSuggestion } from '../ai/suggestionStore';
 import { aiSuggestLimiter } from './aiRateLimit';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  diffPatchableFields,
+  recordAudit,
+} from '../audit/log';
 
 /**
  * Map a rule's shape to the InternalBackfillRequest parameters. Regex
@@ -149,11 +155,51 @@ router.post('/', async (req, res, next) => {
       },
       'rule-create',
     );
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.RuleCreated,
+      entityType: AUDIT_ENTITY_TYPES.Rule,
+      entityId: row.id,
+      summary: `Created rule for "${row.merchantPattern}"`,
+      after: {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        category: row.category,
+        priority: row.priority,
+        isBusiness: row.isBusiness,
+        splitType: row.splitType,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+      },
+    });
     res.status(201).json(row);
   } catch (e) {
     next(e);
   }
 });
+
+const RULE_AUDIT_FIELDS = [
+  'merchantPattern',
+  'matchKind',
+  'priority',
+  'category',
+  'isBusiness',
+  'splitType',
+  'pctMe',
+  'pctPartner',
+  'effectiveFrom',
+  'effectiveTo',
+] as const;
+
+function captureRuleAuditFields(
+  row: InstanceType<typeof Rule>,
+): Record<(typeof RULE_AUDIT_FIELDS)[number], unknown> {
+  const out = {} as Record<(typeof RULE_AUDIT_FIELDS)[number], unknown>;
+  for (const k of RULE_AUDIT_FIELDS) {
+    out[k] = row.get(k);
+  }
+  return out;
+}
 
 router.patch('/:id', async (req, res, next) => {
   try {
@@ -173,6 +219,7 @@ router.patch('/:id', async (req, res, next) => {
       effectiveFrom: row.effectiveFrom,
       effectiveTo: row.effectiveTo,
     };
+    const auditPrev = captureRuleAuditFields(row);
     const b = (req.body || {}) as Record<string, unknown>;
     if (Object.prototype.hasOwnProperty.call(b, 'effectiveFrom')) {
       const p = parseEffectiveDate(b.effectiveFrom);
@@ -223,6 +270,19 @@ router.patch('/:id', async (req, res, next) => {
       },
       'rule-update-next',
     );
+    const auditNext = captureRuleAuditFields(row);
+    const diff = diffPatchableFields(auditPrev, auditNext, RULE_AUDIT_FIELDS);
+    if (Object.keys(diff.after).length > 0) {
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.RuleUpdated,
+        entityType: AUDIT_ENTITY_TYPES.Rule,
+        entityId: row.id,
+        summary: `Updated rule "${row.merchantPattern}": ${Object.keys(diff.after).slice(0, 3).join(', ')}`,
+        before: diff.before,
+        after: diff.after,
+      });
+    }
     res.json(row);
   } catch (e) {
     next(e);
@@ -523,6 +583,24 @@ router.post('/auto-suggestions/:id/accept', aiSuggestLimiter, async (req, res, n
       },
       'rule-auto-suggestion-accept',
     );
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.AiSuggestionAccepted,
+      entityType: AUDIT_ENTITY_TYPES.Rule,
+      entityId: row.id,
+      summary: `Accepted auto-suggestion: rule for "${row.merchantPattern}"`,
+      after: {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        category: row.category,
+        isBusiness: row.isBusiness,
+        splitType: row.splitType,
+      },
+      metadata: {
+        suggestionId: suggestion.id,
+        confidence: suggestion.confidence,
+      },
+    });
     res.status(201).json(row);
   } catch (e) {
     next(e);
@@ -554,6 +632,17 @@ router.post('/auto-suggestions/:id/dismiss', aiSuggestLimiter, async (req, res, 
       model: 'deterministic',
       promptVersion: 'rule-auto-suggestion-dismiss-v1',
     });
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.AiSuggestionDismissed,
+      entityType: AUDIT_ENTITY_TYPES.Rule,
+      entityId: null,
+      summary: `Dismissed auto-suggestion for "${merchantPattern}"`,
+      metadata: {
+        suggestionId: suggestion.id,
+        merchantPattern,
+      },
+    });
     res.status(201).json({ ok: true });
   } catch (e) {
     next(e);
@@ -574,9 +663,19 @@ router.delete('/:id', async (req, res, next) => {
       effectiveFrom: row.effectiveFrom,
       effectiveTo: row.effectiveTo,
     };
+    const auditSnapshot = captureRuleAuditFields(row);
+    const ruleId = row.id;
     const { household } = currentAuth(req);
     await row.destroy();
     scheduleRuleBackfill(household.id, snapshot, 'rule-delete');
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.RuleDeleted,
+      entityType: AUDIT_ENTITY_TYPES.Rule,
+      entityId: ruleId,
+      summary: `Deleted rule "${snapshot.merchantPattern}"`,
+      before: auditSnapshot,
+    });
     res.status(204).send();
   } catch (e) {
     next(e);

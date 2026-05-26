@@ -1173,6 +1173,28 @@ export type NetWorthSeries = {
   gaps: NetWorthGap[];
 };
 
+export type AuditLogEntry = {
+  id: number;
+  action: string;
+  entityType: string;
+  entityId: number | null;
+  actorUserId: number | null;
+  actorDisplayName: string | null;
+  actorEmail: string | null;
+  summary: string | null;
+  before: unknown | null;
+  after: unknown | null;
+  metadata: unknown | null;
+  createdAt: string;
+};
+
+export type AuditLogResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AuditLogEntry[];
+};
+
 /**
  * Per-user safe-to-spend knobs (issue #199). Returned by both GET and
  * PATCH /api/settings/cashflow.

@@ -57,6 +57,7 @@ import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import configRouter from './routes/config';
+import auditLogRouter from './routes/auditLog';
 import jobsRouter from './jobs/api';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
@@ -144,6 +145,7 @@ app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
 app.use('/api/data-quality', dataQualityRouter);
 app.use('/api/money-leaks', moneyLeaksRouter);
+app.use('/api/audit-log', auditLogRouter);
 app.use('/api/reports', reportsRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai

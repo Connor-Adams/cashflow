@@ -81,6 +81,7 @@ import {
 import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 import { Purchase, initPurchase } from './Purchase';
 import { Notification, initNotification } from './Notification';
+import { AuditLog, initAuditLog } from './AuditLog';
 import {
   NotificationPreference,
   initNotificationPreference,
@@ -155,6 +156,7 @@ initPurchase(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
+initAuditLog(sequelize);
 initBudgetAlertState(sequelize);
 
 User.hasMany(Notification, {
@@ -557,6 +559,25 @@ TaxReserveSetting.belongsTo(Household, {
   as: 'household',
 });
 
+Household.hasMany(AuditLog, {
+  foreignKey: 'household_id',
+  as: 'auditLog',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AuditLog.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(AuditLog, {
+  foreignKey: 'actor_user_id',
+  as: 'auditLogEntries',
+});
+AuditLog.belongsTo(User, {
+  foreignKey: 'actor_user_id',
+  as: 'actor',
+});
+
 // Monthly close (issue #227). Period cascades to tasks; deleting a
 // household removes its periods and (via the period→task cascade) tasks.
 Household.hasMany(MonthlyClosePeriod, {
@@ -700,5 +721,6 @@ export {
   CashflowSettings,
   Notification,
   NotificationPreference,
+  AuditLog,
   BudgetAlertState,
 };

@@ -12,6 +12,12 @@ import {
 import { createTrackedSuggestion, markTransactionSuggestionOutcome } from '../ai/suggestionStore';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  diffPatchableFields,
+  recordAudit,
+} from '../audit/log';
 import { currentAuth } from '../auth/middleware';
 import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -212,6 +218,29 @@ const PATCHABLE_KEYS = [
   'ownershipContactId',
 ] as const;
 
+/**
+ * Fields snapshotted for the audit-log diff. Includes every directly-
+ * patchable user field plus `reviewFlag` and the computed `finalCategory`
+ * so a reviewer can see when a re-enrich changed the resolved category
+ * after a manual flag flip.
+ */
+const AUDIT_DIFF_FIELDS = [
+  ...PATCHABLE_KEYS,
+  'reviewFlag',
+  'finalCategory',
+] as const;
+type AuditDiffField = (typeof AUDIT_DIFF_FIELDS)[number];
+
+function captureAuditFields(
+  txn: InstanceType<typeof Transaction>,
+): Record<AuditDiffField, unknown> {
+  const out = {} as Record<AuditDiffField, unknown>;
+  for (const k of AUDIT_DIFF_FIELDS) {
+    out[k] = txn.get(k);
+  }
+  return out;
+}
+
 export async function applyPatchBody(
   req: import('express').Request,
   txn: InstanceType<typeof Transaction>,
@@ -391,6 +420,20 @@ router.post('/bulk-patch', async (req, res, next) => {
     logTransactionEvent('bulk_patch_completed', {
       count: ids.length,
     });
+    if (ids.length > 0) {
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.TransactionBulkUpdated,
+        entityType: AUDIT_ENTITY_TYPES.Transaction,
+        entityId: null,
+        summary: `Bulk-updated ${ids.length} transaction(s): ${Object.keys(patch).slice(0, 3).join(', ')}`,
+        after: patch,
+        metadata: {
+          ids: ids.slice(0, 200),
+          count: ids.length,
+        },
+      });
+    }
     res.json({ updated: ids.length });
   } catch (e) {
     next(e);
@@ -468,6 +511,21 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
     logTransactionEvent('bulk_patch_filter_completed', {
       updated: updatedIds.length,
     });
+    if (updatedIds.length > 0) {
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.TransactionBulkFilterUpdated,
+        entityType: AUDIT_ENTITY_TYPES.Transaction,
+        entityId: null,
+        summary: `Filter-updated ${updatedIds.length} transaction(s): ${Object.keys(patch).slice(0, 3).join(', ')}`,
+        after: patch,
+        metadata: {
+          ids: updatedIds.slice(0, 200),
+          count: updatedIds.length,
+          filterKeys: Object.keys(filter),
+        },
+      });
+    }
     res.json({ updated: updatedIds.length, ids: updatedIds });
   } catch (e) {
     next(e);
@@ -667,6 +725,7 @@ router.patch('/:id', async (req, res, next) => {
     }
 
     const memSnap = captureMemorySnapshot(txn);
+    const auditPrev = captureAuditFields(txn);
     await applyPatchBody(req, txn, b);
 
     recomputeTransactionAmounts(txn);
@@ -691,6 +750,24 @@ router.patch('/:id', async (req, res, next) => {
     await txn.reload({
       include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
     });
+    const auditNext = captureAuditFields(txn);
+    const diff = diffPatchableFields(auditPrev, auditNext, AUDIT_DIFF_FIELDS);
+    if (Object.keys(diff.after).length > 0) {
+      const summaryFields = Object.keys(diff.after).slice(0, 3).join(', ');
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.TransactionUpdated,
+        entityType: AUDIT_ENTITY_TYPES.Transaction,
+        entityId: txn.id,
+        summary: `Updated ${summaryFields}`,
+        before: diff.before,
+        after: diff.after,
+        metadata:
+          Number.isInteger(aiSuggestionId) && aiSuggestionId > 0
+            ? { aiSuggestionId }
+            : undefined,
+      });
+    }
     logTransactionEvent('patch_completed', { id });
     res.json(serializeTransaction(txn));
   } catch (e) {

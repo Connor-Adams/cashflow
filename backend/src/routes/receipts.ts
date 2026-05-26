@@ -13,6 +13,11 @@ import { getOpenAiConfig } from '../config/openai';
 import { visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  recordAudit,
+} from '../audit/log';
+import {
   deleteReceiptObject,
   readReceiptObject,
   saveReceiptObject,
@@ -161,6 +166,21 @@ router.post(
         extractedNote: null,
       });
 
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.ReceiptCreated,
+        entityType: AUDIT_ENTITY_TYPES.Receipt,
+        entityId: row.id,
+        summary: `Attached receipt "${row.originalName}" to transaction #${tid}`,
+        after: {
+          transactionId: tid,
+          originalName: row.originalName,
+          mimeType: row.mimeType,
+          sizeBytes: row.sizeBytes,
+        },
+        metadata: { transactionId: tid },
+      });
+
       res.status(201).json({
         id: row.id,
         transactionId: tid,
@@ -304,12 +324,29 @@ router.delete('/receipts/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    const auditBefore = {
+      transactionId: row.transactionId,
+      originalName: row.originalName,
+      mimeType: row.mimeType,
+      sizeBytes: row.sizeBytes,
+    };
+    const receiptId = row.id;
+    const transactionId = row.transactionId;
     await row.destroy();
     try {
       await deleteReceiptObject(row.storedFilename);
     } catch {
       /* ignore */
     }
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.ReceiptDeleted,
+      entityType: AUDIT_ENTITY_TYPES.Receipt,
+      entityId: receiptId,
+      summary: `Removed receipt "${auditBefore.originalName}" from transaction #${transactionId}`,
+      before: auditBefore,
+      metadata: { transactionId },
+    });
     res.status(204).end();
   } catch (e) {
     next(e);
