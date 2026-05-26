@@ -57,6 +57,7 @@ import { ScenarioReturn, initScenarioReturn } from './ScenarioReturn';
 import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
+import { Subscription, initSubscription } from './Subscription';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -110,6 +111,7 @@ initScenarioReturn(sequelize);
 initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
+initSubscription(sequelize);
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -346,6 +348,14 @@ PlannedEvent.belongsTo(Transaction, {
   as: 'linkedTransaction',
 });
 
+Household.hasMany(Subscription, {
+  foreignKey: 'household_id',
+  as: 'subscriptions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
 export {
   sequelize,
   User,
@@ -398,4 +408,5 @@ export {
   HouseholdPlan,
   Insight,
   PlannedEvent,
+  Subscription,
 };
