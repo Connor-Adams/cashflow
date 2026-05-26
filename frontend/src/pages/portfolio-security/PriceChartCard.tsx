@@ -81,7 +81,9 @@ export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
             <h2 className="text-base">Price history</h2>
           </div>
         </div>
-        <p className="muted">Quote provider is not configured.</p>
+        <p className="muted">
+          Set <code>ALPHA_VANTAGE_API_KEY</code> to enable price history.
+        </p>
       </Card>
     )
   }
@@ -100,7 +102,7 @@ export function PriceChartCard({ securityId, currency }: PriceChartCardProps) {
         <div>
           <h2 className="text-base">Price history</h2>
           <p className="muted">
-            Adjusted close. Buys in green, sells in red. Source: Yahoo Finance.
+            Adjusted close. Buys in green, sells in red. Source: Alpha Vantage.
           </p>
         </div>
         <div className="flex gap-1">
@@ -169,9 +171,13 @@ function BackfillBanner({
     )
   }
   if (status === 'rate_limited') {
+    // Backfill rate budget resets at UTC midnight (see backend/src/portfolio/
+    // backfill.ts). Banner uses a literal phrase rather than a locale-formatted
+    // datetime for deterministic UX. The API still returns nextRetryAt for
+    // programmatic consumers.
     return (
       <p className="uploadMsg warn text-sm">
-        Quote provider is rate-limiting us — retry shortly.
+        Daily AV quota exhausted — retry after midnight UTC.
       </p>
     )
   }

@@ -1,26 +1,26 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/ui/page-header'
-import { UploadCard } from '../components/import/UploadCard'
+import { Button } from '@/components/ui/button'
+import { ImportModal } from '../components/import/ImportModal'
 import { ImportHistoryTable } from '../components/import/ImportHistoryTable'
 import { getJson } from '../lib/api'
 import type { Account } from '../types/api'
 
 /**
  * `/import` — the ingestion surface. Single-column stack:
- *   <PageHeader> → <UploadCard> → <ImportHistoryTable>
+ *   <PageHeader>+"Import" button → <ImportHistoryTable>
  *
- * The accounts list is fetched here (rather than inside UploadCard) so a
- * successful Wealthsimple bundle import can refetch it; bundle imports can
- * create new accounts as a side effect.
- *
- * `historyRefreshKey` is bumped after every successful upload / commit /
- * folder-import so the embedded `ImportHistoryTable` knows to re-fetch.
+ * Clicking "Import" opens `ImportModal`, which hosts the drop-zone + side
+ * pane upload UI for every file mode (PDF bundle, WS bundle, holdings CSV,
+ * single statement). Accounts are loaded here so the modal can target a
+ * specific account in standard mode.
  */
 export function ImportPage() {
   const navigate = useNavigate()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
+  const [modalOpen, setModalOpen] = useState(false)
 
   const loadAccounts = useCallback(() => {
     void getJson<Account[]>('/api/accounts')
@@ -36,9 +36,12 @@ export function ImportPage() {
     <div className="page">
       <PageHeader
         title="Import"
-        description="CSVs, OFX exports, Wealthsimple bundles, or RBC PDF bundles."
+        description="Drop CSVs, OFX exports, Wealthsimple bundles, or PDF bundles (RBC, CIBC, Questrade)."
+        actions={<Button onClick={() => setModalOpen(true)}>Import statements</Button>}
       />
-      <UploadCard
+      <ImportModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
         accounts={accounts}
         onCommitted={() => setHistoryRefreshKey((k) => k + 1)}
         onAccountsChanged={() => {

@@ -36,6 +36,25 @@ import {
   harvestCandidate,
   type RowFlag,
 } from '../portfolio/tax-buckets';
+import { PortfolioForwardProjection } from '../models/PortfolioForwardProjection';
+import { rebuildForwardProjectionsForHousehold } from '../portfolio/forwardIncomeBuilder';
+import { PortfolioDailySnapshot } from '../models/PortfolioDailySnapshot';
+import { Household } from '../models/Household';
+import { FxRate } from '../models/FxRate';
+import {
+  computeTwr,
+  computeXirr,
+  buildCashFlowSeries,
+  computeBenchmarkSeries,
+  type DailyPoint,
+  type AggregatedDailySnapshot,
+} from '../portfolio/returns';
+import type {
+  PortfolioForwardIncome,
+  PortfolioPerformance,
+  PortfolioPerformanceRange,
+  PortfolioPerformanceStats,
+} from '@cashflow/shared';
 
 const router = Router();
 const PRICE_CACHE_MS = 60 * 60 * 1000;
@@ -1807,6 +1826,398 @@ router.post('/prices/refresh', async (req, res, next) => {
     res.json({ provider: YAHOO_PROVIDER, results });
   } catch (e) {
     next(e);
+  }
+});
+
+router.get('/forward-income', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    const householdId = auth.household.id;
+
+    // 1. Trigger lazy rebuild if any row stale, or no rows yet but household has holdings
+    const [staleCount, totalRows, holdingsResult] = await Promise.all([
+      PortfolioForwardProjection.count({
+        where: { householdId, staleAt: { [Op.ne]: null } },
+      }),
+      PortfolioForwardProjection.count({ where: { householdId } }),
+      loadVisibleLatestHoldings(req),
+    ]);
+    const { latestHoldings, accounts } = holdingsResult;
+    if (staleCount > 0 || (totalRows === 0 && latestHoldings.length > 0)) {
+      await rebuildForwardProjectionsForHousehold(householdId);
+    }
+
+    // 2. Reload after rebuild
+    const rows = await PortfolioForwardProjection.findAll({ where: { householdId } });
+    const securityIds = rows.map((r) => r.securityId);
+    const securities = await Security.findAll({ where: { id: securityIds } });
+    const secById = new Map(securities.map((s) => [s.id, s]));
+    const acctById = new Map(accounts.map((a) => [a.id, a]));
+
+    // 3. Per-security qty totals + per (account, security) qty for apportionment
+    interface AcctSecPair { accountId: number; securityId: number; qty: number; mvNative: number; costNative: number; currency: string; taxStatus: string; }
+    const pairs: AcctSecPair[] = [];
+    const totalQtyBySec = new Map<number, number>();
+    const totalMvBySec = new Map<number, number>();
+    const totalCostBySec = new Map<number, number>();
+    for (const h of latestHoldings) {
+      const qty = Number(h.quantity);
+      if (qty === 0) continue;
+      const mv = Number(h.marketValue ?? 0);
+      const cost = Number(h.costBasis ?? 0);
+      const acct = acctById.get(h.accountId);
+      const taxStatus = acct?.taxStatus ?? 'n_a';
+      pairs.push({
+        accountId: h.accountId, securityId: h.securityId, qty,
+        mvNative: mv, costNative: cost, currency: h.currency, taxStatus,
+      });
+      totalQtyBySec.set(h.securityId, (totalQtyBySec.get(h.securityId) ?? 0) + qty);
+      totalMvBySec.set(h.securityId, (totalMvBySec.get(h.securityId) ?? 0) + mv);
+      totalCostBySec.set(h.securityId, (totalCostBySec.get(h.securityId) ?? 0) + cost);
+    }
+
+    // 4. FX rates per currency (today)
+    const asOf = new Date();
+    const asOfDate = asOf.toISOString().slice(0, 10);
+    const fxByCurrency = new Map<string, number>();
+    fxByCurrency.set('CAD', 1);
+    for (const r of rows) {
+      if (r.currency !== 'CAD' && !fxByCurrency.has(r.currency)) {
+        const fx = await ensureFxRate(r.currency, 'CAD', asOfDate);
+        fxByCurrency.set(r.currency, fx ? Number(fx.rate) : 1);
+      }
+    }
+
+    // 5. Build per-row output + accumulate totals
+    let totalAnnualCad = 0;
+    let totalMvCad = 0;
+    let totalCostCad = 0;
+    const byCurrencyTotal = new Map<string, number>();
+    const outRows = rows.map((r) => {
+      const sec = secById.get(r.securityId);
+      const qty = totalQtyBySec.get(r.securityId) ?? Number(r.qtyBasis);
+      const mvNative = totalMvBySec.get(r.securityId) ?? 0;
+      const costNative = totalCostBySec.get(r.securityId) ?? 0;
+      const fx = fxByCurrency.get(r.currency) ?? 1;
+      const projNative = Number(r.projectedAnnualIncomeNative);
+      const projCad = projNative * fx;
+      const forwardYieldPct = mvNative > 0 ? (projNative / mvNative) * 100 : 0;
+      const forwardYieldOnCostPct = costNative > 0 ? (projNative / costNative) * 100 : 0;
+      totalAnnualCad += projCad;
+      totalMvCad += mvNative * fx;
+      totalCostCad += costNative * fx;
+      byCurrencyTotal.set(r.currency, (byCurrencyTotal.get(r.currency) ?? 0) + projNative);
+      return {
+        securityId: r.securityId,
+        symbol: sec?.symbol ?? '',
+        name: sec?.name ?? '',
+        assetType: sec?.assetType ?? null,
+        currency: r.currency,
+        qty,
+        currentMvNative: mvNative,
+        costBasisNative: costNative,
+        annualDividendPerShare: Number(r.annualDividendPerShare),
+        annualInterestPerShare: Number(r.annualInterestPerShare),
+        projectedAnnualIncomeNative: projNative,
+        projectedAnnualIncomeCad: projCad,
+        forwardYieldPct,
+        forwardYieldOnCostPct,
+        cadenceLabel: r.cadenceLabel,
+        cvPct: r.cvPct === null ? null : Number(r.cvPct),
+        unreliable: r.unreliable,
+        nextExDivDates: r.nextExDivDates.map((d) => ({
+          date: d.date,
+          estimatedPerShare: d.estimatedPerShare,
+          estimatedTotal: d.estimatedPerShare * qty,
+          kind: d.kind,
+        })),
+      };
+    });
+
+    // 6. byTaxStatus + byAssetType — apportion per-security income across accounts by qty
+    const taxMap = new Map<string, Map<string, number>>();
+    const assetMap = new Map<string, Map<string, number>>();
+    const projBySec = new Map(rows.map((r) => [r.securityId, Number(r.projectedAnnualIncomeNative)]));
+    const currencyBySec = new Map(rows.map((r) => [r.securityId, r.currency]));
+    for (const p of pairs) {
+      const proj = projBySec.get(p.securityId);
+      const totalQty = totalQtyBySec.get(p.securityId) ?? 0;
+      if (proj == null || totalQty === 0) continue;
+      const share = (p.qty / totalQty) * proj;
+      const cur = currencyBySec.get(p.securityId) ?? p.currency;
+      // tax
+      if (!taxMap.has(p.taxStatus)) taxMap.set(p.taxStatus, new Map());
+      taxMap.get(p.taxStatus)!.set(cur, (taxMap.get(p.taxStatus)!.get(cur) ?? 0) + share);
+      // asset
+      const sec = secById.get(p.securityId);
+      const assetType = sec?.assetType ?? 'other';
+      if (!assetMap.has(assetType)) assetMap.set(assetType, new Map());
+      assetMap.get(assetType)!.set(cur, (assetMap.get(assetType)!.get(cur) ?? 0) + share);
+    }
+    const cadConv = (cur: string, amt: number) => amt * (fxByCurrency.get(cur) ?? 1);
+    const byTaxStatus = [...taxMap.entries()].map(([taxStatus, byCur]) => ({
+      taxStatus: taxStatus as PortfolioForwardIncome['byTaxStatus'][number]['taxStatus'],
+      byCurrency: [...byCur.entries()].map(([currency, amount]) => ({ currency, amount })),
+      totalCad: [...byCur.entries()].reduce((s, [c, a]) => s + cadConv(c, a), 0),
+    }));
+    const byAssetType = [...assetMap.entries()].map(([assetType, byCur]) => ({
+      assetType,
+      byCurrency: [...byCur.entries()].map(([currency, amount]) => ({ currency, amount })),
+      totalCad: [...byCur.entries()].reduce((s, [c, a]) => s + cadConv(c, a), 0),
+    }));
+
+    // 7. upcoming90d (flatten + sort)
+    const upcoming: PortfolioForwardIncome['upcoming90d'] = [];
+    for (const out of outRows) {
+      for (const d of out.nextExDivDates) {
+        upcoming.push({
+          date: d.date,
+          securityId: out.securityId,
+          symbol: out.symbol,
+          estimatedTotalNative: d.estimatedTotal,
+          estimatedTotalCad: d.estimatedTotal * (fxByCurrency.get(out.currency) ?? 1),
+          currency: out.currency,
+          kind: d.kind,
+        });
+      }
+    }
+    upcoming.sort((a, b) => a.date.localeCompare(b.date));
+
+    // 8. caveats
+    const unreliableSecurityIds = outRows.filter((r) => r.unreliable).map((r) => r.securityId);
+    const holdingsWithoutHistory = outRows
+      .filter((r) => r.cadenceLabel === 'none')
+      .map((r) => ({
+        securityId: r.securityId,
+        symbol: r.symbol,
+        reason: 'no_dividend_history' as const,
+      }));
+
+    // 9. totals
+    const oldestComputedAt = rows.length === 0
+      ? asOf.toISOString()
+      : rows.reduce((min, r) => (r.computedAt < min ? r.computedAt : min), rows[0].computedAt).toISOString();
+
+    const response: PortfolioForwardIncome = {
+      totals: {
+        projectedAnnualIncomeCad: totalAnnualCad,
+        projectedAnnualIncomeByCurrency: [...byCurrencyTotal.entries()].map(([currency, amount]) => ({ currency, amount })),
+        forwardYieldPct: totalMvCad > 0 ? (totalAnnualCad / totalMvCad) * 100 : 0,
+        forwardYieldOnCostPct: totalCostCad > 0 ? (totalAnnualCad / totalCostCad) * 100 : 0,
+        computedAt: oldestComputedAt,
+        fxRateUsedAt: asOf.toISOString(),
+      },
+      rows: outRows,
+      byTaxStatus,
+      byAssetType,
+      upcoming90d: upcoming,
+      caveats: { unreliableSecurityIds, holdingsWithoutHistory },
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/performance', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    const householdId = auth.household.id;
+    const householdRow = await Household.findByPk(householdId);
+    const benchmarkSymbol = householdRow?.benchmarkSymbol ?? 'SPY';
+
+    const range = (req.query.range as PortfolioPerformanceRange) || '1Y';
+    const today = new Date().toISOString().slice(0, 10);
+
+    function addDaysIso(iso: string, days: number): string {
+      const d = new Date(iso);
+      d.setDate(d.getDate() + days);
+      return d.toISOString().slice(0, 10);
+    }
+
+    const presetRanges: Record<'1M' | '3M' | 'YTD' | '1Y' | 'All', { from: string; to: string }> = {
+      '1M': { from: addDaysIso(today, -30), to: today },
+      '3M': { from: addDaysIso(today, -90), to: today },
+      'YTD': { from: `${today.slice(0, 4)}-01-01`, to: today },
+      '1Y': { from: addDaysIso(today, -365), to: today },
+      'All': { from: '1970-01-01', to: today },
+    };
+    let selectedRange = { from: '', to: '' };
+    if (range === 'custom') {
+      const from = req.query.from as string | undefined;
+      const to = req.query.to as string | undefined;
+      if (!from || !to) { res.status(400).json({ error: 'from and to required for custom range' }); return; }
+      selectedRange = { from, to };
+    } else {
+      selectedRange = presetRanges[range as keyof typeof presetRanges];
+    }
+
+    const widestFrom = (['1M', '3M', 'YTD', '1Y', 'All'] as const).reduce(
+      (min, k) => (presetRanges[k].from < min ? presetRanges[k].from : min),
+      selectedRange.from || today,
+    );
+
+    const allSnapshots = await PortfolioDailySnapshot.findAll({
+      where: { householdId, date: { [Op.gte]: widestFrom, [Op.lte]: selectedRange.to } },
+      order: [['date', 'ASC']],
+    });
+
+    const computeStats = (from: string, to: string): PortfolioPerformanceStats => {
+      const inRange = allSnapshots.filter((s) => s.date >= from && s.date <= to);
+      const byDate = new Map<string, { mvCad: number; cashFlowCad: number }>();
+      for (const s of inRange) {
+        const cur = byDate.get(s.date) ?? { mvCad: 0, cashFlowCad: 0 };
+        cur.mvCad += Number(s.marketValueCad);
+        cur.cashFlowCad += Number(s.cashFlowCad);
+        byDate.set(s.date, cur);
+      }
+      const points: DailyPoint[] = [...byDate.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, v]) => ({ date, marketValueCad: v.mvCad, cashFlowCad: v.cashFlowCad }));
+      const twrPct = computeTwr(points);
+      const aggSnaps: AggregatedDailySnapshot[] = points.map((p) => ({
+        date: p.date, marketValueCad: p.marketValueCad, cashFlowCad: p.cashFlowCad,
+      }));
+      const finalMv = points.length > 0 ? points[points.length - 1].marketValueCad : 0;
+      const mwrPct = computeXirr(buildCashFlowSeries(aggSnaps, finalMv));
+
+      return {
+        twrPct,
+        mwrPct,
+        benchmarkTwrPct: 0,
+        vsBenchmarkDeltaPct: twrPct,
+        startDate: points[0]?.date ?? from,
+        endDate: points[points.length - 1]?.date ?? to,
+        startValueCad: points[0]?.marketValueCad ?? 0,
+        endValueCad: finalMv,
+        netCashFlowCad: points.reduce((s, p) => s + p.cashFlowCad, 0),
+      };
+    };
+
+    const benchmarkSecurity = await Security.findOne({ where: { householdId, symbol: benchmarkSymbol } });
+    const benchmarkPrices = benchmarkSecurity
+      ? await SecurityDailyPrice.findAll({
+          where: { securityId: benchmarkSecurity.id, date: { [Op.gte]: widestFrom, [Op.lte]: selectedRange.to } },
+          order: [['date', 'ASC']],
+        })
+      : [];
+    const fxByDate = new Map<string, number>();
+    if (benchmarkSecurity && benchmarkSecurity.currency !== 'CAD') {
+      const fxRows = await FxRate.findAll({
+        where: {
+          fromCurrency: benchmarkSecurity.currency,
+          toCurrency: 'CAD',
+          ratedDate: { [Op.gte]: widestFrom, [Op.lte]: selectedRange.to },
+        },
+      });
+      for (const f of fxRows) fxByDate.set(f.ratedDate, Number(f.rate));
+    } else if (benchmarkSecurity) {
+      benchmarkPrices.forEach((p) => fxByDate.set(p.date, 1));
+    }
+    const benchmarkIsPartial = !benchmarkSecurity || benchmarkPrices.length === 0;
+
+    const computeBenchmarkStats = (from: string, to: string, initialCad: number) => {
+      const inRange = benchmarkPrices
+        .filter((p) => p.date >= from && p.date <= to)
+        .map((p) => ({ date: p.date, adjClose: Number(p.adjClose) }));
+      const series = computeBenchmarkSeries(inRange, fxByDate, initialCad);
+      if (series.length < 2) return { twr: 0, series };
+      const points: DailyPoint[] = series.map((s) => ({
+        date: s.date, marketValueCad: s.valueCad, cashFlowCad: 0,
+      }));
+      return { twr: computeTwr(points), series };
+    };
+
+    const fillBenchmark = (stats: PortfolioPerformanceStats, from: string, to: string): PortfolioPerformanceStats => {
+      const { twr } = computeBenchmarkStats(from, to, stats.startValueCad);
+      return { ...stats, benchmarkTwrPct: twr, vsBenchmarkDeltaPct: stats.twrPct - twr };
+    };
+
+    const presetStats = {
+      '1M': fillBenchmark(computeStats(presetRanges['1M'].from, presetRanges['1M'].to), presetRanges['1M'].from, presetRanges['1M'].to),
+      '3M': fillBenchmark(computeStats(presetRanges['3M'].from, presetRanges['3M'].to), presetRanges['3M'].from, presetRanges['3M'].to),
+      'YTD': fillBenchmark(computeStats(presetRanges['YTD'].from, presetRanges['YTD'].to), presetRanges['YTD'].from, presetRanges['YTD'].to),
+      '1Y': fillBenchmark(computeStats(presetRanges['1Y'].from, presetRanges['1Y'].to), presetRanges['1Y'].from, presetRanges['1Y'].to),
+      'All': fillBenchmark(computeStats(presetRanges['All'].from, presetRanges['All'].to), presetRanges['All'].from, presetRanges['All'].to),
+    };
+
+    const selectedStats = fillBenchmark(
+      computeStats(selectedRange.from, selectedRange.to),
+      selectedRange.from, selectedRange.to,
+    );
+
+    const seriesByDate = new Map<string, { mvCad: number; isPartial: boolean }>();
+    for (const s of allSnapshots) {
+      if (s.date < selectedRange.from || s.date > selectedRange.to) continue;
+      const cur = seriesByDate.get(s.date) ?? { mvCad: 0, isPartial: false };
+      cur.mvCad += Number(s.marketValueCad);
+      if (s.isPartial) cur.isPartial = true;
+      seriesByDate.set(s.date, cur);
+    }
+    const benchmarkSelected = computeBenchmarkStats(selectedRange.from, selectedRange.to, selectedStats.startValueCad);
+    const benchmarkByDate = new Map(benchmarkSelected.series.map((s) => [s.date, s.valueCad]));
+    const series = [...seriesByDate.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, v]) => ({
+        date,
+        portfolioValueCad: v.mvCad,
+        benchmarkValueCad: benchmarkByDate.get(date) ?? 0,
+        isPartial: v.isPartial,
+      }));
+
+    const accountIds = [...new Set(allSnapshots
+      .filter((s) => s.date >= selectedRange.from && s.date <= selectedRange.to)
+      .map((s) => s.accountId))];
+    const accountMap = new Map(
+      (await Account.findAll({ where: { id: { [Op.in]: accountIds } } })).map((a) => [a.id, a]),
+    );
+    const totalEnd = selectedStats.endValueCad || 1;
+    const byAccount = accountIds.map((accountId) => {
+      const inRange = allSnapshots.filter((s) => s.accountId === accountId && s.date >= selectedRange.from && s.date <= selectedRange.to);
+      const points: DailyPoint[] = inRange.map((s) => ({
+        date: s.date,
+        marketValueCad: Number(s.marketValueCad),
+        cashFlowCad: Number(s.cashFlowCad),
+      }));
+      const twrPct = computeTwr(points);
+      const endValueCad = points[points.length - 1]?.marketValueCad ?? 0;
+      return {
+        accountId,
+        accountName: accountMap.get(accountId)?.name ?? '',
+        twrPct,
+        endValueCad,
+        weightInPortfolioPct: (endValueCad / totalEnd) * 100,
+      };
+    });
+
+    const partialSnaps = allSnapshots.filter((s) => s.date >= selectedRange.from && s.date <= selectedRange.to && s.isPartial);
+    const partialDaysCount = new Set(partialSnaps.map((s) => s.date)).size;
+    const reasonSet = new Set<string>();
+    for (const s of partialSnaps) {
+      for (const r of s.missingDataReasons ?? []) {
+        if (reasonSet.size >= 20) break;
+        reasonSet.add(r);
+      }
+      if (reasonSet.size >= 20) break;
+    }
+    const caveats = {
+      partialDaysCount,
+      missingDataReasons: [...reasonSet].slice(0, 20),
+      benchmarkSymbol,
+      benchmarkIsPartial,
+    };
+
+    const response: PortfolioPerformance = {
+      range,
+      stats: selectedStats,
+      presetStats,
+      series,
+      byAccount,
+      caveats,
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
   }
 });
 

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
 import { PREVIEW_MAX_ROWS } from '../import/previewImport';
@@ -7,9 +7,9 @@ import {
   importCsvFile,
   importWsBundleFile,
   importWsHoldingsFile,
-  importRbcBundleFile,
+  importPdfBundleFile,
   type BundleFileResult,
-  type RbcBundleFileResult,
+  type PdfBundleFileResult,
 } from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
@@ -65,9 +65,9 @@ const bundleUpload = multer({
   },
 });
 
-// RBC PDF bundle drop. PDF-only, mirror Wealthsimple bundle limits (20 files,
-// 15 MB each — matches statementUpload).
-const rbcBundleUpload = multer({
+// PDF bundle drop (RBC, CIBC, Questrade). PDF-only, mirrors Wealthsimple
+// bundle limits (20 files, 15 MB each — matches statementUpload).
+const pdfBundleUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 20 },
   fileFilter: (_req, file, cb) => {
@@ -487,81 +487,80 @@ router.post(
   },
 );
 
-router.post(
-  '/upload-rbc-bundle',
-  importUploadLimiter,
-  (req, res, next) => {
-    rbcBundleUpload.array('files', 20)(req as never, res as never, (err: unknown) => {
-      if (err) {
-        next(err);
-        return;
-      }
-      next();
-    });
-  },
-  async (req, res, next) => {
-    try {
-      const files = Array.isArray(req.files) ? req.files : [];
-      if (files.length === 0) {
-        res.status(400).json({ error: 'Missing files field "files"' });
-        return;
-      }
-      const { user, household } = currentAuth(req);
-      logImportEvent('rbc_bundle_started', {
-        fileCount: files.length,
-        totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
-      });
-
-      const results: RbcBundleFileResult[] = [];
-      for (const file of files) {
-        try {
-          const result = await importRbcBundleFile({
-            buffer: file.buffer,
-            fileName: file.originalname,
-            householdId: household.id,
-            userId: user.id,
-          });
-          results.push(result);
-        } catch (e) {
-          const message = e instanceof Error ? e.message : String(e);
-          logImportEvent('rbc_bundle_file_failed', {
-            file: file.originalname,
-            error: message,
-          });
-          results.push({
-            file: file.originalname,
-            accountSuffix: null,
-            productLabel: null,
-            accountId: null,
-            accountName: null,
-            accountCreated: false,
-            inserted: 0,
-            insertedTransactions: 0,
-            insertedInvestmentActivities: 0,
-            insertedHoldings: 0,
-            skippedDuplicates: 0,
-            rowErrors: 0,
-            parseErrors: [],
-            warnings: [],
-            error: message,
-          });
-        }
-      }
-
-      const accountsCreated = results.filter((r) => r.accountCreated).length;
-      const filesImported = results.filter((r) => !r.error).length;
-      logImportEvent('rbc_bundle_completed', {
-        fileCount: files.length,
-        filesImported,
-        accountsCreated,
-      });
-
-      res.json({ results });
-    } catch (e) {
-      next(e);
+const pdfBundleHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length === 0) {
+      res.status(400).json({ error: 'Missing files field "files"' });
+      return;
     }
-  },
-);
+    const { user, household } = currentAuth(req);
+    logImportEvent('pdf_bundle_started', {
+      fileCount: files.length,
+      totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
+    });
+
+    const results: PdfBundleFileResult[] = [];
+    for (const file of files) {
+      try {
+        const result = await importPdfBundleFile({
+          buffer: file.buffer,
+          fileName: file.originalname,
+          householdId: household.id,
+          userId: user.id,
+        });
+        results.push(result);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        logImportEvent('pdf_bundle_file_failed', {
+          file: file.originalname,
+          error: message,
+        });
+        results.push({
+          file: file.originalname,
+          accountSuffix: null,
+          productLabel: null,
+          accountId: null,
+          accountName: null,
+          accountCreated: false,
+          inserted: 0,
+          insertedTransactions: 0,
+          insertedInvestmentActivities: 0,
+          insertedHoldings: 0,
+          skippedDuplicates: 0,
+          rowErrors: 0,
+          parseErrors: [],
+          warnings: [],
+          error: message,
+        });
+      }
+    }
+
+    const accountsCreated = results.filter((r) => r.accountCreated).length;
+    const filesImported = results.filter((r) => !r.error).length;
+    logImportEvent('pdf_bundle_completed', {
+      fileCount: files.length,
+      filesImported,
+      accountsCreated,
+    });
+
+    res.json({ results });
+  } catch (e) {
+    next(e);
+  }
+};
+
+const pdfBundleMulter = (req: Request, res: Response, next: NextFunction) => {
+  pdfBundleUpload.array('files', 20)(req as never, res as never, (err: unknown) => {
+    if (err) {
+      next(err);
+      return;
+    }
+    next();
+  });
+};
+
+router.post('/upload-pdf-bundle', importUploadLimiter, pdfBundleMulter, pdfBundleHandler);
 
 router.post(
   '/upload-holdings',

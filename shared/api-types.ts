@@ -912,3 +912,134 @@ export type PortfolioByAccountType = {
   warnings: PortfolioByAccountTypeWarning[]
   harvestCandidates: PortfolioByAccountTypeHarvestCandidate[]
 }
+
+export type PortfolioForwardIncomeCadence =
+  | 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'irregular' | 'none';
+
+export type PortfolioForwardIncomeNextExDivEntry = {
+  date: string;
+  estimatedPerShare: number;
+  estimatedTotal: number;
+  kind: 'dividend' | 'interest';
+};
+
+export type PortfolioForwardIncomeRow = {
+  securityId: number;
+  symbol: string;
+  name: string;
+  assetType: string | null;
+  currency: string;
+  qty: number;
+  currentMvNative: number;
+  costBasisNative: number;
+  annualDividendPerShare: number;
+  annualInterestPerShare: number;
+  projectedAnnualIncomeNative: number;
+  projectedAnnualIncomeCad: number;
+  forwardYieldPct: number;
+  forwardYieldOnCostPct: number;
+  cadenceLabel: PortfolioForwardIncomeCadence;
+  cvPct: number | null;
+  unreliable: boolean;
+  nextExDivDates: PortfolioForwardIncomeNextExDivEntry[];
+};
+
+export type PortfolioForwardIncomeTaxBucket = {
+  taxStatus:
+    | 'registered_rrsp' | 'registered_tfsa' | 'registered_fhsa'
+    | 'registered_rrif' | 'non_registered' | 'n_a';
+  byCurrency: Array<{ currency: string; amount: number }>;
+  totalCad: number;
+};
+
+export type PortfolioForwardIncomeAssetBucket = {
+  assetType: string;
+  byCurrency: Array<{ currency: string; amount: number }>;
+  totalCad: number;
+};
+
+export type PortfolioForwardIncomeUpcomingEntry = {
+  date: string;
+  securityId: number;
+  symbol: string;
+  estimatedTotalNative: number;
+  estimatedTotalCad: number;
+  currency: string;
+  kind: 'dividend' | 'interest';
+};
+
+export type PortfolioForwardIncomeHoldingWithoutHistory = {
+  securityId: number;
+  symbol: string;
+  reason: 'no_dividend_history' | 'insufficient_history';
+};
+
+export type PortfolioForwardIncome = {
+  totals: {
+    projectedAnnualIncomeCad: number;
+    projectedAnnualIncomeByCurrency: Array<{ currency: string; amount: number }>;
+    forwardYieldPct: number;
+    forwardYieldOnCostPct: number;
+    computedAt: string;
+    fxRateUsedAt: string;
+  };
+  rows: PortfolioForwardIncomeRow[];
+  byTaxStatus: PortfolioForwardIncomeTaxBucket[];
+  byAssetType: PortfolioForwardIncomeAssetBucket[];
+  upcoming90d: PortfolioForwardIncomeUpcomingEntry[];
+  caveats: {
+    unreliableSecurityIds: number[];
+    holdingsWithoutHistory: PortfolioForwardIncomeHoldingWithoutHistory[];
+  };
+};
+
+export type PortfolioPerformanceRange = '1M' | '3M' | 'YTD' | '1Y' | 'All' | 'custom';
+
+export type PortfolioPerformancePoint = {
+  date: string;
+  portfolioValueCad: number;
+  benchmarkValueCad: number;
+  isPartial: boolean;
+};
+
+export type PortfolioPerformanceStats = {
+  twrPct: number;
+  mwrPct: number | null;
+  benchmarkTwrPct: number;
+  vsBenchmarkDeltaPct: number;
+  startDate: string;
+  endDate: string;
+  startValueCad: number;
+  endValueCad: number;
+  netCashFlowCad: number;
+};
+
+export type PortfolioPerformanceByAccount = {
+  accountId: number;
+  accountName: string;
+  twrPct: number;
+  endValueCad: number;
+  weightInPortfolioPct: number;
+};
+
+export type PortfolioPerformanceCaveats = {
+  partialDaysCount: number;
+  missingDataReasons: string[];
+  benchmarkSymbol: string;
+  benchmarkIsPartial: boolean;
+};
+
+export type PortfolioPerformance = {
+  range: PortfolioPerformanceRange;
+  stats: PortfolioPerformanceStats;
+  presetStats: {
+    '1M': PortfolioPerformanceStats;
+    '3M': PortfolioPerformanceStats;
+    'YTD': PortfolioPerformanceStats;
+    '1Y': PortfolioPerformanceStats;
+    'All': PortfolioPerformanceStats;
+  };
+  series: PortfolioPerformancePoint[];
+  byAccount: PortfolioPerformanceByAccount[];
+  caveats: PortfolioPerformanceCaveats;
+};

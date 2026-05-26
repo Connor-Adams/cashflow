@@ -6,6 +6,8 @@ import { backfillUsdCadHistory } from './fx/backfillUsdCadHistory';
 import { logger } from './observability/logger';
 import { isS3ReceiptStorageEnabled } from './storage/receiptStorage';
 import { startQuoteScheduler } from './integrations/yahoo/scheduler';
+import { startForwardIncomeScheduler } from './portfolio/forwardIncomeScheduler';
+import { startDailySnapshotScheduler } from './portfolio/dailySnapshotScheduler';
 
 const uploadDir = env.csvUploadDir;
 if (!fs.existsSync(uploadDir)) {
@@ -37,6 +39,8 @@ async function start() {
   });
 
   startQuoteScheduler();
+  startForwardIncomeScheduler();
+  startDailySnapshotScheduler();
 }
 
 start().catch((err) => {
