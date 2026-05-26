@@ -94,13 +94,13 @@ test('renderWeeklyDigest: html escapes user-supplied merchant strings', () => {
       date: '2026-05-20',
       amount: -200,
       currency: 'CAD',
-      merchant: '<script>alert(1)</script>',
+      merchant: '<SCRIPT>alert(1)</SCRIPT>',
       category: null,
     },
   };
   const r = renderWeeklyDigest(data);
-  assert.doesNotMatch(r.html, /<script>/);
-  assert.match(r.html, /&lt;script&gt;/);
+  assert.doesNotMatch(r.html, /<script\b/i);
+  assert.match(r.html, /&lt;SCRIPT&gt;/);
 });
 
 test('renderWeeklyDigest: text body has no HTML tags', () => {
