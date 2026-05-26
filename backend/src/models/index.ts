@@ -70,6 +70,7 @@ import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
+import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
 import {
   MoneyLeakDismissal,
   initMoneyLeakDismissal,
@@ -150,6 +151,7 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
+initCfoBriefing(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
@@ -550,6 +552,27 @@ AiReviewRun.belongsTo(User, {
   as: 'user',
 });
 
+// CFO briefings (issue #236). Cascades with household; user FK for the
+// actor that requested the briefing.
+Household.hasMany(CfoBriefing, {
+  foreignKey: 'household_id',
+  as: 'cfoBriefings',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+CfoBriefing.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(CfoBriefing, {
+  foreignKey: 'user_id',
+  as: 'cfoBriefings',
+});
+CfoBriefing.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 Household.hasMany(TaxReserveSetting, {
   foreignKey: 'household_id',
   as: 'taxReserveSettings',
@@ -716,6 +739,7 @@ export {
   FinancialGoal,
   Subscription,
   AiReviewRun,
+  CfoBriefing,
   MoneyLeakDismissal,
   TaxReserveSetting,
   MonthlyClosePeriod,

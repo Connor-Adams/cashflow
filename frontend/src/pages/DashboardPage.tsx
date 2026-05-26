@@ -28,6 +28,7 @@ import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMont
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
+import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
@@ -1176,6 +1177,8 @@ export function DashboardPage() {
         <NetWorthTile />
 
         <SafeToSpendTile currency={currency || null} />
+
+        <CfoBriefingTile />
 
         <BentoTile
           span={8}
