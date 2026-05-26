@@ -116,6 +116,16 @@ export function ImportsTab() {
   const [captureLoading, setCaptureLoading] = useState(false)
   const [captureError, setCaptureError] = useState<string | null>(null)
 
+  // ── Capture paste fallback state (for sites whose CSP blocks the direct fetch)
+  const [captureFromPasteText, setCaptureFromPasteText] = useState('')
+  const [captureFromPasteBusy, setCaptureFromPasteBusy] = useState(false)
+  const [captureFromPasteError, setCaptureFromPasteError] = useState<string | null>(null)
+  const [captureFromPasteResult, setCaptureFromPasteResult] = useState<{
+    created: number
+    updated: number
+    skipped: number
+  } | null>(null)
+
   const mountedRef = useRef(true)
   useEffect(() => {
     return () => {
@@ -272,6 +282,35 @@ export function ImportsTab() {
     } catch (e) {
       if (!mountedRef.current) return
       setCaptureError(e instanceof Error ? e.message : 'Revoke failed')
+    }
+  }
+
+  async function submitCaptureFromPaste() {
+    if (captureFromPasteBusy) return
+    setCaptureFromPasteBusy(true)
+    setCaptureFromPasteError(null)
+    setCaptureFromPasteResult(null)
+    try {
+      const raw = captureFromPasteText.trim()
+      if (!raw) throw new Error('Paste the JSON output by the bookmarklet first.')
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        throw new Error('Pasted content is not valid JSON.')
+      }
+      const result = await postJson<{ created: number; updated: number; skipped: number }>(
+        '/api/capture/orders-from-paste',
+        parsed,
+      )
+      if (!mountedRef.current) return
+      setCaptureFromPasteResult(result)
+      setCaptureFromPasteText('')
+    } catch (e) {
+      if (!mountedRef.current) return
+      setCaptureFromPasteError(e instanceof Error ? e.message : 'Paste import failed')
+    } finally {
+      if (mountedRef.current) setCaptureFromPasteBusy(false)
     }
   }
 
@@ -580,6 +619,55 @@ export function ImportsTab() {
             </em>
           </p>
         )}
+
+        <div
+          className="formGrid"
+          style={{ gap: '0.5rem', marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}
+        >
+          <div>
+            <strong style={{ display: 'block' }}>Paste captured orders</strong>
+            <span className="muted" style={{ fontSize: '0.85rem' }}>
+              Fallback for vendor pages (e.g. reportaproblem.apple.com) whose CSP blocks the
+              bookmarklet's direct upload. The bookmarklet copies the captured JSON to your
+              clipboard — paste it here to import.
+            </span>
+          </div>
+          <Textarea
+            value={captureFromPasteText}
+            onChange={(e) => setCaptureFromPasteText(e.target.value)}
+            disabled={captureFromPasteBusy}
+            rows={4}
+            placeholder='{"vendor":"apple","orders":[…]}'
+          />
+          <div className="row" style={{ gap: '0.5rem' }}>
+            <Button
+              type="button"
+              disabled={captureFromPasteBusy || !captureFromPasteText.trim()}
+              onClick={() => void submitCaptureFromPaste()}
+            >
+              {captureFromPasteBusy ? 'Importing…' : 'Import pasted capture'}
+            </Button>
+          </div>
+          {captureFromPasteError && (
+            <span className="error" role="alert">
+              {captureFromPasteError}
+            </span>
+          )}
+          {captureFromPasteResult && (
+            <div
+              style={{
+                padding: '0.5rem 0.75rem',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md, 6px)',
+                fontSize: '0.85rem',
+              }}
+            >
+              Imported {captureFromPasteResult.created} new,{' '}
+              {captureFromPasteResult.updated} updated,{' '}
+              {captureFromPasteResult.skipped} unchanged.
+            </div>
+          )}
+        </div>
       </Card>
     </>
   )

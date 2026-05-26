@@ -124,6 +124,48 @@ test('rejects POST with invalid calendar date in YYYY-MM-DD format', async () =>
   assert.match(String(res.body.error ?? ''), /orders\[0\]\.orderDate/);
 });
 
+test('rejects POST /capture/orders-from-paste without a session', async () => {
+  const res = await request(app)
+    .post('/api/capture/orders-from-paste')
+    .send({ vendor: 'amazon', orders: [] });
+  assert.equal(res.status, 401);
+});
+
+test('accepts POST /capture/orders-from-paste with session auth and tags source as bookmarklet-paste', async () => {
+  const res = await authed.post('/api/capture/orders-from-paste').send({
+    vendor: 'apple',
+    orders: [
+      {
+        vendorOrderId: 'PASTE-APPLE-1',
+        orderDate: '2026-05-08',
+        total: 4.99,
+        currency: 'CAD',
+        paymentLast4: null,
+        items: [{ title: 'iCloud+ 50GB', totalPrice: 4.99 }],
+        rawSource: 'bookmarklet-apple-v1',
+      },
+    ],
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.created, 1);
+  const order = await models.ExternalOrder.findOne({
+    where: { vendorOrderId: 'PASTE-APPLE-1' },
+  });
+  assert.ok(order);
+  assert.equal(order.source, 'bookmarklet-paste-apple-v1');
+});
+
+test('rejects POST /capture/orders-from-paste with malformed payload', async () => {
+  const res = await authed.post('/api/capture/orders-from-paste').send({
+    vendor: 'apple',
+    orders: [
+      { vendorOrderId: 'x', orderDate: 'not-a-date', total: 1, currency: 'CAD', items: [] },
+    ],
+  });
+  assert.equal(res.status, 400);
+  assert.match(String(res.body.error ?? ''), /orderDate must be YYYY-MM-DD/);
+});
+
 test('post-capture backfill enriches a matching transaction', async () => {
   const acc = await models.Account.findOne();
   assert.ok(acc);
