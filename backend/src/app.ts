@@ -15,12 +15,14 @@ import merchantsRouter from './routes/merchants';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
 import moneyLeaksRouter from './routes/moneyLeaks';
+import reportsRouter from './routes/reports';
 import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
+import purchasesRouter from './routes/purchases';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
@@ -138,6 +140,7 @@ app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
 app.use('/api/data-quality', dataQualityRouter);
 app.use('/api/money-leaks', moneyLeaksRouter);
+app.use('/api/reports', reportsRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai
 // prefix to satisfy the issue's endpoint spec.
@@ -166,6 +169,7 @@ app.use('/api', businessTaxRouter);
 app.use('/api', returnWarrantyRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
+app.use('/api', purchasesRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;

@@ -23,6 +23,7 @@ import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
+import { TransactionRevision, initTransactionRevision } from './TransactionRevision';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
@@ -73,6 +74,7 @@ import {
   initMoneyLeakDismissal,
 } from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
+import { Purchase, initPurchase } from './Purchase';
 import { Notification, initNotification } from './Notification';
 import {
   NotificationPreference,
@@ -104,6 +106,7 @@ initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
+initTransactionRevision(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
@@ -141,6 +144,7 @@ initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
+initPurchase(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
@@ -385,6 +389,17 @@ TransactionSignal.belongsTo(Transaction, {
   as: 'transaction',
 });
 
+Transaction.hasMany(TransactionRevision, {
+  foreignKey: 'transaction_id',
+  as: 'revisions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionRevision.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
 Scenario.hasMany(ScenarioReturn, {
   foreignKey: 'scenario_id',
   as: 'returns',
@@ -535,6 +550,33 @@ TaxReserveSetting.belongsTo(Household, {
   as: 'household',
 });
 
+Transaction.hasOne(Purchase, {
+  foreignKey: 'transaction_id',
+  as: 'purchase',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Purchase.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+Household.hasMany(Purchase, {
+  foreignKey: 'household_id',
+  as: 'purchases',
+});
+Purchase.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(Purchase, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedPurchases',
+});
+Purchase.belongsTo(User, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedByUser',
+});
+
 // CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
 // the DB level; we surface the relationship as hasOne so callers can eager
 // load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
@@ -574,6 +616,7 @@ export {
   ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
+  TransactionRevision,
   Security,
   InvestmentActivity,
   HoldingSnapshot,
@@ -609,6 +652,7 @@ export {
   AiReviewRun,
   MoneyLeakDismissal,
   TaxReserveSetting,
+  Purchase,
   CashflowSettings,
   Notification,
   NotificationPreference,

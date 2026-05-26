@@ -358,5 +358,52 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       logger.warn({ err: e, model: 'Transaction' }, 'ensure_category_hook_failed');
     }
   });
+
+  /**
+   * Version-history capture (#229). Computed in `beforeUpdate` so
+   * `previous(field)` still returns the pre-mutation value (after
+   * `afterUpdate`, Sequelize has synced the snapshot and the diff is
+   * lost). The diff is stashed on the `options` bag and consumed by the
+   * `afterUpdate` hook below, which writes a single TransactionRevision
+   * row inside the caller's SQL transaction (if any).
+   *
+   * No revision is written when nothing tracked changed — the recorder
+   * returns `null` from buildTransactionDiff in that case.
+   */
+  Transaction.addHook('beforeUpdate', (instance: Transaction, options) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { buildTransactionDiff } = require('../util/transactionRevisions') as typeof import('../util/transactionRevisions');
+      const diff = buildTransactionDiff(instance);
+      if (diff != null) {
+        (options as unknown as { _pendingRevisionDiff?: unknown })._pendingRevisionDiff = diff;
+      }
+    } catch (e) {
+      logger.warn({ err: e, model: 'Transaction' }, 'transaction_revision_diff_failed');
+    }
+  });
+  Transaction.addHook('afterUpdate', async (instance: Transaction, options) => {
+    const opts = options as unknown as {
+      _pendingRevisionDiff?: Array<{ field: string; before: unknown; after: unknown }>;
+    };
+    const diff = opts._pendingRevisionDiff;
+    if (!diff || diff.length === 0) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { recordTransactionRevision } = require('../util/transactionRevisions') as typeof import('../util/transactionRevisions');
+      await recordTransactionRevision(instance, diff, {
+        transaction: options.transaction,
+      });
+    } catch (e) {
+      logger.warn(
+        { err: e, model: 'Transaction', transactionId: instance.id },
+        'transaction_revision_record_failed',
+      );
+    } finally {
+      // Clear so a subsequent reload-then-save in the same options bag
+      // doesn't accidentally re-emit the same revision.
+      delete opts._pendingRevisionDiff;
+    }
+  });
   return Transaction;
 }
