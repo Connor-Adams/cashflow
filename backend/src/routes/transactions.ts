@@ -34,6 +34,7 @@ import {
   withRevisionContext,
   type RevisionedField,
 } from '../util/transactionRevisions';
+import { isTransactionStatus } from '../transactions/types';
 
 const router = Router();
 
@@ -106,6 +107,9 @@ export function buildTransactionFilterWhere(
   }
   if (source.importBatch) {
     where.importBatch = String(source.importBatch);
+  }
+  if (isTransactionStatus(source.status)) {
+    where.status = source.status;
   }
   if (source.dateFrom || source.dateTo) {
     const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
@@ -216,6 +220,7 @@ const PATCHABLE_KEYS = [
   'visibility',
   'ownershipType',
   'ownershipContactId',
+  'status',
 ] as const;
 
 /**
@@ -274,6 +279,13 @@ export async function applyPatchBody(
           }
           txn.set('ownershipContactId', contact.id);
         }
+      } else if (k === 'status') {
+        if (!isTransactionStatus(b[k])) {
+          const err = new Error('INVALID_STATUS') as Error & { status?: number };
+          err.status = 400;
+          throw err;
+        }
+        txn.set('status', b[k]);
       } else {
         txn.set(k, b[k] as never);
       }

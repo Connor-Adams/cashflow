@@ -251,6 +251,10 @@ export async function commitStatementImport(
         sourceIdentityFingerprint: identityFp,
         sourceReference: row.sourceReference ?? null,
         t,
+        incomingStatus: 'posted',
+        incomingDate: row.date,
+        incomingAmount: row.amount,
+        incomingMerchantRaw: row.merchantRaw,
       });
       if (dedup.kind !== 'no-match') {
         skippedDuplicates += 1;
@@ -339,6 +343,7 @@ export async function commitStatementImport(
         sourceReference: row.sourceReference ?? null,
         sourceRowFingerprint: row.sourceRowFingerprint,
         sourceIdentityFingerprint: identityFp,
+        status: 'posted',
         appliedRuleId: f.appliedRuleId,
         autoCategory: f.autoCategory,
         autoBusiness: overrideBusiness ? true : f.autoBusiness,
