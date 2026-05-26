@@ -298,9 +298,10 @@ export async function ensureOverview(securityId: number): Promise<BackfillStatus
   // first visit instead of waiting out the 90-day staleness window.
   //
   // Canary keys (bump these whenever fetchOverview adds new fields):
-  //   - marketCap         (rollout 1: market data / fundamentals / analysts)
-  //   - fundExpenseRatio  (rollout 2: fund + crypto fields)
-  const SCHEMA_CANARIES = ['marketCap', 'fundExpenseRatio'] as const;
+  //   - marketCap                  (rollout 1: market data / fundamentals / analysts)
+  //   - fundExpenseRatio           (rollout 2: fund + crypto fields)
+  //   - nextEarningsDate           (rollout 3: earnings + analyst trend modules)
+  const SCHEMA_CANARIES = ['marketCap', 'fundExpenseRatio', 'nextEarningsDate'] as const;
   const metadataKeys = sec.metadata as Record<string, unknown> | null;
   const schemaStale =
     metadataKeys != null && SCHEMA_CANARIES.some((k) => !(k in metadataKeys));

@@ -25,8 +25,10 @@ import { ensureFxRate } from '../fx/bankOfCanada';
 import {
   YAHOO_PROVIDER,
   YahooFinanceError,
+  fetchNews,
   fetchQuote,
 } from '../integrations/yahoo/client';
+import { toYahooSymbol } from '../integrations/yahoo/symbol';
 import { recordCall } from '../integrations/yahoo/jobLog';
 import { enumerateYahooSymbols } from '../integrations/yahoo/symbol';
 import {
@@ -1221,6 +1223,13 @@ const OVERVIEW_NUMBER_FIELDS = [
   'trailingReturn5y',
   'trailingReturn10y',
   'trailingReturnYtd',
+  // Earnings forecast
+  'earningsEpsAvg',
+  'earningsEpsLow',
+  'earningsEpsHigh',
+  'earningsRevenueAvg',
+  'earningsRevenueLow',
+  'earningsRevenueHigh',
 ] as const;
 
 const OVERVIEW_STRING_FIELDS = [
@@ -1239,7 +1248,11 @@ const OVERVIEW_STRING_FIELDS = [
   'fundFamily',
   'fundCategory',
   'fundLegalType',
+  // Earnings
+  'nextEarningsDate',
 ] as const;
+
+const OVERVIEW_BOOLEAN_FIELDS = ['nextEarningsIsEstimate'] as const;
 
 function pickTopHoldings(
   m: Record<string, unknown>,
@@ -1271,6 +1284,65 @@ function pickSectorWeightings(
   return Object.keys(out).length === 0 ? null : out;
 }
 
+function pickEarningsHistory(m: Record<string, unknown>): unknown[] | null {
+  const arr = m['earningsHistory'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr.map((h) => {
+    const rec = (h ?? {}) as Record<string, unknown>;
+    return {
+      period: typeof rec['period'] === 'string' ? rec['period'] : null,
+      quarter: typeof rec['quarter'] === 'string' ? rec['quarter'] : null,
+      epsActual:
+        typeof rec['epsActual'] === 'number' && Number.isFinite(rec['epsActual'])
+          ? rec['epsActual']
+          : null,
+      epsEstimate:
+        typeof rec['epsEstimate'] === 'number' && Number.isFinite(rec['epsEstimate'])
+          ? rec['epsEstimate']
+          : null,
+      epsDifference:
+        typeof rec['epsDifference'] === 'number' && Number.isFinite(rec['epsDifference'])
+          ? rec['epsDifference']
+          : null,
+      surprisePercent:
+        typeof rec['surprisePercent'] === 'number' && Number.isFinite(rec['surprisePercent'])
+          ? rec['surprisePercent']
+          : null,
+    };
+  });
+}
+
+function pickRecommendationTrend(m: Record<string, unknown>): unknown[] | null {
+  const arr = m['recommendationTrend'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr.map((r) => {
+    const rec = (r ?? {}) as Record<string, unknown>;
+    return {
+      period: typeof rec['period'] === 'string' ? rec['period'] : null,
+      strongBuy: pickNumber(rec, 'strongBuy'),
+      buy: pickNumber(rec, 'buy'),
+      hold: pickNumber(rec, 'hold'),
+      sell: pickNumber(rec, 'sell'),
+      strongSell: pickNumber(rec, 'strongSell'),
+    };
+  });
+}
+
+function pickUpgradeDowngrade(m: Record<string, unknown>): unknown[] | null {
+  const arr = m['upgradeDowngradeHistory'];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr.map((r) => {
+    const rec = (r ?? {}) as Record<string, unknown>;
+    return {
+      date: typeof rec['date'] === 'string' ? rec['date'] : null,
+      firm: typeof rec['firm'] === 'string' ? rec['firm'] : null,
+      fromGrade: typeof rec['fromGrade'] === 'string' ? rec['fromGrade'] : null,
+      toGrade: typeof rec['toGrade'] === 'string' ? rec['toGrade'] : null,
+      action: typeof rec['action'] === 'string' ? rec['action'] : null,
+    };
+  });
+}
+
 function pickNumber(m: Record<string, unknown>, key: string): number | null {
   const v = m[key];
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -1278,6 +1350,10 @@ function pickNumber(m: Record<string, unknown>, key: string): number | null {
 function pickString(m: Record<string, unknown>, key: string): string | null {
   const v = m[key];
   return typeof v === 'string' && v.trim() !== '' ? v : null;
+}
+function pickBoolean(m: Record<string, unknown>, key: string): boolean | null {
+  const v = m[key];
+  return typeof v === 'boolean' ? v : null;
 }
 
 router.get('/security/:id/overview', async (req, res, next) => {
@@ -1297,9 +1373,55 @@ router.get('/security/:id/overview', async (req, res, next) => {
     };
     for (const key of OVERVIEW_STRING_FIELDS) payload[key] = pickString(m, key);
     for (const key of OVERVIEW_NUMBER_FIELDS) payload[key] = pickNumber(m, key);
+    for (const key of OVERVIEW_BOOLEAN_FIELDS) payload[key] = pickBoolean(m, key);
     payload['topHoldings'] = pickTopHoldings(m);
     payload['sectorWeightings'] = pickSectorWeightings(m);
+    payload['earningsHistory'] = pickEarningsHistory(m);
+    payload['recommendationTrend'] = pickRecommendationTrend(m);
+    payload['upgradeDowngradeHistory'] = pickUpgradeDowngrade(m);
     res.json(payload);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/portfolio/security/:id/news — live Yahoo news search.
+ *
+ * News goes stale fast and the payload is small enough that caching it in
+ * Security.metadata isn't worth the schema churn. Fetched live per request.
+ * Errors are swallowed into `{ items: [] }` so a transient Yahoo outage
+ * doesn't break the ticker page.
+ */
+router.get('/security/:id/news', async (req, res, next) => {
+  try {
+    const scoped = await loadSecurityScoped(req, req.params.id);
+    if ('error' in scoped) {
+      res.status(scoped.error as number).json({ error: 'Security not visible' });
+      return;
+    }
+    const { security } = scoped;
+    const yahooSymbol = toYahooSymbol(security.symbol, security.currency, {
+      assetType: security.assetType,
+      name: security.name,
+    });
+    if (yahooSymbol === '') {
+      res.json({ securityId: security.id, items: [] });
+      return;
+    }
+    let items: unknown[] = [];
+    try {
+      const news = await fetchNews(yahooSymbol);
+      if (news) items = news;
+    } catch (err) {
+      // Log but don't fail the request — news is a non-essential surface.
+      // eslint-disable-next-line no-console
+      console.warn('news_fetch_failed', {
+        symbol: yahooSymbol,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    res.json({ securityId: security.id, items });
   } catch (e) {
     next(e);
   }
