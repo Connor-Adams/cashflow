@@ -127,3 +127,56 @@ test('Integration: cap losses do not produce negative CDA', () => {
   // grossGains = -10000; cdaAddition = maxZero(-10000) × 0.5 = 0
   assert.equal(integ.cdaAddition.toFixed(2), '0.00');
 });
+
+test('P11b T5: connected intercorp dividend (source-tagged) excluded from ERDTOH/NERDTOH; portfolio div still attracts Part IV', () => {
+  // Holdco receives:
+  //   - $50,000 eligible div from Opco via intercorpRouter (CONNECTED → Part IV = 0 in v1)
+  //   - $20,000 eligible div from a public-co portfolio holding (PORTFOLIO → 38.33% ERDTOH)
+  //   - $15,000 non-eligible div from another holdco via intercorpRouter (CONNECTED → Part IV = 0 in v1)
+  //   - $8,000 non-eligible div from a private-co minority stake (PORTFOLIO → 30.67% NERDTOH)
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    investmentIncome: {
+      interest: [],
+      eligibleDividends: [
+        { source: 'intercorpRouter:from-corp-42:eligible', amount: D('50000'), cadAmount: D('50000') },
+        { source: 'BCE shares', amount: D('20000'), cadAmount: D('20000') },
+      ],
+      nonEligibleDividends: [
+        { source: 'intercorpRouter:from-corp-99:nonEligible', amount: D('15000'), cadAmount: D('15000') },
+        { source: 'minority stake', amount: D('8000'), cadAmount: D('8000') },
+      ],
+      rentNet: [],
+    },
+  };
+
+  const integ = computeIntegration(facts, D('0'), r);
+
+  // ERDTOH: only the $20k portfolio eligible div contributes (interest=0, rent=0)
+  //   20000 × 0.3833 = 7666
+  assert.equal(integ.erdtohAddition.toFixed(4), '7666.0000');
+  // NERDTOH: only the $8k portfolio non-eligible div contributes
+  //   8000 × 0.3067 = 2453.60
+  assert.equal(integ.nerdtohAddition.toFixed(4), '2453.6000');
+});
+
+test('P11b T5: connected-only divs produce zero RDTOH addition (v1 simplification)', () => {
+  // 100% intercorp eligible div, no portfolio — ERDTOH addition should be 0
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    investmentIncome: {
+      interest: [],
+      eligibleDividends: [
+        { source: 'intercorpRouter:from-corp-7:eligible', amount: D('100000'), cadAmount: D('100000') },
+      ],
+      nonEligibleDividends: [
+        { source: 'intercorpRouter:from-corp-7:nonEligible', amount: D('40000'), cadAmount: D('40000') },
+      ],
+      rentNet: [],
+    },
+  };
+
+  const integ = computeIntegration(facts, D('0'), r);
+  assert.equal(integ.erdtohAddition.toFixed(2), '0.00');
+  assert.equal(integ.nerdtohAddition.toFixed(2), '0.00');
+});

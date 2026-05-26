@@ -201,10 +201,13 @@ test('P11a E2E: opco→holdco non-eligible dividend routed via household-plan co
     new RegExp(`from-corp-${opcoEntityId}:nonEligible`),
   );
 
-  // 6b. Holdco's NERDTOH addition = 80,000 × 0.3067 = 24,536 (Part IV via the
-  //     existing integration engine). No dividend refund because Holdco pays
-  //     no divs out, so nerdtohEnding == addition (carryforwards start at 0
-  //     on a baseline-derived fork).
+  // 6b. P11b T5 v1: Holdco's NERDTOH ending = 0 because the received
+  //     intercorp non-eligible div is source-tagged
+  //     `intercorpRouter:from-corp-<opcoId>:nonEligible`, and
+  //     `computeIntegration` excludes connected divs from the Part IV /
+  //     NERDTOH base (v1 simplification — real rule requires payer's actual
+  //     dividend refund × ownership%, deferred to P11c). Pre-P11b this
+  //     asserted 24,536 = 80,000 × 0.3067.
   const holdcoResult = body.corp.find(
     (c: { scenario: { entityId: number } }) => c.scenario.entityId === holdcoEntityId,
   );
@@ -215,7 +218,7 @@ test('P11a E2E: opco→holdco non-eligible dividend routed via household-plan co
     'Holdco should take the cache-skipping receiver path',
   );
   assert.equal(holdcoResult.computed.cached, false);
-  assert.equal(String(holdcoResult.computed.totals.nerdtohEnding ?? '0'), '24536');
+  assert.equal(String(holdcoResult.computed.totals.nerdtohEnding ?? '0'), '0');
 
   // 6c. Plan-wide total corp tax = Opco net tax + Holdco net tax. This is
   //     mostly a no-double-count sanity check: the orchestrator returns one

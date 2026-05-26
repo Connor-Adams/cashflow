@@ -120,10 +120,11 @@ test('computeHouseholdPlan routes intercorp non-eligible dividend from Opco to H
   //   1. intercorpRouter emits a CorpReceivedDivs entry for Holdco
   //   2. Holdco's compute path injects the received div into its
   //      investmentIncome.nonEligibleDividends array (cache-skipped path)
-  //   3. computeIntegration applies Part IV via NERDTOH addition:
-  //      80000 × 0.3067 = 24,536
-  //   4. Holdco's totals.nerdtohEnding reflects that (no dividendRefund
-  //      because Holdco pays no dividends out itself)
+  //   3. P11b T5 v1: the injected item carries the source tag
+  //      `intercorpRouter:from-corp-<opcoId>:nonEligible`, so computeIntegration
+  //      treats it as a CONNECTED div and Part IV / NERDTOH addition = 0.
+  //   4. Holdco's totals.nerdtohEnding stays at 0 (no Part IV in v1 on connected
+  //      divs, no dividendRefund because Holdco pays no dividends out itself).
   const household = await Household.create({ name: 'Holdco' });
   const personalEntity = await Entity.create({
     householdId: household.id, kind: 'personal', legalName: 'P',
@@ -192,10 +193,13 @@ test('computeHouseholdPlan routes intercorp non-eligible dividend from Opco to H
   assert.equal(holdcoResult.computed.factsHash, 'household-intercorp');
   assert.equal(holdcoResult.computed.cached, false);
 
-  // Holdco's NERDTOH ending = 80000 × 0.3067 = 24,536 (Part IV via NERDTOH addition).
-  // No dividendRefund because Holdco pays no dividends out (no dividendsPaid in baseline).
+  // P11b T5 v1: Holdco's NERDTOH ending = 0 because the received intercorp
+  // non-eligible div is source-tagged `intercorpRouter:from-corp-<opcoId>:nonEligible`
+  // and computeIntegration excludes connected divs from the Part IV base.
+  // (Pre-P11b this asserted 24,536 = 80000 × 0.3067. The v1 simplification trades
+  // exactness for tractability — real rule: Part IV = payer_div_refund × ownership%.)
   const holdcoNerdtohEnding = String(holdcoResult.computed.totals.nerdtohEnding ?? '0');
-  assert.equal(holdcoNerdtohEnding, '24536');
+  assert.equal(holdcoNerdtohEnding, '0');
 
   // Opco's compute path used the cache (it doesn't receive divs — it pays them).
   // Sanity: Opco's tax computation isn't affected by the intercorp distribution
