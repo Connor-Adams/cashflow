@@ -860,12 +860,12 @@ router.post(
   importUploadLimiter,
   async (req, res, next) => {
     try {
+      const { user } = currentAuth(req);
       const batchLabel = decodeURIComponent(req.params.batchLabel ?? '');
       if (!batchLabel) {
         res.status(400).json({ error: 'batchLabel is required' });
         return;
       }
-      const { user } = currentAuth(req);
       logImportEvent('rollback_started', {
         batchLabel,
         userId: user.id,
