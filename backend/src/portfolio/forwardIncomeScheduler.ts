@@ -1,5 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
+import { randomUUID } from 'crypto';
 import { logger } from '../observability/logger';
+import { withContext } from '../observability/requestContext';
 import * as env from '../config/env';
 import { rebuildForwardProjectionsForAllHouseholds } from './forwardIncomeBuilder';
 
@@ -56,19 +58,24 @@ export function startForwardIncomeScheduler(): ScheduledTask | null {
     return null;
   }
   activeTask = cron.schedule(env.forwardIncomeCron, async () => {
-    if (runningTick) {
-      logger.debug({}, 'forward_income_tick_skipped_reentrant');
-      return;
-    }
-    runningTick = true;
-    try {
-      const r = await runForwardIncomeTick();
-      logger.info(r as unknown as Record<string, unknown>, 'forward_income_tick');
-    } catch (err) {
-      logger.error({ err }, 'forward_income_tick_unhandled');
-    } finally {
-      runningTick = false;
-    }
+    await withContext(
+      { jobName: 'forward_income_scheduler', tickId: randomUUID() },
+      async () => {
+        if (runningTick) {
+          logger.debug({}, 'forward_income_tick_skipped_reentrant');
+          return;
+        }
+        runningTick = true;
+        try {
+          const r = await runForwardIncomeTick();
+          logger.info(r as unknown as Record<string, unknown>, 'forward_income_tick');
+        } catch (err) {
+          logger.error({ err }, 'forward_income_tick_unhandled');
+        } finally {
+          runningTick = false;
+        }
+      },
+    );
   });
   logger.info({ cron: env.forwardIncomeCron }, 'forward_income_scheduler_started');
   return activeTask;

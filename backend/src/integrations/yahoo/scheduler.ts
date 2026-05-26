@@ -20,10 +20,12 @@
  */
 
 import cron, { type ScheduledTask } from 'node-cron';
+import { randomUUID } from 'crypto';
 import { Security } from '../../models/Security';
 import { SecurityDividend } from '../../models/SecurityDividend';
 import { SecurityPrice } from '../../models/SecurityPrice';
 import { logger } from '../../observability/logger';
+import { withContext } from '../../observability/requestContext';
 import * as env from '../../config/env';
 import { reconcileDividendsForSecurity } from '../../portfolio/reconcileDividends';
 import { recordCall } from './jobLog';
@@ -277,19 +279,24 @@ export function startQuoteScheduler(): ScheduledTask | null {
   }
 
   activeTask = cron.schedule(env.quoteTickCron, async () => {
-    if (runningTick) {
-      logger.debug({}, 'quote_scheduler_tick_skipped_reentrant');
-      return;
-    }
-    runningTick = true;
-    try {
-      const result = await runQuoteSchedulerTick();
-      logger.info(result as unknown as Record<string, unknown>, 'quote_scheduler_tick');
-    } catch (err) {
-      logger.error({ err }, 'quote_scheduler_tick_unhandled');
-    } finally {
-      runningTick = false;
-    }
+    await withContext(
+      { jobName: 'yahoo_quote_scheduler', tickId: randomUUID() },
+      async () => {
+        if (runningTick) {
+          logger.debug({}, 'quote_scheduler_tick_skipped_reentrant');
+          return;
+        }
+        runningTick = true;
+        try {
+          const result = await runQuoteSchedulerTick();
+          logger.info(result as unknown as Record<string, unknown>, 'quote_scheduler_tick');
+        } catch (err) {
+          logger.error({ err }, 'quote_scheduler_tick_unhandled');
+        } finally {
+          runningTick = false;
+        }
+      },
+    );
   });
 
   logger.info({ cron: env.quoteTickCron, minAgeHours: env.quoteMinAgeHours }, 'quote_scheduler_started');

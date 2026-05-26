@@ -1,5 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
+import { randomUUID } from 'crypto';
 import { logger } from '../observability/logger';
+import { withContext } from '../observability/requestContext';
 import * as env from '../config/env';
 import { buildDailySnapshotsForAllHouseholds } from './dailySnapshotBuilder';
 
@@ -58,19 +60,24 @@ export function startDailySnapshotScheduler(): ScheduledTask | null {
     return null;
   }
   activeTask = cron.schedule(env.dailySnapshotCron, async () => {
-    if (runningTick) {
-      logger.debug({}, 'daily_snapshot_tick_skipped_reentrant');
-      return;
-    }
-    runningTick = true;
-    try {
-      const r = await runDailySnapshotTick();
-      logger.info(r as unknown as Record<string, unknown>, 'daily_snapshot_tick');
-    } catch (err) {
-      logger.error({ err }, 'daily_snapshot_tick_unhandled');
-    } finally {
-      runningTick = false;
-    }
+    await withContext(
+      { jobName: 'daily_snapshot_scheduler', tickId: randomUUID() },
+      async () => {
+        if (runningTick) {
+          logger.debug({}, 'daily_snapshot_tick_skipped_reentrant');
+          return;
+        }
+        runningTick = true;
+        try {
+          const r = await runDailySnapshotTick();
+          logger.info(r as unknown as Record<string, unknown>, 'daily_snapshot_tick');
+        } catch (err) {
+          logger.error({ err }, 'daily_snapshot_tick_unhandled');
+        } finally {
+          runningTick = false;
+        }
+      },
+    );
   });
   logger.info({ cron: env.dailySnapshotCron }, 'daily_snapshot_scheduler_started');
   return activeTask;
