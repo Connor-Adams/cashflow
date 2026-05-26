@@ -51,3 +51,16 @@ test('apply intercorp.<id>.eligible stamps onto corp facts intercorp map', () =>
   };
   assert.equal(result.intercorp?.['42']?.eligible?.toFixed(2), '80000.00');
 });
+
+test('validateOverrideMap accepts intercorp.<id>.ownershipPercent on corp scenario', () => {
+  validateOverrideMap({ 'intercorp.7.ownershipPercent': 75 }, 'corp');
+});
+
+test('apply intercorp.<id>.ownershipPercent stamps onto corp facts intercorp map', () => {
+  const entry = getOverrideKey('intercorp.7.ownershipPercent')!;
+  entry.validate(75);
+  const result = entry.apply(emptyCorp() as unknown as never, 75) as unknown as CorpTaxYearFacts & {
+    intercorp?: Record<string, Record<string, ReturnType<typeof D>>>;
+  };
+  assert.equal(result.intercorp?.['7']?.ownershipPercent?.toFixed(2), '75.00');
+});

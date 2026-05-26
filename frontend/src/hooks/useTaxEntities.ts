@@ -11,6 +11,11 @@ export type TaxEntity = {
   // spouses (P10). Backend `GET /api/tax/entities` echoes the column verbatim;
   // for non-personal kinds this stays null.
   spouseEntityId: number | null;
+  // Free-form group tag (P11b T1) — corps sharing the same string are treated
+  // as an associated group for SBD $500k + AAII $50k purposes. Engine ignores
+  // it on personal entities; backend PATCH /api/tax/entities/:id rejects
+  // setting it on non-corp.
+  associatedGroupId: string | null;
 };
 
 export function useTaxEntities() {

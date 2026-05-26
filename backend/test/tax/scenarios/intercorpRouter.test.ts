@@ -26,6 +26,7 @@ test('single A→B eligible dividend → B has 1 eligibleDividend item with corr
         eligible: D('50000'),
         nonEligible: D('0'),
         capital: D('0'),
+        ownershipPercent: D('100'),
       },
     ],
     corpEntityIdsInPlan: new Set<number>([10, 20]),
@@ -52,6 +53,7 @@ test('receiver not in plan → warning, no addition', () => {
         eligible: D('30000'),
         nonEligible: D('0'),
         capital: D('0'),
+        ownershipPercent: D('100'),
       },
     ],
     corpEntityIdsInPlan: new Set<number>([10, 20]),
@@ -76,6 +78,7 @@ test('self-loop (corp paying to itself) → error severity warning, no addition'
         eligible: D('25000'),
         nonEligible: D('0'),
         capital: D('0'),
+        ownershipPercent: D('100'),
       },
     ],
     corpEntityIdsInPlan: new Set<number>([10, 20]),
@@ -100,6 +103,7 @@ test('multi-type (eligible + nonEligible + capital from one payer) → all 3 arr
         eligible: D('40000'),
         nonEligible: D('15000'),
         capital: D('7500'),
+        ownershipPercent: D('100'),
       },
     ],
     corpEntityIdsInPlan: new Set<number>([10, 20]),
@@ -120,4 +124,110 @@ test('multi-type (eligible + nonEligible + capital from one payer) → all 3 arr
   assert.equal(received.capitalDividends.length, 1);
   assert.equal(received.capitalDividends[0].source, 'intercorpRouter:from-corp-10:capital');
   assert.equal(received.capitalDividends[0].amount.toFixed(2), '7500.00');
+});
+
+test('P11b T6: gripBoost = eligible × 100% on single 100%-owned payer (sole-shareholder holdco)', () => {
+  const inputs: IntercorpDistributionInputs = {
+    distributions: [
+      {
+        payerCorpScenarioId: 100,
+        payerCorpEntityId: 10,
+        receiverCorpEntityId: 20,
+        eligible: D('50000'),
+        nonEligible: D('0'),
+        capital: D('0'),
+        ownershipPercent: D('100'),
+      },
+    ],
+    corpEntityIdsInPlan: new Set<number>([10, 20]),
+  };
+  const out = intercorpRouter(inputs);
+  const received = out.byReceiverEntityId[20];
+  assert.ok(received, 'expected receiver 20 to have received-divs entry');
+  // 50000 × 100/100 = 50000
+  assert.equal(received.gripBoost.toFixed(2), '50000.00');
+});
+
+test('P11b T6: gripBoost = eligible × ownership% on partial-ownership payer', () => {
+  const inputs: IntercorpDistributionInputs = {
+    distributions: [
+      {
+        payerCorpScenarioId: 100,
+        payerCorpEntityId: 10,
+        receiverCorpEntityId: 20,
+        eligible: D('40000'),
+        nonEligible: D('0'),
+        capital: D('0'),
+        ownershipPercent: D('75'),
+      },
+    ],
+    corpEntityIdsInPlan: new Set<number>([10, 20]),
+  };
+  const out = intercorpRouter(inputs);
+  const received = out.byReceiverEntityId[20];
+  assert.ok(received, 'expected receiver 20 to have received-divs entry');
+  // 40000 × 75/100 = 30000
+  assert.equal(received.gripBoost.toFixed(2), '30000.00');
+  // Eligible dividend still recorded at full $40k (taxable to receiver); only
+  // GRIP designation is grossed by ownership%.
+  assert.equal(received.eligibleDividends[0].cadAmount.toFixed(2), '40000.00');
+});
+
+test('P11b T6: gripBoost aggregates across multiple payers on same receiver', () => {
+  // Scenario: receiver corp C is owned 100% by A and 50% by B (e.g. A is C's
+  // parent; B is a fellow-subsidiary holding C-shares). Both pay eligible divs.
+  //   from A: 50000 × 100/100 = 50000
+  //   from B: 20000 × 50/100  = 10000
+  //   total gripBoost on C   = 60000
+  const inputs: IntercorpDistributionInputs = {
+    distributions: [
+      {
+        payerCorpScenarioId: 100,
+        payerCorpEntityId: 10,
+        receiverCorpEntityId: 30,
+        eligible: D('50000'),
+        nonEligible: D('0'),
+        capital: D('0'),
+        ownershipPercent: D('100'),
+      },
+      {
+        payerCorpScenarioId: 101,
+        payerCorpEntityId: 20,
+        receiverCorpEntityId: 30,
+        eligible: D('20000'),
+        nonEligible: D('0'),
+        capital: D('0'),
+        ownershipPercent: D('50'),
+      },
+    ],
+    corpEntityIdsInPlan: new Set<number>([10, 20, 30]),
+  };
+  const out = intercorpRouter(inputs);
+  const received = out.byReceiverEntityId[30];
+  assert.ok(received, 'expected receiver 30 to have received-divs entry');
+  // Both payers appear with their full eligible amounts on the receiver.
+  assert.equal(received.eligibleDividends.length, 2);
+  // Sum of (eligible × ownership%/100) = 50000 + 10000 = 60000
+  assert.equal(received.gripBoost.toFixed(2), '60000.00');
+});
+
+test('P11b T6: zero eligible → gripBoost stays 0 even with non-zero ownership%', () => {
+  const inputs: IntercorpDistributionInputs = {
+    distributions: [
+      {
+        payerCorpScenarioId: 100,
+        payerCorpEntityId: 10,
+        receiverCorpEntityId: 20,
+        eligible: D('0'),
+        nonEligible: D('30000'),
+        capital: D('0'),
+        ownershipPercent: D('100'),
+      },
+    ],
+    corpEntityIdsInPlan: new Set<number>([10, 20]),
+  };
+  const out = intercorpRouter(inputs);
+  const received = out.byReceiverEntityId[20];
+  assert.ok(received, 'expected receiver 20 to have received-divs entry');
+  assert.equal(received.gripBoost.toFixed(2), '0.00');
 });

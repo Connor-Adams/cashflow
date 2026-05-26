@@ -74,6 +74,22 @@ export type CorpTaxYearFacts = {
   dividendsPaid: CorpDividendPaid[];
   salaryPaid: Decimal;                  // T4 box 14 from corp to owner
   carryforwards: CorpCarryforwards;
+  /**
+   * P11b: Associated-group AAII total. When present, used in place of per-corp
+   * AAII for the SBD grind so all corps in an associated group share the
+   * $500k SBD limit / $50k AAII threshold under s.125(5.1).
+   * Injected by `computeHouseholdPlan` via `computeGroupAaii` rollup.
+   */
+  groupAaii?: Decimal;
+  /**
+   * P11b T6: GRIP designation flowing in from intercorp eligible dividends
+   * received this year. Injected by `computeHouseholdPlan` from
+   * `intercorpRouter`'s `CorpReceivedDivs.gripBoost`
+   * (Σ eligible × ownership%/100 across received transfers). Engine adds this
+   * to `gripEnding` in `buildT2`, on top of the existing growth from the corp's
+   * own general-rate income.
+   */
+  openingGripBoost?: Decimal;
 };
 
 export type CorpTaxReturn = {
