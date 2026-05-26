@@ -85,6 +85,63 @@ export type RecurringResponse = {
   minOccurrences: number
 }
 
+/** Lifecycle state of a subscription row in the optimizer. */
+export type SubscriptionStatus =
+  | 'active'
+  | 'cancelled'
+  | 'ignored'
+  | 'unknown'
+
+/** One row of the /api/subscriptions response. */
+export type Subscription = {
+  id: number
+  householdId: number
+  merchantName: string
+  normalizedName: string
+  amount: string
+  currency: string
+  cadence: 'monthly' | 'weekly'
+  lastChargeDate: string
+  nextExpectedDate: string | null
+  status: SubscriptionStatus
+  category: string | null
+  annualizedCost: string
+  priceChangeDetected: boolean
+  cancellationUrl: string | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/subscriptions. */
+export type SubscriptionsResponse = {
+  items: Subscription[]
+}
+
+/** PATCH /api/subscriptions/:id request body — only user-curated fields. */
+export type SubscriptionPatch = {
+  status?: SubscriptionStatus
+  cancellationUrl?: string | null
+  notes?: string | null
+}
+
+/** Response shape for GET /api/subscriptions/summary. */
+export type SubscriptionsSummary = {
+  totals: {
+    active: number
+    ignored: number
+    cancelled: number
+    unknown: number
+    priceChangeDetected: number
+  }
+  byCurrency: Array<{
+    currency: string
+    activeCount: number
+    monthlyCost: number
+    annualCost: number
+  }>
+}
+
 /** Direction of a partner-balance settlement record. */
 export type PartnerSettlementDirection = 'i_paid_partner' | 'partner_paid_me'
 
