@@ -1094,6 +1094,149 @@ router.get('/:id/signals', async (req, res, next) => {
 });
 
 /**
+ * GET /api/transactions/:id/explanation
+ *
+ * Issue #230: per-field explanation of why a transaction has its current
+ * category, split, business flag, notes, and review state.
+ *
+ * Unlike `/:id/signals` (which dumps raw enrichment signals JSON), this
+ * endpoint returns a structured, human-readable explanation suitable for the
+ * transaction detail panel. The actual reasoning is in
+ * `backend/src/util/transactionExplanation.ts` — a pure function — so the
+ * route is a thin shell that loads the rows the helper needs.
+ *
+ * Authorization: household-scoped via `visibleTransactionWhere(req)`. Both
+ * the transaction and any joined rule/AI suggestion are filtered by the same
+ * household, so cross-household leakage is impossible.
+ */
+router.get('/:id/explanation', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const { TransactionSignal, Rule, AiSuggestion, User } = await import('../models');
+
+    const [appliedRuleRow, signalRows, latestAcceptedAiRow] = await Promise.all([
+      txn.appliedRuleId == null
+        ? null
+        : Rule.findOne({
+            where: {
+              id: txn.appliedRuleId,
+              // Rules are household-scoped — same auth gate as the transaction.
+              householdId: txn.householdId,
+            },
+          }),
+      TransactionSignal.findAll({
+        where: { transactionId: id },
+        order: [['id', 'ASC']],
+      }),
+      AiSuggestion.findOne({
+        where: {
+          transactionId: id,
+          kind: 'transaction_fields',
+          status: ['accepted', 'edited'],
+          householdId: txn.householdId,
+        },
+        order: [['updatedAt', 'DESC']],
+      }),
+    ]);
+
+    // Best-effort actor lookup. We only know the creator (createdByUserId)
+    // for now — true historical actor of each edit needs the finance audit
+    // log (#228), which is not yet shipped. The helper falls back to a
+    // displayName-less label when lookup returns null.
+    let actorDisplayName: string | null = null;
+    if (txn.createdByUserId != null) {
+      const u = await User.findOne({
+        where: { id: txn.createdByUserId },
+        attributes: ['id', 'displayName'],
+      });
+      actorDisplayName = u?.displayName ?? null;
+    }
+
+    const { buildTransactionExplanation } = await import('../util/transactionExplanation');
+    const explanation = buildTransactionExplanation({
+      transaction: {
+        id: txn.id,
+        createdByUserId: txn.createdByUserId,
+        createdAt: txn.createdAt,
+        updatedAt: txn.updatedAt,
+        appliedRuleId: txn.appliedRuleId,
+        autoSource: txn.autoSource,
+        autoCategory: txn.autoCategory,
+        categoryOverride: txn.categoryOverride,
+        finalCategory: txn.finalCategory,
+        autoBusiness: txn.autoBusiness,
+        businessOverride: txn.businessOverride,
+        finalBusiness: txn.finalBusiness,
+        autoSplitType: txn.autoSplitType,
+        splitOverride: txn.splitOverride,
+        finalSplitType: txn.finalSplitType,
+        autoPctMe: txn.autoPctMe,
+        pctMeOverride: txn.pctMeOverride,
+        finalPctMe: txn.finalPctMe,
+        autoPctPartner: txn.autoPctPartner,
+        pctPartnerOverride: txn.pctPartnerOverride,
+        finalPctPartner: txn.finalPctPartner,
+        notes: txn.notes,
+        reviewFlag: txn.reviewFlag,
+        reviewedAt: txn.reviewedAt,
+      },
+      appliedRule:
+        appliedRuleRow == null
+          ? null
+          : {
+              id: appliedRuleRow.id,
+              merchantPattern: appliedRuleRow.merchantPattern,
+              category: appliedRuleRow.category,
+              splitType: appliedRuleRow.splitType,
+            },
+      latestAcceptedAiSuggestion:
+        latestAcceptedAiRow == null
+          ? null
+          : {
+              id: latestAcceptedAiRow.id,
+              createdAt: latestAcceptedAiRow.createdAt,
+              status: latestAcceptedAiRow.status as 'accepted' | 'edited',
+              model: latestAcceptedAiRow.model,
+              output: latestAcceptedAiRow.output as {
+                category?: string | null;
+                business?: boolean | null;
+                splitType?: string | null;
+                notes?: string | null;
+              } | null,
+            },
+      signals: signalRows.map((s) => ({
+        source: s.source,
+        confidence: s.confidence,
+        fields: s.fields,
+        rationale: s.rationale,
+      })),
+      actorLookup:
+        actorDisplayName == null || txn.createdByUserId == null
+          ? null
+          : (uid) =>
+              uid === txn.createdByUserId
+                ? { id: uid, displayName: actorDisplayName! }
+                : null,
+    });
+
+    res.json(explanation);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/transactions/enrichment/stats
  *
  * Aggregate enrichment stats for the caller's household. Used by the
