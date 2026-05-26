@@ -383,6 +383,13 @@ export type Budget = {
   period: BudgetPeriod
   scope: BudgetScope
   rolloverEnabled: boolean
+  /**
+   * When true (issue #215) the budget's progress route subtracts the
+   * linked-original-purchase amount of every refund that lands in the
+   * current period — so a $200 jacket that was refunded in the same
+   * window contributes $0 to the budget.
+   */
+  excludeRefundedPurchases: boolean
   createdAt: string
   updatedAt: string
 }
@@ -419,6 +426,8 @@ export type BudgetProgress = {
   scope: BudgetScope
   period: BudgetPeriod
   rolloverEnabled: boolean
+  /** Mirror of `Budget.excludeRefundedPurchases` for issue #215. */
+  excludeRefundedPurchases?: boolean
   periodElapsedPercent: number
   pacingState: BudgetPacingState
 }
@@ -439,6 +448,7 @@ export type BudgetInput = {
   period?: BudgetPeriod
   scope?: BudgetScope
   rolloverEnabled?: boolean
+  excludeRefundedPurchases?: boolean
 }
 
 /** One row in the GET /api/budgets/:id/exclusions response. */
@@ -451,6 +461,73 @@ export type BudgetExclusion = {
 
 export type BudgetExclusionsResponse = {
   data: BudgetExclusion[]
+}
+
+/**
+ * Issue #215: response from GET /api/transactions/:id/refund-details.
+ *
+ * When `linked` is true and `original` is non-null, the refund row is
+ * tied to an accessible original purchase the frontend can render inline.
+ * `linked` true with `original` null means the link exists but the
+ * original lies outside the caller's visible scope (still surfaced so the
+ * UI shows "Linked to original you don't have access to" rather than
+ * hallucinating an unlinked state).
+ *
+ * `partial` is true when |refund amount| < |original amount| (the refund
+ * only returned part of the purchase).
+ */
+export type RefundDetailsResponse = {
+  refundId: number
+  linked: boolean
+  partial: boolean | null
+  original: {
+    id: number
+    date: string
+    merchantClean: string
+    merchantCanonical: string | null
+    amount: number
+    currency: string
+    finalCategory: string | null
+  } | null
+}
+
+/**
+ * Issue #215: one row from GET /api/transactions/refund-suggestions, the
+ * review queue. `linkedOriginal` is set when the refund has an auto-linked
+ * original. `suggestions` contains any medium-confidence canonical-brand
+ * matches the detector flagged for review. The UI uses both to render a
+ * "confirm this match" / "switch to suggestion" / "unlink" affordance.
+ */
+export type RefundSuggestionRow = {
+  refundId: number
+  refundDate: string
+  refundMerchantClean: string
+  refundAmount: number
+  refundCurrency: string
+  autoSource: string | null
+  autoConfidence: 'high' | 'medium' | 'low' | null
+  reviewFlag: boolean
+  linkedOriginal: {
+    id: number
+    date: string
+    merchantClean: string
+    amount: number
+    currency: string
+    finalCategory: string | null
+  } | null
+  suggestions: Array<{
+    originalId: number
+    originalDate: string
+    originalMerchantClean: string
+    originalAmount: number
+    originalCurrency: string
+    originalFinalCategory: string | null
+    rationale: string | null
+  }>
+}
+
+export type RefundSuggestionsResponse = {
+  data: RefundSuggestionRow[]
 }
 
 /**

@@ -15,6 +15,7 @@ export type SignalSource =
   | 'memory'
   | 'item-link'
   | 'refund-link'
+  | 'refund-link-suggested'
   | 'transfer-link'
   | 'ai';
 

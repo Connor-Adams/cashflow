@@ -592,3 +592,168 @@ test('POST /api/budgets/:id/exclusions rejects another household transaction', a
     .send({ transactionId: foreignTxnId });
   assert.equal(res.status, 404);
 });
+
+// ---- Issue #215: excludeRefundedPurchases ----
+
+async function createRefundLinkedTransaction(
+  householdId: number,
+  accountId: number,
+  date: string,
+  category: string | null,
+  amount: number,
+  linkedTransactionId: number,
+  currency = 'CAD'
+): Promise<number> {
+  const models = await import('../../src/models');
+  const row = await models.Transaction.create({
+    accountId,
+    householdId,
+    visibility: 'shared',
+    ownershipType: 'me',
+    ownershipContactId: null,
+    importBatch: 'budgets-test',
+    date,
+    merchantRaw: 'Refund Test',
+    merchantClean: 'Refund Test',
+    amount: amount.toFixed(4),
+    currency,
+    notes: null,
+    sourceReference: null,
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    appliedRuleId: null,
+    autoCategory: null,
+    categoryOverride: null,
+    finalCategory: category,
+    autoBusiness: null,
+    businessOverride: null,
+    finalBusiness: false,
+    autoSplitType: null,
+    splitOverride: null,
+    autoPctMe: null,
+    pctMeOverride: null,
+    finalPctMe: null,
+    autoPctPartner: null,
+    pctPartnerOverride: null,
+    finalPctPartner: null,
+    reviewFlag: false,
+    reviewedAt: null,
+    createdByUserId: null,
+    txnType: 'refund',
+    linkedTransactionId,
+  });
+  return row.id;
+}
+
+test('excludeRefundedPurchases: subtracts linked original from budget spend when toggled on', async () => {
+  // Fresh budget with the flag set. Use a unique category so prior tests
+  // sharing the primary household don't bleed in.
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'RefundExclude-Test',
+    currency: 'CAD',
+    amount: 500,
+    excludeRefundedPurchases: true,
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.excludeRefundedPurchases, true);
+  const budgetId = created.body.id as number;
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+
+  // $200 purchase that will be refunded.
+  const refundedOriginalId = await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-05`,
+    'RefundExclude-Test',
+    -200
+  );
+  // $80 purchase that stays as spend.
+  await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-06`,
+    'RefundExclude-Test',
+    -80
+  );
+  // The refund — points back at the $200 row via linked_transaction_id.
+  await createRefundLinkedTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-10`,
+    'RefundExclude-Test',
+    200,
+    refundedOriginalId
+  );
+
+  const res = await primaryAgent.get('/api/budgets/progress');
+  assert.equal(res.status, 200);
+  const items = res.body.items as Array<{
+    budgetId: number;
+    category: string | null;
+    spent: number;
+    excludeRefundedPurchases?: boolean;
+  }>;
+  const row = items.find((i) => i.budgetId === budgetId);
+  assert.ok(row, 'budget should appear in /progress');
+  // 80 not 280: the $200 charge that got refunded must not count.
+  assert.equal(row!.spent, 80);
+  assert.equal(row!.excludeRefundedPurchases, true);
+});
+
+test('excludeRefundedPurchases: default false keeps refunded original in budget spend', async () => {
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'RefundNoExclude-Test',
+    currency: 'CAD',
+    amount: 500,
+    // flag omitted → defaults to false
+  });
+  const budgetId = created.body.id as number;
+  assert.equal(created.body.excludeRefundedPurchases, false);
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+
+  const refundedOriginalId = await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-05`,
+    'RefundNoExclude-Test',
+    -150
+  );
+  await createRefundLinkedTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-10`,
+    'RefundNoExclude-Test',
+    150,
+    refundedOriginalId
+  );
+
+  const res = await primaryAgent.get('/api/budgets/progress');
+  const items = res.body.items as Array<{
+    budgetId: number;
+    spent: number;
+  }>;
+  const row = items.find((i) => i.budgetId === budgetId);
+  assert.ok(row);
+  // Without the flag, the original $150 still counts even though refunded.
+  assert.equal(row!.spent, 150);
+});
+
+test('PATCH /:id can toggle excludeRefundedPurchases', async () => {
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'Toggle-Test',
+    currency: 'CAD',
+    amount: 100,
+  });
+  const id = created.body.id as number;
+  const patched = await primaryAgent
+    .patch(`/api/budgets/${id}`)
+    .send({ excludeRefundedPurchases: true });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.excludeRefundedPurchases, true);
+});

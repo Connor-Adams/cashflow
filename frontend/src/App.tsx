@@ -18,6 +18,7 @@ import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
 import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
+import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { TransfersPage } from './pages/TransfersPage'
@@ -59,6 +60,7 @@ function AppRoutes() {
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="review" element={<ReviewInboxPage />} />
+          <Route path="refunds" element={<RefundsReviewPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="transfers" element={<TransfersPage />} />
           <Route path="items" element={<ItemsPage />} />
