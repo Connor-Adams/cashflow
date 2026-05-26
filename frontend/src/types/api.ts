@@ -298,6 +298,87 @@ export type PlannedEventInput = {
 /** PUT /api/planned-events/:id body shape — every field optional. */
 export type PlannedEventPatch = Partial<PlannedEventInput>
 
+/**
+ * Lifecycle for a financial goal. Mirrors `FinancialGoalStatus` in the
+ * backend model. Completed goals are archived (filtered from the default
+ * list view) — the API does not auto-delete them.
+ */
+export type FinancialGoalStatus = 'active' | 'paused' | 'completed'
+
+/**
+ * One row from GET /api/goals. Mirrors the FinancialGoal serializer in
+ * `backend/src/routes/goals.ts`. Money fields arrive as strings
+ * (DECIMAL(14,4)) for lossless transport — coerce with `Number(...)` for
+ * arithmetic and display.
+ */
+export type FinancialGoal = {
+  id: number
+  userId: number
+  householdId: number
+  name: string
+  targetAmount: string
+  currentAmount: string
+  currency: string
+  /** YYYY-MM-DD or null. Null = open-ended. */
+  targetDate: string | null
+  monthlyContribution: string | null
+  linkedAccountId: number | null
+  priority: number
+  status: FinancialGoalStatus
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/goals. */
+export type FinancialGoalsResponse = {
+  data: FinancialGoal[]
+}
+
+/** POST /api/goals body shape. */
+export type FinancialGoalInput = {
+  name: string
+  targetAmount: number
+  currentAmount?: number
+  currency: string
+  targetDate?: string | null
+  monthlyContribution?: number | null
+  linkedAccountId?: number | null
+  priority?: number
+  status?: FinancialGoalStatus
+  notes?: string | null
+}
+
+/** PUT /api/goals/:id body shape — every field optional. */
+export type FinancialGoalPatch = Partial<FinancialGoalInput>
+
+/** "Where is the user vs. expected pace?" surfaced by the projection endpoint. */
+export type GoalOnTrackStatus =
+  | 'ahead'
+  | 'on_track'
+  | 'behind'
+  | 'overdue'
+  | 'no_deadline'
+  | 'completed'
+  | 'paused'
+
+/** Response shape for GET /api/goals/:id/projection. */
+export type GoalProjection = {
+  goalId: number
+  monthsRemaining: number | null
+  requiredMonthlyContribution: string | null
+  projectedCompletionDate: string | null
+  expectedAmountToday: string | null
+  progressPercent: number
+  onTrackStatus: GoalOnTrackStatus
+}
+
+/** Response shape for GET /api/goals/summary/required-contributions. */
+export type GoalRequiredContributionsResponse = {
+  today: string
+  byCurrency: Record<string, string>
+}
+
 export type AppConfig = {
   logoDevToken: string | null;
   quoteProviderConfigured: boolean;
