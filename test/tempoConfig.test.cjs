@@ -17,3 +17,7 @@ test('tempo storage uses /var/tempo so the /tempo binary is not shadowed', () =>
   assert.match(observabilityDocs, /mount at `\/var\/tempo`/);
   assert.doesNotMatch(observabilityDocs, /mount at `\/tempo`/);
 });
+
+test('tempo compactor ring does not depend on Railway interface names', () => {
+  assert.match(tempoConfig, /compactor:\n(?:.*\n)*?  ring:\n(?:.*\n)*?    instance_addr: 127\.0\.0\.1\b/);
+});

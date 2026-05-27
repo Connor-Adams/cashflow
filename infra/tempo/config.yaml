@@ -22,6 +22,7 @@ compactor:
     block_retention: 168h        # 7 days
     compacted_block_retention: 1h
   ring:
+    instance_addr: 127.0.0.1
     kvstore:
       store: inmemory
 
