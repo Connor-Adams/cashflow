@@ -19,10 +19,13 @@
  * fetch is slow and the next cron fires.
  */
 
+import { trace } from '@opentelemetry/api';
 import { Security } from '../../models/Security';
 import { SecurityDividend } from '../../models/SecurityDividend';
 import { SecurityPrice } from '../../models/SecurityPrice';
 import * as env from '../../config/env';
+
+const tracer = trace.getTracer('cashflow-scheduler');
 import { reconcileDividendsForSecurity } from '../../portfolio/reconcileDividends';
 import { recordCall } from './jobLog';
 import {
@@ -234,19 +237,28 @@ async function dispatch(
 export async function runQuoteSchedulerTick(
   configOverride?: Partial<TickConfig>,
 ): Promise<TickResult> {
-  const config: TickConfig = { ...configFromEnv(), ...configOverride };
+  return tracer.startActiveSpan('yahoo_quote_scheduler.tick', async (span): Promise<TickResult> => {
+    try {
+      const config: TickConfig = { ...configFromEnv(), ...configOverride };
 
-  if (!config.enabled) {
-    return { status: 'skipped_disabled' };
-  }
+      if (!config.enabled) {
+        return { status: 'skipped_disabled' };
+      }
 
-  const item = await pickNext({
-    minAgeSeconds: config.minAgeHours * 3600,
+      const item = await pickNext({
+        minAgeSeconds: config.minAgeHours * 3600,
+      });
+      if (!item) {
+        return { status: 'skipped_no_eligible_symbol' };
+      }
+
+      return await dispatch(item.function, item.yahooSymbol);
+    } catch (err) {
+      span.recordException(err as Error);
+      throw err;
+    } finally {
+      span.end();
+    }
   });
-  if (!item) {
-    return { status: 'skipped_no_eligible_symbol' };
-  }
-
-  return dispatch(item.function, item.yahooSymbol);
 }
 

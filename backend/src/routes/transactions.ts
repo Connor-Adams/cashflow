@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { Op, QueryTypes } from 'sequelize';
-import { Transaction, Account, Contact, sequelize } from '../models';
+import { Transaction, Account, Contact, TransactionRevision, sequelize } from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
 import { computeReceiptWarnings } from '../util/receiptWarnings';
@@ -12,6 +12,17 @@ import {
 import { createTrackedSuggestion, markTransactionSuggestionOutcome } from '../ai/suggestionStore';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  diffPatchableFields,
+  recordAudit,
+} from '../audit/log';
+import {
+  FINANCE_EVENT_TYPES,
+  FINANCE_EVENT_ENTITY_TYPES,
+  recordFinanceEvent,
+} from '../events/financeEvents';
 import { currentAuth } from '../auth/middleware';
 import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -22,6 +33,13 @@ import {
   isBackfillInFlight,
   scheduleInternalBackfill,
 } from '../import/backfillCoordinator';
+import {
+  parseRevisionChanges,
+  RESTORABLE_FIELDS,
+  withRevisionContext,
+  type RevisionedField,
+} from '../util/transactionRevisions';
+import { isTransactionStatus } from '../transactions/types';
 
 const router = Router();
 
@@ -95,6 +113,9 @@ export function buildTransactionFilterWhere(
   if (source.importBatch) {
     where.importBatch = String(source.importBatch);
   }
+  if (isTransactionStatus(source.status)) {
+    where.status = source.status;
+  }
   if (source.dateFrom || source.dateTo) {
     const dateCond: { [Op.gte]?: string; [Op.lte]?: string } = {};
     if (source.dateFrom) dateCond[Op.gte] = String(source.dateFrom);
@@ -108,6 +129,21 @@ export function buildTransactionFilterWhere(
       .filter((n) => Number.isInteger(n) && n > 0);
     // -1 matches nothing; auto-increment ids start at 1, so this returns empty when all entries are invalid.
     where.id = ids.length === 0 ? -1 : ids;
+  }
+  if (source.importConfidence) {
+    const v = String(source.importConfidence);
+    if (v === 'clean' || v === 'needs_review') {
+      where.importConfidence = v;
+    }
+  }
+  // confidenceFlag uses LIKE on the JSON-encoded TEXT column. The classifier
+  // serializes tokens as a JSON array (e.g. ["needs_review","missing_category"])
+  // so `'%"missing_category"%'` matches deterministically. This avoids needing
+  // a JSONB column + GIN index for what is effectively a small enum filter.
+  if (typeof source.confidenceFlag === 'string' && source.confidenceFlag.length > 0) {
+    where.importConfidenceFlags = {
+      [Op.like]: `%"${source.confidenceFlag.replace(/[^a-z_]/gi, '')}"%`,
+    };
   }
   return where;
 }
@@ -189,7 +225,31 @@ const PATCHABLE_KEYS = [
   'visibility',
   'ownershipType',
   'ownershipContactId',
+  'status',
 ] as const;
+
+/**
+ * Fields snapshotted for the audit-log diff. Includes every directly-
+ * patchable user field plus `reviewFlag` and the computed `finalCategory`
+ * so a reviewer can see when a re-enrich changed the resolved category
+ * after a manual flag flip.
+ */
+const AUDIT_DIFF_FIELDS = [
+  ...PATCHABLE_KEYS,
+  'reviewFlag',
+  'finalCategory',
+] as const;
+type AuditDiffField = (typeof AUDIT_DIFF_FIELDS)[number];
+
+function captureAuditFields(
+  txn: InstanceType<typeof Transaction>,
+): Record<AuditDiffField, unknown> {
+  const out = {} as Record<AuditDiffField, unknown>;
+  for (const k of AUDIT_DIFF_FIELDS) {
+    out[k] = txn.get(k);
+  }
+  return out;
+}
 
 export async function applyPatchBody(
   req: import('express').Request,
@@ -224,6 +284,13 @@ export async function applyPatchBody(
           }
           txn.set('ownershipContactId', contact.id);
         }
+      } else if (k === 'status') {
+        if (!isTransactionStatus(b[k])) {
+          const err = new Error('INVALID_STATUS') as Error & { status?: number };
+          err.status = 400;
+          throw err;
+        }
+        txn.set('status', b[k]);
       } else {
         txn.set(k, b[k] as never);
       }
@@ -338,26 +405,31 @@ router.post('/bulk-patch', async (req, res, next) => {
     });
 
     const fanoutTargets: Array<{ snap: MemorySnapshot; txn: InstanceType<typeof Transaction> }> = [];
-    await sequelize.transaction(async (t) => {
-      for (const id of ids) {
-        const txn = await Transaction.findOne({
-          where: { id, ...visibleTransactionWhere(req) },
-          transaction: t,
-        });
-        if (!txn) {
-          const err = new Error(`Transaction ${id} not found`) as Error & {
-            status?: number;
-          };
-          err.status = 404;
-          throw err;
-        }
-        const snap = captureMemorySnapshot(txn);
-        await applyPatchBody(req, txn, patch);
-        recomputeTransactionAmounts(txn);
-        await txn.save({ transaction: t });
-        fanoutTargets.push({ snap, txn });
-      }
-    });
+    const { user: bulkUser } = currentAuth(req);
+    await withRevisionContext(
+      { changedByUserId: bulkUser.id, source: 'bulk_patch' },
+      () =>
+        sequelize.transaction(async (t) => {
+          for (const id of ids) {
+            const txn = await Transaction.findOne({
+              where: { id, ...visibleTransactionWhere(req) },
+              transaction: t,
+            });
+            if (!txn) {
+              const err = new Error(`Transaction ${id} not found`) as Error & {
+                status?: number;
+              };
+              err.status = 404;
+              throw err;
+            }
+            const snap = captureMemorySnapshot(txn);
+            await applyPatchBody(req, txn, patch);
+            recomputeTransactionAmounts(txn);
+            await txn.save({ transaction: t });
+            fanoutTargets.push({ snap, txn });
+          }
+        }),
+    );
     // Fire memory-fanout AFTER the outer commit so we never schedule a
     // re-enrich for a transaction whose patch was rolled back.
     for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
@@ -365,6 +437,20 @@ router.post('/bulk-patch', async (req, res, next) => {
     logTransactionEvent('bulk_patch_completed', {
       count: ids.length,
     });
+    if (ids.length > 0) {
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.TransactionBulkUpdated,
+        entityType: AUDIT_ENTITY_TYPES.Transaction,
+        entityId: null,
+        summary: `Bulk-updated ${ids.length} transaction(s): ${Object.keys(patch).slice(0, 3).join(', ')}`,
+        after: patch,
+        metadata: {
+          ids: ids.slice(0, 200),
+          count: ids.length,
+        },
+      });
+    }
     res.json({ updated: ids.length });
   } catch (e) {
     next(e);
@@ -410,32 +496,53 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
 
     const updatedIds: number[] = [];
     const fanoutTargets: Array<{ snap: MemorySnapshot; txn: InstanceType<typeof Transaction> }> = [];
-    await sequelize.transaction(async (t) => {
-      // Pull every matching row up front to keep the patched set deterministic
-      // for the duration of the transaction. The count above also gates this
-      // against runaway memory use via {@link BULK_PATCH_FILTER_MAX}.
-      const matched = await Transaction.findAll({
-        where,
-        transaction: t,
-        order: [
-          ['date', 'DESC'],
-          ['id', 'DESC'],
-        ],
-      });
-      for (const txn of matched) {
-        const snap = captureMemorySnapshot(txn);
-        await applyPatchBody(req, txn, patch);
-        recomputeTransactionAmounts(txn);
-        await txn.save({ transaction: t });
-        updatedIds.push(txn.id);
-        fanoutTargets.push({ snap, txn });
-      }
-    });
+    const { user: bulkFilterUser } = currentAuth(req);
+    await withRevisionContext(
+      { changedByUserId: bulkFilterUser.id, source: 'bulk_patch' },
+      () =>
+        sequelize.transaction(async (t) => {
+          // Pull every matching row up front to keep the patched set
+          // deterministic for the duration of the transaction. The count above
+          // also gates this against runaway memory use via {@link
+          // BULK_PATCH_FILTER_MAX}.
+          const matched = await Transaction.findAll({
+            where,
+            transaction: t,
+            order: [
+              ['date', 'DESC'],
+              ['id', 'DESC'],
+            ],
+          });
+          for (const txn of matched) {
+            const snap = captureMemorySnapshot(txn);
+            await applyPatchBody(req, txn, patch);
+            recomputeTransactionAmounts(txn);
+            await txn.save({ transaction: t });
+            updatedIds.push(txn.id);
+            fanoutTargets.push({ snap, txn });
+          }
+        }),
+    );
     for (const { snap, txn } of fanoutTargets) scheduleMemoryFanoutIfNeeded(snap, txn);
 
     logTransactionEvent('bulk_patch_filter_completed', {
       updated: updatedIds.length,
     });
+    if (updatedIds.length > 0) {
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.TransactionBulkFilterUpdated,
+        entityType: AUDIT_ENTITY_TYPES.Transaction,
+        entityId: null,
+        summary: `Filter-updated ${updatedIds.length} transaction(s): ${Object.keys(patch).slice(0, 3).join(', ')}`,
+        after: patch,
+        metadata: {
+          ids: updatedIds.slice(0, 200),
+          count: updatedIds.length,
+          filterKeys: Object.keys(filter),
+        },
+      });
+    }
     res.json({ updated: updatedIds.length, ids: updatedIds });
   } catch (e) {
     next(e);
@@ -635,18 +742,67 @@ router.patch('/:id', async (req, res, next) => {
     }
 
     const memSnap = captureMemorySnapshot(txn);
+    const auditPrev = captureAuditFields(txn);
     await applyPatchBody(req, txn, b);
 
     recomputeTransactionAmounts(txn);
-    await txn.save();
-    scheduleMemoryFanoutIfNeeded(memSnap, txn);
+    // Version-history (#229): if the caller is accepting an AI suggestion,
+    // tag the revision with source='ai_suggestion' and link the AiSuggestion
+    // row. Otherwise it's a plain user_edit.
     const aiSuggestionId = Number(b.aiSuggestionId);
-    if (Number.isInteger(aiSuggestionId) && aiSuggestionId > 0) {
+    const hasAiSuggestion = Number.isInteger(aiSuggestionId) && aiSuggestionId > 0;
+    const { user } = currentAuth(req);
+    await withRevisionContext(
+      {
+        changedByUserId: user.id,
+        source: hasAiSuggestion ? 'ai_suggestion' : 'user_edit',
+        aiSuggestionId: hasAiSuggestion ? aiSuggestionId : null,
+      },
+      () => txn.save(),
+    );
+    scheduleMemoryFanoutIfNeeded(memSnap, txn);
+    if (hasAiSuggestion) {
       await markTransactionSuggestionOutcome(req, aiSuggestionId, txn);
     }
     await txn.reload({
       include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
     });
+    const auditNext = captureAuditFields(txn);
+    const diff = diffPatchableFields(auditPrev, auditNext, AUDIT_DIFF_FIELDS);
+    if (Object.keys(diff.after).length > 0) {
+      const summaryFields = Object.keys(diff.after).slice(0, 3).join(', ');
+      await recordAudit({
+        req,
+        action: AUDIT_ACTIONS.TransactionUpdated,
+        entityType: AUDIT_ENTITY_TYPES.Transaction,
+        entityId: txn.id,
+        summary: `Updated ${summaryFields}`,
+        before: diff.before,
+        after: diff.after,
+        metadata:
+          Number.isInteger(aiSuggestionId) && aiSuggestionId > 0
+            ? { aiSuggestionId }
+            : undefined,
+      });
+      // Domain event for the stream (issue #238). The payload is the
+      // set of changed fields keyed by field name — replay-friendly
+      // and small. Consumers wanting the full before/after diff should
+      // go to audit_log; this stream is for "what changed" reactions.
+      await recordFinanceEvent({
+        req,
+        type: FINANCE_EVENT_TYPES.TransactionUpdated,
+        entityType: FINANCE_EVENT_ENTITY_TYPES.Transaction,
+        entityId: txn.id,
+        payload: {
+          changed: Object.keys(diff.after),
+          after: diff.after,
+          aiSuggestionId:
+            Number.isInteger(aiSuggestionId) && aiSuggestionId > 0
+              ? aiSuggestionId
+              : null,
+        },
+      });
+    }
     logTransactionEvent('patch_completed', { id });
     res.json(serializeTransaction(txn));
   } catch (e) {
@@ -704,6 +860,362 @@ router.post('/:id/re-enrich', async (req, res, next) => {
 });
 
 /**
+ * GET /api/transactions/refund-suggestions
+ *
+ * Issue #215: review queue for refund matches.
+ *
+ * Returns rows from the caller's household where either:
+ *   - The detector emitted a `refund-link-suggested` medium-confidence signal
+ *     (canonical-brand match but cleaned merchants differ — needs human
+ *     confirmation).
+ *   - A refund already has an auto-linked original via the high-confidence
+ *     `refund-link` path but the row remains unreviewed — so the user can
+ *     audit the auto-links if desired.
+ *
+ * Suggestions are scoped to the visible-transaction set (so cross-household
+ * leakage is impossible). Each row hydrates the linked original's merchant,
+ * date and amount so the frontend can render a "Refund of $X at <merchant>
+ * on <date>" preview without a second round-trip.
+ */
+router.get('/refund-suggestions', async (req, res, next) => {
+  try {
+    const { TransactionSignal } = await import('../models');
+    // First pass: every refund row visible to the caller that's either
+    // a) auto-linked but unreviewed, or b) has a suggested-link signal.
+    const refunds = await Transaction.findAll({
+      where: {
+        ...visibleTransactionWhere(req),
+        txnType: 'refund',
+      },
+      attributes: [
+        'id',
+        'date',
+        'merchantClean',
+        'merchantCanonical',
+        'amount',
+        'currency',
+        'linkedTransactionId',
+        'autoSource',
+        'autoConfidence',
+        'reviewFlag',
+        'reviewedAt',
+      ],
+      order: [['date', 'DESC']],
+      limit: 200,
+      raw: true,
+    });
+    if (refunds.length === 0) {
+      res.json({ data: [] });
+      return;
+    }
+    const refundIds = refunds.map((r) => r.id);
+
+    // Pull every refund-link-suggested signal for the matching refund ids
+    // in one query so we can map them onto the rows.
+    const suggestedSignals = await TransactionSignal.findAll({
+      where: {
+        transactionId: refundIds,
+        source: 'refund-link-suggested',
+      },
+      raw: true,
+    });
+    const suggestedByRefundId = new Map<number, Array<{ linkedTransactionId: number | null; rationale: string | null }>>();
+    for (const s of suggestedSignals) {
+      const list = suggestedByRefundId.get(s.transactionId) ?? [];
+      const fields = (s.fields ?? {}) as Record<string, unknown>;
+      list.push({
+        linkedTransactionId:
+          typeof fields.linkedTransactionId === 'number' ? fields.linkedTransactionId : null,
+        rationale: s.rationale ?? null,
+      });
+      suggestedByRefundId.set(s.transactionId, list);
+    }
+
+    // Collect every original id we may need to hydrate (auto-linked + suggested).
+    const originalIds = new Set<number>();
+    for (const r of refunds) {
+      if (r.linkedTransactionId != null) originalIds.add(r.linkedTransactionId);
+    }
+    for (const list of suggestedByRefundId.values()) {
+      for (const s of list) {
+        if (s.linkedTransactionId != null) originalIds.add(s.linkedTransactionId);
+      }
+    }
+    const originals = originalIds.size === 0
+      ? []
+      : await Transaction.findAll({
+          where: { id: Array.from(originalIds), ...visibleTransactionWhere(req) },
+          attributes: [
+            'id',
+            'date',
+            'merchantClean',
+            'merchantCanonical',
+            'amount',
+            'currency',
+            'finalCategory',
+          ],
+          raw: true,
+        });
+    const originalById = new Map<number, (typeof originals)[number]>(
+      originals.map((o) => [o.id, o]),
+    );
+
+    const out = refunds
+      // A refund only appears in the queue when there's something to confirm:
+      //   - it carries an auto-link via the detector AND remains unreviewed, OR
+      //   - it has at least one suggested-link signal in the SQL fetch above
+      .filter((r) => {
+        const isAutoLink =
+          r.linkedTransactionId != null && r.autoSource === 'refund-link' && !r.reviewedAt;
+        const hasSuggestion = (suggestedByRefundId.get(r.id) ?? []).length > 0;
+        return isAutoLink || hasSuggestion;
+      })
+      .map((r) => {
+        const linkedOriginal =
+          r.linkedTransactionId != null
+            ? originalById.get(r.linkedTransactionId) ?? null
+            : null;
+        const suggestions = (suggestedByRefundId.get(r.id) ?? [])
+          .map((s) => {
+            const orig =
+              s.linkedTransactionId != null ? originalById.get(s.linkedTransactionId) ?? null : null;
+            if (!orig) return null;
+            return {
+              originalId: orig.id,
+              originalDate: orig.date,
+              originalMerchantClean: orig.merchantClean,
+              originalAmount: Number(orig.amount),
+              originalCurrency: orig.currency,
+              originalFinalCategory: orig.finalCategory,
+              rationale: s.rationale,
+            };
+          })
+          .filter((s): s is NonNullable<typeof s> => s != null);
+        return {
+          refundId: r.id,
+          refundDate: r.date,
+          refundMerchantClean: r.merchantClean,
+          refundAmount: Number(r.amount),
+          refundCurrency: r.currency,
+          autoSource: r.autoSource,
+          autoConfidence: r.autoConfidence,
+          reviewFlag: r.reviewFlag,
+          linkedOriginal: linkedOriginal
+            ? {
+                id: linkedOriginal.id,
+                date: linkedOriginal.date,
+                merchantClean: linkedOriginal.merchantClean,
+                amount: Number(linkedOriginal.amount),
+                currency: linkedOriginal.currency,
+                finalCategory: linkedOriginal.finalCategory,
+              }
+            : null,
+          suggestions,
+        };
+      });
+    res.json({ data: out });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/:id/refund-link
+ *
+ * Issue #215: manually link a refund to its original purchase. The route
+ * enforces:
+ *   - both txns visible to the caller via `visibleTransactionWhere`
+ *   - both txns share the same currency (a $50 USD refund can't offset a
+ *     $50 CAD purchase)
+ *   - the source (`:id`) is a refund (positive amount or txnType='refund')
+ *   - the original (body.originalTransactionId) is a negative-amount purchase
+ *
+ * When successful, sets `linkedTransactionId` on the refund and stamps
+ * `txnType='refund'` if the row was mis-classified. Returns the updated
+ * serialized refund row.
+ */
+router.post('/:id/refund-link', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const body = (req.body || {}) as { originalTransactionId?: unknown };
+    const originalId = Number(body.originalTransactionId);
+    if (!Number.isInteger(originalId) || originalId <= 0) {
+      res.status(400).json({ error: 'originalTransactionId must be a positive integer' });
+      return;
+    }
+    if (originalId === id) {
+      res.status(400).json({ error: 'A transaction cannot link to itself' });
+      return;
+    }
+    const refund = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!refund) {
+      res.status(404).json({ error: 'Refund not found' });
+      return;
+    }
+    const original = await Transaction.findOne({
+      where: { id: originalId, ...visibleTransactionWhere(req) },
+    });
+    if (!original) {
+      res.status(404).json({ error: 'Original transaction not found' });
+      return;
+    }
+    if (refund.currency !== original.currency) {
+      res.status(400).json({ error: 'Refund and original currencies must match' });
+      return;
+    }
+    const refundAmount = Number(refund.amount);
+    const originalAmount = Number(original.amount);
+    if (!(refundAmount >= 0)) {
+      res.status(400).json({
+        error: 'Refund row must have a non-negative amount (got ' + String(refund.amount) + ')',
+      });
+      return;
+    }
+    if (!(originalAmount < 0)) {
+      res.status(400).json({
+        error:
+          'Original row must have a negative amount (got ' + String(original.amount) + ')',
+      });
+      return;
+    }
+    refund.linkedTransactionId = original.id;
+    if (refund.txnType !== 'refund') refund.txnType = 'refund';
+    // Manual links are user-confirmed → clear the review flag and stamp
+    // reviewedAt so the row drops out of the queue immediately.
+    refund.autoSource = 'refund-link';
+    refund.autoConfidence = 'high';
+    refund.reviewFlag = false;
+    refund.reviewedAt = new Date();
+    {
+      const { user: refundUser } = currentAuth(req);
+      await withRevisionContext(
+        { changedByUserId: refundUser.id, source: 'refund_link' },
+        () => refund.save(),
+      );
+    }
+    await refund.reload({
+      include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
+    });
+    res.json(serializeTransaction(refund));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/transactions/:id/refund-link
+ *
+ * Issue #215: tear a refund off its linked original. Idempotent — succeeds
+ * with the current row state even if the link was already null. The row's
+ * `txnType` is preserved (still a refund, just unlinked).
+ */
+router.delete('/:id/refund-link', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const refund = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!refund) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    refund.linkedTransactionId = null;
+    refund.autoSource = null;
+    refund.autoConfidence = null;
+    refund.reviewedAt = new Date();
+    {
+      const { user: refundUser } = currentAuth(req);
+      await withRevisionContext(
+        { changedByUserId: refundUser.id, source: 'refund_link' },
+        () => refund.save(),
+      );
+    }
+    await refund.reload({
+      include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
+    });
+    res.json(serializeTransaction(refund));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/:id/refund-details
+ *
+ * Issue #215: returns hydrated info about the original purchase linked from a
+ * refund row, plus a derived "partial" flag (true when refund |amount| <
+ * original |amount|). The frontend uses this to render the "Refund of $X at
+ * <merchant>" inline badge.
+ */
+router.get('/:id/refund-details', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const refund = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!refund) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (refund.linkedTransactionId == null) {
+      res.json({
+        refundId: refund.id,
+        linked: false,
+        original: null,
+        partial: null,
+      });
+      return;
+    }
+    const original = await Transaction.findOne({
+      where: { id: refund.linkedTransactionId, ...visibleTransactionWhere(req) },
+    });
+    if (!original) {
+      // Linked row exists but lies outside the caller's visible scope; report
+      // "linked but inaccessible" rather than leak data via 404.
+      res.json({
+        refundId: refund.id,
+        linked: true,
+        original: null,
+        partial: null,
+      });
+      return;
+    }
+    const refundAmount = Math.abs(Number(refund.amount));
+    const originalAmount = Math.abs(Number(original.amount));
+    res.json({
+      refundId: refund.id,
+      linked: true,
+      partial: refundAmount < originalAmount,
+      original: {
+        id: original.id,
+        date: original.date,
+        merchantClean: original.merchantClean,
+        merchantCanonical: original.merchantCanonical,
+        amount: Number(original.amount),
+        currency: original.currency,
+        finalCategory: original.finalCategory,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/transactions/:id/signals
  *
  * Returns all enrichment signals emitted for a single transaction, ordered by
@@ -729,6 +1241,149 @@ router.get('/:id/signals', async (req, res, next) => {
       order: [['id', 'ASC']],
     });
     res.json(rows.map((r) => r.toJSON()));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/:id/explanation
+ *
+ * Issue #230: per-field explanation of why a transaction has its current
+ * category, split, business flag, notes, and review state.
+ *
+ * Unlike `/:id/signals` (which dumps raw enrichment signals JSON), this
+ * endpoint returns a structured, human-readable explanation suitable for the
+ * transaction detail panel. The actual reasoning is in
+ * `backend/src/util/transactionExplanation.ts` — a pure function — so the
+ * route is a thin shell that loads the rows the helper needs.
+ *
+ * Authorization: household-scoped via `visibleTransactionWhere(req)`. Both
+ * the transaction and any joined rule/AI suggestion are filtered by the same
+ * household, so cross-household leakage is impossible.
+ */
+router.get('/:id/explanation', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const { TransactionSignal, Rule, AiSuggestion, User } = await import('../models');
+
+    const [appliedRuleRow, signalRows, latestAcceptedAiRow] = await Promise.all([
+      txn.appliedRuleId == null
+        ? null
+        : Rule.findOne({
+            where: {
+              id: txn.appliedRuleId,
+              // Rules are household-scoped — same auth gate as the transaction.
+              householdId: txn.householdId,
+            },
+          }),
+      TransactionSignal.findAll({
+        where: { transactionId: id },
+        order: [['id', 'ASC']],
+      }),
+      AiSuggestion.findOne({
+        where: {
+          transactionId: id,
+          kind: 'transaction_fields',
+          status: ['accepted', 'edited'],
+          householdId: txn.householdId,
+        },
+        order: [['updatedAt', 'DESC']],
+      }),
+    ]);
+
+    // Best-effort actor lookup. We only know the creator (createdByUserId)
+    // for now — true historical actor of each edit needs the finance audit
+    // log (#228), which is not yet shipped. The helper falls back to a
+    // displayName-less label when lookup returns null.
+    let actorDisplayName: string | null = null;
+    if (txn.createdByUserId != null) {
+      const u = await User.findOne({
+        where: { id: txn.createdByUserId },
+        attributes: ['id', 'displayName'],
+      });
+      actorDisplayName = u?.displayName ?? null;
+    }
+
+    const { buildTransactionExplanation } = await import('../util/transactionExplanation');
+    const explanation = buildTransactionExplanation({
+      transaction: {
+        id: txn.id,
+        createdByUserId: txn.createdByUserId,
+        createdAt: txn.createdAt,
+        updatedAt: txn.updatedAt,
+        appliedRuleId: txn.appliedRuleId,
+        autoSource: txn.autoSource,
+        autoCategory: txn.autoCategory,
+        categoryOverride: txn.categoryOverride,
+        finalCategory: txn.finalCategory,
+        autoBusiness: txn.autoBusiness,
+        businessOverride: txn.businessOverride,
+        finalBusiness: txn.finalBusiness,
+        autoSplitType: txn.autoSplitType,
+        splitOverride: txn.splitOverride,
+        finalSplitType: txn.finalSplitType,
+        autoPctMe: txn.autoPctMe,
+        pctMeOverride: txn.pctMeOverride,
+        finalPctMe: txn.finalPctMe,
+        autoPctPartner: txn.autoPctPartner,
+        pctPartnerOverride: txn.pctPartnerOverride,
+        finalPctPartner: txn.finalPctPartner,
+        notes: txn.notes,
+        reviewFlag: txn.reviewFlag,
+        reviewedAt: txn.reviewedAt,
+      },
+      appliedRule:
+        appliedRuleRow == null
+          ? null
+          : {
+              id: appliedRuleRow.id,
+              merchantPattern: appliedRuleRow.merchantPattern,
+              category: appliedRuleRow.category,
+              splitType: appliedRuleRow.splitType,
+            },
+      latestAcceptedAiSuggestion:
+        latestAcceptedAiRow == null
+          ? null
+          : {
+              id: latestAcceptedAiRow.id,
+              createdAt: latestAcceptedAiRow.createdAt,
+              status: latestAcceptedAiRow.status as 'accepted' | 'edited',
+              model: latestAcceptedAiRow.model,
+              output: latestAcceptedAiRow.output as {
+                category?: string | null;
+                business?: boolean | null;
+                splitType?: string | null;
+                notes?: string | null;
+              } | null,
+            },
+      signals: signalRows.map((s) => ({
+        source: s.source,
+        confidence: s.confidence,
+        fields: s.fields,
+        rationale: s.rationale,
+      })),
+      actorLookup:
+        actorDisplayName == null || txn.createdByUserId == null
+          ? null
+          : (uid) =>
+              uid === txn.createdByUserId
+                ? { id: uid, displayName: actorDisplayName! }
+                : null,
+    });
+
+    res.json(explanation);
   } catch (e) {
     next(e);
   }
@@ -961,6 +1616,182 @@ router.post('/enrichment/backfill', async (req, res, next) => {
     } finally {
       backfillRunning.delete(household.id);
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/:id/revisions
+ *
+ * Issue #229: version-history timeline for a single transaction. Returns
+ * an ordered list of revisions (oldest -> newest), each with the recorded
+ * field-level diff plus actor/source provenance. The Sequelize
+ * beforeUpdate/afterUpdate hooks on Transaction emit one revision per
+ * touched-and-changed save; nothing is emitted when the patch is a no-op.
+ *
+ * Response shape:
+ *   { data: [{
+ *     id, transactionId, source, changedByUserId, aiSuggestionId,
+ *     changes: [{ field, before, after }, ...],
+ *     createdAt
+ *   }, ...] }
+ */
+router.get('/:id/revisions', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+      attributes: ['id', 'householdId'],
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const rows = await TransactionRevision.findAll({
+      where: { transactionId: id },
+      order: [
+        ['createdAt', 'ASC'],
+        ['id', 'ASC'],
+      ],
+      limit: 500,
+    });
+    res.json({
+      data: rows.map((r) => ({
+        id: r.id,
+        transactionId: r.transactionId,
+        source: r.source,
+        changedByUserId: r.changedByUserId,
+        aiSuggestionId: r.aiSuggestionId,
+        changes: parseRevisionChanges(r.changes),
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/:id/revisions/:rid/restore
+ *
+ * Issue #229: restore one or more supported fields from a prior revision.
+ * The body specifies which fields to restore -- if omitted, every field on
+ * the revision that intersects {@link RESTORABLE_FIELDS} is restored.
+ * Returns the updated serialized transaction.
+ *
+ * Restoring a value emits a NEW revision with source='restore' so the
+ * timeline shows the round-trip rather than silently rolling history.
+ *
+ * Validation:
+ *   - 400 if `fields` is provided and contains any non-restorable field.
+ *   - 400 if no restorable fields are present on the target revision.
+ *   - 404 if the transaction is not visible, or the revision id does not
+ *     belong to the same transaction (anti-tamper).
+ *
+ * Rate-limited via {@link aiSuggestLimiter} -- restore is an
+ * authenticated mutating endpoint, so CodeQL's no-unrate-limited rule
+ * applies even though this is not an AI call.
+ */
+router.post('/:id/revisions/:rid/restore', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const rid = Number(req.params.rid);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid transaction id' });
+      return;
+    }
+    if (!Number.isInteger(rid) || rid <= 0) {
+      res.status(400).json({ error: 'Invalid revision id' });
+      return;
+    }
+    const body = (req.body || {}) as { fields?: unknown };
+    let requestedFields: RevisionedField[] | null = null;
+    if (Array.isArray(body.fields)) {
+      const invalid: string[] = [];
+      requestedFields = [];
+      for (const raw of body.fields) {
+        const name = String(raw);
+        if ((RESTORABLE_FIELDS as readonly string[]).includes(name)) {
+          requestedFields.push(name as RevisionedField);
+        } else {
+          invalid.push(name);
+        }
+      }
+      if (invalid.length > 0) {
+        res.status(400).json({
+          error: `Unsupported restore field(s): ${invalid.join(', ')}`,
+          restorable: RESTORABLE_FIELDS,
+        });
+        return;
+      }
+      if (requestedFields.length === 0) {
+        res.status(400).json({ error: 'fields must include at least one entry' });
+        return;
+      }
+    }
+
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
+
+    const revision = await TransactionRevision.findOne({ where: { id: rid } });
+    if (!revision || revision.transactionId !== id) {
+      res.status(404).json({ error: 'Revision not found' });
+      return;
+    }
+
+    const changes = parseRevisionChanges(revision.changes);
+    if (changes.length === 0) {
+      res.status(400).json({ error: 'Revision has no recorded changes' });
+      return;
+    }
+
+    // Restore the `before` value for each field that is (a) on the revision,
+    // (b) in RESTORABLE_FIELDS, and (c) either unfiltered or in the
+    // explicit `fields` allowlist. Anything else is silently ignored so a
+    // legacy revision with a now-unsupported field doesn't fail the whole
+    // restore.
+    const applied: Array<{ field: RevisionedField; restoredTo: unknown }> = [];
+    for (const entry of changes) {
+      const field = entry.field as RevisionedField;
+      if (!(RESTORABLE_FIELDS as readonly string[]).includes(field)) continue;
+      if (requestedFields != null && !requestedFields.includes(field)) continue;
+      txn.set(field as never, entry.before as never);
+      applied.push({ field, restoredTo: entry.before });
+    }
+    if (applied.length === 0) {
+      res.status(400).json({
+        error: 'Revision has no restorable fields',
+        restorable: RESTORABLE_FIELDS,
+      });
+      return;
+    }
+
+    recomputeTransactionAmounts(txn);
+    const { user } = currentAuth(req);
+    await withRevisionContext(
+      {
+        changedByUserId: user.id,
+        source: 'restore',
+      },
+      () => txn.save(),
+    );
+    await txn.reload({
+      include: [{ model: Account, as: 'account', attributes: ['id', 'name', 'shortCode'] }],
+    });
+    res.json({
+      transaction: serializeTransaction(txn),
+      restored: applied,
+    });
   } catch (e) {
     next(e);
   }

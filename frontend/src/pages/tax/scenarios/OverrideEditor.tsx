@@ -21,6 +21,9 @@ const KEY_DEFS: KeyDef[] = [
   { key: 'deductions.spousalRrspContrib', label: 'Spousal RRSP contribution (CAD, contributor side)', inputType: 'decimal' },
   { key: 'pensionSplit.transferAmount', label: 'Pension income split — transferred to spouse (CAD)', inputType: 'decimal' },
   { key: 'capgains.dispositions', label: 'Capital gain dispositions', inputType: 'array_capgain_dispositions' },
+  { key: 'income.pensionIncome', label: 'Pension income (RRIF / employer) — CAD', inputType: 'decimal' },
+  { key: 'income.cppRetirement', label: 'CPP retirement benefit — CAD', inputType: 'decimal' },
+  { key: 'income.oasRetirement', label: 'OAS retirement benefit — CAD', inputType: 'decimal' },
 ];
 
 interface Disposition {

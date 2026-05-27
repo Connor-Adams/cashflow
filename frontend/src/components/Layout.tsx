@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
-import { Menu } from 'lucide-react'
+import { Command as CommandIcon, Menu } from 'lucide-react'
 import { useLayoutWidth } from '../lib/layoutWidth'
+import { useCommandPalette } from '../hooks/useCommandPalette'
+import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
+import { NotificationBell } from './notifications/NotificationBell'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -10,6 +13,10 @@ export function Layout() {
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   const openSidebar = useCallback(() => setSidebarOpen(true), [])
   const location = useLocation()
+  // Issue #237: global finance command palette (⌘K / Ctrl+K). Hook owns
+  // the global keydown listener; the toolbar button opens it for mouse
+  // users.
+  const palette = useCommandPalette()
 
   // Auto-close on route change so the mobile drawer doesn't linger after
   // the user picks a destination. Desktop ignores `open` so this is a
@@ -59,12 +66,33 @@ export function Layout() {
             <Menu size={20} aria-hidden="true" />
           </button>
           <span className="topBar__wordmark">Cashflow</span>
+          <div className="topBar__right ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => palette.setOpen(true)}
+              aria-label="Open command palette"
+              title="Command palette (⌘K / Ctrl+K)"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+              data-testid="top-bar-command-palette-trigger"
+            >
+              <CommandIcon size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Search commands</span>
+              <kbd className="ml-1 hidden font-mono text-[10px] sm:inline">
+                ⌘K
+              </kbd>
+            </button>
+            <NotificationBell />
+          </div>
         </header>
 
         <main className="main" data-layout-width={layoutWidth}>
           <Outlet />
         </main>
       </div>
+
+      {/* Global ⌘K / Ctrl+K finance command palette. Lives in the Layout so
+          every authenticated page shares one instance. */}
+      <CommandPalette open={palette.open} onOpenChange={palette.setOpen} />
     </div>
   )
 }

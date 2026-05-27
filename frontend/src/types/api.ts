@@ -15,6 +15,16 @@ export type {
   EnrichmentBackfillProgress,
   EnrichmentSignal,
   EnrichmentStats,
+  ExplanationSource,
+  ManualEditAttribution,
+  AiSuggestionAttribution,
+  AppliedRuleAttribution,
+  CategoryExplanation,
+  SplitExplanation,
+  BusinessExplanation,
+  NotesExplanation,
+  ReviewExplanation,
+  TransactionExplanation,
   HoldingSnapshot,
   IncomeAccountRow,
   IncomeMonthRow,
@@ -62,7 +72,14 @@ export type {
   Security,
   SecurityPrice,
   StatementPreview,
+  AccountStatement,
+  StatementReconciliation,
+  StatementTransaction,
+  StatementDetailResponse,
+  StatementListResponse,
   Transaction,
+  TransactionStatus,
+  TransferPurpose,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */
@@ -140,6 +157,134 @@ export type SubscriptionsSummary = {
     monthlyCost: number
     annualCost: number
   }>
+}
+
+// -------- Money leaks dashboard (GET /api/money-leaks) -----------------
+// Mirrors backend/src/money_leaks/detect.ts. Each leak row is detector
+// output; identityKey + leakType are stable across reads so the UI can
+// post dismissals without round-tripping through a numeric leak id.
+
+/** Money-leak type emitted by the detectors. New types must be added in
+ *  lockstep with MONEY_LEAK_TYPES on the backend. */
+export type MoneyLeakType =
+  | 'subscription_price_increase'
+  | 'small_subscription'
+  | 'recurring_fee'
+  | 'duplicate_service'
+  | 'delivery_fee_high'
+
+export type MoneyLeakSeverity = 'low' | 'medium' | 'high'
+
+/** One leak row as returned by GET /api/money-leaks. */
+export type MoneyLeakItem = {
+  leakType: MoneyLeakType
+  identityKey: string
+  title: string
+  description: string
+  currency: string
+  monthlyImpact: number
+  annualImpact: number
+  severity: MoneyLeakSeverity
+  meta: Record<string, unknown>
+}
+
+/** Response shape for GET /api/money-leaks. */
+export type MoneyLeaksResponse = {
+  items: MoneyLeakItem[]
+  totals: {
+    byCurrency: Array<{
+      currency: string
+      monthlyImpact: number
+      annualImpact: number
+      count: number
+    }>
+  }
+}
+
+/** One persisted dismissal row as returned by GET /api/money-leaks/dismissed. */
+export type MoneyLeakDismissal = {
+  id: number
+  leakType: MoneyLeakType
+  identityKey: string
+  snapshot: Record<string, unknown> | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape for GET /api/money-leaks/dismissed. */
+export type MoneyLeakDismissedResponse = {
+  items: MoneyLeakDismissal[]
+}
+
+// -------- Explain this month report (GET /api/reports/explain-month) ----
+// Mirrors backend/src/summary/explainMonth.ts. The deterministic engine
+// produces a month-over-month breakdown by currency plus a flat list of
+// findings (spend changes, missing receipts, subscription changes, review
+// backlog, business summary). The aiSummary field is filled in by the
+// route when `ai=true` and OpenAI is configured; otherwise it stays null.
+
+export type ExplainMonthFindingKind =
+  | 'spend_change'
+  | 'missing_receipt'
+  | 'subscription_change'
+  | 'review_needed'
+  | 'business_summary'
+
+export type ExplainMonthSeverity = 'low' | 'medium' | 'high'
+
+/** Filter payload backing each finding — the page translates it into the
+ *  TransactionsPage URL params it natively understands. */
+export type ExplainMonthTransactionFilter = {
+  dateFrom?: string
+  dateTo?: string
+  category?: string
+  merchant?: string
+  businessOnly?: boolean
+  reviewFlag?: boolean
+  currency?: string
+}
+
+export type ExplainMonthFinding = {
+  id: string
+  kind: ExplainMonthFindingKind
+  title: string
+  summary: string
+  currency: string
+  monthlyImpact: number
+  severity: ExplainMonthSeverity
+  supportingTransactionIds: number[]
+  transactionFilter: ExplainMonthTransactionFilter
+  meta: Record<string, unknown>
+}
+
+export type ExplainMonthCategoryDelta = {
+  category: string
+  current: number
+  previous: number
+  delta: number
+  deltaPct: number | null
+}
+
+export type ExplainMonthMonthOverMonth = {
+  currency: string
+  currentSpend: number
+  previousSpend: number
+  spendDelta: number
+  currentIncome: number
+  previousIncome: number
+  incomeDelta: number
+  netCurrent: number
+  netPrevious: number
+  netDelta: number
+  byCategory: ExplainMonthCategoryDelta[]
+}
+
+export type ExplainMonthResponse = {
+  month: string
+  previousMonth: string
+  monthOverMonth: ExplainMonthMonthOverMonth[]
+  findings: ExplainMonthFinding[]
+  aiSummary: string | null
 }
 
 /** Direction of a partner-balance settlement record. */
@@ -255,6 +400,59 @@ export type PartnerSettlementRecommendationResponse = {
   recommendations: PartnerSettlementRecommendation[]
 }
 
+// ---- Sankey visualization (issue #224) ---------------------------------
+
+/** Classification of a node in the Sankey diagram — drives coloring. */
+export type SankeyNodeKind =
+  | 'income'
+  | 'category'
+  | 'business'
+  | 'savings'
+  | 'uncategorized'
+
+export type SankeyNode = {
+  name: string
+  kind: SankeyNodeKind
+}
+
+export type SankeyLink = {
+  source: number
+  target: number
+  value: number
+}
+
+/** Response shape for GET /api/summary/sankey. */
+export type SankeyResponse = {
+  currency: string | null
+  totalIncome: number
+  totalSpend: number
+  transactionCount: number
+  nodes: SankeyNode[]
+  links: SankeyLink[]
+  /** Every currency the household has at least one visible txn in. */
+  availableCurrencies: string[]
+  dateRange: { from: string | null; to: string | null }
+}
+
+export type SankeyDrilldownTransaction = {
+  id: number
+  date: string
+  currency: string
+  amount: number
+  merchant: string
+  finalCategory: string | null
+  finalBusiness: boolean
+  txnType: string | null
+}
+
+/** Response shape for GET /api/summary/sankey/source-transactions. */
+export type SankeyDrilldownResponse = {
+  edge: { source: number; target: number }
+  transactionCount: number
+  truncated: boolean
+  transactions: SankeyDrilldownTransaction[]
+}
+
 /**
  * Filter shape accepted by POST /api/transactions/bulk-patch-filter. Mirrors
  * the subset of GET /api/transactions query params relevant for narrowing
@@ -268,6 +466,7 @@ export type TransactionFilterPayload = {
   importBatch?: string
   dateFrom?: string
   dateTo?: string
+  status?: import('@cashflow/shared').TransactionStatus
 }
 
 /**
@@ -325,6 +524,20 @@ export type Budget = {
   period: BudgetPeriod
   scope: BudgetScope
   rolloverEnabled: boolean
+  /**
+   * When true (issue #215) the budget's progress route subtracts the
+   * linked-original-purchase amount of every refund that lands in the
+   * current period — so a $200 jacket that was refunded in the same
+   * window contributes $0 to the budget.
+   */
+  excludeRefundedPurchases: boolean
+  /**
+   * Percentages (1–500) at which the daily `budget_breach_check` cron fires
+   * a proactive in-app notification (issue #268). Defaults to
+   * `[80, 100, 120]`; an empty array disables alerts entirely for this
+   * budget. Validated server-side: integers, 1≤n≤500, dedup+sort ascending.
+   */
+  alertThresholds: number[]
   createdAt: string
   updatedAt: string
 }
@@ -361,6 +574,8 @@ export type BudgetProgress = {
   scope: BudgetScope
   period: BudgetPeriod
   rolloverEnabled: boolean
+  /** Mirror of `Budget.excludeRefundedPurchases` for issue #215. */
+  excludeRefundedPurchases?: boolean
   periodElapsedPercent: number
   pacingState: BudgetPacingState
 }
@@ -381,6 +596,12 @@ export type BudgetInput = {
   period?: BudgetPeriod
   scope?: BudgetScope
   rolloverEnabled?: boolean
+  excludeRefundedPurchases?: boolean
+  /**
+   * See `Budget.alertThresholds` for the contract. Omitting the field keeps
+   * the existing value on update, or applies server defaults on create.
+   */
+  alertThresholds?: number[]
 }
 
 /** One row in the GET /api/budgets/:id/exclusions response. */
@@ -393,6 +614,73 @@ export type BudgetExclusion = {
 
 export type BudgetExclusionsResponse = {
   data: BudgetExclusion[]
+}
+
+/**
+ * Issue #215: response from GET /api/transactions/:id/refund-details.
+ *
+ * When `linked` is true and `original` is non-null, the refund row is
+ * tied to an accessible original purchase the frontend can render inline.
+ * `linked` true with `original` null means the link exists but the
+ * original lies outside the caller's visible scope (still surfaced so the
+ * UI shows "Linked to original you don't have access to" rather than
+ * hallucinating an unlinked state).
+ *
+ * `partial` is true when |refund amount| < |original amount| (the refund
+ * only returned part of the purchase).
+ */
+export type RefundDetailsResponse = {
+  refundId: number
+  linked: boolean
+  partial: boolean | null
+  original: {
+    id: number
+    date: string
+    merchantClean: string
+    merchantCanonical: string | null
+    amount: number
+    currency: string
+    finalCategory: string | null
+  } | null
+}
+
+/**
+ * Issue #215: one row from GET /api/transactions/refund-suggestions, the
+ * review queue. `linkedOriginal` is set when the refund has an auto-linked
+ * original. `suggestions` contains any medium-confidence canonical-brand
+ * matches the detector flagged for review. The UI uses both to render a
+ * "confirm this match" / "switch to suggestion" / "unlink" affordance.
+ */
+export type RefundSuggestionRow = {
+  refundId: number
+  refundDate: string
+  refundMerchantClean: string
+  refundAmount: number
+  refundCurrency: string
+  autoSource: string | null
+  autoConfidence: 'high' | 'medium' | 'low' | null
+  reviewFlag: boolean
+  linkedOriginal: {
+    id: number
+    date: string
+    merchantClean: string
+    amount: number
+    currency: string
+    finalCategory: string | null
+  } | null
+  suggestions: Array<{
+    originalId: number
+    originalDate: string
+    originalMerchantClean: string
+    originalAmount: number
+    originalCurrency: string
+    originalFinalCategory: string | null
+    rationale: string | null
+  }>
+}
+
+export type RefundSuggestionsResponse = {
+  data: RefundSuggestionRow[]
 }
 
 /**
@@ -890,4 +1178,217 @@ export type NetWorthSeries = {
   points: NetWorthSeriesPoint[];
   partial: boolean;
   gaps: NetWorthGap[];
+};
+
+export type AuditLogEntry = {
+  id: number;
+  action: string;
+  entityType: string;
+  entityId: number | null;
+  actorUserId: number | null;
+  actorDisplayName: string | null;
+  actorEmail: string | null;
+  summary: string | null;
+  before: unknown | null;
+  after: unknown | null;
+  metadata: unknown | null;
+  createdAt: string;
+};
+
+export type AuditLogResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AuditLogEntry[];
+};
+
+/**
+ * Per-user safe-to-spend knobs (issue #199). Returned by both GET and
+ * PATCH /api/settings/cashflow.
+ */
+export type CashflowSettings = {
+  /** DECIMAL(14,4) string. */
+  minimumCashBuffer: string;
+  safeToSpendWindowDays: number;
+  includeCreditCardBalance: boolean;
+  includeGoalContributions: boolean;
+};
+
+export type SafeToSpendBreakdown = {
+  currentCash: number;
+  upcomingRequiredExpenses: number;
+  requiredSavingsContributions: number;
+  expectedCreditCardPayments: number;
+  minimumBuffer: number;
+};
+
+/** Response shape for GET /api/forecast/safe-to-spend. */
+export type SafeToSpendResponse = {
+  currency: string;
+  asOfDate: string;
+  windowDays: number;
+  windowEndDate: string;
+  value: number;
+  isNegative: boolean;
+  breakdown: SafeToSpendBreakdown;
+  settings: CashflowSettings;
+};
+
+// --- FX & currency intelligence (issue #221) -------------------------------
+
+export type CurrencyExposureRow = {
+  currency: string;
+  transactionCount: number;
+  sumNative: number;
+  absSumNative: number;
+  cadEquivalent: number | null;
+  shareOfTotal: number;
+  fxRate: number | null;
+  ratedDate: string | null;
+};
+
+export type CurrencyExposureResponse = {
+  reportingCurrency: string;
+  asOf: string;
+  totalCadEquivalent: number;
+  byCurrency: CurrencyExposureRow[];
+  gaps: Array<{ currency: string; reason: 'fx_rate_unavailable' }>;
+};
+
+export type FxFeeRow = {
+  transactionId: number;
+  accountId: number;
+  accountName: string | null;
+  date: string;
+  merchant: string;
+  currency: string;
+  amount: number;
+  reason: string;
+  confidence: 'high' | 'medium' | 'low' | null;
+};
+
+export type FxFeesResponse = {
+  fees: FxFeeRow[];
+  total: number;
+  limit: number;
+};
+
+export type EffectiveRateRow = {
+  transactionId: number;
+  accountId: number;
+  date: string;
+  merchant: string;
+  fromCurrency: string;
+  toCurrency: string;
+  nativeAmount: number;
+  effectiveRate: number;
+  source: 'linked_transaction' | 'paired_transfer';
+  counterpartyTransactionId: number;
+};
+
+export type EffectiveRatesResponse = {
+  rates: EffectiveRateRow[];
+  total: number;
+  limit: number;
+};
+
+export type FxReportingMetric = {
+  key: string;
+  normalized: number;
+  partial: boolean;
+  contributions: Array<{
+    currency: string;
+    native: number;
+    normalized: number | null;
+    fxRate: number | null;
+    ratedDate: string | null;
+  }>;
+};
+
+export type FxReportingResponse = {
+  reportingCurrency: string;
+  asOf: string;
+  metrics: FxReportingMetric[];
+  fxRatesUsed: Array<{ from: string; to: string; rate: number; ratedDate: string }>;
+  gaps: Array<{ currency: string; reason: 'fx_rate_unavailable' }>;
+  transactionCountByCurrency: Record<string, number>;
+};
+
+// ---- Notifications (issue #266) -----------------------------------------
+
+export type NotificationSeverity = 'info' | 'warn' | 'critical';
+
+export type Notification = {
+  id: number;
+  type: string;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  dataJson: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export type NotificationsListResponse = {
+  data: Notification[];
+};
+
+export type NotificationUnreadCountResponse = {
+  count: number;
+};
+
+export type NotificationPreference = {
+  type: string;
+  channelInApp: boolean;
+  channelEmail: boolean;
+};
+
+export type NotificationPreferencesListResponse = {
+  data: NotificationPreference[];
+};
+
+/** Local-first encrypted sync foundation (#239). */
+export type SyncBackupResponse = {
+  bundle: string;
+  bundleVersion: number;
+  schemaVersion: number;
+  createdAt: string;
+  origin: string;
+  bundleBytes: number;
+  rowCount: number;
+  tableCounts: Record<string, number>;
+};
+
+export type SyncRestorePreviewResponse = {
+  sourceHouseholdId: number | null;
+  createdAt: string;
+  origin: string;
+  schemaVersion: number;
+  bundleBytes: number;
+  rowCount: number;
+  tableCounts: Record<string, number>;
+};
+
+export type SyncRestoreMode = 'merge' | 'replace';
+
+export type SyncRestoreResponse = {
+  mode: SyncRestoreMode;
+  inserted: Record<string, number>;
+  skipped: Record<string, number>;
+  sourceHouseholdId: number | null;
+  createdAt: string;
+};
+
+export type SyncHistoryEntry = {
+  id: number;
+  kind: 'backup' | 'restore';
+  bundleVersion: number;
+  schemaVersion: number;
+  bundleBytes: number;
+  tableCounts: Record<string, number>;
+  createdAt: string;
+};
+
+export type SyncHistoryResponse = {
+  data: SyncHistoryEntry[];
 };

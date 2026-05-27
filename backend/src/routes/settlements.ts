@@ -8,6 +8,16 @@ import {
 import { Contact } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  recordAudit,
+} from '../audit/log';
+import {
+  FINANCE_EVENT_TYPES,
+  FINANCE_EVENT_ENTITY_TYPES,
+  recordFinanceEvent,
+} from '../events/financeEvents';
 
 const router = Router();
 
@@ -217,6 +227,42 @@ router.post('/', async (req, res, next) => {
       notes: result.value.notes,
     });
 
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.SettlementCreated,
+      entityType: AUDIT_ENTITY_TYPES.Settlement,
+      entityId: row.id,
+      summary: `Recorded settlement: ${result.value.direction} ${result.value.currency} ${result.value.amount} with ${contact.name}`,
+      after: {
+        contactId: contact.id,
+        contactName: contact.name,
+        direction: result.value.direction,
+        currency: result.value.currency,
+        amount: result.value.amount,
+        settledDate: result.value.settledDate,
+        notes: result.value.notes,
+      },
+    });
+
+    // Domain event for the stream (issue #238). Independent of the
+    // audit-log write above; payload is the canonical settlement input
+    // (no contact-name dereference — the consumer can resolve from
+    // contactId if needed).
+    await recordFinanceEvent({
+      req,
+      type: FINANCE_EVENT_TYPES.SettlementCreated,
+      entityType: FINANCE_EVENT_ENTITY_TYPES.Settlement,
+      entityId: row.id,
+      payload: {
+        contactId: contact.id,
+        direction: result.value.direction,
+        currency: result.value.currency,
+        amount: result.value.amount,
+        settledDate: result.value.settledDate,
+        notes: result.value.notes,
+      },
+    });
+
     const contactNames = new Map<number, string>([[contact.id, contact.name]]);
     res.status(201).json(serializeSettlement(row, contactNames));
   } catch (e) {
@@ -238,7 +284,31 @@ router.delete('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    const snapshot = {
+      contactId: row.contactId,
+      direction: row.direction,
+      currency: row.currency,
+      amount: row.amount,
+      settledDate: row.settledDate,
+      notes: row.notes,
+    };
+    const settlementId = row.id;
     await row.destroy();
+    await recordAudit({
+      req,
+      action: AUDIT_ACTIONS.SettlementDeleted,
+      entityType: AUDIT_ENTITY_TYPES.Settlement,
+      entityId: settlementId,
+      summary: `Deleted settlement #${settlementId}`,
+      before: snapshot,
+    });
+    await recordFinanceEvent({
+      req,
+      type: FINANCE_EVENT_TYPES.SettlementDeleted,
+      entityType: FINANCE_EVENT_ENTITY_TYPES.Settlement,
+      entityId: settlementId,
+      payload: snapshot,
+    });
     res.status(204).send();
   } catch (e) {
     next(e);

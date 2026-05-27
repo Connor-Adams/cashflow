@@ -11,7 +11,8 @@ const ALL_TOP_TABS: Array<TabItem & { superadminOnly?: boolean }> = [
   { value: 'contacts', label: 'Contacts' },
   { value: 'budgets', label: 'Budgets' },
   { value: 'categories', label: 'Categories' },
-  { value: 'jobs', label: 'Jobs', superadminOnly: true },
+  { value: 'notifications', label: 'Notifications' },
+  { value: 'jobs', label: 'Jobs' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -21,6 +22,7 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   contacts: '/settings/contacts',
   budgets: '/settings/budgets',
   categories: '/settings/categories',
+  notifications: '/settings/notifications',
   jobs: '/settings/jobs',
 }
 

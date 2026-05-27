@@ -26,6 +26,10 @@ export type EnvConfig = {
   dailySnapshotCron: string;
   enrichmentBackfillEnabled: boolean;
   enrichmentBackfillCron: string;
+  weeklyDigestEnabled: boolean;
+  weeklyDigestCron: string;
+  budgetBreachCheckEnabled: boolean;
+  budgetBreachCheckCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -130,6 +134,16 @@ export function loadEnvConfig(
     nodeEnv,
   );
   const enrichmentBackfillCron = e.ENRICHMENT_BACKFILL_CRON?.trim() || '0 4 * * *';
+  const weeklyDigestEnabled = parseWeeklyDigestEnabled(
+    e.WEEKLY_DIGEST_ENABLED,
+    nodeEnv,
+  );
+  const weeklyDigestCron = e.WEEKLY_DIGEST_CRON?.trim() || '0 9 * * 1';
+  const budgetBreachCheckEnabled = parseBudgetBreachCheckEnabled(
+    e.BUDGET_BREACH_CHECK_ENABLED,
+    nodeEnv,
+  );
+  const budgetBreachCheckCron = e.BUDGET_BREACH_CHECK_CRON?.trim() || '0 8 * * *';
 
   return {
     csvUploadDir,
@@ -152,7 +166,25 @@ export function loadEnvConfig(
     dailySnapshotCron,
     enrichmentBackfillEnabled,
     enrichmentBackfillCron,
+    weeklyDigestEnabled,
+    weeklyDigestCron,
+    budgetBreachCheckEnabled,
+    budgetBreachCheckCron,
   };
+}
+
+export function parseWeeklyDigestEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  // Default OFF in test so the cron doesn't fire during integration tests.
+  // Default ON in dev/prod so a freshly-deployed server starts shipping
+  // digests on schedule.
+  if (nodeEnv === 'test') return false;
+  return true;
 }
 
 const QUOTE_TRUTHY = new Set(['true', '1', 'yes']);
@@ -220,6 +252,22 @@ export function parseEnrichmentBackfillEnabled(
   return true;
 }
 
+/**
+ * Default-off in test so the budget breach cron doesn't auto-schedule
+ * during the integration-test suite (the dedicated breach-check tests
+ * invoke the handler directly). Production / dev defaults on.
+ */
+export function parseBudgetBreachCheckEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -253,6 +301,10 @@ export const dailySnapshotEnabled = resolved.dailySnapshotEnabled;
 export const dailySnapshotCron = resolved.dailySnapshotCron;
 export const enrichmentBackfillEnabled = resolved.enrichmentBackfillEnabled;
 export const enrichmentBackfillCron = resolved.enrichmentBackfillCron;
+export const weeklyDigestEnabled = resolved.weeklyDigestEnabled;
+export const weeklyDigestCron = resolved.weeklyDigestCron;
+export const budgetBreachCheckEnabled = resolved.budgetBreachCheckEnabled;
+export const budgetBreachCheckCron = resolved.budgetBreachCheckCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];

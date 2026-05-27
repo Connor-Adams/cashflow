@@ -1,15 +1,50 @@
 import type { Transaction as SequelizeTransaction } from 'sequelize';
+import { Op } from 'sequelize';
 import { Transaction } from '../models';
+import { logger } from '../observability/logger';
+import type { TransactionStatus } from '../transactions/types';
 
 export type DedupOutcome =
   | { kind: 'no-match' }
   | { kind: 'duplicate'; existingId: number }
-  | { kind: 'duplicate-backfilled'; existingId: number };
+  | { kind: 'duplicate-backfilled'; existingId: number }
+  | { kind: 'pending-promoted'; existingId: number };
 
 function normalizeRef(v: string | null | undefined): string | null {
   if (v == null) return null;
   const s = String(v).trim();
   return s === '' ? null : s;
+}
+
+function normalizePendingMatchText(v: string | null | undefined): string {
+  return String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ');
+}
+
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function promotePending(existing: InstanceType<typeof Transaction>, incomingRef: string | null, t: SequelizeTransaction): Promise<DedupOutcome> {
+  existing.status = 'posted';
+  if (incomingRef != null) existing.sourceReference = incomingRef;
+  await existing.save({
+    transaction: t,
+    fields: incomingRef == null ? ['status'] : ['status', 'sourceReference'],
+  });
+  logger.info(
+    {
+      transactionId: existing.id,
+      accountId: existing.accountId,
+      sourceReferenceBackfilled: incomingRef != null,
+    },
+    'import_pending_transaction_promoted',
+  );
+  return { kind: 'pending-promoted', existingId: existing.id };
 }
 
 /**
@@ -40,6 +75,10 @@ export async function findExistingForDedup(args: {
   sourceIdentityFingerprint: string;
   sourceReference: string | null;
   t: SequelizeTransaction;
+  incomingStatus?: TransactionStatus;
+  incomingDate?: string;
+  incomingAmount?: number;
+  incomingMerchantRaw?: string;
 }): Promise<DedupOutcome> {
   const incomingRef = normalizeRef(args.sourceReference);
   const candidates = await Transaction.findAll({
@@ -49,10 +88,11 @@ export async function findExistingForDedup(args: {
     },
     transaction: args.t,
   });
-  if (candidates.length === 0) return { kind: 'no-match' };
-
   for (const existing of candidates) {
     if (normalizeRef(existing.sourceReference) === incomingRef) {
+      if (existing.status === 'pending' && args.incomingStatus === 'posted') {
+        return promotePending(existing, incomingRef, args.t);
+      }
       return { kind: 'duplicate', existingId: existing.id };
     }
   }
@@ -69,6 +109,9 @@ export async function findExistingForDedup(args: {
       (c) => normalizeRef(c.sourceReference) == null,
     );
     if (nullExisting) {
+      if (nullExisting.status === 'pending' && args.incomingStatus === 'posted') {
+        return promotePending(nullExisting, incomingRef, args.t);
+      }
       nullExisting.sourceReference = incomingRef;
       // Scoped save: only persist the sourceReference column. The audit-hash
       // `sourceRowFingerprint` is intentionally left as the null-era hash —
@@ -80,6 +123,33 @@ export async function findExistingForDedup(args: {
         fields: ['sourceReference'],
       });
       return { kind: 'duplicate-backfilled', existingId: nullExisting.id };
+    }
+  }
+
+  if (
+    args.incomingStatus === 'posted' &&
+    args.incomingDate &&
+    typeof args.incomingAmount === 'number'
+  ) {
+    const windowCandidates = await Transaction.findAll({
+      where: {
+        accountId: args.accountId,
+        status: 'pending',
+        date: {
+          [Op.between]: [addDays(args.incomingDate, -3), addDays(args.incomingDate, 3)],
+        },
+      },
+      transaction: args.t,
+    });
+    const incomingText = normalizePendingMatchText(args.incomingMerchantRaw);
+    const match = windowCandidates.find(
+      (row) =>
+        Number(row.amount) === args.incomingAmount &&
+        (normalizePendingMatchText(row.merchantRaw) === incomingText ||
+          normalizePendingMatchText(row.merchantClean) === incomingText),
+    );
+    if (match) {
+      return promotePending(match, incomingRef, args.t);
     }
   }
 

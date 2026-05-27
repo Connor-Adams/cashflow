@@ -5,6 +5,16 @@ export type JobStatus =
   | 'skipped_locked'
   | 'skipped_reentrant';
 
+export interface JobRunView {
+  id: number;
+  jobName: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: 'running' | 'success' | 'failed' | 'skipped';
+  durationMs: number | null;
+  errorMessage: string | null;
+}
+
 export interface JobHandlerResult {
   /** Optional structured summary persisted as JSON (truncated to 2KB). */
   summary?: Record<string, unknown>;

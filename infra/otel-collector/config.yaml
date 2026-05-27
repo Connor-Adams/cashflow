@@ -34,6 +34,10 @@ exporters:
       job: true
   prometheus:
     endpoint: 0.0.0.0:9464
+  otlphttp/tempo:
+    endpoint: http://${env:TEMPO_HOST}:4318
+    tls:
+      insecure: true
 
 service:
   pipelines:
@@ -45,6 +49,10 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/tempo]
   telemetry:
     logs:
       level: info

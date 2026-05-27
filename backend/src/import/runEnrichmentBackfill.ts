@@ -31,6 +31,7 @@ import {
   enrichmentTransferWindowDays,
 } from '../config/env';
 import { recomputeTransactionAmounts } from './calculateShares';
+import { runBackfillBatchTrace } from './backfillTrace';
 
 export interface BackfillFlags {
   dryRun: boolean;
@@ -141,6 +142,7 @@ export async function runBackfill(
   let signalsWritten = 0;
   let skipped = 0;
   let offset = 0;
+  let batchIndex = 0;
 
   while (true) {
     if (flags.limit != null && processed >= flags.limit) break;
@@ -159,167 +161,207 @@ export async function runBackfill(
     });
     if (txns.length === 0) break;
 
-    for (const txn of txns) {
-      processed++;
+    batchIndex++;
+    const batchProcessedStart = processed;
+    const batchUpdatedStart = updated;
+    const batchReviewFlagClearedStart = reviewFlagCleared;
+    const batchSignalsWrittenStart = signalsWritten;
+    const batchSkippedStart = skipped;
 
-      try {
-        const rules = await getRules(txn.householdId);
-        const amazonOrders = await getAmazonOrders(txn.householdId);
-        const householdAccountIds = await getHouseholdAccountIds(txn.accountId, txn.householdId);
-        const memory = await findMerchantMemory(txn.householdId, txn.merchantClean, Number(txn.amount));
-        const recurringHistory = await loadRecurringHistory(
-          txn.householdId,
-          txn.merchantClean,
-          txn.date,
-        );
-        const relationshipCandidatesRaw = await loadRelationshipCandidates(
-          txn.householdId,
-          householdAccountIds,
-          txn.merchantClean,
-          txn.date,
-          enrichmentRefundWindowDays,
-        );
-        // Exclude self — otherwise a transfer or refund row could "link to itself".
-        const relationshipCandidates = relationshipCandidatesRaw.filter((c) => c.id !== txn.id);
+    await runBackfillBatchTrace(
+      {
+        householdId: flags.householdId,
+        batchIndex,
+        batchSize: txns.length,
+        offset,
+        total,
+        dryRun: flags.dryRun,
+      },
+      async (span) => {
+        for (const txn of txns) {
+          processed++;
 
-        const enriched = await enrichTransaction({
-          raw: {
-            merchantRaw: txn.merchantRaw,
-            date: txn.date,
-            amount: Number(txn.amount),
-            sourceReference: txn.sourceReference ?? null,
-            notes: null,
-          },
-          accountId: txn.accountId,
-          householdId: txn.householdId,
-          householdAccountIds,
-          rules,
-          amazonOrders,
-          memory,
-          recurringHistory,
-          relationshipCandidates,
-          refundWindowDays: enrichmentRefundWindowDays,
-          transferWindowDays: enrichmentTransferWindowDays,
-          recurringMinSupport: enrichmentRecurringMinSupport,
-          amazonLinkThreshold: enrichmentAmazonLinkThreshold,
-        });
+          try {
+            const rules = await getRules(txn.householdId);
+            const amazonOrders = await getAmazonOrders(txn.householdId);
+            const householdAccountIds = await getHouseholdAccountIds(
+              txn.accountId,
+              txn.householdId,
+            );
+            const memory = await findMerchantMemory(
+              txn.householdId,
+              txn.merchantClean,
+              Number(txn.amount),
+            );
+            const recurringHistory = await loadRecurringHistory(
+              txn.householdId,
+              txn.merchantClean,
+              txn.date,
+            );
+            const relationshipCandidatesRaw = await loadRelationshipCandidates(
+              txn.householdId,
+              householdAccountIds,
+              txn.merchantClean,
+              txn.date,
+              enrichmentRefundWindowDays,
+            );
+            // Exclude self — otherwise a transfer or refund row could "link to itself".
+            const relationshipCandidates = relationshipCandidatesRaw.filter(
+              (c) => c.id !== txn.id,
+            );
 
-        const f = enriched.fields;
+            const enriched = await enrichTransaction({
+              raw: {
+                merchantRaw: txn.merchantRaw,
+                date: txn.date,
+                amount: Number(txn.amount),
+                sourceReference: txn.sourceReference ?? null,
+                notes: null,
+              },
+              accountId: txn.accountId,
+              householdId: txn.householdId,
+              householdAccountIds,
+              rules,
+              amazonOrders,
+              memory,
+              recurringHistory,
+              relationshipCandidates,
+              refundWindowDays: enrichmentRefundWindowDays,
+              transferWindowDays: enrichmentTransferWindowDays,
+              recurringMinSupport: enrichmentRecurringMinSupport,
+              amazonLinkThreshold: enrichmentAmazonLinkThreshold,
+            });
 
-        let willClearReview = false;
-        if (
-          !flags.noReviewFlag &&
-          txn.reviewedAt == null &&
-          f.reviewFlag === false &&
-          txn.reviewFlag === true
-        ) {
-          willClearReview = true;
-        }
+            const f = enriched.fields;
 
-        if (flags.verbose) {
-          logger.debug(
-            {
+            let willClearReview = false;
+            if (
+              !flags.noReviewFlag &&
+              txn.reviewedAt == null &&
+              f.reviewFlag === false &&
+              txn.reviewFlag === true
+            ) {
+              willClearReview = true;
+            }
+
+            if (flags.verbose) {
+              logger.debug(
+                {
+                  txnId: txn.id,
+                  date: txn.date,
+                  merchantRaw: txn.merchantRaw,
+                  merchantClean: f.merchantClean,
+                  merchantCanonical: f.merchantCanonical ?? null,
+                  txnType: f.txnType,
+                  autoSource: f.autoSource ?? null,
+                  autoConfidence: f.autoConfidence ?? null,
+                  signalsCount: enriched.signals.length,
+                  willClearReview,
+                  module: 'enrichment_backfill',
+                },
+                'backfill_txn_enriched',
+              );
+            }
+
+            if (flags.dryRun) {
+              updated++;
+              if (willClearReview) reviewFlagCleared++;
+              signalsWritten += enriched.signals.length;
+              callbacks.onProgress?.({
+                txnId: txn.id,
+                merchantRaw: txn.merchantRaw,
+                merchantClean: f.merchantClean,
+                merchantCanonical: f.merchantCanonical,
+                txnType: f.txnType,
+                autoSource: f.autoSource,
+                autoConfidence: f.autoConfidence,
+                reviewFlagCleared: willClearReview,
+                signalsCount: enriched.signals.length,
+              });
+              continue;
+            }
+
+            await sequelize.transaction(async (t) => {
+              txn.set({
+                merchantClean: f.merchantClean,
+                merchantCanonical: f.merchantCanonical,
+                txnType: f.txnType,
+                autoSource: f.autoSource,
+                autoConfidence: f.autoConfidence,
+                autoCategory: f.autoCategory,
+                autoBusiness: f.autoBusiness,
+                autoSplitType: f.autoSplitType,
+                autoPctMe: f.autoPctMe,
+                autoPctPartner: f.autoPctPartner,
+                appliedRuleId: f.appliedRuleId,
+                linkedTransactionId: f.linkedTransactionId,
+                isRecurring: f.isRecurring,
+              });
+              // Only fill notes if the row had none — don't overwrite user-authored notes.
+              if (!txn.notes && f.notes) {
+                txn.set({ notes: f.notes });
+              }
+              if (willClearReview) {
+                txn.set({ reviewFlag: false });
+              }
+
+              recomputeTransactionAmounts(txn);
+              await txn.save({ transaction: t });
+
+              await TransactionSignal.destroy({
+                where: { transactionId: txn.id },
+                transaction: t,
+              });
+              if (enriched.signals.length > 0) {
+                await TransactionSignal.bulkCreate(
+                  enriched.signals.map((s) => ({
+                    transactionId: txn.id,
+                    source: s.source,
+                    confidence: s.confidence,
+                    fields: s.fields,
+                    rationale: s.rationale ?? null,
+                  })),
+                  { transaction: t },
+                );
+              }
+            });
+
+            updated++;
+            if (willClearReview) reviewFlagCleared++;
+            signalsWritten += enriched.signals.length;
+
+            callbacks.onProgress?.({
               txnId: txn.id,
-              date: txn.date,
               merchantRaw: txn.merchantRaw,
               merchantClean: f.merchantClean,
-              merchantCanonical: f.merchantCanonical ?? null,
+              merchantCanonical: f.merchantCanonical,
               txnType: f.txnType,
-              autoSource: f.autoSource ?? null,
-              autoConfidence: f.autoConfidence ?? null,
+              autoSource: f.autoSource,
+              autoConfidence: f.autoConfidence,
+              reviewFlagCleared: willClearReview,
               signalsCount: enriched.signals.length,
-              willClearReview,
-              module: 'enrichment_backfill',
-            },
-            'backfill_txn_enriched',
-          );
-        }
-
-        if (flags.dryRun) {
-          updated++;
-          if (willClearReview) reviewFlagCleared++;
-          signalsWritten += enriched.signals.length;
-          callbacks.onProgress?.({
-            txnId: txn.id,
-            merchantRaw: txn.merchantRaw,
-            merchantClean: f.merchantClean,
-            merchantCanonical: f.merchantCanonical,
-            txnType: f.txnType,
-            autoSource: f.autoSource,
-            autoConfidence: f.autoConfidence,
-            reviewFlagCleared: willClearReview,
-            signalsCount: enriched.signals.length,
-          });
-          continue;
-        }
-
-        await sequelize.transaction(async (t) => {
-          txn.set({
-            merchantClean: f.merchantClean,
-            merchantCanonical: f.merchantCanonical,
-            txnType: f.txnType,
-            autoSource: f.autoSource,
-            autoConfidence: f.autoConfidence,
-            autoCategory: f.autoCategory,
-            autoBusiness: f.autoBusiness,
-            autoSplitType: f.autoSplitType,
-            autoPctMe: f.autoPctMe,
-            autoPctPartner: f.autoPctPartner,
-            appliedRuleId: f.appliedRuleId,
-            linkedTransactionId: f.linkedTransactionId,
-            isRecurring: f.isRecurring,
-          });
-          // Only fill notes if the row had none — don't overwrite user-authored notes.
-          if (!txn.notes && f.notes) {
-            txn.set({ notes: f.notes });
-          }
-          if (willClearReview) {
-            txn.set({ reviewFlag: false });
-          }
-
-          recomputeTransactionAmounts(txn);
-          await txn.save({ transaction: t });
-
-          await TransactionSignal.destroy({
-            where: { transactionId: txn.id },
-            transaction: t,
-          });
-          if (enriched.signals.length > 0) {
-            await TransactionSignal.bulkCreate(
-              enriched.signals.map((s) => ({
-                transactionId: txn.id,
-                source: s.source,
-                confidence: s.confidence,
-                fields: s.fields,
-                rationale: s.rationale ?? null,
-              })),
-              { transaction: t },
+            });
+          } catch (err) {
+            skipped++;
+            const message = err instanceof Error ? err.message : String(err);
+            logger.error(
+              { err, txnId: txn.id, module: 'enrichment_backfill' },
+              'backfill_txn_failed',
             );
+            callbacks.onError?.({ txnId: txn.id, message });
           }
-        });
+        }
 
-        updated++;
-        if (willClearReview) reviewFlagCleared++;
-        signalsWritten += enriched.signals.length;
-
-        callbacks.onProgress?.({
-          txnId: txn.id,
-          merchantRaw: txn.merchantRaw,
-          merchantClean: f.merchantClean,
-          merchantCanonical: f.merchantCanonical,
-          txnType: f.txnType,
-          autoSource: f.autoSource,
-          autoConfidence: f.autoConfidence,
-          reviewFlagCleared: willClearReview,
-          signalsCount: enriched.signals.length,
+        span.setAttributes({
+          'cashflow.backfill.batch_processed': processed - batchProcessedStart,
+          'cashflow.backfill.batch_updated': updated - batchUpdatedStart,
+          'cashflow.backfill.batch_review_flag_cleared':
+            reviewFlagCleared - batchReviewFlagClearedStart,
+          'cashflow.backfill.batch_signals_written': signalsWritten - batchSignalsWrittenStart,
+          'cashflow.backfill.batch_skipped': skipped - batchSkippedStart,
         });
-      } catch (err) {
-        skipped++;
-        const message = err instanceof Error ? err.message : String(err);
-        logger.error({ err, txnId: txn.id, module: 'enrichment_backfill' }, 'backfill_txn_failed');
-        callbacks.onError?.({ txnId: txn.id, message });
-      }
-    }
+      },
+    );
 
     offset += txns.length;
 
