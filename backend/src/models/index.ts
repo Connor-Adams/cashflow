@@ -91,6 +91,7 @@ import {
 } from './NotificationPreference';
 import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
+import { SavedSearch, initSavedSearch } from './SavedSearch';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
 
@@ -168,6 +169,7 @@ initAuditLog(sequelize);
 initVaultDocument(sequelize);
 initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
+initSavedSearch(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
 
@@ -760,6 +762,16 @@ CashflowSettings.belongsTo(User, {
   as: 'user',
 });
 
+// SavedSearch (issue #235). One row per user-named query string; cascades
+// on user delete so we never orphan rows when a user is removed.
+User.hasMany(SavedSearch, {
+  foreignKey: 'user_id',
+  as: 'savedSearches',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedSearch.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 // Sync backups (issue #239). No CASCADE on household delete: the audit
 // history is useful diagnostic context, so we keep the rows around even
 // if the household is later removed. The intentionally-loose FK (no
@@ -854,6 +866,7 @@ export {
   AuditLog,
   FinanceEvent,
   BudgetAlertState,
+  SavedSearch,
   VaultDocument,
   AccountStatement,
   SyncBackup,
