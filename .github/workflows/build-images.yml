@@ -40,6 +40,10 @@ jobs:
             context: infra/loki
             file: infra/loki/Dockerfile
             needs_app_args: 'false'
+          - name: prometheus
+            context: infra/prometheus
+            file: infra/prometheus/Dockerfile
+            needs_app_args: 'false'
           - name: grafana
             context: infra/grafana
             file: infra/grafana/Dockerfile

@@ -20,6 +20,7 @@ services:
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
+      - "9464:9464"   # Prometheus scrape endpoint
     environment:
       - LOKI_HOST=loki
       - TEMPO_HOST=tempo
@@ -40,7 +41,17 @@ services:
     depends_on:
       - loki
 
+  prometheus:
+    build: ./prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+    depends_on:
+      - otel-collector
+
 volumes:
   loki-data:
+  prometheus-data:
   grafana-data:
   tempo-data:

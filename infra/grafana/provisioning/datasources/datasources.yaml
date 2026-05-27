@@ -32,3 +32,10 @@ datasources:
         filterByTraceID: true
       nodeGraph:
         enabled: true
+
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: prometheus
+    url: http://prometheus.railway.internal:9090
+    editable: false

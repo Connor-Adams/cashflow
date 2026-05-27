@@ -2,10 +2,11 @@
 
 Cashflow runs a self-hosted observability stack on Railway:
 
-- `otel-collector` — receives OTLP from the backend, forwards logs to Loki and traces to Tempo.
+- `otel-collector` — receives OTLP from the backend, forwards logs to Loki, traces to Tempo, and metrics to Prometheus.
 - `loki` — log storage, 30-day retention, 10GB filesystem volume.
 - `tempo` — trace storage, 7-day retention, local filesystem volume on Railway.
-- `grafana` — self-hosted Grafana for querying Loki and Tempo via private networking. Loki log lines auto-correlate to Tempo traces via `trace_id` derived field.
+- `prometheus` — metrics storage, 15-day retention, local filesystem volume on Railway.
+- `grafana` — self-hosted Grafana for querying Loki, Tempo, and Prometheus via private networking. Loki log lines auto-correlate to Tempo traces via `trace_id` derived field.
 
 ## Local development
 
@@ -17,10 +18,10 @@ docker compose up -d --build
 # wait ~15s for Loki + collector to boot
 
 # Verify Loki is ready
-curl -sS http://localhost:3100/ready                                # → "ready"
+curl -sS http://localhost:3100/ready                                # -> "ready"
 
 # Verify the collector OTLP endpoint accepts requests
-curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://localhost:4318/v1/logs   # → 415 (expected — no body)
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://localhost:4318/v1/logs   # -> 415 (expected — no body)
 ```
 
 Then run the backend dev server with OTLP pointed at the local collector:
@@ -39,6 +40,19 @@ curl -sG http://localhost:3100/loki/api/v1/query_range \
   --data-urlencode 'limit=20'
 ```
 
+Prometheus metrics flow through the same OTLP endpoint:
+
+1. Backend exports OTLP metrics to `otel-collector` at `http://localhost:4318/v1/metrics`.
+2. The collector exposes Prometheus-format metrics at `http://localhost:9464/metrics`.
+3. Prometheus scrapes the collector and serves PromQL at `http://localhost:9090`.
+
+Verify locally:
+
+```bash
+curl -fsS http://localhost:9464/metrics | head
+curl -fsS 'http://localhost:9090/api/v1/query?query=up'
+```
+
 Tear down:
 
 ```bash
@@ -47,7 +61,7 @@ cd infra && docker compose down -v
 
 ## Railway setup (one-time)
 
-The backend and frontend deploy as GHCR images, not source builds. The new observability services follow the same pattern — `build-images.yml` publishes images to GHCR on every merge to `main`; `promote-to-production.yml` retags `:sha-XXX` as `:production` on each GitHub release and triggers `railway redeploy`.
+The backend and frontend deploy as GHCR images, not source builds. The observability services follow the same pattern — `build-images.yml` publishes images to GHCR on every merge to `main`; `promote-to-production.yml` retags `:sha-XXX` as `:production` on each GitHub release and triggers `railway redeploy`.
 
 To onboard:
 
@@ -63,20 +77,29 @@ To onboard:
    - Image: `ghcr.io/connor-adams/cashflow-otel-collector:main` (or `:production`).
    - Env vars:
      - `LOKI_HOST=loki.railway.internal`
+     - `TEMPO_HOST=tempo.railway.internal`
      - `PUBLIC_FRONTEND_ORIGIN=cashflow.<your-domain>` (frontend origin without protocol)
    - Expose port 4318 publicly (for browser OTLP later) AND internally (for the backend).
    - Deploy.
 
-3. **Add the service IDs to `.github/workflows/promote-to-production.yml`** so future releases auto-redeploy them. Copy the IDs from the Railway dashboard URL of each service. Open a follow-up PR with the `env:` values filled in.
+3. **Create the `prometheus` Railway service.**
+   - New Service → "Deploy from Docker image".
+   - Image: `ghcr.io/connor-adams/cashflow-prometheus:main` (or `:production`).
+   - Add a persistent volume, mount at `/prometheus`, size 10GB.
+   - Keep the service private-network only.
+   - Set service name to `prometheus` (Railway exposes it as `prometheus.railway.internal`).
+   - After the service exists, set `RAILWAY_PROMETHEUS_SERVICE_ID` in `.github/workflows/promote-to-production.yml` so releases redeploy it automatically.
 
-4. **Update `cashflow-backend` env vars.**
+4. **Add the service IDs to `.github/workflows/promote-to-production.yml`** so future releases auto-redeploy them. Copy the IDs from the Railway dashboard URL of each service. Open a follow-up PR with the `env:` values filled in.
+
+5. **Update `cashflow-backend` env vars.**
    - `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.railway.internal:4318`
    - `GIT_SHA=${{RAILWAY_GIT_COMMIT_SHA}}`
    - Redeploy.
 
 ## Grafana service
 
-The cashflow stack includes a self-hosted Grafana instance for querying Loki (and future Tempo). Grafana runs as a Railway service at `ghcr.io/connor-adams/cashflow-grafana`. Datasources auto-provision on boot from `infra/grafana/provisioning/`.
+The cashflow stack includes a self-hosted Grafana instance for querying Loki, Tempo, and Prometheus. Grafana runs as a Railway service at `ghcr.io/connor-adams/cashflow-grafana`. Datasources auto-provision on boot from `infra/grafana/provisioning/`.
 
 ### One-time Railway setup
 
@@ -94,9 +117,15 @@ The cashflow stack includes a self-hosted Grafana instance for querying Loki (an
 
 Open the Grafana public URL. Log in with the admin credentials. Navigate to Explore → Loki, query `{service_name="cashflow-backend"}`.
 
-### Loki access from Grafana
+### Datasource access from Grafana
 
-Loki stays on Railway private networking (`loki.railway.internal:3100`). Grafana queries it via its provisioned datasource. No public Loki URL needed. The `loki-production-b81e.up.railway.app` public domain on the loki service can now be removed.
+Loki, Tempo, and Prometheus stay on Railway private networking:
+
+- `loki.railway.internal:3100`
+- `tempo.railway.internal:3200`
+- `prometheus.railway.internal:9090`
+
+Grafana queries them via provisioned datasources. No public Loki, Tempo, or Prometheus URL is needed.
 
 ## Tempo service
 
@@ -136,6 +165,14 @@ In Grafana Explore, switch to the Loki datasource and run:
 ```
 
 You should see log lines from the deployed backend. Note: the Loki label is `service_name` (underscore), not `service.name` — the collector's loki exporter maps OTel resource attributes by normalizing dots to underscores.
+
+In Grafana Explore, switch to the Prometheus datasource and run:
+
+```
+cashflow_http_server_requests_total
+```
+
+After the backend has served requests, you should see route-bounded request counters with labels such as `http_route`, `http_request_method`, and `http_response_status_code`.
 
 ## Kill switch
 
