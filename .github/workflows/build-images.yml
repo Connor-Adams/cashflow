@@ -44,6 +44,10 @@ jobs:
             context: infra/grafana
             file: infra/grafana/Dockerfile
             needs_app_args: 'false'
+          - name: tempo
+            context: infra/tempo
+            file: infra/tempo/Dockerfile
+            needs_app_args: 'false'
     steps:
       - uses: actions/checkout@v4
         with:

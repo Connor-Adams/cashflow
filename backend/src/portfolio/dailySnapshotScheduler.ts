@@ -1,5 +1,8 @@
+import { trace } from '@opentelemetry/api';
 import * as env from '../config/env';
 import { buildDailySnapshotsForAllHouseholds } from './dailySnapshotBuilder';
+
+const tracer = trace.getTracer('cashflow-scheduler');
 
 export interface DailySnapshotTickResult {
   status: 'skipped_disabled' | 'ran' | 'error';
@@ -21,20 +24,24 @@ function configFromEnv(): DailySnapshotTickConfig {
 export async function runDailySnapshotTick(
   configOverride?: Partial<DailySnapshotTickConfig>,
 ): Promise<DailySnapshotTickResult> {
-  const config: DailySnapshotTickConfig = { ...configFromEnv(), ...configOverride };
-  if (!config.enabled) return { status: 'skipped_disabled' };
+  return tracer.startActiveSpan('daily_snapshot_scheduler.tick', async (span): Promise<DailySnapshotTickResult> => {
+    try {
+      const config: DailySnapshotTickConfig = { ...configFromEnv(), ...configOverride };
+      if (!config.enabled) return { status: 'skipped_disabled' };
 
-  try {
-    const r = await buildDailySnapshotsForAllHouseholds();
-    return {
-      status: 'ran',
-      householdsProcessed: r.households,
-      daysBuilt: r.daysBuilt,
-      daysSkipped: r.daysSkipped,
-      partialDays: r.partialDays,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'unknown error';
-    return { status: 'error', error: msg };
-  }
+      const r = await buildDailySnapshotsForAllHouseholds();
+      return {
+        status: 'ran',
+        householdsProcessed: r.households,
+        daysBuilt: r.daysBuilt,
+        daysSkipped: r.daysSkipped,
+        partialDays: r.partialDays,
+      };
+    } catch (err) {
+      span.recordException(err as Error);
+      throw err;
+    } finally {
+      span.end();
+    }
+  });
 }
