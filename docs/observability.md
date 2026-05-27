@@ -1,12 +1,11 @@
-# Observability stack (Phase 2)
+# Observability stack (Phase 3)
 
 Cashflow runs a self-hosted observability stack on Railway:
 
-- `otel-collector` — receives OTLP from the backend, forwards to Loki.
+- `otel-collector` — receives OTLP from the backend, forwards logs to Loki and traces to Tempo.
 - `loki` — log storage, 30-day retention, 10GB filesystem volume.
-- `grafana` — self-hosted Grafana for querying Loki (and future Tempo) via private networking.
-
-Phase 3 will add a Tempo service for traces.
+- `tempo` — trace storage, 7-day retention, local filesystem volume on Railway.
+- `grafana` — self-hosted Grafana for querying Loki and Tempo via private networking. Loki log lines auto-correlate to Tempo traces via `trace_id` derived field.
 
 ## Local development
 
@@ -99,6 +98,35 @@ Open the Grafana public URL. Log in with the admin credentials. Navigate to Expl
 
 Loki stays on Railway private networking (`loki.railway.internal:3100`). Grafana queries it via its provisioned datasource. No public Loki URL needed. The `loki-production-b81e.up.railway.app` public domain on the loki service can now be removed.
 
+## Tempo service
+
+Tempo receives traces from the otel-collector and makes them queryable in Grafana. It runs as a single-binary with local filesystem storage on a Railway volume.
+
+### One-time Railway setup
+
+1. **Create the `tempo` Railway service.**
+   - New Service → "Deploy from Docker image".
+   - Image: `ghcr.io/connor-adams/cashflow-tempo:main` (initially) — bump to `:production` once a release has tagged it.
+   - Add a persistent volume, mount at `/tempo`, size 10GB.
+   - Set service name to `tempo` (Railway exposes it as `tempo.railway.internal` in private networking).
+   - Set env var: `PORT=3200`.
+   - Deploy.
+
+2. **Add `TEMPO_HOST` to the `otel-collector` service.**
+   - Set env var: `TEMPO_HOST=tempo.railway.internal`
+   - Redeploy the otel-collector.
+
+3. **Add the service ID to `.github/workflows/promote-to-production.yml`** (`RAILWAY_TEMPO_SERVICE_ID`). Open a follow-up PR with the value filled in.
+
+### Loki ↔ Tempo correlation in Grafana
+
+The Grafana datasource provisioning (`infra/grafana/provisioning/datasources/datasources.yaml`) sets up automatic correlation:
+
+- **Loki → Tempo**: a `derivedFields` rule on the Loki datasource matches `trace_id` in log JSON and renders a "View Trace" link. Clicking it opens the matching span waterfall in Tempo Explore.
+- **Tempo → Loki**: the Tempo datasource's `tracesToLogsV2` config links back to Loki, filtering logs by trace ID and time window around the span.
+
+To use: in Grafana Explore, select the Loki datasource and query for log lines. Any line containing `"trace_id":` shows a "View Trace" button. Click it to jump to the Tempo trace view.
+
 ## Verification
 
 In Grafana Explore, switch to the Loki datasource and run:
@@ -127,4 +155,4 @@ Each log record landing in Loki carries these fields (via the pino → OTLP tran
 - `resources.deployment.environment`: `development` / `production`
 - `resources.service.version`: the `GIT_SHA` env var (or `dev` locally)
 
-When Phase 3 adds the trace SDK, every log will also carry `trace_id` and `span_id` automatically (the pino mixin already reads them from the active OTel context).
+Every log carries `trace_id` and `span_id` automatically — the pino mixin reads them from the active OTel context set by the NodeSDK (Phase 3).

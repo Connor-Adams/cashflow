@@ -7,6 +7,14 @@ services:
     volumes:
       - loki-data:/loki
 
+  tempo:
+    build: ./tempo
+    ports:
+      - "3200:3200"
+      - "4319:4318"   # OTLP HTTP — collector uses 4318; tempo reuses; remap to 4319 to avoid clash
+    volumes:
+      - tempo-data:/tempo
+
   otel-collector:
     build: ./otel-collector
     ports:
@@ -14,9 +22,11 @@ services:
       - "4318:4318"   # OTLP HTTP
     environment:
       - LOKI_HOST=loki
+      - TEMPO_HOST=tempo
       - PUBLIC_FRONTEND_ORIGIN=localhost:5173
     depends_on:
       - loki
+      - tempo
 
   grafana:
     build: ./grafana
@@ -33,3 +43,4 @@ services:
 volumes:
   loki-data:
   grafana-data:
+  tempo-data:

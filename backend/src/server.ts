@@ -1,3 +1,6 @@
+// MUST be first: registers NodeSDK + auto-instrumentations before other modules load.
+import './observability/otel';
+
 import fs from 'fs';
 import app from './app';
 import * as env from './config/env';
