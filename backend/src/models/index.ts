@@ -89,6 +89,7 @@ import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
+import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
@@ -165,6 +166,7 @@ initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
 initAuditLog(sequelize);
+initVaultDocument(sequelize);
 initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
@@ -611,6 +613,25 @@ AuditLog.belongsTo(User, {
   as: 'actor',
 });
 
+Household.hasMany(VaultDocument, {
+  foreignKey: 'household_id',
+  as: 'vaultDocuments',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+VaultDocument.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(VaultDocument, {
+  foreignKey: 'uploaded_by_user_id',
+  as: 'vaultDocuments',
+});
+VaultDocument.belongsTo(User, {
+  foreignKey: 'uploaded_by_user_id',
+  as: 'uploadedByUser',
+});
+
 // Finance domain events (issue #238) — append-only stream parallel to
 // audit_log. Cascade on household delete so removing a household
 // removes its event stream too.
@@ -846,6 +867,7 @@ export {
   FinanceEvent,
   BudgetAlertState,
   SavedSearch,
+  VaultDocument,
   AccountStatement,
   SyncBackup,
 };

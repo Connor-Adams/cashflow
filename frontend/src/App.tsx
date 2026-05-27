@@ -53,6 +53,7 @@ import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AskCashflowPage } from './pages/AskCashflowPage'
 import { SearchPage } from './pages/SearchPage'
+import { VaultPage } from './pages/VaultPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
@@ -122,6 +123,7 @@ function AppRoutes() {
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<AskCashflowPage />} />
           <Route path="search" element={<SearchPage />} />
+          <Route path="vault" element={<VaultPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
