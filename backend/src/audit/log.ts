@@ -50,6 +50,9 @@ export const AUDIT_ACTIONS = {
   ReceiptCreated: 'receipt.created',
   ReceiptDeleted: 'receipt.deleted',
   ImportCommitted: 'import.committed',
+  VaultDocumentCreated: 'vault_document.created',
+  VaultDocumentUpdated: 'vault_document.updated',
+  VaultDocumentDeleted: 'vault_document.deleted',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -64,6 +67,7 @@ export const AUDIT_ENTITY_TYPES = {
   Settlement: 'settlement',
   Receipt: 'receipt',
   Import: 'import',
+  VaultDocument: 'vault_document',
 } as const;
 
 export type AuditEntityType =
