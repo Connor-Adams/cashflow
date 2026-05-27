@@ -107,7 +107,7 @@ Tempo receives traces from the otel-collector and makes them queryable in Grafan
 1. **Create the `tempo` Railway service.**
    - New Service → "Deploy from Docker image".
    - Image: `ghcr.io/connor-adams/cashflow-tempo:main` (initially) — bump to `:production` once a release has tagged it.
-   - Add a persistent volume, mount at `/tempo`, size 10GB.
+   - Add a persistent volume, mount at `/var/tempo`, size 10GB.
    - Set service name to `tempo` (Railway exposes it as `tempo.railway.internal` in private networking).
    - Set env var: `PORT=3200`.
    - Deploy.
