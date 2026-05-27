@@ -32,6 +32,8 @@ exporters:
     default_labels_enabled:
       exporter: false
       job: true
+  prometheus:
+    endpoint: 0.0.0.0:9464
 
 service:
   pipelines:
@@ -39,6 +41,10 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, attributes/redact, batch]
       exporters: [loki]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
   telemetry:
     logs:
       level: info

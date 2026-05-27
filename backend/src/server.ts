@@ -1,3 +1,4 @@
+import './observability/metrics';
 import fs from 'fs';
 import { lookup } from 'node:dns';
 import { promisify } from 'node:util';

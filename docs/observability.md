@@ -29,6 +29,33 @@ Then run the backend dev server with OTLP pointed at the local collector:
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 yarn workspace cashflow-backend run dev
 ```
 
+## Prometheus metrics
+
+Cashflow uses OpenTelemetry in application code and Prometheus as the first owned metrics store.
+
+Local flow:
+
+1. Backend exports OTLP metrics to `otel-collector` at `http://localhost:4318/v1/metrics`.
+2. The collector exposes Prometheus-format metrics at `http://localhost:9464/metrics`.
+3. Prometheus scrapes the collector and serves PromQL at `http://localhost:9090`.
+
+Verify locally:
+
+```bash
+cd infra
+docker compose up -d --build
+curl -fsS http://localhost:9464/metrics | head
+curl -fsS 'http://localhost:9090/api/v1/query?query=up'
+```
+
+Railway:
+
+- Create a `prometheus` service from `ghcr.io/connor-adams/cashflow-prometheus:production`.
+- Mount a volume at `/prometheus`.
+- Keep the service private-network only.
+- Set `RAILWAY_PROMETHEUS_SERVICE_ID` in `.github/workflows/promote-to-production.yml` after the service exists so releases redeploy it automatically.
+- Add a Grafana Prometheus datasource pointing to `http://prometheus.railway.internal:9090`.
+
 Exercise the API a bit, then query Loki:
 
 ```bash
