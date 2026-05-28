@@ -4,6 +4,7 @@ datasources:
   - name: Loki
     type: loki
     access: proxy
+    uid: loki
     url: http://loki.railway.internal:3100
     isDefault: true
     editable: false
@@ -12,6 +13,11 @@ datasources:
       timeout: 60
       derivedFields:
         - name: TraceID
+          matcherRegex: '"traceid":"([a-f0-9]+)"'
+          url: '${__value.raw}'
+          datasourceUid: tempo
+          urlDisplayLabel: 'View Trace'
+        - name: TraceIDLegacy
           matcherRegex: '"trace_id":"([a-f0-9]+)"'
           url: '${__value.raw}'
           datasourceUid: tempo
