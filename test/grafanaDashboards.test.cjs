@@ -25,6 +25,9 @@ test('grafana provisions cashflow dashboards from disk', () => {
   for (const dashboard of [
     'infra/grafana/provisioning/dashboards/cashflow/api-health.json',
     'infra/grafana/provisioning/dashboards/cashflow/observability-stack.json',
+    'infra/grafana/provisioning/dashboards/cashflow/route-drilldown.json',
+    'infra/grafana/provisioning/dashboards/cashflow/backend-logs-jobs.json',
+    'infra/grafana/provisioning/dashboards/cashflow/outbound-dependencies.json',
   ]) {
     assert.equal(existsSync(dashboard), true, `${dashboard} should exist`);
   }
@@ -58,5 +61,49 @@ test('observability stack dashboard shows telemetry pipeline health', () => {
   );
   assert.match(serialized, /scrape_samples_scraped/);
   assert.match(serialized, /otel-collector\.railway\.internal:9464/);
+  assert.match(serialized, /datasourceUid":"tempo"/);
+});
+
+test('route drilldown dashboard scopes metrics and logs by selected route', () => {
+  const dashboard = JSON.parse(
+    readFileSync('infra/grafana/provisioning/dashboards/cashflow/route-drilldown.json', 'utf8'),
+  );
+  const serialized = JSON.stringify(dashboard);
+  const expressions = targetExpressions(dashboard);
+
+  assert.equal(dashboard.uid, 'cashflow-route-drilldown');
+  assert.ok(dashboard.templating.list.some((variable) => variable.name === 'route'));
+  assert.match(serialized, /label_values\(cashflow_http_server_requests_total, http_route\)/);
+  assert.ok(expressions.some((expr) => expr.includes('http_route="$route"')));
+  assert.ok(expressions.some((expr) => expr.includes('|= "$route"')));
+  assert.match(serialized, /datasourceUid":"tempo"/);
+});
+
+test('backend logs and jobs dashboard exposes request and job log streams', () => {
+  const dashboard = JSON.parse(
+    readFileSync('infra/grafana/provisioning/dashboards/cashflow/backend-logs-jobs.json', 'utf8'),
+  );
+  const serialized = JSON.stringify(dashboard);
+  const expressions = targetExpressions(dashboard);
+
+  assert.equal(dashboard.uid, 'cashflow-backend-logs-jobs');
+  assert.ok(expressions.some((expr) => expr.includes('{service_name="cashflow-backend"}')));
+  assert.ok(expressions.some((expr) => expr.includes('job_tick')));
+  assert.ok(expressions.some((expr) => expr.includes('http_request')));
+  assert.match(serialized, /"uid":"loki"/);
+});
+
+test('outbound dependencies dashboard shows external HTTP client health', () => {
+  const dashboard = JSON.parse(
+    readFileSync('infra/grafana/provisioning/dashboards/cashflow/outbound-dependencies.json', 'utf8'),
+  );
+  const serialized = JSON.stringify(dashboard);
+  const expressions = targetExpressions(dashboard);
+
+  assert.equal(dashboard.uid, 'cashflow-outbound-dependencies');
+  assert.match(serialized, /http_client_request_duration_seconds_count/);
+  assert.match(serialized, /http_client_request_duration_seconds_bucket/);
+  assert.match(serialized, /server_address/);
+  assert.ok(expressions.some((expr) => expr.includes('query1') && expr.includes('finance') && expr.includes('yahoo')));
   assert.match(serialized, /datasourceUid":"tempo"/);
 });
