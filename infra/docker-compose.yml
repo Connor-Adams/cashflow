@@ -17,6 +17,10 @@ services:
 
   otel-collector:
     build: ./otel-collector
+    networks:
+      default:
+        aliases:
+          - otel-collector.railway.internal
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
