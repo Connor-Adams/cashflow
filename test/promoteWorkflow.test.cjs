@@ -22,4 +22,10 @@ test('promotion waits for all source images before retagging and redeploying', (
       `image-wait must inspect ${svc}`,
     );
   }
+
+  assert.match(
+    workflow,
+    /RAILWAY_PROMETHEUS_SERVICE_ID: "03a89189-868d-44af-89cf-d096a1c6e61a"/,
+    'promotion must redeploy the Railway prometheus service',
+  );
 });
