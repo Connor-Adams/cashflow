@@ -21,6 +21,8 @@ import {
   computeImportConfidence,
   serializeFlags,
 } from './computeImportConfidence';
+import { extractCounterparty } from './extractCounterparty';
+import type { AccountType } from '@cashflow/shared';
 import {
   enrichmentRecurringMinSupport,
   enrichmentAmazonLinkThreshold,
@@ -323,6 +325,10 @@ export async function commitStatementImport(
         amount: row.amount,
       });
 
+      const counterpartyRaw = extractCounterparty(
+        row.merchantRaw,
+        account.accountType as AccountType,
+      );
       const txn = Transaction.build({
         accountId: account.id,
         householdId: account.householdId ?? null,
@@ -331,6 +337,8 @@ export async function commitStatementImport(
         ownershipType:
           f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
+        counterpartyRaw,
+        counterpartyContactId: null,
         importBatch: preview.importBatch,
         date: row.date,
         merchantRaw: row.merchantRaw,

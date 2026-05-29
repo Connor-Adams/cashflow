@@ -1797,4 +1797,80 @@ router.post('/:id/revisions/:rid/restore', aiSuggestLimiter, async (req, res, ne
   }
 });
 
+/**
+ * POST /api/transactions/:id/counterparty/promote
+ *
+ * Promotes the txn's raw counterparty text into a structured Contact link
+ * (#372). Two modes:
+ *
+ *  - `{ contactId: <existing> }` — link to an existing Contact owned by
+ *    the user's household. 404 if the Contact does not belong here.
+ *  - `{}` (no contactId) — auto-create a Contact from `counterparty_raw`
+ *    if no Contact in this household already has that name; otherwise
+ *    reuse the existing match. Requires `counterparty_raw` to be set.
+ *
+ * Contact dedup key is `(householdId, name)`. The match is case-sensitive
+ * and exact-string to keep promotion deterministic; a future "suggest
+ * promote" job (#373) will handle fuzzy/normalized deduplication.
+ */
+router.post('/:id/counterparty/promote', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const { household } = currentAuth(req);
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
+    const body = (req.body || {}) as { contactId?: unknown };
+    let contact: Contact | null = null;
+    if (body.contactId != null) {
+      const contactId = Number(body.contactId);
+      if (!Number.isInteger(contactId) || contactId <= 0) {
+        res.status(400).json({ error: 'contactId must be a positive integer' });
+        return;
+      }
+      contact = await Contact.findOne({
+        where: { id: contactId, householdId: household.id },
+      });
+      if (!contact) {
+        res.status(404).json({ error: 'Contact not found' });
+        return;
+      }
+    } else {
+      const raw = (txn.counterpartyRaw ?? '').trim();
+      if (!raw) {
+        res.status(400).json({
+          error: 'Transaction has no counterpartyRaw; supply contactId to link manually',
+        });
+        return;
+      }
+      contact = await Contact.findOne({
+        where: { householdId: household.id, name: raw },
+      });
+      if (!contact) {
+        contact = await Contact.create({
+          householdId: household.id,
+          name: raw,
+          notes: null,
+        });
+      }
+    }
+    txn.counterpartyContactId = contact.id;
+    await txn.save();
+    res.json({
+      transaction: serializeTransaction(txn),
+      contact,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 export default router;

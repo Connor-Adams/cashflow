@@ -199,6 +199,18 @@ export type Transaction = {
    * (e.g. ["missing_category","needs_review"]). NULL when no flags fired.
    */
   importConfidenceFlags?: string | null
+  /**
+   * Source/dest counterparty extracted from the statement line for
+   * checking/savings/cash accounts (e.g. "JANE DOE" from
+   * "INTERAC E-TFR FROM JANE DOE"). NULL when no pattern matched or the
+   * account is out of scope (#372).
+   */
+  counterpartyRaw: string | null
+  /**
+   * Optional FK to `contacts.id` when the user has promoted the raw
+   * counterparty into a structured Contact. NULL until promoted.
+   */
+  counterpartyContactId: number | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
 }
 
