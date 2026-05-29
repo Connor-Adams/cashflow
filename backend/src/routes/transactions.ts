@@ -34,6 +34,12 @@ import {
   scheduleInternalBackfill,
 } from '../import/backfillCoordinator';
 import {
+  CounterpartyBackfillInFlightError,
+  getLastCounterpartyBackfillRun,
+  isCounterpartyBackfillRunning,
+  runCounterpartyBackfill,
+} from '../import/counterpartyBackfill';
+import {
   parseRevisionChanges,
   RESTORABLE_FIELDS,
   withRevisionContext,
@@ -1615,6 +1621,177 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       next(err);
     } finally {
       backfillRunning.delete(household.id);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Counterparty backfill (issue #376) — retroactive sweep over legacy imports.
+//
+// #372 populates counterparty_raw only on *new* imports; households who
+// imported years of statements before that shipped get value only going
+// forward. This pair of routes exposes the backfill job to the Settings UI.
+//
+// Rate-limited to once per hour per household (the work is read-mostly but
+// chatty; we use the ProviderJobLog as the rate-limit clock so it survives
+// process restarts).
+// ---------------------------------------------------------------------------
+
+const COUNTERPARTY_BACKFILL_RATE_LIMIT_MS = 60 * 60 * 1000;
+
+interface CounterpartyBackfillStatus {
+  running: boolean;
+  lastRunAt: string | null;
+  nextAllowedAt: string | null;
+  lastSummary: { processed: number; extracted: number; elapsedMs: number } | null;
+  rateLimitMs: number;
+}
+
+async function computeCounterpartyBackfillStatus(
+  householdId: number,
+): Promise<CounterpartyBackfillStatus> {
+  const last = await getLastCounterpartyBackfillRun(householdId);
+  const now = Date.now();
+  let nextAllowedAt: string | null = null;
+  if (last && last.status === 'ok') {
+    const next = last.fetchedAt.getTime() + COUNTERPARTY_BACKFILL_RATE_LIMIT_MS;
+    if (next > now) nextAllowedAt = new Date(next).toISOString();
+  }
+  return {
+    running: isCounterpartyBackfillRunning(householdId),
+    lastRunAt: last ? last.fetchedAt.toISOString() : null,
+    nextAllowedAt,
+    lastSummary: last ? last.summary : null,
+    rateLimitMs: COUNTERPARTY_BACKFILL_RATE_LIMIT_MS,
+  };
+}
+
+/**
+ * GET /api/transactions/counterparty/backfill/status
+ *
+ * Read-only status for the Settings UI mount. Returns:
+ *   - whether a backfill is currently running for this household
+ *   - the last completed run's wall-clock timestamp + summary
+ *   - the next-allowed timestamp (null when the 1h window has elapsed)
+ *   - the rate-limit window in ms (so the client can render a countdown)
+ */
+router.get('/counterparty/backfill/status', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const status = await computeCounterpartyBackfillStatus(household.id);
+    res.json(status);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/counterparty/backfill
+ *
+ * Streams NDJSON events while the backfill runs:
+ *   - `{kind: "progress", txnId, merchantRaw, counterpartyRaw}` per row
+ *   - `{kind: "error", txnId, message}` per failed row
+ *   - `{kind: "summary", processed, extracted, skipped, elapsedMs, dryRun}` at end
+ *
+ * Body (all optional):
+ *   {
+ *     dryRun?: boolean,   // when true, no DB write, no rate-limit log
+ *     batchSize?: number  // 1-1000; defaults to 200
+ *   }
+ *
+ * Returns:
+ *   - 409 when another backfill is in flight for this household
+ *   - 429 when the 1h rate limit hasn't elapsed since the last completed run
+ */
+router.post('/counterparty/backfill', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const dryRun = Boolean(body.dryRun);
+    const batchSize =
+      typeof body.batchSize === 'number' && Number.isFinite(body.batchSize) && body.batchSize > 0
+        ? Math.min(1000, Math.floor(body.batchSize))
+        : 200;
+
+    if (isCounterpartyBackfillRunning(household.id)) {
+      res.status(409).json({ error: 'Counterparty backfill already running for this household' });
+      return;
+    }
+
+    // Rate limit (real runs only — dry runs are cheap and never logged).
+    if (!dryRun) {
+      const status = await computeCounterpartyBackfillStatus(household.id);
+      if (status.nextAllowedAt) {
+        res.status(429).json({
+          error: 'Counterparty backfill is rate-limited to once per hour per household',
+          nextAllowedAt: status.nextAllowedAt,
+          rateLimitMs: status.rateLimitMs,
+        });
+        return;
+      }
+    }
+
+    const accept = String(req.headers['accept'] ?? '').toLowerCase();
+    const wantsStream =
+      accept.includes('application/x-ndjson') ||
+      accept.includes('application/ndjson') ||
+      req.query.stream === '1';
+
+    logger.info(
+      { householdId: household.id, dryRun, batchSize, streaming: wantsStream },
+      'counterparty_backfill_started',
+    );
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Accel-Buffering', 'no');
+      function emit(obj: unknown) {
+        res.write(`${JSON.stringify(obj)}\n`);
+      }
+      try {
+        const result = await runCounterpartyBackfill(
+          { householdId: household.id, batchSize, dryRun },
+          {
+            onProgress: (e) => emit({ kind: 'progress', ...e }),
+            onError: (e) => emit({ kind: 'error', ...e }),
+          },
+        );
+        emit({ kind: 'summary', ...result });
+        res.end();
+      } catch (err) {
+        if (err instanceof CounterpartyBackfillInFlightError) {
+          emit({ kind: 'error', message: err.message });
+          res.end();
+          return;
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(
+          { householdId: household.id, message },
+          'counterparty_backfill_failed',
+        );
+        emit({ kind: 'error', message });
+        res.end();
+      }
+      return;
+    }
+
+    // Non-streaming path: single JSON summary on completion.
+    try {
+      const result = await runCounterpartyBackfill({
+        householdId: household.id,
+        batchSize,
+        dryRun,
+      });
+      res.json(result);
+    } catch (err) {
+      if (err instanceof CounterpartyBackfillInFlightError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      next(err);
     }
   } catch (e) {
     next(e);

@@ -391,6 +391,40 @@ export type EnrichmentBackfillProgress =
     }
   | { kind: 'error'; message: string; txnId?: number }
 
+/**
+ * NDJSON stream events for POST /api/transactions/counterparty/backfill
+ * (issue #376). Mirrors EnrichmentBackfillProgress in shape so the UI can
+ * reuse the same feed-rendering pattern.
+ */
+export type CounterpartyBackfillProgress =
+  | {
+      kind: 'progress'
+      txnId: number
+      merchantRaw: string
+      counterpartyRaw: string | null
+    }
+  | {
+      kind: 'summary'
+      processed: number
+      extracted: number
+      skipped: number
+      elapsedMs: number
+      dryRun: boolean
+    }
+  | { kind: 'error'; message: string; txnId?: number }
+
+export type CounterpartyBackfillStatus = {
+  running: boolean
+  lastRunAt: string | null
+  nextAllowedAt: string | null
+  lastSummary: {
+    processed: number
+    extracted: number
+    elapsedMs: number
+  } | null
+  rateLimitMs: number
+}
+
 export type Contact = {
   id: number
   householdId: number
