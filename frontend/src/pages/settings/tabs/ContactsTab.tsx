@@ -21,7 +21,14 @@ export function ContactsTab() {
   const [err, setErr] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<Contact | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  // #375 — edit dialog carries the partner flag alongside the name so both
+  // can be saved in one PATCH round-trip.
+  const [renameIsPartner, setRenameIsPartner] = useState(false)
   const [renameSaving, setRenameSaving] = useState(false)
+  // #375 — controlled state on the create form (FormData on checkboxes is
+  // brittle: an unchecked box never appears in the payload, so we surface
+  // the flag explicitly).
+  const [createIsPartner, setCreateIsPartner] = useState(false)
 
   const confirm = useConfirm()
   const errorId = 'contacts-error'
@@ -48,8 +55,13 @@ export function ContactsTab() {
     if (!name) return
     setErr(null)
     try {
-      await postJson<Contact>('/api/contacts', { name, notes: notes || null })
+      await postJson<Contact>('/api/contacts', {
+        name,
+        notes: notes || null,
+        isPartner: createIsPartner,
+      })
       form.reset()
+      setCreateIsPartner(false)
       await loadContacts()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create contact')
@@ -59,11 +71,13 @@ export function ContactsTab() {
   function openRename(contact: Contact) {
     setRenameTarget(contact)
     setRenameValue(contact.name)
+    setRenameIsPartner(contact.isPartner)
   }
 
   function closeRename() {
     setRenameTarget(null)
     setRenameValue('')
+    setRenameIsPartner(false)
     setRenameSaving(false)
   }
 
@@ -74,7 +88,10 @@ export function ContactsTab() {
     if (!next) return
     setRenameSaving(true)
     try {
-      await patchJson<Contact>(`/api/contacts/${renameTarget.id}`, { name: next })
+      await patchJson<Contact>(`/api/contacts/${renameTarget.id}`, {
+        name: next,
+        isPartner: renameIsPartner,
+      })
       closeRename()
       await loadContacts()
     } catch (e) {
@@ -125,6 +142,16 @@ export function ContactsTab() {
               <Input id="settings-contact-notes" name="notes" />
             </Label>
           </div>
+          {/* #375 — partner flag drives the Partner Fairness inflow split. */}
+          <Label htmlFor="settings-contact-is-partner" className="row">
+            <input
+              id="settings-contact-is-partner"
+              type="checkbox"
+              checked={createIsPartner}
+              onChange={(e) => setCreateIsPartner(e.target.checked)}
+            />
+            <span>Partner</span>
+          </Label>
           <Button type="submit">
             <Plus aria-hidden="true" />
             Add contact
@@ -141,7 +168,14 @@ export function ContactsTab() {
         {contacts.map((contact) => (
           <Card className="accountCard" key={contact.id}>
             <div>
-              <h3>{contact.name}</h3>
+              <h3>
+                {contact.name}
+                {contact.isPartner && (
+                  <span className="muted ml-2 text-xs font-normal uppercase tracking-wide">
+                    Partner
+                  </span>
+                )}
+              </h3>
               {contact.notes && <p className="muted">{contact.notes}</p>}
             </div>
             <div className="row">
@@ -180,6 +214,16 @@ export function ContactsTab() {
                   autoComplete="off"
                 />
               </Label>
+              {/* #375 — let the user mark/unmark this Contact as the partner. */}
+              <Label htmlFor="settings-rename-is-partner" className="row">
+                <input
+                  id="settings-rename-is-partner"
+                  type="checkbox"
+                  checked={renameIsPartner}
+                  onChange={(e) => setRenameIsPartner(e.target.checked)}
+                />
+                <span>Partner</span>
+              </Label>
             </DialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeRename}>
@@ -187,7 +231,12 @@ export function ContactsTab() {
               </Button>
               <Button
                 type="submit"
-                disabled={renameSaving || !renameValue.trim() || renameValue.trim() === renameTarget.name}
+                disabled={
+                  renameSaving ||
+                  !renameValue.trim() ||
+                  (renameValue.trim() === renameTarget.name &&
+                    renameIsPartner === renameTarget.isPartner)
+                }
               >
                 Save
               </Button>

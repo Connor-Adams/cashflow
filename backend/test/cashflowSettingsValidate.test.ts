@@ -134,3 +134,29 @@ test('unknown fields are ignored (not included in patch)', () => {
     assert.ok(!('bogusField' in r.patch));
   }
 });
+
+// ---------------- #375 excludeNonPartnerInflows -------------------------
+
+test('excludeNonPartnerInflows accepts boolean true/false', () => {
+  const t = validateCashflowSettingsPatch({ excludeNonPartnerInflows: true });
+  const f = validateCashflowSettingsPatch({ excludeNonPartnerInflows: false });
+  assert.equal(t.ok, true);
+  if (t.ok) assert.equal(t.patch.excludeNonPartnerInflows, true);
+  assert.equal(f.ok, true);
+  if (f.ok) assert.equal(f.patch.excludeNonPartnerInflows, false);
+});
+
+test('excludeNonPartnerInflows accepts string "true"/"false"', () => {
+  const t = validateCashflowSettingsPatch({ excludeNonPartnerInflows: 'true' });
+  const f = validateCashflowSettingsPatch({ excludeNonPartnerInflows: 'false' });
+  assert.equal(t.ok, true);
+  if (t.ok) assert.equal(t.patch.excludeNonPartnerInflows, true);
+  assert.equal(f.ok, true);
+  if (f.ok) assert.equal(f.patch.excludeNonPartnerInflows, false);
+});
+
+test('excludeNonPartnerInflows rejects garbage values', () => {
+  const r = validateCashflowSettingsPatch({ excludeNonPartnerInflows: 'sometimes' });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /excludeNonPartnerInflows must be boolean/);
+});
