@@ -14,6 +14,11 @@ import {
   createTrackedSuggestion,
 } from '../ai/suggestionStore';
 import { findRuleProposals, merchantPatternFor } from '../ai/ruleProposals';
+import {
+  findCounterpartyPromotions,
+  normalizeCounterpartyName,
+  type CounterpartyPromotion,
+} from '../ai/counterpartyPromotions';
 import { buildFinancialInsights } from '../ai/insights';
 import { auditTransactionsForMislabels } from '../ai/auditTransactions';
 import { aiSuggestLimiter } from './aiRateLimit';
@@ -417,7 +422,11 @@ router.get('/import-cleanup', async (req, res, next) => {
 
 type InboxItem = {
   id: number;
-  kind: 'transaction_audit' | 'financial_insight' | 'rule_proposal';
+  kind:
+    | 'transaction_audit'
+    | 'financial_insight'
+    | 'rule_proposal'
+    | 'counterparty_promotion';
   createdAt: string;
   transactionId: number | null;
   summary: string;
@@ -487,18 +496,27 @@ async function supersedeFinancialInsightDupes(
   );
 }
 
+function summarizeCounterpartyPromotion(p: CounterpartyPromotion): string {
+  // "You've had 5 transactions from JANE DOE in the last 90 days. Create a Contact?"
+  // Kept concise so the inbox card stays one-line; details live in the output payload.
+  const noun = p.supportCount === 1 ? 'transaction' : 'transactions';
+  return `${p.supportCount} ${noun} with ${p.sampleRaw} in the last 90 days · promote to Contact?`;
+}
+
 router.get('/inbox', async (req, res, next) => {
   try {
     await supersedeFinancialInsightDupes(req);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
-    const [rows, ruleProposals] = await Promise.all([
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const [rows, ruleProposals, counterpartyPromotions] = await Promise.all([
       AiSuggestion.findAll({
         where: { ...where, kind: ['transaction_audit', 'financial_insight'] },
         order: [['id', 'DESC']],
         limit,
       }),
-      findRuleProposals(isSuperadmin(req) ? null : currentAuth(req).household.id),
+      findRuleProposals(householdId),
+      findCounterpartyPromotions(householdId),
     ]);
     const persistedItems: InboxItem[] = [];
     for (const row of rows) {
@@ -538,7 +556,20 @@ router.get('/inbox', async (req, res, next) => {
       confidence: null,
       output: p,
     }));
-    res.json({ items: [...persistedItems, ...proposalItems] });
+    // Synthesized ids for counterparty_promotion go below rule_proposal's
+    // range to avoid collisions in the frontend `${kind}:${id}` key. Pick
+    // an offset comfortably larger than any expected ruleProposals.length.
+    const counterpartyItems: InboxItem[] = counterpartyPromotions.map((p, idx) => ({
+      id: -10001 - idx,
+      kind: 'counterparty_promotion',
+      createdAt: new Date().toISOString(),
+      transactionId: null,
+      summary: summarizeCounterpartyPromotion(p),
+      severity: null,
+      confidence: null,
+      output: p,
+    }));
+    res.json({ items: [...persistedItems, ...proposalItems, ...counterpartyItems] });
   } catch (e) {
     next(e);
   }
@@ -548,24 +579,87 @@ router.get('/inbox/count', async (req, res, next) => {
   try {
     await supersedeFinancialInsightDupes(req);
     const where = { ...aiSuggestionWhere(req), status: 'suggested' as const };
-    const [auditRows, insightCount, ruleProposals] = await Promise.all([
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const [auditRows, insightCount, ruleProposals, counterpartyPromotions] = await Promise.all([
       AiSuggestion.findAll({
         where: { ...where, kind: 'transaction_audit' },
         attributes: ['id', 'output'],
       }),
       AiSuggestion.count({ where: { ...where, kind: 'financial_insight' } }),
-      findRuleProposals(isSuperadmin(req) ? null : currentAuth(req).household.id),
+      findRuleProposals(householdId),
+      findCounterpartyPromotions(householdId),
     ]);
     const auditCount = auditRows.filter((r) => auditIssueCount(r.output) > 0).length;
     const ruleProposalCount = ruleProposals.length;
+    const counterpartyPromotionCount = counterpartyPromotions.length;
     res.json({
-      total: auditCount + insightCount + ruleProposalCount,
+      total:
+        auditCount +
+        insightCount +
+        ruleProposalCount +
+        counterpartyPromotionCount,
       byKind: {
         transaction_audit: auditCount,
         financial_insight: insightCount,
         rule_proposal: ruleProposalCount,
+        counterparty_promotion: counterpartyPromotionCount,
       },
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/ai/counterparty-promotions
+ *
+ * Lists counterparty promotion suggestions for the caller's household
+ * (#373). Same detector as the inbox card; kept as a dedicated endpoint
+ * so the frontend can list them on a settings/tooling page without
+ * pulling the full inbox.
+ */
+router.get('/counterparty-promotions', async (req, res, next) => {
+  try {
+    const promotions = await findCounterpartyPromotions(
+      isSuperadmin(req) ? null : currentAuth(req).household.id,
+    );
+    res.json({ promotions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/ai/counterparty-promotions/:normalizedName/dismiss
+ *
+ * "Ignore this name forever" (#373 AC #3). Persists an AiSuggestion row
+ * with kind='counterparty_promotion', status='rejected', and the
+ * normalized name in input_snapshot. The detector filters out any
+ * normalized name with a rejected row, so the suggestion stays
+ * suppressed across detector runs (and across user sessions).
+ *
+ * The route is idempotent: posting twice for the same name creates two
+ * rejected rows, but the second one is a no-op for the filter; the
+ * detector only checks for presence, not count.
+ */
+router.post('/counterparty-promotions/:normalizedName/dismiss', async (req, res, next) => {
+  try {
+    const decoded = decodeURIComponent(req.params.normalizedName);
+    const normalized = normalizeCounterpartyName(decoded);
+    if (!normalized) {
+      res.status(400).json({ error: 'normalizedName is required' });
+      return;
+    }
+    const row = await createTrackedSuggestion({
+      req,
+      kind: 'counterparty_promotion',
+      inputSnapshot: { normalizedName: normalized },
+      output: null,
+      status: 'rejected',
+      model: 'deterministic',
+      promptVersion: 'counterparty-promotion-dismiss-v1',
+    });
+    res.status(201).json({ ok: true, id: row.id });
   } catch (e) {
     next(e);
   }

@@ -10,6 +10,10 @@ import {
   suggestTransactionFieldsTracked,
 } from '../ai/suggestTransaction';
 import { createTrackedSuggestion, markTransactionSuggestionOutcome } from '../ai/suggestionStore';
+import {
+  COUNTERPARTY_PROMOTION_WINDOW_DAYS,
+  normalizeCounterpartyName,
+} from '../ai/counterpartyPromotions';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import {
@@ -2044,6 +2048,142 @@ router.post('/:id/counterparty/promote', async (req, res, next) => {
     res.json({
       transaction: serializeTransaction(txn),
       contact,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/counterparty/promote-bulk
+ *
+ * "Create Contact and link all" action behind issue #373's
+ * counterparty-promotion suggestion. Walks every un-linked transaction
+ * in the caller's household whose normalized counterpartyRaw matches the
+ * supplied `normalizedName` (lowercase + collapsed whitespace) within
+ * the trailing 90-day window, creates (or reuses) a Contact, and links
+ * the whole set in a single transaction.
+ *
+ * Body:
+ *   - `normalizedName`: REQUIRED, the normalized key the user clicked.
+ *     Server re-normalizes it defensively against the client value.
+ *   - `contactId`: OPTIONAL, link to an existing Contact owned by the
+ *     caller's household. When omitted, the route auto-creates a
+ *     Contact whose name is the most-recent matching txn's raw
+ *     counterparty value (preserving the casing the user has seen on
+ *     their statements).
+ *
+ * Returns:
+ *   - `contact`: the linked Contact row.
+ *   - `linkedCount`: how many transactions were linked.
+ *   - `transactionIds`: ids that were linked (capped at 200 for sanity).
+ *
+ * Authorization: all touched txns must pass `visibleTransactionWhere`.
+ * Cross-household txns are silently excluded by that gate; the route
+ * never reveals their existence.
+ */
+router.post('/counterparty/promote-bulk', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = (req.body || {}) as { normalizedName?: unknown; contactId?: unknown };
+    const normalized = normalizeCounterpartyName(
+      typeof body.normalizedName === 'string' ? body.normalizedName : '',
+    );
+    if (!normalized) {
+      res.status(400).json({ error: 'normalizedName is required' });
+      return;
+    }
+    // 90-day window matches the detector. Computing the cutoff here
+    // (instead of pushing it into the detector) keeps the route a single
+    // SQL query and lets the integration tests pin a known `now`.
+    const cutoff = new Date(
+      Date.now() - COUNTERPARTY_PROMOTION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    const result = await sequelize.transaction(async (t) => {
+      // Pull the matching txns up front (within the window, unlinked,
+      // exact normalized match). raw:false so Sequelize keeps it as model
+      // instances — needed for the .save() loop below.
+      const matchedAll = await Transaction.findAll({
+        where: {
+          ...visibleTransactionWhere(req),
+          counterpartyContactId: null,
+          date: { [Op.gte]: cutoff },
+        },
+        transaction: t,
+      });
+      const matched = matchedAll.filter(
+        (m) => normalizeCounterpartyName(m.counterpartyRaw) === normalized,
+      );
+
+      // Resolve the Contact: explicit id, or auto-create from the most
+      // recent matching txn's raw value.
+      let contact: Contact | null = null;
+      if (body.contactId != null) {
+        const contactId = Number(body.contactId);
+        if (!Number.isInteger(contactId) || contactId <= 0) {
+          const err = new Error('contactId must be a positive integer') as Error & {
+            status?: number;
+          };
+          err.status = 400;
+          throw err;
+        }
+        contact = await Contact.findOne({
+          where: { id: contactId, householdId: household.id },
+          transaction: t,
+        });
+        if (!contact) {
+          const err = new Error('Contact not found') as Error & { status?: number };
+          err.status = 404;
+          throw err;
+        }
+      } else {
+        // Auto-create: pick the most recent txn's raw counterparty for
+        // the Contact name to preserve casing (`Jane Doe` vs `JANE DOE`).
+        // If no candidates remain (race with another promote), 404.
+        const newest = matched.sort((a, b) => {
+          if (a.date === b.date) return b.id - a.id;
+          return a.date < b.date ? 1 : -1;
+        })[0];
+        if (!newest) {
+          res.status(404).json({
+            error: 'No matching un-linked transactions in the trailing 90 days',
+          });
+          return null;
+        }
+        const rawName = (newest.counterpartyRaw ?? '').trim();
+        contact = await Contact.findOne({
+          where: { householdId: household.id, name: rawName },
+          transaction: t,
+        });
+        if (!contact) {
+          contact = await Contact.create(
+            { householdId: household.id, name: rawName, notes: null },
+            { transaction: t },
+          );
+        }
+      }
+
+      // Link every matching txn. Iterate so per-row save triggers
+      // revision tracking (the same way the single-txn promote does it
+      // implicitly via Sequelize). bulkUpdate would skip revisions.
+      const linkedIds: number[] = [];
+      for (const txn of matched) {
+        if (txn.counterpartyContactId === contact.id) continue;
+        txn.counterpartyContactId = contact.id;
+        await txn.save({ transaction: t });
+        linkedIds.push(txn.id);
+        if (linkedIds.length >= 200) break;
+      }
+      return { contact, linkedIds };
+    });
+    if (result == null) return;
+    res.json({
+      contact: result.contact,
+      linkedCount: result.linkedIds.length,
+      transactionIds: result.linkedIds,
     });
   } catch (e) {
     next(e);

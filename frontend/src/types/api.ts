@@ -1232,6 +1232,12 @@ export type CashflowSettings = {
   safeToSpendWindowDays: number;
   includeCreditCardBalance: boolean;
   includeGoalContributions: boolean;
+  /**
+   * Threshold for the "promote counterparty to Contact" suggestion (#373).
+   * Surfaces a suggestion when un-linked counterparty_raw recurs >= N
+   * times in the trailing 90 days. Default 3, bounded 2..50.
+   */
+  counterpartyPromotionThreshold: number;
 };
 
 export type SafeToSpendBreakdown = {

@@ -31,6 +31,13 @@ export class CashflowSettings extends Model<
   /** When true, subtract required monthly goal contributions. Default true. */
   declare includeGoalContributions: CreationOptional<boolean>;
   /**
+   * Minimum recurrence threshold for the "promote counterparty to Contact"
+   * suggestion (#373). When a normalized counterparty_raw value has been
+   * seen on N+ un-linked transactions in the trailing 90 days, the AI
+   * Inbox surfaces a one-click bulk promote. Default 3, bounded 2..50.
+   */
+  declare counterpartyPromotionThreshold: CreationOptional<number>;
+  /**
    * #375 — drives the Partner Fairness dashboard "Exclude non-partner inflows"
    * toggle. When true (default), positive-amount shared rows whose
    * counterparty_contact_id does NOT reference a partner Contact are dropped
@@ -48,11 +55,14 @@ export const CASHFLOW_SETTINGS_DEFAULTS = {
   safeToSpendWindowDays: 14,
   includeCreditCardBalance: true,
   includeGoalContributions: true,
+  counterpartyPromotionThreshold: 3,
   excludeNonPartnerInflows: true,
 } as const;
 
 export const MIN_SAFE_TO_SPEND_WINDOW_DAYS = 1;
 export const MAX_SAFE_TO_SPEND_WINDOW_DAYS = 365;
+export const MIN_COUNTERPARTY_PROMOTION_THRESHOLD = 2;
+export const MAX_COUNTERPARTY_PROMOTION_THRESHOLD = 50;
 
 export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSettings {
   CashflowSettings.init(
@@ -87,6 +97,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
         field: 'include_goal_contributions',
         allowNull: false,
         defaultValue: true,
+      },
+      counterpartyPromotionThreshold: {
+        type: DataTypes.INTEGER,
+        field: 'counterparty_promotion_threshold',
+        allowNull: false,
+        defaultValue: 3,
       },
       excludeNonPartnerInflows: {
         type: DataTypes.BOOLEAN,
