@@ -69,7 +69,7 @@ yarn workspace frontend run build
 
 ## Code health: dead code & duplication
 
-Two static-analysis tools are wired in to find unused code and copy-paste duplication. They run informationally in CI (the `code-audit` job) and never block merges — the goal is to drive the baseline down over time.
+Two static-analysis tools are wired in to find unused code and copy-paste duplication. They run informationally in CI (the `code-audit` job), which **posts the results as a sticky pull-request comment** (updated in place on each push) and never blocks merges — the goal is to drive the baseline down over time.
 
 ```bash
 yarn audit:code     # runs both tools
