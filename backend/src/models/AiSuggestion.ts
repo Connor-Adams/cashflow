@@ -14,7 +14,8 @@ export type AiSuggestionKind =
   | 'amazon_item_categories'
   | 'receipt_extract'
   | 'financial_insight'
-  | 'rule_proposal';
+  | 'rule_proposal'
+  | 'counterparty_promotion';
 
 export type AiSuggestionStatus =
   | 'suggested'

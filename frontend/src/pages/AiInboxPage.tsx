@@ -6,7 +6,11 @@ import { getJson, postJson } from '@/lib/api'
 
 type InboxItem = {
   id: number
-  kind: 'transaction_audit' | 'financial_insight' | 'rule_proposal'
+  kind:
+    | 'transaction_audit'
+    | 'financial_insight'
+    | 'rule_proposal'
+    | 'counterparty_promotion'
   createdAt: string
   transactionId: number | null
   summary: string
@@ -22,17 +26,36 @@ type InsightDetail = {
   supportingTransactionIds?: number[]
 }
 
+type CounterpartyPromotionPayload = {
+  normalizedName: string
+  sampleRaw: string
+  supportCount: number
+  exampleTransactionIds: number[]
+}
+
 type InboxResponse = { items: InboxItem[] }
 
-type Tab = 'all' | 'transaction_audit' | 'financial_insight' | 'rule_proposal'
+type Tab =
+  | 'all'
+  | 'transaction_audit'
+  | 'financial_insight'
+  | 'rule_proposal'
+  | 'counterparty_promotion'
 
-const TAB_ORDER: Tab[] = ['all', 'transaction_audit', 'financial_insight', 'rule_proposal']
+const TAB_ORDER: Tab[] = [
+  'all',
+  'transaction_audit',
+  'financial_insight',
+  'rule_proposal',
+  'counterparty_promotion',
+]
 
 const TAB_LABEL: Record<Tab, string> = {
   all: 'All',
   transaction_audit: 'Audit',
   financial_insight: 'Insights',
   rule_proposal: 'Rules',
+  counterparty_promotion: 'Contacts',
 }
 
 const SEVERITY_RANK: Record<InsightSeverity | 'null', number> = {
@@ -86,6 +109,7 @@ export function AiInboxPage() {
       transaction_audit: 0,
       financial_insight: 0,
       rule_proposal: 0,
+      counterparty_promotion: 0,
     }
     for (const item of items) c[item.kind] += 1
     return c
@@ -154,6 +178,40 @@ export function AiInboxPage() {
     }
   }
 
+  async function promoteCounterparty(item: InboxItem) {
+    // "Create Contact and link all" action behind #373's suggestion card.
+    // Reuses POST /api/transactions/counterparty/promote-bulk to create a
+    // Contact (auto-named from the most recent matching txn's raw value)
+    // and link every matching un-linked txn in the trailing 90 days.
+    const output = item.output as CounterpartyPromotionPayload | null
+    if (!output?.normalizedName) return
+    const original = items
+    setItems((prev) => prev.filter((i) => i !== item))
+    try {
+      await postJson('/api/transactions/counterparty/promote-bulk', {
+        normalizedName: output.normalizedName,
+      })
+    } catch (e) {
+      setItems(original)
+      setErrorById((prev) => ({ ...prev, [item.id]: e instanceof Error ? e.message : 'Failed' }))
+    }
+  }
+
+  async function dismissCounterparty(item: InboxItem) {
+    const output = item.output as CounterpartyPromotionPayload | null
+    if (!output?.normalizedName) return
+    const original = items
+    setItems((prev) => prev.filter((i) => i !== item))
+    try {
+      await postJson(
+        `/api/ai/counterparty-promotions/${encodeURIComponent(output.normalizedName)}/dismiss`,
+      )
+    } catch (e) {
+      setItems(original)
+      setErrorById((prev) => ({ ...prev, [item.id]: e instanceof Error ? e.message : 'Failed' }))
+    }
+  }
+
   function insightDetailsFor(item: InboxItem): InsightDetail[] {
     if (item.kind !== 'financial_insight') return []
     return Array.isArray(item.output) ? (item.output as InsightDetail[]) : []
@@ -170,6 +228,10 @@ export function AiInboxPage() {
     }
     if (item.kind === 'rule_proposal') {
       const out = item.output as { exampleTransactionIds?: number[] } | null
+      return (out?.exampleTransactionIds || []).join(',')
+    }
+    if (item.kind === 'counterparty_promotion') {
+      const out = item.output as CounterpartyPromotionPayload | null
       return (out?.exampleTransactionIds || []).join(',')
     }
     return ''
@@ -263,6 +325,24 @@ export function AiInboxPage() {
                     </Button>
                     <Button type="button" variant="secondary" onClick={() => void dismissProposal(item)}>
                       Dismiss
+                    </Button>
+                  </>
+                ) : item.kind === 'counterparty_promotion' ? (
+                  <>
+                    <Button type="button" onClick={() => void promoteCounterparty(item)}>
+                      Create Contact and link all
+                    </Button>
+                    {ids ? (
+                      <Link to={`/transactions?ids=${ids}`} className="buttonLikeLink">
+                        Review transactions
+                      </Link>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void dismissCounterparty(item)}
+                    >
+                      Ignore this name forever
                     </Button>
                   </>
                 ) : (

@@ -30,7 +30,8 @@ export async function createTrackedSuggestion(params: {
     | 'amazon_item_categories'
     | 'receipt_extract'
     | 'financial_insight'
-    | 'rule_proposal';
+    | 'rule_proposal'
+    | 'counterparty_promotion';
   inputSnapshot: unknown;
   output: unknown;
   model?: string | null;
