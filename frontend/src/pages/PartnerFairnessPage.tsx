@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getJson } from '../lib/api'
+import { getJson, patchJson } from '../lib/api'
 import {
   fromDateInputValue,
   toDateInputValue,
@@ -29,6 +29,15 @@ import type {
   PartnerSettlementRecommendation,
   PartnerSettlementRecommendationResponse,
 } from '../types/api'
+
+/**
+ * #375 — settings shape for the `excludeNonPartnerInflows` knob. Imported
+ * by reference (matches backend) so the dashboard can read + persist it
+ * via /api/settings/cashflow.
+ */
+type CashflowSettingsResponse = {
+  excludeNonPartnerInflows: boolean
+}
 
 const DEFAULT_PARTNER_CURRENCY = 'CAD'
 
@@ -78,11 +87,62 @@ export function PartnerFairnessPage() {
   const [recommendations, setRecommendations] = useState<PartnerSettlementRecommendation[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  /**
+   * #375 — local mirror of the `excludeNonPartnerInflows` preference. Null
+   * during the first /api/settings/cashflow GET so the page doesn't fire a
+   * partner request with a guessed value. Once loaded, flipping the toggle
+   * writes through to the settings endpoint AND re-queries the fairness
+   * routes so the UI reflects the new partition immediately.
+   */
+  const [excludeNonPartnerInflows, setExcludeNonPartnerInflows] =
+    useState<boolean | null>(null)
+  const [togglePersisting, setTogglePersisting] = useState(false)
 
-  const qs = useMemo(
-    () => summaryQueryString({ currency, dateFrom, dateTo }),
-    [currency, dateFrom, dateTo],
-  )
+  const qs = useMemo(() => {
+    const base = summaryQueryString({ currency, dateFrom, dateTo })
+    if (excludeNonPartnerInflows == null) return base
+    const sep = base ? '&' : '?'
+    return `${base}${sep}excludeNonPartnerInflows=${excludeNonPartnerInflows ? 'true' : 'false'}`
+  }, [currency, dateFrom, dateTo, excludeNonPartnerInflows])
+
+  // #375 — load the user's persisted toggle preference once on mount.
+  useEffect(() => {
+    let cancelled = false
+    getJson<CashflowSettingsResponse>('/api/settings/cashflow')
+      .then((s) => {
+        if (cancelled) return
+        setExcludeNonPartnerInflows(s.excludeNonPartnerInflows)
+      })
+      .catch(() => {
+        // If we can't read settings (e.g. auth bounce on first paint), the
+        // backend will fall back to the default (true) in its own resolver.
+        // Drive the UI to the same default so the toggle isn't stuck.
+        if (!cancelled) setExcludeNonPartnerInflows(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // #375 — flip handler: optimistic local update + write-through to the
+  // settings endpoint so the next visit defaults to the same view.
+  async function toggleExcludeNonPartner(next: boolean) {
+    setExcludeNonPartnerInflows(next)
+    setTogglePersisting(true)
+    try {
+      await patchJson<CashflowSettingsResponse>('/api/settings/cashflow', {
+        excludeNonPartnerInflows: next,
+      })
+    } catch (e) {
+      setErr(
+        e instanceof Error
+          ? `Toggle saved locally but could not persist: ${e.message}`
+          : 'Toggle persistence failed',
+      )
+    } finally {
+      setTogglePersisting(false)
+    }
+  }
 
   const quickRanges = useMemo<QuickRange[]>(
     () => [
@@ -95,6 +155,9 @@ export function PartnerFairnessPage() {
   )
 
   useEffect(() => {
+    // #375 — wait for the settings GET to land so the first partner request
+    // already carries the user's persisted toggle.
+    if (excludeNonPartnerInflows == null) return
     let cancelled = false
     setLoading(true)
     setErr(null)
@@ -120,7 +183,7 @@ export function PartnerFairnessPage() {
     return () => {
       cancelled = true
     }
-  }, [qs])
+  }, [qs, excludeNonPartnerInflows])
 
   return (
     <>
@@ -142,6 +205,26 @@ export function PartnerFairnessPage() {
             quickRanges={quickRanges}
             quickRangesLabel="Range"
           />
+          {/* #375 — exclude non-partner inflows toggle. Default ON, persisted
+              in CashflowSettings. Tooltip explains exactly what gets dropped
+              so the user has visibility into the filter. */}
+          <label
+            htmlFor="partner-exclude-non-partner"
+            className="row mt-3"
+            title="When on, positive-amount shared rows whose counterparty contact is not marked Partner (or has no contact) are excluded from the fairness totals, balance, and settlement recommendation."
+          >
+            <input
+              id="partner-exclude-non-partner"
+              type="checkbox"
+              checked={excludeNonPartnerInflows ?? true}
+              disabled={excludeNonPartnerInflows == null || togglePersisting}
+              onChange={(e) => void toggleExcludeNonPartner(e.target.checked)}
+            />
+            <span>Exclude non-partner inflows</span>
+            {togglePersisting && (
+              <span className="muted text-xs">Saving…</span>
+            )}
+          </label>
         </CardContent>
       </Card>
 
@@ -259,6 +342,24 @@ function PartnerFairnessSection({
                 ? 'outflow'
                 : 'neutral'
           }
+        />
+      </div>
+
+      {/* #375 — partner_inflows / non_partner_inflows split. Always
+          rendered; the second tile is greyed-out hint when the user is
+          actively excluding it from the totals. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <StatCard
+          label="Partner inflows"
+          value={formatMoney(data.partnerInflows, cur)}
+          hint="Positive-amount shared rows whose counterparty is your partner."
+          tone="inflow"
+        />
+        <StatCard
+          label="Non-partner inflows"
+          value={formatMoney(data.nonPartnerInflows, cur)}
+          hint="Positive-amount shared rows from side gigs, reimbursements, gifts."
+          tone="neutral"
         />
       </div>
 

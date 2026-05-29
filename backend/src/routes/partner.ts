@@ -2,10 +2,13 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { Op } from 'sequelize';
 import {
+  CashflowSettings,
   Contact,
   PartnerSettlement,
   Transaction,
 } from '../models';
+import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
+import { currentAuth } from '../auth/middleware';
 import { num } from '../util/numbers';
 import {
   buildFairnessByCurrency,
@@ -72,6 +75,7 @@ type RawTxnRow = {
   merchantRaw: string;
   ownershipType: string;
   ownershipContactId: number | null;
+  counterpartyContactId: number | null;
 };
 
 type RawSettlementRow = {
@@ -86,6 +90,7 @@ async function loadSharedTxns(req: Request): Promise<{
   sharedRows: SharedTxnRow[];
   settlementTotals: SettlementTotals[];
   monthlySettlements: Array<SettlementTotals & { month: string }>;
+  partnerContactIds: Set<number>;
 }> {
   const [txns, settlements, contacts] = await Promise.all([
     Transaction.findAll({
@@ -102,6 +107,7 @@ async function loadSharedTxns(req: Request): Promise<{
         'merchantRaw',
         'ownershipType',
         'ownershipContactId',
+        'counterpartyContactId',
       ],
       raw: true,
     }),
@@ -112,13 +118,20 @@ async function loadSharedTxns(req: Request): Promise<{
     }),
     Contact.findAll({
       where: householdWhere(req),
-      attributes: ['id', 'name'],
+      attributes: ['id', 'name', 'isPartner'],
       raw: true,
     }),
   ]);
 
   const contactsById = new Map(
-    (contacts as Array<{ id: number; name: string }>).map((c) => [c.id, c.name]),
+    (contacts as Array<{ id: number; name: string; isPartner: boolean | number }>).map(
+      (c) => [c.id, c.name],
+    ),
+  );
+  const partnerContactIds = new Set<number>(
+    (contacts as Array<{ id: number; name: string; isPartner: boolean | number }>)
+      .filter((c) => Boolean(c.isPartner))
+      .map((c) => c.id),
   );
 
   const sharedRows: SharedTxnRow[] = (txns as unknown as RawTxnRow[]).map((r) => ({
@@ -132,6 +145,7 @@ async function loadSharedTxns(req: Request): Promise<{
     partnerShare: num(r.partnerShareAmount) ?? 0,
     ownershipType: r.ownershipType,
     ownershipContactId: r.ownershipContactId,
+    counterpartyContactId: r.counterpartyContactId,
     contactName:
       r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
   }));
@@ -175,7 +189,28 @@ async function loadSharedTxns(req: Request): Promise<{
     sharedRows,
     settlementTotals: Array.from(totalsByKey.values()),
     monthlySettlements: Array.from(monthlyByKey.values()),
+    partnerContactIds,
   };
+}
+
+/**
+ * #375 — resolve the active user's `excludeNonPartnerInflows` preference.
+ * Falls back to the bundled default when no `cashflow_settings` row exists.
+ * Accepts a `?excludeNonPartnerInflows=true|false` query string override so
+ * the frontend can preview both views without writing the preference.
+ */
+async function resolveExcludeNonPartnerInflows(req: Request): Promise<boolean> {
+  const override = req.query.excludeNonPartnerInflows;
+  if (override === 'true') return true;
+  if (override === 'false') return false;
+  try {
+    const { user } = currentAuth(req);
+    const row = await CashflowSettings.findOne({ where: { userId: user.id } });
+    if (row) return row.excludeNonPartnerInflows;
+  } catch {
+    // No auth context (e.g. tests bypassing middleware) — fall through to default.
+  }
+  return CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows;
 }
 
 function currentMonthBoundaries(now: Date): { start: string; nextStart: string } {
@@ -202,15 +237,18 @@ function currentMonthBoundaries(now: Date): { start: string; nextStart: string }
  */
 router.get('/fairness', async (req, res, next) => {
   try {
-    const { sharedRows, settlementTotals } = await loadSharedTxns(req);
+    const { sharedRows, settlementTotals, partnerContactIds } =
+      await loadSharedTxns(req);
+    const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
     const byCurrency = buildFairnessByCurrency(
       sharedRows,
       settlementTotals,
       start,
       nextStart,
+      { partnerContactIds, excludeNonPartnerInflows },
     );
-    res.json({ byCurrency });
+    res.json({ byCurrency, excludeNonPartnerInflows });
   } catch (e) {
     next(e);
   }
@@ -227,9 +265,14 @@ router.get('/fairness', async (req, res, next) => {
  */
 router.get('/monthly', async (req, res, next) => {
   try {
-    const { sharedRows, monthlySettlements } = await loadSharedTxns(req);
-    const points = buildFairnessMonthly(sharedRows, monthlySettlements);
-    res.json({ points });
+    const { sharedRows, monthlySettlements, partnerContactIds } =
+      await loadSharedTxns(req);
+    const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
+    const points = buildFairnessMonthly(sharedRows, monthlySettlements, {
+      partnerContactIds,
+      excludeNonPartnerInflows,
+    });
+    res.json({ points, excludeNonPartnerInflows });
   } catch (e) {
     next(e);
   }
@@ -244,16 +287,19 @@ router.get('/monthly', async (req, res, next) => {
  */
 router.get('/settlement-recommendation', async (req, res, next) => {
   try {
-    const { sharedRows, settlementTotals } = await loadSharedTxns(req);
+    const { sharedRows, settlementTotals, partnerContactIds } =
+      await loadSharedTxns(req);
+    const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
     const fairness = buildFairnessByCurrency(
       sharedRows,
       settlementTotals,
       start,
       nextStart,
+      { partnerContactIds, excludeNonPartnerInflows },
     );
     const recommendations = buildSettlementRecommendation(fairness);
-    res.json({ recommendations });
+    res.json({ recommendations, excludeNonPartnerInflows });
   } catch (e) {
     next(e);
   }
