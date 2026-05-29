@@ -30,6 +30,15 @@ export class CashflowSettings extends Model<
   declare includeCreditCardBalance: CreationOptional<boolean>;
   /** When true, subtract required monthly goal contributions. Default true. */
   declare includeGoalContributions: CreationOptional<boolean>;
+  /**
+   * #375 — drives the Partner Fairness dashboard "Exclude non-partner inflows"
+   * toggle. When true (default), positive-amount shared rows whose
+   * counterparty_contact_id does NOT reference a partner Contact are dropped
+   * from the fairness rollup so the totals, balance, and settlement
+   * recommendation reflect only partner-attributable cashflow. When false,
+   * the legacy behavior is preserved (every shared row counts).
+   */
+  declare excludeNonPartnerInflows: CreationOptional<boolean>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -39,6 +48,7 @@ export const CASHFLOW_SETTINGS_DEFAULTS = {
   safeToSpendWindowDays: 14,
   includeCreditCardBalance: true,
   includeGoalContributions: true,
+  excludeNonPartnerInflows: true,
 } as const;
 
 export const MIN_SAFE_TO_SPEND_WINDOW_DAYS = 1;
@@ -75,6 +85,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
       includeGoalContributions: {
         type: DataTypes.BOOLEAN,
         field: 'include_goal_contributions',
+        allowNull: false,
+        defaultValue: true,
+      },
+      excludeNonPartnerInflows: {
+        type: DataTypes.BOOLEAN,
+        field: 'exclude_non_partner_inflows',
         allowNull: false,
         defaultValue: true,
       },

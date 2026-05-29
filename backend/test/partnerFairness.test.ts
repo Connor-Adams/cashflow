@@ -22,6 +22,7 @@ function makeRow(over: Partial<SharedTxnRow> = {}): SharedTxnRow {
     partnerShare: -50,
     ownershipType: 'shared',
     ownershipContactId: null,
+    counterpartyContactId: null,
     contactName: null,
     ...over,
   };
@@ -293,6 +294,8 @@ test('buildSettlementRecommendation: positive balance → partner pays you', () 
       partnerShareTotal: 100,
       sharedTransactionCount: 1,
       currentMonthSharedSpend: 0,
+      partnerInflows: 0,
+      nonPartnerInflows: 0,
       balance: 100,
       direction: 'partner_owes_me',
       paidMore: { youCovered: 0, partnerCovered: 0 },
@@ -313,6 +316,8 @@ test('buildSettlementRecommendation: negative balance → you pay partner', () =
       partnerShareTotal: -75,
       sharedTransactionCount: 1,
       currentMonthSharedSpend: 0,
+      partnerInflows: 0,
+      nonPartnerInflows: 0,
       balance: -75,
       direction: 'i_owe_partner',
       paidMore: { youCovered: 0, partnerCovered: 0 },
@@ -333,6 +338,8 @@ test('buildSettlementRecommendation: sub-cent balance collapses to direction "no
       partnerShareTotal: 0.001,
       sharedTransactionCount: 0,
       currentMonthSharedSpend: 0,
+      partnerInflows: 0,
+      nonPartnerInflows: 0,
       balance: 0.001,
       direction: 'even',
       paidMore: { youCovered: 0, partnerCovered: 0 },
@@ -353,6 +360,8 @@ test('buildSettlementRecommendation: amount is always positive (absolute)', () =
       partnerShareTotal: -200,
       sharedTransactionCount: 0,
       currentMonthSharedSpend: 0,
+      partnerInflows: 0,
+      nonPartnerInflows: 0,
       balance: -200,
       direction: 'i_owe_partner',
       paidMore: { youCovered: 0, partnerCovered: 0 },
@@ -362,4 +371,213 @@ test('buildSettlementRecommendation: amount is always positive (absolute)', () =
   ]);
   assert.equal(rec[0].amount, 200);
   assert.ok(rec[0].amount >= 0);
+});
+
+// ---------------- #375 partner_inflows / non_partner_inflows -----------
+
+test('buildFairnessByCurrency: classifies positive-amount rows by counterparty', () => {
+  // Three inflows: one from partner (counterparty=1), one from non-partner contact
+  // (counterparty=2), one with NULL counterparty (anonymous deposit).
+  const rows = [
+    makeRow({
+      txnId: 1,
+      amount: 500,
+      myShare: 0,
+      partnerShare: 250,
+      counterpartyContactId: 1, // partner
+      category: 'Income',
+    }),
+    makeRow({
+      txnId: 2,
+      amount: 30,
+      myShare: 0,
+      partnerShare: 15,
+      counterpartyContactId: 2, // non-partner contact (friend)
+      category: 'Reimbursement',
+    }),
+    makeRow({
+      txnId: 3,
+      amount: 100,
+      myShare: 0,
+      partnerShare: 50,
+      counterpartyContactId: null, // unknown counterparty
+      category: 'Income',
+    }),
+  ];
+  const partnerContactIds = new Set([1]);
+  const result = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', {
+    partnerContactIds,
+  });
+  assert.equal(result.length, 1);
+  // partnerInflows = 500 (only the row with counterparty=1).
+  assert.equal(result[0].partnerInflows, 500);
+  // nonPartnerInflows = 30 + 100 = 130 (other inflows).
+  assert.equal(result[0].nonPartnerInflows, 130);
+});
+
+test('buildFairnessByCurrency: excludeNonPartnerInflows drops non-partner inflow rows from totals', () => {
+  const rows = [
+    // Partner inflow: kept regardless.
+    makeRow({
+      txnId: 1,
+      amount: 500,
+      myShare: 0,
+      partnerShare: 250,
+      counterpartyContactId: 1,
+      category: 'Income',
+    }),
+    // Non-partner inflow: dropped when toggle on.
+    makeRow({
+      txnId: 2,
+      amount: 30,
+      myShare: 0,
+      partnerShare: 15,
+      counterpartyContactId: 2,
+      category: 'Reimbursement',
+    }),
+    // Purchase row: kept (amount < 0, the toggle only filters inflows).
+    makeRow({
+      txnId: 3,
+      amount: -200,
+      myShare: -100,
+      partnerShare: -100,
+      counterpartyContactId: null,
+      category: 'Groceries',
+    }),
+  ];
+  const partnerContactIds = new Set([1]);
+  const result = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', {
+    partnerContactIds,
+    excludeNonPartnerInflows: true,
+  });
+  const cad = result[0];
+  // sharedTransactionCount drops the non-partner inflow → 2 (partner inflow + grocery).
+  assert.equal(cad.sharedTransactionCount, 2);
+  // partnerShareTotal: 250 + (-100) = 150 (non-partner +15 excluded).
+  assert.equal(cad.partnerShareTotal, 150);
+  // sharedSpendTotal: 500 + (-200) = 300 (non-partner 30 excluded).
+  assert.equal(cad.sharedSpendTotal, 300);
+  // Inflow split is reported on the unfiltered input regardless of the toggle.
+  assert.equal(cad.partnerInflows, 500);
+  assert.equal(cad.nonPartnerInflows, 30);
+  // Balance reflects the cleaned set: 150 + 0 settlements = 150.
+  assert.equal(cad.balance, 150);
+});
+
+test('buildFairnessByCurrency: excludeNonPartnerInflows=false preserves legacy behavior', () => {
+  const rows = [
+    makeRow({
+      txnId: 1,
+      amount: 100,
+      myShare: 0,
+      partnerShare: 50,
+      counterpartyContactId: 99, // not in partner set
+    }),
+  ];
+  const partnerContactIds = new Set([1]);
+  const result = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', {
+    partnerContactIds,
+    excludeNonPartnerInflows: false,
+  });
+  // Without exclusion, the non-partner inflow is counted.
+  assert.equal(result[0].sharedTransactionCount, 1);
+  assert.equal(result[0].partnerShareTotal, 50);
+  assert.equal(result[0].nonPartnerInflows, 100);
+  assert.equal(result[0].partnerInflows, 0);
+});
+
+test('buildFairnessByCurrency: empty partnerContactIds → all inflows are non-partner', () => {
+  const rows = [
+    makeRow({
+      txnId: 1,
+      amount: 200,
+      myShare: 0,
+      partnerShare: 100,
+      counterpartyContactId: 1,
+    }),
+  ];
+  const result = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', {
+    // No partner contact ids registered.
+    partnerContactIds: new Set(),
+    excludeNonPartnerInflows: false,
+  });
+  assert.equal(result[0].partnerInflows, 0);
+  assert.equal(result[0].nonPartnerInflows, 200);
+});
+
+test('buildFairnessMonthly: excludeNonPartnerInflows drops non-partner rows from monthly trend', () => {
+  const rows = [
+    // Partner inflow in April.
+    makeRow({
+      txnId: 1,
+      date: '2026-04-10',
+      amount: 500,
+      myShare: 0,
+      partnerShare: 250,
+      counterpartyContactId: 1,
+    }),
+    // Non-partner inflow in April: dropped.
+    makeRow({
+      txnId: 2,
+      date: '2026-04-20',
+      amount: 30,
+      myShare: 0,
+      partnerShare: 15,
+      counterpartyContactId: 2,
+    }),
+    // Purchase in May, kept.
+    makeRow({
+      txnId: 3,
+      date: '2026-05-05',
+      amount: -100,
+      myShare: -50,
+      partnerShare: -50,
+      counterpartyContactId: null,
+    }),
+  ];
+  const partnerContactIds = new Set([1]);
+  const result = buildFairnessMonthly(rows, [], {
+    partnerContactIds,
+    excludeNonPartnerInflows: true,
+  });
+  const apr = result.find((p) => p.month === '2026-04')!;
+  assert.ok(apr);
+  // April partnerShare = 250 only (15 dropped).
+  assert.equal(apr.partnerShare, 250);
+  assert.equal(apr.cumulativeBalance, 250);
+  const may = result.find((p) => p.month === '2026-05')!;
+  assert.ok(may);
+  assert.equal(may.partnerShare, -50);
+  assert.equal(may.cumulativeBalance, 200);
+});
+
+test('buildFairnessByCurrency: refunds (negative-amount rows) are unaffected by the toggle', () => {
+  // A refund row (positive amount on the partner side counts), but for purchase refunds
+  // we get negative amount + positive partnerShare. Confirm that toggle doesn't cull the
+  // amount > 0 rows belonging to partner.
+  const rows = [
+    makeRow({
+      txnId: 1,
+      amount: -200,
+      myShare: -100,
+      partnerShare: -100,
+      counterpartyContactId: null,
+    }),
+    makeRow({
+      txnId: 2,
+      amount: 50, // a partner-attributable refund inflow
+      myShare: 25,
+      partnerShare: 25,
+      counterpartyContactId: 1,
+    }),
+  ];
+  const partnerContactIds = new Set([1]);
+  const result = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', {
+    partnerContactIds,
+    excludeNonPartnerInflows: true,
+  });
+  // Both rows kept; partner refund counted as partnerInflow=50.
+  assert.equal(result[0].sharedTransactionCount, 2);
+  assert.equal(result[0].partnerInflows, 50);
+  assert.equal(result[0].nonPartnerInflows, 0);
 });

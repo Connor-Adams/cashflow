@@ -39,6 +39,13 @@ export type SharedTxnRow = {
   ownershipType: string;
   ownershipContactId: number | null;
   contactName: string | null;
+  /**
+   * #375 — counterparty Contact id (from PR #380). Independent of
+   * ownershipContactId: counterparty is "who paid in / who got paid",
+   * ownership is "who the spend belongs to". NULL on legacy rows and on
+   * any row where the import pipeline did not surface a counterparty.
+   */
+  counterpartyContactId: number | null;
 };
 
 /** Settlement summary keyed by (contactId, currency). Mirrors `partnerMath.SettlementSummary`. */
@@ -107,6 +114,19 @@ export type FairnessByCurrency = {
    * negative in the headline metric.
    */
   currentMonthSharedSpend: number;
+  /**
+   * #375 — sum of positive-amount rows whose counterparty_contact_id is a
+   * partner Contact (Contact.is_partner=true). Always reported regardless of
+   * the excludeNonPartnerInflows toggle so the UI can show both totals
+   * side-by-side.
+   */
+  partnerInflows: number;
+  /**
+   * #375 — sum of positive-amount rows whose counterparty is NOT a partner
+   * Contact (NULL or a non-partner Contact). These are the friend-paid-back-
+   * lunch / side-gig / family-gift rows the toggle defaults to excluding.
+   */
+  nonPartnerInflows: number;
   /**
    * Cumulative settlement-adjusted balance: gross + (iPaid - partnerPaid).
    * Positive: partner owes me. Negative: I owe partner.
@@ -237,28 +257,95 @@ export function topLargestShared(
 }
 
 /**
+ * #375 — option bag for the fairness rollup. Pure value object so the
+ * helper stays trivially testable.
+ *
+ * `partnerContactIds` lists the Contact ids the household has flagged as
+ * `is_partner=true`. A row counts as a "partner inflow" when:
+ *   1. `amount > 0` (positive-amount row — inflow), and
+ *   2. `counterpartyContactId` is non-null and present in this set.
+ * Everything else with `amount > 0` is a non-partner inflow.
+ *
+ * `excludeNonPartnerInflows` (default false here; the route caller threads
+ * the user's CashflowSettings value through) drops non-partner-inflow rows
+ * from the rollup BEFORE all totals are computed, so sharedSpendTotal,
+ * partnerShareTotal, balance, and settlement recommendation all reflect
+ * the cleaned set. The drop happens at the per-currency loop level so the
+ * sharedTransactionCount also reflects what the user sees.
+ */
+export type FairnessOptions = {
+  partnerContactIds?: Set<number>;
+  excludeNonPartnerInflows?: boolean;
+};
+
+/**
+ * #375 — classify a single shared row as a partner inflow or non-partner
+ * inflow. Returns 'none' for non-inflow rows (amount <= 0) so the caller
+ * can iterate once and compute both side counts.
+ */
+function classifyInflow(
+  row: SharedTxnRow,
+  partnerContactIds: Set<number>,
+): 'partner' | 'non_partner' | 'none' {
+  if (row.amount <= 0) return 'none';
+  if (
+    row.counterpartyContactId != null &&
+    partnerContactIds.has(row.counterpartyContactId)
+  ) {
+    return 'partner';
+  }
+  return 'non_partner';
+}
+
+/**
  * Build the per-currency fairness summary used by `GET /api/partner/fairness`.
  *
  * @param rows           Raw shared transaction rows (already scoped to household + date filter)
  * @param settlements    Pre-aggregated settlement totals scoped to the same date filter
  * @param currentMonthStart YYYY-MM-DD of the first day of the current month (caller passes today's month, or any reference month)
  * @param nextMonthStart YYYY-MM-DD of the first day of the month AFTER currentMonthStart
+ * @param options         #375 — partner-contact set + excludeNonPartnerInflows toggle
  */
 export function buildFairnessByCurrency(
   rows: SharedTxnRow[],
   settlements: SettlementTotals[],
   currentMonthStart: string,
   nextMonthStart: string,
+  options: FairnessOptions = {},
 ): FairnessByCurrency[] {
+  const partnerContactIds = options.partnerContactIds ?? new Set<number>();
+  const excludeNonPartnerInflows = options.excludeNonPartnerInflows ?? false;
+
   const byCurrency = new Map<string, FairnessByCurrency>();
 
-  // Bucket shared rows per currency.
+  // Bucket shared rows per currency. #375 — when excludeNonPartnerInflows is
+  // on, drop non-partner inflows BEFORE bucketing so every downstream total
+  // (sharedSpendTotal, balance, categoryBreakdown, largestShared) ignores
+  // them. We still tally the inflow splits separately on the unfiltered
+  // input below, so the user can always see what they're hiding.
   const rowsByCurrency = new Map<string, SharedTxnRow[]>();
   for (const r of rows) {
     if (r.partnerShare === 0) continue;
+    if (excludeNonPartnerInflows) {
+      const kind = classifyInflow(r, partnerContactIds);
+      if (kind === 'non_partner') continue;
+    }
     const list = rowsByCurrency.get(r.currency) ?? [];
     list.push(r);
     rowsByCurrency.set(r.currency, list);
+  }
+
+  // Tally partner/non-partner inflows on the unfiltered input so the UI can
+  // present both totals even when the toggle is hiding the non-partner side.
+  const inflowsByCurrency = new Map<string, { partner: number; nonPartner: number }>();
+  for (const r of rows) {
+    if (r.partnerShare === 0) continue;
+    const kind = classifyInflow(r, partnerContactIds);
+    if (kind === 'none') continue;
+    const acc = inflowsByCurrency.get(r.currency) ?? { partner: 0, nonPartner: 0 };
+    if (kind === 'partner') acc.partner += r.amount;
+    else acc.nonPartner += r.amount;
+    inflowsByCurrency.set(r.currency, acc);
   }
 
   // Bucket settlements per currency (sum across contacts).
@@ -270,16 +357,18 @@ export function buildFairnessByCurrency(
     settlementByCurrency.set(s.currency, cur);
   }
 
-  // Union currencies across rows and settlements so a currency with only a
-  // settlement still surfaces.
+  // Union currencies across rows, inflows, and settlements so a currency
+  // with only one of those still surfaces.
   const allCurrencies = new Set<string>([
     ...rowsByCurrency.keys(),
+    ...inflowsByCurrency.keys(),
     ...settlementByCurrency.keys(),
   ]);
 
   for (const currency of allCurrencies) {
     const list = rowsByCurrency.get(currency) ?? [];
     const settlement = settlementByCurrency.get(currency) ?? { iPaid: 0, partnerPaid: 0 };
+    const inflowSplit = inflowsByCurrency.get(currency) ?? { partner: 0, nonPartner: 0 };
     let sharedSpendTotal = 0;
     let myShareTotal = 0;
     let partnerShareTotal = 0;
@@ -311,6 +400,8 @@ export function buildFairnessByCurrency(
       partnerShareTotal,
       sharedTransactionCount: list.length,
       currentMonthSharedSpend,
+      partnerInflows: inflowSplit.partner,
+      nonPartnerInflows: inflowSplit.nonPartner,
       balance,
       direction: directionFromBalance(balance),
       paidMore,
@@ -333,11 +424,19 @@ export function buildFairnessByCurrency(
  * month in the dataset through each emitted month; callers passing a
  * narrowed date range still get a balance relative to that range, NOT the
  * lifetime balance. Pass an unfiltered range for the lifetime view.
+ *
+ * #375 — when `options.excludeNonPartnerInflows` is true, non-partner
+ * inflow rows are dropped before bucketing so the monthly netDelta and
+ * cumulativeBalance reflect the same cleaned set as the headline fairness.
  */
 export function buildFairnessMonthly(
   rows: SharedTxnRow[],
   settlements: Array<SettlementTotals & { /** YYYY-MM */ month: string }>,
+  options: FairnessOptions = {},
 ): FairnessMonthlyPoint[] {
+  const partnerContactIds = options.partnerContactIds ?? new Set<number>();
+  const excludeNonPartnerInflows = options.excludeNonPartnerInflows ?? false;
+
   type Acc = {
     sharedSpend: number;
     myShare: number;
@@ -348,6 +447,10 @@ export function buildFairnessMonthly(
 
   for (const r of rows) {
     if (r.partnerShare === 0) continue;
+    if (excludeNonPartnerInflows) {
+      const kind = classifyInflow(r, partnerContactIds);
+      if (kind === 'non_partner') continue;
+    }
     const month = r.date.slice(0, 7); // YYYY-MM
     const key = `${r.currency}\0${month}`;
     const acc =

@@ -85,6 +85,10 @@ test('GET /api/settings/cashflow returns defaults when no row exists', async () 
   assert.equal(res.body.safeToSpendWindowDays, 14);
   assert.equal(res.body.includeCreditCardBalance, true);
   assert.equal(res.body.includeGoalContributions, true);
+  // #375 — exclude_non_partner_inflows defaults to true so the partner
+  // fairness dashboard hides side-gig / friend-repayment inflows out of
+  // the box.
+  assert.equal(res.body.excludeNonPartnerInflows, true);
 });
 
 test('PATCH /api/settings/cashflow creates row on first call', async () => {
@@ -162,4 +166,30 @@ test('unauthenticated request is rejected', async () => {
   const fresh = request.agent(app);
   const res = await fresh.get('/api/settings/cashflow');
   assert.equal(res.status, 401);
+});
+
+test('PATCH /api/settings/cashflow accepts excludeNonPartnerInflows=false', async () => {
+  const res = await primaryAgent.patch('/api/settings/cashflow').send({
+    excludeNonPartnerInflows: false,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.excludeNonPartnerInflows, false);
+  // Other fields untouched.
+  assert.equal(res.body.includeGoalContributions, true);
+});
+
+test('PATCH /api/settings/cashflow rejects non-boolean excludeNonPartnerInflows', async () => {
+  const res = await primaryAgent.patch('/api/settings/cashflow').send({
+    excludeNonPartnerInflows: 'sometimes',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /excludeNonPartnerInflows must be boolean/);
+});
+
+test('PATCH /api/settings/cashflow coerces string boolean inputs', async () => {
+  const res = await primaryAgent.patch('/api/settings/cashflow').send({
+    excludeNonPartnerInflows: 'true',
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.excludeNonPartnerInflows, true);
 });
