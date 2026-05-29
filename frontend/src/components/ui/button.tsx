@@ -14,7 +14,8 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "default", size = "default", asChild = false, ...props }, ref) => {
     const Comp: React.ElementType = asChild ? Slot : "button"
-    const sizeClass = size === "sm" ? "h-9 px-3 text-sm" : size === "lg" ? "h-11 px-8" : "h-10 px-4"
+    // WCAG 2.1 AA 2.5.5: minimum 44×44px tap target on mobile; desktop keeps h-9 (36px) for density.
+    const sizeClass = size === "sm" ? "h-11 md:h-9 px-3 text-sm" : size === "lg" ? "h-11 px-8" : "h-10 px-4"
     const baseClass = "inline-flex items-center justify-center whitespace-nowrap rounded-lg font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 disabled:pointer-events-none disabled:opacity-50"
 
     if (variant === "primary" || variant === "default") {

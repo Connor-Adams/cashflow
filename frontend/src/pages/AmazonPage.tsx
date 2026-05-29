@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useConfirm } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -126,6 +127,7 @@ function categoryPreview(order?: AmazonOrder): string {
 
 export function AmazonPage() {
   const fileRef = useRef<HTMLInputElement>(null)
+  const confirm = useConfirm()
   const [orders, setOrders] = useState<AmazonOrder[]>([])
   const [txns, setTxns] = useState<AmazonTransaction[]>([])
   const [categories, setCategories] = useState<string[]>([])
@@ -257,6 +259,13 @@ export function AmazonPage() {
   }
 
   async function unlink(id: number) {
+    const ok = await confirm({
+      title: 'Unlink order from transaction?',
+      description: "This won't delete either. You can re-link later.",
+      confirmLabel: 'Unlink',
+      cancelLabel: 'Keep linked',
+    })
+    if (!ok) return
     setLoading(true)
     try {
       await deleteReq(`/api/amazon/links/${id}`)
@@ -323,6 +332,7 @@ export function AmazonPage() {
 
   return (
     <div className="page amazonPage">
+      {confirm.dialog}
       <div className="amazonHeader">
         <div>
           <h1>Amazon Enrichment</h1>
