@@ -49,6 +49,9 @@ export class Transaction extends Model<
   declare categoryOverride: string | null;
   declare finalCategory: string | null;
 
+  declare counterpartyRaw: string | null;
+  declare counterpartyContactId: number | null;
+
   declare autoBusiness: boolean | null;
   declare businessOverride: boolean | null;
   declare finalBusiness: CreationOptional<boolean>;
@@ -346,6 +349,17 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       importConfidenceFlags: {
         type: DataTypes.TEXT,
         field: 'import_confidence_flags',
+        allowNull: true,
+      },
+
+      counterpartyRaw: {
+        type: DataTypes.TEXT,
+        field: 'counterparty_raw',
+        allowNull: true,
+      },
+      counterpartyContactId: {
+        type: DataTypes.INTEGER,
+        field: 'counterparty_contact_id',
         allowNull: true,
       },
     } as ModelAttributes<Transaction>,
