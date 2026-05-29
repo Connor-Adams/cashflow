@@ -26,6 +26,7 @@ let agentB: ReturnType<typeof request.agent>;
 let householdAId: number;
 let householdBId: number;
 let userAId: number;
+let userBId: number;
 let testDb: PgTestDb;
 
 async function makeAccount(opts: {
@@ -96,6 +97,7 @@ before(async () => {
   householdAId = seedA.householdId;
   householdBId = seedB.householdId;
   userAId = seedA.userId;
+  userBId = seedB.userId;
 
   agentA = request.agent(app);
   agentA.jar.setCookie(`cashflow_session=${seedA.token}; Path=/`);
@@ -153,7 +155,7 @@ test('POST /counterparty/backfill: streaming sweep extracts in-scope rows and sk
   // Household B (must remain untouched): one in-scope checking row.
   const checkingB = await makeAccount({
     householdId: householdBId,
-    userId: 0,
+    userId: userBId,
     name: 'B Checking',
     accountType: 'checking',
   });
