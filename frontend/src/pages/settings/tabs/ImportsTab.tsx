@@ -12,6 +12,7 @@ import {
   revokeCaptureToken,
   type CaptureTokenRow,
 } from '../../../lib/captureTokens'
+import { CounterpartyBackfillCard } from './imports/CounterpartyBackfillCard'
 
 // ---------------------------------------------------------------------------
 // Types (inlined from SettingsPage.tsx — no shared type file yet)
@@ -669,6 +670,8 @@ export function ImportsTab() {
           )}
         </div>
       </Card>
+      {/* ── Counterparty backfill (issue #376) ──────────────────────────── */}
+      <CounterpartyBackfillCard />
     </>
   )
 }
