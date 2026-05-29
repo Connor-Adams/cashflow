@@ -153,6 +153,45 @@ jobs:
       - name: Build backend
         run: yarn workspace cashflow-backend run build
 
+  code-audit:
+    needs: install
+    runs-on: ubuntu-latest
+    # Informational for now: surfaces dead code (knip) and duplication (jscpd)
+    # without blocking merges. Flip the steps to required once the baseline is
+    # driven down. See CONTRIBUTING.md for the local `yarn audit:code` workflow.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Dead code (knip)
+        continue-on-error: true
+        run: yarn deadcode
+
+      - name: Duplicate code (jscpd)
+        continue-on-error: true
+        run: yarn dupes
+
+      - name: Upload jscpd report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jscpd-report
+          path: reports/jscpd
+          retention-days: 7
+          if-no-files-found: ignore
+
   frontend-test:
     needs: install
     runs-on: ubuntu-latest

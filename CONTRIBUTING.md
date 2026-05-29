@@ -67,6 +67,22 @@ yarn workspace frontend run test
 yarn workspace frontend run build
 ```
 
+## Code health: dead code & duplication
+
+Two static-analysis tools are wired in to find unused code and copy-paste duplication. They run informationally in CI (the `code-audit` job) and never block merges — the goal is to drive the baseline down over time.
+
+```bash
+yarn audit:code     # runs both tools
+yarn deadcode       # knip: unused files, exports, types, dependencies
+yarn deadcode:fix   # knip --fix: auto-remove safe unused exports/files (review the diff!)
+yarn dupes          # jscpd: duplicate-code detector, writes reports/jscpd/html/
+```
+
+- **[knip](https://knip.dev)** (`knip.json`) understands the yarn-workspace layout and reports unused files, exports, exported types, and dependencies across `backend` / `frontend` / `shared`.
+- **[jscpd](https://github.com/kucherenko/jscpd)** (`.jscpd.json`) reports duplicated blocks; open `reports/jscpd/html/index.html` for a browsable view. The `threshold` (5% duplicated lines) acts as a ratchet — lower it as duplication drops.
+
+When you knowingly keep an "unused" export (e.g. a public API or test seam), add it to the relevant `knip.json` workspace `ignore`/`ignoreDependencies` entry rather than leaving it as noise.
+
 ## Project layout
 
 | Path | Role |

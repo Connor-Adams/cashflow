@@ -27,12 +27,18 @@
     "railway:frontend:start": "RAILWAY_DEPLOY_TARGET=frontend node scripts/railway-run.cjs start",
     "test": "yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace frontend run test",
     "ci": "yarn test:workflows && yarn workspace cashflow-backend run typecheck && yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace cashflow-backend run build && yarn workspace frontend run test && yarn workspace frontend run build",
-    "test:workflows": "node --test test/*.test.cjs"
+    "test:workflows": "node --test test/*.test.cjs",
+    "deadcode": "knip",
+    "deadcode:fix": "knip --fix",
+    "dupes": "jscpd",
+    "audit:code": "knip --no-exit-code; jscpd"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
     "fallow": "^2.79.0",
     "husky": "^9.1.7",
+    "jscpd": "^4.2.4",
+    "knip": "^6.14.2",
     "lint-staged": "^16.4.0"
   }
 }
