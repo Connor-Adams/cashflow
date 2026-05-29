@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { AICleanupPanel } from '../components/import/AICleanupPanel'
 import type { ImportHistoryRow } from '../components/import/ImportHistoryTable'
@@ -90,8 +91,11 @@ export function ImportBatchPage() {
 
   if (row === undefined) {
     return (
-      <div className="page">
-        <PageHeader title={`Import ${batchLabel}`} description="Loading batch detail…" />
+      <div className="page space-y-4">
+        <PageHeader title={`Import ${batchLabel}`} />
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-24 w-full" />
       </div>
     )
   }

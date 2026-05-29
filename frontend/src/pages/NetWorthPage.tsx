@@ -272,10 +272,18 @@ export function NetWorthPage() {
                   <TableCell>{row.label}</TableCell>
                   <TableCell>{row.currency}</TableCell>
                   <TableCell className="text-right">
-                    {row.native != null ? formatMoney(row.native, row.currency) : '—'}
+                    {row.native != null
+                      ? formatMoney(row.native, row.currency)
+                      : row.source === 'account' && !row.openingBalanceSet
+                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        : '—'}
                   </TableCell>
                   <TableCell className="text-right">
-                    {row.cadValue != null ? formatMoney(row.cadValue, 'CAD') : '—'}
+                    {row.cadValue != null
+                      ? formatMoney(row.cadValue, 'CAD')
+                      : row.source === 'account' && !row.openingBalanceSet
+                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        : '—'}
                   </TableCell>
                   <TableCell>
                     {badges.length === 0 ? (

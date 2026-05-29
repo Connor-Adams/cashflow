@@ -159,6 +159,13 @@ export function ReviewInboxPage() {
   const [err, setErr] = useState<string | null>(null)
   const [cursorRowId, setCursorRowId] = useState<number | null>(null)
   const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
+  const [showShortcutHint, setShowShortcutHint] = useState(() => {
+    try {
+      return localStorage.getItem('seenReviewInboxShortcuts') !== 'true'
+    } catch {
+      return false
+    }
+  })
   const { showToast } = useToast()
   const categoryPickerRef = useRef<HTMLDivElement>(null)
   const tableWrapRef = useRef<HTMLDivElement>(null)
@@ -585,17 +592,30 @@ export function ReviewInboxPage() {
                 </Badge>
               ))}
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={showShortcutsHelp}
-              aria-label="Show keyboard shortcuts"
-              title="Keyboard shortcuts (press ?)"
-            >
-              <Keyboard aria-hidden="true" />
-              Shortcuts
-            </Button>
+            <div className="relative">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  showShortcutsHelp()
+                  if (showShortcutHint) {
+                    setShowShortcutHint(false)
+                    try { localStorage.setItem('seenReviewInboxShortcuts', 'true') } catch { /* ignore */ }
+                  }
+                }}
+                aria-label="Show keyboard shortcuts"
+                title="Keyboard shortcuts (press ?)"
+              >
+                <Keyboard aria-hidden="true" />
+                Shortcuts
+              </Button>
+              {showShortcutHint && (
+                <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-0.5 text-xs text-background">
+                  Press ? anytime for keyboard shortcuts
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Import-confidence flag chips (#214). Selecting a chip narrows the
