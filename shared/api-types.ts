@@ -396,6 +396,11 @@ export type Contact = {
   householdId: number
   name: string
   notes: string | null
+  /**
+   * #375 — flags the household's partner Contact. Drives the Partner
+   * Fairness dashboard's partner_inflows / non_partner_inflows split.
+   */
+  isPartner: boolean
 }
 
 export type Category = {

@@ -16,6 +16,14 @@ export class Contact extends Model<
   declare householdId: number;
   declare name: string;
   declare notes: string | null;
+  /**
+   * #375 — marks this Contact as the household's partner. Drives the Partner
+   * Fairness dashboard's partner_inflows / non_partner_inflows split: inflows
+   * whose counterparty_contact_id points at a partner Contact count as partner
+   * inflows; all other positive-amount shared rows count as non-partner.
+   * Default false so legacy rows behave as before.
+   */
+  declare isPartner: CreationOptional<boolean>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -31,6 +39,12 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       },
       name: { type: DataTypes.STRING(160), allowNull: false },
       notes: { type: DataTypes.TEXT, allowNull: true },
+      isPartner: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_partner',
+        allowNull: false,
+        defaultValue: false,
+      },
     } as ModelAttributes<Contact>,
     {
       sequelize,

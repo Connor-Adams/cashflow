@@ -66,7 +66,12 @@ test('GET /api/ai/inbox/count returns zeros when nothing pending', async () => {
   assert.equal(r.status, 200);
   assert.deepEqual(r.body, {
     total: 0,
-    byKind: { transaction_audit: 0, financial_insight: 0, rule_proposal: 0 },
+    byKind: {
+      transaction_audit: 0,
+      financial_insight: 0,
+      rule_proposal: 0,
+      counterparty_promotion: 0,
+    },
   });
 });
 

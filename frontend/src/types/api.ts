@@ -357,6 +357,16 @@ export type PartnerFairnessByCurrency = {
   partnerShareTotal: number
   sharedTransactionCount: number
   currentMonthSharedSpend: number
+  /**
+   * #375 — sum of positive-amount rows whose counterparty Contact has
+   * `isPartner=true`.
+   */
+  partnerInflows: number
+  /**
+   * #375 — sum of positive-amount rows whose counterparty is null or a
+   * non-partner Contact (friend repaying lunch, side gig, family gift).
+   */
+  nonPartnerInflows: number
   balance: number
   direction: 'partner_owes_me' | 'i_owe_partner' | 'even'
   paidMore: { youCovered: number; partnerCovered: number }
@@ -367,6 +377,12 @@ export type PartnerFairnessByCurrency = {
 /** Response shape for GET /api/partner/fairness. */
 export type PartnerFairnessResponse = {
   byCurrency: PartnerFairnessByCurrency[]
+  /**
+   * #375 — echo of the toggle state the rollup was computed with. The
+   * frontend uses this to keep the local switch in sync after a navigation
+   * that bypasses the settings round-trip.
+   */
+  excludeNonPartnerInflows: boolean
 }
 
 /** One point in the historical fairness trend. */
@@ -385,6 +401,8 @@ export type PartnerFairnessMonthlyPoint = {
 /** Response shape for GET /api/partner/monthly. */
 export type PartnerFairnessMonthlyResponse = {
   points: PartnerFairnessMonthlyPoint[]
+  /** #375 — echo of the toggle state used to compute the trend. */
+  excludeNonPartnerInflows: boolean
 }
 
 /** One settlement recommendation per currency. */
@@ -398,6 +416,8 @@ export type PartnerSettlementRecommendation = {
 /** Response shape for GET /api/partner/settlement-recommendation. */
 export type PartnerSettlementRecommendationResponse = {
   recommendations: PartnerSettlementRecommendation[]
+  /** #375 — echo of the toggle state used to compute the recommendation. */
+  excludeNonPartnerInflows: boolean
 }
 
 // ---- Sankey visualization (issue #224) ---------------------------------

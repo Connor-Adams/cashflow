@@ -22,6 +22,7 @@ type Serialized = {
   includeCreditCardBalance: boolean;
   includeGoalContributions: boolean;
   counterpartyPromotionThreshold: number;
+  excludeNonPartnerInflows: boolean;
 };
 
 function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
@@ -31,6 +32,7 @@ function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
     includeCreditCardBalance: row.includeCreditCardBalance,
     includeGoalContributions: row.includeGoalContributions,
     counterpartyPromotionThreshold: row.counterpartyPromotionThreshold,
+    excludeNonPartnerInflows: row.excludeNonPartnerInflows,
   };
 }
 
@@ -42,6 +44,7 @@ function defaults(): Serialized {
     includeGoalContributions: CASHFLOW_SETTINGS_DEFAULTS.includeGoalContributions,
     counterpartyPromotionThreshold:
       CASHFLOW_SETTINGS_DEFAULTS.counterpartyPromotionThreshold,
+    excludeNonPartnerInflows: CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows,
   };
 }
 
@@ -113,6 +116,14 @@ export function validateCashflowSettingsPatch(raw: Record<string, unknown>):
     out.counterpartyPromotionThreshold = n;
   }
 
+  if (raw.excludeNonPartnerInflows !== undefined) {
+    const b = coerceBool(raw.excludeNonPartnerInflows);
+    if (b === null) {
+      return { ok: false, error: 'excludeNonPartnerInflows must be boolean' };
+    }
+    out.excludeNonPartnerInflows = b;
+  }
+
   return { ok: true, patch: out };
 }
 
@@ -163,6 +174,9 @@ router.patch('/', async (req, res, next) => {
         'counterpartyPromotionThreshold',
         result.patch.counterpartyPromotionThreshold,
       );
+    }
+    if (result.patch.excludeNonPartnerInflows !== undefined) {
+      row.set('excludeNonPartnerInflows', result.patch.excludeNonPartnerInflows);
     }
     await row.save();
     res.json(serialize(row));
