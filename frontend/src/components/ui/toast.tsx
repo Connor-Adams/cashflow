@@ -144,9 +144,10 @@ function ToastViewport({
   if (typeof document === 'undefined') return null
   const visible = toasts.slice(-MAX_VISIBLE_TOASTS)
   return createPortal(
+    // WCAG 2.1 AA 2.5.5: on mobile (<768px) anchor above bottom-anchored UI; desktop keeps bottom-4.
     <div
       data-slot="toast-viewport"
-      className="pointer-events-none fixed bottom-4 right-4 z-60 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
+      className="pointer-events-none fixed bottom-20 right-4 md:bottom-4 z-60 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
     >
       {visible.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />

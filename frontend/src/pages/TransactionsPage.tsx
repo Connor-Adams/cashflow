@@ -559,6 +559,18 @@ export function TransactionsPage() {
     ]
   )
 
+  function clearAllFilters() {
+    setPage(1)
+    setReviewOnly(false)
+    setCurrency(DEFAULT_TRANSACTION_CURRENCY)
+    setCategoryFilter('')
+    setDateFrom('')
+    setDateTo('')
+    setBatchFilter('')
+    setIdsFilter('')
+    setStatusFilter('')
+  }
+
   async function openItemsDrawer(txnId: number) {
     setErr(null)
     try {
@@ -1503,16 +1515,29 @@ export function TransactionsPage() {
               ) : !sortedRows.length ? (
                 <TableRow>
                   <TableCell colSpan={9} className="emptyStateCell">
-                    <p>
-                      {statusFilter === 'pending'
-                        ? 'No pending transactions.'
-                        : 'No transactions yet — or none match your filters.'}
-                    </p>
-                    <p className="muted">
-                      Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
-                      placed files in the configured upload folder. Create accounts under{' '}
-                      <Link to="/accounts">Accounts</Link> if needed.
-                    </p>
+                    {activeFilters.length > 0 ? (
+                      <>
+                        <p>No transactions match this filter.</p>
+                        <p>
+                          <Button type="button" variant="outline" size="sm" onClick={clearAllFilters}>
+                            Clear filters
+                          </Button>
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          {statusFilter === 'pending'
+                            ? 'No pending transactions.'
+                            : 'No transactions yet.'}
+                        </p>
+                        <p className="muted">
+                          Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
+                          placed files in the configured upload folder. Create accounts under{' '}
+                          <Link to="/accounts">Accounts</Link> if needed.
+                        </p>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
