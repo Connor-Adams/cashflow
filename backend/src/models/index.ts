@@ -109,6 +109,8 @@ import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 import { Label, initLabel } from './Label';
 import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
 import { Feedback, initFeedback } from './Feedback';
+import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
+import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -196,6 +198,8 @@ initFinancialScenario(sequelize);
 initLabel(sequelize);
 initTransactionLabel(sequelize);
 initFeedback(sequelize);
+initClientErrorEvent(sequelize);
+initServerErrorEvent(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -999,6 +1003,20 @@ Household.hasMany(Feedback, {
 });
 Feedback.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
+// Client-error ring buffer (issue #392). Nullable FKs — events can arrive
+// before the user is authenticated. Cascade so removing a user or household
+// removes their error history.
+User.hasMany(ClientErrorEvent, { foreignKey: 'user_id', as: 'clientErrorEvents', onDelete: 'CASCADE', hooks: true });
+ClientErrorEvent.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Household.hasMany(ClientErrorEvent, { foreignKey: 'household_id', as: 'clientErrorEvents', onDelete: 'CASCADE', hooks: true });
+ClientErrorEvent.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+// Server-error ring buffer (issue #393). Same nullable-FK + cascade pattern.
+User.hasMany(ServerErrorEvent, { foreignKey: 'user_id', as: 'serverErrorEvents', onDelete: 'CASCADE', hooks: true });
+ServerErrorEvent.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Household.hasMany(ServerErrorEvent, { foreignKey: 'household_id', as: 'serverErrorEvents', onDelete: 'CASCADE', hooks: true });
+ServerErrorEvent.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
 export {
   sequelize,
   User,
@@ -1085,4 +1103,6 @@ export {
   Label,
   TransactionLabel,
   Feedback,
+  ClientErrorEvent,
+  ServerErrorEvent,
 };

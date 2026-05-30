@@ -82,6 +82,7 @@ import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
+import { ServerErrorEvent } from './models';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
 
@@ -264,6 +265,25 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+// Error tap for 5xx events — best-effort, never fails the request (issue #393).
+app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
+  const rawStatus = isObjectError(err) && 'status' in err ? err.status : isObjectError(err) && 'statusCode' in err ? err.statusCode : undefined;
+  const status = Number(rawStatus) || 500;
+  if (status >= 500) {
+    void ServerErrorEvent.create({
+      householdId: req.auth?.household?.id ?? null,
+      userId: req.auth?.user?.id ?? null,
+      method: req.method,
+      path: (req.originalUrl || req.url).slice(0, 512),
+      status,
+      message: String(err instanceof Error ? err.message : '').slice(0, 4000),
+      stack: String(err instanceof Error ? err.stack ?? '' : '').slice(0, 8000),
+      requestId: req.requestId ?? null,
+    }).catch(() => undefined);
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);
