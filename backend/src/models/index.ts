@@ -105,6 +105,7 @@ import {
   initDebtPayoffScenario,
 } from './DebtPayoffScenario';
 import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
+import { Feedback, initFeedback } from './Feedback';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -188,6 +189,7 @@ initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
 initDebtPayoffScenario(sequelize);
 initFinancialScenario(sequelize);
+initFeedback(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -943,6 +945,24 @@ DebtPayoffScenario.belongsTo(User, {
   as: 'user',
 });
 
+// In-app feedback / bug reports (issue #295). Scoped to both the submitting
+// user and their household; both cascade on delete so removing either removes
+// the feedback. The owner-only inbox lists via householdWhere().
+User.hasMany(Feedback, {
+  foreignKey: 'user_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Household.hasMany(Feedback, {
+  foreignKey: 'household_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
 export {
   sequelize,
   User,
@@ -1025,4 +1045,5 @@ export {
   LiabilityAccount,
   DebtPayoffScenario,
   FinancialScenario,
+  Feedback,
 };
