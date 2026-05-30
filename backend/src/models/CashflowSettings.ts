@@ -61,6 +61,13 @@ export class CashflowSettings extends Model<
    * first successful onboarding import.
    */
   declare onboardingDismissedAt: CreationOptional<Date | null>;
+  /**
+   * #290 — sidebar section collapse state. Array of section IDs the user has
+   * collapsed. Valid values: 'today', 'money', 'planning', 'investments',
+   * 'insights-rules'. Empty array means all sections expanded (default).
+   * Persisted server-side so state is shared across devices.
+   */
+  declare sidebarCollapsedSections: CreationOptional<string[]>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -139,6 +146,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
         field: 'onboarding_dismissed_at',
         allowNull: true,
         defaultValue: null,
+      },
+      sidebarCollapsedSections: {
+        type: DataTypes.JSONB,
+        field: 'sidebar_collapsed_sections',
+        allowNull: false,
+        defaultValue: [],
       },
     } as ModelAttributes<CashflowSettings>,
     {

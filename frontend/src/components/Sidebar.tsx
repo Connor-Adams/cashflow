@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart3,
@@ -60,6 +60,7 @@ import { useAiInboxCount } from '@/hooks/useAiInboxCount'
 import { useInsightsCount } from '@/hooks/useInsightsCount'
 import { useAiStatus } from '@/hooks/useAiStatus'
 import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
+import { getJson, patchJson } from '../lib/api'
 
 type NavItem = {
   to: string
@@ -131,7 +132,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    id: 'insights',
+    id: 'insights-rules',
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
@@ -165,52 +166,79 @@ const navSections: NavSection[] = [
 // Settings is always visible at the bottom with no section header.
 const settingsItem: NavItem = { to: '/settings', label: 'Settings', icon: Settings }
 
-const STORAGE_KEY = 'sidebar.collapsed'
+const VALID_SECTION_IDS = ['today', 'money', 'planning', 'investments', 'insights-rules'] as const
+type SectionId = (typeof VALID_SECTION_IDS)[number]
 
-function loadCollapsed(): Set<string> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return new Set()
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? new Set<string>(parsed) : new Set()
-  } catch {
-    return new Set()
-  }
-}
+type PreferencesResponse = { sidebarCollapsedSections: string[] }
 
-function saveCollapsed(collapsed: Set<string>) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsed]))
-  } catch {
-    // ignore storage errors
-  }
-}
+/** Debounce delay (ms) for persisting sidebar collapse state to the API. */
+const DEBOUNCE_MS = 300
 
 function useSidebarCollapsed() {
-  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const toggle = useCallback((sectionId: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(sectionId)) {
+  // Load from API on mount; fall back to all-expanded on error.
+  useEffect(() => {
+    let cancelled = false
+    getJson<PreferencesResponse>('/api/preferences')
+      .then((data) => {
+        if (!cancelled) {
+          setCollapsed(new Set(data.sidebarCollapsedSections ?? []))
+        }
+      })
+      .catch(() => {
+        // Default to all expanded on fetch failure.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  /** Persist collapsed state to the API, debounced. */
+  const persistCollapsed = useCallback((next: Set<string>) => {
+    if (debounceTimer.current !== null) {
+      clearTimeout(debounceTimer.current)
+    }
+    debounceTimer.current = setTimeout(() => {
+      debounceTimer.current = null
+      const sections = [...next].filter((id): id is SectionId =>
+        VALID_SECTION_IDS.includes(id as SectionId),
+      )
+      patchJson('/api/preferences', { sidebarCollapsedSections: sections }).catch(() => {
+        // Ignore persistence errors — state is still correct in memory.
+      })
+    }, DEBOUNCE_MS)
+  }, [])
+
+  const toggle = useCallback(
+    (sectionId: string) => {
+      setCollapsed((prev) => {
+        const next = new Set(prev)
+        if (next.has(sectionId)) {
+          next.delete(sectionId)
+        } else {
+          next.add(sectionId)
+        }
+        persistCollapsed(next)
+        return next
+      })
+    },
+    [persistCollapsed],
+  )
+
+  const expand = useCallback(
+    (sectionId: string) => {
+      setCollapsed((prev) => {
+        if (!prev.has(sectionId)) return prev
+        const next = new Set(prev)
         next.delete(sectionId)
-      } else {
-        next.add(sectionId)
-      }
-      saveCollapsed(next)
-      return next
-    })
-  }, [])
-
-  const expand = useCallback((sectionId: string) => {
-    setCollapsed((prev) => {
-      if (!prev.has(sectionId)) return prev
-      const next = new Set(prev)
-      next.delete(sectionId)
-      saveCollapsed(next)
-      return next
-    })
-  }, [])
+        persistCollapsed(next)
+        return next
+      })
+    },
+    [persistCollapsed],
+  )
 
   return { collapsed, toggle, expand }
 }
