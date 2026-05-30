@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { requireAuditAuth } from '../auth/auditAuth';
 import { healthDeep } from '../audit/healthDeep';
+import { freshness } from '../audit/freshness';
+import { integrity } from '../audit/integrity';
 
 const router = Router();
 
@@ -14,6 +16,24 @@ router.get('/health-deep', async (_req, res, next) => {
   try {
     const result = await healthDeep();
     res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/freshness', async (req, res, next) => {
+  try {
+    const { household } = req.auditAuth!;
+    res.json(await freshness(household.id));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/integrity', async (req, res, next) => {
+  try {
+    const { household } = req.auditAuth!;
+    res.json(await integrity(household.id));
   } catch (e) {
     next(e);
   }
