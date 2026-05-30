@@ -40,7 +40,10 @@ if (otlpEnabled) {
         '@opentelemetry/instrumentation-fs': { enabled: false },
         '@opentelemetry/instrumentation-dns': { enabled: false },
         '@opentelemetry/instrumentation-net': { enabled: false },
-        // HTTP + Express + Sequelize + Undici are what we care about; they're enabled by default.
+        // HTTP + Express + Sequelize + Undici are enabled by default.
+        // @opentelemetry/instrumentation-runtime-node is included in
+        // auto-instrumentations-node and emits event-loop delay, heap,
+        // GC, and CPU metrics under the nodejs.* namespace (#421).
       }),
     ],
   });
