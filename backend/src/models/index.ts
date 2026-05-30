@@ -101,6 +101,8 @@ import {
   initDebtPayoffScenario,
 } from './DebtPayoffScenario';
 import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
+import { Label, initLabel } from './Label';
+import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -183,6 +185,31 @@ initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
 initDebtPayoffScenario(sequelize);
 initFinancialScenario(sequelize);
+initLabel(sequelize);
+initTransactionLabel(sequelize);
+
+// Transaction labels (issue #270). belongsToMany both directions so a
+// transaction can `include` its labels and a label can resolve its
+// transactions, through the join model. hasMany on the join model itself
+// powers the usageCount aggregate in GET /api/labels.
+Household.hasMany(Label, { foreignKey: 'household_id', as: 'labels' });
+Label.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Transaction.belongsToMany(Label, {
+  through: TransactionLabel,
+  foreignKey: 'transaction_id',
+  otherKey: 'label_id',
+  as: 'labels',
+});
+Label.belongsToMany(Transaction, {
+  through: TransactionLabel,
+  foreignKey: 'label_id',
+  otherKey: 'transaction_id',
+  as: 'transactions',
+});
+Label.hasMany(TransactionLabel, { foreignKey: 'label_id', as: 'links' });
+TransactionLabel.belongsTo(Label, { foreignKey: 'label_id', as: 'label' });
+Transaction.hasMany(TransactionLabel, { foreignKey: 'transaction_id', as: 'labelLinks' });
+TransactionLabel.belongsTo(Transaction, { foreignKey: 'transaction_id', as: 'transaction' });
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -1005,4 +1032,6 @@ export {
   LiabilityAccount,
   DebtPayoffScenario,
   FinancialScenario,
+  Label,
+  TransactionLabel,
 };

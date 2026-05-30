@@ -11,6 +11,8 @@ export type {
   BySecurityAccountBreakdown,
   BySecurityRow,
   Category,
+  Label,
+  TransactionLabelRef,
   Contact,
   EnrichmentBackfillProgress,
   EnrichmentSignal,
