@@ -3,6 +3,8 @@ import { Job, JobRun } from '../models';
 import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
 import { withContext } from '../observability/requestContext';
+import { runWithJobSpan } from '../observability/jobSpan';
+import { recordJobTick } from '../observability/metrics';
 import { resolveJobConfig } from './configResolver';
 import { withAdvisoryLock } from './pgLock';
 import { pruneJobRuns } from './runRetention';
@@ -64,7 +66,10 @@ export interface TickOptions {
 }
 
 export async function tick(def: JobDefinition, opts: TickOptions = {}): Promise<TickOutcome> {
-  return withContext({ jobName: def.name, tickId: randomUUID() }, () => tickInner(def, opts));
+  const tickId = randomUUID();
+  return withContext({ jobName: def.name, tickId }, () =>
+    runWithJobSpan(def.name, tickId, () => tickInner(def, opts))
+  );
 }
 
 async function createRun(jobName: string, startedAt: Date): Promise<JobRun | null> {
@@ -194,6 +199,7 @@ async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOut
     });
     await finishRun(run, { status: 'success', durationMs });
     await pruneRuns(def.name);
+    recordJobTick({ job: def.name, result: 'success', durationMs });
     logger.info({ name: def.name, durationMs }, 'job_tick_ok');
     return { status: 'ok', durationMs, result: summary, ...runMeta };
   } catch (err) {
@@ -209,6 +215,7 @@ async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOut
     await finishRun(run, { status: 'failed', durationMs, errorMessage: truncated });
     await notifyFailure(def, run, truncated, opts.failureNotificationUserIds);
     await pruneRuns(def.name);
+    recordJobTick({ job: def.name, result: 'failure', durationMs });
     logger.error({ err, name: def.name, durationMs }, 'job_tick_failed');
     return { status: 'error', durationMs, error: message, ...runMeta };
   } finally {

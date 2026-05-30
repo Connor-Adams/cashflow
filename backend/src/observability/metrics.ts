@@ -130,3 +130,38 @@ export function recordHttpRequest(input: HttpMetricInput & { durationMs: number 
 export async function shutdownMetrics(): Promise<void> {
   await meterProvider?.shutdown();
 }
+
+// --- Job RED metrics ---
+
+const jobRunCounter = meter.createCounter('cashflow.job.runs', {
+  description: 'Total job tick executions',
+});
+
+const jobDurationHistogram = meter.createHistogram('cashflow.job.duration', {
+  description: 'Job tick duration',
+  unit: 'ms',
+});
+
+// Per-job last-success epoch seconds, updated on each successful tick.
+// The observable gauge reads this map on each export cycle.
+const jobLastSuccessTs = new Map<string, number>();
+
+meter.createObservableGauge('cashflow.job.last_success_timestamp_seconds', {
+  description: 'Unix epoch seconds of the last successful job tick, per job',
+}).addCallback((observableResult) => {
+  for (const [job, ts] of jobLastSuccessTs) {
+    observableResult.observe(ts, { job });
+  }
+});
+
+export function recordJobTick(opts: {
+  job: string;
+  result: 'success' | 'failure';
+  durationMs: number;
+}): void {
+  jobRunCounter.add(1, { job: opts.job, result: opts.result });
+  jobDurationHistogram.record(opts.durationMs, { job: opts.job });
+  if (opts.result === 'success') {
+    jobLastSuccessTs.set(opts.job, Math.floor(Date.now() / 1000));
+  }
+}
