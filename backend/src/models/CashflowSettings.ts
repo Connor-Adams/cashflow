@@ -76,6 +76,13 @@ export class CashflowSettings extends Model<
    * across devices.
    */
   declare dismissedActivationCards: CreationOptional<string[]>;
+  /**
+   * #294 — in-app What's New changelog surface. Stores the version string of
+   * the last changelog entry the user acknowledged (format: YYYY-MM-DD-N).
+   * NULL means the user has never dismissed the changelog modal, so the badge
+   * is shown whenever a latest entry exists.
+   */
+  declare lastSeenChangelogVersion: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -166,6 +173,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
         field: 'dismissed_activation_cards',
         allowNull: false,
         defaultValue: [],
+      },
+      lastSeenChangelogVersion: {
+        type: DataTypes.STRING(64),
+        field: 'last_seen_changelog_version',
+        allowNull: true,
+        defaultValue: null,
       },
     } as ModelAttributes<CashflowSettings>,
     {

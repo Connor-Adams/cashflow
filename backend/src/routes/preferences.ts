@@ -3,6 +3,7 @@
  *
  * GET  /api/preferences                — read all user preferences
  * PATCH /api/preferences               — update sidebarCollapsedSections (#290)
+ *                                        and lastSeenChangelogVersion (#294)
  * PATCH /api/preferences/onboarding-dismiss — first-run onboarding (#259)
  *
  * Mounted at /api/preferences behind the global requireAuth in app.ts.
@@ -16,9 +17,12 @@ const router = Router();
 /** Valid sidebar section IDs for #290 */
 const VALID_SECTION_IDS = ['today', 'money', 'planning', 'investments', 'insights-rules'] as const;
 
+/** Changelog version format: YYYY-MM-DD-N (#294) */
+const CHANGELOG_VERSION_RE = /^\d{4}-\d{2}-\d{2}-\d+$/;
+
 /**
  * GET /api/preferences — return current user preferences.
- * Returns `{ sidebarCollapsedSections: string[] }`.
+ * Returns `{ sidebarCollapsedSections: string[], lastSeenChangelogVersion: string | null }`.
  */
 router.get('/', async (req, res, next) => {
   try {
@@ -29,6 +33,7 @@ router.get('/', async (req, res, next) => {
     });
     res.json({
       sidebarCollapsedSections: row.sidebarCollapsedSections ?? [],
+      lastSeenChangelogVersion: row.lastSeenChangelogVersion ?? null,
     });
   } catch (e) {
     next(e);
@@ -37,14 +42,19 @@ router.get('/', async (req, res, next) => {
 
 /**
  * PATCH /api/preferences — update user preferences.
- * Accepts `{ sidebarCollapsedSections: string[] }`.
- * Returns 400 with `{ error: 'INVALID_SECTION_ID' }` if any entry is invalid.
+ * Accepts `{ sidebarCollapsedSections?: string[], lastSeenChangelogVersion?: string }`.
+ * Returns 400 with `{ error: 'INVALID_SECTION_ID' }` if any section ID is invalid.
+ * Returns 400 with `{ error: 'INVALID_VERSION' }` if the version format is wrong.
  */
 router.patch('/', async (req, res, next) => {
   try {
     const { user } = currentAuth(req);
-    const { sidebarCollapsedSections } = req.body as { sidebarCollapsedSections?: unknown };
+    const { sidebarCollapsedSections, lastSeenChangelogVersion } = req.body as {
+      sidebarCollapsedSections?: unknown;
+      lastSeenChangelogVersion?: unknown;
+    };
 
+    // Validate fields before touching the DB
     if (sidebarCollapsedSections !== undefined) {
       if (
         !Array.isArray(sidebarCollapsedSections) ||
@@ -55,18 +65,41 @@ router.patch('/', async (req, res, next) => {
         res.status(400).json({ error: 'INVALID_SECTION_ID' });
         return;
       }
+    }
 
-      const [row] = await CashflowSettings.findOrCreate({
-        where: { userId: user.id },
-        defaults: { userId: user.id },
-      });
-      row.sidebarCollapsedSections = sidebarCollapsedSections as string[];
-      await row.save();
-      res.json({ sidebarCollapsedSections: row.sidebarCollapsedSections });
+    if (lastSeenChangelogVersion !== undefined) {
+      if (
+        typeof lastSeenChangelogVersion !== 'string' ||
+        !CHANGELOG_VERSION_RE.test(lastSeenChangelogVersion)
+      ) {
+        res.status(400).json({ error: 'INVALID_VERSION' });
+        return;
+      }
+    }
+
+    if (sidebarCollapsedSections === undefined && lastSeenChangelogVersion === undefined) {
+      res.status(400).json({ error: 'NO_VALID_FIELD' });
       return;
     }
 
-    res.status(400).json({ error: 'NO_VALID_FIELD' });
+    const [row] = await CashflowSettings.findOrCreate({
+      where: { userId: user.id },
+      defaults: { userId: user.id },
+    });
+
+    if (sidebarCollapsedSections !== undefined) {
+      row.sidebarCollapsedSections = sidebarCollapsedSections as string[];
+    }
+    if (lastSeenChangelogVersion !== undefined) {
+      row.lastSeenChangelogVersion = lastSeenChangelogVersion as string;
+    }
+
+    await row.save();
+
+    res.json({
+      sidebarCollapsedSections: row.sidebarCollapsedSections,
+      lastSeenChangelogVersion: row.lastSeenChangelogVersion ?? null,
+    });
   } catch (e) {
     next(e);
   }

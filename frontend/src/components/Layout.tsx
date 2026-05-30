@@ -7,6 +7,7 @@ import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { NotificationBell } from './notifications/NotificationBell'
 import { FeedbackButton } from './feedback/FeedbackButton'
+import { WhatsNewBadge } from './TopBar'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -82,6 +83,7 @@ export function Layout() {
                 ⌘K
               </kbd>
             </button>
+            <WhatsNewBadge />
             <NotificationBell />
             <FeedbackButton />
           </div>
