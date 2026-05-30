@@ -26,6 +26,7 @@ import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
 import purchasesRouter from './routes/purchases';
 import reimbursementsRouter from './routes/reimbursements';
+import largePurchaseReviewRouter from './routes/largePurchaseReview';
 import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
@@ -201,6 +202,9 @@ app.use('/api', purchasesRouter);
 // reimbursementsRouter mounts /reimbursements/* and
 // /transactions/:id/reimbursable under /api (issue #216).
 app.use('/api', reimbursementsRouter);
+// largePurchaseReviewRouter mounts /large-purchases/* and
+// /transactions/:id/large-purchase-review under /api (issue #244).
+app.use('/api', largePurchaseReviewRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
