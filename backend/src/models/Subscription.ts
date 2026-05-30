@@ -23,11 +23,26 @@ export const SUBSCRIPTION_STATUSES: readonly SubscriptionStatus[] = [
   'unknown',
 ] as const;
 
-export type SubscriptionCadence = 'monthly' | 'weekly';
+/**
+ * Subscription billing cadence. Like status, this is persisted as a STRING
+ * column (not a true PG enum), so widening the set is additive — no migration
+ * is required. The detector (routes/recurring.ts) only ever produces 'monthly'
+ * or 'weekly', but a user can correct a misdetected cadence to any of these
+ * via PATCH /api/subscriptions/:id (Cashflow #291).
+ */
+export type SubscriptionCadence =
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'annual';
 
 export const SUBSCRIPTION_CADENCES: readonly SubscriptionCadence[] = [
-  'monthly',
   'weekly',
+  'monthly',
+  'quarterly',
+  'semiannual',
+  'annual',
 ] as const;
 
 export class Subscription extends Model<
