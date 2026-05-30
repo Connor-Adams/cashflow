@@ -15,6 +15,7 @@ export type SettingsTopTab =
   | 'audit-tokens'
   | 'whats-new'
   | 'saved-filters'
+  | 'data'
 
 export function useActiveSettingsTopTab(): SettingsTopTab {
   const isDisplay = useMatch('/settings/display')
@@ -33,6 +34,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isAuditTokens = useMatch('/settings/audit-tokens')
   const isWhatsNew = useMatch('/settings/whats-new')
   const isSavedFilters = useMatch('/settings/saved-filters')
+  const isData = useMatch('/settings/data')
 
   if (isDisplay || isGmail || isPartnerInvite) return 'settings'
   if (isImports) return 'imports'
@@ -48,5 +50,6 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   if (isAuditTokens) return 'audit-tokens'
   if (isWhatsNew) return 'whats-new'
   if (isSavedFilters) return 'saved-filters'
+  if (isData) return 'data'
   return 'settings'
 }

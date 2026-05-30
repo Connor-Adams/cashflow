@@ -21,6 +21,7 @@ const ALL_TOP_TABS: Array<
   { value: 'audit-tokens', label: 'AI audit tokens' },
   { value: 'whats-new', label: "What's new" },
   { value: 'saved-filters', label: 'Saved filters' },
+  { value: 'data', label: 'Data' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -38,6 +39,7 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   'audit-tokens': '/settings/audit-tokens',
   'whats-new': '/settings/whats-new',
   'saved-filters': '/settings/saved-filters',
+  'data': '/settings/data',
 }
 
 export function SettingsPage() {
