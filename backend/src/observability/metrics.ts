@@ -220,3 +220,12 @@ meter.createObservableGauge('cashflow.db.pool.available', {
   const p = getPool();
   if (p) result.observe(p.available);
 });
+
+// --- Liveness heartbeat ---
+// Observable gauge that always reports 1 on every export cycle.
+// Used by the BackendDown alert (absent(cashflow_up) == 1).
+meter.createObservableGauge('cashflow.up', {
+  description: 'Backend liveness heartbeat — always 1 when the process is alive',
+}).addCallback((result) => {
+  result.observe(1);
+});

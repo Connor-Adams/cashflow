@@ -344,6 +344,66 @@ the last line of defense for the whole pipeline.
    Prometheus is the problem, `railway redeploy --service prometheus --yes`.
 5. Recovery: `up{job="cashflow-otel-collector"}` returns to `1`; TempoExportFailing/LokiExportFailing become evaluable again.
 
+#### BackendDown
+
+**Alert condition:** `absent(cashflow_up) == 1` for `2m`
+
+The backend emits a `cashflow.up` observable gauge that reports `1` on every OTel export cycle (every 15 seconds). If Prometheus has not seen this gauge for 2 consecutive minutes, the backend process is dead, stuck in a crash loop, or the collector pipeline is broken.
+
+**Note on alternatives:**
+- `absent(cashflow_http_server_requests_total)` was rejected — it false-positives during overnight idle periods.
+- blackbox_exporter (`/api/health` probe) is the gold-standard future option (exercises the HTTP path) but requires a new service + scrape job. Documented here for future adoption.
+
+**Remediation:**
+1. Check Railway cashflow-backend service → Logs. Is it running? Is it crashing at startup?
+2. If crashing: check for a missing required env var (`DATABASE_URL`, `SESSION_SECRET`, etc.) or a migration failure.
+3. If running but alert still firing: verify `OTEL_EXPORTER_OTLP_ENDPOINT` is set and points at `http://otel-collector.railway.internal:4318`.
+4. Check otel-collector logs for connection errors.
+5. Verify the backend is actually pushing: `GET /api/health` should return 200.
+6. Recovery: once `cashflow_up` reappears in Prometheus, the alert clears automatically.
+
+#### HighHttp5xxRate
+
+**Alert condition:** >2% 5xx rate over 5 minutes
+
+**Remediation:**
+1. Open Loki and search for `level=error` in cashflow-backend logs from the same time window.
+2. Look for database connection errors, unhandled exceptions, or timeout errors.
+3. Check `cashflow_db_pool_waiting` gauge — if high, the DB pool is saturated.
+4. Check recent deployments — rollback if a new deploy correlates with the error spike.
+5. If an AI endpoint is failing, check the AI provider's status page.
+
+#### HighRouteLatencyP99
+
+**Alert condition:** p99 latency > 1000ms for 5 minutes. Threshold chosen as 2× typical p99 baseline.
+
+**Remediation:**
+1. Identify the slow route using `cashflow_http_server_duration_milliseconds_bucket` filtered by `http_route`.
+2. Check the Tempo dashboard for slow traces on that route — look for slow DB spans (`db.statement` attribute).
+3. Check `cashflow_db_pool_in_use` vs `cashflow_db_pool_size` — pool saturation causes latency cliffs.
+4. Check if an external API call (Yahoo Finance, AI) is slow using `http_client_request_duration_seconds`.
+
+#### OutboundDependencyFailing
+
+**Alert condition:** Outbound HTTP 5xx errors over 10 minutes, grouped by `server_address`.
+
+**Remediation:**
+1. Identify the failing upstream from the `server_address` label (e.g. `api.openai.com`, `query1.finance.yahoo.com`).
+2. Check the upstream provider's status page.
+3. If Yahoo Finance: quote data may be stale — affected features show cached values.
+4. If AI APIs: AI features degrade gracefully but users cannot initiate new AI requests.
+5. Recovery is automatic once the upstream recovers.
+
+#### JobFailing
+
+**Alert condition:** Any background job tick failure in the last 15 minutes.
+
+**Remediation:**
+1. Check Loki for `job_tick_failed` log events — the `name` field identifies the job.
+2. Common causes: DB connection timeout, external API failure (for sync jobs), missing env var.
+3. Most jobs self-recover on the next cron tick. If failures persist, check the job definition.
+4. Jobs tab in Settings → Jobs shows the last status and error message per job.
+
 ### Verification
 
 Once `restartPolicyType: ALWAYS` is set on tempo, simulate the original
