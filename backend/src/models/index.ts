@@ -83,6 +83,10 @@ import {
 import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 import { Purchase, initPurchase } from './Purchase';
 import { Reimbursement, initReimbursement } from './Reimbursement';
+import {
+  TransactionLargePurchaseReview,
+  initTransactionLargePurchaseReview,
+} from './TransactionLargePurchaseReview';
 import { Notification, initNotification } from './Notification';
 import { AuditLog, initAuditLog } from './AuditLog';
 import { FinanceEvent, initFinanceEvent } from './FinanceEvent';
@@ -164,6 +168,7 @@ initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
 initPurchase(sequelize);
 initReimbursement(sequelize);
+initTransactionLargePurchaseReview(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
@@ -801,6 +806,20 @@ AccountStatement.belongsTo(User, {
   as: 'createdByUser',
 });
 
+// Large purchase review sidecar (issue #244). 1:1 with transactions; mirrors
+// the return-metadata sidecar pattern. Cascade on transaction delete so the
+// sidecar is never orphaned.
+Transaction.hasOne(TransactionLargePurchaseReview, {
+  foreignKey: 'transaction_id',
+  as: 'largePurchaseReview',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionLargePurchaseReview.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
 // CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
 // the DB level; we surface the relationship as hasOne so callers can eager
 // load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
@@ -913,6 +932,7 @@ export {
   MonthlyCloseTask,
   Purchase,
   Reimbursement,
+  TransactionLargePurchaseReview,
   CashflowSettings,
   Notification,
   NotificationPreference,
