@@ -63,6 +63,7 @@ import { ScenariosPage } from './pages/ScenariosPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
+import { OnboardingGate } from './components/onboarding/OnboardingGate'
 import './App.css'
 
 function AppRoutes() {
@@ -73,6 +74,9 @@ function AppRoutes() {
   if (!auth.user) return <AuthPage />
   return (
     <BrowserRouter>
+      {/* First-run onboarding overlay (#259): shows over Dashboard when the
+          app has no active accounts and onboarding was never dismissed. */}
+      <OnboardingGate />
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<DashboardPage />} />
