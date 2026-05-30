@@ -14,6 +14,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
+import { RulePatternPreview } from '../components/rules/RulePatternPreview'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
 
@@ -69,6 +70,29 @@ export function RulesPage() {
     [categoryHints]
   )
 
+  // Form state for share fields and live validation
+  const [splitType, setSplitType] = useState('me')
+  const [yourPct, setYourPct] = useState('')
+  const [partnerPct, setPartnerPct] = useState('')
+  const [matchKind, setMatchKind] = useState<'substring' | 'regex'>('substring')
+  const [pattern, setPattern] = useState('')
+  const [patternError, setPatternError] = useState<string | null>(null)
+
+  const showShares = splitType === 'shared'
+  const yourPctNum = parseFloat(yourPct)
+  const partnerPctNum = parseFloat(partnerPct)
+  const shareSum =
+    showShares && !isNaN(yourPctNum) && !isNaN(partnerPctNum)
+      ? yourPctNum + partnerPctNum
+      : null
+
+  const shareError =
+    showShares && shareSum !== null && Math.abs(shareSum - 100) > 0.001
+      ? `Shares must add to 100% (current: ${shareSum}%)`
+      : null
+
+  const saveDisabled = Boolean(shareError) || Boolean(patternError)
+
   async function load() {
     const requestId = ++loadRequestRef.current
     setErr(null)
@@ -112,12 +136,50 @@ export function RulesPage() {
       .catch(() => setCategoryHints([]))
   }, [])
 
+  // Validate regex on blur of pattern field
+  async function handlePatternBlur() {
+    if (matchKind !== 'regex' || !pattern) {
+      setPatternError(null)
+      return
+    }
+    try {
+      const res = await fetch('/api/rules/preview-pattern', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pattern, matchType: 'regex' }),
+      })
+      if (!res.ok) {
+        const body = (await res.json()) as { message?: string; error?: string }
+        setPatternError(body.message ?? body.error ?? 'Invalid pattern')
+      } else {
+        setPatternError(null)
+      }
+    } catch {
+      // Network error — don't block the user
+      setPatternError(null)
+    }
+  }
+
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (saveDisabled) return
     const form = e.currentTarget
     const fd = new FormData(form)
     setErr(null)
     try {
+      // Convert display percentages (0-100) to storage fractions (0-1)
+      const rawPctMe = fd.get('pctMe')
+      const rawPctPartner = fd.get('pctPartner')
+      const pctMeStored =
+        rawPctMe && String(rawPctMe) !== ''
+          ? String(parseFloat(String(rawPctMe)) / 100)
+          : null
+      const pctPartnerStored =
+        rawPctPartner && String(rawPctPartner) !== ''
+          ? String(parseFloat(String(rawPctPartner)) / 100)
+          : null
+
       await postJson('/api/rules', {
         merchantPattern: String(fd.get('merchantPattern') ?? ''),
         matchKind: String(fd.get('matchKind') ?? 'substring'),
@@ -125,11 +187,17 @@ export function RulesPage() {
         category: String(fd.get('category') ?? '') || null,
         isBusiness: fd.get('isBusiness') === 'on',
         splitType: String(fd.get('splitType') ?? 'me'),
-        pctMe: fd.get('pctMe') ? String(fd.get('pctMe')) : null,
-        pctPartner: fd.get('pctPartner') ? String(fd.get('pctPartner')) : null,
+        pctMe: pctMeStored,
+        pctPartner: pctPartnerStored,
       })
       form.reset()
       setRuleCategory('')
+      setSplitType('me')
+      setYourPct('')
+      setPartnerPct('')
+      setMatchKind('substring')
+      setPattern('')
+      setPatternError(null)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create rule')
@@ -139,7 +207,7 @@ export function RulesPage() {
   async function remove(rule: Rule) {
     const ok = await confirm({
       title: 'Delete rule?',
-      description: `The rule for “${rule.merchantPattern}” will be removed.`,
+      description: `The rule for "${rule.merchantPattern}" will be removed.`,
       confirmLabel: 'Delete',
       destructive: true,
     })
@@ -257,14 +325,40 @@ export function RulesPage() {
         <div className="formGrid rulesFormGrid">
           <label>
             Pattern
-            <input name="merchantPattern" required placeholder="merchant text" />
+            <input
+              name="merchantPattern"
+              required
+              placeholder="merchant text"
+              value={pattern}
+              onChange={(e) => {
+                setPattern(e.target.value)
+                setPatternError(null)
+              }}
+              onBlur={() => void handlePatternBlur()}
+            />
+            {patternError && (
+              <span className="error" style={{ fontSize: '0.8em', marginTop: 2 }}>
+                Invalid pattern: {patternError}
+              </span>
+            )}
+            <RulePatternPreview pattern={pattern} matchType={matchKind} />
           </label>
           <label>
-            Match
-            <select name="matchKind" defaultValue="substring">
+            Match type
+            <select
+              name="matchKind"
+              value={matchKind}
+              onChange={(e) => {
+                setMatchKind(e.target.value as 'substring' | 'regex')
+                setPatternError(null)
+              }}
+            >
               <option value="substring">substring</option>
               <option value="regex">regex</option>
             </select>
+            <span className="muted" style={{ fontSize: '0.8em' }}>
+              substring matches any part of the description; regex is for patterns (advanced).
+            </span>
           </label>
           <label>
             Priority
@@ -288,22 +382,58 @@ export function RulesPage() {
           </label>
           <label>
             Split
-            <select name="splitType" defaultValue="me">
+            <select
+              name="splitType"
+              value={splitType}
+              onChange={(e) => setSplitType(e.target.value)}
+            >
               <option value="me">me</option>
               <option value="partner">partner</option>
               <option value="shared">shared</option>
             </select>
           </label>
-          <label>
-            pct_me (0–1)
-            <input name="pctMe" placeholder="0.5" />
-          </label>
-          <label>
-            pct_partner (0–1)
-            <input name="pctPartner" placeholder="0.5" />
-          </label>
+          {showShares && (
+            <>
+              <label>
+                Your share (%)
+                <input
+                  name="pctMe"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="any"
+                  placeholder="50"
+                  value={yourPct}
+                  onChange={(e) => setYourPct(e.target.value)}
+                />
+              </label>
+              <label>
+                Partner's share (%)
+                <input
+                  name="pctPartner"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="any"
+                  placeholder="50"
+                  value={partnerPct}
+                  onChange={(e) => setPartnerPct(e.target.value)}
+                />
+              </label>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <span className="muted" style={{ fontSize: '0.85em' }}>
+                  Must sum to 100%
+                </span>
+                {shareError && (
+                  <span className="error" style={{ fontSize: '0.85em', marginLeft: 8 }}>
+                    {shareError}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
-        <button type="submit">Add rule</button>
+        <button type="submit" disabled={saveDisabled}>Add rule</button>
       </form>
 
       {autoSuggestions.length > 0 && (

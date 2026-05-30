@@ -683,6 +683,79 @@ router.post('/auto-suggestions/:id/dismiss', aiSuggestLimiter, async (req, res, 
   }
 });
 
+/**
+ * POST /api/rules/preview-pattern
+ *
+ * Issue #261 — validate a regex pattern and count how many of the household's
+ * transactions the pattern would match. Used by the frontend to show a live
+ * "matches N existing transactions" indicator and to surface invalid regex
+ * errors inline before the user saves a rule.
+ *
+ * Body: { pattern: string, matchType: 'substring' | 'regex' }
+ * Response:
+ *   200 { matches: number, sample: Transaction[] }
+ *       `matches` is capped at 500; if the true count exceeds 500 the value
+ *       will be exactly 500 and the frontend should display "500+".
+ *   400 { error: 'INVALID_PATTERN', message: string }  (regex only)
+ */
+router.post('/preview-pattern', async (req, res, next) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const pattern = typeof b.pattern === 'string' ? b.pattern : '';
+    const matchType =
+      b.matchType === 'regex' || b.matchType === 'substring' ? b.matchType : 'substring';
+
+    // For regex, attempt to compile first — return 400 on failure.
+    let re: RegExp | null = null;
+    if (matchType === 'regex') {
+      try {
+        re = new RegExp(pattern, 'i');
+      } catch (err) {
+        res.status(400).json({
+          error: 'INVALID_PATTERN',
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+    }
+
+    const { household } = currentAuth(req);
+
+    // Fetch all transactions for the household (unbounded — typical households
+    // have < 10 k rows; we stop as soon as we have 501 matches).
+    const allTxns = await Transaction.findAll({
+      where: { householdId: household.id },
+      attributes: ['id', 'merchantClean', 'merchantRaw', 'date', 'amount', 'finalCategory'],
+      order: [['date', 'DESC']],
+    });
+
+    const CAP = 500;
+    const sample: (typeof allTxns)[number][] = [];
+    let matchCount = 0;
+    for (const txn of allTxns) {
+      const haystack = (txn.get('merchantClean') as string | null) || '';
+      let matched = false;
+      if (matchType === 'regex' && re) {
+        matched = re.test(haystack);
+      } else {
+        matched = haystack.toLowerCase().includes(pattern.toLowerCase());
+      }
+      if (matched) {
+        matchCount++;
+        if (sample.length < 5) sample.push(txn);
+        if (matchCount > CAP) break;
+      }
+    }
+
+    res.json({
+      matches: Math.min(matchCount, CAP),
+      sample: sample.map((t) => t.toJSON()),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.delete('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
