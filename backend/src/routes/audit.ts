@@ -3,6 +3,7 @@ import { requireAuditAuth } from '../auth/auditAuth';
 import { buildHealthDeep } from '../audit/healthDeep';
 import { buildCounts } from '../audit/counts';
 import { buildFreshness } from '../audit/freshness';
+import { buildIntegrity } from '../audit/integrity';
 
 const router = Router();
 
@@ -26,6 +27,16 @@ router.get('/counts', async (req, res, next) => {
     const householdId = req.auditAuth!.household.id;
     const counts = await buildCounts(householdId);
     res.json({ counts, generatedAt: new Date().toISOString() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/integrity', async (req, res, next) => {
+  try {
+    const householdId = req.auditAuth!.household.id;
+    const result = await buildIntegrity(householdId);
+    res.json(result);
   } catch (e) {
     next(e);
   }
