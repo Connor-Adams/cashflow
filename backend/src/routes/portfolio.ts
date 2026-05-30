@@ -2026,6 +2026,209 @@ router.get('/by-account-type', async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/portfolio/securities — list all securities visible to the
+ * caller's household. Used by the activity form to power the "new security"
+ * dropdown for spin_off / merger corporate actions.
+ */
+router.get('/securities', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const securities = await Security.findAll({
+      where: { householdId: household.id },
+      order: [['symbol', 'ASC']],
+      attributes: ['id', 'symbol', 'name', 'assetType', 'currency'],
+    });
+    res.json({ securities: securities.map((s) => ({ id: s.id, symbol: s.symbol, name: s.name, assetType: s.assetType, currency: s.currency })) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const CORPORATE_ACTION_TYPES = ['dividend_in_kind', 'spin_off', 'merger', 'return_of_capital'] as const;
+const ALL_ACTIVITY_TYPES = [
+  'buy', 'sell', 'split', 'reinvestment', 'dividend', 'interest', 'fee',
+  'transfer', 'transfer_in', 'transfer_out', 'return_of_capital',
+  'dividend_in_kind', 'spin_off', 'merger',
+] as const;
+type AllActivityType = typeof ALL_ACTIVITY_TYPES[number];
+
+function validateActivityBody(body: Record<string, unknown>): { error: string; code: string } | null {
+  const type = body.activityType as string;
+  if (!ALL_ACTIVITY_TYPES.includes(type as AllActivityType)) {
+    return { error: `Invalid activityType: ${type}`, code: 'INVALID_ACTIVITY_TYPE' };
+  }
+  if (type === 'dividend_in_kind') {
+    const qty = Number(body.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return { error: 'dividend_in_kind requires quantity > 0', code: 'MISSING_QUANTITY' };
+    }
+  }
+  if (type === 'spin_off') {
+    const qty = Number(body.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return { error: 'spin_off requires quantity > 0', code: 'MISSING_QUANTITY' };
+    }
+    if (!body.recipientSecurityId) {
+      return { error: 'spin_off requires recipientSecurityId', code: 'MISSING_RECIPIENT_SECURITY' };
+    }
+    const pct = Number(body.costBasisAllocationPct);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 1) {
+      return { error: 'spin_off costBasisAllocationPct must be in (0, 1]', code: 'INVALID_ALLOCATION_PCT' };
+    }
+  }
+  if (type === 'merger') {
+    const qty = Number(body.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return { error: 'merger requires quantity > 0 (shares received)', code: 'MISSING_QUANTITY' };
+    }
+    if (!body.recipientSecurityId) {
+      return { error: 'merger requires recipientSecurityId', code: 'MISSING_RECIPIENT_SECURITY' };
+    }
+  }
+  if (type === 'return_of_capital') {
+    const price = Number(body.pricePerShare ?? body.price);
+    const amount = Number(body.amount);
+    const hasAmount = Number.isFinite(amount) && amount !== 0;
+    const hasPrice = Number.isFinite(price) && price > 0;
+    if (!hasAmount && !hasPrice) {
+      return { error: 'return_of_capital requires pricePerShare > 0 or amount', code: 'MISSING_AMOUNT' };
+    }
+  }
+  return null;
+}
+
+/**
+ * POST /api/portfolio/activities — create a manual investment activity.
+ */
+router.post('/activities', async (req, res, next) => {
+  try {
+    const { household, user } = currentAuth(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    const validErr = validateActivityBody(body);
+    if (validErr) {
+      res.status(400).json(validErr);
+      return;
+    }
+
+    const accountId = Number(body.accountId);
+    if (!Number.isFinite(accountId) || accountId <= 0) {
+      res.status(400).json({ error: 'accountId is required', code: 'MISSING_ACCOUNT' });
+      return;
+    }
+    // Verify the account belongs to this household.
+    const account = await Account.findOne({
+      where: { id: accountId, ...visibleAccountWhere(req) },
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Account not found', code: 'ACCOUNT_NOT_FOUND' });
+      return;
+    }
+
+    const tradeDate = String(body.tradeDate ?? '');
+    if (!DATE_RE.test(tradeDate)) {
+      res.status(400).json({ error: 'tradeDate must be YYYY-MM-DD', code: 'INVALID_DATE' });
+      return;
+    }
+
+    const activity = await InvestmentActivity.create({
+      accountId,
+      householdId: household.id,
+      securityId: body.securityId ? Number(body.securityId) : null,
+      activityType: String(body.activityType),
+      tradeDate,
+      settlementDate: body.settlementDate ? String(body.settlementDate) : null,
+      description: String(body.description ?? body.activityType),
+      quantity: body.quantity != null ? String(Number(body.quantity)) : null,
+      price: body.pricePerShare != null ? String(Number(body.pricePerShare)) : (body.price != null ? String(Number(body.price)) : null),
+      amount: body.amount != null ? String(Number(body.amount)) : null,
+      fees: body.fees != null ? String(Number(body.fees)) : null,
+      splitRatio: body.splitRatio != null ? String(Number(body.splitRatio)) : null,
+      recipientSecurityId: body.recipientSecurityId ? Number(body.recipientSecurityId) : null,
+      costBasisAllocationPct: body.costBasisAllocationPct != null ? String(Number(body.costBasisAllocationPct)) : null,
+      cashComponent: body.cashComponent != null ? String(Number(body.cashComponent)) : null,
+      currency: String(body.currency ?? account.defaultCurrency ?? 'CAD'),
+      sourceReference: null,
+      sourceRowFingerprint: `manual:${user.id}:${Date.now()}`,
+      importBatch: `manual:${user.id}`,
+    });
+    res.status(201).json({ activity });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * PATCH /api/portfolio/activities/:id — update a manually-entered activity.
+ */
+router.patch('/activities/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid activity id', code: 'INVALID_ID' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    if (body.activityType != null) {
+      const validErr = validateActivityBody(body);
+      if (validErr) {
+        res.status(400).json(validErr);
+        return;
+      }
+    }
+
+    // Verify the activity belongs to a visible account.
+    const activity = await InvestmentActivity.findOne({
+      where: { id },
+      include: [{ model: Account, as: 'account' }],
+    });
+    if (!activity) {
+      res.status(404).json({ error: 'Activity not found', code: 'NOT_FOUND' });
+      return;
+    }
+    const account = activity.get('account') as Account | undefined;
+    const accounts = await Account.findAll({ where: visibleAccountWhere(req) });
+    const accountIds = accounts.map((a) => a.id);
+    if (!accountIds.includes(activity.accountId)) {
+      res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
+      return;
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (body.activityType != null) updates.activityType = String(body.activityType);
+    if (body.tradeDate != null) {
+      if (!DATE_RE.test(String(body.tradeDate))) {
+        res.status(400).json({ error: 'tradeDate must be YYYY-MM-DD', code: 'INVALID_DATE' });
+        return;
+      }
+      updates.tradeDate = String(body.tradeDate);
+    }
+    if (body.settlementDate !== undefined) updates.settlementDate = body.settlementDate ? String(body.settlementDate) : null;
+    if (body.description != null) updates.description = String(body.description);
+    if (body.securityId !== undefined) updates.securityId = body.securityId ? Number(body.securityId) : null;
+    if (body.quantity !== undefined) updates.quantity = body.quantity != null ? String(Number(body.quantity)) : null;
+    if (body.pricePerShare !== undefined || body.price !== undefined) {
+      const raw = body.pricePerShare ?? body.price;
+      updates.price = raw != null ? String(Number(raw)) : null;
+    }
+    if (body.amount !== undefined) updates.amount = body.amount != null ? String(Number(body.amount)) : null;
+    if (body.fees !== undefined) updates.fees = body.fees != null ? String(Number(body.fees)) : null;
+    if (body.splitRatio !== undefined) updates.splitRatio = body.splitRatio != null ? String(Number(body.splitRatio)) : null;
+    if (body.recipientSecurityId !== undefined) updates.recipientSecurityId = body.recipientSecurityId ? Number(body.recipientSecurityId) : null;
+    if (body.costBasisAllocationPct !== undefined) updates.costBasisAllocationPct = body.costBasisAllocationPct != null ? String(Number(body.costBasisAllocationPct)) : null;
+    if (body.cashComponent !== undefined) updates.cashComponent = body.cashComponent != null ? String(Number(body.cashComponent)) : null;
+    if (body.currency != null) updates.currency = String(body.currency);
+
+    await activity.update(updates);
+    res.json({ activity });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/prices/refresh', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);

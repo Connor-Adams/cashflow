@@ -49,6 +49,24 @@ export type AcbActivity = {
    * split. Total cost is preserved across the split.
    */
   splitRatio?: number | null;
+  /**
+   * For spin_off / merger: the security that is received as a result of the
+   * corporate action. The ACB engine records a warning/note for the caller
+   * to create a corresponding position for this security.
+   */
+  recipientSecurityId?: number | null;
+  /**
+   * For spin_off: fraction of existing cost basis allocated to the new
+   * (recipient) security. Must be in (0, 1]. The original security retains
+   * (1 - costBasisAllocationPct) of the total cost base.
+   */
+  costBasisAllocationPct?: number | null;
+  /**
+   * For merger: cash received per original share as part of the deal
+   * (cash boot). Reduces the cost basis transferred to the recipient and
+   * triggers a realized gain on the cash portion.
+   */
+  cashComponent?: number | null;
 };
 
 /** Position state recorded after each buy/sell event. */
@@ -325,6 +343,112 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         quantity: newQuantity,
         totalCost: newTotalCost,
         acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'dividend_in_kind') {
+      // Stock dividend (dividend paid in additional shares of the same
+      // security). CRA: no immediate cash receipt → treated like a bonus
+      // issue. The new shares take a cost base of zero (they are received
+      // at no cost), so the existing total cost is spread over more shares.
+      // Net effect: totalCost unchanged, quantity increases, ACB/unit drops.
+      if (activity.quantity == null || activity.quantity <= 0) {
+        warnings.push(
+          `DIVIDEND_IN_KIND activity ${activity.id} on ${activity.tradeDate} missing or zero quantity; ignored`
+        );
+        continue;
+      }
+      const newQuantity = state.quantity + activity.quantity;
+      const newAcb = newQuantity > EPS ? state.totalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: state.totalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'spin_off') {
+      // Corporate spin-off: the original security allocates a portion of its
+      // cost base to the new (recipient) security. Per CRA, the allocation
+      // is based on relative fair-market values on the distribution date.
+      // The caller supplies `costBasisAllocationPct` which is the fraction
+      // to assign to the spin-off. The original security keeps
+      // (1 - pct) × existingBasis; the recipient is a separate holding.
+      const pct = activity.costBasisAllocationPct;
+      if (pct == null || pct <= 0 || pct > 1) {
+        warnings.push(
+          `SPIN_OFF activity ${activity.id} on ${activity.tradeDate} missing or invalid costBasisAllocationPct; treated as no-op`
+        );
+        continue;
+      }
+      if (state.quantity <= EPS) {
+        warnings.push(
+          `SPIN_OFF activity ${activity.id} on ${activity.tradeDate} applied to zero position; ignored`
+        );
+        continue;
+      }
+      const allocatedToRecipient = state.totalCost * pct;
+      const remainingCost = state.totalCost - allocatedToRecipient;
+      const newAcb = state.quantity > EPS ? remainingCost / state.quantity : 0;
+      warnings.push(
+        `SPIN_OFF activity ${activity.id} on ${activity.tradeDate}: ` +
+        `$${allocatedToRecipient.toFixed(2)} of cost base allocated to recipient security ` +
+        `(id=${activity.recipientSecurityId ?? 'unknown'}); ` +
+        `original security retains $${remainingCost.toFixed(2)}.`
+      );
+      state = {
+        asOf: activity.tradeDate,
+        quantity: state.quantity,
+        totalCost: remainingCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'merger') {
+      // Merger / acquisition: original holding is exchanged for shares of
+      // the acquirer (recipient security) and optionally some cash (boot).
+      // The cash component per share is a deemed disposition at ACB, so
+      // any excess over ACB is a realized gain. The remaining cost basis
+      // transfers to the recipient security position.
+      // After the merger the original security position is zeroed.
+      if (state.quantity <= EPS) {
+        warnings.push(
+          `MERGER activity ${activity.id} on ${activity.tradeDate} applied to zero position; ignored`
+        );
+        continue;
+      }
+      const cashPerShare = activity.cashComponent ?? 0;
+      const totalCash = cashPerShare * state.quantity;
+      // Cost basis consumed by the cash portion.
+      const costForCash = Math.min(totalCash, state.totalCost);
+      const gainOnCash = totalCash - costForCash;
+      if (gainOnCash > EPS) {
+        realizedEvents.push({
+          activityId: activity.id,
+          tradeDate: activity.tradeDate,
+          qtySold: 0,
+          proceeds: totalCash,
+          acbPerUnitAtSale: state.acbPerUnit,
+          costRemoved: costForCash,
+          realizedGain: gainOnCash,
+          currency: activity.currency || currency,
+        });
+        realizedTotal += gainOnCash;
+        warnings.push(
+          `MERGER activity ${activity.id} on ${activity.tradeDate}: ` +
+          `cash boot $${totalCash.toFixed(2)} triggers realized gain of $${gainOnCash.toFixed(2)}.`
+        );
+      }
+      const costTransferred = state.totalCost - costForCash;
+      warnings.push(
+        `MERGER activity ${activity.id} on ${activity.tradeDate}: ` +
+        `original position closed; $${costTransferred.toFixed(2)} of cost base transfers to ` +
+        `recipient security (id=${activity.recipientSecurityId ?? 'unknown'}).`
+      );
+      // Zero out the original position.
+      state = {
+        asOf: activity.tradeDate,
+        quantity: 0,
+        totalCost: 0,
+        acbPerUnit: 0,
       };
       timeline.push(state);
     } else if (type === 'transfer_out') {

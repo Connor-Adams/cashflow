@@ -16,7 +16,22 @@ export class InvestmentActivity extends Model<
   declare accountId: number;
   declare householdId: number | null;
   declare securityId: number | null;
-  declare activityType: string;
+  declare activityType:
+    | 'buy'
+    | 'sell'
+    | 'split'
+    | 'reinvestment'
+    | 'dividend'
+    | 'interest'
+    | 'fee'
+    | 'transfer'
+    | 'transfer_in'
+    | 'transfer_out'
+    | 'return_of_capital'
+    | 'dividend_in_kind'
+    | 'spin_off'
+    | 'merger'
+    | string;
   declare tradeDate: string;
   declare settlementDate: string | null;
   declare description: string;
@@ -25,6 +40,9 @@ export class InvestmentActivity extends Model<
   declare amount: string | null;
   declare fees: string | null;
   declare splitRatio: string | null;
+  declare recipientSecurityId: CreationOptional<number | null>;
+  declare costBasisAllocationPct: CreationOptional<string | null>;
+  declare cashComponent: CreationOptional<string | null>;
   declare currency: string;
   declare sourceReference: string | null;
   declare sourceRowFingerprint: string;
@@ -77,6 +95,21 @@ export function initInvestmentActivity(
       splitRatio: {
         type: DataTypes.DECIMAL(10, 6),
         field: 'split_ratio',
+        allowNull: true,
+      },
+      recipientSecurityId: {
+        type: DataTypes.BIGINT,
+        field: 'recipient_security_id',
+        allowNull: true,
+      },
+      costBasisAllocationPct: {
+        type: DataTypes.DECIMAL(5, 4),
+        field: 'cost_basis_allocation_pct',
+        allowNull: true,
+      },
+      cashComponent: {
+        type: DataTypes.DECIMAL(18, 4),
+        field: 'cash_component',
         allowNull: true,
       },
       currency: { type: DataTypes.STRING(3), allowNull: false },

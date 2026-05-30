@@ -37,6 +37,13 @@ import { ForwardIncomePanel } from './portfolio-forward-income/ForwardIncomePane
 import { PerformancePanel } from './portfolio-performance/PerformancePanel'
 import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { ActivityForm } from '../components/portfolio/ActivityForm'
+import {
+  Dialog,
+  DialogBody,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import type {
   PortfolioAllocation,
   PortfolioBySecurity,
@@ -258,7 +265,7 @@ export function PortfolioPage() {
       </TabPanel>
 
       <TabPanel value="holdings" active={activeTab}>
-        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} />
+        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} onRefresh={load} />
       </TabPanel>
 
       <TabPanel value="by-security" active={activeTab}>
@@ -294,11 +301,20 @@ function HoldingsPanel({
   summary,
   accountsById,
   sparklines,
+  onRefresh,
 }: {
   summary: PortfolioSummary | null
   accountsById: Map<number, PortfolioSummary['accounts'][number]>
   sparklines: Map<number, PortfolioSparklinePoint[]>
+  onRefresh: () => void
 }) {
+  const [activityDialogOpen, setActivityDialogOpen] = useState(false)
+  // Use the first investment account if available.
+  const firstAccount = summary?.accounts[0]
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null)
+
+  const accountId = selectedAccountId ?? firstAccount?.id ?? 0
+
   return (
     <>
       <Card className="transactionsTableCard">
@@ -428,7 +444,49 @@ function HoldingsPanel({
               Trades, dividends, fees, transfers, and other imported brokerage rows.
             </p>
           </div>
+          {summary && summary.accounts.length > 0 && (
+            <div className="flex items-center gap-2">
+              {summary.accounts.length > 1 && (
+                <select
+                  className="rounded-md border border-input bg-background/70 px-2 py-1 text-sm"
+                  value={accountId}
+                  onChange={(e) => setSelectedAccountId(Number(e.target.value))}
+                >
+                  {summary.accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Button
+                type="button"
+                onClick={() => setActivityDialogOpen(true)}
+              >
+                + Add activity
+              </Button>
+            </div>
+          )}
         </div>
+
+        <Dialog
+          open={activityDialogOpen}
+          onOpenChange={setActivityDialogOpen}
+        >
+          <DialogHeader>
+            <DialogTitle>Add investment activity</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <ActivityForm
+              accountId={accountId}
+              onSaved={() => {
+                setActivityDialogOpen(false)
+                onRefresh()
+              }}
+              onCancel={() => setActivityDialogOpen(false)}
+            />
+          </DialogBody>
+        </Dialog>
         <div className="transactionsTableWrap">
           <Table className="table transactionsTable">
             <TableHeader>
