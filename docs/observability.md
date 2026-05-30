@@ -136,7 +136,7 @@ Tempo receives traces from the otel-collector and makes them queryable in Grafan
 1. **Create the `tempo` Railway service.**
    - New Service → "Deploy from Docker image".
    - Image: `ghcr.io/connor-adams/cashflow-tempo:main` (initially) — bump to `:production` once a release has tagged it.
-   - Add a persistent volume, mount at `/var/tempo`, size 10GB.
+   - Add a persistent volume, mount at `/var/tempo`, size 10GB. **The mount path MUST be `/var/tempo`** — do NOT mount at `/tempo`, which would shadow the `grafana/tempo` binary at `/tempo` and fail-start the container. The storage paths in `infra/tempo/config.yaml` (`storage.trace.wal.path` and `storage.trace.local.path`) are hard-pinned under `/var/tempo`; the regression-guard test `backend/test/tempoConfig.test.ts` asserts this in CI.
    - Set service name to `tempo` (Railway exposes it as `tempo.railway.internal` in private networking).
    - Set env var: `PORT=3200`.
    - Deploy.
@@ -146,6 +146,66 @@ Tempo receives traces from the otel-collector and makes them queryable in Grafan
    - Redeploy the otel-collector.
 
 3. **Add the service ID to `.github/workflows/promote-to-production.yml`** (`RAILWAY_TEMPO_SERVICE_ID`). Open a follow-up PR with the value filled in.
+
+### Verifying the volume mount
+
+After deploying — or any time you suspect the mount has drifted — verify the tempo service is writing to the persistent volume rather than to the container's ephemeral overlay filesystem.
+
+1. **Confirm volume exists and is attached.** From a checkout linked to the Railway project:
+
+   ```bash
+   railway volume list
+   # Expect a `tempo-volume` row with `Attached to: tempo` and `Mount path: /var/tempo`.
+   ```
+
+   Or via GraphQL (no need for `RAILWAY_TOKEN` env var if the CLI is logged in — token lives in `~/.railway/config.json`):
+
+   ```bash
+   TOKEN=$(jq -r .user.token ~/.railway/config.json)
+   PROJECT_ID=a5293fbb-c995-4c87-b3c7-4fb03a701156
+   curl -sS https://backboard.railway.com/graphql/v2 \
+     -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+     -d "{\"query\":\"query{project(id:\\\"${PROJECT_ID}\\\"){volumes{edges{node{name volumeInstances{edges{node{mountPath state serviceId}}}}}}}}\"}" \
+     | jq '.data.project.volumes.edges[] | select(.node.name == "tempo-volume")'
+   ```
+
+2. **Confirm the live container has `/var/tempo` mounted as a separate filesystem.**
+
+   ```bash
+   railway ssh -s tempo "mount | grep /var/tempo"
+   # Expect a line like: /dev/zd1968 on /var/tempo type ext4 (rw,relatime,...)
+   ```
+
+   If the only mount is the overlay `/` filesystem, the volume is not attached and traces will be lost on every restart.
+
+3. **Confirm tempo is writing blocks to the mounted path.**
+
+   ```bash
+   railway ssh -s tempo "sh -c 'ls /var/tempo/wal; ls /var/tempo/traces; du -sh /var/tempo/*'"
+   ```
+
+   Healthy output shows a WAL block directory like `<uuid>+single-tenant+vParquet4`, a `traces/single-tenant/<uuid>/` tree once blocks have been flushed, and `tempo_cluster_seed.json` in `traces/`.
+
+4. **Confirm trace durability across a deploy.** Note the current WAL block UUID, force a redeploy (`railway redeploy --service tempo -y`), and re-list — the prior WAL block should now appear under `/var/tempo/traces/single-tenant/<uuid>/` with `data.parquet`, `bloom-0`, `index`, `meta.json` files, proving it survived the container swap. A new WAL block starts for fresh ingestion.
+
+### Creating a missing tempo volume
+
+If `railway volume list` does not show `tempo-volume` at all (e.g. it was deleted, or the service was created without a volume), create it via the Railway GraphQL API rather than the dashboard so the mount path is set atomically with creation:
+
+```bash
+TOKEN=$(jq -r .user.token ~/.railway/config.json)
+PROJECT_ID=a5293fbb-c995-4c87-b3c7-4fb03a701156
+ENV_ID=a72f97a7-7fde-459f-87e7-57ac9255617c           # production
+TEMPO_SERVICE_ID=977ae051-e712-4194-a564-f821346ad098
+
+curl -sS https://backboard.railway.com/graphql/v2 \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg pid "$PROJECT_ID" --arg eid "$ENV_ID" --arg sid "$TEMPO_SERVICE_ID" \
+        '{query: "mutation($input: VolumeCreateInput!) { volumeCreate(input: $input) { id name } }",
+          variables: {input: {projectId: $pid, environmentId: $eid, serviceId: $sid, mountPath: "/var/tempo"}}}')"
+```
+
+Railway automatically triggers a redeploy of the targeted service when a volume is attached. After the new deployment reports `SUCCESS`, run the verification steps above.
 
 ### Loki ↔ Tempo correlation in Grafana
 
