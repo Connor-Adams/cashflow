@@ -22,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safeNum } from '../lib/num'
 import type {
   Account,
   FinancialGoal,
@@ -507,25 +508,28 @@ export function GoalsPage() {
                             />
                           </div>
                           <div className="muted text-xs">
-                            {formatMoney(Number(row.currentAmount), row.currency)}
+                            {safeNum(Number(row.currentAmount)) !== null
+                              ? formatMoney(safeNum(Number(row.currentAmount))!, row.currency)
+                              : <em>(unset)</em>}
                             {' / '}
-                            {formatMoney(Number(row.targetAmount), row.currency)}
+                            {safeNum(Number(row.targetAmount)) !== null
+                              ? formatMoney(safeNum(Number(row.targetAmount))!, row.currency)
+                              : <em>(unset)</em>}
                             {' '}
                             ({progress.toFixed(0)}%)
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {formatMoney(Number(row.targetAmount), row.currency)}
+                        {safeNum(Number(row.targetAmount)) !== null
+                          ? formatMoney(safeNum(Number(row.targetAmount))!, row.currency)
+                          : <em className="muted">(unset)</em>}
                       </TableCell>
                       <TableCell>{row.targetDate ?? '—'}</TableCell>
                       <TableCell>
-                        {row.monthlyContribution == null
-                          ? '—'
-                          : formatMoney(
-                              Number(row.monthlyContribution),
-                              row.currency,
-                            )}
+                        {safeNum(Number(row.monthlyContribution)) !== null
+                          ? formatMoney(safeNum(Number(row.monthlyContribution))!, row.currency)
+                          : '—'}
                       </TableCell>
                       <TableCell>
                         {projection?.requiredMonthlyContribution ? (
@@ -533,7 +537,7 @@ export function GoalsPage() {
                             <div>
                               Need{' '}
                               {formatMoney(
-                                Number(projection.requiredMonthlyContribution),
+                                safeNum(Number(projection.requiredMonthlyContribution)) ?? 0,
                                 row.currency,
                               )}
                               /mo

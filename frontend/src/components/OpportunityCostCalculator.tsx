@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { postJson } from '@/lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safeNum } from '../lib/num'
 
 /**
  * Opportunity-cost calculator (issue #252): "what if I invested this money
@@ -99,14 +100,29 @@ export function OpportunityCostCalculator({
   async function calculate(event?: React.FormEvent) {
     event?.preventDefault()
     setError(null)
+    const amountVal = safeNum(Number(amount))
+    const horizonVal = safeNum(Number(horizonYears))
+    const returnVal = safeNum(Number(returnPercent))
+    if (amountVal === null || amountVal <= 0) {
+      setError('Enter a positive number.')
+      return
+    }
+    if (horizonVal === null || horizonVal <= 0) {
+      setError('Enter a positive number.')
+      return
+    }
+    if (returnVal === null || returnVal <= 0) {
+      setError('Enter a positive number.')
+      return
+    }
     setLoading(true)
     try {
       const payload: Record<string, unknown> = {
         mode,
-        amount: Number(amount),
-        horizonYears: Number(horizonYears),
+        amount: amountVal,
+        horizonYears: horizonVal,
         // Percent in the UI, decimal on the wire.
-        annualReturnRate: Number(returnPercent) / 100,
+        annualReturnRate: returnVal / 100,
       }
       if (mode === 'recurring') payload.cadence = cadence
 
