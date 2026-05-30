@@ -174,6 +174,90 @@ cashflow_http_server_requests_total
 
 After the backend has served requests, you should see route-bounded request counters with labels such as `http_route`, `http_request_method`, and `http_response_status_code`.
 
+## Service reliability
+
+The observability services (`tempo`, `loki`, `prometheus`) must auto-recover
+from a clean shutdown. The 2026-05-29 incident exposed why: the tempo Railway
+service received a clean SIGTERM (exit 0) and stayed stopped for ~15 hours
+because the service was configured with `restartPolicyType: ON_FAILURE`,
+which does not restart on a clean exit. The otel-collector silently retried
+forever, so the only user-visible signal was "no new traces in Grafana."
+
+### Decision: `restartPolicyType: ALWAYS` for tempo, loki, prometheus
+
+For each of the `tempo`, `loki`, and `prometheus` Railway services, set:
+
+```
+restartPolicyType: ALWAYS
+```
+
+in the Railway dashboard → service → Settings → Deploy. This is set per
+service in Railway and is **not** captured in this repo (Railway has no IaC
+file for restart policy). The decision is documented here so a future reader
+knows the intent.
+
+Why ALWAYS over a watchdog (cron job, external monitor, custom probe):
+
+- **Smaller blast radius**: no new service to deploy, monitor, or maintain.
+  A watchdog has its own failure modes (the watchdog crashes; who watches it?).
+- **Faster recovery**: Railway restarts the container immediately; an external
+  watchdog cycles on a poll interval (minimum minutes).
+- **`railway down` still works**: Railway honors explicit `down` commands
+  separately from the restart policy, so an operator can still take a service
+  offline intentionally for maintenance.
+
+These services are stateless w.r.t. their bound volumes (they use local-disk
+storage and are safe to restart at any time) and have no graceful-shutdown
+ordering requirement that an ALWAYS policy would violate.
+
+### Defense in depth: Grafana alerts on collector self-metrics
+
+`ALWAYS` covers the crash case but not the "container running, pipeline
+unhealthy" case (e.g. tempo accepts the TCP connection but rejects writes due
+to a corrupt block or full disk). For that, Grafana provisions a set of
+alert rules from `infra/grafana/provisioning/alerting/observability-stack.yaml`:
+
+- `TempoExportFailing` —
+  `rate(otelcol_exporter_send_failed_spans_total{exporter="otlphttp/tempo"}[5m]) > 0`
+- `LokiExportFailing` —
+  `rate(otelcol_exporter_send_failed_log_records_total{exporter="loki"}[5m]) > 0`
+- `OtelCollectorScrapeDown` —
+  `up{job="cashflow-otel-collector"} == 0`
+
+These rules read the otel-collector's own self-telemetry metrics, which
+require two supporting changes already in this repo:
+
+1. `infra/otel-collector/config.yaml` binds `service.telemetry.metrics.address`
+   to `0.0.0.0:8888` (default is loopback-only).
+2. `infra/prometheus/prometheus.yml` adds a `cashflow-otel-collector-self`
+   scrape job pointed at `otel-collector.railway.internal:8888`.
+
+The 5-minute rate window plus `for: 1m` keeps the worst-case alert latency
+under 6 minutes, satisfying the issue #371 SLO of "surface tempo downtime
+within 5 minutes."
+
+### Verification
+
+Once `restartPolicyType: ALWAYS` is set on tempo, simulate the original
+incident:
+
+1. From the Railway dashboard, stop the tempo deployment (or run
+   `railway down --service tempo`).
+2. Watch the deployment list. Within ~30 seconds Railway should spawn a new
+   deployment automatically.
+3. If you instead want to test the alert path, leave tempo down for ~2
+   minutes and confirm `TempoExportFailing` fires in Grafana → Alerting.
+
+Repeat for `loki` and `prometheus`.
+
+### Notification routing (future work)
+
+The alert rules will fire and show as "Firing" in Grafana → Alerting → Alert
+rules immediately. Routing them to email/Slack/Discord requires a contact
+point + notification policy, which lives outside this repo because it needs
+SMTP/webhook credentials. Add when ready via Grafana → Alerting → Contact
+points.
+
 ## Kill switch
 
 To stop OTLP export without redeploying app code:

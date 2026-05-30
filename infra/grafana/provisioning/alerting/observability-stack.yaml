@@ -1,0 +1,199 @@
+# Cashflow observability stack alerts.
+#
+# These alerts catch the case where the otel-collector is up but tempo, loki,
+# or prometheus is silently failing — the same failure mode that caused the
+# 2026-05-29 tempo SIGTERM-without-restart incident (issue #371).
+#
+# The primary fix for that incident is Railway `restartPolicyType: ALWAYS`
+# on tempo, loki, and prometheus (documented in docs/observability.md). These
+# alerts are defense in depth for cases where the container is technically
+# running but the pipeline is unhealthy.
+#
+# Data prerequisites:
+# - prometheus must scrape `otel-collector.railway.internal:8888`
+#   (configured in infra/prometheus/prometheus.yml).
+# - otel-collector must bind self-telemetry to 0.0.0.0:8888
+#   (configured in infra/otel-collector/config.yaml).
+#
+# SLO: tempo/loki/prometheus downtime must surface within 5 minutes. A 5m
+# rate window plus `for: 1m` keeps the worst-case alert latency under 6
+# minutes, with most fires landing in 1-2 minutes.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: observability-stack
+    folder: Cashflow
+    interval: 1m
+    rules:
+      - uid: cashflow-tempo-export-failing
+        title: TempoExportFailing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'rate(otelcol_exporter_send_failed_spans_total{exporter="otlphttp/tempo"}[5m]) > 0'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: 'otel-collector is failing to export traces to tempo'
+          description: |
+            The otel-collector reports >0 failed spans/sec on the
+            otlphttp/tempo exporter over the last 5 minutes. Tempo may be
+            down, unreachable, or refusing writes.
+
+            Check the tempo Railway service status. If it is stopped, redeploy
+            with `railway redeploy --service tempo --yes`. Restart policy is
+            `ALWAYS` so a crash should self-heal — this alert means the
+            crash loop is failing or the service is hung.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#service-reliability'
+        labels:
+          severity: critical
+          component: tempo
+
+      - uid: cashflow-loki-export-failing
+        title: LokiExportFailing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'rate(otelcol_exporter_send_failed_log_records_total{exporter="loki"}[5m]) > 0'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: 'otel-collector is failing to export logs to loki'
+          description: |
+            The otel-collector reports >0 failed log records/sec on the
+            loki exporter over the last 5 minutes. Loki may be down,
+            unreachable, or refusing writes.
+
+            Check the loki Railway service status. Restart policy is
+            `ALWAYS` so a crash should self-heal — this alert means the
+            crash loop is failing or the service is hung.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#service-reliability'
+        labels:
+          severity: critical
+          component: loki
+
+      - uid: cashflow-otel-collector-scrape-down
+        title: OtelCollectorScrapeDown
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'up{job="cashflow-otel-collector"} == 0'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: Alerting
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'Prometheus cannot scrape the otel-collector'
+          description: |
+            Prometheus reports the otel-collector target is down. Either the
+            collector is crashing, the prometheus service is unhealthy, or
+            Railway private networking is broken.
+
+            Without a working collector + prometheus, the TempoExportFailing
+            and LokiExportFailing alerts cannot fire — this alert is the
+            last line of defense for the whole pipeline.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#service-reliability'
+        labels:
+          severity: critical
+          component: otel-collector

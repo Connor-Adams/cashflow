@@ -24,7 +24,8 @@ services:
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
-      - "9464:9464"   # Prometheus scrape endpoint
+      - "9464:9464"   # Prometheus scrape endpoint (app metrics)
+      - "8888:8888"   # Collector self-telemetry (otelcol_*) for alerts
     environment:
       - LOKI_HOST=loki
       - TEMPO_HOST=tempo

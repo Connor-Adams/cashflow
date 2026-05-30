@@ -56,3 +56,12 @@ service:
   telemetry:
     logs:
       level: info
+    # Expose the collector's own internal metrics (otelcol_exporter_*,
+    # otelcol_receiver_*, otelcol_processor_*) so Prometheus can scrape them
+    # over Railway's private network. The default bind is 127.0.0.1:8888,
+    # which only works inside the container; 0.0.0.0:8888 is required so the
+    # prometheus service can reach `otel-collector.railway.internal:8888`.
+    # These metrics drive the TempoExportFailing / LokiExportFailing alerts
+    # in infra/grafana/provisioning/alerting/observability-stack.yaml.
+    metrics:
+      address: 0.0.0.0:8888
