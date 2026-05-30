@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -33,6 +33,19 @@ const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
   { value: 'other', label: 'Other' },
 ]
 
+function renderMarkdown(text: string): string {
+  let html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>')
+  html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+  html = html.replace(/\s+on[a-z]+="[^"]*"/gi, '')
+  html = html.replace(/href="javascript:[^"]*"/gi, 'href="#"')
+  return html
+}
+
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -47,6 +60,7 @@ export function AccountsPage() {
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editNotes, setEditNotes] = useState('')
+  const [notesError, setNotesError] = useState<string | null>(null)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -175,6 +189,10 @@ export function AccountsPage() {
       return
     }
     setErr(null)
+    setNotesError(null)
+    const originalAccount = accounts.find((a) => a.id === id)
+    const notesChanged =
+      (editNotes.trim() || null) !== (originalAccount?.notes ?? null)
     try {
       await patchJson<Account>(`/api/accounts/${id}`, {
         name,
@@ -196,8 +214,19 @@ export function AccountsPage() {
       setEditClosedAt('')
       setEditNotes('')
       await load()
+      if (notesChanged) {
+        showToast({ title: 'Notes saved.', variant: 'success', durationMs: 3000 })
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not update account')
+      const msg = e instanceof Error ? e.message : ''
+      if (msg.includes('NOTES_TOO_LONG')) {
+        setNotesError('Notes must be 4000 characters or fewer.')
+      } else if (notesChanged) {
+        showToast({ title: "Couldn't save notes. Try again.", variant: 'destructive', durationMs: 4000 })
+        setErr(msg || 'Could not update account')
+      } else {
+        setErr(msg || 'Could not update account')
+      }
     }
   }
 
@@ -211,6 +240,7 @@ export function AccountsPage() {
     setEditVisibility('private')
     setEditClosedAt('')
     setEditNotes('')
+    setNotesError(null)
   }
 
   function startEdit(account: Account) {
@@ -350,9 +380,6 @@ export function AccountsPage() {
           </Label>
           <Label htmlFor="accounts-create-notes" style={{ gridColumn: '1 / -1' }}>
             Notes
-            <p className="muted" style={{ fontWeight: 'normal', fontSize: '0.85em', marginBottom: 4 }}>
-              Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account.
-            </p>
             <textarea
               id="accounts-create-notes"
               name="notes"
@@ -361,6 +388,9 @@ export function AccountsPage() {
               style={{ width: '100%', resize: 'vertical' }}
               placeholder="e.g. routing #021000021, contact: support@bank.com"
             />
+            <p style={{ fontSize: '0.75em', color: 'gray' }}>
+              Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account.
+            </p>
           </Label>
         </div>
         <Button type="submit" disabled={saving}>
@@ -405,7 +435,8 @@ export function AccountsPage() {
                 ))
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
+                  <Fragment key={a.id}>
+                  <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -521,6 +552,7 @@ export function AccountsPage() {
                           <p style={{ fontSize: '0.75em', color: editNotes.length > 3800 ? 'red' : 'inherit' }}>
                             {editNotes.length}/4000
                           </p>
+                          {notesError && <p style={{ color: 'red', fontSize: '0.8em', marginTop: 2 }}>{notesError}</p>}
                         </div>
                       ) : (
                         a.notesPreview
@@ -561,6 +593,18 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId !== a.id && a.notesPreview && a.notesPreview.trim() && (
+                    <TableRow key={`${a.id}-notes`}>
+                      <TableCell colSpan={9} style={{ paddingTop: 0 }}>
+                        <div className="accountNotesCard">
+                          <strong>Notes</strong>
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(a.notesPreview) }} />
+                          {a.notesPreview.length >= 100 && <span style={{ fontSize: '0.8em', color: '#888' }}>… (truncated)</span>}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 ))
               )}
             </TableBody>
