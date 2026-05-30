@@ -1,8 +1,43 @@
 import { Link } from 'react-router-dom'
 import { Area, AreaChart, ResponsiveContainer } from 'recharts'
 import { BentoTile } from './BentoTile'
-import { useNetWorthCurrent, useNetWorthSeries } from '@/hooks/useNetWorth'
+import {
+  useCreditUtilization,
+  useNetWorthCurrent,
+  useNetWorthSeries,
+} from '@/hooks/useNetWorth'
 import { formatMoney } from '@/lib/formatMoney'
+
+/**
+ * Per-currency credit-utilization summary line (#437). Renders one line per
+ * currency that has at least one active credit card with a limit set:
+ *   "Credit utilization: 28% across 3 cards (CAD)"
+ * Colour-coded subtly: amber > 30%, red > 70%. Hidden entirely if no
+ * eligible cards exist.
+ */
+function CreditUtilizationLine() {
+  const { data } = useCreditUtilization()
+  if (!data || data.length === 0) return null
+  return (
+    <>
+      {data.map((bucket) => {
+        const tone =
+          bucket.utilizationPct > 70
+            ? 'text-red-700'
+            : bucket.utilizationPct > 30
+              ? 'text-amber-700'
+              : 'text-muted-foreground'
+        const cardLabel = bucket.cardCount === 1 ? 'card' : 'cards'
+        return (
+          <div key={bucket.currency} className={`text-xs ${tone}`}>
+            Credit utilization: {Math.round(bucket.utilizationPct)}% across{' '}
+            {bucket.cardCount} {cardLabel} ({bucket.currency})
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
 function oneYearAgo(): { from: string; to: string } {
   const today = new Date()
@@ -37,6 +72,7 @@ export function NetWorthTile() {
                 Assets {formatMoney(current.data.assetsTotal, 'CAD')} · Liabilities{' '}
                 {formatMoney(current.data.liabilitiesTotal, 'CAD')}
               </div>
+              <CreditUtilizationLine />
             </div>
             <div className="w-28 h-12">
               <ResponsiveContainer width="100%" height="100%">
