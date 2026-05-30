@@ -45,6 +45,7 @@ import calendarRouter from './routes/calendar';
 import goalsRouter from './routes/goals';
 import notificationsRouter from './routes/notifications';
 import notificationPreferencesRouter from './routes/notificationPreferences';
+import usersNotificationsRouter from './routes/usersNotifications';
 import notificationsAdminRouter from './routes/admin/notificationsAdmin';
 import forecastRouter from './routes/forecast';
 import debtRouter from './routes/debt';
@@ -150,6 +151,11 @@ app.use('/api/monthly-close', monthlyCloseRouter);
 app.use('/api/calendar', calendarRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/notifications', notificationsRouter);
+// Notification preferences folded under the user namespace (issue #379):
+// the live endpoints are /api/users/me/notifications/preferences[/:type].
+app.use('/api/users/me/notifications', usersNotificationsRouter);
+// The old standalone path is retained only to return 410 Gone (see the route
+// file) so any stale client surfaces loudly instead of silently breaking.
 app.use('/api/notification-preferences', notificationPreferencesRouter);
 app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);

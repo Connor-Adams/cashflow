@@ -429,9 +429,10 @@ test('muted budget.breach preference suppresses the in-app row', async () => {
   await createBudget({ category: 'Lunch', amount: 100 });
   await spend(primaryHouseholdId, primaryAccountId, currentMonthDate(15), 'Lunch', -85);
 
-  // Mute the channel before running the cron.
+  // Mute the channel before running the cron. Preferences moved under the
+  // user namespace in issue #379.
   const muteRes = await primaryAgent
-    .patch('/api/notification-preferences/budget.breach')
+    .patch('/api/users/me/notifications/preferences/budget.breach')
     .send({ channelInApp: false });
   assert.equal(muteRes.status, 200);
 
