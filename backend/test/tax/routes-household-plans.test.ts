@@ -43,7 +43,7 @@ async function createPlan(
 }
 
 async function createPersonalScenario(name: string): Promise<number> {
-  const res = await authed.post('/api/tax/personal-scenarios').send({
+  const res = await authed.post('/api/tax/scenarios/personal').send({
     entityId: personalEntityId,
     year: 2025,
     name,
@@ -277,7 +277,7 @@ test('GET /:id/compute returns integrated bundle with corp + personal', async ()
 
   // Create a corp scenario with a salary override (routes employment income
   // into the personal entity via the integration router).
-  const corpScen = await authed.post('/api/tax/corp-scenarios').send({
+  const corpScen = await authed.post('/api/tax/scenarios/corp').send({
     entityId: corpEntityId,
     year: 2025,
     name: 'Salary heavy',
@@ -378,6 +378,6 @@ test('DELETE /:id removes the plan and unlinks scenarios', async () => {
   assertStatus(get, 404);
 
   // Scenario survives.
-  const scenGet = await authed.get(`/api/tax/personal-scenarios/${scenarioId}`);
+  const scenGet = await authed.get(`/api/tax/scenarios/personal/${scenarioId}`);
   assertStatus(scenGet, 200);
 });
