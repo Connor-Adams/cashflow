@@ -118,6 +118,8 @@ type RbcBundleUploadResponse = {
 /** Which upload form is currently rendered. */
 type UploadMode = 'standard' | 'bundle' | 'holdings' | 'rbc-bundle'
 
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 // 100 MB
+
 type CsvProfileOption = { id: string; label: string; hint: string }
 
 type PreviewResponse = StatementPreview
@@ -199,6 +201,7 @@ export function UploadCard({
     title: string
     lines?: string[]
   } | null>(null)
+  const [hasOversizedFile, setHasOversizedFile] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [runningFolderImport, setRunningFolderImport] = useState(false)
   const [previewing, setPreviewing] = useState(false)
@@ -986,6 +989,18 @@ export function UploadCard({
             onChange={() => {
               setPreviewData(null)
               setUploadFeedback(null)
+              const files = Array.from(fileRef.current?.files ?? [])
+              const oversized = files.find((f) => f.size > MAX_UPLOAD_BYTES)
+              if (oversized) {
+                const mb = (oversized.size / (1024 * 1024)).toFixed(0)
+                setUploadFeedback({
+                  variant: 'error',
+                  title: `${oversized.name} is too large (${mb} MB). Maximum is 100 MB.`,
+                })
+                setHasOversizedFile(true)
+              } else {
+                setHasOversizedFile(false)
+              }
             }}
           />
         </Label>
@@ -997,6 +1012,7 @@ export function UploadCard({
           disabled={
             uploading ||
             previewing ||
+            hasOversizedFile ||
             !uploadAccountId ||
             accounts.length === 0
           }
@@ -1004,7 +1020,7 @@ export function UploadCard({
         >
           {previewing ? 'Previewing…' : 'Preview statement'}
         </Button>
-        <Button type="submit" disabled={uploading}>
+        <Button type="submit" disabled={uploading || hasOversizedFile}>
           {uploading ? 'Importing…' : previewData?.previewToken ? 'Commit preview' : 'Import CSV file(s)'}
         </Button>
       </div>
