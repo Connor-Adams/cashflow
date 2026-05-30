@@ -36,6 +36,11 @@ import {
   lifestyleInflation,
   type LifestyleInflationTxnRow,
 } from '../summary/lifestyleInflation';
+import {
+  savingsRate,
+  type SavingsRateTxnRow,
+  type SavingsRateResponse,
+} from '../summary/savingsRate';
 import { scopeWhereClause } from './budgets';
 import { getOpenAiConfig } from '../config/openai';
 import { openaiJson } from '../ai/openaiJson';
@@ -474,6 +479,134 @@ router.get('/lifestyle-inflation', async (req, res, next) => {
       anchorMonth: anchor,
       scope,
       currency: currency ?? null,
+      ...result,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Fetch transactions for the savings rate report. Fetches all transaction
+ * rows with account type info so the aggregator can classify by destination.
+ */
+async function fetchSavingsRateTransactions(
+  req: Parameters<typeof currentAuth>[0],
+  fromDate: string,
+  toDate: string,
+  currency: string | null,
+  scope: LifestyleScope,
+): Promise<SavingsRateTxnRow[]> {
+  const where: WhereOptions = {
+    ...visibleTransactionWhere(req),
+    ...scopeFilter(scope),
+    date: { [Op.between]: [fromDate, toDate] },
+  };
+  if (currency) (where as Record<string, unknown>).currency = currency;
+
+  const [rows, accounts] = await Promise.all([
+    Transaction.findAll({
+      where,
+      attributes: ['id', 'accountId', 'date', 'currency', 'amount', 'finalCategory', 'finalBusiness', 'txnType', 'linkedTransactionId'],
+      raw: true,
+    }),
+    Account.findAll({
+      where: visibleAccountWhere(req),
+      attributes: ['id', 'accountType'],
+      raw: true,
+    }),
+  ]);
+
+  const accountTypeById = new Map<number, string | null>(
+    (accounts as unknown as Array<{ id: number; accountType: string | null }>).map((a) => [
+      a.id,
+      a.accountType,
+    ]),
+  );
+
+  type RawRow = {
+    id: number;
+    accountId: number;
+    date: string;
+    currency: string;
+    amount: unknown;
+    finalCategory: string | null;
+    finalBusiness: boolean;
+    txnType: string | null;
+    linkedTransactionId: number | null;
+  };
+  return (rows as unknown as RawRow[]).map((r) => ({
+    id: r.id,
+    accountId: r.accountId,
+    date: r.date,
+    currency: r.currency,
+    amount: r.amount,
+    finalCategory: r.finalCategory,
+    finalBusiness: r.finalBusiness,
+    txnType: r.txnType,
+    accountType: accountTypeById.get(r.accountId) ?? 'checking',
+    linkedTransactionId: r.linkedTransactionId,
+  }));
+}
+
+/**
+ * GET /api/reports/savings-rate (Cashflow #246).
+ *
+ * Calculates monthly savings rate breakdown (income, spending, savings,
+ * investments, debt principal) over a rolling window of months.
+ *
+ * Query parameters:
+ *   month (YYYY-MM): anchor month (defaults to current month)
+ *   months (number): window size in months (2–36, default 12)
+ *   currency (string): optional filter to single currency (empty = all)
+ *   scope (personal|shared|business|all): transaction scope filter
+ *   includeInvestments (true|false): whether to count investments in numerator (default true)
+ *   includeDebtPrincipal (true|false): whether to count debt principal (default true)
+ */
+router.get('/savings-rate', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    void auth; // throws if unauthenticated.
+
+    const anchor =
+      req.query.month != null && req.query.month !== ''
+        ? parseMonth(req.query.month)
+        : currentMonth();
+    if (!anchor) {
+      res.status(400).json({
+        error: 'month must be in YYYY-MM format (e.g. 2026-05)',
+      });
+      return;
+    }
+    const windowMonths = parseWindowMonths(req.query.months);
+    const singleCurrency = parseCurrency(req.query.currency);
+    const scope = parseScope(req.query.scope);
+    const includeInvestments = parseBool(req.query.includeInvestments ?? 'true');
+    const includeDebtPrincipal = parseBool(req.query.includeDebtPrincipal ?? 'true');
+
+    const months = buildMonthWindow(anchor, windowMonths);
+    const fromDate = monthBounds(months[0]).from;
+    const toDate = monthBounds(months[months.length - 1]).to;
+
+    const transactions = await fetchSavingsRateTransactions(
+      req,
+      fromDate,
+      toDate,
+      singleCurrency,
+      scope,
+    );
+
+    const result: SavingsRateResponse = savingsRate(
+      transactions,
+      months,
+      includeInvestments,
+      includeDebtPrincipal,
+    );
+
+    res.json({
+      anchorMonth: anchor,
+      scope,
+      currency: singleCurrency ?? null,
       ...result,
     });
   } catch (e) {
