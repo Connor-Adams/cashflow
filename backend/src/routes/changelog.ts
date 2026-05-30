@@ -23,7 +23,8 @@ export function validateSeenPatch(
 router.get('/latest', async (req, res, next) => {
   try {
     const { user } = currentAuth(req);
-    const visible = userEntries(loadChangelog(changelogDir).entries);
+    const { entries } = loadChangelog(changelogDir);
+    const visible = userEntries(entries);
     if (visible.length === 0) {
       res.json({ empty: true });
       return;
@@ -36,7 +37,7 @@ router.get('/latest', async (req, res, next) => {
       title: top.title,
       publishedAt: top.publishedAt,
       html: top.html,
-      unread: isUnread(top, lastSeen, visible),
+      unread: isUnread(top, lastSeen, entries),
     });
   } catch (e) {
     next(e);
