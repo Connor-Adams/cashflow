@@ -275,15 +275,15 @@ export function NetWorthPage() {
                     {row.native != null
                       ? formatMoney(row.native, row.currency)
                       : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-amber-700">(unset)</span>
-                        : '—'}
+                        ? <em title="Opening balance not set. Edit the account to set it." className="text-xs text-amber-700 not-italic">(unset)</em>
+                        : <span title="Data not available for this date.">—</span>}
                   </TableCell>
                   <TableCell className="text-right">
                     {row.cadValue != null
                       ? formatMoney(row.cadValue, 'CAD')
                       : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-amber-700">(unset)</span>
-                        : '—'}
+                        ? <em title="Opening balance not set. Edit the account to set it." className="text-xs text-amber-700 not-italic">(unset)</em>
+                        : <span title="Data not available for this date.">—</span>}
                   </TableCell>
                   <TableCell>
                     {badges.length === 0 ? (

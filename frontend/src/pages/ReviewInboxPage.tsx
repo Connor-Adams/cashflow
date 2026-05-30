@@ -161,12 +161,22 @@ export function ReviewInboxPage() {
   const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
   const [showShortcutHint, setShowShortcutHint] = useState(() => {
     try {
-      return localStorage.getItem('seenReviewInboxShortcuts') !== 'true'
+      return localStorage.getItem('seenReviewInboxShortcuts') !== '1'
     } catch {
       return false
     }
   })
   const { showToast } = useToast()
+
+  // Auto-dismiss the first-visit shortcuts hint after 4 seconds.
+  useEffect(() => {
+    if (!showShortcutHint) return
+    const timer = setTimeout(() => {
+      setShowShortcutHint(false)
+      try { localStorage.setItem('seenReviewInboxShortcuts', '1') } catch { /* ignore */ }
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [showShortcutHint])
   const categoryPickerRef = useRef<HTMLDivElement>(null)
   const tableWrapRef = useRef<HTMLDivElement>(null)
 
@@ -601,7 +611,7 @@ export function ReviewInboxPage() {
                   showShortcutsHelp()
                   if (showShortcutHint) {
                     setShowShortcutHint(false)
-                    try { localStorage.setItem('seenReviewInboxShortcuts', 'true') } catch { /* ignore */ }
+                    try { localStorage.setItem('seenReviewInboxShortcuts', '1') } catch { /* ignore */ }
                   }
                 }}
                 aria-label="Show keyboard shortcuts"
