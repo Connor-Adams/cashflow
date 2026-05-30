@@ -22,18 +22,21 @@ export async function integrity(householdId: number): Promise<IntegrityResult> {
   }
 
   type DupeRow = { groups: string; extras: string };
+  const placeholders = accountIds.map((_, i) => `:id${i}`).join(', ');
+  const replacements: Record<string, unknown> = {};
+  accountIds.forEach((id, i) => { replacements[`id${i}`] = id; });
   const [dupe] = await sequelize.query<DupeRow>(
     `SELECT COUNT(*)::text AS groups, COALESCE(SUM(extras), 0)::text AS extras FROM (
        SELECT source_identity_fingerprint, COUNT(*) - 1 AS extras
        FROM transactions
-       WHERE account_id = ANY(:accountIds)
+       WHERE account_id IN (${placeholders})
          AND source_identity_fingerprint IS NOT NULL
        GROUP BY source_identity_fingerprint
        HAVING COUNT(*) > 1
      ) g`,
     {
       type: QueryTypes.SELECT,
-      replacements: { accountIds },
+      replacements,
     },
   );
 

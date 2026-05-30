@@ -9,6 +9,7 @@ import {
   ExternalOrder,
   FinancialGoal,
   HoldingSnapshot,
+  HouseholdMember,
   Rule,
   Subscription,
   Transaction,
@@ -26,7 +27,15 @@ export async function counts(householdId: number): Promise<CountsResult> {
   });
   const accountIds = accountRows.map((a) => a.id);
   const txnWhere = accountIds.length ? { accountId: { [Op.in]: accountIds } } : { id: -1 };
+  const holdingsWhere = accountIds.length ? { accountId: { [Op.in]: accountIds } } : { id: -1 };
   const hw = { householdId };
+
+  const memberRows = await HouseholdMember.findAll({
+    where: { householdId },
+    attributes: ['userId'],
+  });
+  const userIds = memberRows.map((m) => m.userId);
+  const chatWhere = userIds.length ? { userId: { [Op.in]: userIds } } : { id: -1 };
 
   const [
     transactions,
@@ -44,7 +53,7 @@ export async function counts(householdId: number): Promise<CountsResult> {
   ] = await Promise.all([
     Transaction.count({ where: txnWhere }),
     Account.count({ where: hw }),
-    HoldingSnapshot.count({ where: { accountId: accountIds.length ? { [Op.in]: accountIds } : -1 } }),
+    HoldingSnapshot.count({ where: holdingsWhere }),
     Rule.count({ where: hw }),
     Contact.count({ where: hw }),
     ExternalOrder.count({ where: hw }),
@@ -52,10 +61,8 @@ export async function counts(householdId: number): Promise<CountsResult> {
     FinancialGoal.count({ where: hw }),
     BudgetTarget.count({ where: hw }),
     AuditLog.count({ where: hw }),
-    ChatThread.count({ where: hw }),
-    AiSuggestion.count({
-      where: txnWhere,
-    }),
+    ChatThread.count({ where: chatWhere }),
+    AiSuggestion.count({ where: hw }),
   ]);
 
   return {
