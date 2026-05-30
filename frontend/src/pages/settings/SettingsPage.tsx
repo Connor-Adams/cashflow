@@ -14,6 +14,7 @@ const ALL_TOP_TABS: Array<TabItem & { superadminOnly?: boolean }> = [
   { value: 'categories', label: 'Categories' },
   { value: 'notifications', label: 'Notifications' },
   { value: 'jobs', label: 'Jobs' },
+  { value: 'whatsnew', label: "What's new" },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -26,6 +27,7 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   categories: '/settings/categories',
   notifications: '/settings/notifications',
   jobs: '/settings/jobs',
+  whatsnew: '/settings/whatsnew',
 }
 
 export function SettingsPage() {

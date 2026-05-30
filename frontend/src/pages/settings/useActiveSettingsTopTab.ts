@@ -10,6 +10,7 @@ export type SettingsTopTab =
   | 'categories'
   | 'notifications'
   | 'jobs'
+  | 'whatsnew'
 
 export function useActiveSettingsTopTab(): SettingsTopTab {
   const isDisplay = useMatch('/settings/display')
@@ -23,6 +24,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isCategories = useMatch('/settings/categories')
   const isNotifications = useMatch('/settings/notifications')
   const isJobs = useMatch('/settings/jobs')
+  const isWhatsnew = useMatch('/settings/whatsnew')
 
   if (isDisplay || isGmail || isPartnerInvite) return 'settings'
   if (isImports) return 'imports'
@@ -33,5 +35,6 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   if (isCategories) return 'categories'
   if (isNotifications) return 'notifications'
   if (isJobs) return 'jobs'
+  if (isWhatsnew) return 'whatsnew'
   return 'settings'
 }

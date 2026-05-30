@@ -48,6 +48,7 @@ import { MembersTab } from './pages/settings/tabs/MembersTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
+import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
@@ -130,6 +131,7 @@ function AppRoutes() {
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="jobs" element={<JobsTab />} />
+            <Route path="whatsnew" element={<WhatsNewTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />

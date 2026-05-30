@@ -42,6 +42,7 @@ describe('SettingsPage shell', () => {
       'Categories',
       'Notifications',
       'Jobs',
+      "What's new",
     ])
   })
 
