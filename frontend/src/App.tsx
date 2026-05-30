@@ -19,6 +19,7 @@ import { CalendarPage } from './pages/CalendarPage'
 import { GoalsPage } from './pages/GoalsPage'
 import { ForecastPage } from './pages/ForecastPage'
 import { DebtPage } from './pages/DebtPage'
+import { CreditCardPlannerPage } from './pages/CreditCardPlannerPage'
 import { OpportunityCostPage } from './pages/OpportunityCostPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
@@ -95,6 +96,7 @@ function AppRoutes() {
           <Route path="goals" element={<GoalsPage />} />
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="debt" element={<DebtPage />} />
+          <Route path="credit-cards" element={<CreditCardPlannerPage />} />
           <Route path="opportunity-cost" element={<OpportunityCostPage />} />
           <Route path="scenarios" element={<ScenariosPage />} />
           <Route path="recurring" element={<RecurringPage />} />

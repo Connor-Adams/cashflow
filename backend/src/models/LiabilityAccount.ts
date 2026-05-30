@@ -34,6 +34,21 @@ export class LiabilityAccount extends Model<
   declare statementBalance: string | null;
   /** Optional day-of-month (1-31) the payment is due. */
   declare dueDay: number | null;
+  /**
+   * Credit-card payment planner fields (#243). Operational bill-management
+   * metadata layered onto the liability sidecar; only meaningful for
+   * credit_card accounts.
+   */
+  /** YYYY-MM-DD (DATEONLY) — when the current statement closed. */
+  declare statementDate: string | null;
+  /** Whether the card is on autopay. */
+  declare autopayEnabled: CreationOptional<boolean>;
+  /** full | minimum | fixed — how much autopay draws. NULL when off. */
+  declare autopayType: string | null;
+  /** Fixed autopay draw when autopayType = 'fixed'. DECIMAL(14,4) string. */
+  declare autopayAmount: string | null;
+  /** Cash account the bill is paid from. SET NULL on that account's delete. */
+  declare paymentAccountId: number | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -73,6 +88,32 @@ export function initLiabilityAccount(sequelize: Sequelize): typeof LiabilityAcco
       dueDay: {
         type: DataTypes.INTEGER,
         field: 'due_day',
+        allowNull: true,
+      },
+      statementDate: {
+        type: DataTypes.DATEONLY,
+        field: 'statement_date',
+        allowNull: true,
+      },
+      autopayEnabled: {
+        type: DataTypes.BOOLEAN,
+        field: 'autopay_enabled',
+        allowNull: false,
+        defaultValue: false,
+      },
+      autopayType: {
+        type: DataTypes.STRING(16),
+        field: 'autopay_type',
+        allowNull: true,
+      },
+      autopayAmount: {
+        type: DataTypes.DECIMAL(14, 4),
+        field: 'autopay_amount',
+        allowNull: true,
+      },
+      paymentAccountId: {
+        type: DataTypes.INTEGER,
+        field: 'payment_account_id',
         allowNull: true,
       },
     } as ModelAttributes<LiabilityAccount>,
