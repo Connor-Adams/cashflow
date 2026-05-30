@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { Account, Transaction, sequelize } from '../models';
+import { Account, AccountStatement, Transaction, sequelize } from '../models';
 import * as env from '../config/env';
 import { currentAuth } from '../auth/middleware';
-import { visibleAccountWhere } from '../auth/scope';
+import { visibleAccountWhere, visibleStatementWhere, visibleTransactionWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
 import { mergeAccounts } from '../services/accountMerge';
+import { computeReconciliation, isBalanced } from '../statements/computeReconciliation';
 
 const router = Router();
 const ACCOUNT_TYPES = new Set([
@@ -246,6 +247,143 @@ router.delete('/:id', async (req, res, next) => {
       await account.destroy({ transaction: t });
     });
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Account-scoped statement reconciliation (#403)
+//
+// AccountStatement is a period-child of Account. These routes make the
+// reconcile / unreconcile actions accessible via the Account primitive path.
+// The flat /api/statements/* routes are kept for backwards compatibility.
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/accounts/:accountId/statements
+ *
+ * List statements for one account. This is the Account-owned read path —
+ * the same rows returned by GET /api/statements?accountId=N.
+ */
+router.get('/:accountId/statements', async (req, res, next) => {
+  try {
+    const accountId = parseInt(req.params.accountId, 10);
+    if (Number.isNaN(accountId)) {
+      res.status(400).json({ error: 'Invalid accountId' });
+      return;
+    }
+    const account = await Account.findOne({
+      where: { id: accountId, ...visibleAccountWhere(req) },
+      attributes: ['id'],
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+    const rows = await AccountStatement.findAll({
+      where: { accountId, ...visibleStatementWhere(req) },
+      order: [['period_start', 'DESC']],
+    });
+    res.json({ data: rows.map((r) => r.toJSON()) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/accounts/:accountId/statements/:stmtId/reconcile
+ *
+ * Reconcile a statement. The statement must belong to the specified account.
+ */
+router.post('/:accountId/statements/:stmtId/reconcile', async (req, res, next) => {
+  try {
+    const accountId = parseInt(req.params.accountId, 10);
+    const stmtId = parseInt(req.params.stmtId, 10);
+    if (Number.isNaN(accountId) || Number.isNaN(stmtId)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const account = await Account.findOne({
+      where: { id: accountId, ...visibleAccountWhere(req) },
+      attributes: ['id'],
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+    const stmt = await AccountStatement.findOne({
+      where: { id: stmtId, accountId, ...visibleStatementWhere(req) },
+    });
+    if (!stmt) {
+      res.status(404).json({ error: 'Statement not found' });
+      return;
+    }
+    const txns = await Transaction.findAll({
+      where: {
+        ...visibleTransactionWhere(req),
+        accountId: stmt.accountId,
+        date: { [Op.between]: [stmt.periodStart, stmt.periodEnd] },
+      },
+      attributes: ['amount'],
+    });
+    const reconciliation = computeReconciliation({
+      openingBalance: stmt.openingBalance,
+      closingBalance: stmt.closingBalance,
+      transactions: txns.map((t) => ({ amount: t.amount })),
+    });
+    const body = (req.body || {}) as Record<string, unknown>;
+    const explanationFromBody = typeof body.varianceExplanation === 'string'
+      ? body.varianceExplanation
+      : null;
+    if (!isBalanced(reconciliation) && !explanationFromBody && !stmt.varianceExplanation) {
+      res.status(400).json({
+        error: 'Statement has a variance — record a varianceExplanation before reconciling.',
+        variance: reconciliation.variance,
+      });
+      return;
+    }
+    await sequelize.transaction(async (t) => {
+      stmt.reconciledAt = new Date();
+      if (explanationFromBody != null) stmt.varianceExplanation = explanationFromBody;
+      await stmt.save({ transaction: t });
+    });
+    res.json({ data: stmt.toJSON(), reconciliation: { ...reconciliation, isBalanced: isBalanced(reconciliation) } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/accounts/:accountId/statements/:stmtId/unreconcile
+ *
+ * Clear reconciliation on a statement owned by this account.
+ */
+router.post('/:accountId/statements/:stmtId/unreconcile', async (req, res, next) => {
+  try {
+    const accountId = parseInt(req.params.accountId, 10);
+    const stmtId = parseInt(req.params.stmtId, 10);
+    if (Number.isNaN(accountId) || Number.isNaN(stmtId)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const account = await Account.findOne({
+      where: { id: accountId, ...visibleAccountWhere(req) },
+      attributes: ['id'],
+    });
+    if (!account) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+    const stmt = await AccountStatement.findOne({
+      where: { id: stmtId, accountId, ...visibleStatementWhere(req) },
+    });
+    if (!stmt) {
+      res.status(404).json({ error: 'Statement not found' });
+      return;
+    }
+    await stmt.update({ reconciledAt: null });
+    res.json({ data: stmt.toJSON() });
   } catch (e) {
     next(e);
   }
