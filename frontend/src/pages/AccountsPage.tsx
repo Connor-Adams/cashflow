@@ -48,6 +48,7 @@ export function AccountsPage() {
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editNotes, setEditNotes] = useState<string>('')
+  const [createNotes, setCreateNotes] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -107,6 +108,7 @@ export function AccountsPage() {
         notes: notesRaw || null,
       })
       form.reset()
+      setCreateNotes('')
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create account')
@@ -365,12 +367,20 @@ export function AccountsPage() {
           <Textarea
             id="accounts-create-notes"
             name="notes"
+            value={createNotes}
+            onChange={(e) => setCreateNotes(e.target.value)}
             placeholder="Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account."
             maxLength={4000}
             rows={3}
           />
-          <span className="muted" style={{ fontSize: '0.75rem' }}>
-            0/4000
+          <span
+            className="muted"
+            style={{
+              fontSize: '0.75rem',
+              color: createNotes.trim().length > 3800 ? 'var(--color-destructive)' : undefined,
+            }}
+          >
+            {createNotes.trim().length}/4000
           </span>
         </Label>
         <Button type="submit" disabled={saving}>
