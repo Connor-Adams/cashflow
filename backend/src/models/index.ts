@@ -95,6 +95,7 @@ import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
+import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -174,6 +175,7 @@ initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
+initFinancialScenario(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -824,6 +826,30 @@ User.hasMany(SavedSearch, {
 });
 SavedSearch.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+// Financial scenario planner (issue #213). Scenarios cascade on household
+// delete and user delete. Each scenario belongs to both a household and the
+// user who created it — isolating per household is enforced by householdWhere().
+Household.hasMany(FinancialScenario, {
+  foreignKey: 'household_id',
+  as: 'financialScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialScenario.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinancialScenario, {
+  foreignKey: 'user_id',
+  as: 'financialScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialScenario.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 // Sync backups (issue #239). No CASCADE on household delete: the audit
 // history is useful diagnostic context, so we keep the rows around even
 // if the household is later removed. The intentionally-loose FK (no
@@ -923,4 +949,5 @@ export {
   VaultDocument,
   AccountStatement,
   SyncBackup,
+  FinancialScenario,
 };
