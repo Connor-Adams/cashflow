@@ -97,7 +97,11 @@ async function createTxn(seed: TxnSeed): Promise<number> {
 
 /** Parse a CSV text into rows (split on CRLF or LF, skip empty lines). */
 function parseCSV(text: string): string[][] {
+  // Strip a leading UTF-8 BOM (﻿). The export stream prepends a BOM so
+  // Excel detects UTF-8; a real CSV consumer drops it before parsing. Without
+  // this, the first header cell parses as "﻿id" instead of "id".
   return text
+    .replace(/^﻿/, '')
     .split(/\r?\n/)
     .filter((line) => line.trim().length > 0)
     .map((line) => {
