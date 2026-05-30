@@ -69,6 +69,7 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
+import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
@@ -174,6 +175,7 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
+initIncomeEntry(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
@@ -1094,4 +1096,5 @@ export {
   Feedback,
   ClientErrorEvent,
   ServerErrorEvent,
+  IncomeEntry,
 };

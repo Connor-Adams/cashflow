@@ -50,6 +50,7 @@ import {
   Undo2,
   Upload,
   Users,
+  Wallet,
   Waypoints,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -95,6 +96,7 @@ const navSections: NavSection[] = [
       { to: '/refunds', label: 'Refunds', icon: Undo2 },
       { to: '/reimbursements', label: 'Reimbursements', icon: HandCoins },
       { to: '/search', label: 'Smart search', icon: Filter },
+      { to: '/income', label: 'Income', icon: Wallet },
       { to: '/transfers', label: 'Transfers', icon: ArrowLeftRight },
       { to: '/statements', label: 'Statements', icon: FileCheck2 },
       { to: '/items', label: 'Items', icon: Package },

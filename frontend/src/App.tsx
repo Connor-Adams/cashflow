@@ -18,6 +18,7 @@ import { PortfolioSecurityPage } from './pages/PortfolioSecurityPage'
 import { PlannedEventsPage } from './pages/PlannedEventsPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { GoalsPage } from './pages/GoalsPage'
+import { IncomePage } from './pages/IncomePage'
 import { ForecastPage } from './pages/ForecastPage'
 import { DebtPage } from './pages/DebtPage'
 import { CreditCardPlannerPage } from './pages/CreditCardPlannerPage'
@@ -103,6 +104,7 @@ function AppRoutes() {
           <Route path="planned" element={<PlannedEventsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="goals" element={<GoalsPage />} />
+          <Route path="income" element={<IncomePage />} />
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="debt" element={<DebtPage />} />
           <Route path="credit-cards" element={<CreditCardPlannerPage />} />
