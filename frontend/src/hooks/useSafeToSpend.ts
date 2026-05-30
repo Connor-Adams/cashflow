@@ -50,11 +50,10 @@ export function buildSafeToSpendPath(opts: {
   currency?: string | null
   asOfDate?: string | null
 }): string {
-  const params = new URLSearchParams()
+  const params = new URLSearchParams({ view: 'safe_to_spend' })
   if (opts.currency) params.set('currency', opts.currency)
   if (opts.asOfDate) params.set('asOfDate', opts.asOfDate)
-  const q = params.toString()
-  return q ? `/api/forecast/safe-to-spend?${q}` : '/api/forecast/safe-to-spend'
+  return `/api/forecast?${params.toString()}`
 }
 
 export function useSafeToSpend(opts: {

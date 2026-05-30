@@ -155,6 +155,41 @@ function serializeOccurrence(o: ForecastOccurrence): SerializedOccurrence {
  *   }
  */
 router.get('/', async (req, res, next) => {
+  // ?view=safe_to_spend — serve the safe-to-spend derivation from this
+  // unified forecast endpoint rather than requiring a separate parallel route.
+  // The /safe-to-spend sub-route is kept as a backwards-compatible alias.
+  if (req.query.view === 'safe_to_spend') {
+    try {
+      const { user, household } = currentAuth(req);
+      const asOfDate = req.query.asOfDate
+        ? String(req.query.asOfDate)
+        : todayIso();
+      if (!ISO_DATE_RE.test(asOfDate)) {
+        res.status(400).json({ error: 'asOfDate must be YYYY-MM-DD' });
+        return;
+      }
+      let currency: string | null = null;
+      if (req.query.currency !== undefined && req.query.currency !== '') {
+        const raw = String(req.query.currency).trim().toUpperCase();
+        if (raw.length !== 3) {
+          res.status(400).json({ error: 'currency must be a 3-letter ISO code' });
+          return;
+        }
+        currency = raw;
+      }
+      const result = await computeSafeToSpend({
+        userId: user.id,
+        householdId: household.id,
+        currency,
+        asOfDate,
+      });
+      res.json(result);
+    } catch (e) {
+      next(e);
+    }
+    return;
+  }
+
   try {
     const range = parseRange(req);
     if ('error' in range) {
