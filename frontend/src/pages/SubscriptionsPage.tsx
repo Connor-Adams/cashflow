@@ -99,6 +99,7 @@ export function SubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [rowErrors, setRowErrors] = useState<Record<number, string>>({})
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -134,6 +135,7 @@ export function SubscriptionsPage() {
   }, [queryString])
 
   async function updateStatus(id: number, status: SubscriptionStatus) {
+    const name = data?.items.find((item) => item.id === id)?.merchantName ?? String(id)
     try {
       const patch: SubscriptionPatch = { status }
       const updated = await patchJson<Subscription>(
@@ -150,13 +152,15 @@ export function SubscriptionsPage() {
             }
           : prev,
       )
+      setRowErrors((prev) => { const next = { ...prev }; delete next[id]; return next })
       showToast({
         title: `Marked as ${status}`,
         variant: 'success',
       })
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Update failed'
-      showToast({ title: message, variant: 'destructive' })
+      const reason = e instanceof Error ? e.message : 'Update failed'
+      setRowErrors((prev) => ({ ...prev, [id]: reason }))
+      showToast({ title: `Couldn't update ${name}: ${reason}`, variant: 'destructive' })
     }
   }
 
@@ -290,6 +294,7 @@ export function SubscriptionsPage() {
                   <SubscriptionRow
                     key={item.id}
                     item={item}
+                    rowError={rowErrors[item.id] ?? null}
                     onStatusChange={updateStatus}
                     onCadenceChange={updateCadence}
                   />
@@ -385,10 +390,12 @@ function SummaryStat({
 
 function SubscriptionRow({
   item,
+  rowError,
   onStatusChange,
   onCadenceChange,
 }: {
   item: Subscription
+  rowError: string | null
   onStatusChange: (id: number, status: SubscriptionStatus) => Promise<void>
   onCadenceChange: (id: number, cadence: SubscriptionCadence) => Promise<void>
 }) {
@@ -469,6 +476,25 @@ function SubscriptionRow({
           <Badge variant={STATUS_BADGE_VARIANT[item.status]}>
             {item.status}
           </Badge>
+          {rowError && (
+            <>
+              <span
+                className="inline-block size-2 rounded-full bg-red-500 flex-shrink-0"
+                title={rowError}
+                aria-label={`Error: ${rowError}`}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void onStatusChange(item.id, item.status)
+                }}
+              >
+                Retry
+              </Button>
+            </>
+          )}
           <ReviewActions
             item={item}
             onStatusChange={onStatusChange}
