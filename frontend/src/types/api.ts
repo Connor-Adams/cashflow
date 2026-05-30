@@ -1374,6 +1374,14 @@ export type CashflowSettings = {
    * times in the trailing 90 days. Default 3, bounded 2..50.
    */
   counterpartyPromotionThreshold: number;
+  /** #375 — Partner Fairness "exclude non-partner inflows" toggle. */
+  excludeNonPartnerInflows: boolean;
+  /**
+   * #259 — ISO8601 timestamp the user dismissed/completed first-run
+   * onboarding, or null if they never did. The onboarding gate reads this
+   * (with the active-account count) to decide whether to show the wizard.
+   */
+  onboardingDismissedAt: string | null;
 };
 
 export type SafeToSpendBreakdown = {

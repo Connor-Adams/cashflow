@@ -26,6 +26,14 @@ type Serialized = {
   counterpartyPromotionThreshold: number;
   excludeNonPartnerInflows: boolean;
   largePurchaseThreshold: string;
+  /**
+   * #259 — ISO8601 timestamp the user dismissed/completed first-run
+   * onboarding, or null if they never did. The frontend onboarding gate
+   * reads this (combined with active-account count) to decide whether to
+   * show the import-creates-accounts wizard. Read-only here; mutated via
+   * PATCH /api/preferences/onboarding-dismiss.
+   */
+  onboardingDismissedAt: string | null;
 };
 
 function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
@@ -37,6 +45,9 @@ function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
     counterpartyPromotionThreshold: row.counterpartyPromotionThreshold,
     excludeNonPartnerInflows: row.excludeNonPartnerInflows,
     largePurchaseThreshold: String(row.largePurchaseThreshold),
+    onboardingDismissedAt: row.onboardingDismissedAt
+      ? new Date(row.onboardingDismissedAt).toISOString()
+      : null,
   };
 }
 
@@ -50,6 +61,7 @@ function defaults(): Serialized {
       CASHFLOW_SETTINGS_DEFAULTS.counterpartyPromotionThreshold,
     excludeNonPartnerInflows: CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows,
     largePurchaseThreshold: CASHFLOW_SETTINGS_DEFAULTS.largePurchaseThreshold,
+    onboardingDismissedAt: null,
   };
 }
 
