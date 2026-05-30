@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuditAuth } from '../auth/auditAuth';
 import { buildHealthDeep } from '../audit/healthDeep';
 import { buildCounts } from '../audit/counts';
+import { buildFreshness } from '../audit/freshness';
 
 const router = Router();
 
@@ -25,6 +26,16 @@ router.get('/counts', async (req, res, next) => {
     const householdId = req.auditAuth!.household.id;
     const counts = await buildCounts(householdId);
     res.json({ counts, generatedAt: new Date().toISOString() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/freshness', async (req, res, next) => {
+  try {
+    const householdId = req.auditAuth!.household.id;
+    const result = await buildFreshness(householdId);
+    res.json(result);
   } catch (e) {
     next(e);
   }
