@@ -7,6 +7,7 @@ import { buildCounts } from '../audit/counts';
 import { buildClientErrors } from '../audit/clientErrors';
 import { buildServerErrors } from '../audit/serverErrors';
 import { buildRouteProbe } from '../audit/routeProbe';
+import { buildSummary } from '../audit/summary';
 
 const router = Router();
 
@@ -74,6 +75,14 @@ router.get('/route-probe', async (req, res, next) => {
   try {
     const userId = req.auditAuth!.user.id;
     res.json(await buildRouteProbe(req.app, userId));
+  } catch (e) { next(e); }
+});
+
+router.get('/summary', async (req, res, next) => {
+  try {
+    const { household, user } = req.auditAuth!;
+    const windowMinutes = req.query.windowMinutes ? Number(req.query.windowMinutes) : 60;
+    res.json(await buildSummary(req.app, household.id, user.id, windowMinutes));
   } catch (e) { next(e); }
 });
 
