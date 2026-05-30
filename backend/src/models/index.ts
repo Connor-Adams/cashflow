@@ -67,6 +67,7 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
+import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
@@ -155,6 +156,7 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
+initFinancialScenario(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
@@ -516,6 +518,27 @@ Account.hasMany(FinancialGoal, {
 FinancialGoal.belongsTo(Account, {
   foreignKey: 'linked_account_id',
   as: 'linkedAccount',
+});
+
+// Financial scenarios (issue #213). Household-scoped; cascades on household
+// delete so hypothetical plans don't outlive the household they belong to.
+Household.hasMany(FinancialScenario, {
+  foreignKey: 'household_id',
+  as: 'financialScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialScenario.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinancialScenario, {
+  foreignKey: 'user_id',
+  as: 'financialScenarios',
+});
+FinancialScenario.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
 });
 
 Household.hasMany(Subscription, {
@@ -904,6 +927,7 @@ export {
   Insight,
   PlannedEvent,
   FinancialGoal,
+  FinancialScenario,
   Subscription,
   AiReviewRun,
   CfoBriefing,

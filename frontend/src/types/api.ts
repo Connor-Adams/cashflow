@@ -1418,3 +1418,54 @@ export type SyncHistoryEntry = {
 export type SyncHistoryResponse = {
   data: SyncHistoryEntry[];
 };
+
+// --- Financial scenario planner (issue #213) -------------------------------
+
+/** A single hypothetical change replayed by the scenario engine. */
+export type ScenarioAssumption =
+  | { kind: 'income_pct'; pct: number }
+  | { kind: 'expense_pct'; pct: number }
+  | { kind: 'savings_monthly'; amount: number }
+  | { kind: 'one_off'; date: string; amount: number; direction: 'in' | 'out' };
+
+/** One side (base or scenario) of the comparison. */
+export type ScenarioMetrics = {
+  projectedClosingBalance: number;
+  lowestProjectedBalance: number;
+  safeToSpend: number;
+  netWorth: number;
+};
+
+/** Computed comparison stored on a scenario row. */
+export type ScenarioComputed = {
+  base: ScenarioMetrics;
+  scenario: ScenarioMetrics;
+  deltas: ScenarioMetrics;
+};
+
+/** A saved financial scenario (response shape). */
+export type FinancialScenario = {
+  id: number;
+  userId: number;
+  householdId: number;
+  name: string;
+  baseForecastId: number | null;
+  assumptions: ScenarioAssumption[];
+  horizonDays: number;
+  currency: string;
+  result: ScenarioComputed | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FinancialScenariosListResponse = {
+  data: FinancialScenario[];
+};
+
+/** Request body for POST /api/financial-scenarios. */
+export type CreateScenarioInput = {
+  name: string;
+  assumptions: ScenarioAssumption[];
+  horizonDays?: number;
+  currency?: string | null;
+};

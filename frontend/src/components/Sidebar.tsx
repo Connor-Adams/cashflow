@@ -19,6 +19,7 @@ import {
   ClipboardCheck,
   Droplet,
   Filter,
+  FlaskConical,
   Globe,
   Lightbulb,
   LineChart,
@@ -109,6 +110,7 @@ const navSections: NavSection[] = [
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/goals', label: 'Goals', icon: Target },
       { to: '/forecast', label: 'Forecast', icon: TrendingUp },
+      { to: '/scenarios', label: 'Scenarios', icon: FlaskConical },
     ],
   },
   {
