@@ -1,32 +1,74 @@
-// backend/src/routes/tax-personal-scenarios.ts
+// backend/src/routes/tax-scenarios.ts
 //
-// CRUD routes for the personal tax scenario tree (P7 Task 6). Fork / compute /
-// compare endpoints land in P7 Task 7.
+// Unified CRUD + fork/compute/compare/chain routes for tax scenarios
+// (issue #377). Folds the former tax-personal-scenarios.ts + tax-corp-scenarios.ts
+// into one router mounted at `/api/tax/scenarios`.
 //
-// All endpoints are mounted under `/api/tax/personal-scenarios` and require
-// auth (the global `requireAuth` middleware at `/api` enforces this).
+// The first path segment is `:kind` ∈ {personal, corp}. A `requireKind`
+// middleware validates it and stashes the matching `SCENARIO_KIND_CONFIG` entry
+// on `res.locals.scenarioKind`; every handler then dispatches through that
+// config (override validator, baseline-ensure fn, compute fn, entity-kind
+// guard) instead of branching on the kind. The personal/corp routes were
+// byte-for-byte identical apart from those four axes, so there is a single
+// handler per endpoint — no parallel mirrored implementations.
+//
+// All endpoints require auth (the global `requireAuth` middleware at `/api`).
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
 import { Entity, Scenario } from '../models';
-import { validateOverrideMap } from '../tax/scenarios/overrideKeys';
-import { ensureBaselineScenario } from '../tax/scenarios/resolveScenario';
-import { computeScenario } from '../tax/scenarios/computeScenario';
-import { withAuthorizedScenario } from './tax-scenario-routing';
+import {
+  SCENARIO_KIND_CONFIG,
+  isScenarioEntityKind,
+  withAuthorizedScenario,
+  type ScenarioKindConfig,
+  type ScenarioRouteHandler,
+} from './tax-scenario-routing';
 
 const router = Router();
 
-// Personal endpoints historically don't enforce entity-kind on :id, so the
-// shared `withAuthorizedScenario` wrapper is invoked with `undefined` (no
-// kind check). Corp routes pass `'corp'` to also reject non-corp entities.
-const withPersonalScenario = (
-  handler: Parameters<typeof withAuthorizedScenario>[1],
-) => withAuthorizedScenario(undefined, handler);
+/**
+ * Validate the `:kind` path segment and stash the resolved per-kind config on
+ * `res.locals.scenarioKind`. Unknown kinds short-circuit with 404 so a typo'd
+ * path can't silently fall through to the corp (or personal) handler.
+ */
+const requireKind: RequestHandler = (req, res, next) => {
+  const { kind } = req.params;
+  if (!isScenarioEntityKind(kind)) {
+    res.status(404).json({
+      error: 'unknown_scenario_kind',
+      message: `kind must be 'personal' or 'corp', got '${kind}'`,
+    });
+    return;
+  }
+  res.locals.scenarioKind = SCENARIO_KIND_CONFIG[kind];
+  next();
+};
 
-// POST /api/tax/personal-scenarios — create a fork scenario.
+function cfgOf(res: Response): ScenarioKindConfig {
+  return res.locals.scenarioKind as ScenarioKindConfig;
+}
+
+// `withAuthorizedScenario` needs the per-kind guard, which is only known at
+// request time (it lives in res.locals). This thin wrapper reads the resolved
+// config and forwards the guard so `:id` endpoints reject the wrong entity kind
+// exactly as the old corp route did (personal stays lax via `undefined`).
+function withScenario(handler: ScenarioRouteHandler): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const cfg = cfgOf(res);
+    return withAuthorizedScenario(cfg.entityKindGuard, handler)(req, res, next);
+  };
+}
+
+// All routes carry the `:kind` segment; validate it before anything else.
+router.use('/:kind', requireKind);
+
+// POST /api/tax/scenarios/:kind — create a fork scenario.
 // Baseline is auto-created if not yet present for (entityId, year). New
 // scenario's parent defaults to the baseline unless `parentId` is supplied.
-router.post('/', async (req, res, next) => {
+router.post('/:kind', async (req, res, next) => {
   try {
+    const cfg = cfgOf(res);
     const { household } = currentAuth(req);
     const {
       entityId,
@@ -56,9 +98,17 @@ router.post('/', async (req, res, next) => {
       res.status(404).json({ error: 'entity_not_found' });
       return;
     }
+    // Corp enforces entity kind; personal stays lax (guard is undefined).
+    if (cfg.entityKindGuard !== undefined && entity.kind !== cfg.entityKindGuard) {
+      res.status(400).json({
+        error: `not_${cfg.entityKindGuard}`,
+        message: `entity id=${entityId} is kind=${entity.kind}, not ${cfg.entityKindGuard}`,
+      });
+      return;
+    }
 
     try {
-      validateOverrideMap(overrides, 'personal');
+      cfg.validateOverrides(overrides);
     } catch (err) {
       res
         .status(400)
@@ -67,7 +117,7 @@ router.post('/', async (req, res, next) => {
     }
 
     // Auto-create the baseline so explicit forks always have a stable root.
-    const baseline = await ensureBaselineScenario(entityId, year);
+    const baseline = await cfg.ensureBaseline(entityId, year);
     const effectiveParentId = parentId ?? baseline.id;
 
     const scenario = await Scenario.create({
@@ -88,11 +138,12 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-// GET /api/tax/personal-scenarios?entityId=&year= — list scenarios for an
+// GET /api/tax/scenarios/:kind?entityId=&year= — list scenarios for an
 // entity+year, ordered by creation time so the baseline (created first via
 // auto-create) renders before forks.
-router.get('/', async (req, res, next) => {
+router.get('/:kind', async (req, res, next) => {
   try {
+    const cfg = cfgOf(res);
     const { household } = currentAuth(req);
     const entityId = Number(req.query.entityId);
     const year = Number(req.query.year);
@@ -108,6 +159,13 @@ router.get('/', async (req, res, next) => {
       res.status(404).json({ error: 'entity_not_found' });
       return;
     }
+    if (cfg.entityKindGuard !== undefined && entity.kind !== cfg.entityKindGuard) {
+      res.status(400).json({
+        error: `not_${cfg.entityKindGuard}`,
+        message: `entity id=${entityId} is kind=${entity.kind}, not ${cfg.entityKindGuard}`,
+      });
+      return;
+    }
     const scenarios = await Scenario.findAll({
       where: { entityId, year },
       order: [['createdAt', 'ASC']],
@@ -118,11 +176,12 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// GET /api/tax/personal-scenarios/compare?ids=1,2,3 — diff payload for N
-// scenarios. MUST be registered before `GET /:id` so Express doesn't match
-// the literal "compare" as the `:id` param.
-router.get('/compare', async (req, res, next) => {
+// GET /api/tax/scenarios/:kind/compare?ids=1,2,3 — diff payload for N
+// scenarios. MUST be registered before `GET /:kind/:id` so Express doesn't
+// match the literal "compare" as the `:id` param.
+router.get('/:kind/compare', async (req, res, next) => {
   try {
+    const cfg = cfgOf(res);
     const { household } = currentAuth(req);
     const idsRaw = String(req.query.ids ?? '');
     const ids = idsRaw
@@ -143,17 +202,25 @@ router.get('/compare', async (req, res, next) => {
     }
     // Authorize: every referenced scenario's entity must live in the caller's
     // household. One mismatched entity nukes the whole request (403) so a
-    // partial-permission compare can't leak any rows.
+    // partial-permission compare can't leak any rows. Corp additionally
+    // enforces every entity be corp (personal's guard is undefined → no check).
     const entityIds = Array.from(new Set(scenarios.map((s) => s.entityId)));
     const entities = await Entity.findAll({ where: { id: entityIds } });
     if (entities.some((e) => e.householdId !== household.id)) {
       res.status(403).json({ error: 'forbidden' });
       return;
     }
+    if (
+      cfg.entityKindGuard !== undefined &&
+      entities.some((e) => e.kind !== cfg.entityKindGuard)
+    ) {
+      res.status(400).json({ error: `not_${cfg.entityKindGuard}` });
+      return;
+    }
     const computedAll = await Promise.all(
       scenarios.map(async (s) => ({
         scenario: s,
-        computed: await computeScenario(s.id),
+        computed: await cfg.compute(s.id),
       })),
     );
     res.json({ scenarios: computedAll });
@@ -162,7 +229,7 @@ router.get('/compare', async (req, res, next) => {
   }
 });
 
-// GET /api/tax/personal-scenarios/:id/chain — walk the multi-year chain a
+// GET /api/tax/scenarios/:kind/:id/chain — walk the multi-year chain a
 // scenario belongs to, returning all scenarios in year order along with their
 // computed returns.
 //
@@ -171,8 +238,8 @@ router.get('/compare', async (req, res, next) => {
 // chain; calling /chain on a fork returns the year-chain that fork's parent
 // belongs to (if any), or the fork itself as a single-entry chain.
 //
-// MUST be registered before `GET /:id` so Express doesn't match the literal
-// "chain" as the `:id` param. Same pattern as `/compare`.
+// MUST be registered before `GET /:kind/:id` so Express doesn't match the
+// literal "chain" as the `:id` param. Same pattern as `/compare`.
 //
 // Algorithm:
 //   1. Walk parentId backwards collecting ancestry (root-first).
@@ -180,11 +247,11 @@ router.get('/compare', async (req, res, next) => {
 //      year-N anchor of the chain. If no ancestor has nextYearId, the leaf
 //      itself is the entire chain (single entry).
 //   3. Walk forwards via nextYearId from the anchor, collecting each
-//      scenario + its computed return (Task 3 dispatch handles projection
-//      vs baseline transparently).
+//      scenario + its computed return.
 router.get(
-  '/:id/chain',
-  withPersonalScenario(async (_req, res, { scenario }) => {
+  '/:kind/:id/chain',
+  withScenario(async (_req, res, { scenario }) => {
+    const cfg = cfgOf(res);
     // Step 1: walk parentId backwards collecting ancestry root-first.
     const MAX_DEPTH = 32;
     const ancestry: Scenario[] = [];
@@ -229,28 +296,30 @@ router.get(
     const chain = await Promise.all(
       chainScenarios.map(async (s) => ({
         scenario: s,
-        computed: await computeScenario(s.id),
+        computed: await cfg.compute(s.id),
       })),
     );
     res.json({ chain });
   }),
 );
 
-// GET /api/tax/personal-scenarios/:id — get a scenario + its computed return
+// GET /api/tax/scenarios/:kind/:id — get a scenario + its computed return
 // (cached on facts hash; recomputed on miss).
 router.get(
-  '/:id',
-  withPersonalScenario(async (_req, res, { scenario }) => {
-    const computed = await computeScenario(scenario.id);
+  '/:kind/:id',
+  withScenario(async (_req, res, { scenario }) => {
+    const cfg = cfgOf(res);
+    const computed = await cfg.compute(scenario.id);
     res.json({ scenario, computed });
   }),
 );
 
-// PATCH /api/tax/personal-scenarios/:id — update name / notes / overrides /
+// PATCH /api/tax/scenarios/:kind/:id — update name / notes / overrides /
 // assumptions. Overrides go through the same validator the POST handler uses.
 router.patch(
-  '/:id',
-  withPersonalScenario(async (req, res, { scenario }) => {
+  '/:kind/:id',
+  withScenario(async (req, res, { scenario }) => {
+    const cfg = cfgOf(res);
     const updates: Partial<{
       name: string;
       notes: string | null;
@@ -263,7 +332,7 @@ router.patch(
     }
     if ('overrides' in req.body) {
       try {
-        validateOverrideMap(req.body.overrides, 'personal');
+        cfg.validateOverrides(req.body.overrides);
       } catch (err) {
         res
           .status(400)
@@ -278,13 +347,13 @@ router.patch(
   }),
 );
 
-// DELETE /api/tax/personal-scenarios/:id — delete a fork. Refuses baselines
+// DELETE /api/tax/scenarios/:kind/:id — delete a fork. Refuses baselines
 // (the baseline is the engine's anchor for actuals) and any node that still
 // has children (the foreign key uses RESTRICT, but checking here gives a clear
 // 409 rather than an opaque DB error).
 router.delete(
-  '/:id',
-  withPersonalScenario(async (_req, res, { scenario }) => {
+  '/:kind/:id',
+  withScenario(async (_req, res, { scenario }) => {
     if (scenario.kind === 'baseline') {
       res.status(409).json({ error: 'baseline_cannot_be_deleted' });
       return;
@@ -302,13 +371,13 @@ router.delete(
   }),
 );
 
-// POST /api/tax/personal-scenarios/:id/fork — create a child scenario whose
+// POST /api/tax/scenarios/:kind/:id/fork — create a child scenario whose
 // effective facts inherit from the parent via ancestry resolution. The new
 // scenario starts with an empty override map; inheritance is by walking the
 // parent chain at compute time, not by duplicating overrides.
 router.post(
-  '/:id/fork',
-  withPersonalScenario(async (req, res, { scenario }) => {
+  '/:kind/:id/fork',
+  withScenario(async (req, res, { scenario }) => {
     const name =
       typeof req.body?.name === 'string' && req.body.name.trim() !== ''
         ? req.body.name
@@ -329,14 +398,14 @@ router.post(
   }),
 );
 
-// POST /api/tax/personal-scenarios/:id/project-next-year — create a
+// POST /api/tax/scenarios/:kind/:id/project-next-year — create a
 // projection_root scenario for year+1 chained to `:id` via `next_year_id`.
 // Idempotent: if a projection_root already exists for the same entity+next
 // year, returns 409 with the existing scenario so callers can recover the
 // link without creating a duplicate.
 router.post(
-  '/:id/project-next-year',
-  withPersonalScenario(async (req, res, { scenario }) => {
+  '/:kind/:id/project-next-year',
+  withScenario(async (req, res, { scenario }) => {
     if (scenario.kind === 'projection_root') {
       // Block chaining two projection_root scenarios in a single hop — the
       // resolver requires a baseline (or fork) as the year-N anchor.
@@ -384,18 +453,19 @@ router.post(
       notes: null,
     });
     // Link the chain forward: parent.nextYearId now points at the new
-    // projection so GET /:id/chain (Task 5) can walk year N → N+1.
+    // projection so GET /:kind/:id/chain can walk year N → N+1.
     await scenario.update({ nextYearId: projection.id });
     res.status(201).json({ scenario: projection });
   }),
 );
 
-// POST /api/tax/personal-scenarios/:id/compute — force a recompute, bypassing
+// POST /api/tax/scenarios/:kind/:id/compute — force a recompute, bypassing
 // the facts-hash cache. Always writes a fresh ScenarioReturn row.
 router.post(
-  '/:id/compute',
-  withPersonalScenario(async (_req, res, { scenario }) => {
-    const computed = await computeScenario(scenario.id, { force: true });
+  '/:kind/:id/compute',
+  withScenario(async (_req, res, { scenario }) => {
+    const cfg = cfgOf(res);
+    const computed = await cfg.compute(scenario.id, { force: true });
     res.json({ computed });
   }),
 );
