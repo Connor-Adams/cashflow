@@ -349,6 +349,22 @@ test('PATCH cadence is rejected across households (AC #12)', async () => {
   assert.equal(res.status, 404);
 });
 
+// Restore the household to "no active subscriptions" so the summary test
+// below (which asserts active === 0) sees the same precondition it did before
+// the cadence/cancel-impact tests seeded an active AcmePlus subscription.
+test('cleanup: mark the seeded AcmePlus subscription ignored', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  const res = await primaryAgent
+    .patch(`/api/subscriptions/${acme!.id}`)
+    .send({ status: 'ignored' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, 'ignored');
+});
+
 test('PATCH /api/subscriptions/:id rejects non-http cancellationUrl', async () => {
   const list = await primaryAgent.get('/api/subscriptions?refresh=0');
   const id = (list.body.items as Array<{ id: number }>)[0].id;
