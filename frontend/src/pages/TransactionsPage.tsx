@@ -32,6 +32,7 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { LabelChipPicker } from '../components/transactions/LabelChipPicker'
+import { SavedFiltersDropdown } from '../components/transactions/SavedFiltersDropdown'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
@@ -600,6 +601,56 @@ export function TransactionsPage() {
     setIdsFilter('')
     setStatusFilter('')
     setLabelsFilter([])
+  }
+
+  /**
+   * Build a URLSearchParams snapshot of the current active filters so the
+   * SavedFiltersDropdown can compare/save them.
+   */
+  const currentFilterParams = useMemo(() => {
+    const p = new URLSearchParams()
+    if (reviewOnly) p.set('reviewFlag', 'true')
+    if (currency && currency !== DEFAULT_TRANSACTION_CURRENCY) p.set('currency', currency)
+    if (categoryFilter.trim()) p.set('category', categoryFilter.trim())
+    if (dateFrom.trim()) p.set('dateFrom', dateFrom.trim())
+    if (dateTo.trim()) p.set('dateTo', dateTo.trim())
+    if (batchFilter.trim()) p.set('importBatch', batchFilter.trim())
+    if (statusFilter) p.set('status', statusFilter)
+    if (labelsFilter.length > 0) p.set('labels', labelsFilter.join(','))
+    return p
+  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, statusFilter, labelsFilter])
+
+  /**
+   * Apply a saved filter preset. Reads the stored filterJson and pushes the
+   * values into session-state filter hooks so the page immediately reloads.
+   */
+  function applyFilterPreset(filterJson: Record<string, unknown>) {
+    setPage(1)
+    setReviewOnly(filterJson.reviewFlag === 'true' || filterJson.reviewFlag === true)
+    if (typeof filterJson.currency === 'string' && filterJson.currency) {
+      setCurrency(filterJson.currency.toUpperCase())
+    } else {
+      setCurrency(DEFAULT_TRANSACTION_CURRENCY)
+    }
+    setCategoryFilter(typeof filterJson.category === 'string' ? filterJson.category : '')
+    setDateFrom(typeof filterJson.dateFrom === 'string' ? filterJson.dateFrom : '')
+    setDateTo(typeof filterJson.dateTo === 'string' ? filterJson.dateTo : '')
+    setBatchFilter(typeof filterJson.importBatch === 'string' ? filterJson.importBatch : '')
+    if (
+      filterJson.status === 'pending' ||
+      filterJson.status === 'posted' ||
+      filterJson.status === 'cleared'
+    ) {
+      setStatusFilter(filterJson.status)
+    } else {
+      setStatusFilter('')
+    }
+    if (typeof filterJson.labels === 'string' && filterJson.labels) {
+      const ids = filterJson.labels.split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0)
+      setLabelsFilter(ids)
+    } else {
+      setLabelsFilter([])
+    }
   }
 
   async function openItemsDrawer(txnId: number) {
@@ -1270,6 +1321,10 @@ export function TransactionsPage() {
           </Label>
         </div>
           <div className="row transactionsActionRow">
+          <SavedFiltersDropdown
+            currentParams={currentFilterParams}
+            onApply={applyFilterPreset}
+          />
           {activeFilters.length > 0 && (
             <Button
               type="button"

@@ -100,6 +100,7 @@ import {
 import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
+import { SavedFilter, initSavedFilter } from './SavedFilter';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
 import { LiabilityAccount, initLiabilityAccount } from './LiabilityAccount';
@@ -192,6 +193,7 @@ initVaultDocument(sequelize);
 initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
+initSavedFilter(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
@@ -887,6 +889,16 @@ User.hasMany(SavedSearch, {
 });
 SavedSearch.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+// SavedFilter (issue #272). One row per user-named filter preset per page;
+// cascades on user delete so we never orphan rows when a user is removed.
+User.hasMany(SavedFilter, {
+  foreignKey: 'user_id',
+  as: 'savedFilters',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedFilter.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 // Financial scenario planner (issue #213). Scenarios cascade on household
 // delete and user delete. Each scenario belongs to both a household and the
 // user who created it — isolating per household is enforced by householdWhere().
@@ -1082,6 +1094,7 @@ export {
   FinanceEvent,
   BudgetAlertState,
   SavedSearch,
+  SavedFilter,
   VaultDocument,
   AccountStatement,
   SyncBackup,
