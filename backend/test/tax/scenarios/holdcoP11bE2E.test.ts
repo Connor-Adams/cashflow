@@ -16,7 +16,7 @@
  * Test scenario (mirrors plan T8 fixture):
  *   1. Seed household + 2 corps (Opco, Holdco) both tagged
  *      `associatedGroupId = "ABCorp"`.
- *   2. Create 2 corp forks (auto-baseline via POST /api/tax/corp-scenarios)
+ *   2. Create 2 corp forks (auto-baseline via POST /api/tax/scenarios/corp)
  *      linked to a single HouseholdPlan.
  *   3. Opco overrides: activeIncome=$400k, passiveInvestmentIncome=$60k,
  *      intercorp.<Holdco>.eligible=$50k, intercorp.<Holdco>.ownershipPercent=100.
@@ -132,7 +132,7 @@ test('P11b E2E: associated group + connected eligible div + GRIP flow via househ
   // 1. Create Opco fork. POST auto-creates the baseline; this fork starts
   //    empty so we can PATCH the overrides in step 4 (exercising the
   //    intercorp.<id>.<field> + ownershipPercent validator paths from T4).
-  const opcoCreate = await authed.post('/api/tax/corp-scenarios').send({
+  const opcoCreate = await authed.post('/api/tax/scenarios/corp').send({
     entityId: opcoEntityId,
     year: 2025,
     name: 'Opco fork',
@@ -144,7 +144,7 @@ test('P11b E2E: associated group + connected eligible div + GRIP flow via househ
   // 2. Create Holdco fork. Plain — no overrides; it just needs to exist in
   //    the plan so the intercorp router accepts it as a receiver AND so it
   //    appears in `corpFactsByEntityId` for the group-AAII rollup.
-  const holdcoCreate = await authed.post('/api/tax/corp-scenarios').send({
+  const holdcoCreate = await authed.post('/api/tax/scenarios/corp').send({
     entityId: holdcoEntityId,
     year: 2025,
     name: 'Holdco fork',
@@ -170,7 +170,7 @@ test('P11b E2E: associated group + connected eligible div + GRIP flow via househ
   //    static corp.* keys and the dynamic intercorp.<id>.<field> validator
   //    paths (T4 added the ownershipPercent suffix).
   const patchOpco = await authed
-    .patch(`/api/tax/corp-scenarios/${opcoScenarioId}`)
+    .patch(`/api/tax/scenarios/corp/${opcoScenarioId}`)
     .send({
       overrides: {
         'corp.activeIncome': 400000,

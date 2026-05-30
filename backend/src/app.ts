@@ -65,8 +65,7 @@ import returnWarrantyRouter from './routes/returnWarranty';
 import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import invitesRouter from './routes/invites';
-import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
-import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
+import taxScenariosRouter from './routes/tax-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import configRouter from './routes/config';
@@ -193,8 +192,18 @@ app.use('/api/household', householdRouter);
 app.use('/api/invites', invitesRouter);
 app.use('/api/net-worth', netWorthRouter);
 app.use('/api/fx', fxRouter);
-app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
-app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
+// Unified scenario route (issue #377): /api/tax/scenarios/:kind folds the
+// former /api/tax/personal-scenarios + /api/tax/corp-scenarios. The old paths
+// now return 410 Gone — every internal caller (the frontend hooks) moved to the
+// unified path in the same change, so nothing should hit these.
+app.use(['/api/tax/personal-scenarios', '/api/tax/corp-scenarios'], (_req, res) => {
+  res.status(410).json({
+    error: 'gone',
+    message:
+      'This endpoint moved to /api/tax/scenarios/:kind (kind ∈ {personal, corp}).',
+  });
+});
+app.use('/api/tax/scenarios', taxScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
 app.use('/api/tax/reserve', taxReserveRouter);
 app.use('/api/tax', taxRouter);
