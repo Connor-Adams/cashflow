@@ -10,6 +10,7 @@
  * the app.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -415,8 +416,13 @@ function ReimbursementRow({
               type="button"
               variant="outline"
               size="sm"
+              disabled={row.repaymentTransactionId != null}
+              title={
+                row.repaymentTransactionId != null
+                  ? 'Reimbursement already matched'
+                  : 'Find and link the repayment transaction'
+              }
               onClick={() => onMatch(row)}
-              title="Find and link the repayment transaction"
             >
               Match
             </Button>
@@ -470,35 +476,39 @@ function MatchDialog({
   onLinked: () => void
 }) {
   const { showToast } = useToast()
+  const [contacts, setContacts] = useState<{ id: number; name: string }[]>([])
+  const [contactsLoading, setContactsLoading] = useState(true)
   const [candidates, setCandidates] = useState<RepaymentCandidate[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadKey, setLoadKey] = useState(0)
   const [linkingId, setLinkingId] = useState<number | null>(null)
+  const [windowDays, setWindowDays] = useState(30)
+  const [showAccountHint, setShowAccountHint] = useState(false)
 
+  // Check whether the household has any contacts before querying candidates.
   useEffect(() => {
     let cancelled = false
-    async function load() {
-      setLoading(true)
-      try {
-        const res = await getJson<RepaymentCandidatesResponse>(
-          `/api/reimbursements/${row.id}/match-candidates`,
-        )
-        if (!cancelled) setCandidates(res.data)
-      } catch (e) {
-        if (!cancelled) {
-          showToast({
-            title: e instanceof Error ? e.message : 'Failed to load candidates',
-            variant: 'destructive',
-          })
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [row.id, showToast])
+    void getJson<{ id: number; name: string }[]>('/api/contacts')
+      .then((data) => { if (!cancelled) { setContacts(data); setContactsLoading(false) } })
+      .catch(() => { if (!cancelled) { setContacts([]); setContactsLoading(false) } })
+    return () => { cancelled = true }
+  }, [])
+
+  // Fetch match candidates once we know contacts exist.
+  useEffect(() => {
+    if (contactsLoading || contacts.length === 0) return
+    let cancelled = false
+    setLoading(true)
+    setLoadError(null)
+    void getJson<RepaymentCandidatesResponse>(
+      `/api/reimbursements/${row.id}/match-candidates?windowDays=${windowDays}`,
+    )
+      .then((res) => { if (!cancelled) setCandidates(res.data) })
+      .catch((e) => { if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Failed to load candidates') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [row.id, windowDays, loadKey, contacts.length, contactsLoading])
 
   async function link(transactionId: number) {
     setLinkingId(transactionId)
@@ -518,6 +528,9 @@ function MatchDialog({
     }
   }
 
+  const noContactsYet = !contactsLoading && contacts.length === 0
+  const noCandidates = !loading && !loadError && contacts.length > 0 && candidates.length === 0
+
   return (
     <div
       role="dialog"
@@ -534,13 +547,77 @@ function MatchDialog({
           {row.partyLabel} · {formatMoney(Number(row.amount) || 0, row.currency)}
           {row.dueDate ? ` · due ${row.dueDate}` : ''}
         </p>
-        {loading ? (
+
+        {contactsLoading ? (
+          <p className="muted text-sm">Loading…</p>
+        ) : noContactsYet ? (
+          <div>
+            <p className="font-medium mb-1">No contacts yet.</p>
+            <p className="muted text-sm mb-3">
+              Reimbursements track who owes you. Add a contact first.
+            </p>
+            <Button type="button" size="sm" asChild>
+              <Link to="/settings/contacts">Add a contact</Link>
+            </Button>
+          </div>
+        ) : loading ? (
           <p className="muted text-sm">Searching for likely repayments…</p>
-        ) : candidates.length === 0 ? (
-          <p className="muted text-sm">
-            No likely repayment transactions found. The repayment should be an
-            incoming credit in {row.currency} on or after the original charge.
-          </p>
+        ) : loadError ? (
+          <div>
+            <p className="error text-sm mb-2">Couldn't load candidates. Retry.</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setLoadKey((k) => k + 1)}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : noCandidates ? (
+          <div>
+            <p className="muted text-sm mb-2">No likely repayment transactions found.</p>
+            <p className="text-sm font-medium mb-2">Try one of these:</p>
+            <div className="flex flex-col gap-2">
+              {row.contactId == null && (
+                <Button type="button" size="sm" variant="outline" onClick={onClose}>
+                  Set expected contact
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={windowDays >= 90}
+                title={windowDays >= 90 ? 'Already at maximum.' : undefined}
+                onClick={() => { if (windowDays < 90) setWindowDays(90) }}
+              >
+                Widen date range
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setShowAccountHint((v) => !v)}
+              >
+                Check account selection
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={onClose}>
+                Edit reimbursement date
+              </Button>
+            </div>
+            {showAccountHint && (
+              <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm dark:bg-amber-950">
+                <p className="mb-1">
+                  The match search looks across all your accounts in{' '}
+                  <strong>{row.currency}</strong>. Make sure the repayment was imported.
+                </p>
+                <Link to="/settings/accounts" className="underline">
+                  Edit accounts in settings →
+                </Link>
+              </div>
+            )}
+          </div>
         ) : (
           <ul className="flex flex-col gap-2">
             {candidates.map((c) => (
@@ -561,7 +638,7 @@ function MatchDialog({
                   type="button"
                   size="sm"
                   disabled={linkingId != null}
-                  onClick={() => link(c.transactionId)}
+                  onClick={() => void link(c.transactionId)}
                 >
                   {linkingId === c.transactionId ? 'Linking…' : 'Link'}
                 </Button>
@@ -569,6 +646,7 @@ function MatchDialog({
             ))}
           </ul>
         )}
+
         <div className="mt-4 flex justify-end">
           <Button type="button" variant="outline" onClick={onClose}>
             Close

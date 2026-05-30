@@ -493,6 +493,9 @@ router.get('/reimbursements/:id/match-candidates', async (req, res, next) => {
       return;
     }
     const limit = parseLimit(req.query.limit, 5, 25);
+    const windowDays = Math.min(Math.max(parseInt(String(req.query.windowDays || '30'), 10) || 30, 1), 90);
+    const maxDate = new Date(new Date(outlay.date).getTime() + windowDays * 24 * 60 * 60 * 1000)
+      .toISOString().slice(0, 10);
     // Pull visible inflows in the same currency on/after the outlay, excluding
     // the outlay itself and any already-linked repayment. Over-fetch then rank.
     const candidates = await Transaction.findAll({
@@ -500,7 +503,7 @@ router.get('/reimbursements/:id/match-candidates', async (req, res, next) => {
         ...visibleTransactionWhere(req),
         currency: r.currency,
         amount: { [Op.gt]: 0 },
-        date: { [Op.gte]: outlay.date },
+        date: { [Op.gte]: outlay.date, [Op.lte]: maxDate },
         id: { [Op.ne]: r.transactionId },
       } as WhereOptions,
       attributes: ['id', 'date', 'merchantClean', 'amount', 'currency'],
