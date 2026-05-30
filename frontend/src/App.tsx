@@ -19,6 +19,7 @@ import { CalendarPage } from './pages/CalendarPage'
 import { GoalsPage } from './pages/GoalsPage'
 import { ForecastPage } from './pages/ForecastPage'
 import { DebtPage } from './pages/DebtPage'
+import { OpportunityCostPage } from './pages/OpportunityCostPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
 import { MoneyLeaksPage } from './pages/MoneyLeaksPage'
@@ -43,6 +44,7 @@ import { PartnerInviteSection } from './pages/settings/sections/PartnerInviteSec
 import { ImportsTab } from './pages/settings/tabs/ImportsTab'
 import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
 import { ContactsTab } from './pages/settings/tabs/ContactsTab'
+import { MembersTab } from './pages/settings/tabs/MembersTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
@@ -93,6 +95,7 @@ function AppRoutes() {
           <Route path="goals" element={<GoalsPage />} />
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="debt" element={<DebtPage />} />
+          <Route path="opportunity-cost" element={<OpportunityCostPage />} />
           <Route path="scenarios" element={<ScenariosPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
@@ -123,6 +126,7 @@ function AppRoutes() {
             <Route path="imports" element={<ImportsTab />} />
             <Route path="enrichment" element={<EnrichmentTab />} />
             <Route path="contacts" element={<ContactsTab />} />
+            <Route path="members" element={<MembersTab />} />
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="jobs" element={<JobsTab />} />

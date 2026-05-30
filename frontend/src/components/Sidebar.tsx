@@ -113,6 +113,7 @@ const navSections: NavSection[] = [
       { to: '/goals', label: 'Goals', icon: Target },
       { to: '/forecast', label: 'Forecast', icon: TrendingUp },
       { to: '/debt', label: 'Debt payoff', icon: Landmark },
+      { to: '/opportunity-cost', label: 'Opportunity cost', icon: Calculator },
       { to: '/scenarios', label: 'Scenarios', icon: GitCompare },
     ],
   },

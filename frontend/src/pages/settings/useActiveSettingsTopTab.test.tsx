@@ -22,6 +22,7 @@ describe('useActiveSettingsTopTab', () => {
     ['/settings/imports', 'imports'],
     ['/settings/enrichment', 'enrichment'],
     ['/settings/contacts', 'contacts'],
+    ['/settings/members', 'members'],
     ['/settings/budgets', 'budgets'],
   ])('maps %s to %s', (path, expected) => {
     const { result } = renderHook(() => useActiveSettingsTopTab(), {
