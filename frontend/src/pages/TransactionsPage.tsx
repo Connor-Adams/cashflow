@@ -31,6 +31,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
+import { LabelChipPicker } from '../components/transactions/LabelChipPicker'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
@@ -56,7 +57,9 @@ import type {
   TransactionStatus,
   TransactionBulkPatch,
   TransactionFilterPayload,
+  TransactionLabelRef,
 } from '../types/api'
+import { useLabels } from '../lib/useLabels'
 import { useSessionState } from '../lib/useSessionState'
 import { notifyReceiptsChanged } from '@/hooks/useReceiptCompleteness'
 
@@ -177,6 +180,13 @@ export function TransactionsPage() {
     ''
   )
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  // Labels (issue #270): any-of filter (ids) + bulk apply/remove control.
+  const [labelsFilter, setLabelsFilter] = useSessionState<number[]>(
+    'transactions.labelsFilter',
+    []
+  )
+  const [bulkLabelId, setBulkLabelId] = useState('')
+  const [bulkLabelApplying, setBulkLabelApplying] = useState(false)
   const [bulkCat, setBulkCat] = useState('')
   const [bulkBiz, setBulkBiz] = useState('')
   const [bulkSplit, setBulkSplit] = useState('')
@@ -189,6 +199,7 @@ export function TransactionsPage() {
   const [bulkAllApplying, setBulkAllApplying] = useState(false)
   const confirmAction = useConfirm()
   const { showToast } = useToast()
+  const { labels: allLabels, refresh: refreshLabels } = useLabels()
   const [res, setRes] = useState<Paginated<Transaction> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -315,6 +326,7 @@ export function TransactionsPage() {
       if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
       if (statusFilter) qs.set('status', statusFilter)
+      if (labelsFilter.length > 0) qs.set('labels', labelsFilter.join(','))
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`,
       )
@@ -330,7 +342,7 @@ export function TransactionsPage() {
         setLoading(false)
       }
     }
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, dateRangeInvalid])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter, dateRangeInvalid])
 
   useEffect(() => {
     void load()
@@ -338,14 +350,14 @@ export function TransactionsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter])
+  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter])
 
   useEffect(() => {
     setSelectedIds(new Set())
     setBulkAiResults([])
     setAiAuditResults([])
     setAiAuditMessage(null)
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, labelsFilter])
 
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
@@ -532,6 +544,18 @@ export function TransactionsPage() {
               },
             }
           : null,
+        labelsFilter.length > 0
+          ? {
+              key: 'labels',
+              label: `Labels: ${labelsFilter
+                .map((id) => allLabels.find((l) => l.id === id)?.name ?? `#${id}`)
+                .join(', ')}`,
+              clear: () => {
+                setPage(1)
+                setLabelsFilter([])
+              },
+            }
+          : null,
       ].filter(Boolean) as Array<{
         key: string
         label: string
@@ -549,6 +573,8 @@ export function TransactionsPage() {
       batchFilter,
       idsFilter,
       statusFilter,
+      labelsFilter,
+      allLabels,
       setReviewOnly,
       setCurrency,
       setCategoryFilter,
@@ -557,6 +583,7 @@ export function TransactionsPage() {
       setBatchFilter,
       setIdsFilter,
       setStatusFilter,
+      setLabelsFilter,
     ]
   )
 
@@ -570,6 +597,7 @@ export function TransactionsPage() {
     setBatchFilter('')
     setIdsFilter('')
     setStatusFilter('')
+    setLabelsFilter([])
   }
 
   async function openItemsDrawer(txnId: number) {
@@ -791,6 +819,39 @@ export function TransactionsPage() {
       setErr(e instanceof Error ? e.message : 'Bulk update failed')
     } finally {
       setBulkApplying(false)
+    }
+  }
+
+  /**
+   * Bulk apply/remove a label across the selected transactions (issue #270).
+   * On apply, toasts "Applied <label> to N transactions."; on remove, a
+   * matching confirmation. Reloads so the per-row chips reflect the change.
+   */
+  async function applyBulkLabel(op: 'apply' | 'remove') {
+    const labelId = Number(bulkLabelId)
+    if (!Number.isInteger(labelId) || labelId <= 0 || selectedIds.size === 0) return
+    const label = allLabels.find((l) => l.id === labelId)
+    setBulkLabelApplying(true)
+    setErr(null)
+    try {
+      const res = await postJson<{ affected: number }>(
+        '/api/transactions/bulk/labels',
+        { transactionIds: [...selectedIds], labelId, op },
+      )
+      const n = res.affected
+      const labelName = label?.name ?? 'label'
+      showToast({
+        title:
+          op === 'apply'
+            ? `Applied ${labelName} to ${n} transaction${n === 1 ? '' : 's'}.`
+            : `Removed ${labelName} from ${n} transaction${n === 1 ? '' : 's'}.`,
+        variant: 'success',
+      })
+      await Promise.all([load(), refreshLabels()])
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't update labels. Try again.")
+    } finally {
+      setBulkLabelApplying(false)
     }
   }
 
@@ -1052,6 +1113,39 @@ export function TransactionsPage() {
               placeholder="exact batch label"
             />
           </Label>
+          {/* Labels filter (issue #270, AC #11): multi-select, any-of. Hidden
+              entirely when the household has no labels yet. */}
+          {allLabels.length > 0 && (
+            <fieldset className="transactionsLabelFilter" aria-label="Filter by labels">
+              <legend className="text-sm">Labels</legend>
+              <div className="flex flex-wrap gap-2">
+                {allLabels.map((label) => {
+                  const checked = labelsFilter.includes(label.id)
+                  return (
+                    <label
+                      key={label.id}
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700"
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-3"
+                        checked={checked}
+                        onChange={(e) => {
+                          setPage(1)
+                          setLabelsFilter((prev) =>
+                            e.target.checked
+                              ? [...prev, label.id]
+                              : prev.filter((id) => id !== label.id),
+                          )
+                        }}
+                      />
+                      {label.name}
+                    </label>
+                  )
+                })}
+              </div>
+            </fieldset>
+          )}
           <Label>
             Sort by
             <NativeSelect
@@ -1412,6 +1506,45 @@ export function TransactionsPage() {
             />{' '}
             Mark reviewed
           </Label>
+          {/* Bulk label apply/remove (issue #270). Only meaningful with a
+              selection and at least one label. */}
+          {allLabels.length > 0 && (
+            <Label>
+              Label
+              <div className="flex items-center gap-1">
+                <NativeSelect
+                  value={bulkLabelId}
+                  onChange={(e) => setBulkLabelId(e.target.value)}
+                  aria-label="Bulk label"
+                >
+                  <NativeSelectOption value="">(choose)</NativeSelectOption>
+                  {allLabels.map((label) => (
+                    <NativeSelectOption key={label.id} value={String(label.id)}>
+                      {label.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={bulkLabelApplying || !bulkLabelId || selectedIds.size === 0}
+                  onClick={() => void applyBulkLabel('apply')}
+                >
+                  Apply label
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={bulkLabelApplying || !bulkLabelId || selectedIds.size === 0}
+                  onClick={() => void applyBulkLabel('remove')}
+                >
+                  Remove label
+                </Button>
+              </div>
+            </Label>
+          )}
           <Button
             type="button"
             disabled={
@@ -1560,6 +1693,8 @@ export function TransactionsPage() {
                     onError={(msg) => setErr(msg)}
                     onOpenSignals={(id) => setSignalsDialogTxnId(id)}
                     onOpenRevisions={(id) => setRevisionsDialogTxnId(id)}
+                    availableLabels={allLabels}
+                    onLabelsMutated={() => void refreshLabels()}
                   />
                 ))
               )}
@@ -1663,6 +1798,8 @@ function TransactionRow({
   onError,
   onOpenSignals,
   onOpenRevisions,
+  availableLabels,
+  onLabelsMutated,
 }: {
   t: Transaction
   categoryOptions: string[]
@@ -1676,7 +1813,10 @@ function TransactionRow({
   onError: (message: string) => void
   onOpenSignals: (id: number) => void
   onOpenRevisions: (id: number) => void
+  availableLabels: import('../types/api').Label[]
+  onLabelsMutated: () => void
 }) {
+  const [rowLabels, setRowLabels] = useState<TransactionLabelRef[]>(t.labels ?? [])
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
   const [aiSuggestionId, setAiSuggestionId] = useState<number | null>(null)
@@ -1745,6 +1885,7 @@ function TransactionRow({
     setOwnershipType(t.ownershipType ?? 'me')
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
     setStatus(t.status)
+    setRowLabels(t.labels ?? [])
     setAiSuggestion(null)
     setAiSuggestionId(null)
   }, [t])
@@ -1818,6 +1959,13 @@ function TransactionRow({
               currency={t.currency}
             />
           )}
+          <LabelChipPicker
+            transactionId={t.id}
+            value={rowLabels}
+            availableLabels={availableLabels}
+            onChange={setRowLabels}
+            onLabelsMutated={onLabelsMutated}
+          />
         </div>
       </TableCell>
       <TableCell>
