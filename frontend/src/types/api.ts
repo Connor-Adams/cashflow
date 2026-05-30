@@ -91,6 +91,14 @@ export type {
   DebtOverview,
   DebtPayoffScenario,
   DebtScenarioResponse,
+  CardPaymentStrategy,
+  CardAutopayType,
+  CreditCard,
+  CreditCardsOverview,
+  CreditCardProfile,
+  CardPaymentPlannedEvent,
+  CardSafeToSpendImpact,
+  CreditCardPaymentResponse,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */

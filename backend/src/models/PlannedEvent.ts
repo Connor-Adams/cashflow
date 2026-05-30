@@ -47,6 +47,7 @@ export type PlannedEventSource =
   | 'recurring_detection'
   | 'settlement'
   | 'debt'
+  | 'credit_card'
   | 'goal'
   | 'system';
 
@@ -55,6 +56,7 @@ export const PLANNED_EVENT_SOURCES: readonly PlannedEventSource[] = [
   'recurring_detection',
   'settlement',
   'debt',
+  'credit_card',
   'goal',
   'system',
 ] as const;

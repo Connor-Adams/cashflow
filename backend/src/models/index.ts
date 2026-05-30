@@ -920,6 +920,13 @@ LiabilityAccount.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
 });
+// Credit-card payment planner (#243). The funding (cash) account a card's
+// bill is paid from. SET NULL at the DB level (see the cc-fields migration) so
+// deleting the funding account unlinks the profile rather than removing it.
+LiabilityAccount.belongsTo(Account, {
+  foreignKey: 'payment_account_id',
+  as: 'paymentAccount',
+});
 
 // DebtPayoffScenario (issue #202). Household-scoped saved payoff plans. The
 // creating user is kept loosely (SET NULL) so a scenario survives the user's

@@ -1454,3 +1454,92 @@ export type DebtLiabilityProfile = {
   statementBalance: number | null
   dueDay: number | null
 }
+
+// ---------------------------------------------------------------------------
+// Credit-card payment planner (#243) — operational bill management.
+// ---------------------------------------------------------------------------
+
+/** How a planned card payment sizes its amount. */
+export type CardPaymentStrategy = 'statement' | 'minimum' | 'current'
+
+/** How much autopay draws each cycle. */
+export type CardAutopayType = 'full' | 'minimum' | 'fixed'
+
+/** One credit card returned by GET /api/credit-cards. */
+export type CreditCard = {
+  accountId: number
+  name: string
+  accountType: string
+  currency: string
+  /** Transaction-derived amount currently owed, as a positive number. */
+  currentBalance: number
+  /** User-entered statement-balance snapshot, or null. */
+  statementBalance: number | null
+  minimumPayment: number
+  /** Day-of-month (1-31) the payment is due, or null. */
+  dueDay: number | null
+  /** YYYY-MM-DD the current statement closed, or null. */
+  statementDate: string | null
+  autopayEnabled: boolean
+  autopayType: CardAutopayType | null
+  autopayAmount: number | null
+  /** The cash account the bill is paid from, or null. */
+  paymentAccountId: number | null
+  /** Next calendar due date derived from dueDay, or null. */
+  nextDueDate: string | null
+  /** Whole days until nextDueDate (>= 0), or null when no dueDay set. */
+  daysUntilDue: number | null
+  /** True when a payment is due within the warning window. */
+  dueSoon: boolean
+}
+
+/** Response shape of GET /api/credit-cards. */
+export type CreditCardsOverview = {
+  currency: string
+  asOfDate: string
+  cards: CreditCard[]
+}
+
+/** The profile row returned by PUT /api/credit-cards/:accountId. */
+export type CreditCardProfile = {
+  accountId: number
+  statementBalance: number | null
+  minimumPayment: number
+  dueDay: number | null
+  statementDate: string | null
+  autopayEnabled: boolean
+  autopayType: CardAutopayType | null
+  autopayAmount: number | null
+  paymentAccountId: number | null
+}
+
+/** The planned-event summary returned by the payment / mark-paid endpoints. */
+export type CardPaymentPlannedEvent = {
+  id: number
+  accountId: number | null
+  type?: string
+  name?: string
+  amount?: string
+  currency?: string
+  expectedDate?: string
+  source?: string
+  status: string
+  linkedTransactionId: number | null
+}
+
+/**
+ * Safe-to-spend impact echoed back when a card payment is planned, so the UI
+ * can warn without a follow-up request. A structural subset of the backend's
+ * full safe-to-spend result (extra fields are ignored).
+ */
+export type CardSafeToSpendImpact = {
+  currency: string
+  value: number
+  isNegative: boolean
+}
+
+/** Response shape of POST /api/credit-cards/:accountId/payment. */
+export type CreditCardPaymentResponse = {
+  plannedEvent: CardPaymentPlannedEvent
+  safeToSpend: CardSafeToSpendImpact | null
+}
