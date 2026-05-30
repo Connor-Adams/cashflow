@@ -91,6 +91,12 @@ export type {
   DebtOverview,
   DebtPayoffScenario,
   DebtScenarioResponse,
+  DividendReconciliationStatus,
+  DividendReconciliationRow,
+  DividendUpcomingRow,
+  DividendListResponse,
+  DividendCandidate,
+  DividendCandidatesResponse,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */
