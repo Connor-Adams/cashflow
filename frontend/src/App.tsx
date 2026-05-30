@@ -41,6 +41,7 @@ import { PartnerInviteSection } from './pages/settings/sections/PartnerInviteSec
 import { ImportsTab } from './pages/settings/tabs/ImportsTab'
 import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
 import { ContactsTab } from './pages/settings/tabs/ContactsTab'
+import { MembersTab } from './pages/settings/tabs/MembersTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
@@ -114,6 +115,7 @@ function AppRoutes() {
             <Route path="imports" element={<ImportsTab />} />
             <Route path="enrichment" element={<EnrichmentTab />} />
             <Route path="contacts" element={<ContactsTab />} />
+            <Route path="members" element={<MembersTab />} />
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="jobs" element={<JobsTab />} />

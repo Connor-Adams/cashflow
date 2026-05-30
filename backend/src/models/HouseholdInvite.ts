@@ -19,6 +19,9 @@ export class HouseholdInvite extends Model<
   declare expiresAt: Date;
   declare acceptedAt: Date | null;
   declare acceptedByUserId: number | null;
+  // #281 — optional email captured at invite creation for the inviter's own
+  // record-keeping. Not used to send mail in v1; nullable for legacy invites.
+  declare optionalEmail: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -55,6 +58,11 @@ export function initHouseholdInvite(sequelize: Sequelize): typeof HouseholdInvit
       acceptedByUserId: {
         type: DataTypes.INTEGER,
         field: 'accepted_by_user_id',
+        allowNull: true,
+      },
+      optionalEmail: {
+        type: DataTypes.STRING(255),
+        field: 'optional_email',
         allowNull: true,
       },
     } as ModelAttributes<HouseholdInvite>,
