@@ -18,9 +18,10 @@
 
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { Receipt, Subscription, Transaction } from '../models';
+import type { WhereOptions } from 'sequelize';
+import { Account, Receipt, Subscription, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere, visibleTransactionWhere } from '../auth/scope';
+import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 import { aiSuggestLimiter } from './aiRateLimit';
 import {
   explainMonth,
@@ -30,6 +31,12 @@ import {
   type ExplainMonthTxnRow,
   type ExplainMonthResult,
 } from '../summary/explainMonth';
+import {
+  buildMonthWindow,
+  lifestyleInflation,
+  type LifestyleInflationTxnRow,
+} from '../summary/lifestyleInflation';
+import { scopeWhereClause } from './budgets';
 import { getOpenAiConfig } from '../config/openai';
 import { openaiJson } from '../ai/openaiJson';
 import { logger } from '../observability/logger';
@@ -55,6 +62,65 @@ function parseBool(raw: unknown): boolean {
   if (raw == null) return false;
   const s = String(raw).trim().toLowerCase();
   return s === 'true' || s === '1' || s === 'yes' || s === 'on';
+}
+
+/**
+ * Scope filter for the lifestyle-inflation report. The issue frames scopes as
+ * "personal, shared, business, and all"; we map those to the existing budget
+ * scope WHERE clauses so the two features classify spend identically:
+ *
+ *   personal → private + non-business     (scopeWhereClause('personal'))
+ *   shared   → visibility = 'shared'       (scopeWhereClause('household'))
+ *   business → final_business = true       (scopeWhereClause('business'))
+ *   all      → no extra filter ({})
+ *
+ * Unknown/missing scope falls open to 'all'. The returned clause is combined
+ * with visibleTransactionWhere() so row-level visibility is always enforced.
+ */
+const LIFESTYLE_SCOPES = ['personal', 'shared', 'business', 'all'] as const;
+type LifestyleScope = (typeof LIFESTYLE_SCOPES)[number];
+
+function parseScope(raw: unknown): LifestyleScope {
+  if (raw == null || raw === '') return 'all';
+  const s = String(raw).trim().toLowerCase();
+  return (LIFESTYLE_SCOPES as readonly string[]).includes(s)
+    ? (s as LifestyleScope)
+    : 'all';
+}
+
+function scopeFilter(scope: LifestyleScope): WhereOptions {
+  switch (scope) {
+    case 'personal':
+      return scopeWhereClause('personal');
+    case 'shared':
+      return scopeWhereClause('household');
+    case 'business':
+      return scopeWhereClause('business');
+    case 'all':
+    default:
+      return {};
+  }
+}
+
+const DEFAULT_LIFESTYLE_WINDOW_MONTHS = 12;
+const MIN_LIFESTYLE_WINDOW_MONTHS = 2;
+const MAX_LIFESTYLE_WINDOW_MONTHS = 36;
+
+/** Clamp the requested window size into a sane range. Defaults to 12. */
+function parseWindowMonths(raw: unknown): number {
+  if (raw == null || raw === '') return DEFAULT_LIFESTYLE_WINDOW_MONTHS;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_LIFESTYLE_WINDOW_MONTHS;
+  return Math.min(
+    MAX_LIFESTYLE_WINDOW_MONTHS,
+    Math.max(MIN_LIFESTYLE_WINDOW_MONTHS, Math.trunc(n)),
+  );
+}
+
+/** Current calendar month (YYYY-MM) in UTC — used as the default anchor. */
+function currentMonth(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 interface TxnRawRow {
@@ -285,6 +351,131 @@ router.get('/explain-month', aiSuggestLimiter, async (req, res, next) => {
     }
 
     res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Fetch transactions across the whole window for the lifestyle-inflation
+ * report. Joins account_type (via a per-household account-type map) so the
+ * aggregator can drop investment-account rows, mirroring /summary/monthly.
+ */
+async function fetchLifestyleTransactions(
+  req: Parameters<typeof currentAuth>[0],
+  fromDate: string,
+  toDate: string,
+  currency: string | null,
+  scope: LifestyleScope,
+): Promise<LifestyleInflationTxnRow[]> {
+  const where: WhereOptions = {
+    ...visibleTransactionWhere(req),
+    ...scopeFilter(scope),
+    date: { [Op.between]: [fromDate, toDate] },
+  };
+  if (currency) (where as Record<string, unknown>).currency = currency;
+
+  const [rows, accounts] = await Promise.all([
+    Transaction.findAll({
+      where,
+      attributes: ['accountId', 'date', 'currency', 'amount', 'finalCategory', 'txnType'],
+      raw: true,
+    }),
+    Account.findAll({
+      where: visibleAccountWhere(req),
+      attributes: ['id', 'accountType'],
+      raw: true,
+    }),
+  ]);
+
+  const accountTypeById = new Map<number, string | null>(
+    (accounts as unknown as Array<{ id: number; accountType: string | null }>).map((a) => [
+      a.id,
+      a.accountType,
+    ]),
+  );
+
+  type RawRow = {
+    accountId: number;
+    date: string;
+    currency: string;
+    amount: unknown;
+    finalCategory: string | null;
+    txnType: string | null;
+  };
+  return (rows as unknown as RawRow[]).map((r) => ({
+    date: r.date,
+    currency: r.currency,
+    amount: r.amount,
+    finalCategory: r.finalCategory,
+    txnType: r.txnType,
+    accountType: accountTypeById.get(r.accountId) ?? null,
+  }));
+}
+
+/**
+ * GET /api/reports/lifestyle-inflation (Cashflow #245).
+ *
+ * Tracks whether spending growth is outpacing income growth over a rolling
+ * window of months. Returns, per currency: a monthly income/spend/savings
+ * series, first-half-vs-second-half growth figures, the categories driving
+ * spend growth, and a warning insight when spend growth materially outpaces
+ * income growth.
+ *
+ * Query params:
+ *   month     — anchor month YYYY-MM (default: current month). The window ends here.
+ *   months    — window size, clamped to [2, 36] (default 12).
+ *   currency  — 3-letter filter, or omit for all currencies.
+ *   scope     — personal | shared | business | all (default all).
+ *   threshold — percentage-point gap for the outpacing insight (default 10).
+ */
+router.get('/lifestyle-inflation', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    void auth; // throws if unauthenticated.
+
+    const anchor =
+      req.query.month != null && req.query.month !== ''
+        ? parseMonth(req.query.month)
+        : currentMonth();
+    if (!anchor) {
+      res.status(400).json({
+        error: 'month must be in YYYY-MM format (e.g. 2026-05)',
+      });
+      return;
+    }
+    const windowMonths = parseWindowMonths(req.query.months);
+    const currency = parseCurrency(req.query.currency);
+    const scope = parseScope(req.query.scope);
+    const thresholdRaw = Number(req.query.threshold);
+    const outpaceThresholdPct =
+      Number.isFinite(thresholdRaw) && thresholdRaw >= 0 ? thresholdRaw : undefined;
+
+    const months = buildMonthWindow(anchor, windowMonths);
+    const fromDate = monthBounds(months[0]).from;
+    const toDate = monthBounds(months[months.length - 1]).to;
+
+    const transactions = await fetchLifestyleTransactions(
+      req,
+      fromDate,
+      toDate,
+      currency,
+      scope,
+    );
+
+    const result = lifestyleInflation({
+      months,
+      transactions,
+      currency,
+      outpaceThresholdPct,
+    });
+
+    res.json({
+      anchorMonth: anchor,
+      scope,
+      currency: currency ?? null,
+      ...result,
+    });
   } catch (e) {
     next(e);
   }
