@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -391,6 +392,18 @@ export function ForecastPage() {
                       loading
                         ? 'Loading…'
                         : 'Add a planned event or wait until recurring charges are detected.'
+                    }
+                    actions={
+                      !loading && (
+                        <>
+                          <Button asChild size="sm" variant="secondary">
+                            <Link to="/planned">Add planned event</Link>
+                          </Button>
+                          <Button asChild size="sm" variant="ghost">
+                            <Link to="/recurring">View recurring</Link>
+                          </Button>
+                        </>
+                      )
                     }
                   />
                 </TableCell>

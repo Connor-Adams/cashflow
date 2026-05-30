@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -375,6 +376,11 @@ export function PlannedEventsPage() {
                           >
                             <Trash2 aria-hidden="true" />
                             Delete
+                          </Button>
+                          <Button asChild size="sm" variant="ghost">
+                            <Link to={`/forecast?date=${row.expectedDate}`}>
+                              View in forecast →
+                            </Link>
                           </Button>
                         </div>
                       </TableCell>

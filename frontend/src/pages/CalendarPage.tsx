@@ -18,7 +18,7 @@ import {
   type FormEvent,
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -501,11 +501,15 @@ export function CalendarPage() {
                         aria-hidden="true"
                       />
                       <div>
-                        <div className="font-medium">{ev.name}</div>
+                        <div className="font-medium" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          {ev.recurrenceRule
+                            ? <Repeat size={12} title="Recurring charge" aria-label="Recurring charge" />
+                            : <CalendarIcon size={12} title="Planned event" aria-label="Planned event" />}
+                          {ev.name}
+                        </div>
                         <div className="muted text-xs">
-                          {ev.kindLabel} ·{' '}
+                          {ev.recurrenceRule ? 'Recurring charge' : 'Planned event'} ·{' '}
                           {formatMoney(Number(ev.amount), ev.currency)}
-                          {ev.recurrenceRule ? ' · recurring' : ''}
                         </div>
                       </div>
                     </div>
