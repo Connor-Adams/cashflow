@@ -28,10 +28,23 @@ test('up: adds nullable last_seen_changelog_version column', async () => {
   const desc = await sequelize.getQueryInterface().describeTable('users');
   assert.ok('last_seen_changelog_version' in desc, 'column missing');
   assert.equal(desc.last_seen_changelog_version.allowNull, true);
+  assert.equal(desc.last_seen_changelog_version.defaultValue, null);
 });
 
 test('down: removes the column', async () => {
   await migration.down(sequelize.getQueryInterface());
   const desc = await sequelize.getQueryInterface().describeTable('users');
   assert.ok(!('last_seen_changelog_version' in desc), 'column should be gone');
+});
+
+test('up again is idempotent (round-trip and no-throw)', async () => {
+  // Column was removed by the prior down test; re-running up should re-add it.
+  await migration.up(sequelize.getQueryInterface(), Sequelize);
+  const desc = await sequelize.getQueryInterface().describeTable('users');
+  assert.ok('last_seen_changelog_version' in desc, 'column should re-appear after second up');
+  // Column already exists; calling up again must not throw (guard is a no-op).
+  await assert.doesNotReject(
+    () => migration.up(sequelize.getQueryInterface(), Sequelize),
+    'up() must not throw when column already exists',
+  );
 });
