@@ -67,21 +67,22 @@ yarn workspace frontend run test
 yarn workspace frontend run build
 ```
 
-## Code health: dead code & duplication
+## Code health: dead code, complexity & duplication
 
-Two static-analysis tools are wired in to find unused code and copy-paste duplication. They run informationally in CI (the `code-audit` job), which **posts the results as a sticky pull-request comment** (updated in place on each push) and never blocks merges — the goal is to drive the baseline down over time.
+[**fallow**](https://github.com/fallow-rs/fallow) (`.fallowrc.json`) is the single static-analysis engine. It reports dead code (unused files/exports/types/deps, circular deps), function complexity / CRAP scores, and duplication. [**jscpd**](https://github.com/kucherenko/jscpd) (`.jscpd.json`) is kept alongside purely for its browsable HTML duplication report.
+
+The CI `code-audit` job runs both informationally (never blocks merges) and **posts a sticky pull-request comment** — a whole-repo health snapshot (dead code + complexity from fallow, duplication from jscpd) updated in place on each push. The separate `fallow.yml` workflow adds **inline review comments** on changed lines; its own summary comment is disabled (`comment: false`) in favour of the rendered one.
 
 ```bash
-yarn audit:code     # runs both tools
-yarn deadcode       # knip: unused files, exports, types, dependencies
-yarn deadcode:fix   # knip --fix: auto-remove safe unused exports/files (review the diff!)
-yarn dupes          # jscpd: duplicate-code detector, writes reports/jscpd/html/
+yarn audit:code   # fallow audit (changed files) + jscpd
+yarn deadcode     # fallow dead-code — unused files, exports, types, deps
+yarn health       # fallow health — complexity / CRAP / maintainability
+yarn dupes        # jscpd — writes reports/jscpd/html/
 ```
 
-- **[knip](https://knip.dev)** (`knip.json`) understands the yarn-workspace layout and reports unused files, exports, exported types, and dependencies across `backend` / `frontend` / `shared`.
-- **[jscpd](https://github.com/kucherenko/jscpd)** (`.jscpd.json`) reports duplicated blocks; open `reports/jscpd/html/index.html` for a browsable view. The `threshold` (5% duplicated lines) acts as a ratchet — lower it as duplication drops.
-
-When you knowingly keep an "unused" export (e.g. a public API or test seam), add it to the relevant `knip.json` workspace `ignore`/`ignoreDependencies` entry rather than leaving it as noise.
+- The PR comment is rendered by `scripts/audit-summary.cjs` from the JSON reports under `reports/`.
+- jscpd's `threshold` (5% duplicated lines) acts as a ratchet — lower it as duplication drops.
+- To keep a knowingly-"unused" symbol, add a `// fallow-ignore-*` suppression comment or extend `.fallowrc.json` rather than leaving it as noise.
 
 ## Project layout
 

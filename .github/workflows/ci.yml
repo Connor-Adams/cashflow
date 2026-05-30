@@ -156,10 +156,10 @@ jobs:
   code-audit:
     needs: install
     runs-on: ubuntu-latest
-    # Informational for now: surfaces dead code (knip) and duplication (jscpd)
-    # without blocking merges, and posts the results as a PR comment. Flip the
-    # steps to required once the baseline is driven down. See CONTRIBUTING.md
-    # for the local `yarn audit:code` workflow.
+    # Informational for now: surfaces dead code + complexity (fallow) and
+    # duplication (jscpd) without blocking merges, and posts a whole-repo
+    # snapshot as a sticky PR comment. Flip the steps to required once the
+    # baseline is driven down. See CONTRIBUTING.md for `yarn audit:code`.
     permissions:
       contents: read
       pull-requests: write
@@ -179,12 +179,12 @@ jobs:
       - name: Extract node_modules
         run: tar -xf node_modules.tar
 
-      - name: Dead code (knip)
+      - name: Dead code & complexity (fallow)
         continue-on-error: true
         run: |
           mkdir -p reports
-          yarn --silent knip --reporter json --no-exit-code > reports/knip-report.json
-          yarn deadcode || true
+          yarn --silent fallow dead-code --format json > reports/fallow-deadcode.json
+          yarn --silent fallow health --format json > reports/fallow-health.json
 
       - name: Duplicate code (jscpd)
         continue-on-error: true
