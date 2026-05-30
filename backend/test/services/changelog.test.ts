@@ -89,3 +89,13 @@ test('entriesSince returns only entries newer than the given tag', () => {
   assert.deepEqual(entriesSince(visible, 'v0.13.51').map((e) => e.version), ['v0.13.52']);
   assert.deepEqual(entriesSince(visible, null).map((e) => e.version), ['v0.13.52', 'v0.13.51']);
 });
+
+test('loadChangelog output is sanitized (full path)', () => {
+  const top = loadChangelog(dir).entries.find((e) => e.version === 'v0.13.52')!;
+  assert.ok(!top.html.includes('<script'), 'loaded entry html must be sanitized');
+});
+
+test('parseEntry returns null when version or publishedAt is missing', () => {
+  assert.equal(parseEntry('---\ntitle: T\naudience: user\n---\nBody', 'x.md'), null);
+  assert.equal(parseEntry('---\nversion: v1.0.0\ntitle: T\n---\nBody', 'x.md'), null);
+});

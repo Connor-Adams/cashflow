@@ -19,6 +19,8 @@ export interface ChangelogOverview {
   updatedAt: string;
 }
 
+// Changelog markdown is repo-controlled (committed by maintainers), so img is
+// allowed. External images are an accepted, low risk on this read-only surface.
 const SANITIZE_OPTS: sanitizeHtml.IOptions = {
   allowedTags: [
     'p', 'a', 'ul', 'ol', 'li', 'strong', 'em', 'code', 'pre', 'blockquote',
@@ -38,7 +40,10 @@ export function renderMarkdown(md: string): string {
 /** Normalise a gray-matter date value (may be a Date object or a string) to an ISO string. */
 function toIsoString(raw: unknown): string {
   if (raw instanceof Date) return raw.toISOString();
-  return String(raw ?? '').trim();
+  const s = String(raw ?? '').trim();
+  // Entries must use ISO-8601 timestamps; lexicographic ordering depends on it.
+  // Anything that isn't ISO-shaped is treated as missing (entry skipped).
+  return /^\d{4}-\d{2}-\d{2}([T ]|$)/.test(s) ? s : '';
 }
 
 export function parseEntry(fileContents: string, _filename: string): ChangelogEntry | null {
