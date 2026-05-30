@@ -10,7 +10,6 @@
  */
 
 import { num } from '../util/numbers';
-import { isNonCategorical } from './classifyTransactionFlow';
 
 /** Transaction row consumed by the aggregator. */
 export interface SavingsRateTxnRow {
@@ -70,7 +69,11 @@ export interface SavingsRateResponse {
  * Classify a transaction row and extract its contribution to each category.
  * Returns { income, spending, savings, investments, debtPrincipal } — only
  * one is nonzero per row (exclusive classification).
- * Returns all zeros for invalid (null amount) or non-categorical rows.
+ * Returns all zeros for invalid (null amount) or unclassifiable rows.
+ *
+ * Note: We do NOT use isNonCategorical() from classifyTransactionFlow since
+ * that filters transfers. Instead, we classify based on destination account
+ * type and txnType, allowing transfers to be counted by where they land.
  */
 function classifyTxn(row: SavingsRateTxnRow): {
   income: number;
@@ -86,14 +89,13 @@ function classifyTxn(row: SavingsRateTxnRow): {
 
   const isNegative = amount < 0;
 
-  // Skip non-categorical and internal transfers (zero-sum across the pair).
-  // A linked transfer is counted only once: on the destination account.
-  // We'll handle this in the caller by filtering to only one leg.
-  if (isNonCategorical(row.txnType, row.accountType)) {
+  // Skip pure brokerage/dividend flows that don't land on user-facing accounts
+  // (These are internal investment account churn.)
+  if (row.txnType === 'dividend' || (row.txnType === 'investment' && row.accountType === 'investment')) {
     return { income: 0, spending: 0, savings: 0, investments: 0, debtPrincipal: 0 };
   }
 
-  // Income: positive amounts (excluding payments, handled by isNonCategorical filter)
+  // Income: positive amounts (excluding payments and payment-like flows)
   if (amount > 0 && row.txnType !== 'payment') {
     return { income: amount, spending: 0, savings: 0, investments: 0, debtPrincipal: 0 };
   }
