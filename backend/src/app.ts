@@ -28,6 +28,7 @@ import purchasesRouter from './routes/purchases';
 import reimbursementsRouter from './routes/reimbursements';
 import largePurchaseReviewRouter from './routes/largePurchaseReview';
 import feedbackRouter from './routes/feedback';
+import dataExportRouter from './routes/dataExport';
 import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
@@ -232,6 +233,9 @@ app.use('/api', largePurchaseReviewRouter);
 // feedbackRouter mounts /feedback and /feedback/:id/resolve under /api
 // (issue #295). Behind the global requireAuth above.
 app.use('/api', feedbackRouter);
+// dataExportRouter mounts /me/export, /me/exports, /me/export/:id under /api
+// (issue #302). Behind the global requireAuth above.
+app.use('/api', dataExportRouter);
 // Unified review-items inbox (issue #378). Read-only fan-out across
 // AiSuggestion, AiReviewRun items, CfoBriefing items, and ChatProposal.
 app.use('/api/review-items', reviewItemsRouter);
