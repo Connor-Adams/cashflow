@@ -80,6 +80,17 @@ export type {
   Transaction,
   TransactionStatus,
   TransferPurpose,
+  DebtPayoffStrategy,
+  DebtLiability,
+  DebtLiabilityProfile,
+  PayoffMonthDebtLine,
+  PayoffMonth,
+  PayoffScheduledPayment,
+  DebtPayoffPlan,
+  DebtPayoffComparison,
+  DebtOverview,
+  DebtPayoffScenario,
+  DebtScenarioResponse,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */

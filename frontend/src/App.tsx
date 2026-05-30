@@ -18,6 +18,7 @@ import { PlannedEventsPage } from './pages/PlannedEventsPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { GoalsPage } from './pages/GoalsPage'
 import { ForecastPage } from './pages/ForecastPage'
+import { DebtPage } from './pages/DebtPage'
 import { OpportunityCostPage } from './pages/OpportunityCostPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
@@ -93,6 +94,7 @@ function AppRoutes() {
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="goals" element={<GoalsPage />} />
           <Route path="forecast" element={<ForecastPage />} />
+          <Route path="debt" element={<DebtPage />} />
           <Route path="opportunity-cost" element={<OpportunityCostPage />} />
           <Route path="scenarios" element={<ScenariosPage />} />
           <Route path="recurring" element={<RecurringPage />} />
