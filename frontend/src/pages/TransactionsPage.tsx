@@ -187,8 +187,9 @@ export function TransactionsPage() {
   const [bulkMarkReviewed, setBulkMarkReviewed] = useState(false)
   const [bulkApplying, setBulkApplying] = useState(false)
   const [bulkAllApplying, setBulkAllApplying] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
   const confirmAction = useConfirm()
-  const { showToast } = useToast()
+  const { showToast, dismissToast } = useToast()
   const [res, setRes] = useState<Paginated<Transaction> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -832,6 +833,91 @@ export function TransactionsPage() {
    * before any write happens; the server independently enforces a cap and
    * rejects oversize selections with 422.
    */
+  /**
+   * Triggers a CSV export for the current filter. Uses a hidden anchor with
+   * href pointing to GET /api/transactions/export?<filter> so the browser
+   * handles the file download natively (no memory spike for large exports).
+   * A "Exporting…" toast appears while waiting for the first byte; the toast
+   * is dismissed once the fetch head resolves or errors.
+   */
+  async function handleExport() {
+    if (exportBusy) return
+    setExportBusy(true)
+
+    const qs = new URLSearchParams()
+    if (reviewOnly) qs.set('reviewFlag', 'true')
+    if (currency) qs.set('currency', currency)
+    if (categoryFilter.trim()) qs.set('category', categoryFilter.trim())
+    if (dateFrom.trim()) qs.set('dateFrom', dateFrom.trim())
+    if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
+    if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
+    if (idsFilter.trim()) qs.set('ids', idsFilter.trim())
+    if (statusFilter) qs.set('status', statusFilter)
+
+    const exportUrl = `/api/transactions/export${qs.toString() ? `?${qs.toString()}` : ''}`
+
+    const toastId = showToast({
+      title: 'Exporting…',
+      durationMs: 60000, // keep visible until resolved
+    })
+
+    try {
+      // Fetch the export. We consume the body to count rows and then trigger
+      // the download via Blob + anchor so no separate request is needed.
+      const probe = await fetch(exportUrl, { credentials: 'include', method: 'GET' })
+
+      if (!probe.ok) {
+        const text = await probe.text().catch(() => probe.statusText)
+        let errMsg = text
+        try {
+          const j = JSON.parse(text) as { error?: string }
+          errMsg = j.error ?? text
+        } catch { /* not JSON */ }
+        dismissToast(toastId)
+        showToast({
+          title: "Couldn't export. Try again.",
+          description: errMsg,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      // Count rows from the response body (it's a CSV stream).
+      const csv = await probe.text()
+      const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0)
+      // lines[0] is the header; data rows start from index 1
+      const rowCount = Math.max(0, lines.length - 1)
+
+      // Trigger the actual file download via a transient anchor.
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const today = new Date().toISOString().slice(0, 10)
+      const filename = `cashflow-transactions-${today}.csv`
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      dismissToast(toastId)
+      showToast({
+        title: `Exported ${rowCount} row${rowCount === 1 ? '' : 's'}.`,
+        variant: 'success',
+      })
+    } catch {
+      dismissToast(toastId)
+      showToast({
+        title: "Couldn't export. Try again.",
+        variant: 'destructive',
+      })
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   async function applyBulkToAllMatching() {
     const patch = buildBulkPatch()
     if (!patch) return
@@ -1107,6 +1193,15 @@ export function TransactionsPage() {
           )}
           <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void handleExport()}
+            disabled={exportBusy}
+            aria-label="Export transactions as CSV"
+          >
+            {exportBusy ? 'Exporting…' : 'Export'}
           </Button>
         </div>
         {activeFilters.length > 0 ? (

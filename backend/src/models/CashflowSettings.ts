@@ -47,6 +47,12 @@ export class CashflowSettings extends Model<
    */
   declare excludeNonPartnerInflows: CreationOptional<boolean>;
   /**
+   * #244 — Minimum absolute transaction amount (in the user's primary
+   * currency) to flag for large purchase review. Default 500. Set to 0 to
+   * disable. DECIMAL(14,4) stored as string for lossless transport.
+   */
+  declare largePurchaseThreshold: CreationOptional<string>;
+  /**
    * #259 — first-run onboarding wizard suppression. NULL means the user has
    * neither dismissed nor completed onboarding, so the import-creates-accounts
    * wizard is eligible (gated also on `active accounts === 0`). A non-NULL
@@ -66,12 +72,15 @@ export const CASHFLOW_SETTINGS_DEFAULTS = {
   includeGoalContributions: true,
   counterpartyPromotionThreshold: 3,
   excludeNonPartnerInflows: true,
+  largePurchaseThreshold: '500.0000',
 } as const;
 
 export const MIN_SAFE_TO_SPEND_WINDOW_DAYS = 1;
 export const MAX_SAFE_TO_SPEND_WINDOW_DAYS = 365;
 export const MIN_COUNTERPARTY_PROMOTION_THRESHOLD = 2;
 export const MAX_COUNTERPARTY_PROMOTION_THRESHOLD = 50;
+export const MIN_LARGE_PURCHASE_THRESHOLD = 0;
+export const MAX_LARGE_PURCHASE_THRESHOLD = 1_000_000;
 
 export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSettings {
   CashflowSettings.init(
@@ -118,6 +127,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
         field: 'exclude_non_partner_inflows',
         allowNull: false,
         defaultValue: true,
+      },
+      largePurchaseThreshold: {
+        type: DataTypes.DECIMAL(14, 4),
+        field: 'large_purchase_threshold',
+        allowNull: false,
+        defaultValue: '500',
       },
       onboardingDismissedAt: {
         type: DataTypes.DATE,

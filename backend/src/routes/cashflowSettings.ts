@@ -12,6 +12,8 @@ import {
   MAX_SAFE_TO_SPEND_WINDOW_DAYS,
   MIN_COUNTERPARTY_PROMOTION_THRESHOLD,
   MAX_COUNTERPARTY_PROMOTION_THRESHOLD,
+  MIN_LARGE_PURCHASE_THRESHOLD,
+  MAX_LARGE_PURCHASE_THRESHOLD,
 } from '../models/CashflowSettings';
 
 const router = Router();
@@ -23,6 +25,7 @@ type Serialized = {
   includeGoalContributions: boolean;
   counterpartyPromotionThreshold: number;
   excludeNonPartnerInflows: boolean;
+  largePurchaseThreshold: string;
   /**
    * #259 — ISO8601 timestamp the user dismissed/completed first-run
    * onboarding, or null if they never did. The frontend onboarding gate
@@ -41,6 +44,7 @@ function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
     includeGoalContributions: row.includeGoalContributions,
     counterpartyPromotionThreshold: row.counterpartyPromotionThreshold,
     excludeNonPartnerInflows: row.excludeNonPartnerInflows,
+    largePurchaseThreshold: String(row.largePurchaseThreshold),
     onboardingDismissedAt: row.onboardingDismissedAt
       ? new Date(row.onboardingDismissedAt).toISOString()
       : null,
@@ -56,6 +60,7 @@ function defaults(): Serialized {
     counterpartyPromotionThreshold:
       CASHFLOW_SETTINGS_DEFAULTS.counterpartyPromotionThreshold,
     excludeNonPartnerInflows: CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows,
+    largePurchaseThreshold: CASHFLOW_SETTINGS_DEFAULTS.largePurchaseThreshold,
     onboardingDismissedAt: null,
   };
 }
@@ -136,6 +141,21 @@ export function validateCashflowSettingsPatch(raw: Record<string, unknown>):
     out.excludeNonPartnerInflows = b;
   }
 
+  if (raw.largePurchaseThreshold !== undefined) {
+    const n = Number(raw.largePurchaseThreshold);
+    if (
+      !Number.isFinite(n) ||
+      n < MIN_LARGE_PURCHASE_THRESHOLD ||
+      n > MAX_LARGE_PURCHASE_THRESHOLD
+    ) {
+      return {
+        ok: false,
+        error: `largePurchaseThreshold must be a number between ${MIN_LARGE_PURCHASE_THRESHOLD} and ${MAX_LARGE_PURCHASE_THRESHOLD}`,
+      };
+    }
+    out.largePurchaseThreshold = n.toFixed(4);
+  }
+
   return { ok: true, patch: out };
 }
 
@@ -189,6 +209,9 @@ router.patch('/', async (req, res, next) => {
     }
     if (result.patch.excludeNonPartnerInflows !== undefined) {
       row.set('excludeNonPartnerInflows', result.patch.excludeNonPartnerInflows);
+    }
+    if (result.patch.largePurchaseThreshold !== undefined) {
+      row.set('largePurchaseThreshold', result.patch.largePurchaseThreshold);
     }
     await row.save();
     res.json(serialize(row));
