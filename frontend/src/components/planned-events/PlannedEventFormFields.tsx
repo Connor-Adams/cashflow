@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
+import { RecurrencePicker } from '../planned/RecurrencePicker'
 import type { Account, PlannedEventStatus, PlannedEventType } from '../../types/api'
 import {
   PLANNED_EVENT_STATUS_OPTIONS,
@@ -124,15 +125,14 @@ export function PlannedEventFormFields({
           ))}
         </NativeSelect>
       </Label>
-      <Label htmlFor={`${idPrefix}-recurrence`}>
+      <Label>
         Recurrence rule (optional)
-        <Input
-          id={`${idPrefix}-recurrence`}
+        <RecurrencePicker
           value={form.recurrenceRule}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, recurrenceRule: e.target.value }))
+          onChange={(rrule) =>
+            setForm((prev) => ({ ...prev, recurrenceRule: rrule }))
           }
-          placeholder="FREQ=MONTHLY;BYMONTHDAY=1"
+          startDate={form.expectedDate || undefined}
         />
       </Label>
       {showStatus ? (
