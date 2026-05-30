@@ -49,6 +49,12 @@ export class LiabilityAccount extends Model<
   declare autopayAmount: string | null;
   /** Cash account the bill is paid from. SET NULL on that account's delete. */
   declare paymentAccountId: number | null;
+  /**
+   * Credit limit (#437). Meaningful only for credit_card accounts; null for
+   * loan / mortgage. Validated `> 0 or null` at the route layer.
+   * DECIMAL(14,4) — string for transport.
+   */
+  declare creditLimit: string | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -114,6 +120,11 @@ export function initLiabilityAccount(sequelize: Sequelize): typeof LiabilityAcco
       paymentAccountId: {
         type: DataTypes.INTEGER,
         field: 'payment_account_id',
+        allowNull: true,
+      },
+      creditLimit: {
+        type: DataTypes.DECIMAL(14, 4),
+        field: 'credit_limit',
         allowNull: true,
       },
     } as ModelAttributes<LiabilityAccount>,

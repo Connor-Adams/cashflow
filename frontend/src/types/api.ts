@@ -98,6 +98,7 @@ export type {
   CreditCard,
   CreditCardsOverview,
   CreditCardProfile,
+  CreditUtilizationByCurrency,
   CardPaymentPlannedEvent,
   CardSafeToSpendImpact,
   CreditCardPaymentResponse,

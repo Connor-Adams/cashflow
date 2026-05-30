@@ -11,6 +11,14 @@ export type Account = {
   shortCode: string | null
   defaultCurrency: string | null
   closedAt: string | null
+  /** Credit limit (#437). Only set for credit_card accounts; null otherwise. */
+  creditLimit?: number | null
+  /** Current owed balance, derived from the transaction stream. Credit cards
+   *  only. Positive number. Null for non-credit accounts. */
+  currentBalance?: number | null
+  /** currentBalance / creditLimit × 100, or null when either is missing or
+   *  the card is closed. Frontend renders the badge tier from this. */
+  utilizationPct?: number | null
 }
 
 /**
@@ -1507,6 +1515,11 @@ export type CreditCard = {
   autopayAmount: number | null
   /** The cash account the bill is paid from, or null. */
   paymentAccountId: number | null
+  /** User-entered credit limit (#437), or null. */
+  creditLimit: number | null
+  /** currentBalance / creditLimit × 100, or null when either is missing or
+   *  the card is closed. */
+  utilizationPct: number | null
   /** Next calendar due date derived from dueDay, or null. */
   nextDueDate: string | null
   /** Whole days until nextDueDate (>= 0), or null when no dueDay set. */
@@ -1533,6 +1546,26 @@ export type CreditCardProfile = {
   autopayType: CardAutopayType | null
   autopayAmount: number | null
   paymentAccountId: number | null
+  creditLimit: number | null
+}
+
+/**
+ * Per-currency credit-utilization summary returned by
+ * GET /api/networth/credit-utilization (#437).
+ */
+export type CreditUtilizationByCurrency = {
+  currency: string
+  utilizationPct: number
+  cardCount: number
+  totalBalance: number
+  totalLimit: number
+  byCard: Array<{
+    accountId: number
+    name: string
+    currentBalance: number
+    creditLimit: number
+    utilizationPct: number
+  }>
 }
 
 /** The planned-event summary returned by the payment / mark-paid endpoints. */
