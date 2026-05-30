@@ -202,6 +202,7 @@ export function UploadCard({
     lines?: string[]
   } | null>(null)
   const [hasOversizedFile, setHasOversizedFile] = useState(false)
+  const [totalFileBytes, setTotalFileBytes] = useState(0)
   const [uploading, setUploading] = useState(false)
   const [runningFolderImport, setRunningFolderImport] = useState(false)
   const [previewing, setPreviewing] = useState(false)
@@ -990,12 +991,13 @@ export function UploadCard({
               setPreviewData(null)
               setUploadFeedback(null)
               const files = Array.from(fileRef.current?.files ?? [])
+              const total = files.reduce((sum, f) => sum + f.size, 0)
+              setTotalFileBytes(total)
               const oversized = files.find((f) => f.size > MAX_UPLOAD_BYTES)
               if (oversized) {
-                const mb = (oversized.size / (1024 * 1024)).toFixed(0)
                 setUploadFeedback({
                   variant: 'error',
-                  title: `${oversized.name} is too large (${mb} MB). Maximum is 100 MB.`,
+                  title: `${oversized.name} is too large. Maximum is 100 MB.`,
                 })
                 setHasOversizedFile(true)
               } else {
@@ -1005,6 +1007,11 @@ export function UploadCard({
           />
         </Label>
       </div>
+      {totalFileBytes > 0 && (
+        <p className="muted" style={{ fontSize: '0.75rem' }}>
+          Total: {(totalFileBytes / (1024 * 1024)).toFixed(1)} MB / 100 MB
+        </p>
+      )}
       <div className="row transactionsActionRow">
         <Button
           type="button"

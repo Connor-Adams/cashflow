@@ -210,6 +210,7 @@ export function TransactionsPage() {
   // Issue #229: per-transaction edit history viewer + restore.
   const [revisionsDialogTxnId, setRevisionsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
+  const [hintsError, setHintsError] = useState(false)
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [itemsDrawer, setItemsDrawer] = useState<{ txnId: number; receipts: ReceiptWithItems[] } | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
@@ -289,7 +290,7 @@ export function TransactionsPage() {
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
       .then((data) => setCategoryHints(data.categories))
-      .catch(() => setCategoryHints([]))
+      .catch(() => setHintsError(true))
   }, [])
 
   // Per-issue-262: detect an impossible date range and surface inline guidance.
@@ -1154,6 +1155,9 @@ export function TransactionsPage() {
               options={categoryLabels}
               placeholder="e.g. Groceries"
             />
+            {hintsError && (
+              <span className="muted" style={{ fontSize: '0.75rem' }}>Hints unavailable</span>
+            )}
           </Label>
           <Label>
             From

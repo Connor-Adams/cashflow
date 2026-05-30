@@ -45,8 +45,8 @@ export function ImportPage() {
       {accountsError && (
         <Alert
           variant="error"
-          title="Couldn't load accounts."
-          action={<Button size="sm" variant="outline" onClick={loadAccounts}>Try again</Button>}
+          title="Couldn't load accounts. Try again."
+          action={<Button size="sm" variant="outline" onClick={loadAccounts}>Retry</Button>}
           className="mb-4"
         />
       )}
