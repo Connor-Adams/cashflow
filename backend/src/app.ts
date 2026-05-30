@@ -42,6 +42,7 @@ import notificationsRouter from './routes/notifications';
 import notificationPreferencesRouter from './routes/notificationPreferences';
 import notificationsAdminRouter from './routes/admin/notificationsAdmin';
 import forecastRouter from './routes/forecast';
+import opportunityCostRouter from './routes/opportunityCost';
 import cashflowSettingsRouter from './routes/cashflowSettings';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
@@ -142,6 +143,7 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/notification-preferences', notificationPreferencesRouter);
 app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);
+app.use('/api/opportunity-cost', opportunityCostRouter);
 app.use('/api/settings/cashflow', cashflowSettingsRouter);
 app.use('/api/import', importRouter);
 // sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins

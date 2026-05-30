@@ -109,6 +109,7 @@ const navSections: NavSection[] = [
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/goals', label: 'Goals', icon: Target },
       { to: '/forecast', label: 'Forecast', icon: TrendingUp },
+      { to: '/opportunity-cost', label: 'Opportunity cost', icon: Calculator },
     ],
   },
   {
