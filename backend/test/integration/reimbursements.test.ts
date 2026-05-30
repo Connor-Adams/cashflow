@@ -145,6 +145,14 @@ function isoDaysFromNow(days: number): string {
 }
 
 before(async () => {
+  // CRITICAL: NODE_ENV='test' before the route module loads so the
+  // aiSuggestLimiter skip() short-circuits. The reimbursements router mounts
+  // the limiter (router.use(aiSuggestLimiter)) on ALL its routes; this test
+  // file fires >20 sequential requests from the same client, which would
+  // otherwise trip the 60s/20-request window and 429 every assertion past the
+  // first handful (mirrors cfoBriefings/statements integration tests).
+  process.env.NODE_ENV = 'test';
+
   testDb = await setupPgTestDb('reimbursements');
   const mod = await import('../../src/app.js');
   app = mod.default;
