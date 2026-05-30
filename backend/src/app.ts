@@ -80,6 +80,7 @@ import financeEventsRouter from './routes/financeEvents';
 import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
+import reviewItemsRouter from './routes/reviewItems';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -225,6 +226,9 @@ app.use('/api', largePurchaseReviewRouter);
 // feedbackRouter mounts /feedback and /feedback/:id/resolve under /api
 // (issue #295). Behind the global requireAuth above.
 app.use('/api', feedbackRouter);
+// Unified review-items inbox (issue #378). Read-only fan-out across
+// AiSuggestion, AiReviewRun items, CfoBriefing items, and ChatProposal.
+app.use('/api/review-items', reviewItemsRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;

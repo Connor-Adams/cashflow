@@ -60,6 +60,7 @@ import { LargePurchasesPage } from './pages/LargePurchasesPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
 import { CfoBriefingPage } from './pages/CfoBriefingPage'
+import { AiUnifiedInboxPage } from './pages/AiUnifiedInboxPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AskCashflowPage } from './pages/AskCashflowPage'
@@ -149,6 +150,7 @@ function AppRoutes() {
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />
+          <Route path="ai/unified-inbox" element={<AiUnifiedInboxPage />} />
           <Route path="cfo/briefings" element={<CfoBriefingPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
