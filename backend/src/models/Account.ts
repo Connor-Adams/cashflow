@@ -34,6 +34,8 @@ export class Account extends Model<
   declare openingBalance: CreationOptional<string>;
   declare openingBalanceDate: CreationOptional<string | null>;
   declare closedAt: CreationOptional<string | null>;
+  declare mergedIntoId: CreationOptional<number | null>;
+  declare mergedAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
