@@ -1,0 +1,56 @@
+name: Feature
+description: Propose a cashflow feature (build rule applies — see the spine)
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: read the primitives spine —
+        `docs/superpowers/specs/2026-05-30-cashflow-primitives-design.md`.
+        Most features extend an existing primitive. A new primitive is rare.
+  - type: dropdown
+    id: primitive
+    attributes:
+      label: Primitive
+      description: Which of the 13 primitives does this extend? Pick "New primitive" only if you can name a genuinely new status machine.
+      options:
+        - Transaction
+        - Expectation
+        - Account
+        - Holding
+        - Principal
+        - Counterparty
+        - Scenario
+        - Budget
+        - Goal
+        - Proposal
+        - Observation
+        - Document
+        - Period
+        - New primitive (justify in description)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What this builds and why. If "New primitive", name its lifecycle (status machine) here.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Concrete, checkable criteria. Workers implement against these.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: input
+    id: extends_or_forks
+    attributes:
+      label: Extends / variant / view / fold
+      description: One of — extends (new field), variant (type discriminator), view (derivation), or fold (collapses an existing fork).
+    validations:
+      required: true
