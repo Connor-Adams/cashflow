@@ -27,6 +27,7 @@ import itemsRouter from './routes/items';
 import purchasesRouter from './routes/purchases';
 import reimbursementsRouter from './routes/reimbursements';
 import largePurchaseReviewRouter from './routes/largePurchaseReview';
+import feedbackRouter from './routes/feedback';
 import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
@@ -205,6 +206,9 @@ app.use('/api', reimbursementsRouter);
 // largePurchaseReviewRouter mounts /large-purchases/* and
 // /transactions/:id/large-purchase-review under /api (issue #244).
 app.use('/api', largePurchaseReviewRouter);
+// feedbackRouter mounts /feedback and /feedback/:id/resolve under /api
+// (issue #295). Behind requireAuth; the limiter is per-route.
+app.use('/api', feedbackRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
