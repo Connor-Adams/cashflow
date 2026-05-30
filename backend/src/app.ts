@@ -69,6 +69,8 @@ import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
+import auditTokensRouter from './routes/auditTokens';
+import auditRouter from './routes/audit';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
@@ -80,6 +82,7 @@ import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
+import { ServerErrorEvent } from './models';
 
 const app = express();
 
@@ -130,6 +133,8 @@ app.use('/api/config', configRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
+app.use('/api/audit/tokens', auditTokensRouter);
+app.use('/api/audit', auditRouter);
 app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/search', searchRouter);
@@ -253,6 +258,26 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+app.use(
+  (err: unknown, req: Request, _res: Response, next: NextFunction) => {
+    const code = getErrorCode(err);
+    const status = getErrorStatus(err, code);
+    if (status >= 500) {
+      void ServerErrorEvent.create({
+        householdId: req.auth?.household.id ?? req.auditAuth?.household.id ?? null,
+        userId: req.auth?.user.id ?? req.auditAuth?.user.id ?? null,
+        method: req.method ?? null,
+        path: (req.originalUrl ?? req.url ?? '').slice(0, 512),
+        status,
+        message: String((err as Error)?.message ?? '').slice(0, 4000),
+        stack: String((err as Error)?.stack ?? '').slice(0, 8000),
+        requestId: req.requestId ?? null,
+      }).catch(() => undefined);
+    }
+    next(err);
+  },
+);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);
