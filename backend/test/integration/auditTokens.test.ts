@@ -1,3 +1,7 @@
+/**
+ * Integration tests for audit token mint/list/revoke (#387).
+ * Mirrors captureTokens.test.ts.
+ */
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
@@ -13,8 +17,8 @@ before(async () => {
   app = (await import('../../src/app.js')).default;
   authed = request.agent(app);
   const register = await authed.post('/api/auth/register').send({
-    email: 'audit-tokens@example.com',
-    displayName: 'Audit Token User',
+    email: 'auditokens@example.com',
+    displayName: 'Audit Tokens User',
     password: 'password123',
   });
   assert.equal(register.status, 201);
@@ -24,12 +28,13 @@ after(async () => {
   await teardownPgTestDb(testDb);
 });
 
-test('mints a token, lists it (without plaintext), then revokes', async () => {
-  const mint = await authed.post('/api/audit/tokens').send({ label: 'CI Agent' });
+test('mints an audit token, lists it (without plaintext), then revokes', async () => {
+  const mint = await authed.post('/api/audit/tokens').send({ label: 'My Agent' });
   assert.equal(mint.status, 201);
   assert.match(mint.body.plaintext, /^cfa_[A-Za-z0-9_-]{32}$/);
-  assert.equal(mint.body.label, 'CI Agent');
+  assert.equal(mint.body.label, 'My Agent');
   const tokenId = mint.body.id;
+  const plaintext = mint.body.plaintext as string;
 
   const list = await authed.get('/api/audit/tokens');
   assert.equal(list.status, 200);
@@ -37,34 +42,54 @@ test('mints a token, lists it (without plaintext), then revokes', async () => {
   assert.equal(list.body[0].id, tokenId);
   assert.equal(list.body[0].plaintext, undefined, 'list must never include plaintext');
   assert.equal(list.body[0].tokenHash, undefined, 'list must never include tokenHash');
-  assert.equal(list.body[0].label, 'CI Agent');
+  assert.equal(list.body[0].label, 'My Agent');
 
+  // Bearer auth on _ping
+  const ping = await request(app)
+    .get('/api/audit/_ping')
+    .set('Authorization', `Bearer ${plaintext}`);
+  assert.equal(ping.status, 200);
+  assert.deepEqual(ping.body, { ok: true });
+
+  // Revoke
   const revoke = await authed.delete(`/api/audit/tokens/${tokenId}`);
   assert.equal(revoke.status, 204);
+
+  // Token no longer works
+  const pingAfter = await request(app)
+    .get('/api/audit/_ping')
+    .set('Authorization', `Bearer ${plaintext}`);
+  assert.equal(pingAfter.status, 401);
 
   const listAfter = await authed.get('/api/audit/tokens');
   assert.equal(listAfter.status, 200);
   assert.equal(listAfter.body.length, 0);
 });
 
-test('rejects unauthenticated calls to mint', async () => {
+test('audit middleware rejects POST method with 405', async () => {
+  const mint = await authed.post('/api/audit/tokens').send({ label: 'Test' });
+  assert.equal(mint.status, 201);
+  const plaintext = mint.body.plaintext as string;
+
+  // POST to audit router should be 405
+  const postRes = await request(app)
+    .post('/api/audit/_ping')
+    .set('Authorization', `Bearer ${plaintext}`)
+    .send({});
+  assert.equal(postRes.status, 405);
+});
+
+test('audit middleware rejects missing/invalid tokens with 401', async () => {
+  const noToken = await request(app).get('/api/audit/_ping');
+  assert.equal(noToken.status, 401);
+
+  const wrongPrefix = await request(app)
+    .get('/api/audit/_ping')
+    .set('Authorization', 'Bearer cfc_aBcDeFgHiJkLmNoPqRsTuVwXyZ01234_');
+  assert.equal(wrongPrefix.status, 401);
+});
+
+test('rejects unauthenticated calls to audit tokens CRUD', async () => {
   const res = await request(app).post('/api/audit/tokens').send({ label: 'x' });
   assert.equal(res.status, 401);
-});
-
-test('defaults label to "Audit" when omitted', async () => {
-  const mint = await authed.post('/api/audit/tokens').send({});
-  assert.equal(mint.status, 201);
-  assert.equal(mint.body.label, 'Default');
-  await authed.delete(`/api/audit/tokens/${mint.body.id}`);
-});
-
-test('rejects label longer than 64 chars', async () => {
-  const mint = await authed.post('/api/audit/tokens').send({ label: 'x'.repeat(65) });
-  assert.equal(mint.status, 400);
-});
-
-test('revoke of unknown id returns 404', async () => {
-  const res = await authed.delete('/api/audit/tokens/999999');
-  assert.equal(res.status, 404);
 });

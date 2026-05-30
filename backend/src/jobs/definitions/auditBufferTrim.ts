@@ -14,6 +14,6 @@ defineJob({
       ClientErrorEvent.destroy({ where: { createdAt: { [Op.lt]: cutoff } } }),
       ServerErrorEvent.destroy({ where: { createdAt: { [Op.lt]: cutoff } } }),
     ]);
-    return { deleted: clientDeleted + serverDeleted, cutoff: cutoff.toISOString() };
+    return { summary: { deleted: clientDeleted + serverDeleted, cutoff: cutoff.toISOString() } };
   },
 });

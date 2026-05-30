@@ -35,14 +35,7 @@ async function checkHealth(): Promise<{ verdict: Verdict; summary: string }> {
     await sequelize.authenticate();
     const ms = Date.now() - start;
 
-    // Check pending migrations via SequelizeMeta
-    const [[pendingRow]] = await sequelize.query<{ pending: string }>(
-      `SELECT COUNT(*) AS pending FROM information_schema.tables
-       WHERE table_name = 'sequelize_meta'
-       LIMIT 1`,
-    );
-    // Simply confirm DB is up; migration check needs more context so we treat
-    // reachability as pass
+    // Simply confirm DB is up; reachability = pass
     return { verdict: 'pass', summary: `db ${ms}ms` };
   } catch (err) {
     return { verdict: 'fail', summary: `db unreachable: ${String(err)}` };
