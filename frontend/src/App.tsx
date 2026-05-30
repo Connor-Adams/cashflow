@@ -8,6 +8,7 @@ import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { ExplainMonthPage } from './pages/ExplainMonthPage'
+import { LifestyleInflationPage } from './pages/LifestyleInflationPage'
 import { SankeyPage } from './pages/SankeyPage'
 import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
@@ -98,6 +99,10 @@ function AppRoutes() {
           <Route path="audit-log" element={<AuditLogPage />} />
           <Route path="sync" element={<SyncPage />} />
           <Route path="reports/explain-month" element={<ExplainMonthPage />} />
+          <Route
+            path="reports/lifestyle-inflation"
+            element={<LifestyleInflationPage />}
+          />
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
