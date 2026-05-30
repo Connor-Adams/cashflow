@@ -86,6 +86,7 @@ import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
 import reviewItemsRouter from './routes/reviewItems';
 import dividendsRouter from './routes/dividends';
+import expectationsRouter from './routes/expectations';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -241,6 +242,7 @@ app.use('/api', dataExportRouter);
 // AiSuggestion, AiReviewRun items, CfoBriefing items, and ChatProposal.
 app.use('/api/review-items', reviewItemsRouter);
 app.use('/api/dividends', dividendsRouter);
+app.use('/api/expectations', expectationsRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
