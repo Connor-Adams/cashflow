@@ -17,6 +17,19 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+/**
+ * #375 — coerce common boolean representations from a JSON body so the
+ * `is_partner` flag can be set from a checkbox (true/false), an HTML form
+ * (the strings "true"/"false"), or a 0/1 integer. Returns null for invalid
+ * input so the route can 400.
+ */
+function coerceBool(raw: unknown): boolean | null {
+  if (typeof raw === 'boolean') return raw;
+  if (raw === 'true' || raw === 1 || raw === '1') return true;
+  if (raw === 'false' || raw === 0 || raw === '0') return false;
+  return null;
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
@@ -26,10 +39,20 @@ router.post('/', async (req, res, next) => {
       res.status(400).json({ error: 'name is required' });
       return;
     }
+    let isPartner = false;
+    if (b.isPartner !== undefined) {
+      const parsed = coerceBool(b.isPartner);
+      if (parsed === null) {
+        res.status(400).json({ error: 'isPartner must be boolean' });
+        return;
+      }
+      isPartner = parsed;
+    }
     const row = await Contact.create({
       householdId: household.id,
       name,
       notes: b.notes != null ? String(b.notes) : null,
+      isPartner,
     });
     res.status(201).json(row);
   } catch (e) {
@@ -55,6 +78,14 @@ router.patch('/:id', async (req, res, next) => {
       row.set('name', name);
     }
     if (b.notes !== undefined) row.set('notes', b.notes != null ? String(b.notes) : null);
+    if (b.isPartner !== undefined) {
+      const parsed = coerceBool(b.isPartner);
+      if (parsed === null) {
+        res.status(400).json({ error: 'isPartner must be boolean' });
+        return;
+      }
+      row.set('isPartner', parsed);
+    }
     await row.save();
     res.json(row);
   } catch (e) {

@@ -10,6 +10,10 @@ import {
   suggestTransactionFieldsTracked,
 } from '../ai/suggestTransaction';
 import { createTrackedSuggestion, markTransactionSuggestionOutcome } from '../ai/suggestionStore';
+import {
+  COUNTERPARTY_PROMOTION_WINDOW_DAYS,
+  normalizeCounterpartyName,
+} from '../ai/counterpartyPromotions';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
 import {
@@ -33,6 +37,12 @@ import {
   isBackfillInFlight,
   scheduleInternalBackfill,
 } from '../import/backfillCoordinator';
+import {
+  CounterpartyBackfillInFlightError,
+  getLastCounterpartyBackfillRun,
+  isCounterpartyBackfillRunning,
+  runCounterpartyBackfill,
+} from '../import/counterpartyBackfill';
 import {
   parseRevisionChanges,
   RESTORABLE_FIELDS,
@@ -1621,6 +1631,177 @@ router.post('/enrichment/backfill', async (req, res, next) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Counterparty backfill (issue #376) — retroactive sweep over legacy imports.
+//
+// #372 populates counterparty_raw only on *new* imports; households who
+// imported years of statements before that shipped get value only going
+// forward. This pair of routes exposes the backfill job to the Settings UI.
+//
+// Rate-limited to once per hour per household (the work is read-mostly but
+// chatty; we use the ProviderJobLog as the rate-limit clock so it survives
+// process restarts).
+// ---------------------------------------------------------------------------
+
+const COUNTERPARTY_BACKFILL_RATE_LIMIT_MS = 60 * 60 * 1000;
+
+interface CounterpartyBackfillStatus {
+  running: boolean;
+  lastRunAt: string | null;
+  nextAllowedAt: string | null;
+  lastSummary: { processed: number; extracted: number; elapsedMs: number } | null;
+  rateLimitMs: number;
+}
+
+async function computeCounterpartyBackfillStatus(
+  householdId: number,
+): Promise<CounterpartyBackfillStatus> {
+  const last = await getLastCounterpartyBackfillRun(householdId);
+  const now = Date.now();
+  let nextAllowedAt: string | null = null;
+  if (last && last.status === 'ok') {
+    const next = last.fetchedAt.getTime() + COUNTERPARTY_BACKFILL_RATE_LIMIT_MS;
+    if (next > now) nextAllowedAt = new Date(next).toISOString();
+  }
+  return {
+    running: isCounterpartyBackfillRunning(householdId),
+    lastRunAt: last ? last.fetchedAt.toISOString() : null,
+    nextAllowedAt,
+    lastSummary: last ? last.summary : null,
+    rateLimitMs: COUNTERPARTY_BACKFILL_RATE_LIMIT_MS,
+  };
+}
+
+/**
+ * GET /api/transactions/counterparty/backfill/status
+ *
+ * Read-only status for the Settings UI mount. Returns:
+ *   - whether a backfill is currently running for this household
+ *   - the last completed run's wall-clock timestamp + summary
+ *   - the next-allowed timestamp (null when the 1h window has elapsed)
+ *   - the rate-limit window in ms (so the client can render a countdown)
+ */
+router.get('/counterparty/backfill/status', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const status = await computeCounterpartyBackfillStatus(household.id);
+    res.json(status);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/counterparty/backfill
+ *
+ * Streams NDJSON events while the backfill runs:
+ *   - `{kind: "progress", txnId, merchantRaw, counterpartyRaw}` per row
+ *   - `{kind: "error", txnId, message}` per failed row
+ *   - `{kind: "summary", processed, extracted, skipped, elapsedMs, dryRun}` at end
+ *
+ * Body (all optional):
+ *   {
+ *     dryRun?: boolean,   // when true, no DB write, no rate-limit log
+ *     batchSize?: number  // 1-1000; defaults to 200
+ *   }
+ *
+ * Returns:
+ *   - 409 when another backfill is in flight for this household
+ *   - 429 when the 1h rate limit hasn't elapsed since the last completed run
+ */
+router.post('/counterparty/backfill', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const dryRun = Boolean(body.dryRun);
+    const batchSize =
+      typeof body.batchSize === 'number' && Number.isFinite(body.batchSize) && body.batchSize > 0
+        ? Math.min(1000, Math.floor(body.batchSize))
+        : 200;
+
+    if (isCounterpartyBackfillRunning(household.id)) {
+      res.status(409).json({ error: 'Counterparty backfill already running for this household' });
+      return;
+    }
+
+    // Rate limit (real runs only — dry runs are cheap and never logged).
+    if (!dryRun) {
+      const status = await computeCounterpartyBackfillStatus(household.id);
+      if (status.nextAllowedAt) {
+        res.status(429).json({
+          error: 'Counterparty backfill is rate-limited to once per hour per household',
+          nextAllowedAt: status.nextAllowedAt,
+          rateLimitMs: status.rateLimitMs,
+        });
+        return;
+      }
+    }
+
+    const accept = String(req.headers['accept'] ?? '').toLowerCase();
+    const wantsStream =
+      accept.includes('application/x-ndjson') ||
+      accept.includes('application/ndjson') ||
+      req.query.stream === '1';
+
+    logger.info(
+      { householdId: household.id, dryRun, batchSize, streaming: wantsStream },
+      'counterparty_backfill_started',
+    );
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Accel-Buffering', 'no');
+      function emit(obj: unknown) {
+        res.write(`${JSON.stringify(obj)}\n`);
+      }
+      try {
+        const result = await runCounterpartyBackfill(
+          { householdId: household.id, batchSize, dryRun },
+          {
+            onProgress: (e) => emit({ kind: 'progress', ...e }),
+            onError: (e) => emit({ kind: 'error', ...e }),
+          },
+        );
+        emit({ kind: 'summary', ...result });
+        res.end();
+      } catch (err) {
+        if (err instanceof CounterpartyBackfillInFlightError) {
+          emit({ kind: 'error', message: err.message });
+          res.end();
+          return;
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(
+          { householdId: household.id, message },
+          'counterparty_backfill_failed',
+        );
+        emit({ kind: 'error', message });
+        res.end();
+      }
+      return;
+    }
+
+    // Non-streaming path: single JSON summary on completion.
+    try {
+      const result = await runCounterpartyBackfill({
+        householdId: household.id,
+        batchSize,
+        dryRun,
+      });
+      res.json(result);
+    } catch (err) {
+      if (err instanceof CounterpartyBackfillInFlightError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * GET /api/transactions/:id/revisions
  *
@@ -1791,6 +1972,218 @@ router.post('/:id/revisions/:rid/restore', aiSuggestLimiter, async (req, res, ne
     res.json({
       transaction: serializeTransaction(txn),
       restored: applied,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/:id/counterparty/promote
+ *
+ * Promotes the txn's raw counterparty text into a structured Contact link
+ * (#372). Two modes:
+ *
+ *  - `{ contactId: <existing> }` — link to an existing Contact owned by
+ *    the user's household. 404 if the Contact does not belong here.
+ *  - `{}` (no contactId) — auto-create a Contact from `counterparty_raw`
+ *    if no Contact in this household already has that name; otherwise
+ *    reuse the existing match. Requires `counterparty_raw` to be set.
+ *
+ * Contact dedup key is `(householdId, name)`. The match is case-sensitive
+ * and exact-string to keep promotion deterministic; a future "suggest
+ * promote" job (#373) will handle fuzzy/normalized deduplication.
+ */
+router.post('/:id/counterparty/promote', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const { household } = currentAuth(req);
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
+    const body = (req.body || {}) as { contactId?: unknown };
+    let contact: Contact | null = null;
+    if (body.contactId != null) {
+      const contactId = Number(body.contactId);
+      if (!Number.isInteger(contactId) || contactId <= 0) {
+        res.status(400).json({ error: 'contactId must be a positive integer' });
+        return;
+      }
+      contact = await Contact.findOne({
+        where: { id: contactId, householdId: household.id },
+      });
+      if (!contact) {
+        res.status(404).json({ error: 'Contact not found' });
+        return;
+      }
+    } else {
+      const raw = (txn.counterpartyRaw ?? '').trim();
+      if (!raw) {
+        res.status(400).json({
+          error: 'Transaction has no counterpartyRaw; supply contactId to link manually',
+        });
+        return;
+      }
+      contact = await Contact.findOne({
+        where: { householdId: household.id, name: raw },
+      });
+      if (!contact) {
+        contact = await Contact.create({
+          householdId: household.id,
+          name: raw,
+          notes: null,
+        });
+      }
+    }
+    txn.counterpartyContactId = contact.id;
+    await txn.save();
+    res.json({
+      transaction: serializeTransaction(txn),
+      contact,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/counterparty/promote-bulk
+ *
+ * "Create Contact and link all" action behind issue #373's
+ * counterparty-promotion suggestion. Walks every un-linked transaction
+ * in the caller's household whose normalized counterpartyRaw matches the
+ * supplied `normalizedName` (lowercase + collapsed whitespace) within
+ * the trailing 90-day window, creates (or reuses) a Contact, and links
+ * the whole set in a single transaction.
+ *
+ * Body:
+ *   - `normalizedName`: REQUIRED, the normalized key the user clicked.
+ *     Server re-normalizes it defensively against the client value.
+ *   - `contactId`: OPTIONAL, link to an existing Contact owned by the
+ *     caller's household. When omitted, the route auto-creates a
+ *     Contact whose name is the most-recent matching txn's raw
+ *     counterparty value (preserving the casing the user has seen on
+ *     their statements).
+ *
+ * Returns:
+ *   - `contact`: the linked Contact row.
+ *   - `linkedCount`: how many transactions were linked.
+ *   - `transactionIds`: ids that were linked (capped at 200 for sanity).
+ *
+ * Authorization: all touched txns must pass `visibleTransactionWhere`.
+ * Cross-household txns are silently excluded by that gate; the route
+ * never reveals their existence.
+ */
+router.post('/counterparty/promote-bulk', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = (req.body || {}) as { normalizedName?: unknown; contactId?: unknown };
+    const normalized = normalizeCounterpartyName(
+      typeof body.normalizedName === 'string' ? body.normalizedName : '',
+    );
+    if (!normalized) {
+      res.status(400).json({ error: 'normalizedName is required' });
+      return;
+    }
+    // 90-day window matches the detector. Computing the cutoff here
+    // (instead of pushing it into the detector) keeps the route a single
+    // SQL query and lets the integration tests pin a known `now`.
+    const cutoff = new Date(
+      Date.now() - COUNTERPARTY_PROMOTION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    const result = await sequelize.transaction(async (t) => {
+      // Pull the matching txns up front (within the window, unlinked,
+      // exact normalized match). raw:false so Sequelize keeps it as model
+      // instances — needed for the .save() loop below.
+      const matchedAll = await Transaction.findAll({
+        where: {
+          ...visibleTransactionWhere(req),
+          counterpartyContactId: null,
+          date: { [Op.gte]: cutoff },
+        },
+        transaction: t,
+      });
+      const matched = matchedAll.filter(
+        (m) => normalizeCounterpartyName(m.counterpartyRaw) === normalized,
+      );
+
+      // Resolve the Contact: explicit id, or auto-create from the most
+      // recent matching txn's raw value.
+      let contact: Contact | null = null;
+      if (body.contactId != null) {
+        const contactId = Number(body.contactId);
+        if (!Number.isInteger(contactId) || contactId <= 0) {
+          const err = new Error('contactId must be a positive integer') as Error & {
+            status?: number;
+          };
+          err.status = 400;
+          throw err;
+        }
+        contact = await Contact.findOne({
+          where: { id: contactId, householdId: household.id },
+          transaction: t,
+        });
+        if (!contact) {
+          const err = new Error('Contact not found') as Error & { status?: number };
+          err.status = 404;
+          throw err;
+        }
+      } else {
+        // Auto-create: pick the most recent txn's raw counterparty for
+        // the Contact name to preserve casing (`Jane Doe` vs `JANE DOE`).
+        // If no candidates remain (race with another promote), 404.
+        const newest = matched.sort((a, b) => {
+          if (a.date === b.date) return b.id - a.id;
+          return a.date < b.date ? 1 : -1;
+        })[0];
+        if (!newest) {
+          res.status(404).json({
+            error: 'No matching un-linked transactions in the trailing 90 days',
+          });
+          return null;
+        }
+        const rawName = (newest.counterpartyRaw ?? '').trim();
+        contact = await Contact.findOne({
+          where: { householdId: household.id, name: rawName },
+          transaction: t,
+        });
+        if (!contact) {
+          contact = await Contact.create(
+            { householdId: household.id, name: rawName, notes: null },
+            { transaction: t },
+          );
+        }
+      }
+
+      // Link every matching txn. Iterate so per-row save triggers
+      // revision tracking (the same way the single-txn promote does it
+      // implicitly via Sequelize). bulkUpdate would skip revisions.
+      const linkedIds: number[] = [];
+      for (const txn of matched) {
+        if (txn.counterpartyContactId === contact.id) continue;
+        txn.counterpartyContactId = contact.id;
+        await txn.save({ transaction: t });
+        linkedIds.push(txn.id);
+        if (linkedIds.length >= 200) break;
+      }
+      return { contact, linkedIds };
+    });
+    if (result == null) return;
+    res.json({
+      contact: result.contact,
+      linkedCount: result.linkedIds.length,
+      transactionIds: result.linkedIds,
     });
   } catch (e) {
     next(e);

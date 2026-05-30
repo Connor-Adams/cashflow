@@ -1797,6 +1797,18 @@ function TransactionRow({
           <span className="txnMerchantMeta">
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
           </span>
+          {(t.counterpartyContactId != null || t.counterpartyRaw) && (
+            <span className="txnCounterparty text-xs text-muted-foreground">
+              {Number(t.amount) >= 0 ? 'from ' : 'to '}
+              {(() => {
+                if (t.counterpartyContactId != null) {
+                  const c = contacts.find((x) => x.id === t.counterpartyContactId)
+                  return c ? c.name : `contact #${t.counterpartyContactId}`
+                }
+                return t.counterpartyRaw
+              })()}
+            </span>
+          )}
           {t.txnType === 'refund' && (
             <RefundBadge
               transactionId={t.id}

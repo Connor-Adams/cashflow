@@ -134,3 +134,70 @@ test('unknown fields are ignored (not included in patch)', () => {
     assert.ok(!('bogusField' in r.patch));
   }
 });
+
+// --- counterpartyPromotionThreshold (#373) --------------------------------
+
+test('counterpartyPromotionThreshold accepts integer within range', () => {
+  const r = validateCashflowSettingsPatch({ counterpartyPromotionThreshold: 5 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.counterpartyPromotionThreshold, 5);
+});
+
+test('counterpartyPromotionThreshold accepts the lower boundary 2', () => {
+  const r = validateCashflowSettingsPatch({ counterpartyPromotionThreshold: 2 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.counterpartyPromotionThreshold, 2);
+});
+
+test('counterpartyPromotionThreshold accepts the upper boundary 50', () => {
+  const r = validateCashflowSettingsPatch({ counterpartyPromotionThreshold: 50 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.counterpartyPromotionThreshold, 50);
+});
+
+test('counterpartyPromotionThreshold rejects 1 (below minimum)', () => {
+  const r = validateCashflowSettingsPatch({ counterpartyPromotionThreshold: 1 });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /counterpartyPromotionThreshold/);
+});
+
+test('counterpartyPromotionThreshold rejects 51 (above maximum)', () => {
+  const r = validateCashflowSettingsPatch({ counterpartyPromotionThreshold: 51 });
+  assert.equal(r.ok, false);
+});
+
+test('counterpartyPromotionThreshold rejects non-integer', () => {
+  const r = validateCashflowSettingsPatch({ counterpartyPromotionThreshold: 3.5 });
+  assert.equal(r.ok, false);
+});
+
+test('counterpartyPromotionThreshold rejects non-numeric', () => {
+  const r = validateCashflowSettingsPatch({ counterpartyPromotionThreshold: 'three' });
+  assert.equal(r.ok, false);
+});
+
+// ---------------- #375 excludeNonPartnerInflows -------------------------
+
+test('excludeNonPartnerInflows accepts boolean true/false', () => {
+  const t = validateCashflowSettingsPatch({ excludeNonPartnerInflows: true });
+  const f = validateCashflowSettingsPatch({ excludeNonPartnerInflows: false });
+  assert.equal(t.ok, true);
+  if (t.ok) assert.equal(t.patch.excludeNonPartnerInflows, true);
+  assert.equal(f.ok, true);
+  if (f.ok) assert.equal(f.patch.excludeNonPartnerInflows, false);
+});
+
+test('excludeNonPartnerInflows accepts string "true"/"false"', () => {
+  const t = validateCashflowSettingsPatch({ excludeNonPartnerInflows: 'true' });
+  const f = validateCashflowSettingsPatch({ excludeNonPartnerInflows: 'false' });
+  assert.equal(t.ok, true);
+  if (t.ok) assert.equal(t.patch.excludeNonPartnerInflows, true);
+  assert.equal(f.ok, true);
+  if (f.ok) assert.equal(f.patch.excludeNonPartnerInflows, false);
+});
+
+test('excludeNonPartnerInflows rejects garbage values', () => {
+  const r = validateCashflowSettingsPatch({ excludeNonPartnerInflows: 'sometimes' });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /excludeNonPartnerInflows must be boolean/);
+});

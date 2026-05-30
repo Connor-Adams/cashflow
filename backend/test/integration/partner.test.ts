@@ -44,6 +44,9 @@ type TxnSeed = {
   txnType?: string;
   visibility?: string;
   createdByUserId?: number | null;
+  // #375 — populate the counterparty link from a seed so partner-inflow tests
+  // can dial in who paid in on each row.
+  counterpartyContactId?: number | null;
 };
 
 async function createTxn(seed: TxnSeed): Promise<number> {
@@ -92,6 +95,7 @@ async function createTxn(seed: TxnSeed): Promise<number> {
     reviewFlag: false,
     reviewedAt: null,
     createdByUserId: seed.createdByUserId ?? null,
+    counterpartyContactId: seed.counterpartyContactId ?? null,
   });
   return row.id;
 }
@@ -516,4 +520,228 @@ test('cross-cutting: household B cannot see household A settlement recommendatio
   );
   // B's me-only row has partnerShare=0 → no CAD recommendation.
   assert.equal(cad, undefined);
+});
+
+// ---------------- #375 partner_inflows / non_partner_inflows ---------------
+
+test('/fairness: #375 AC3 returns partnerInflows and nonPartnerInflows split', async () => {
+  // Mark the household's contactA as the partner so its counterparty rows
+  // count as partner_inflows. Use a fresh date window so prior tests don't
+  // bleed into the assertion.
+  const models = await import('../../src/models');
+  const partnerContact = await models.Contact.findByPk(contactAId);
+  assert.ok(partnerContact);
+  partnerContact.set('isPartner', true);
+  await partnerContact.save();
+
+  // A non-partner contact in the same household — used as the counterparty
+  // for the "friend paying back lunch" inflow.
+  const friend = await models.Contact.create({
+    householdId: householdAId,
+    name: '#375 Friend',
+    notes: null,
+    isPartner: false,
+  });
+
+  // Three inflows in a fresh date window:
+  //   1. partner inflow (counterparty=partner contact)
+  //   2. non-partner inflow (counterparty=friend)
+  //   3. anonymous inflow (counterparty NULL)
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2031-02-10',
+    amount: 500,
+    currency: 'CAD',
+    finalSplitType: 'shared',
+    ownershipType: 'contact',
+    ownershipContactId: contactAId,
+    counterpartyContactId: contactAId,
+    myShareAmount: 0,
+    partnerShareAmount: 250,
+    merchantRaw: 'Partner Income',
+    finalCategory: 'Income',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2031-02-15',
+    amount: 30,
+    currency: 'CAD',
+    finalSplitType: 'shared',
+    ownershipType: 'contact',
+    ownershipContactId: contactAId,
+    counterpartyContactId: friend.id,
+    myShareAmount: 0,
+    partnerShareAmount: 15,
+    merchantRaw: 'Lunch Repaid',
+    finalCategory: 'Reimbursement',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2031-02-20',
+    amount: 100,
+    currency: 'CAD',
+    finalSplitType: 'shared',
+    ownershipType: 'contact',
+    ownershipContactId: contactAId,
+    counterpartyContactId: null,
+    myShareAmount: 0,
+    partnerShareAmount: 50,
+    merchantRaw: 'Unknown Deposit',
+    finalCategory: 'Income',
+  });
+
+  // Toggle OFF: every inflow counts (legacy). partnerInflows=500,
+  // nonPartnerInflows=130.
+  const off = await agentA
+    .get('/api/partner/fairness')
+    .query({
+      currency: 'CAD',
+      dateFrom: '2031-02-01',
+      dateTo: '2031-02-28',
+      excludeNonPartnerInflows: 'false',
+    });
+  assert.equal(off.status, 200);
+  assert.equal(off.body.excludeNonPartnerInflows, false);
+  const cadOff = (off.body.byCurrency as Array<{
+    currency: string;
+    partnerInflows: number;
+    nonPartnerInflows: number;
+    sharedTransactionCount: number;
+    partnerShareTotal: number;
+  }>).find((r) => r.currency === 'CAD');
+  assert.ok(cadOff, `expected CAD entry: ${JSON.stringify(off.body)}`);
+  assert.equal(cadOff.partnerInflows, 500);
+  assert.equal(cadOff.nonPartnerInflows, 130);
+  assert.equal(cadOff.sharedTransactionCount, 3);
+  // partnerShareTotal = 250 + 15 + 50 = 315
+  assert.equal(cadOff.partnerShareTotal, 315);
+});
+
+test('/fairness: #375 AC4 excludeNonPartnerInflows=true drops non-partner inflows', async () => {
+  // Same data as above test — toggle ON now drops the friend + null
+  // counterparty rows from the rollup.
+  const on = await agentA
+    .get('/api/partner/fairness')
+    .query({
+      currency: 'CAD',
+      dateFrom: '2031-02-01',
+      dateTo: '2031-02-28',
+      excludeNonPartnerInflows: 'true',
+    });
+  assert.equal(on.status, 200);
+  assert.equal(on.body.excludeNonPartnerInflows, true);
+  const cadOn = (on.body.byCurrency as Array<{
+    currency: string;
+    partnerInflows: number;
+    nonPartnerInflows: number;
+    sharedTransactionCount: number;
+    partnerShareTotal: number;
+    balance: number;
+  }>).find((r) => r.currency === 'CAD');
+  assert.ok(cadOn);
+  // Inflow split is reported regardless of the toggle.
+  assert.equal(cadOn.partnerInflows, 500);
+  assert.equal(cadOn.nonPartnerInflows, 130);
+  // sharedTransactionCount now 1 (only the partner inflow).
+  assert.equal(cadOn.sharedTransactionCount, 1);
+  // partnerShareTotal = 250 only (15 and 50 dropped).
+  assert.equal(cadOn.partnerShareTotal, 250);
+  // balance reflects cleaned set: 250 + 0 settlements = 250.
+  assert.equal(cadOn.balance, 250);
+});
+
+test('/settlement-recommendation: #375 toggle ON flips the recommendation total', async () => {
+  // Reuse the same 2031-02 seeds. Toggle ON: partnerShareTotal=250, no
+  // settlements → recommendation amount=250 partner_pays_you. Toggle OFF:
+  // partnerShareTotal=315 → recommendation amount=315.
+  const on = await agentA
+    .get('/api/partner/settlement-recommendation')
+    .query({
+      currency: 'CAD',
+      dateFrom: '2031-02-01',
+      dateTo: '2031-02-28',
+      excludeNonPartnerInflows: 'true',
+    });
+  assert.equal(on.status, 200);
+  const onCad = (on.body.recommendations as Array<{
+    currency: string;
+    amount: number;
+    direction: string;
+  }>).find((r) => r.currency === 'CAD');
+  assert.ok(onCad);
+  assert.equal(onCad.direction, 'partner_pays_you');
+  assert.equal(onCad.amount, 250);
+
+  const off = await agentA
+    .get('/api/partner/settlement-recommendation')
+    .query({
+      currency: 'CAD',
+      dateFrom: '2031-02-01',
+      dateTo: '2031-02-28',
+      excludeNonPartnerInflows: 'false',
+    });
+  assert.equal(off.status, 200);
+  const offCad = (off.body.recommendations as Array<{
+    currency: string;
+    amount: number;
+    direction: string;
+  }>).find((r) => r.currency === 'CAD');
+  assert.ok(offCad);
+  assert.equal(offCad.direction, 'partner_pays_you');
+  assert.equal(offCad.amount, 315);
+});
+
+test('/monthly: #375 toggle ON respects partner classification in trend', async () => {
+  // Re-using the same Feb 2031 seeds. Toggle ON should give partnerShare=250
+  // for that month (friend + null counterparty dropped).
+  const res = await agentA
+    .get('/api/partner/monthly')
+    .query({
+      currency: 'CAD',
+      dateFrom: '2031-02-01',
+      dateTo: '2031-02-28',
+      excludeNonPartnerInflows: 'true',
+    });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.excludeNonPartnerInflows, true);
+  const pts = res.body.points as Array<{
+    month: string;
+    partnerShare: number;
+  }>;
+  const feb = pts.find((p) => p.month === '2031-02');
+  assert.ok(feb, `expected 2031-02 point: ${JSON.stringify(pts)}`);
+  assert.equal(feb.partnerShare, 250);
+});
+
+test('/fairness: #375 toggle default falls back to CashflowSettings (defaults true)', async () => {
+  // No override query param → server reads the user's CashflowSettings row.
+  // We never wrote one, so the bundled default (true) wins.
+  const res = await agentA
+    .get('/api/partner/fairness')
+    .query({ currency: 'CAD', dateFrom: '2031-02-01', dateTo: '2031-02-28' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.excludeNonPartnerInflows, true);
+});
+
+test('/fairness: #375 override query param wins over CashflowSettings', async () => {
+  // Persist the user's preference as TRUE.
+  const r1 = await agentA
+    .patch('/api/settings/cashflow')
+    .send({ excludeNonPartnerInflows: true });
+  assert.equal(r1.status, 200);
+  // Then ask the fairness route to render the OFF view — query param should
+  // override the saved preference for this read.
+  const res = await agentA
+    .get('/api/partner/fairness')
+    .query({
+      currency: 'CAD',
+      dateFrom: '2031-02-01',
+      dateTo: '2031-02-28',
+      excludeNonPartnerInflows: 'false',
+    });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.excludeNonPartnerInflows, false);
 });

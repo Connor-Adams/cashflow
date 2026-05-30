@@ -10,6 +10,8 @@ import {
   CASHFLOW_SETTINGS_DEFAULTS,
   MIN_SAFE_TO_SPEND_WINDOW_DAYS,
   MAX_SAFE_TO_SPEND_WINDOW_DAYS,
+  MIN_COUNTERPARTY_PROMOTION_THRESHOLD,
+  MAX_COUNTERPARTY_PROMOTION_THRESHOLD,
 } from '../models/CashflowSettings';
 
 const router = Router();
@@ -19,6 +21,8 @@ type Serialized = {
   safeToSpendWindowDays: number;
   includeCreditCardBalance: boolean;
   includeGoalContributions: boolean;
+  counterpartyPromotionThreshold: number;
+  excludeNonPartnerInflows: boolean;
 };
 
 function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
@@ -27,6 +31,8 @@ function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
     safeToSpendWindowDays: row.safeToSpendWindowDays,
     includeCreditCardBalance: row.includeCreditCardBalance,
     includeGoalContributions: row.includeGoalContributions,
+    counterpartyPromotionThreshold: row.counterpartyPromotionThreshold,
+    excludeNonPartnerInflows: row.excludeNonPartnerInflows,
   };
 }
 
@@ -36,6 +42,9 @@ function defaults(): Serialized {
     safeToSpendWindowDays: CASHFLOW_SETTINGS_DEFAULTS.safeToSpendWindowDays,
     includeCreditCardBalance: CASHFLOW_SETTINGS_DEFAULTS.includeCreditCardBalance,
     includeGoalContributions: CASHFLOW_SETTINGS_DEFAULTS.includeGoalContributions,
+    counterpartyPromotionThreshold:
+      CASHFLOW_SETTINGS_DEFAULTS.counterpartyPromotionThreshold,
+    excludeNonPartnerInflows: CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows,
   };
 }
 
@@ -92,6 +101,29 @@ export function validateCashflowSettingsPatch(raw: Record<string, unknown>):
     out.includeGoalContributions = b;
   }
 
+  if (raw.counterpartyPromotionThreshold !== undefined) {
+    const n = Number(raw.counterpartyPromotionThreshold);
+    if (
+      !Number.isInteger(n) ||
+      n < MIN_COUNTERPARTY_PROMOTION_THRESHOLD ||
+      n > MAX_COUNTERPARTY_PROMOTION_THRESHOLD
+    ) {
+      return {
+        ok: false,
+        error: `counterpartyPromotionThreshold must be an integer between ${MIN_COUNTERPARTY_PROMOTION_THRESHOLD} and ${MAX_COUNTERPARTY_PROMOTION_THRESHOLD}`,
+      };
+    }
+    out.counterpartyPromotionThreshold = n;
+  }
+
+  if (raw.excludeNonPartnerInflows !== undefined) {
+    const b = coerceBool(raw.excludeNonPartnerInflows);
+    if (b === null) {
+      return { ok: false, error: 'excludeNonPartnerInflows must be boolean' };
+    }
+    out.excludeNonPartnerInflows = b;
+  }
+
   return { ok: true, patch: out };
 }
 
@@ -136,6 +168,15 @@ router.patch('/', async (req, res, next) => {
     }
     if (result.patch.includeGoalContributions !== undefined) {
       row.set('includeGoalContributions', result.patch.includeGoalContributions);
+    }
+    if (result.patch.counterpartyPromotionThreshold !== undefined) {
+      row.set(
+        'counterpartyPromotionThreshold',
+        result.patch.counterpartyPromotionThreshold,
+      );
+    }
+    if (result.patch.excludeNonPartnerInflows !== undefined) {
+      row.set('excludeNonPartnerInflows', result.patch.excludeNonPartnerInflows);
     }
     await row.save();
     res.json(serialize(row));

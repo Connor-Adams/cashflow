@@ -13,6 +13,8 @@ const FAIRNESS_PAYLOAD = {
       partnerShareTotal: -400,
       sharedTransactionCount: 3,
       currentMonthSharedSpend: 300,
+      partnerInflows: 500,
+      nonPartnerInflows: 75,
       balance: -400,
       direction: 'i_owe_partner',
       paidMore: { youCovered: 400, partnerCovered: 0 },
@@ -36,6 +38,7 @@ const FAIRNESS_PAYLOAD = {
       ],
     },
   ],
+  excludeNonPartnerInflows: true,
 }
 
 const MONTHLY_PAYLOAD = {
@@ -61,6 +64,7 @@ const MONTHLY_PAYLOAD = {
       cumulativeBalance: -400,
     },
   ],
+  excludeNonPartnerInflows: true,
 }
 
 const RECOMMENDATION_PAYLOAD = {
@@ -72,6 +76,16 @@ const RECOMMENDATION_PAYLOAD = {
       outstandingBalance: -400,
     },
   ],
+  excludeNonPartnerInflows: true,
+}
+
+// #375 — base CashflowSettings response for the dashboard's first GET.
+const SETTINGS_PAYLOAD = {
+  minimumCashBuffer: '0.0000',
+  safeToSpendWindowDays: 14,
+  includeCreditCardBalance: true,
+  includeGoalContributions: true,
+  excludeNonPartnerInflows: true,
 }
 
 function mockFetch() {
@@ -79,6 +93,9 @@ function mockFetch() {
     'fetch',
     vi.fn((input: RequestInfo) => {
       const url = String(input)
+      if (url.includes('/api/settings/cashflow')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(SETTINGS_PAYLOAD) } as Response)
+      }
       if (url.includes('/api/partner/fairness')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(FAIRNESS_PAYLOAD) } as Response)
       }
@@ -167,14 +184,17 @@ describe('PartnerFairnessPage', () => {
       'fetch',
       vi.fn((input: RequestInfo) => {
         const url = String(input)
+        if (url.includes('/api/settings/cashflow')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(SETTINGS_PAYLOAD) } as Response)
+        }
         if (url.includes('/api/partner/fairness')) {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ byCurrency: [] }) } as Response)
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ byCurrency: [], excludeNonPartnerInflows: true }) } as Response)
         }
         if (url.includes('/api/partner/monthly')) {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ points: [] }) } as Response)
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ points: [], excludeNonPartnerInflows: true }) } as Response)
         }
         if (url.includes('/api/partner/settlement-recommendation')) {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ recommendations: [] }) } as Response)
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ recommendations: [], excludeNonPartnerInflows: true }) } as Response)
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
       }),
@@ -187,5 +207,83 @@ describe('PartnerFairnessPage', () => {
     await waitFor(() =>
       expect(screen.getByText(/No shared activity yet/i)).toBeInTheDocument(),
     )
+  })
+
+  // ---------------- #375 toggle + partner inflows split ------------------
+
+  it('renders the partner-inflows and non-partner-inflows tiles', async () => {
+    render(
+      <MemoryRouter>
+        <PartnerFairnessPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Partner inflows')).toBeInTheDocument())
+    expect(screen.getByText('Non-partner inflows')).toBeInTheDocument()
+  })
+
+  it('shows the exclude-non-partner-inflows toggle', async () => {
+    render(
+      <MemoryRouter>
+        <PartnerFairnessPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() =>
+      expect(screen.getByText('Exclude non-partner inflows')).toBeInTheDocument(),
+    )
+    const checkbox = screen.getByRole('checkbox', {
+      name: /exclude non-partner inflows/i,
+    }) as HTMLInputElement
+    expect(checkbox.checked).toBe(true)
+  })
+
+  it('persists the toggle via PATCH /api/settings/cashflow', async () => {
+    const fetchMock = vi.fn((input: RequestInfo, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url.includes('/api/settings/cashflow') && method === 'GET') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(SETTINGS_PAYLOAD) } as Response)
+      }
+      if (url.includes('/api/settings/cashflow') && method === 'PATCH') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ...SETTINGS_PAYLOAD, excludeNonPartnerInflows: false }),
+        } as Response)
+      }
+      if (url.includes('/api/partner/fairness')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(FAIRNESS_PAYLOAD) } as Response)
+      }
+      if (url.includes('/api/partner/monthly')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(MONTHLY_PAYLOAD) } as Response)
+      }
+      if (url.includes('/api/partner/settlement-recommendation')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(RECOMMENDATION_PAYLOAD) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <PartnerFairnessPage />
+      </MemoryRouter>,
+    )
+
+    const checkbox = await screen.findByRole('checkbox', {
+      name: /exclude non-partner inflows/i,
+    })
+    await user.click(checkbox)
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(([url, init]) => {
+        return (
+          String(url).includes('/api/settings/cashflow') &&
+          (init as RequestInit | undefined)?.method === 'PATCH'
+        )
+      })
+      expect(patchCall).toBeTruthy()
+    })
   })
 })

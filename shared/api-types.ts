@@ -199,6 +199,18 @@ export type Transaction = {
    * (e.g. ["missing_category","needs_review"]). NULL when no flags fired.
    */
   importConfidenceFlags?: string | null
+  /**
+   * Source/dest counterparty extracted from the statement line for
+   * checking/savings/cash accounts (e.g. "JANE DOE" from
+   * "INTERAC E-TFR FROM JANE DOE"). NULL when no pattern matched or the
+   * account is out of scope (#372).
+   */
+  counterpartyRaw: string | null
+  /**
+   * Optional FK to `contacts.id` when the user has promoted the raw
+   * counterparty into a structured Contact. NULL until promoted.
+   */
+  counterpartyContactId: number | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
 }
 
@@ -379,11 +391,50 @@ export type EnrichmentBackfillProgress =
     }
   | { kind: 'error'; message: string; txnId?: number }
 
+/**
+ * NDJSON stream events for POST /api/transactions/counterparty/backfill
+ * (issue #376). Mirrors EnrichmentBackfillProgress in shape so the UI can
+ * reuse the same feed-rendering pattern.
+ */
+export type CounterpartyBackfillProgress =
+  | {
+      kind: 'progress'
+      txnId: number
+      merchantRaw: string
+      counterpartyRaw: string | null
+    }
+  | {
+      kind: 'summary'
+      processed: number
+      extracted: number
+      skipped: number
+      elapsedMs: number
+      dryRun: boolean
+    }
+  | { kind: 'error'; message: string; txnId?: number }
+
+export type CounterpartyBackfillStatus = {
+  running: boolean
+  lastRunAt: string | null
+  nextAllowedAt: string | null
+  lastSummary: {
+    processed: number
+    extracted: number
+    elapsedMs: number
+  } | null
+  rateLimitMs: number
+}
+
 export type Contact = {
   id: number
   householdId: number
   name: string
   notes: string | null
+  /**
+   * #375 — flags the household's partner Contact. Drives the Partner
+   * Fairness dashboard's partner_inflows / non_partner_inflows split.
+   */
+  isPartner: boolean
 }
 
 export type Category = {

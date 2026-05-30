@@ -112,4 +112,142 @@ describe('AiInboxPage', () => {
     expect(screen.getByText('Second insight')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Hide details/ })).toBeTruthy()
   })
+
+  it('renders a counterparty_promotion card with "Create Contact and link all" + "Ignore" buttons (#373)', async () => {
+    mockInbox([
+      {
+        id: -10001,
+        kind: 'counterparty_promotion',
+        createdAt: '2026-05-01T00:00:00Z',
+        transactionId: null,
+        summary: '5 transactions with JANE DOE in the last 90 days · promote to Contact?',
+        severity: null,
+        confidence: null,
+        output: {
+          normalizedName: 'jane doe',
+          sampleRaw: 'JANE DOE',
+          supportCount: 5,
+          exampleTransactionIds: [101, 102, 103, 104, 105],
+        },
+      },
+    ])
+    render(
+      <MemoryRouter>
+        <AiInboxPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() =>
+      screen.getByText(/5 transactions with JANE DOE in the last 90 days/),
+    )
+    expect(
+      screen.getByRole('button', { name: /Create Contact and link all/i }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /Ignore this name forever/i }),
+    ).toBeTruthy()
+  })
+
+  it('clicking "Create Contact and link all" POSTs to the bulk-promote endpoint with normalizedName', async () => {
+    const promotePayload = {
+      normalizedName: 'jane doe',
+      sampleRaw: 'JANE DOE',
+      supportCount: 5,
+      exampleTransactionIds: [101, 102, 103],
+    }
+    const postSpy = vi.fn()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      const method = init?.method ?? 'GET'
+      if (method === 'GET' && url.includes('/api/ai/inbox')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: -10001,
+                kind: 'counterparty_promotion',
+                createdAt: '2026-05-01T00:00:00Z',
+                transactionId: null,
+                summary: '5 transactions with JANE DOE in the last 90 days · promote to Contact?',
+                severity: null,
+                confidence: null,
+                output: promotePayload,
+              },
+            ],
+          }),
+          { status: 200 },
+        )
+      }
+      if (method === 'POST' && url.includes('/api/transactions/counterparty/promote-bulk')) {
+        postSpy(url, init?.body)
+        return new Response(
+          JSON.stringify({ contact: { id: 99, name: 'JANE DOE' }, linkedCount: 5 }),
+          { status: 200 },
+        )
+      }
+      return new Response('not found', { status: 404 })
+    })
+    render(
+      <MemoryRouter>
+        <AiInboxPage />
+      </MemoryRouter>,
+    )
+    const btn = await waitFor(() =>
+      screen.getByRole('button', { name: /Create Contact and link all/i }),
+    )
+    fireEvent.click(btn)
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
+    const bodyStr = String(postSpy.mock.calls[0]?.[1] ?? '')
+    expect(bodyStr).toContain('"normalizedName"')
+    expect(bodyStr).toContain('jane doe')
+  })
+
+  it('clicking "Ignore this name forever" POSTs to the dismiss endpoint', async () => {
+    const postSpy = vi.fn()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      const method = init?.method ?? 'GET'
+      if (method === 'GET' && url.includes('/api/ai/inbox')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: -10001,
+                kind: 'counterparty_promotion',
+                createdAt: '2026-05-01T00:00:00Z',
+                transactionId: null,
+                summary: '4 transactions with SARAH KIM in the last 90 days · promote to Contact?',
+                severity: null,
+                confidence: null,
+                output: {
+                  normalizedName: 'sarah kim',
+                  sampleRaw: 'SARAH KIM',
+                  supportCount: 4,
+                  exampleTransactionIds: [1, 2, 3, 4],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        )
+      }
+      if (method === 'POST' && url.includes('/api/ai/counterparty-promotions/')) {
+        postSpy(url)
+        return new Response(JSON.stringify({ ok: true, id: 7 }), { status: 201 })
+      }
+      return new Response('not found', { status: 404 })
+    })
+    render(
+      <MemoryRouter>
+        <AiInboxPage />
+      </MemoryRouter>,
+    )
+    const btn = await waitFor(() =>
+      screen.getByRole('button', { name: /Ignore this name forever/i }),
+    )
+    fireEvent.click(btn)
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
+    const calledUrl = String(postSpy.mock.calls[0]?.[0] ?? '')
+    expect(calledUrl).toContain('sarah%20kim')
+    expect(calledUrl).toContain('/dismiss')
+  })
 })
