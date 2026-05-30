@@ -26,6 +26,15 @@ it('shows badge when latest is unread, opens modal, and acknowledges', async () 
   await waitFor(() =>
     expect(patchSpy).toHaveBeenCalledWith('/api/changelog/seen', { version: 'v0.13.52' }),
   )
+
+  // acknowledge clears the badge optimistically...
+  await waitFor(() =>
+    expect(screen.queryByTestId('whats-new-badge')).not.toBeInTheDocument(),
+  )
+  // ...and closes the modal
+  await waitFor(() =>
+    expect(screen.queryByText('New things')).not.toBeInTheDocument(),
+  )
 })
 
 it('renders nothing when changelog is empty', async () => {
