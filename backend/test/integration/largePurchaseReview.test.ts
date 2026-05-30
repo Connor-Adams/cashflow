@@ -112,6 +112,16 @@ async function createTransaction(
 }
 
 before(async () => {
+  // CRITICAL: NODE_ENV='test' so the aiSuggestLimiter skip() short-circuits.
+  // The purchases and reimbursements routers (mounted at the bare '/api' prefix,
+  // BEFORE largePurchaseReviewRouter) each call router.use(aiSuggestLimiter),
+  // so that 60s/20-request limiter runs on EVERY /api/* request that passes
+  // through them — including /api/large-purchases/* and the PATCH review route.
+  // This file fires >20 sequential requests from the same client, which would
+  // otherwise 429 every assertion past the first handful (mirrors the
+  // reimbursements/statements/cfoBriefings integration tests).
+  process.env.NODE_ENV = 'test';
+
   testDb = await setupPgTestDb('lp-review');
   const mod = await import('../../src/app.js');
   app = mod.default;

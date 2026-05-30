@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Tabs, TabPanel } from '@/components/ui/tabs'
+import { Tabs, TabPanel, type TabItem } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
@@ -57,11 +57,11 @@ const STATUS_LABEL: Record<LargePurchaseReviewStatus, string> = {
 
 type TabKey = 'inbox' | 'reviewed' | 'dismissed'
 
-const TAB_ITEMS = [
+const TAB_ITEMS: TabItem[] = [
   { value: 'inbox', label: 'Inbox' },
   { value: 'reviewed', label: 'Reviewed' },
   { value: 'dismissed', label: 'Dismissed' },
-] as const
+]
 
 const COLUMN_COUNT = 6
 
@@ -186,16 +186,21 @@ export function LargePurchasesPage() {
             reviewedAt: finalStatus === 'reviewed' ? today : null,
           },
         )
-        showToast(
-          res.data.status === 'reviewed'
-            ? 'Marked as reviewed'
-            : 'Review saved',
-          'success',
-        )
+        showToast({
+          title:
+            res.data.status === 'reviewed'
+              ? 'Marked as reviewed'
+              : 'Review saved',
+          variant: 'success',
+        })
         closeReview()
         void refresh()
       } catch (e) {
-        showToast(e instanceof Error ? e.message : 'Failed to save', 'error')
+        showToast({
+          title: 'Failed to save',
+          description: e instanceof Error ? e.message : undefined,
+          variant: 'destructive',
+        })
       } finally {
         setSaving(false)
       }
@@ -207,9 +212,9 @@ export function LargePurchasesPage() {
     <>
       <PageHeader
         title="Large purchases"
-        subtitle={
+        description={
           threshold !== null
-            ? `Showing transactions ≥ ${formatMoney(threshold, 'CAD')} for review`
+            ? `Showing transactions ≥ ${formatMoney(Number(threshold), 'CAD')} for review`
             : 'Review your large purchases'
         }
       />
@@ -287,7 +292,7 @@ function PurchaseTable({ rows, loading, err, onReview }: PurchaseTableProps) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {loading && <SkeletonRow colSpan={COLUMN_COUNT + 1} />}
+        {loading && <SkeletonRow cols={COLUMN_COUNT + 1} />}
         {!loading && err && (
           <TableRow>
             <TableCell colSpan={COLUMN_COUNT + 1} className="text-destructive">
@@ -298,7 +303,7 @@ function PurchaseTable({ rows, loading, err, onReview }: PurchaseTableProps) {
         {!loading && !err && rows.length === 0 && (
           <EmptyTableRow
             colSpan={COLUMN_COUNT + 1}
-            message="No purchases in this section"
+            title="No purchases in this section"
           />
         )}
         {!loading &&
@@ -314,7 +319,7 @@ function PurchaseTable({ rows, loading, err, onReview }: PurchaseTableProps) {
                 {row.accountName ?? '—'}
               </TableCell>
               <TableCell className="text-right font-mono">
-                {formatMoney(row.amount, row.currency)}
+                {formatMoney(Number(row.amount), row.currency)}
               </TableCell>
               <TableCell>
                 <Badge variant={STATUS_VARIANT[row.review.status]}>
@@ -363,7 +368,7 @@ function ReviewDialog({
           <div>
             <h2 className="font-semibold text-lg">{row.merchant}</h2>
             <p className="text-sm text-muted-foreground">
-              {row.date} &bull; {formatMoney(row.amount, row.currency)}
+              {row.date} &bull; {formatMoney(Number(row.amount), row.currency)}
             </p>
           </div>
           <button
