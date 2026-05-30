@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
+import { Alert } from '@/components/ui/alert'
 import { ImportModal } from '../components/import/ImportModal'
 import { ImportHistoryTable } from '../components/import/ImportHistoryTable'
 import { getJson } from '../lib/api'
@@ -19,13 +20,15 @@ import type { Account } from '../types/api'
 export function ImportPage() {
   const navigate = useNavigate()
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [accountsError, setAccountsError] = useState(false)
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [modalOpen, setModalOpen] = useState(false)
 
   const loadAccounts = useCallback(() => {
+    setAccountsError(false)
     void getJson<Account[]>('/api/accounts')
       .then(setAccounts)
-      .catch(() => {})
+      .catch(() => setAccountsError(true))
   }, [])
 
   useEffect(() => {
@@ -39,6 +42,14 @@ export function ImportPage() {
         description="Drop CSVs, OFX exports, Wealthsimple bundles, or PDF bundles (RBC, CIBC, Questrade)."
         actions={<Button onClick={() => setModalOpen(true)}>Import statements</Button>}
       />
+      {accountsError && (
+        <Alert
+          variant="error"
+          title="Couldn't load accounts."
+          action={<Button size="sm" variant="outline" onClick={loadAccounts}>Try again</Button>}
+          className="mb-4"
+        />
+      )}
       <ImportModal
         open={modalOpen}
         onOpenChange={setModalOpen}
