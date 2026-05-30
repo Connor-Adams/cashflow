@@ -43,7 +43,7 @@ export function NotificationsTab() {
     setError(null)
     try {
       const r = await getJson<NotificationPreferencesListResponse>(
-        '/api/notification-preferences',
+        '/api/users/me/notifications/preferences',
       )
       setPrefs(r.data)
     } catch (e) {
@@ -69,7 +69,7 @@ export function NotificationsTab() {
       )
       try {
         const saved = await patchJson<NotificationPreference>(
-          `/api/notification-preferences/${encodeURIComponent(type)}`,
+          `/api/users/me/notifications/preferences/${encodeURIComponent(type)}`,
           { [field]: next },
         )
         setPrefs((curr) => curr.map((p) => (p.type === type ? saved : p)))
