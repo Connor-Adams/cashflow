@@ -71,6 +71,7 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
 import { Subscription, initSubscription } from './Subscription';
+import { SubscriptionPriceChange, initSubscriptionPriceChange } from './SubscriptionPriceChange';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
@@ -177,6 +178,7 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initIncomeEntry(sequelize);
 initSubscription(sequelize);
+initSubscriptionPriceChange(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
 initMoneyLeakDismissal(sequelize);
@@ -1069,6 +1071,7 @@ export {
   PlannedEvent,
   FinancialGoal,
   Subscription,
+  SubscriptionPriceChange,
   AiReviewRun,
   CfoBriefing,
   MoneyLeakDismissal,

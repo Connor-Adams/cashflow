@@ -7,7 +7,7 @@ import {
   type SubscriptionStatus,
   type SubscriptionCadence,
 } from '../models/Subscription';
-import { Transaction } from '../models';
+import { Transaction, SubscriptionPriceChange } from '../models';
 import { num } from '../util/numbers';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
@@ -34,6 +34,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_WINDOW_DAYS = 180;
 const DEFAULT_MIN_OCCURRENCES = 3;
 
+interface PendingPriceChange {
+  id: number;
+  detectedOn: string;
+  previousAmountCents: number;
+  newAmountCents: number;
+  pctChange: string;
+  currency: string;
+}
+
 interface SubscriptionResponse {
   id: number;
   householdId: number;
@@ -48,13 +57,17 @@ interface SubscriptionResponse {
   category: string | null;
   annualizedCost: string;
   priceChangeDetected: boolean;
+  pendingPriceChange: PendingPriceChange | null;
   cancellationUrl: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-function serialize(row: InstanceType<typeof Subscription>): SubscriptionResponse {
+function serialize(
+  row: InstanceType<typeof Subscription>,
+  pendingPriceChange: PendingPriceChange | null = null,
+): SubscriptionResponse {
   return {
     id: row.id,
     householdId: row.householdId,
@@ -69,6 +82,7 @@ function serialize(row: InstanceType<typeof Subscription>): SubscriptionResponse
     category: row.category,
     annualizedCost: String(row.annualizedCost),
     priceChangeDetected: Boolean(row.priceChangeDetected),
+    pendingPriceChange,
     cancellationUrl: row.cancellationUrl,
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
@@ -308,7 +322,30 @@ router.get('/', async (req, res, next) => {
         ['merchantName', 'ASC'],
       ],
     });
-    res.json({ items: rows.map(serialize) });
+
+    // Attach most-recent unacknowledged price change per subscription
+    const subIds = rows.map((r) => r.id);
+    const pendingChanges = subIds.length > 0
+      ? await SubscriptionPriceChange.findAll({
+          where: { subscriptionId: subIds, acknowledgedAt: null },
+          order: [['detectedOn', 'DESC']],
+        })
+      : [];
+    const pendingBySubId = new Map<number, PendingPriceChange>();
+    for (const pc of pendingChanges) {
+      if (!pendingBySubId.has(Number(pc.subscriptionId))) {
+        pendingBySubId.set(Number(pc.subscriptionId), {
+          id: Number(pc.id),
+          detectedOn: pc.detectedOn,
+          previousAmountCents: Number(pc.previousAmountCents),
+          newAmountCents: Number(pc.newAmountCents),
+          pctChange: pc.pctChange,
+          currency: pc.currency,
+        });
+      }
+    }
+
+    res.json({ items: rows.map((r) => serialize(r, pendingBySubId.get(r.id) ?? null)) });
   } catch (e) {
     next(e);
   }

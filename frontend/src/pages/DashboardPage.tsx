@@ -54,6 +54,7 @@ import type {
   BudgetProgressResponse,
   RecurringItem,
   RecurringResponse,
+  SubscriptionPriceChange,
 } from '../types/api'
 
 type Row = {
@@ -308,6 +309,7 @@ export function DashboardPage() {
   // initial load.
   const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
   const [recurringLoading, setRecurringLoading] = useState(true)
+  const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -429,6 +431,17 @@ export function DashboardPage() {
       cancelled = true
     }
   }, [currency])
+
+  // Subscription price changes — fetched once at mount (not currency-scoped).
+  useEffect(() => {
+    let cancelled = false
+    void getJson<{ items: SubscriptionPriceChange[] }>(
+      '/api/subscription-price-changes?status=unack'
+    )
+      .then((r) => { if (!cancelled) setPriceChangeCount(r.items.length) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -1593,6 +1606,25 @@ export function DashboardPage() {
           items={recurringItems}
           loading={recurringLoading}
         />
+
+        {priceChangeCount > 0 && (
+          <BentoTile span={4} label="Subscription price changes" aria-label="Subscription price changes">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <p style={{ fontSize: 32, fontWeight: 700, color: 'var(--destructive)' }}>
+                {priceChangeCount}
+              </p>
+              <p className="muted" style={{ fontSize: 13 }}>
+                Unacknowledged price {priceChangeCount === 1 ? 'change' : 'changes'} detected
+              </p>
+              <Link
+                to="/subscriptions"
+                style={{ fontSize: 13, textDecoration: 'underline' }}
+              >
+                Review on Subscriptions →
+              </Link>
+            </div>
+          </BentoTile>
+        )}
 
         <TableTile
           span={6}

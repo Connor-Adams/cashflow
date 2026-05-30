@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ExternalLink } from 'lucide-react'
+import { AlertTriangle, ExternalLink, TrendingUp } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -25,10 +25,13 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CancelImpactCard } from '@/components/subscriptions/CancelImpactCard'
+import { PriceChangeChip } from '@/components/subscriptions/PriceChangeChip'
+import { PriceChangeDrawer } from '@/components/subscriptions/PriceChangeDrawer'
 import { getJson, patchJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   CancelImpact,
+  PendingPriceChange,
   Subscription,
   SubscriptionCadence,
   SubscriptionPatch,
@@ -99,7 +102,12 @@ export function SubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [priceChangeFilter, setPriceChangeFilter] = useState(false)
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({})
+  const [drawerChange, setDrawerChange] = useState<{
+    change: PendingPriceChange
+    subscriptionName: string
+  } | null>(null)
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -225,7 +233,26 @@ export function SubscriptionsPage() {
     }
   }
 
-  const visibleItems = data?.items ?? []
+  function handlePriceChangeAcknowledged(changeId: number) {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            items: prev.items.map((item) =>
+              item.pendingPriceChange?.id === changeId
+                ? { ...item, pendingPriceChange: null }
+                : item,
+            ),
+          }
+        : prev,
+    )
+    setDrawerChange(null)
+  }
+
+  const allItems = data?.items ?? []
+  const visibleItems = priceChangeFilter
+    ? allItems.filter((item) => item.pendingPriceChange != null)
+    : allItems
 
   return (
     <div className="page">
@@ -237,7 +264,7 @@ export function SubscriptionsPage() {
       <SubscriptionSummary summary={summary} loading={loading} />
 
       <section className="card">
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <label htmlFor="subscriptions-status-filter">Status</label>
           <NativeSelect
             id="subscriptions-status-filter"
@@ -250,6 +277,15 @@ export function SubscriptionsPage() {
               </option>
             ))}
           </NativeSelect>
+          <Button
+            type="button"
+            size="sm"
+            variant={priceChangeFilter ? 'default' : 'outline'}
+            onClick={() => setPriceChangeFilter((v) => !v)}
+          >
+            <TrendingUp size={14} aria-hidden="true" />
+            Price changes only
+          </Button>
         </div>
       </section>
 
@@ -297,6 +333,9 @@ export function SubscriptionsPage() {
                     rowError={rowErrors[item.id] ?? null}
                     onStatusChange={updateStatus}
                     onCadenceChange={updateCadence}
+                    onPriceChangeClick={(change) =>
+                      setDrawerChange({ change, subscriptionName: item.merchantName })
+                    }
                   />
                 ))
               )}
@@ -304,6 +343,16 @@ export function SubscriptionsPage() {
           </Table>
         </div>
       </CollapsibleCard>
+
+      {drawerChange && (
+        <PriceChangeDrawer
+          subscriptionName={drawerChange.subscriptionName}
+          change={drawerChange.change}
+          open={drawerChange != null}
+          onOpenChange={(open) => { if (!open) setDrawerChange(null) }}
+          onAcknowledged={handlePriceChangeAcknowledged}
+        />
+      )}
     </div>
   )
 }
@@ -393,11 +442,13 @@ function SubscriptionRow({
   rowError,
   onStatusChange,
   onCadenceChange,
+  onPriceChangeClick,
 }: {
   item: Subscription
   rowError: string | null
   onStatusChange: (id: number, status: SubscriptionStatus) => Promise<void>
   onCadenceChange: (id: number, cadence: SubscriptionCadence) => Promise<void>
+  onPriceChangeClick: (change: NonNullable<Subscription['pendingPriceChange']>) => void
 }) {
   const annual = Number(item.annualizedCost)
   const amount = Number(item.amount)
@@ -411,14 +462,19 @@ function SubscriptionRow({
       <TableCell>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {item.merchantName}
-          {item.priceChangeDetected && (
+          {item.pendingPriceChange ? (
+            <PriceChangeChip
+              change={item.pendingPriceChange}
+              onClick={() => onPriceChangeClick(item.pendingPriceChange!)}
+            />
+          ) : item.priceChangeDetected ? (
             <Badge
               variant="destructive"
               title="Price has increased since the last refresh"
             >
               <AlertTriangle size={12} aria-hidden="true" /> price up
             </Badge>
-          )}
+          ) : null}
         </div>
         {item.cancellationUrl && (
           <a

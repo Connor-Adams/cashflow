@@ -138,6 +138,31 @@ export type SubscriptionCadence =
   | 'semiannual'
   | 'annual'
 
+/** Unacknowledged price change attached to a subscription row. */
+export type PendingPriceChange = {
+  id: number
+  detectedOn: string
+  previousAmountCents: number
+  newAmountCents: number
+  pctChange: string
+  currency: string
+}
+
+/** One row returned by GET /api/subscription-price-changes. */
+export type SubscriptionPriceChange = {
+  id: number
+  subscriptionId: number
+  detectedOn: string
+  previousAmountCents: number
+  newAmountCents: number
+  pctChange: string
+  currency: string
+  triggeringTransactionId: number | null
+  acknowledgedAt: string | null
+  acknowledgedByUserId: number | null
+  createdAt: string
+}
+
 /** One row of the /api/subscriptions response. */
 export type Subscription = {
   id: number
@@ -153,6 +178,7 @@ export type Subscription = {
   category: string | null
   annualizedCost: string
   priceChangeDetected: boolean
+  pendingPriceChange: PendingPriceChange | null
   cancellationUrl: string | null
   notes: string | null
   createdAt: string
