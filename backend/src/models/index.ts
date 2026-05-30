@@ -99,6 +99,12 @@ import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
+import { LiabilityAccount, initLiabilityAccount } from './LiabilityAccount';
+import {
+  DebtPayoffScenario,
+  initDebtPayoffScenario,
+} from './DebtPayoffScenario';
+import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -179,6 +185,9 @@ initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
+initLiabilityAccount(sequelize);
+initDebtPayoffScenario(sequelize);
+initFinancialScenario(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -843,6 +852,30 @@ User.hasMany(SavedSearch, {
 });
 SavedSearch.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+// Financial scenario planner (issue #213). Scenarios cascade on household
+// delete and user delete. Each scenario belongs to both a household and the
+// user who created it — isolating per household is enforced by householdWhere().
+Household.hasMany(FinancialScenario, {
+  foreignKey: 'household_id',
+  as: 'financialScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialScenario.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinancialScenario, {
+  foreignKey: 'user_id',
+  as: 'financialScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialScenario.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 // Sync backups (issue #239). No CASCADE on household delete: the audit
 // history is useful diagnostic context, so we keep the rows around even
 // if the household is later removed. The intentionally-loose FK (no
@@ -860,6 +893,52 @@ User.hasMany(SyncBackup, {
   as: 'syncBackups',
 });
 SyncBackup.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// LiabilityAccount (issue #202). 1:1 sidecar for an Account whose type is a
+// liability kind. account_id is UNIQUE so we surface it as hasOne; both the
+// account and household teardown cascade-remove the profile.
+Account.hasOne(LiabilityAccount, {
+  foreignKey: 'account_id',
+  as: 'liabilityProfile',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+LiabilityAccount.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+Household.hasMany(LiabilityAccount, {
+  foreignKey: 'household_id',
+  as: 'liabilityAccounts',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+LiabilityAccount.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
+// DebtPayoffScenario (issue #202). Household-scoped saved payoff plans. The
+// creating user is kept loosely (SET NULL) so a scenario survives the user's
+// removal; the household teardown cascade-removes scenarios.
+Household.hasMany(DebtPayoffScenario, {
+  foreignKey: 'household_id',
+  as: 'debtPayoffScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+DebtPayoffScenario.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(DebtPayoffScenario, {
+  foreignKey: 'user_id',
+  as: 'debtPayoffScenarios',
+});
+DebtPayoffScenario.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
@@ -943,4 +1022,7 @@ export {
   VaultDocument,
   AccountStatement,
   SyncBackup,
+  LiabilityAccount,
+  DebtPayoffScenario,
+  FinancialScenario,
 };

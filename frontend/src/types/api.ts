@@ -80,6 +80,17 @@ export type {
   Transaction,
   TransactionStatus,
   TransferPurpose,
+  DebtPayoffStrategy,
+  DebtLiability,
+  DebtLiabilityProfile,
+  PayoffMonthDebtLine,
+  PayoffMonth,
+  PayoffScheduledPayment,
+  DebtPayoffPlan,
+  DebtPayoffComparison,
+  DebtOverview,
+  DebtPayoffScenario,
+  DebtScenarioResponse,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */
@@ -285,6 +296,74 @@ export type ExplainMonthResponse = {
   monthOverMonth: ExplainMonthMonthOverMonth[]
   findings: ExplainMonthFinding[]
   aiSummary: string | null
+}
+
+// --- Lifestyle inflation tracker (GET /api/reports/lifestyle-inflation) ---
+// Tracks whether spending growth is outpacing income growth over a rolling
+// window of months. See backend/src/summary/lifestyleInflation.ts (Cashflow #245).
+
+export type LifestyleScope = 'personal' | 'shared' | 'business' | 'all'
+
+export type LifestyleInflationSeverity = 'low' | 'medium' | 'high'
+
+/** One month of aggregated totals for a single currency. */
+export type LifestyleMonthlyPoint = {
+  month: string
+  income: number
+  spend: number
+  /** income - spend; can be negative. */
+  savings: number
+}
+
+/** First-half vs second-half averages for a metric over the window. */
+export type LifestyleHalfAverages = {
+  firstHalfAvg: number
+  secondHalfAvg: number
+  /** secondHalfAvg - firstHalfAvg. */
+  delta: number
+}
+
+/** A category's contribution to spend growth. */
+export type LifestyleCategoryDriver = {
+  category: string
+  firstHalfAvg: number
+  secondHalfAvg: number
+  delta: number
+  deltaPct: number | null
+}
+
+/** Warning surfaced when spend growth materially outpaces income growth. */
+export type LifestyleInflationInsight = {
+  kind: 'lifestyle_inflation'
+  currency: string
+  severity: LifestyleInflationSeverity
+  title: string
+  summary: string
+  /** spendGrowthPct - incomeGrowthPct, in percentage points. */
+  gapPct: number
+  meta: Record<string, unknown>
+}
+
+export type LifestyleCurrencyTrend = {
+  currency: string
+  series: LifestyleMonthlyPoint[]
+  spendGrowth: LifestyleHalfAverages
+  incomeGrowth: LifestyleHalfAverages
+  savingsGrowth: LifestyleHalfAverages
+  spendGrowthPct: number | null
+  incomeGrowthPct: number | null
+  savingsGrowthPct: number | null
+  spendOutpacingIncome: boolean
+  categoryDrivers: LifestyleCategoryDriver[]
+  insight: LifestyleInflationInsight | null
+}
+
+export type LifestyleInflationResponse = {
+  anchorMonth: string
+  scope: LifestyleScope
+  currency: string | null
+  windowMonths: string[]
+  byCurrency: LifestyleCurrencyTrend[]
 }
 
 /** Direction of a partner-balance settlement record. */
