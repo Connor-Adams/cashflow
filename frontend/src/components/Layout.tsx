@@ -6,6 +6,7 @@ import { useCommandPalette } from '../hooks/useCommandPalette'
 import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { NotificationBell } from './notifications/NotificationBell'
+import { WhatsNewBell } from './changelog/WhatsNewBell'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -81,6 +82,7 @@ export function Layout() {
                 ⌘K
               </kbd>
             </button>
+            <WhatsNewBell />
             <NotificationBell />
           </div>
         </header>
