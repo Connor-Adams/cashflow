@@ -6,6 +6,8 @@ import { integrity } from '../audit/integrity';
 import { counts } from '../audit/counts';
 import { clientErrors } from '../audit/clientErrors';
 import { serverErrors } from '../audit/serverErrors';
+import { routeProbe } from '../audit/routeProbe';
+import { summary } from '../audit/summary';
 
 const router = Router();
 
@@ -64,6 +66,25 @@ router.get('/server-errors', async (req, res, next) => {
     const limit = req.query.limit ? Number(req.query.limit) : 100;
     const status = req.query.status ? Number(req.query.status) : null;
     res.json(await serverErrors(req.auditAuth!.household.id, { since, limit, status }));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/route-probe', async (req, res, next) => {
+  try {
+    res.json(await routeProbe(req.app, req.auditAuth!));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/summary', async (req, res, next) => {
+  try {
+    const windowMinutes = req.query.windowMinutes
+      ? Math.max(1, Math.min(1440, Number(req.query.windowMinutes)))
+      : 60;
+    res.json(await summary(req.app, req.auditAuth!, windowMinutes));
   } catch (e) {
     next(e);
   }
