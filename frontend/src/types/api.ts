@@ -1397,6 +1397,37 @@ export type SyncRestorePreviewResponse = {
 
 export type SyncRestoreMode = 'merge' | 'replace';
 
+// ---- Data exports (issue #302) -------------------------------------------
+
+export type DataExportStatus = 'queued' | 'running' | 'ready' | 'failed';
+
+export type DataExport = {
+  id: number;
+  status: DataExportStatus;
+  requestedAt: string;
+  readyAt: string | null;
+  expiresAt: string | null;
+  byteSize: number | null;
+  errorMessage: string | null;
+  /** Backend-generated signed download URL; present only when status=ready */
+  downloadUrl: string | null;
+};
+
+export type DataExportsListResponse = {
+  data: DataExport[];
+};
+
+export type RequestDataExportResponse = {
+  exportId: number;
+  status: DataExportStatus;
+};
+
+export type RequestDataExportError = {
+  error: 'EXPORT_IN_FLIGHT';
+  message: string;
+  exportId: number;
+};
+
 export type SyncRestoreResponse = {
   mode: SyncRestoreMode;
   inserted: Record<string, number>;

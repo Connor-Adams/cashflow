@@ -64,6 +64,7 @@ import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
 import financeEventsRouter from './routes/financeEvents';
 import syncRouter from './routes/sync';
+import dataExportsRouter from './routes/dataExports';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
 import { attachAuth, requireAuth } from './auth/middleware';
@@ -158,6 +159,7 @@ app.use('/api/audit-log', auditLogRouter);
 app.use('/api/vault', vaultRouter);
 app.use('/api/finance-events', financeEventsRouter);
 app.use('/api/sync', syncRouter);
+app.use('/api', dataExportsRouter);
 app.use('/api/reports', reportsRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai

@@ -95,6 +95,7 @@ import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
+import { DataExport, initDataExport } from './DataExport';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -174,6 +175,7 @@ initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
+initDataExport(sequelize);
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -845,6 +847,20 @@ SyncBackup.belongsTo(User, {
   as: 'user',
 });
 
+// Data exports (issue #302). Cascades on user delete — removing the user
+// account removes all their export rows. Physical files are cleaned up by
+// the daily `dataExportCleanup` cron before expiry.
+User.hasMany(DataExport, {
+  foreignKey: 'user_id',
+  as: 'dataExports',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+DataExport.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -923,4 +939,5 @@ export {
   VaultDocument,
   AccountStatement,
   SyncBackup,
+  DataExport,
 };
