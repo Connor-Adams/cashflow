@@ -14,14 +14,8 @@ const KNIP_JSON = path.join(ROOT, 'reports', 'knip-report.json');
 const JSCPD_JSON = path.join(ROOT, 'reports', 'jscpd', 'jscpd-report.json');
 
 const MARKER = '<!-- code-audit-summary -->';
-
-function readJson(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return null;
-  }
-}
+const KNIP_MISSING = '> ⚠️ knip report not found — see the workflow logs.';
+const JSCPD_MISSING = '> ⚠️ jscpd report not found — see the workflow logs.';
 
 // Knip emits one entry per file; each has arrays per issue category.
 const KNIP_CATEGORIES = [
@@ -38,69 +32,90 @@ const KNIP_CATEGORIES = [
   ['unresolved', 'Unresolved imports'],
 ];
 
-function summarizeKnip(knip) {
-  if (!knip || !Array.isArray(knip.issues)) {
-    return '> ⚠️ knip report not found — see the workflow logs.';
+// Tolerant of a leading CLI banner (e.g. yarn's "$ knip ...") before the JSON.
+function readJson(file) {
+  try {
+    const raw = fs.readFileSync(file, 'utf8');
+    const start = raw.indexOf('{');
+    return JSON.parse(start > 0 ? raw.slice(start) : raw);
+  } catch {
+    return null;
   }
-  const counts = {};
-  const unusedFiles = [];
-  for (const issue of knip.issues) {
-    for (const [key] of KNIP_CATEGORIES) {
-      const arr = issue[key];
-      if (Array.isArray(arr) && arr.length) {
-        counts[key] = (counts[key] || 0) + arr.length;
-        if (key === 'files') {
-          for (const f of arr) unusedFiles.push(typeof f === 'string' ? f : f.name);
-        }
-      }
+}
+
+function countCategory(issues, key) {
+  let n = 0;
+  for (const issue of issues) {
+    const arr = issue[key];
+    if (arr) n += arr.length;
+  }
+  return n;
+}
+
+function collectUnusedFiles(issues) {
+  const files = [];
+  for (const issue of issues) {
+    for (const f of issue.files) files.push(f.name);
+  }
+  return files;
+}
+
+function buildKnipRows(issues) {
+  const rows = [];
+  let total = 0;
+  for (const [key, label] of KNIP_CATEGORIES) {
+    const n = countCategory(issues, key);
+    if (n) {
+      rows.push(`| ${label} | ${n} |`);
+      total += n;
     }
   }
-  const rows = KNIP_CATEGORIES.filter(([k]) => counts[k]).map(
-    ([k, label]) => `| ${label} | ${counts[k]} |`,
-  );
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  if (total === 0) return '✅ **No dead code found.**';
+  return { rows, total };
+}
 
-  let out = `| Category | Count |\n| :--- | ---: |\n${rows.join('\n')}`;
-  if (unusedFiles.length) {
-    out +=
-      `\n\n<details><summary>Unused files (${unusedFiles.length})</summary>\n\n` +
-      unusedFiles.map((f) => `- \`${f}\``).join('\n') +
-      `\n\n</details>`;
-  }
-  return out;
+function renderKnipBody(rows, unusedFiles) {
+  const table = `| Category | Count |\n| :--- | ---: |\n${rows.join('\n')}`;
+  if (unusedFiles.length === 0) return table;
+  const list = unusedFiles.map((f) => `- \`${f}\``).join('\n');
+  return `${table}\n\n<details><summary>Unused files (${unusedFiles.length})</summary>\n\n${list}\n\n</details>`;
+}
+
+function summarizeKnip(knip) {
+  if (!knip || !Array.isArray(knip.issues)) return KNIP_MISSING;
+  const { rows, total } = buildKnipRows(knip.issues);
+  if (total === 0) return '✅ **No dead code found.**';
+  return renderKnipBody(rows, collectUnusedFiles(knip.issues));
+}
+
+function jscpdFormatRows(formats) {
+  return Object.entries(formats || {})
+    .map(([name, data]) => {
+      const s = data.total;
+      return `| ${name} | ${s.sources} | ${s.clones} | ${s.duplicatedLines} (${s.percentage}%) |`;
+    })
+    .join('\n');
 }
 
 function summarizeJscpd(jscpd) {
-  if (!jscpd || !jscpd.statistics || !jscpd.statistics.total) {
-    return '> ⚠️ jscpd report not found — see the workflow logs.';
-  }
-  const t = jscpd.statistics.total;
-  const formats = jscpd.statistics.formats || {};
-  let out =
-    `**${t.clones}** clones · **${t.duplicatedLines}** duplicated lines ` +
-    `(**${t.percentage}%**) · ${t.duplicatedTokens} tokens (${t.percentageTokens}%)\n\n`;
-  out += `| Format | Files | Clones | Dup. lines |\n| :--- | ---: | ---: | ---: |\n`;
-  for (const [name, data] of Object.entries(formats)) {
-    const s = data.total;
-    out += `| ${name} | ${s.sources} | ${s.clones} | ${s.duplicatedLines} (${s.percentage}%) |\n`;
-  }
-  return out;
+  const total = jscpd && jscpd.statistics && jscpd.statistics.total;
+  if (!total) return JSCPD_MISSING;
+  const header =
+    `**${total.clones}** clones · **${total.duplicatedLines}** duplicated lines ` +
+    `(**${total.percentage}%**) · ${total.duplicatedTokens} tokens (${total.percentageTokens}%)`;
+  const rows = jscpdFormatRows(jscpd.statistics.formats);
+  return `${header}\n\n| Format | Files | Clones | Dup. lines |\n| :--- | ---: | ---: | ---: |\n${rows}`;
 }
-
-const knip = readJson(KNIP_JSON);
-const jscpd = readJson(JSCPD_JSON);
 
 const body = `${MARKER}
 ## 🔍 Code audit
 
 ### 🧹 Dead code — [knip](https://knip.dev)
 
-${summarizeKnip(knip)}
+${summarizeKnip(readJson(KNIP_JSON))}
 
 ### 🧬 Duplication — [jscpd](https://github.com/kucherenko/jscpd)
 
-${summarizeJscpd(jscpd)}
+${summarizeJscpd(readJson(JSCPD_JSON))}
 
 ---
 <sub>Informational only — does not block merge. Run locally with \`yarn audit:code\`. Full duplication report is in the **jscpd-report** workflow artifact.</sub>`;

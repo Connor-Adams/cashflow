@@ -183,7 +183,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p reports
-          yarn knip --reporter json --no-exit-code > reports/knip-report.json
+          yarn --silent knip --reporter json --no-exit-code > reports/knip-report.json
           yarn deadcode || true
 
       - name: Duplicate code (jscpd)
