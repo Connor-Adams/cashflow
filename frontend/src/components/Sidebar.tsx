@@ -40,6 +40,7 @@ import {
   BriefcaseBusiness,
   Sun,
   Moon,
+  GitCompare,
   Target,
   TrendingUp,
   Undo2,
@@ -109,6 +110,7 @@ const navSections: NavSection[] = [
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/goals', label: 'Goals', icon: Target },
       { to: '/forecast', label: 'Forecast', icon: TrendingUp },
+      { to: '/scenarios', label: 'Scenarios', icon: GitCompare },
     ],
   },
   {

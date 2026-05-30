@@ -26,6 +26,7 @@ import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
 import purchasesRouter from './routes/purchases';
 import reimbursementsRouter from './routes/reimbursements';
+import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
@@ -142,6 +143,7 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/notification-preferences', notificationPreferencesRouter);
 app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);
+app.use('/api/financial-scenarios', financialScenariosRouter);
 app.use('/api/settings/cashflow', cashflowSettingsRouter);
 app.use('/api/import', importRouter);
 // sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins
