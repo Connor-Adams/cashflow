@@ -11,6 +11,8 @@ export type Account = {
   shortCode: string | null
   defaultCurrency: string | null
   closedAt: string | null
+  notes?: string | null       // present on GET /:id
+  notesPreview?: string | null // present on GET / list
 }
 
 /**

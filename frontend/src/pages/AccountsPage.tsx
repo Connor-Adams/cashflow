@@ -46,6 +46,7 @@ export function AccountsPage() {
   const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
+  const [editNotes, setEditNotes] = useState('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -97,6 +98,7 @@ export function AccountsPage() {
           undefined,
         accountType: String(fd.get('accountType') ?? 'checking'),
         visibility: String(fd.get('visibility') ?? 'private'),
+        notes: String(fd.get('notes') ?? '').trim() || null,
       })
       form.reset()
       await load()
@@ -182,6 +184,7 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
+        notes: editNotes.trim() || null,
       })
       setEditingId(null)
       setEditName('')
@@ -191,6 +194,7 @@ export function AccountsPage() {
       setEditAccountType('checking')
       setEditVisibility('private')
       setEditClosedAt('')
+      setEditNotes('')
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -206,6 +210,7 @@ export function AccountsPage() {
     setEditAccountType('checking')
     setEditVisibility('private')
     setEditClosedAt('')
+    setEditNotes('')
   }
 
   function startEdit(account: Account) {
@@ -217,6 +222,7 @@ export function AccountsPage() {
     setEditAccountType(account.accountType ?? 'checking')
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
+    setEditNotes(account.notes ?? '')
   }
 
   const accountCount = accounts.length
@@ -342,6 +348,20 @@ export function AccountsPage() {
               <option value="shared">shared</option>
             </select>
           </Label>
+          <Label htmlFor="accounts-create-notes" style={{ gridColumn: '1 / -1' }}>
+            Notes
+            <p className="muted" style={{ fontWeight: 'normal', fontSize: '0.85em', marginBottom: 4 }}>
+              Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account.
+            </p>
+            <textarea
+              id="accounts-create-notes"
+              name="notes"
+              rows={4}
+              maxLength={4000}
+              style={{ width: '100%', resize: 'vertical' }}
+              placeholder="e.g. routing #021000021, contact: support@bank.com"
+            />
+          </Label>
         </div>
         <Button type="submit" disabled={saving}>
           <Plus aria-hidden="true" />
@@ -374,13 +394,14 @@ export function AccountsPage() {
                 <TableHead>Default currency</TableHead>
                 <TableHead>Visibility</TableHead>
                 <TableHead>Closed</TableHead>
+                <TableHead>Notes</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
-                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={8} />
+                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
               ) : (
                 accounts.map((a) => (
@@ -485,6 +506,28 @@ export function AccountsPage() {
                         <Badge variant="secondary">Closed {a.closedAt}</Badge>
                       ) : (
                         '—'
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {editingId === a.id ? (
+                        <div>
+                          <textarea
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            rows={3}
+                            maxLength={4000}
+                            style={{ width: '100%', resize: 'vertical' }}
+                          />
+                          <p style={{ fontSize: '0.75em', color: editNotes.length > 3800 ? 'red' : 'inherit' }}>
+                            {editNotes.length}/4000
+                          </p>
+                        </div>
+                      ) : (
+                        a.notesPreview
+                          ? <span title={a.notesPreview} style={{ fontSize: '0.85em', color: '#666' }}>
+                              {a.notesPreview.length >= 100 ? a.notesPreview + '…' : a.notesPreview}
+                            </span>
+                          : <span style={{ color: '#999' }}>—</span>
                       )}
                     </TableCell>
                     <TableCell>
