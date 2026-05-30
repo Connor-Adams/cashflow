@@ -75,7 +75,7 @@ describe('NotificationsTab', () => {
 
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith(
-        '/api/notification-preferences/budget.breach',
+        '/api/users/me/notifications/preferences/budget.breach',
         { channelEmail: true },
       )
     })
