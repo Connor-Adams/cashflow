@@ -109,6 +109,9 @@ import {
   initDebtPayoffScenario,
 } from './DebtPayoffScenario';
 import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
+import { Label, initLabel } from './Label';
+import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
+import { Feedback, initFeedback } from './Feedback';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -193,6 +196,32 @@ initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
 initDebtPayoffScenario(sequelize);
 initFinancialScenario(sequelize);
+initLabel(sequelize);
+initTransactionLabel(sequelize);
+initFeedback(sequelize);
+
+// Transaction labels (issue #270). belongsToMany both directions so a
+// transaction can `include` its labels and a label can resolve its
+// transactions, through the join model. hasMany on the join model itself
+// powers the usageCount aggregate in GET /api/labels.
+Household.hasMany(Label, { foreignKey: 'household_id', as: 'labels' });
+Label.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Transaction.belongsToMany(Label, {
+  through: TransactionLabel,
+  foreignKey: 'transaction_id',
+  otherKey: 'label_id',
+  as: 'labels',
+});
+Label.belongsToMany(Transaction, {
+  through: TransactionLabel,
+  foreignKey: 'label_id',
+  otherKey: 'transaction_id',
+  as: 'transactions',
+});
+Label.hasMany(TransactionLabel, { foreignKey: 'label_id', as: 'links' });
+TransactionLabel.belongsTo(Label, { foreignKey: 'label_id', as: 'label' });
+Transaction.hasMany(TransactionLabel, { foreignKey: 'transaction_id', as: 'labelLinks' });
+TransactionLabel.belongsTo(Transaction, { foreignKey: 'transaction_id', as: 'transaction' });
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -941,6 +970,13 @@ LiabilityAccount.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
 });
+// Credit-card payment planner (#243). The funding (cash) account a card's
+// bill is paid from. SET NULL at the DB level (see the cc-fields migration) so
+// deleting the funding account unlinks the profile rather than removing it.
+LiabilityAccount.belongsTo(Account, {
+  foreignKey: 'payment_account_id',
+  as: 'paymentAccount',
+});
 
 // DebtPayoffScenario (issue #202). Household-scoped saved payoff plans. The
 // creating user is kept loosely (SET NULL) so a scenario survives the user's
@@ -963,6 +999,24 @@ DebtPayoffScenario.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
+
+// In-app feedback / bug reports (issue #295). Scoped to both the submitting
+// user and their household; both cascade on delete so removing either removes
+// the feedback. The owner-only inbox lists via householdWhere().
+User.hasMany(Feedback, {
+  foreignKey: 'user_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Household.hasMany(Feedback, {
+  foreignKey: 'household_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
 export {
   sequelize,
@@ -1047,4 +1101,7 @@ export {
   DebtPayoffScenario,
   FinancialScenario,
   DividendReconciliation,
+  Label,
+  TransactionLabel,
+  Feedback,
 };

@@ -11,6 +11,8 @@ export type {
   BySecurityAccountBreakdown,
   BySecurityRow,
   Category,
+  Label,
+  TransactionLabelRef,
   Contact,
   EnrichmentBackfillProgress,
   EnrichmentSignal,
@@ -97,6 +99,14 @@ export type {
   DividendListResponse,
   DividendCandidate,
   DividendCandidatesResponse,
+  CardPaymentStrategy,
+  CardAutopayType,
+  CreditCard,
+  CreditCardsOverview,
+  CreditCardProfile,
+  CardPaymentPlannedEvent,
+  CardSafeToSpendImpact,
+  CreditCardPaymentResponse,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */
@@ -126,6 +136,14 @@ export type SubscriptionStatus =
   | 'ignored'
   | 'unknown'
 
+/** Billing cadence of a subscription (Cashflow #291 — user-editable). */
+export type SubscriptionCadence =
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'annual'
+
 /** One row of the /api/subscriptions response. */
 export type Subscription = {
   id: number
@@ -134,7 +152,7 @@ export type Subscription = {
   normalizedName: string
   amount: string
   currency: string
-  cadence: 'monthly' | 'weekly'
+  cadence: SubscriptionCadence
   lastChargeDate: string
   nextExpectedDate: string | null
   status: SubscriptionStatus
@@ -155,8 +173,22 @@ export type SubscriptionsResponse = {
 /** PATCH /api/subscriptions/:id request body — only user-curated fields. */
 export type SubscriptionPatch = {
   status?: SubscriptionStatus
+  cadence?: SubscriptionCadence
   cancellationUrl?: string | null
   notes?: string | null
+}
+
+/** Allowed cancel-impact forecast horizons (months). */
+export type CancelImpactHorizon = 6 | 12 | 24
+
+/** Response shape for GET /api/subscriptions/:id/cancel-impact. */
+export type CancelImpact = {
+  /** Projected total spend over the horizon (== potential savings). */
+  amount: number
+  currency: string
+  /** Number of expected occurrences inside the horizon. */
+  count: number
+  horizonMonths: number
 }
 
 /** Response shape for GET /api/subscriptions/summary. */
@@ -1370,6 +1402,14 @@ export type CashflowSettings = {
    * times in the trailing 90 days. Default 3, bounded 2..50.
    */
   counterpartyPromotionThreshold: number;
+  /** #375 — Partner Fairness "exclude non-partner inflows" toggle. */
+  excludeNonPartnerInflows: boolean;
+  /**
+   * #259 — ISO8601 timestamp the user dismissed/completed first-run
+   * onboarding, or null if they never did. The onboarding gate reads this
+   * (with the active-account count) to decide whether to show the wizard.
+   */
+  onboardingDismissedAt: string | null;
 };
 
 export type SafeToSpendBreakdown = {

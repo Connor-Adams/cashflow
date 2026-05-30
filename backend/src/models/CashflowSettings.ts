@@ -52,6 +52,15 @@ export class CashflowSettings extends Model<
    * disable. DECIMAL(14,4) stored as string for lossless transport.
    */
   declare largePurchaseThreshold: CreationOptional<string>;
+  /**
+   * #259 — first-run onboarding wizard suppression. NULL means the user has
+   * neither dismissed nor completed onboarding, so the import-creates-accounts
+   * wizard is eligible (gated also on `active accounts === 0`). A non-NULL
+   * timestamp permanently hides the wizard; set when the user clicks
+   * "Skip for now" (PATCH /api/preferences/onboarding-dismiss) or after the
+   * first successful onboarding import.
+   */
+  declare onboardingDismissedAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -124,6 +133,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
         field: 'large_purchase_threshold',
         allowNull: false,
         defaultValue: '500',
+      },
+      onboardingDismissedAt: {
+        type: DataTypes.DATE,
+        field: 'onboarding_dismissed_at',
+        allowNull: true,
+        defaultValue: null,
       },
     } as ModelAttributes<CashflowSettings>,
     {

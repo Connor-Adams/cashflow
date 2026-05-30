@@ -23,6 +23,7 @@
  */
 
 import { num } from '../util/numbers';
+import type { SubscriptionCadence } from '../models/Subscription';
 
 /** Transaction row consumed by the aggregator. Mirrors the attribute list
  *  the route requests from Sequelize — kept here so editors get type
@@ -47,7 +48,7 @@ export interface ExplainMonthSubRow {
   merchantName: string;
   currency: string;
   amount: number;
-  cadence: 'monthly' | 'weekly';
+  cadence: SubscriptionCadence;
   annualizedCost: number;
   status: 'active' | 'cancelled' | 'ignored' | 'unknown';
   priceChangeDetected: boolean;

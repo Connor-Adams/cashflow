@@ -20,6 +20,7 @@ import { CalendarPage } from './pages/CalendarPage'
 import { GoalsPage } from './pages/GoalsPage'
 import { ForecastPage } from './pages/ForecastPage'
 import { DebtPage } from './pages/DebtPage'
+import { CreditCardPlannerPage } from './pages/CreditCardPlannerPage'
 import { OpportunityCostPage } from './pages/OpportunityCostPage'
 import { RecurringPage } from './pages/RecurringPage'
 import { SubscriptionsPage } from './pages/SubscriptionsPage'
@@ -48,7 +49,9 @@ import { ContactsTab } from './pages/settings/tabs/ContactsTab'
 import { MembersTab } from './pages/settings/tabs/MembersTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
+import { LabelsTab } from './pages/settings/tabs/LabelsTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
+import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
@@ -65,6 +68,7 @@ import { ScenariosPage } from './pages/ScenariosPage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
+import { OnboardingGate } from './components/onboarding/OnboardingGate'
 import './App.css'
 
 function AppRoutes() {
@@ -75,6 +79,9 @@ function AppRoutes() {
   if (!auth.user) return <AuthPage />
   return (
     <BrowserRouter>
+      {/* First-run onboarding overlay (#259): shows over Dashboard when the
+          app has no active accounts and onboarding was never dismissed. */}
+      <OnboardingGate />
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<DashboardPage />} />
@@ -97,6 +104,7 @@ function AppRoutes() {
           <Route path="goals" element={<GoalsPage />} />
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="debt" element={<DebtPage />} />
+          <Route path="credit-cards" element={<CreditCardPlannerPage />} />
           <Route path="opportunity-cost" element={<OpportunityCostPage />} />
           <Route path="scenarios" element={<ScenariosPage />} />
           <Route path="recurring" element={<RecurringPage />} />
@@ -133,7 +141,9 @@ function AppRoutes() {
             <Route path="members" element={<MembersTab />} />
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
+            <Route path="labels" element={<LabelsTab />} />
             <Route path="jobs" element={<JobsTab />} />
+            <Route path="feedback" element={<FeedbackInboxTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />

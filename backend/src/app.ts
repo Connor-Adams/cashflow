@@ -27,11 +27,13 @@ import itemsRouter from './routes/items';
 import purchasesRouter from './routes/purchases';
 import reimbursementsRouter from './routes/reimbursements';
 import largePurchaseReviewRouter from './routes/largePurchaseReview';
+import feedbackRouter from './routes/feedback';
 import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
+import labelsRouter from './routes/labels';
 import settlementsRouter from './routes/settlements';
 import partnerRouter from './routes/partner';
 import budgetsRouter from './routes/budgets';
@@ -45,8 +47,11 @@ import notificationPreferencesRouter from './routes/notificationPreferences';
 import notificationsAdminRouter from './routes/admin/notificationsAdmin';
 import forecastRouter from './routes/forecast';
 import debtRouter from './routes/debt';
+import creditCardsRouter from './routes/creditCards';
 import opportunityCostRouter from './routes/opportunityCost';
 import cashflowSettingsRouter from './routes/cashflowSettings';
+import preferencesRouter from './routes/preferences';
+import onboardingRouter from './routes/onboarding';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
@@ -136,6 +141,7 @@ app.use('/api/statements', statementsRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/categories', categoriesRouter);
+app.use('/api/labels', labelsRouter);
 app.use('/api/settlements', settlementsRouter);
 app.use('/api/partner', partnerRouter);
 app.use('/api/budgets', budgetsRouter);
@@ -149,9 +155,12 @@ app.use('/api/notification-preferences', notificationPreferencesRouter);
 app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);
 app.use('/api/debt', debtRouter);
+app.use('/api/credit-cards', creditCardsRouter);
 app.use('/api/opportunity-cost', opportunityCostRouter);
 app.use('/api/financial-scenarios', financialScenariosRouter);
 app.use('/api/settings/cashflow', cashflowSettingsRouter);
+app.use('/api/preferences', preferencesRouter);
+app.use('/api/onboarding', onboardingRouter);
 app.use('/api/import', importRouter);
 // sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins
 // against any future /:id-style routes added to summaryRouter. The
@@ -207,6 +216,9 @@ app.use('/api', reimbursementsRouter);
 // largePurchaseReviewRouter mounts /large-purchases/* and
 // /transactions/:id/large-purchase-review under /api (issue #244).
 app.use('/api', largePurchaseReviewRouter);
+// feedbackRouter mounts /feedback and /feedback/:id/resolve under /api
+// (issue #295). Behind the global requireAuth above.
+app.use('/api', feedbackRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;

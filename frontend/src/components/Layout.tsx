@@ -6,6 +6,7 @@ import { useCommandPalette } from '../hooks/useCommandPalette'
 import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { NotificationBell } from './notifications/NotificationBell'
+import { FeedbackButton } from './feedback/FeedbackButton'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -82,6 +83,7 @@ export function Layout() {
               </kbd>
             </button>
             <NotificationBell />
+            <FeedbackButton />
           </div>
         </header>
 
