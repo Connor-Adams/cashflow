@@ -72,6 +72,7 @@ import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import auditTokensRouter from './routes/auditTokens';
 import auditRouter from './routes/audit';
+import { ServerErrorEvent } from './models';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
@@ -259,6 +260,26 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+// Best-effort 5xx persistence tap — must never throw; re-throws via next(err).
+app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
+  const tapStatus = Number(
+    (err as Record<string, unknown>)?.status ?? (err as Record<string, unknown>)?.statusCode ?? 500
+  );
+  if (tapStatus >= 500) {
+    void ServerErrorEvent.create({
+      householdId: req.auth?.household.id ?? req.auditAuth?.household.id ?? null,
+      userId: req.auth?.user.id ?? req.auditAuth?.user.id ?? null,
+      method: req.method,
+      path: req.originalUrl.slice(0, 512),
+      status: tapStatus,
+      message: String((err as Error)?.message ?? '').slice(0, 4000),
+      stack: String((err as Error)?.stack ?? '').slice(0, 8000) || null,
+      requestId: req.requestId ?? null,
+    }).catch(() => undefined);
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);

@@ -36,6 +36,8 @@ import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSen
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
 import { UserAuditToken, initUserAuditToken } from './UserAuditToken';
+import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
+import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
@@ -147,6 +149,8 @@ initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
 initUserAuditToken(sequelize);
+initClientErrorEvent(sequelize);
+initServerErrorEvent(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
@@ -1038,6 +1042,8 @@ export {
   ProcessedEmailMessage,
   UserCaptureToken,
   UserAuditToken,
+  ClientErrorEvent,
+  ServerErrorEvent,
   Entity,
   TaxCategory,
   TaxTag,

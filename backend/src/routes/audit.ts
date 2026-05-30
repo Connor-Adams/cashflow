@@ -4,6 +4,10 @@ import { counts } from '../audit/counts';
 import { healthDeep } from '../audit/healthDeep';
 import { freshness } from '../audit/freshness';
 import { integrity } from '../audit/integrity';
+import { clientErrors } from '../audit/clientErrors';
+import { serverErrors } from '../audit/serverErrors';
+import { routeProbe } from '../audit/routeProbe';
+import { summary } from '../audit/summary';
 
 const router = Router();
 
@@ -44,6 +48,46 @@ router.get('/counts', async (req, res, next) => {
   try {
     const { household } = req.auditAuth!;
     res.json(await counts(household.id));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/client-errors', async (req, res, next) => {
+  try {
+    const { household } = req.auditAuth!;
+    const { since, level, limit } = req.query as Record<string, string | undefined>;
+    res.json(await clientErrors(household.id, { since, level, limit: Number(limit) || undefined }));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/server-errors', async (req, res, next) => {
+  try {
+    const { household } = req.auditAuth!;
+    const { since, limit } = req.query as Record<string, string | undefined>;
+    res.json(await serverErrors(household.id, { since, limit: Number(limit) || undefined }));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/route-probe', async (req, res, next) => {
+  try {
+    const { user } = req.auditAuth!;
+    res.json(await routeProbe(user.id));
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/summary', async (req, res, next) => {
+  try {
+    const { household, user } = req.auditAuth!;
+    const rawWindow = req.query['windowMinutes'];
+    const windowMinutes = rawWindow ? Number(rawWindow) : 60;
+    res.json(await summary(household.id, user.id, windowMinutes));
   } catch (e) {
     next(e);
   }
