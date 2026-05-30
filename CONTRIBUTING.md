@@ -100,3 +100,21 @@ yarn dupes        # jscpd — writes reports/jscpd/html/
 ## Git hooks
 
 After `yarn install`, Husky runs `yarn prepare`. Staged `frontend/**/*.{ts,tsx}` files trigger **`yarn workspace frontend run lint`** on commit (via [lint-staged](https://github.com/lint-staged/lint-staged)). To skip once: `git commit --no-verify`.
+
+## Code-audit findings → GitHub issues pipeline
+
+When a pull request merges to `main`, CI (`audit-create-issues` job) diffs the
+current fallow dead-code report against `.fallow/baseline.json` and opens one
+`chore` GitHub issue for each **new** finding. Pre-existing findings are
+already in the baseline and produce no issue.
+
+The baseline is committed and updated automatically on every main-branch push.
+To suppress a known-intentional finding without removing it, add a
+`// fallow-ignore-unused-export` (or equivalent) suppression comment in the
+source file.
+
+## Grafana alert → GitHub issue pipeline
+
+Critical alerts (Grafana → contact point webhook → repository_dispatch) create
+`bug` issues automatically. Workflow: `.github/workflows/grafana-alert-to-issue.yml`.
+See `docs/observability.md#grafana-alert--github-issue-automation` for setup.

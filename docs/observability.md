@@ -445,3 +445,82 @@ Each log record landing in Loki carries these fields (via the pino → OTLP tran
 - `resources.service.version`: the `GIT_SHA` env var (or `dev` locally)
 
 Every log carries `trace_id` and `span_id` automatically — the pino mixin reads them from the active OTel context set by the NodeSDK (Phase 3).
+
+## Grafana alert → GitHub issue automation
+
+Alert rules that fire in Grafana automatically create GitHub issues via the
+`.github/workflows/grafana-alert-to-issue.yml` workflow. This keeps every
+firing alert anchored to a durable, owner-assignable work item rather than
+disappearing into the Grafana UI.
+
+### How it works
+
+1. A Grafana **contact point** (type: Webhook) sends a `POST` to the GitHub
+   repository-dispatch API:
+   ```
+   URL:  https://api.github.com/repos/Connor-Adams/cashflow/dispatches
+   Headers:
+     Authorization: Bearer <PAT>     # needs issues:write scope
+     Content-Type: application/json
+   Body: see template below
+   ```
+2. GitHub fires the `grafana-alert-to-issue.yml` workflow.
+3. The workflow de-dupes on the label `alert:<alertName>`:
+   - **New fire** → creates a `bug` + `incident` issue.
+   - **Repeat fire** → adds a comment to the existing open issue.
+   - **Resolved** → adds a "✅ Resolved" comment and closes the issue.
+
+### Grafana webhook body template
+
+Paste this into the Grafana contact-point "Body" field (Webhook type):
+
+```json
+{
+  "event_type": "grafana-alert",
+  "client_payload": {
+    "alertName":    "{{ template \"__subject\" . }}",
+    "status":       "{{ .Status }}",
+    "severity":     "{{ .CommonLabels.severity }}",
+    "component":    "{{ .CommonLabels.component }}",
+    "summary":      "{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}",
+    "description":  "{{ range .Alerts }}{{ .Annotations.description }}{{ end }}",
+    "runbook_url":  "{{ range .Alerts }}{{ .Annotations.runbook_url }}{{ end }}",
+    "generatorURL": "{{ range .Alerts }}{{ .GeneratorURL }}{{ end }}"
+  }
+}
+```
+
+### Notification policy
+
+In Grafana → Alerting → Notification policies, set the default or specific
+policies to route to the **GitHub** contact point. All alert rules in
+`infra/grafana/provisioning/alerting/` carry the `severity` and `component`
+labels used for deduplication.
+
+## Code-audit findings → GitHub issues
+
+New dead-code findings that land on `main` automatically become `chore` issues
+(via the `audit-create-issues` CI job in `.github/workflows/ci.yml`).
+
+- Findings are diffed against `.fallow/baseline.json` (committed).
+- Only **new** findings (not in the baseline at last run) produce issues.
+- The baseline is updated automatically after each main-branch push — no
+  spam on first run.
+- Issue labels: `chore`, `code-audit`, `audit:dead-code`.
+
+To bootstrap without spam: the initial `.fallow/baseline.json` is empty, so
+the first push to main after this feature lands will create issues for **all**
+current findings. If that is too noisy, update the baseline manually:
+```bash
+yarn --silent fallow dead-code --format json > reports/fallow-deadcode.json
+node -e "
+  const r = require('./reports/fallow-deadcode.json');
+  require('fs').writeFileSync('.fallow/baseline.json', JSON.stringify({
+    unused_exports: (r.unused_exports||[]).map(e=>({file:e.file,name:e.name})),
+    unused_files:   (r.unused_files||[]).map(f=>({path:f.path||f})),
+    unused_types:   (r.unused_types||[]).map(t=>({file:t.file,name:t.name})),
+    version: 1,
+  }, null, 2));
+"
+git add .fallow/baseline.json && git commit -m "chore(audit): seed dead-code baseline"
+```

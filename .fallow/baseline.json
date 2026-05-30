@@ -1,0 +1,7 @@
+{
+  "unused_exports": [],
+  "unused_files": [],
+  "unused_types": [],
+  "version": 1,
+  "_comment": "Bootstrap baseline. CI updates this on every push to main so pre-existing findings are never spammed into issues. Only NEW findings (not present here) produce GitHub issues."
+}

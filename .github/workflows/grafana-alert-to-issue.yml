@@ -1,0 +1,133 @@
+name: Grafana alert → GitHub issue
+
+# Triggered by Grafana contact-point webhooks routed through a GitHub
+# repository_dispatch (event_type: grafana-alert). Configure the Grafana
+# webhook URL as:
+#   https://api.github.com/repos/Connor-Adams/cashflow/dispatches
+# with header `Authorization: Bearer <PAT>` (needs issues:write scope) and
+# Content-Type: application/json.
+#
+# Payload template (Grafana webhook body → client_payload):
+#   {
+#     "event_type": "grafana-alert",
+#     "client_payload": {
+#       "alertName": "{{ template \"__subject\" . }}",
+#       "status": "{{ .Status }}",
+#       "severity": "{{ .CommonLabels.severity }}",
+#       "component": "{{ .CommonLabels.component }}",
+#       "summary": "{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}",
+#       "description": "{{ range .Alerts }}{{ .Annotations.description }}{{ end }}",
+#       "runbook_url": "{{ range .Alerts }}{{ .Annotations.runbook_url }}{{ end }}",
+#       "generatorURL": "{{ range .Alerts }}{{ .GeneratorURL }}{{ end }}",
+#       "expr": "{{ range .Alerts }}{{ index .Labels \"__alert_rule_uid__\" }}{{ end }}"
+#     }
+#   }
+#
+# Dedup key: open issue must carry label "alert:<alertName>".
+# Resolving:  status=resolved → comment "✅ Resolved" + close issue.
+
+on:
+  repository_dispatch:
+    types: [grafana-alert]
+
+permissions:
+  issues: write
+
+jobs:
+  handle-alert:
+    name: Handle Grafana alert
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create, comment, or close issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const payload = context.payload.client_payload || {};
+            const alertName  = String(payload.alertName  || 'Unknown alert').trim();
+            const status     = String(payload.status     || 'firing').toLowerCase();
+            const severity   = String(payload.severity   || 'warning').toLowerCase();
+            const component  = String(payload.component  || 'unknown').toLowerCase();
+            const summary    = String(payload.summary    || '').trim();
+            const description = String(payload.description || '').trim();
+            const runbookUrl = String(payload.runbook_url || '').trim();
+            const generatorUrl = String(payload.generatorURL || '').trim();
+
+            const dedupeLabel = `alert:${alertName.replace(/\s+/g, '-')}`;
+            const { owner, repo } = context.repo;
+
+            // Find existing open issue with the dedup label.
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: dedupeLabel, per_page: 5,
+            });
+            const existing = issues[0] || null;
+
+            if (status === 'resolved') {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: existing.number,
+                  body: `✅ **Alert resolved** at ${new Date().toISOString()}\n\n_Closing automatically._`,
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: existing.number, state: 'closed',
+                });
+                core.info(`Closed issue #${existing.number} (resolved).`);
+              } else {
+                core.info('Alert resolved but no open issue found — nothing to do.');
+              }
+              return;
+            }
+
+            // status === 'firing'
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.number,
+                body: [
+                  `🔔 **Alert re-fired** at ${new Date().toISOString()}`,
+                  summary ? `\n> ${summary}` : '',
+                  generatorUrl ? `\n[Grafana panel](${generatorUrl})` : '',
+                ].join(''),
+              });
+              core.info(`Commented on existing issue #${existing.number}.`);
+              return;
+            }
+
+            // Create new issue.
+            const severityEmoji = severity === 'critical' ? '🔴' : '🟡';
+            const bodyLines = [
+              `## ${severityEmoji} ${alertName}`,
+              '',
+              summary ? `**Summary:** ${summary}` : '',
+              '',
+              description
+                ? `**Description:**\n\n${description}`
+                : '',
+              '',
+              runbookUrl ? `**Runbook:** ${runbookUrl}` : '',
+              generatorUrl ? `**Grafana panel:** ${generatorUrl}` : '',
+              '',
+              `**Fired at:** ${new Date().toISOString()}`,
+              `**Severity:** \`${severity}\`  **Component:** \`${component}\``,
+            ].filter(l => l !== null).join('\n');
+
+            const ensureLabel = async (name, color, desc) => {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch {
+                await github.rest.issues.createLabel({
+                  owner, repo, name, color, description: desc,
+                }).catch(() => undefined);
+              }
+            };
+
+            await ensureLabel(dedupeLabel, 'd93f0b', `Grafana alert: ${alertName}`);
+            await ensureLabel('incident', 'e4e669', 'Active production incident');
+            await ensureLabel(`severity:${severity}`, severity === 'critical' ? 'b60205' : 'fbca04', `Alert severity ${severity}`);
+            await ensureLabel(`component:${component}`, 'c2e0c6', `Component: ${component}`);
+
+            const { data: issue } = await github.rest.issues.create({
+              owner, repo,
+              title: `[alert] ${alertName} on ${component}`,
+              body: bodyLines,
+              labels: [dedupeLabel, 'incident', 'bug', `severity:${severity}`, `component:${component}`],
+            });
+            core.info(`Created issue #${issue.number}: ${issue.html_url}`);

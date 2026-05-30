@@ -13,5 +13,6 @@ coverage/
 uploads/
 *.log
 backend/test/fixtures/pdf/
-.fallow/
+.fallow/*
+!.fallow/baseline.json
 reports/
