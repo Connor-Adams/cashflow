@@ -85,6 +85,7 @@ import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
 import reviewItemsRouter from './routes/reviewItems';
+import dividendsRouter from './routes/dividends';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -239,6 +240,7 @@ app.use('/api', dataExportRouter);
 // Unified review-items inbox (issue #378). Read-only fan-out across
 // AiSuggestion, AiReviewRun items, CfoBriefing items, and ChatProposal.
 app.use('/api/review-items', reviewItemsRouter);
+app.use('/api/dividends', dividendsRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
