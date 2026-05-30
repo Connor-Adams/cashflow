@@ -1,4 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
+import { ServerErrorEvent } from './models/ServerErrorEvent';
 import cors from 'cors';
 import * as env from './config/env';
 
@@ -262,6 +263,27 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+app.use((err: unknown, _req: Request, _res: Response, next: NextFunction) => {
+  const rawStatus =
+    err && typeof err === 'object' && 'status' in err ? (err as { status?: unknown }).status
+    : err && typeof err === 'object' && 'statusCode' in err ? (err as { statusCode?: unknown }).statusCode
+    : undefined;
+  const tapStatus = Number(rawStatus) || 500;
+  if (tapStatus >= 500) {
+    void ServerErrorEvent.create({
+      householdId: _req.auth?.household.id ?? _req.auditAuth?.household.id ?? null,
+      userId: _req.auth?.user.id ?? _req.auditAuth?.user.id ?? null,
+      method: _req.method,
+      path: _req.originalUrl.slice(0, 512),
+      status: tapStatus,
+      message: String(err instanceof Error ? err.message : err ?? '').slice(0, 4000),
+      stack: err instanceof Error ? String(err.stack ?? '').slice(0, 8000) : null,
+      requestId: _req.requestId ?? null,
+    }).catch(() => undefined);
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);
