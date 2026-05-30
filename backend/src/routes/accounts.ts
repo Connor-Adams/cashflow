@@ -3,6 +3,7 @@ import { Account, Transaction, sequelize } from '../models';
 import * as env from '../config/env';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
+import { mergeAccounts, mergedAccountFilter } from '../services/accountMerge';
 
 const router = Router();
 const ACCOUNT_TYPES = new Set([
@@ -22,8 +23,12 @@ function normalizeAccountType(raw: unknown): string {
 
 router.get('/', async (req, res, next) => {
   try {
+    const includeMerged = req.query.includeMerged === 'true';
     const rows = await Account.findAll({
-      where: visibleAccountWhere(req),
+      where: {
+        ...visibleAccountWhere(req),
+        ...mergedAccountFilter(includeMerged),
+      },
       order: [['name', 'ASC']],
     });
     res.json(rows);
@@ -148,6 +153,55 @@ router.delete('/:id', async (req, res, next) => {
       await account.destroy({ transaction: t });
     });
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:sourceId/merge-into/:targetId', async (req, res, next) => {
+  try {
+    const sourceId = parseInt(req.params.sourceId, 10);
+    const targetId = parseInt(req.params.targetId, 10);
+    if (Number.isNaN(sourceId) || Number.isNaN(targetId)) {
+      res.status(400).json({ error: 'Invalid account id' });
+      return;
+    }
+
+    const { household } = currentAuth(req);
+    const result = await mergeAccounts(household.id, sourceId, targetId);
+
+    if (!result.ok) {
+      const { error } = result;
+      switch (error.code) {
+        case 'SAME_ID':
+          res.status(400).json({ error: 'SAME_ID', message: 'Source and target must be different accounts.' });
+          return;
+        case 'SOURCE_NOT_FOUND':
+        case 'TARGET_NOT_FOUND':
+          res.status(404).json({ error: error.code, message: 'Account not found.' });
+          return;
+        case 'CURRENCY_MISMATCH':
+          res.status(400).json({
+            error: 'CURRENCY_MISMATCH',
+            message: `Accounts must be in the same currency. Source: ${error.sourceCurrency}; Target: ${error.targetCurrency}.`,
+            sourceCurrency: error.sourceCurrency,
+            targetCurrency: error.targetCurrency,
+          });
+          return;
+        case 'TARGET_NOT_MERGEABLE':
+          res.status(400).json({ error: 'TARGET_NOT_MERGEABLE', message: 'Target has already been merged into another account.' });
+          return;
+        case 'SOURCE_ALREADY_MERGED':
+          res.status(400).json({ error: 'SOURCE_ALREADY_MERGED', message: 'Source account has already been merged.' });
+          return;
+      }
+    }
+
+    res.json({
+      source: result.source,
+      target: result.target,
+      movedTransactions: result.movedTransactions,
+    });
   } catch (e) {
     next(e);
   }
