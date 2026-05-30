@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { Account, Transaction, TaxReserveSetting } from '../models';
+import { Account, Category, Entity, PlannedEvent, Subscription, Transaction, TaxReserveSetting, TransactionLargePurchaseReview } from '../models';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import { DEFAULT_TAX_RESERVE_PERCENT } from '../models/TaxReserveSetting';
 import { buildNetWorthAt, buildSeries, daysInRange } from '../networth/aggregate';
 import { buildForecast } from '../forecast/buildForecast';
+import { detectRecurring } from './recurring';
 
 const router = Router();
 
@@ -453,6 +454,374 @@ router.get('/projections', async (req, res, next) => {
       },
       projections,
     });
+  } catch (e) { next(e); }
+});
+
+// ── /runway ───────────────────────────────────────────────────────────────────
+
+const ESSENTIAL_CATEGORIES = new Set([
+  'housing', 'rent', 'mortgage', 'utilities', 'groceries', 'insurance',
+  'transport', 'transportation', 'healthcare', 'health', 'debt', 'debt_minimum',
+]);
+
+router.get('/runway', async (req, res, next) => {
+  try {
+    const householdId = req.reportingAuth!.household.id;
+    const accounts = await resolveHouseholdAccounts(householdId);
+    const accountIds = accounts.map((a) => a.id);
+    const availableCurrencies = await resolveAvailableCurrencies(accountIds);
+    const { currency, err } = await resolveCurrency(
+      req as unknown as { query: Record<string, unknown> },
+      availableCurrencies,
+    );
+    if (err) { res.status(400).json({ error: err }); return; }
+
+    const LIQUID_TYPES = new Set(['checking', 'savings', 'cash']);
+    let liquidCash = 0;
+    const asOf = todayIso();
+    for (const account of accounts) {
+      if (!LIQUID_TYPES.has(account.accountType ?? '')) continue;
+      const balances = await balanceAtDate(account, asOf);
+      for (const b of balances) {
+        if (b.currency !== currency) continue;
+        liquidCash += b.amount;
+      }
+    }
+
+    const threeMonthsAgo = monthsAgoIso(3);
+    const txns = accountIds.length === 0 ? [] : await Transaction.findAll({
+      where: {
+        accountId: { [Op.in]: accountIds },
+        currency,
+        date: { [Op.gte]: threeMonthsAgo, [Op.lte]: asOf },
+        amount: { [Op.lt]: 0 },
+      },
+      attributes: ['amount', 'date', 'finalCategory'],
+    });
+
+    const byMonth = new Map<string, { total: number; essential: number }>();
+    for (const txn of txns) {
+      const month = txn.date.slice(0, 7);
+      const bucket = byMonth.get(month) ?? { total: 0, essential: 0 };
+      const spend = -Number(txn.amount);
+      bucket.total += spend;
+      const cat = (txn.finalCategory ?? '').toLowerCase();
+      if (ESSENTIAL_CATEGORIES.has(cat)) bucket.essential += spend;
+      byMonth.set(month, bucket);
+    }
+
+    const monthlyTotals = Array.from(byMonth.values());
+    const avgBurn = monthlyTotals.length > 0
+      ? monthlyTotals.reduce((s, m) => s + m.total, 0) / monthlyTotals.length : 0;
+    const avgEssential = monthlyTotals.length > 0
+      ? monthlyTotals.reduce((s, m) => s + m.essential, 0) / monthlyTotals.length : 0;
+    const avgLifestyle = round2(Math.max(0, avgBurn - avgEssential));
+    const maxMonthlyBurn = monthlyTotals.length > 0 ? Math.max(...monthlyTotals.map((m) => m.total)) : 0;
+
+    res.json({
+      liquidCash: round2(liquidCash),
+      averageMonthlyBurn: round2(avgBurn),
+      essentialMonthlyBurn: round2(avgEssential),
+      lifestyleMonthlyBurn: avgLifestyle,
+      runwayMonths: avgBurn > 0 ? round2(liquidCash / avgBurn) : null,
+      conservativeRunwayMonths: maxMonthlyBurn > 0 ? round2(liquidCash / maxMonthlyBurn) : null,
+    });
+  } catch (e) { next(e); }
+});
+
+// ── /spending/by-category ─────────────────────────────────────────────────────
+
+router.get('/spending/by-category', async (req, res, next) => {
+  try {
+    const householdId = req.reportingAuth!.household.id;
+    const today = todayIso();
+    const start = String(req.query.start ?? monthsAgoIso(1));
+    const end = String(req.query.end ?? today);
+
+    const accounts = await resolveHouseholdAccounts(householdId);
+    const accountIds = accounts.map((a) => a.id);
+    const availableCurrencies = await resolveAvailableCurrencies(accountIds);
+    const { currency, err } = await resolveCurrency(
+      req as unknown as { query: Record<string, unknown> },
+      availableCurrencies,
+    );
+    if (err) { res.status(400).json({ error: err }); return; }
+
+    if (accountIds.length === 0) { res.json({ start, end, categories: [] }); return; }
+
+    // Previous period: equal-length window immediately preceding start
+    const startMs = new Date(start).getTime();
+    const endMs = new Date(end).getTime();
+    const periodMs = Math.max(0, endMs - startMs);
+    const prevEnd = new Date(startMs - 1).toISOString().slice(0, 10);
+    const prevStart = new Date(startMs - periodMs).toISOString().slice(0, 10);
+
+    const [txns, prevTxns, catRows] = await Promise.all([
+      Transaction.findAll({
+        where: { accountId: { [Op.in]: accountIds }, currency, date: { [Op.gte]: start, [Op.lte]: end }, amount: { [Op.lt]: 0 } },
+        attributes: ['amount', 'finalCategory'],
+      }),
+      Transaction.findAll({
+        where: { accountId: { [Op.in]: accountIds }, currency, date: { [Op.gte]: prevStart, [Op.lte]: prevEnd }, amount: { [Op.lt]: 0 } },
+        attributes: ['amount', 'finalCategory'],
+      }),
+      Category.findAll({ where: { householdId } }),
+    ]);
+
+    const catNameMap = new Map<string, string>(catRows.map((c) => [c.name, c.name]));
+
+    const byCat = new Map<string, { amount: number; count: number }>();
+    let totalSpend = 0;
+    for (const txn of txns) {
+      const cat = txn.finalCategory ?? 'Uncategorized';
+      const spend = -Number(txn.amount);
+      const bucket = byCat.get(cat) ?? { amount: 0, count: 0 };
+      bucket.amount += spend;
+      bucket.count += 1;
+      byCat.set(cat, bucket);
+      totalSpend += spend;
+    }
+
+    const prevByCat = new Map<string, number>();
+    for (const txn of prevTxns) {
+      const cat = txn.finalCategory ?? 'Uncategorized';
+      prevByCat.set(cat, (prevByCat.get(cat) ?? 0) + (-Number(txn.amount)));
+    }
+
+    const categories = Array.from(byCat.entries())
+      .sort(([, a], [, b]) => b.amount - a.amount)
+      .map(([catId, { amount, count }]) => {
+        const prevAmount = prevByCat.get(catId) ?? 0;
+        const trend = prevAmount > 0 ? round2((amount - prevAmount) / prevAmount) : null;
+        return {
+          categoryId: catId,
+          name: catNameMap.get(catId) ?? catId,
+          amount: round2(amount),
+          percentage: totalSpend > 0 ? round2(amount / totalSpend) : 0,
+          transactionCount: count,
+          trendVsPreviousPeriod: trend,
+        };
+      });
+
+    res.json({ start, end, categories });
+  } catch (e) { next(e); }
+});
+
+// ── /recurring ────────────────────────────────────────────────────────────────
+
+function parseCadence(rule: string | null): 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual' {
+  if (!rule) return 'monthly';
+  const upper = rule.toUpperCase();
+  if (upper.includes('FREQ=YEARLY') || upper.includes('FREQ=ANNUAL')) return 'annual';
+  if (upper.includes('FREQ=MONTHLY') && (upper.includes('INTERVAL=3') || upper.includes('INTERVAL=4'))) return 'quarterly';
+  if (upper.includes('FREQ=MONTHLY')) return 'monthly';
+  if (upper.includes('FREQ=WEEKLY') && upper.includes('INTERVAL=2')) return 'biweekly';
+  if (upper.includes('FREQ=WEEKLY')) return 'weekly';
+  return 'monthly';
+}
+
+function subCadenceToEnum(c: string): 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual' {
+  if (c === 'weekly') return 'weekly';
+  if (c === 'biweekly') return 'biweekly';
+  if (c === 'monthly') return 'monthly';
+  if (c === 'quarterly') return 'quarterly';
+  return 'annual';
+}
+
+router.get('/recurring', async (req, res, next) => {
+  try {
+    const householdId = req.reportingAuth!.household.id;
+    const accounts = await resolveHouseholdAccounts(householdId);
+    const accountIds = accounts.map((a) => a.id);
+
+    const [subscriptions, plannedEvents] = await Promise.all([
+      Subscription.findAll({ where: { householdId, status: { [Op.in]: ['active', 'unknown'] } } }),
+      PlannedEvent.findAll({ where: { householdId, recurrenceRule: { [Op.ne]: null } } }),
+    ]);
+
+    const sixMonthsAgo = monthsAgoIso(6);
+    const recentTxns = accountIds.length === 0 ? [] : await Transaction.findAll({
+      where: {
+        accountId: { [Op.in]: accountIds },
+        date: { [Op.gte]: sixMonthsAgo },
+        amount: { [Op.lt]: 0 },
+      },
+      attributes: ['merchantClean', 'merchantRaw', 'amount', 'currency', 'date', 'finalCategory'],
+    });
+
+    const detectedItems = detectRecurring(recentTxns.map((t) => ({
+      merchant: t.merchantClean ?? t.merchantRaw ?? null,
+      amount: Number(t.amount),
+      currency: t.currency,
+      date: t.date,
+      category: t.finalCategory,
+    })));
+
+    type RecurringEntry = {
+      id: string; name: string; type: 'income' | 'expense' | 'transfer';
+      amount: number; cadence: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual';
+      nextExpectedDate: string | null; confidence: number; category: string | null;
+    };
+
+    const seen = new Set<string>();
+    const recurringItems: RecurringEntry[] = [];
+
+    for (const sub of subscriptions) {
+      const cadence = subCadenceToEnum(sub.cadence);
+      const key = `${sub.normalizedName}_${cadence}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recurringItems.push({ id: `sub_${sub.id}`, name: sub.merchantName, type: 'expense',
+        amount: round2(Number(sub.amount)), cadence, nextExpectedDate: sub.nextExpectedDate ?? null,
+        confidence: 1.0, category: sub.category ?? null });
+    }
+
+    const typeMap: Record<string, 'income' | 'expense' | 'transfer'> = {
+      income: 'income', expense: 'expense', transfer: 'transfer',
+      settlement: 'transfer', debt_payment: 'expense', savings: 'income',
+    };
+    for (const ev of plannedEvents) {
+      const cadence = parseCadence(ev.recurrenceRule);
+      const key = `${ev.name.toLowerCase()}_${cadence}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recurringItems.push({ id: `ev_${ev.id}`, name: ev.name,
+        type: typeMap[ev.type] ?? 'expense', amount: round2(Math.abs(Number(ev.amount))),
+        cadence, nextExpectedDate: ev.expectedDate ?? null, confidence: 1.0, category: null });
+    }
+
+    for (const item of detectedItems) {
+      const key = `${item.merchant.toLowerCase()}_${item.cadence}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recurringItems.push({ id: `det_${Buffer.from(item.merchant).toString('base64')}_${item.cadence}`,
+        name: item.merchant, type: 'expense', amount: round2(Math.abs(item.avgAmount)),
+        cadence: item.cadence, nextExpectedDate: item.nextExpected,
+        confidence: Math.min(1, Math.max(0, item.amountStability)), category: item.category ?? null });
+    }
+
+    res.json({ recurringItems });
+  } catch (e) { next(e); }
+});
+
+// ── /tax ──────────────────────────────────────────────────────────────────────
+
+router.get('/tax', async (req, res, next) => {
+  try {
+    const householdId = req.reportingAuth!.household.id;
+    const currentYear = new Date().getFullYear();
+    const rawYear = parseInt(String(req.query.year ?? currentYear), 10);
+    const year = Number.isFinite(rawYear) ? rawYear : currentYear;
+
+    const accounts = await resolveHouseholdAccounts(householdId);
+    const accountIds = accounts.map((a) => a.id);
+    const availableCurrencies = await resolveAvailableCurrencies(accountIds);
+    const { currency, err } = await resolveCurrency(
+      req as unknown as { query: Record<string, unknown> },
+      availableCurrencies,
+    );
+    if (err) { res.status(400).json({ error: err }); return; }
+
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+
+    const [incomeTxns, corpEntity, setting] = await Promise.all([
+      accountIds.length === 0 ? Promise.resolve([]) : Transaction.findAll({
+        where: { accountId: { [Op.in]: accountIds }, currency, date: { [Op.gte]: yearStart, [Op.lte]: yearEnd }, amount: { [Op.gt]: 0 } },
+        attributes: ['amount'],
+      }),
+      Entity.findOne({ where: { householdId, kind: 'corp' } }),
+      TaxReserveSetting.findOne({ where: { householdId, currency } }),
+    ]);
+
+    const grossIncome = round2(incomeTxns.reduce((s, t) => s + Number(t.amount), 0));
+    const reservePercent = Number(setting?.reservePercent ?? DEFAULT_TAX_RESERVE_PERCENT);
+    const taxReserveTarget = round2(grossIncome * reservePercent);
+    const taxReserveActual = 0;
+    const estimatedTaxOwed = taxReserveTarget;
+    const reserveDelta = round2(taxReserveTarget - taxReserveActual);
+
+    const response: Record<string, unknown> = { year, grossIncome, estimatedTaxOwed, taxReserveTarget, taxReserveActual, reserveDelta };
+    if (corpEntity) {
+      response.hstCollected = null;
+      response.hstRemitted = null;
+      response.corporateCash = null;
+    }
+
+    res.json(response);
+  } catch (e) { next(e); }
+});
+
+// ── /events ───────────────────────────────────────────────────────────────────
+
+const LARGE_PURCHASE_THRESHOLD = 500;
+
+router.get('/events', async (req, res, next) => {
+  try {
+    const householdId = req.reportingAuth!.household.id;
+    const today = todayIso();
+    const start = String(req.query.start ?? monthsAgoIso(3));
+    const end = String(req.query.end ?? today);
+    const rawLimit = parseInt(String(req.query.limit ?? '50'), 10);
+    const limit = Math.min(Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 50, 200);
+
+    const accounts = await resolveHouseholdAccounts(householdId);
+    const accountIds = accounts.map((a) => a.id);
+
+    type EventEntry = {
+      id: string; date: string;
+      type: 'large_purchase' | 'income_received' | 'subscription_started' | 'subscription_cancelled';
+      title: string; amount: number | null; metadata: Record<string, unknown> | null;
+    };
+    const events: EventEntry[] = [];
+
+    const [incomeEvents, subs] = await Promise.all([
+      PlannedEvent.findAll({
+        where: { householdId, type: 'income', status: 'posted', expectedDate: { [Op.gte]: start, [Op.lte]: end } },
+        order: [['expectedDate', 'DESC']],
+      }),
+      Subscription.findAll({
+        where: { householdId },
+        order: [['updatedAt', 'DESC']],
+      }),
+    ]);
+
+    if (accountIds.length > 0) {
+      const largePurchases = await Transaction.findAll({
+        where: { accountId: { [Op.in]: accountIds }, date: { [Op.gte]: start, [Op.lte]: end }, amount: { [Op.lte]: -LARGE_PURCHASE_THRESHOLD } },
+        include: [{ model: TransactionLargePurchaseReview, as: 'largePurchaseReview', required: true }],
+        order: [['date', 'DESC']],
+      });
+      for (const txn of largePurchases) {
+        events.push({ id: `large_purchase_${txn.id}`, date: txn.date, type: 'large_purchase',
+          title: (txn.merchantClean ?? txn.merchantRaw) || 'Large Purchase',
+          amount: round2(Math.abs(Number(txn.amount))), metadata: null });
+      }
+    }
+
+    for (const ev of incomeEvents) {
+      events.push({ id: `income_received_${ev.id}`, date: ev.expectedDate, type: 'income_received',
+        title: ev.name, amount: round2(Math.abs(Number(ev.amount))), metadata: null });
+    }
+
+    for (const sub of subs) {
+      if (sub.status === 'active') {
+        const d = sub.createdAt.toISOString().slice(0, 10);
+        if (d >= start && d <= end) {
+          events.push({ id: `sub_started_${sub.id}`, date: d, type: 'subscription_started',
+            title: sub.merchantName, amount: round2(Number(sub.amount)), metadata: null });
+        }
+      } else if (sub.status === 'cancelled') {
+        const d = sub.updatedAt.toISOString().slice(0, 10);
+        if (d >= start && d <= end) {
+          events.push({ id: `sub_cancelled_${sub.id}`, date: d, type: 'subscription_cancelled',
+            title: sub.merchantName, amount: round2(Number(sub.amount)), metadata: null });
+        }
+      }
+    }
+
+    events.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+    res.json({ events: events.slice(0, limit) });
   } catch (e) { next(e); }
 });
 
