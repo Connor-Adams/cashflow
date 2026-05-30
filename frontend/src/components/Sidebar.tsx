@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Coins,
   HandCoins,
+  Landmark,
   Package,
   PackageCheck,
   PackageSearch,
@@ -109,6 +110,7 @@ const navSections: NavSection[] = [
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/goals', label: 'Goals', icon: Target },
       { to: '/forecast', label: 'Forecast', icon: TrendingUp },
+      { to: '/debt', label: 'Debt payoff', icon: Landmark },
     ],
   },
   {

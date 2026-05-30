@@ -66,6 +66,17 @@ export async function patchJson<T>(path: string, body: unknown): Promise<T> {
   return parseJson<T>(r)
 }
 
+export async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(`${base}${path}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) throw await apiError(r, path)
+  return parseJson<T>(r)
+}
+
 export async function deleteReq(path: string): Promise<void> {
   const r = await fetch(`${base}${path}`, { method: 'DELETE', credentials: 'include' })
   if (!r.ok && r.status !== 204) throw await apiError(r, path)
