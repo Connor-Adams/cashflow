@@ -2,12 +2,24 @@ import fs from 'fs';
 import path from 'path';
 import { Sequelize } from 'sequelize';
 import * as env from './config/env';
+import { logger } from './observability/logger';
+
+function slowQueryLogger(sql: string, timing?: number): void {
+  const thresholdMs = parseInt(process.env.SLOW_QUERY_MS ?? '500', 10);
+  if (typeof timing === 'number' && timing >= thresholdMs) {
+    // Strip VALUES/WHERE/SET clauses to avoid logging PII (amounts, merchant
+    // names, account numbers). Only the statement type and table are retained.
+    const safeText = sql.replace(/\s+(WHERE|VALUES|SET)\s+.*/is, ' [redacted]');
+    logger.warn({ durationMs: timing, sql: safeText }, 'slow_query');
+  }
+}
 
 function createSequelize(): Sequelize {
   if (env.databaseUrl) {
     return new Sequelize(env.databaseUrl, {
       dialect: 'postgres',
-      logging: false,
+      logging: slowQueryLogger,
+      benchmark: true,
     });
   }
 

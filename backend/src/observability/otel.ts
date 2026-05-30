@@ -13,6 +13,7 @@ import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
+import { type Span } from '@opentelemetry/api';
 
 // ATTR_DEPLOYMENT_ENVIRONMENT_NAME lives in /incubating which is not resolvable
 // under "moduleResolution": "node". Use the string literal directly.
@@ -44,6 +45,18 @@ if (otlpEnabled) {
         // @opentelemetry/instrumentation-runtime-node is included in
         // auto-instrumentations-node and emits event-loop delay, heap,
         // GC, and CPU metrics under the nodejs.* namespace (#421).
+        '@opentelemetry/instrumentation-pg': {
+          // Attach the parameterized query text as db.statement.
+          // Only queryInfo.query.text (with $1/$2 placeholders) is captured —
+          // never queryInfo.query.values, which would expose PII (amounts,
+          // merchant names, account numbers).
+          requestHook: (span: Span, queryInfo: any) => {
+            const text = queryInfo?.query?.text;
+            if (typeof text === 'string') {
+              span.setAttribute('db.statement', text);
+            }
+          },
+        },
       }),
     ],
   });

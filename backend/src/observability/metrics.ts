@@ -165,3 +165,58 @@ export function recordJobTick(opts: {
     jobLastSuccessTs.set(opts.job, Math.floor(Date.now() / 1000));
   }
 }
+
+// --- DB pool metrics ---
+// Observable gauges: read Sequelize connection-pool state on each export cycle.
+// sequelize.connectionManager.pool is a generic-pool Pool; the properties are:
+//   pool.size  (total connections), pool.borrowed (in-use), pool.pending (waiting),
+//   pool.available (idle).
+// We import sequelize lazily to avoid circular deps (db.ts → models → metrics fails
+// if metrics.ts imports db.ts at module load). Use a function that reads the pool
+// on each observation.
+
+function getPool(): { size: number; borrowed: number; pending: number; available: number } | null {
+  try {
+    // Dynamic require to break potential circular dependency at module load time
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { sequelize } = require('../db') as { sequelize: import('sequelize').Sequelize };
+    const pool = (sequelize.connectionManager as any).pool;
+    if (!pool) return null;
+    return {
+      size: pool.size ?? 0,
+      borrowed: pool.borrowed ?? 0,
+      pending: pool.pending ?? 0,
+      available: pool.available ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+meter.createObservableGauge('cashflow.db.pool.size', {
+  description: 'Total connections in the Sequelize pool',
+}).addCallback((result) => {
+  const p = getPool();
+  if (p) result.observe(p.size);
+});
+
+meter.createObservableGauge('cashflow.db.pool.in_use', {
+  description: 'Borrowed (active) connections in the Sequelize pool',
+}).addCallback((result) => {
+  const p = getPool();
+  if (p) result.observe(p.borrowed);
+});
+
+meter.createObservableGauge('cashflow.db.pool.waiting', {
+  description: 'Pending connection acquire requests',
+}).addCallback((result) => {
+  const p = getPool();
+  if (p) result.observe(p.pending);
+});
+
+meter.createObservableGauge('cashflow.db.pool.available', {
+  description: 'Idle connections in the Sequelize pool',
+}).addCallback((result) => {
+  const p = getPool();
+  if (p) result.observe(p.available);
+});
