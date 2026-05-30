@@ -27,6 +27,7 @@ import {
   type MoneyLeakType,
 } from '../models/MoneyLeakDismissal';
 import { Subscription } from '../models/Subscription';
+import { Expectation } from '../models/Expectation';
 import { Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
@@ -137,9 +138,23 @@ router.get('/', async (req, res, next) => {
     const currency = parseCurrency(req.query.currency);
 
     // 1. Active subscriptions for this household.
+    //
+    // Primary source: legacy Subscription table (maintained by
+    // /api/subscriptions refresh-on-read). Secondary source: Expectation rows
+    // with a recurring cadence (cadence != 'one_shot') that originated from
+    // Subscription detection (source_subscription_id IS NOT NULL). The two sets
+    // are merged by source_subscription_id so each real subscription appears
+    // exactly once — the Subscription table row takes precedence because it
+    // holds fresher detection data. Expectation-only rows (no matching
+    // Subscription) are included so the MoneyLeak view is forward-compatible as
+    // new recurring Expectations are written directly to the expectations table.
     const subRows = await Subscription.findAll({
       where: { ...householdWhere(req) },
     });
+
+    // Index existing Subscription rows by id for fast deduplication below.
+    const subIdsSeen = new Set<number>(subRows.map((r) => r.id));
+
     const subscriptions: LeakSubscription[] = subRows.map((row) => ({
       id: row.id,
       merchantName: row.merchantName,
@@ -154,6 +169,69 @@ router.get('/', async (req, res, next) => {
       lastChargeDate: row.lastChargeDate,
       nextExpectedDate: row.nextExpectedDate,
     }));
+
+    // Add any recurring Expectations that do NOT correspond to an existing
+    // Subscription row (i.e. future expectations written directly to the table,
+    // not seeded from the old subscriptions table). For now this is primarily
+    // a forward-compatibility hook — the migration seeds expectations from
+    // subscriptions, so newly created recurring expectations that bypass the
+    // old Subscription model will surface in the leak detector.
+    const expRows = await Expectation.findAll({
+      where: {
+        ...householdWhere(req),
+        cadence: { [Op.ne]: 'one_shot' },
+        // Only include rows not already covered by a Subscription table row.
+        [Op.or]: [
+          { sourceSubscriptionId: null },
+          { sourceSubscriptionId: { [Op.notIn]: subIdsSeen.size > 0 ? [...subIdsSeen] : [-1] } },
+        ],
+      },
+    });
+    for (const row of expRows) {
+      // Translate Expectation cadence → SubscriptionCadence. Expectation uses
+      // 'yearly'; the old Subscription type used 'annual'. We keep 'annual' in
+      // the LeakSubscription shape so the detector logic is unchanged.
+      type SubCadence = LeakSubscription['cadence'];
+      type SubStatus = LeakSubscription['status'];
+      const cadenceMap: Record<string, SubCadence> = {
+        weekly: 'weekly',
+        monthly: 'monthly',
+        quarterly: 'quarterly',
+        yearly: 'annual',
+        custom: 'monthly', // best-effort fallback for custom RRULE cadences
+      };
+      const cadence: SubCadence = cadenceMap[row.cadence] ?? 'monthly';
+
+      // Translate Expectation status → SubscriptionStatus. Expectation has
+      // richer statuses ('planned', 'posted', 'skipped', 'needs_review',
+      // 'paused') that don't exist on Subscription. We map them to the closest
+      // equivalent so the leak detector can still reason about them.
+      const statusMap: Record<string, SubStatus> = {
+        planned: 'unknown',
+        posted: 'active',
+        skipped: 'ignored',
+        active: 'active',
+        cancelled: 'cancelled',
+        paused: 'ignored',
+        needs_review: 'unknown',
+      };
+      const status: SubStatus = statusMap[row.status] ?? 'unknown';
+
+      subscriptions.push({
+        id: row.id,
+        merchantName: row.name,
+        normalizedName: row.normalizedName ?? row.name,
+        currency: row.currency,
+        amount: Number(row.amount),
+        cadence,
+        annualizedCost: row.annualizedCost != null ? Number(row.annualizedCost) : 0,
+        status,
+        priceChangeDetected: Boolean(row.priceChangeDetected),
+        category: row.category,
+        lastChargeDate: row.lastChargeDate ?? new Date().toISOString().slice(0, 10),
+        nextExpectedDate: row.expectedAt,
+      });
+    }
 
     // 2. Recurring transaction groups (180d window) — for recurring_fee.
     const sinceRecurring = new Date(

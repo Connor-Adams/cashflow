@@ -71,6 +71,7 @@ import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
+import { Expectation, initExpectation } from './Expectation';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
@@ -177,6 +178,7 @@ initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initSubscription(sequelize);
+initExpectation(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
 initMoneyLeakDismissal(sequelize);
@@ -578,6 +580,35 @@ Household.hasMany(Subscription, {
   hooks: true,
 });
 Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+
+// Expectation (issue #402). Folded primitive: superset of PlannedEvent +
+// Subscription. Associations mirror PlannedEvent associations; user and account
+// are nullable (subscription-origin rows have no user_id / account_id).
+Household.hasMany(Expectation, {
+  foreignKey: 'household_id',
+  as: 'expectations',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Expectation.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+User.hasMany(Expectation, {
+  foreignKey: 'user_id',
+  as: 'expectations',
+});
+Expectation.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Account.hasMany(Expectation, {
+  foreignKey: 'account_id',
+  as: 'expectations',
+});
+Expectation.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
+Transaction.hasMany(Expectation, {
+  foreignKey: 'linked_transaction_id',
+  as: 'expectations',
+});
+Expectation.belongsTo(Transaction, {
+  foreignKey: 'linked_transaction_id',
+  as: 'linkedTransaction',
+});
 
 Household.hasMany(MoneyLeakDismissal, {
   foreignKey: 'household_id',
@@ -1107,4 +1138,5 @@ export {
   TransactionLabel,
   Feedback,
   DataExport,
+  Expectation,
 };
