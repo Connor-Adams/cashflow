@@ -5,7 +5,7 @@ interface Props {
   onClose: () => void;
   /**
    * Optional override for the compare endpoint. Defaults to the personal
-   * scenarios endpoint. Corp scenarios pass `/api/tax/corp-scenarios/compare`.
+   * scenarios endpoint. Corp scenarios pass `/api/tax/scenarios/corp/compare`.
    * The hook returns the same `ScenarioWithComputed[]` shape either way.
    */
   endpoint?: string;
