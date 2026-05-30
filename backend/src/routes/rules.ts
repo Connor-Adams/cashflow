@@ -323,6 +323,166 @@ router.patch('/:id', async (req, res, next) => {
   }
 });
 
+// ── Rule export/import ────────────────────────────────────────────────────
+
+const EXPORT_SCHEMA_VERSION = 1;
+
+type ExportedRule = {
+  merchantPattern: string;
+  matchKind: string;
+  priority: number;
+  category: string | null;
+  isBusiness: boolean;
+  splitType: string;
+  pctMe: string | null;
+  pctPartner: string | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+};
+
+type RuleExportPayload = {
+  schemaVersion: number;
+  exportedAt: string;
+  exportedBy: string;
+  rules: ExportedRule[];
+};
+
+router.get('/export', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const rows = await Rule.findAll({
+      where: { householdId: household.id },
+      order: [['priority', 'DESC'], ['id', 'ASC']],
+    });
+    const exportedBy = require('crypto').createHash('sha256')
+      .update(String(user.id)).digest('hex').slice(0, 16);
+    const payload: RuleExportPayload = {
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      exportedBy,
+      rules: rows.map((r) => ({
+        merchantPattern: r.merchantPattern,
+        matchKind: r.matchKind,
+        priority: r.priority,
+        category: r.category,
+        isBusiness: r.isBusiness,
+        splitType: r.splitType,
+        pctMe: r.pctMe,
+        pctPartner: r.pctPartner,
+        effectiveFrom: r.effectiveFrom,
+        effectiveTo: r.effectiveTo,
+      })),
+    };
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="cashflow-rules-${date}.json"`);
+    res.json(payload);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/import', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const b = (req.body || {}) as Record<string, unknown>;
+
+    if (!b.json || typeof b.json !== 'object') {
+      res.status(400).json({ error: 'json payload is required' });
+      return;
+    }
+    const payload = b.json as Record<string, unknown>;
+    if (Number(payload.schemaVersion) !== EXPORT_SCHEMA_VERSION) {
+      if ((payload.schemaVersion as number) > EXPORT_SCHEMA_VERSION) {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION' });
+      } else {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION' });
+      }
+      return;
+    }
+
+    const mode = String(b.mode || '');
+    if (mode !== 'append' && mode !== 'replace') {
+      res.status(400).json({ error: 'INVALID_MODE' });
+      return;
+    }
+
+    const rawRules = Array.isArray(payload.rules) ? (payload.rules as unknown[]) : [];
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Validate each rule and collect errors
+    const valid: ExportedRule[] = [];
+    const errors: { name: string; reason: string }[] = [];
+    for (const raw of rawRules) {
+      const r = raw as Record<string, unknown>;
+      if (!r.merchantPattern || typeof r.merchantPattern !== 'string') {
+        errors.push({ name: String(r.merchantPattern ?? '(unknown)'), reason: 'merchantPattern is required' });
+        continue;
+      }
+      const fromParsed = parseEffectiveDate(r.effectiveFrom);
+      const toParsed = parseEffectiveDate(r.effectiveTo);
+      if (!fromParsed.ok) { errors.push({ name: r.merchantPattern, reason: `effectiveFrom ${fromParsed.error}` }); continue; }
+      if (!toParsed.ok) { errors.push({ name: r.merchantPattern, reason: `effectiveTo ${toParsed.error}` }); continue; }
+      if (fromParsed.value != null && toParsed.value != null && fromParsed.value >= toParsed.value) {
+        errors.push({ name: r.merchantPattern, reason: 'effectiveFrom must be < effectiveTo' });
+        continue;
+      }
+      valid.push({
+        merchantPattern: r.merchantPattern,
+        matchKind: String(r.matchKind || 'substring'),
+        priority: r.priority != null ? Number(r.priority) : 0,
+        category: r.category != null ? String(r.category) : null,
+        isBusiness: Boolean(r.isBusiness),
+        splitType: String(r.splitType || 'me'),
+        pctMe: r.pctMe != null ? String(r.pctMe) : null,
+        pctPartner: r.pctPartner != null ? String(r.pctPartner) : null,
+        effectiveFrom: fromParsed.value,
+        effectiveTo: toParsed.value,
+      });
+    }
+
+    // Get existing rule count for replace mode (used for collision suffix in append)
+    const existingNames = new Set(
+      (await Rule.findAll({ where: { householdId: household.id }, attributes: ['merchantPattern'] }))
+        .map((r) => r.merchantPattern),
+    );
+
+    await sequelize.transaction(async (t) => {
+      if (mode === 'replace') {
+        await Rule.destroy({ where: { householdId: household.id }, transaction: t });
+      }
+
+      for (const rule of valid) {
+        let pattern = rule.merchantPattern;
+        if (mode === 'append' && existingNames.has(pattern)) {
+          pattern = `${pattern} (imported ${today})`;
+        }
+        await Rule.create(
+          {
+            merchantPattern: pattern,
+            householdId: household.id,
+            createdByUserId: user.id,
+            matchKind: rule.matchKind,
+            priority: rule.priority,
+            category: rule.category,
+            isBusiness: rule.isBusiness,
+            splitType: rule.splitType,
+            pctMe: rule.pctMe,
+            pctPartner: rule.pctPartner,
+            effectiveFrom: rule.effectiveFrom,
+            effectiveTo: rule.effectiveTo,
+          },
+          { transaction: t },
+        );
+      }
+    });
+
+    res.json({ imported: valid.length, skipped: errors.length, errors });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * GET /api/rules/auto-suggestions
  *

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
 import {
@@ -16,6 +17,7 @@ import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
+import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 
 type CategoryHint = {
   label: string
@@ -61,9 +63,19 @@ export function RulesPage() {
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [showImport, setShowImport] = useState(false)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
+
+  function exportRules() {
+    const link = document.createElement('a')
+    link.href = '/api/rules/export'
+    link.download = ''
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
   const categoryLabels = useMemo(
     () => categoryHints.map((hint) => hint.label),
     [categoryHints]
@@ -239,6 +251,26 @@ export function RulesPage() {
       <PageHeader
         title="Rules"
         description="Match merchants on import so category, business, and split defaults land in the right place."
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={rules.length === 0}
+              title={rules.length === 0 ? 'No rules to export.' : undefined}
+              onClick={exportRules}
+            >
+              Export rules
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowImport(true)}
+            >
+              Import rules
+            </Button>
+          </>
+        }
       />
       {err && <span className="error">{err}</span>}
       <RulesHealthSection onAfterCreate={() => void load()} />
@@ -480,6 +512,13 @@ export function RulesPage() {
       </section>
     </div>
     {confirm.dialog}
+    {showImport && (
+      <ImportRulesModal
+        existingCount={rules.length}
+        onClose={() => setShowImport(false)}
+        onImported={() => { setShowImport(false); void load() }}
+      />
+    )}
     </>
   )
 }
