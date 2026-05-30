@@ -14,6 +14,7 @@ export type ShareholderLoanDto = {
 
 type ShareholderLoansResponse = {
   shareholderLoans: ShareholderLoanDto[];
+  currency: string;
 };
 
 export type NewShareholderLoan = {
@@ -26,12 +27,14 @@ export type NewShareholderLoan = {
 
 export function useShareholderLoans() {
   const [loans, setLoans] = useState<ShareholderLoanDto[]>([]);
+  const [currency, setCurrency] = useState<string>('CAD');
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const d = await getJson<ShareholderLoansResponse>('/api/tax/corp/shareholder-loans');
       setLoans(d.shareholderLoans ?? []);
+      setCurrency(d.currency ?? 'CAD');
     } catch (e: unknown) {
       setError(String((e as Error)?.message ?? e));
     }
@@ -47,5 +50,5 @@ export function useShareholderLoans() {
     [load],
   );
 
-  return { loans, error, add, refresh: load };
+  return { loans, currency, error, add, refresh: load };
 }

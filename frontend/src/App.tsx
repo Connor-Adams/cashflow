@@ -53,6 +53,8 @@ import { LabelsTab } from './pages/settings/tabs/LabelsTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { AuditTokensTab } from './pages/settings/tabs/AuditTokensTab'
+import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
+import { SavedFiltersTab } from './pages/settings/tabs/SavedFiltersTab'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
@@ -147,6 +149,8 @@ function AppRoutes() {
             <Route path="jobs" element={<JobsTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
             <Route path="audit-tokens" element={<AuditTokensTab />} />
+            <Route path="whats-new" element={<WhatsNewTab />} />
+            <Route path="saved-filters" element={<SavedFiltersTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />
           <Route path="ai/reviews" element={<AiReviewsPage />} />

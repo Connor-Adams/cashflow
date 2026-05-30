@@ -1055,6 +1055,7 @@ export type ItemRow = {
   unitPrice: number | null
   totalPrice: number | null
   taxShare: number
+  currency: string
   categoryEffective: string | null
   categoryOverride: string | null
   businessUseEffective: boolean
@@ -1084,6 +1085,7 @@ export type ItemAllocation = {
   txnAmount: number | null
   percentOfTxn: number | null
   linkedTxnIds: number[]
+  currency: string
 }
 
 // Category icon names. MUST exactly match lucide-react exports — every

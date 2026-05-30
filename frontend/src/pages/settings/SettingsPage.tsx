@@ -19,6 +19,8 @@ const ALL_TOP_TABS: Array<
   { value: 'feedback', label: 'Feedback', ownerOnly: true },
   { value: 'jobs', label: 'Jobs' },
   { value: 'audit-tokens', label: 'AI audit tokens' },
+  { value: 'whats-new', label: "What's new" },
+  { value: 'saved-filters', label: 'Saved filters' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -34,6 +36,8 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   feedback: '/settings/feedback',
   jobs: '/settings/jobs',
   'audit-tokens': '/settings/audit-tokens',
+  'whats-new': '/settings/whats-new',
+  'saved-filters': '/settings/saved-filters',
 }
 
 export function SettingsPage() {

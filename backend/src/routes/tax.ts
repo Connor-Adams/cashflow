@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
-import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, sequelize } from '../models';
+import { Account, Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, sequelize } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
@@ -602,14 +602,21 @@ router.get('/corp/shareholder-loans', async (req, res, next) => {
     const { household } = currentAuth(req);
     const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
     if (!entity) {
-      res.json({ shareholderLoans: [] });
+      res.json({ shareholderLoans: [], currency: 'CAD' });
       return;
     }
     const rows = await ShareholderLoan.findAll({
       where: { entityId: entity.id },
       order: [['date', 'DESC']],
     });
-    res.json({ shareholderLoans: rows });
+    // Derive display currency from accounts linked to this corp entity; fall
+    // back to CAD (the most common jurisdiction for corp entities in this app).
+    const corpAccount = await Account.findOne({
+      where: { entityId: entity.id, householdId: household.id },
+      attributes: ['defaultCurrency'],
+    });
+    const currency = corpAccount?.defaultCurrency ?? 'CAD';
+    res.json({ shareholderLoans: rows, currency });
   } catch (err) {
     next(err);
   }

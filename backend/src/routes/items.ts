@@ -58,6 +58,10 @@ function mapItemToRow(it: ExternalOrderItem): ItemRow {
   const receipts = (order as ExternalOrder & { receipts?: Receipt[] }).receipts ?? [];
   const receipt = receipts[0];
   const txn = (receipt as Receipt & { transaction?: Transaction })?.transaction;
+  const currency = txn?.currency ?? null;
+  if (!currency) {
+    console.warn(`[items] item ${it.id} has no linked transaction currency; falling back to USD`);
+  }
   return {
     id: it.id,
     title: it.title,
@@ -65,6 +69,7 @@ function mapItemToRow(it: ExternalOrderItem): ItemRow {
     unitPrice: num(it.unitPrice),
     totalPrice: num(it.totalPrice),
     taxShare: 0,
+    currency: currency ?? 'USD',
     categoryEffective: effectiveCategory(it),
     categoryOverride: it.categoryOverride,
     businessUseEffective: effectiveBusinessUse(it),
@@ -341,6 +346,7 @@ router.get('/items/:id/allocation', async (req, res, next) => {
         txnAmount: null,
         percentOfTxn: null,
         linkedTxnIds: [],
+        currency: 'USD',
       });
       return;
     }
@@ -357,6 +363,7 @@ router.get('/items/:id/allocation', async (req, res, next) => {
         txnAmount: null,
         percentOfTxn: null,
         linkedTxnIds,
+        currency: 'USD',
       });
       return;
     }
@@ -388,6 +395,7 @@ router.get('/items/:id/allocation', async (req, res, next) => {
       txnAmount,
       percentOfTxn: txnAmount > 0 ? Math.round((allocated / txnAmount) * 1000) / 10 : null,
       linkedTxnIds,
+      currency: txn.currency,
     });
   } catch (e) {
     next(e);
