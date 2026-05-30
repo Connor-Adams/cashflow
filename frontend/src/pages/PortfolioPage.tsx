@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { SortableTableHeader } from '../components/table/SortableTableHeader'
+import { useUrlSort } from '../hooks/useUrlSort'
 import { RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
@@ -604,11 +606,82 @@ function BySecurityPanel({
 /* ---------------------- Allocation tab ---------------------- */
 
 function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
+  const { sort, dir, setSort, clearSort } = useUrlSort()
+
   const empty =
     !data ||
     (data.byAssetType.length === 0 &&
       data.bySecurity.length === 0 &&
       data.byAccount.length === 0)
+
+  // Flatten all rows into a unified list for sortable rendering
+  type AllocRow = {
+    key: string
+    group: string
+    bucket: string
+    marketValue: number
+    currency: string
+    percentage: number
+  }
+
+  const allRows = useMemo<AllocRow[]>(() => {
+    if (!data) return []
+    const rows: AllocRow[] = []
+    for (const r of data.byAssetType) {
+      rows.push({
+        key: `assetType|${r.assetType}|${r.currency}`,
+        group: 'Asset type',
+        bucket: `${r.assetType} (${r.currency})`,
+        marketValue: r.marketValue,
+        currency: r.currency,
+        percentage: r.percentage,
+      })
+    }
+    for (const r of data.bySecurity.slice(0, 20)) {
+      rows.push({
+        key: `security|${r.securityId}|${r.currency}`,
+        group: 'Security',
+        bucket: `${r.symbol} (${r.currency})`,
+        marketValue: r.marketValue,
+        currency: r.currency,
+        percentage: r.percentage,
+      })
+    }
+    for (const r of data.byAccount) {
+      rows.push({
+        key: `account|${r.accountId}|${r.currency}`,
+        group: 'Account',
+        bucket: `${r.accountName} (${r.currency})`,
+        marketValue: r.marketValue,
+        currency: r.currency,
+        percentage: r.percentage,
+      })
+    }
+    return rows
+  }, [data])
+
+  const sortedRows = useMemo<AllocRow[]>(() => {
+    if (!sort) return allRows
+    return [...allRows].sort((a, b) => {
+      let cmp = 0
+      if (sort === 'symbol') {
+        cmp = a.bucket.localeCompare(b.bucket)
+      } else if (sort === 'marketValue') {
+        cmp = a.marketValue - b.marketValue
+      } else if (sort === 'pctOfPortfolio') {
+        cmp = a.percentage - b.percentage
+      }
+      return dir === 'desc' ? -cmp : cmp
+    })
+  }, [allRows, sort, dir])
+
+  function handleSort(field: string, direction: 'asc' | 'desc') {
+    if (field === '') {
+      clearSort()
+    } else {
+      setSort(field, direction)
+    }
+  }
 
   if (empty) {
     return (
@@ -663,43 +736,39 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
             <p className="muted">All allocation buckets in numeric form. Percentages are computed per currency.</p>
           </div>
         </div>
-        <div className="transactionsTableWrap">
+        <div className="transactionsTableWrap overflow-y-auto max-h-[70vh]">
           <Table className="table transactionsTable">
             <TableHeader>
               <TableRow>
                 <TableHead>Group</TableHead>
-                <TableHead>Bucket</TableHead>
-                <TableHead>Market value</TableHead>
-                <TableHead>%</TableHead>
+                <SortableTableHeader
+                  field="symbol"
+                  label="Bucket"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  field="marketValue"
+                  label="Market value"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  field="pctOfPortfolio"
+                  label="%"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data!.byAssetType.map((row) => (
-                <TableRow key={`assetType|${row.assetType}|${row.currency}`}>
-                  <TableCell>Asset type</TableCell>
-                  <TableCell>
-                    {row.assetType} ({row.currency})
-                  </TableCell>
-                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
-                </TableRow>
-              ))}
-              {data!.bySecurity.slice(0, 20).map((row) => (
-                <TableRow key={`security|${row.securityId}|${row.currency}`}>
-                  <TableCell>Security</TableCell>
-                  <TableCell>
-                    {row.symbol} ({row.currency})
-                  </TableCell>
-                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
-                </TableRow>
-              ))}
-              {data!.byAccount.map((row) => (
-                <TableRow key={`account|${row.accountId}|${row.currency}`}>
-                  <TableCell>Account</TableCell>
-                  <TableCell>
-                    {row.accountName} ({row.currency})
-                  </TableCell>
+              {sortedRows.map((row) => (
+                <TableRow key={row.key}>
+                  <TableCell>{row.group}</TableCell>
+                  <TableCell>{row.bucket}</TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
                   <TableCell>{row.percentage.toFixed(1)}%</TableCell>
                 </TableRow>

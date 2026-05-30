@@ -12,6 +12,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { SortableTableHeader } from '../components/table/SortableTableHeader'
+import { useUrlSort } from '../hooks/useUrlSort'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
 import { RulePatternPreview } from '../components/rules/RulePatternPreview'
@@ -43,6 +45,7 @@ type AutoRuleSuggestion = RuleProposal & {
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([])
   const [searchParams] = useSearchParams()
+  const { sort: rulesSort, dir: rulesDir, setSort: setRulesSort, clearSort: clearRulesSort } = useUrlSort()
   const focusedId = (() => {
     const raw = searchParams.get('focus')
     if (raw == null) return null
@@ -93,11 +96,19 @@ export function RulesPage() {
 
   const saveDisabled = Boolean(shareError) || Boolean(patternError)
 
+  const rulesSortQuery = useMemo(() => {
+    const params = new URLSearchParams()
+    if (rulesSort) params.set('sort', rulesSort)
+    if (rulesDir) params.set('dir', rulesDir)
+    const s = params.toString()
+    return s ? `?${s}` : ''
+  }, [rulesSort, rulesDir])
+
   async function load() {
     const requestId = ++loadRequestRef.current
     setErr(null)
     try {
-      const nextRules = await getJson<Rule[]>('/api/rules')
+      const nextRules = await getJson<Rule[]>(`/api/rules${rulesSortQuery}`)
       const nextProposals = await getJson<{ proposals: RuleProposal[] }>(
         '/api/ai/rule-proposals'
       )
@@ -128,7 +139,8 @@ export function RulesPage() {
 
   useEffect(() => {
     void load()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rulesSortQuery])
 
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
@@ -558,17 +570,54 @@ export function RulesPage() {
           </div>
           <span className="transactionsPanelBadge">{rules.length} rules</span>
         </div>
-        <div className="tableWrap">
+        <div className="tableWrap overflow-y-auto max-h-[70vh]">
           <Table className="table">
             <TableHeader>
               <TableRow>
-                <TableHead>Pattern</TableHead>
-                <TableHead>Match</TableHead>
-                <TableHead>Pri</TableHead>
+                <SortableTableHeader
+                  field="name"
+                  label="Pattern"
+                  currentSort={rulesSort}
+                  currentDir={rulesDir}
+                  onSort={(field, direction) => {
+                    if (field === '') clearRulesSort()
+                    else setRulesSort(field, direction)
+                  }}
+                />
+                <SortableTableHeader
+                  field="matchType"
+                  label="Match"
+                  currentSort={rulesSort}
+                  currentDir={rulesDir}
+                  onSort={(field, direction) => {
+                    if (field === '') clearRulesSort()
+                    else setRulesSort(field, direction)
+                  }}
+                />
+                <SortableTableHeader
+                  field="priority"
+                  label="Pri"
+                  currentSort={rulesSort}
+                  currentDir={rulesDir}
+                  onSort={(field, direction) => {
+                    if (field === '') clearRulesSort()
+                    else setRulesSort(field, direction)
+                  }}
+                />
                 <TableHead>Category</TableHead>
                 <TableHead>Biz</TableHead>
                 <TableHead>Split</TableHead>
                 <TableHead>Usage</TableHead>
+                <SortableTableHeader
+                  field="updatedAt"
+                  label="Updated"
+                  currentSort={rulesSort}
+                  currentDir={rulesDir}
+                  onSort={(field, direction) => {
+                    if (field === '') clearRulesSort()
+                    else setRulesSort(field, direction)
+                  }}
+                />
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
@@ -596,6 +645,7 @@ export function RulesPage() {
                     <TableCell>{r.isBusiness ? 'yes' : ''}</TableCell>
                     <TableCell>{r.splitType}</TableCell>
                     <TableCell>{r.usageCount ?? 0}</TableCell>
+                    <TableCell>{r.updatedAt?.slice(0, 10) ?? '—'}</TableCell>
                     <TableCell>
                       <button type="button" onClick={() => void remove(r)}>
                         Delete

@@ -68,6 +68,14 @@ export class CashflowSettings extends Model<
    * Persisted server-side so state is shared across devices.
    */
   declare sidebarCollapsedSections: CreationOptional<string[]>;
+  /**
+   * #274 — dashboard activation card dismissal state. Array of card IDs the
+   * user has dismissed. Valid values: 'import' | 'review' | 'budget' |
+   * 'goal' | 'invite'. Empty array means all eligible cards are shown.
+   * Persisted server-side so dismissals survive page reloads and are shared
+   * across devices.
+   */
+  declare dismissedActivationCards: CreationOptional<string[]>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -150,6 +158,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
       sidebarCollapsedSections: {
         type: DataTypes.JSONB,
         field: 'sidebar_collapsed_sections',
+        allowNull: false,
+        defaultValue: [],
+      },
+      dismissedActivationCards: {
+        type: DataTypes.JSONB,
+        field: 'dismissed_activation_cards',
         allowNull: false,
         defaultValue: [],
       },

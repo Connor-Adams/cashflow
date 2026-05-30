@@ -13,6 +13,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { SortableTableHeader } from '../components/table/SortableTableHeader'
+import { useUrlSort } from '../hooks/useUrlSort'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { useSessionState } from '../lib/useSessionState'
@@ -26,14 +28,25 @@ export function RecurringPage() {
   const [data, setData] = useState<RecurringResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const { sort, dir, setSort, clearSort } = useUrlSort()
+
+  function handleSort(field: string, direction: 'asc' | 'desc') {
+    if (field === '') {
+      clearSort()
+    } else {
+      setSort(field, direction)
+    }
+  }
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
     const c = currency.trim()
     if (c) params.set('currency', c.toUpperCase().slice(0, 3))
+    if (sort) params.set('sort', sort)
+    if (dir) params.set('dir', dir)
     const s = params.toString()
     return s ? `?${s}` : ''
-  }, [currency])
+  }, [currency, sort, dir])
 
   useEffect(() => {
     let cancelled = false
@@ -93,16 +106,46 @@ export function RecurringPage() {
         title="Recurring merchants"
         description={`Detected charges that repeat within the last ${windowDays} days.`}
       >
-        <div className="tableWrap" aria-busy={loading}>
+        <div className="tableWrap overflow-y-auto max-h-[70vh]" aria-busy={loading}>
           <Table className="table">
             <TableHeader>
               <TableRow>
-                <TableHead>Merchant</TableHead>
-                <TableHead>Cadence</TableHead>
-                <TableHead>Avg amount</TableHead>
+                <SortableTableHeader
+                  field="merchant"
+                  label="Merchant"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  field="cadence"
+                  label="Cadence"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  field="amount"
+                  label="Avg amount"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
                 <TableHead>Stability</TableHead>
-                <TableHead>Last seen</TableHead>
-                <TableHead>Next expected</TableHead>
+                <SortableTableHeader
+                  field="lastSeenAt"
+                  label="Last seen"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
+                <SortableTableHeader
+                  field="nextOccurrence"
+                  label="Next expected"
+                  currentSort={sort}
+                  currentDir={dir}
+                  onSort={handleSort}
+                />
                 <TableHead>Category</TableHead>
               </TableRow>
             </TableHeader>

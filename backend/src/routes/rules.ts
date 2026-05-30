@@ -88,14 +88,45 @@ function parseEffectiveDate(
 
 const router = Router();
 
+const RULES_VALID_SORT_FIELDS = new Set([
+  'name',
+  'matchType',
+  'priority',
+  'updatedAt',
+]);
+
 router.get('/', async (req, res, next) => {
   try {
+    const sortField = typeof req.query.sort === 'string' ? req.query.sort : null;
+    const sortDir = req.query.dir === 'asc' ? 'asc' : 'desc';
+
+    if (sortField !== null && !RULES_VALID_SORT_FIELDS.has(sortField)) {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+
+    // Default order; overridden below if sort param is present.
+    let order: [string, string][] = [
+      ['priority', 'DESC'],
+      ['id', 'DESC'],
+    ];
+
+    if (sortField) {
+      const dir = sortDir.toUpperCase();
+      if (sortField === 'name') {
+        order = [['merchantPattern', dir], ['id', 'DESC']];
+      } else if (sortField === 'matchType') {
+        order = [['matchKind', dir], ['id', 'DESC']];
+      } else if (sortField === 'priority') {
+        order = [['priority', dir], ['id', 'DESC']];
+      } else if (sortField === 'updatedAt') {
+        order = [['updatedAt', dir], ['id', 'DESC']];
+      }
+    }
+
     const rules = await Rule.findAll({
       where: householdWhere(req),
-      order: [
-        ['priority', 'DESC'],
-        ['id', 'DESC'],
-      ],
+      order: order as Parameters<typeof Rule.findAll>[0]['order'],
     });
     const out = [];
     for (const r of rules) {

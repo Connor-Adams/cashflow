@@ -353,13 +353,24 @@ function valueHolding(
   return { marketValue, currency };
 }
 
+const ALLOCATION_VALID_SORT_FIELDS = new Set(['symbol', 'marketValue', 'pctOfPortfolio']);
+
 /**
  * GET /api/portfolio/allocation — current asset allocation by asset
  * type, security, and account. Percentages are computed per currency
  * bucket so we never mix CAD and USD into one denominator.
+ * Optional ?sort=symbol|marketValue|pctOfPortfolio&dir=asc|desc
  */
 router.get('/allocation', async (req, res, next) => {
   try {
+    const sortField = typeof req.query.sort === 'string' ? req.query.sort : null;
+    const sortDir = req.query.dir === 'desc' ? 'desc' : 'asc';
+
+    if (sortField !== null && !ALLOCATION_VALID_SORT_FIELDS.has(sortField)) {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+
     const { accounts, latestHoldings } = await loadVisibleLatestHoldings(req);
     const prices = await latestPricesBySecurity([
       ...new Set(latestHoldings.map((h) => h.securityId)),
@@ -445,12 +456,24 @@ router.get('/allocation', async (req, res, next) => {
         });
       }
     }
-    const bySecurity = [...securityBuckets.values()]
-      .map((row) => ({
-        ...row,
-        percentage: pct(row.currency, row.marketValue),
-      }))
-      .sort((a, b) => b.marketValue - a.marketValue);
+    const bySecurityRaw = [...securityBuckets.values()].map((row) => ({
+      ...row,
+      percentage: pct(row.currency, row.marketValue),
+    }));
+    const bySecurity = bySecurityRaw.sort((a, b) => {
+      if (!sortField || sortField === 'marketValue') {
+        return sortField ? (sortDir === 'asc' ? a.marketValue - b.marketValue : b.marketValue - a.marketValue) : b.marketValue - a.marketValue;
+      }
+      if (sortField === 'symbol') {
+        const cmp = a.symbol.localeCompare(b.symbol);
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+      if (sortField === 'pctOfPortfolio') {
+        const cmp = a.percentage - b.percentage;
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+      return b.marketValue - a.marketValue;
+    });
 
     // By account.
     const accountBuckets = new Map<
@@ -478,12 +501,24 @@ router.get('/allocation', async (req, res, next) => {
         });
       }
     }
-    const byAccount = [...accountBuckets.values()]
-      .map((row) => ({
-        ...row,
-        percentage: pct(row.currency, row.marketValue),
-      }))
-      .sort((a, b) => b.marketValue - a.marketValue);
+    const byAccountRaw = [...accountBuckets.values()].map((row) => ({
+      ...row,
+      percentage: pct(row.currency, row.marketValue),
+    }));
+    const byAccount = byAccountRaw.sort((a, b) => {
+      if (!sortField || sortField === 'symbol') {
+        // symbol doesn't apply to accounts; fall back to marketValue desc
+        return !sortField ? b.marketValue - a.marketValue : b.marketValue - a.marketValue;
+      }
+      if (sortField === 'marketValue') {
+        return sortDir === 'asc' ? a.marketValue - b.marketValue : b.marketValue - a.marketValue;
+      }
+      if (sortField === 'pctOfPortfolio') {
+        const cmp = a.percentage - b.percentage;
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+      return b.marketValue - a.marketValue;
+    });
 
     res.json({ byAssetType, bySecurity, byAccount });
   } catch (e) {

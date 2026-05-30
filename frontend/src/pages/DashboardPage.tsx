@@ -29,6 +29,7 @@ import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
+import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
@@ -854,6 +855,8 @@ export function DashboardPage() {
       />
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
+
+      <ActivationCardDeck />
 
       <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
         <CardContent className="p-0">

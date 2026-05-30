@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
@@ -9,6 +9,27 @@ import { AICleanupPanel } from '../components/import/AICleanupPanel'
 import type { ImportHistoryRow } from '../components/import/ImportHistoryTable'
 import { RollbackDialog } from '../components/import/RollbackDialog'
 import { getJson } from '../lib/api'
+
+type ActivationState = {
+  hasAccounts: boolean
+  unreviewedCount: number
+  hasBudget: boolean
+  hasGoal: boolean
+  hasOutboundInvite: boolean
+  dismissedCards: string[]
+}
+
+/** Returns the path and label of the highest-priority unfinished activation step. */
+function nextActivationStep(
+  state: ActivationState,
+): { path: string; label: string } | null {
+  if (!state.hasAccounts) return null // they just imported, accounts exist now — skip import step
+  if (state.unreviewedCount > 0) return { path: '/review', label: 'Review transactions' }
+  if (!state.hasBudget) return { path: '/settings/budgets', label: 'Set a budget' }
+  if (!state.hasGoal) return { path: '/goals', label: 'Set a financial goal' }
+  if (!state.hasOutboundInvite) return { path: '/settings/members', label: 'Invite a household member' }
+  return null
+}
 
 const DEFAULT_IMPORT_BATCH_CURRENCY = 'CAD'
 
@@ -51,6 +72,9 @@ export function ImportBatchPage() {
   const [row, setRow] = useState<BatchDetailRow | null | undefined>(undefined)
   const [rollbackOpen, setRollbackOpen] = useState(false)
   const { showToast } = useToast()
+  const navigate = useNavigate()
+  // Guard: only fire the celebration toast once per page load.
+  const celebrationFired = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +105,45 @@ export function ImportBatchPage() {
       cancelled = true
     }
   }, [load])
+
+  // Post-import celebration toast (#274). Fires once when a successful
+  // (non-rolled-back) batch loads for the first time. Fetches activation
+  // state in parallel so the "Next:" action points at the highest-priority
+  // unfinished step.
+  useEffect(() => {
+    if (row == null || row === undefined) return
+    if (row.status === 'rolled_back') return
+    if (celebrationFired.current) return
+    celebrationFired.current = true
+
+    const txCount = row.insertedCount ?? 0
+    const accountName = row.account?.name ?? null
+    const title = accountName
+      ? `Imported ${txCount} transaction${txCount === 1 ? '' : 's'} to ${accountName}`
+      : `Imported ${txCount} transaction${txCount === 1 ? '' : 's'}`
+
+    // Fetch activation state to build the next-step action. Show the toast
+    // regardless of whether the fetch succeeds — the action is optional.
+    getJson<ActivationState>('/api/activation-state')
+      .then((state) => {
+        const next = nextActivationStep(state)
+        showToast({
+          title,
+          variant: 'success',
+          ...(next
+            ? {
+                action: {
+                  label: `Next: ${next.label}`,
+                  onClick: () => navigate(next.path),
+                },
+              }
+            : {}),
+        })
+      })
+      .catch(() => {
+        showToast({ title, variant: 'success' })
+      })
+  }, [row, showToast, navigate])
 
   // Resolve a stable label for the AICleanupPanel: prefer the actual batch
   // label from the loaded row; fall back to the URL slug while loading.

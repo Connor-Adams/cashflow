@@ -495,6 +495,7 @@ export type Rule = {
   effectiveFrom: string | null
   effectiveTo: string | null
   usageCount?: number
+  updatedAt?: string
 }
 
 export type Paginated<T> = {
