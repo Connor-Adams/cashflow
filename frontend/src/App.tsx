@@ -9,6 +9,7 @@ import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { ExplainMonthPage } from './pages/ExplainMonthPage'
 import { LifestyleInflationPage } from './pages/LifestyleInflationPage'
+import { SavingsRatePage } from './pages/SavingsRatePage'
 import { SankeyPage } from './pages/SankeyPage'
 import { CurrencyPage } from './pages/CurrencyPage'
 import { NetWorthPage } from './pages/NetWorthPage'
@@ -111,6 +112,7 @@ function AppRoutes() {
             path="reports/lifestyle-inflation"
             element={<LifestyleInflationPage />}
           />
+          <Route path="reports/savings-rate" element={<SavingsRatePage />} />
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
