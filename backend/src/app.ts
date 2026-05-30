@@ -25,6 +25,7 @@ import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
 import purchasesRouter from './routes/purchases';
+import reimbursementsRouter from './routes/reimbursements';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
@@ -189,6 +190,9 @@ app.use('/api', returnWarrantyRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
 app.use('/api', purchasesRouter);
+// reimbursementsRouter mounts /reimbursements/* and
+// /transactions/:id/reimbursable under /api (issue #216).
+app.use('/api', reimbursementsRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
