@@ -545,3 +545,53 @@ export function summarize(
     totalCount: rows.length,
   };
 }
+
+// ---------- Per-contact aggregate (issue #374) ----------
+
+export interface ContactReimbursementAggregate {
+  /** Still-owed claims (effective status expected | overdue). */
+  open: {
+    count: number;
+    /** How many of the open claims are effectively overdue. */
+    overdueCount: number;
+    /** Outstanding totals keyed by currency (fixed-4 strings). */
+    byCurrency: Record<string, string>;
+  };
+  total: {
+    count: number;
+  };
+}
+
+/**
+ * Aggregate one Contact's reimbursement claims for the Contact detail view
+ * (#374): "Open reimbursements: $X across Y items". Open = effective status
+ * `expected` or `overdue` (i.e. money still owed); `received`/`waived` are
+ * excluded from the open totals but still counted in `total.count`. Totals are
+ * kept per-currency because a household may track claims in mixed currencies
+ * and summing across them would be meaningless.
+ */
+export function aggregateContactReimbursements(
+  rows: ReimbursementRow[],
+  today: string = todayIso(),
+): ContactReimbursementAggregate {
+  const byCurrency: Record<string, string> = {};
+  let openCount = 0;
+  let overdueCount = 0;
+
+  for (const r of rows) {
+    const eff = computeEffectiveStatus(r, today);
+    if (eff === 'expected' || eff === 'overdue') {
+      openCount += 1;
+      if (eff === 'overdue') overdueCount += 1;
+      byCurrency[r.currency] = addMoney(
+        byCurrency[r.currency] ?? '0.0000',
+        String(r.amount),
+      );
+    }
+  }
+
+  return {
+    open: { count: openCount, overdueCount, byCurrency },
+    total: { count: rows.length },
+  };
+}

@@ -12,6 +12,7 @@ import {
   isOverdue,
   serializeReimbursement,
   summarize,
+  aggregateContactReimbursements,
   normalizeAmount,
   daysUntilDue,
   type ReimbursementRow,
@@ -230,4 +231,38 @@ test('summarize sorts groups by outstanding desc', () => {
   const s = summarize(rows, TODAY);
   assert.equal(s.groups[0]?.partyLabel, 'Big');
   assert.equal(s.groups[1]?.partyLabel, 'Small');
+});
+
+// ---------- aggregateContactReimbursements (#374) ----------
+
+test('aggregateContactReimbursements totals open (expected+overdue) by currency', () => {
+  const rows: ReimbursementRow[] = [
+    // expected, open
+    row({ id: 1, amount: '100.0000', currency: 'CAD', status: 'expected', dueDate: '2026-04-01' }),
+    // expected past due -> effective overdue, still open
+    row({ id: 2, amount: '50.0000', currency: 'CAD', status: 'expected', dueDate: '2026-03-01' }),
+    // different currency, open
+    row({ id: 3, amount: '25.0000', currency: 'USD', status: 'expected', dueDate: '2026-04-01' }),
+    // received -> not open
+    row({ id: 4, amount: '999.0000', currency: 'CAD', status: 'received', dueDate: null, receivedAt: new Date() }),
+    // waived -> not open
+    row({ id: 5, amount: '7.0000', currency: 'CAD', status: 'waived', dueDate: null }),
+  ];
+  const agg = aggregateContactReimbursements(rows, TODAY);
+
+  assert.equal(agg.total.count, 5);
+  // open = rows 1,2,3
+  assert.equal(agg.open.count, 3);
+  assert.equal(agg.open.byCurrency.CAD, '150.0000');
+  assert.equal(agg.open.byCurrency.USD, '25.0000');
+  // overdue count among the open set
+  assert.equal(agg.open.overdueCount, 1);
+});
+
+test('aggregateContactReimbursements handles an empty list', () => {
+  const agg = aggregateContactReimbursements([], TODAY);
+  assert.equal(agg.total.count, 0);
+  assert.equal(agg.open.count, 0);
+  assert.equal(agg.open.overdueCount, 0);
+  assert.deepEqual(agg.open.byCurrency, {});
 });
