@@ -23,6 +23,7 @@ import {
   Flame,
   PiggyBank,
   Globe,
+  Inbox,
   Lightbulb,
   LineChart,
   LayoutDashboard,
@@ -38,9 +39,6 @@ import {
   Search,
   Settings,
   Shield,
-  Sparkles,
-  Stethoscope,
-  BriefcaseBusiness,
   BadgeDollarSign,
   Sun,
   Moon,
@@ -81,7 +79,7 @@ const navSections: NavSection[] = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
       { to: '/review', label: 'Review', icon: ClipboardCheck },
-      { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
+      { to: '/inbox', label: 'Inbox', icon: Inbox },
       { to: '/chat', label: 'Chat', icon: MessageSquare },
       { to: '/ask', label: 'Ask Cashflow', icon: Search },
     ],
@@ -135,8 +133,6 @@ const navSections: NavSection[] = [
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-      { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
-      { to: '/cfo/briefings', label: 'CFO briefing', icon: BriefcaseBusiness },
       { to: '/insights', label: 'Insights', icon: Lightbulb },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
       { to: '/reports/explain-month', label: 'Explain month', icon: BookOpen },
@@ -304,7 +300,7 @@ function SidebarNavSections({
   const { count: insightsCount } = useInsightsCount()
 
   function badgeFor(to: string): number {
-    if (to === '/ai/inbox') return aiInboxCount
+    if (to === '/inbox') return aiInboxCount
     if (to === '/insights') return insightsCount
     return 0
   }
