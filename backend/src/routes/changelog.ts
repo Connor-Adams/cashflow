@@ -7,10 +7,10 @@ import {
   userEntries,
   isUnread,
   entriesSince,
+  VERSION_RE,
 } from '../services/changelog';
 
 const router = Router();
-const VERSION_RE = /^v\d+\.\d+\.\d+$/;
 
 export function validateSeenPatch(
   raw: Record<string, unknown>,

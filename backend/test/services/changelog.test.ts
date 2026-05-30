@@ -99,3 +99,8 @@ test('parseEntry returns null when version or publishedAt is missing', () => {
   assert.equal(parseEntry('---\ntitle: T\naudience: user\n---\nBody', 'x.md'), null);
   assert.equal(parseEntry('---\nversion: v1.0.0\ntitle: T\n---\nBody', 'x.md'), null);
 });
+
+test('parseEntry returns null for a non-semver version', () => {
+  assert.equal(parseEntry('---\nversion: v1.2\ntitle: T\npublishedAt: 2026-01-01T00:00:00Z\naudience: user\n---\nBody', 'x.md'), null);
+  assert.equal(parseEntry('---\nversion: 0.13.52\ntitle: T\npublishedAt: 2026-01-01T00:00:00Z\naudience: user\n---\nBody', 'x.md'), null);
+});

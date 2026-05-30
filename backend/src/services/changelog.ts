@@ -4,6 +4,11 @@ import matter from 'gray-matter';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 
+// Release-tag identity. Entries must use this exact shape; the /seen endpoint
+// validates against the same regex, so an entry that can't be acknowledged is
+// never served.
+export const VERSION_RE = /^v\d+\.\d+\.\d+$/;
+
 export type ChangelogAudience = 'user' | 'operator';
 
 export interface ChangelogEntry {
@@ -52,6 +57,7 @@ export function parseEntry(fileContents: string, _filename: string): ChangelogEn
   const version = String(data.version ?? '').trim();
   const publishedAt = toIsoString(data.publishedAt);
   if (!version || !publishedAt) return null; // malformed → skip
+  if (!VERSION_RE.test(version)) return null;
   const audience: ChangelogAudience = data.audience === 'operator' ? 'operator' : 'user';
   return {
     version,
