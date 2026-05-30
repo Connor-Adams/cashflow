@@ -7,6 +7,7 @@ const backendRoot = path.join(__dirname, '..', '..');
 
 export type EnvConfig = {
   csvUploadDir: string;
+  changelogDir: string;
   databaseUrl: string | null;
   databasePath: string;
   port: number;
@@ -105,6 +106,8 @@ export function loadEnvConfig(
 ): EnvConfig {
   const csvUploadDir =
     e.CSV_UPLOAD_DIR || path.join(backendRoot, 'uploads', 'csv');
+  const changelogDir =
+    e.CHANGELOG_DIR || path.join(backendRoot, '..', 'docs', 'changelog');
 
   const databaseUrl = assertDatabaseUrl(e.DATABASE_URL);
   const databasePath = assertDatabasePath(e.DATABASE_PATH, backendRoot);
@@ -147,6 +150,7 @@ export function loadEnvConfig(
 
   return {
     csvUploadDir,
+    changelogDir,
     databaseUrl,
     databasePath,
     port,
@@ -282,6 +286,7 @@ export function parseDividendDedupDays(raw: string | undefined): number {
 const resolved = loadEnvConfig(process.env as Record<string, string | undefined>);
 
 export const csvUploadDir = resolved.csvUploadDir;
+export const changelogDir = resolved.changelogDir;
 export const databaseUrl = resolved.databaseUrl;
 export const databasePath = resolved.databasePath;
 export const port = resolved.port;
