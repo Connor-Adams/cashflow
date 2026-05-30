@@ -203,6 +203,12 @@ railway redeploy --service e0dc05b7-3961-4d4f-aea9-bed3810ea2f5 -y
 A dedicated `workflow_dispatch` rollback workflow would be cleaner but is
 not currently configured.
 
+## AI audit surface
+
+An AI agent or shell script can verify production health after a deploy using
+the read-only audit API.  See [docs/agent-audit.md](docs/agent-audit.md) for
+the endpoint catalog, agent loop pattern, and "page won't load" diagnosis recipe.
+
 ## Deploy
 
 See [docs/deploy-railway.md](docs/deploy-railway.md) for Railway service
