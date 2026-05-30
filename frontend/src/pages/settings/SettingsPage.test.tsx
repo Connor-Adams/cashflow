@@ -37,6 +37,7 @@ describe('SettingsPage shell', () => {
       'Imports',
       'Enrichment',
       'Contacts',
+      'Members',
       'Budgets',
       'Categories',
       'Notifications',
