@@ -49,6 +49,7 @@ import { ContactsTab } from './pages/settings/tabs/ContactsTab'
 import { MembersTab } from './pages/settings/tabs/MembersTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
+import { LabelsTab } from './pages/settings/tabs/LabelsTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
@@ -135,6 +136,7 @@ function AppRoutes() {
             <Route path="members" element={<MembersTab />} />
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
+            <Route path="labels" element={<LabelsTab />} />
             <Route path="jobs" element={<JobsTab />} />
           </Route>
           <Route path="ai/inbox" element={<AiInboxPage />} />

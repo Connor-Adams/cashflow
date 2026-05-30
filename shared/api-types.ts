@@ -212,6 +212,11 @@ export type Transaction = {
    */
   counterpartyContactId: number | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
+  /**
+   * Labels applied to this transaction (issue #270). Present on list/detail
+   * responses; an empty array when the transaction has no labels.
+   */
+  labels?: TransactionLabelRef[]
 }
 
 /**
@@ -444,6 +449,23 @@ export type Category = {
   icon: string | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * A free-text transaction label (issue #270). Household-scoped, max 32 chars,
+ * case-insensitively unique per household. `usageCount` is the number of
+ * transactions tagged with it; present on the GET /api/labels list response.
+ */
+export type Label = {
+  id: number
+  name: string
+  usageCount?: number
+}
+
+/** The shape a transaction carries for each applied label (id + name only). */
+export type TransactionLabelRef = {
+  id: number
+  name: string
 }
 
 export type AuthUser = {

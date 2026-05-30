@@ -8,6 +8,7 @@ export type SettingsTopTab =
   | 'members'
   | 'budgets'
   | 'categories'
+  | 'labels'
   | 'notifications'
   | 'jobs'
 
@@ -21,6 +22,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isMembers = useMatch('/settings/members')
   const isBudgets = useMatch('/settings/budgets')
   const isCategories = useMatch('/settings/categories')
+  const isLabels = useMatch('/settings/labels')
   const isNotifications = useMatch('/settings/notifications')
   const isJobs = useMatch('/settings/jobs')
 
@@ -31,6 +33,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   if (isMembers) return 'members'
   if (isBudgets) return 'budgets'
   if (isCategories) return 'categories'
+  if (isLabels) return 'labels'
   if (isNotifications) return 'notifications'
   if (isJobs) return 'jobs'
   return 'settings'
