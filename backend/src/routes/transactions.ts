@@ -58,6 +58,7 @@ import {
   type RevisionedField,
 } from '../util/transactionRevisions';
 import { isTransactionStatus } from '../transactions/types';
+import { streamCsvExport } from '../services/transactionsExport';
 
 const router = Router();
 
@@ -812,6 +813,65 @@ router.get('/category-hints', async (_req, res, next) => {
     });
   } catch (e) {
     next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/export?<filter-params>
+ *
+ * Streams all transactions matching the caller's filter as a CSV file.
+ * Accepts the same filter query params as GET /api/transactions (dateFrom,
+ * dateTo, category, accountId, currency, reviewFlag, importBatch, ids).
+ *
+ * Response:
+ *   Content-Type: text/csv; charset=utf-8
+ *   Content-Disposition: attachment; filename="cashflow-transactions-<YYYY-MM-DD>.csv"
+ *
+ * The response is streamed in cursor-paged batches so memory stays bounded
+ * for large result sets (e.g. 50K+ rows).
+ *
+ * AC coverage: #1–#9, #12, #13.
+ */
+router.get('/export', async (req, res, next) => {
+  try {
+    if (!isValidDateFilter(req.query.dateFrom)) {
+      res.status(400).json({ error: 'invalid dateFrom' });
+      return;
+    }
+    if (!isValidDateFilter(req.query.dateTo)) {
+      res.status(400).json({ error: 'invalid dateTo' });
+      return;
+    }
+
+    const where = buildTransactionFilterWhere(req, req.query as Record<string, unknown>);
+
+    logger.info(
+      {
+        householdId: isSuperadmin(req) ? null : currentAuth(req).household.id,
+        filterKeys: Object.keys(req.query).join(','),
+      },
+      'transactions_export_started',
+    );
+
+    const rowCount = await streamCsvExport(res, where);
+
+    logger.info(
+      {
+        householdId: isSuperadmin(req) ? null : currentAuth(req).household.id,
+        rowCount,
+      },
+      'transactions_export_completed',
+    );
+  } catch (e) {
+    // If headers haven't been sent yet, let express handle it normally.
+    // If streaming already started (headers sent), we can't change status —
+    // just end the response and log.
+    if (res.headersSent) {
+      logger.error({ err: e }, 'transactions_export_streaming_error');
+      try { res.end(); } catch { /* ignore */ }
+    } else {
+      next(e);
+    }
   }
 });
 

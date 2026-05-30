@@ -368,6 +368,53 @@ export type LifestyleInflationResponse = {
   byCurrency: LifestyleCurrencyTrend[]
 }
 
+// --- Savings rate dashboard (GET /api/reports/savings-rate) ---
+// Tracks the user's "true" savings rate over a rolling window: of the income
+// that came in, what fraction was kept as cash savings, investment
+// contributions, and debt-principal paydown rather than spent. See
+// backend/src/summary/savingsRate.ts (Cashflow #246). Scope is the same
+// personal/shared/business/all dimension as the other reports.
+
+/** One month of savings-rate components for a single currency. */
+export type SavingsRateMonthlyPoint = {
+  month: string
+  income: number
+  spending: number
+  savings: number
+  investments: number
+  debtPrincipal: number
+  /** (savings + [investments] + [debtPrincipal]) / income, as a percentage.
+   *  Null when the month had no income (avoids divide-by-zero). */
+  savingsRatePct: number | null
+}
+
+/** Window-level totals for a currency, plus the overall savings rate. */
+export type SavingsRateTotals = {
+  income: number
+  spending: number
+  savings: number
+  investments: number
+  debtPrincipal: number
+  /** Savings rate on the window totals; null when total income is zero. */
+  savingsRatePct: number | null
+}
+
+export type SavingsRateCurrencySummary = {
+  currency: string
+  series: SavingsRateMonthlyPoint[]
+  totals: SavingsRateTotals
+}
+
+export type SavingsRateResponse = {
+  anchorMonth: string
+  scope: LifestyleScope
+  currency: string | null
+  windowMonths: string[]
+  includeInvestments: boolean
+  includeDebtPrincipal: boolean
+  byCurrency: SavingsRateCurrencySummary[]
+}
+
 /** Direction of a partner-balance settlement record. */
 export type PartnerSettlementDirection = 'i_paid_partner' | 'partner_paid_me'
 
