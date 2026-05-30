@@ -65,6 +65,7 @@ import returnWarrantyRouter from './routes/returnWarranty';
 import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import invitesRouter from './routes/invites';
+import taxScenariosRouter from './routes/tax-scenarios';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
@@ -197,8 +198,9 @@ app.use('/api/household', householdRouter);
 app.use('/api/invites', invitesRouter);
 app.use('/api/net-worth', netWorthRouter);
 app.use('/api/fx', fxRouter);
-app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
-app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
+app.use('/api/tax/scenarios', taxScenariosRouter);
+app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter); // returns 410 Gone
+app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);          // returns 410 Gone
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
 app.use('/api/tax/reserve', taxReserveRouter);
 app.use('/api/tax', taxRouter);

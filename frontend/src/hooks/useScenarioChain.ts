@@ -39,7 +39,7 @@ export function useScenarioChain(id: number | null): UseScenarioChainResult {
     setLoading(true);
     setError(null);
     getJson<{ chain: ScenarioChainEntry[] }>(
-      `/api/tax/personal-scenarios/${id}/chain`,
+      `/api/tax/scenarios/${id}/chain`,
     )
       .then((d) => { if (!cancelled) { setData(d.chain); setLoading(false); } })
       .catch((e: unknown) => {

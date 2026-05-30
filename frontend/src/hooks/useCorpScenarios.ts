@@ -89,7 +89,7 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
     setLoading(true);
     setError(null);
     getJson<{ scenarios: CorpScenario[] }>(
-      `/api/tax/corp-scenarios?entityId=${entityId}&year=${year}`,
+      `/api/tax/scenarios?kind=corp&entityId=${entityId}&year=${year}`,
     )
       .then((d) => { if (!cancelled) { setScenarios(d.scenarios); setLoading(false); } })
       .catch((e: unknown) => {
@@ -106,8 +106,8 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
   const create = useCallback<UseCorpScenariosResult['create']>(
     async (input) => {
       const body = await postJson<{ scenario: CorpScenario }>(
-        '/api/tax/corp-scenarios',
-        { entityId, year, ...input },
+        '/api/tax/scenarios',
+        { entityId, year, kind: 'corp', ...input },
       );
       reload();
       return body.scenario;
@@ -118,7 +118,7 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
   const patch = useCallback<UseCorpScenariosResult['patch']>(
     async (id, body) => {
       const result = await patchJson<{ scenario: CorpScenario }>(
-        `/api/tax/corp-scenarios/${id}`,
+        `/api/tax/scenarios/${id}`,
         body,
       );
       reload();
@@ -130,7 +130,7 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
   const fork = useCallback<UseCorpScenariosResult['fork']>(
     async (id, name) => {
       const body = await postJson<{ scenario: CorpScenario }>(
-        `/api/tax/corp-scenarios/${id}/fork`,
+        `/api/tax/scenarios/${id}/fork`,
         name ? { name } : {},
       );
       reload();
@@ -141,7 +141,7 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
 
   const remove = useCallback<UseCorpScenariosResult['remove']>(
     async (id) => {
-      await deleteReq(`/api/tax/corp-scenarios/${id}`);
+      await deleteReq(`/api/tax/scenarios/${id}`);
       reload();
     },
     [reload],
@@ -154,7 +154,7 @@ export function useCorpScenarios(entityId: number, year: number): UseCorpScenari
   const projectNextYear = useCallback<UseCorpScenariosResult['projectNextYear']>(
     async (id, input) => {
       const body = await postJson<{ scenario: CorpScenario }>(
-        `/api/tax/corp-scenarios/${id}/project-next-year`,
+        `/api/tax/scenarios/${id}/project-next-year`,
         input ?? {},
       );
       reload();

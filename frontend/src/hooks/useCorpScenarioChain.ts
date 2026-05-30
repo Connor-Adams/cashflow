@@ -40,7 +40,7 @@ export function useCorpScenarioChain(id: number | null): UseCorpScenarioChainRes
     setLoading(true);
     setError(null);
     getJson<{ chain: CorpScenarioChainEntry[] }>(
-      `/api/tax/corp-scenarios/${id}/chain`,
+      `/api/tax/scenarios/${id}/chain`,
     )
       .then((d) => { if (!cancelled) { setData(d.chain); setLoading(false); } })
       .catch((e: unknown) => {
