@@ -9,9 +9,11 @@ const ALL_TOP_TABS: Array<TabItem & { superadminOnly?: boolean }> = [
   { value: 'imports', label: 'Imports' },
   { value: 'enrichment', label: 'Enrichment' },
   { value: 'contacts', label: 'Contacts' },
+  { value: 'members', label: 'Members' },
   { value: 'budgets', label: 'Budgets' },
   { value: 'categories', label: 'Categories' },
-  { value: 'jobs', label: 'Jobs', superadminOnly: true },
+  { value: 'notifications', label: 'Notifications' },
+  { value: 'jobs', label: 'Jobs' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -19,8 +21,10 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   imports: '/settings/imports',
   enrichment: '/settings/enrichment',
   contacts: '/settings/contacts',
+  members: '/settings/members',
   budgets: '/settings/budgets',
   categories: '/settings/categories',
+  notifications: '/settings/notifications',
   jobs: '/settings/jobs',
 }
 
