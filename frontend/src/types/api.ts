@@ -142,6 +142,45 @@ export type SubscriptionsSummary = {
   }>
 }
 
+// ---- Savings Rate Dashboard (issue #246) --------------------------------
+
+export type SavingsRateMonthlyPoint = {
+  month: string // YYYY-MM
+  income: number
+  spending: number
+  savings: number
+  investments: number
+  debtPrincipal: number
+  savingsRate: number | null // Percentage
+}
+
+export type SavingsRateTotals = {
+  income: number
+  spending: number
+  savings: number
+  investments: number
+  debtPrincipal: number
+  avgSavingsRate: number | null
+}
+
+export type SavingsRateCurrencyTrend = {
+  currency: string
+  series: SavingsRateMonthlyPoint[]
+  totals: SavingsRateTotals
+}
+
+export type SavingsRateResponse = {
+  anchorMonth: string
+  scope: string
+  currency: string | null
+  currencyTrends: Record<string, SavingsRateCurrencyTrend>
+  months: string[]
+  options: {
+    includeInvestments: boolean
+    includeDebtPrincipal: boolean
+  }
+}
+
 /** Direction of a partner-balance settlement record. */
 export type PartnerSettlementDirection = 'i_paid_partner' | 'partner_paid_me'
 
