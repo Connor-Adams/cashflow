@@ -5,6 +5,8 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
 
+const NOTES_MAX = 4000;
+
 const router = Router();
 const ACCOUNT_TYPES = new Set([
   'checking',
@@ -21,13 +23,30 @@ function normalizeAccountType(raw: unknown): string {
   return ACCOUNT_TYPES.has(value) ? value : 'checking';
 }
 
+function normalizeNotes(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  const trimmed = String(raw).trim();
+  return trimmed || null;
+}
+
+function notesPreview(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  return notes.slice(0, 100);
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const rows = await Account.findAll({
       where: visibleAccountWhere(req),
       order: [['name', 'ASC']],
     });
-    res.json(rows);
+    res.json(
+      rows.map((r) => ({
+        ...r.toJSON(),
+        notes: undefined,
+        notesPreview: notesPreview(r.notes),
+      })),
+    );
   } catch (e) {
     next(e);
   }
@@ -36,12 +55,17 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, notes } = (req.body || {}) as Record<
       string,
       unknown
     >;
     if (!name) {
       res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const normalizedNotes = normalizeNotes(notes);
+    if (normalizedNotes !== null && normalizedNotes.length > NOTES_MAX) {
+      res.status(400).json({ error: 'NOTES_TOO_LONG' });
       return;
     }
     const dc =
@@ -57,6 +81,7 @@ router.post('/', async (req, res, next) => {
       accountType: normalizeAccountType(accountType),
       shortCode: (shortCode as string) || null,
       defaultCurrency: dc,
+      notes: normalizedNotes,
     });
     res.status(201).json(row);
   } catch (e) {
@@ -86,6 +111,24 @@ router.get('/:id/pending-total', async (req, res, next) => {
   }
 });
 
+router.get('/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const account = await Account.findOne({ where: { id, ...visibleAccountWhere(req) } });
+    if (!account) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    res.json(account);
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -98,7 +141,7 @@ router.patch('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt, notes } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -146,6 +189,14 @@ router.patch('/:id', async (req, res, next) => {
         }
         account.set('closedAt', raw);
       }
+    }
+    if (notes !== undefined) {
+      const normalizedNotes = normalizeNotes(notes);
+      if (normalizedNotes !== null && normalizedNotes.length > NOTES_MAX) {
+        res.status(400).json({ error: 'NOTES_TOO_LONG' });
+        return;
+      }
+      account.set('notes', normalizedNotes);
     }
     await account.save();
     res.json(account);

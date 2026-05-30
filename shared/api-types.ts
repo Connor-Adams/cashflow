@@ -11,6 +11,10 @@ export type Account = {
   shortCode: string | null
   defaultCurrency: string | null
   closedAt: string | null
+  /** Raw markdown notes (only present on GET /api/accounts/:id). */
+  notes?: string | null
+  /** First 100 chars of notes (present on GET /api/accounts list). */
+  notesPreview?: string | null
 }
 
 /**

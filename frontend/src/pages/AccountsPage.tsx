@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -46,6 +48,7 @@ export function AccountsPage() {
   const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -161,6 +164,8 @@ export function AccountsPage() {
     }
   }
 
+  const NOTES_MAX = 4000
+
   async function saveCard(id: number) {
     const name = editName.trim()
     const defaultCurrency = editCurrency.trim().toUpperCase()
@@ -170,6 +175,10 @@ export function AccountsPage() {
     }
     if (!defaultCurrency) {
       setErr('Default currency is required')
+      return
+    }
+    if (editNotes.length > NOTES_MAX) {
+      setErr('Notes must be 4000 characters or fewer.')
       return
     }
     setErr(null)
@@ -182,6 +191,7 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
+        notes: editNotes.trim() || null,
       })
       setEditingId(null)
       setEditName('')
@@ -191,9 +201,17 @@ export function AccountsPage() {
       setEditAccountType('checking')
       setEditVisibility('private')
       setEditClosedAt('')
+      setEditNotes('')
+      showToast({ title: 'Notes saved.', variant: 'success', durationMs: 2000 })
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not update account')
+      const msg = e instanceof Error ? e.message : 'Could not update account'
+      if (msg.includes('NOTES_TOO_LONG')) {
+        setErr('Notes must be 4000 characters or fewer.')
+      } else {
+        showToast({ title: "Couldn't save notes. Try again.", variant: 'destructive', durationMs: 4000 })
+        setErr(msg)
+      }
     }
   }
 
@@ -206,6 +224,7 @@ export function AccountsPage() {
     setEditAccountType('checking')
     setEditVisibility('private')
     setEditClosedAt('')
+    setEditNotes('')
   }
 
   function startEdit(account: Account) {
@@ -217,7 +236,17 @@ export function AccountsPage() {
     setEditAccountType(account.accountType ?? 'checking')
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
+    setEditNotes(account.notesPreview ?? '')
   }
+
+  function renderNotesHtml(markdown: string): string {
+    const raw = marked.parse(markdown, { async: false }) as string
+    return DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: ['p','br','strong','em','a','ul','ol','li','h1','h2','h3','h4','h5','h6','code','pre','blockquote'],
+      ALLOWED_ATTR: ['href'],
+    })
+  }
+
 
   const accountCount = accounts.length
   const shortCodeCount = accounts.filter((account) => account.shortCode).length
@@ -384,7 +413,8 @@ export function AccountsPage() {
                 ))
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
+                  <Fragment key={a.id}>
+                  <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -518,6 +548,48 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId === a.id && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="p-3">
+                        <div>
+                          <label htmlFor={`notes-${a.id}`} className="text-sm font-medium block mb-1">
+                            Notes
+                          </label>
+                          <p className="text-xs text-muted-foreground mb-1">
+                            Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account.
+                          </p>
+                          <textarea
+                            id={`notes-${a.id}`}
+                            rows={6}
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            className="w-full rounded border px-3 py-2 text-sm font-mono resize-y"
+                            placeholder="Optional notes…"
+                          />
+                          <p className="text-xs text-right mt-0.5" style={editNotes.length > 3800 ? { color: 'var(--color-destructive)' } : {}}>
+                            {editNotes.length}/4000
+                          </p>
+                          {editNotes.length > 4000 && (
+                            <p className="text-xs text-destructive mt-0.5">Notes must be 4000 characters or fewer.</p>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {editingId !== a.id && a.notesPreview && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="px-4 pb-3 pt-0">
+                        <div className="rounded border p-3 bg-muted/30">
+                          <p className="text-xs font-semibold mb-1 text-muted-foreground">Notes</p>
+                          <div
+                            className="prose prose-sm max-w-none text-sm"
+                            dangerouslySetInnerHTML={{ __html: renderNotesHtml(a.notesPreview) }}
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 ))
               )}
             </TableBody>
