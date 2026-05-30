@@ -35,6 +35,7 @@ import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailInteg
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
+import { UserAuditToken, initUserAuditToken } from './UserAuditToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
@@ -108,6 +109,8 @@ import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 import { Label, initLabel } from './Label';
 import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
 import { Feedback, initFeedback } from './Feedback';
+import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
+import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -145,6 +148,7 @@ initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
+initUserAuditToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
@@ -194,6 +198,8 @@ initFinancialScenario(sequelize);
 initLabel(sequelize);
 initTransactionLabel(sequelize);
 initFeedback(sequelize);
+initClientErrorEvent(sequelize);
+initServerErrorEvent(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -1035,6 +1041,7 @@ export {
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,
+  UserAuditToken,
   Entity,
   TaxCategory,
   TaxTag,
@@ -1082,4 +1089,6 @@ export {
   Label,
   TransactionLabel,
   Feedback,
+  ClientErrorEvent,
+  ServerErrorEvent,
 };

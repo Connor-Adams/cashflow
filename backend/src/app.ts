@@ -72,6 +72,8 @@ import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
+import auditTokensRouter from './routes/auditTokens';
+import auditRouter, { injectApp } from './routes/audit';
 import vaultRouter from './routes/vault';
 import financeEventsRouter from './routes/financeEvents';
 import syncRouter from './routes/sync';
@@ -79,10 +81,14 @@ import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
+import { ServerErrorEvent } from './models';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
 
 const app = express();
+
+// Inject the app instance into the audit router so the route-probe can use supertest.
+injectApp(app);
 
 app.set('trust proxy', env.trustProxy);
 
@@ -131,6 +137,8 @@ app.use('/api/config', configRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
+app.use('/api/audit/tokens', auditTokensRouter);
+app.use('/api/audit', auditRouter);
 app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/search', searchRouter);
@@ -272,6 +280,24 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
+  const errObj = err as { status?: number; statusCode?: number };
+  const status = errObj?.status ?? errObj?.statusCode ?? 500;
+  if (status >= 500) {
+    void ServerErrorEvent.create({
+      householdId: req.auth?.household.id ?? req.auditAuth?.household.id ?? null,
+      userId: req.auth?.user.id ?? req.auditAuth?.user.id ?? null,
+      method: req.method,
+      path: req.originalUrl.slice(0, 512),
+      status,
+      message: String((err as Error)?.message ?? '').slice(0, 4000),
+      stack: String((err as Error)?.stack ?? '').slice(0, 8000),
+      requestId: req.requestId ?? null,
+    }).catch(() => undefined);
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);
