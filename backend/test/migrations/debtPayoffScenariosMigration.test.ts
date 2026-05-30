@@ -1,6 +1,6 @@
 /**
  * Round-trip test for migration
- *   20260608000002-create-debt-payoff-scenarios
+ *   20260608000004-create-debt-payoff-scenarios
  *
  * `debt_payoff_scenarios` persists a saved payoff plan configuration (#202):
  * a named strategy (avalanche | snowball | custom) + extra monthly payment +
@@ -33,7 +33,7 @@ before(async () => {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260608000002-create-debt-payoff-scenarios.js');
+  migration = require('../../src/migrations/20260608000004-create-debt-payoff-scenarios.js');
 });
 
 after(async () => {

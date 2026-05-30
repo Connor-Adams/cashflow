@@ -1,6 +1,6 @@
 /**
  * Round-trip test for migration
- *   20260608000001-create-liability-accounts
+ *   20260608000003-create-liability-accounts
  *
  * `liability_accounts` is a 1:1 sidecar for an Account whose accountType is a
  * liability (credit_card | loan | mortgage). It holds the debt-specific fields
@@ -33,7 +33,7 @@ before(async () => {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260608000001-create-liability-accounts.js');
+  migration = require('../../src/migrations/20260608000003-create-liability-accounts.js');
 });
 
 after(async () => {
