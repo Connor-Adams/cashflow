@@ -4,9 +4,9 @@ interface Props {
   ids: number[];
   onClose: () => void;
   /**
-   * Optional override for the compare endpoint. Defaults to the personal
-   * scenarios endpoint. Corp scenarios pass `/api/tax/corp-scenarios/compare`.
-   * The hook returns the same `ScenarioWithComputed[]` shape either way.
+   * Optional override for the compare endpoint. Defaults to the unified
+   * `/api/tax/scenarios/compare` endpoint, which dispatches on each scenario's
+   * entity kind and works for personal, corp, or mixed sets.
    */
   endpoint?: string;
 }

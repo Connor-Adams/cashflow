@@ -65,10 +65,13 @@ import returnWarrantyRouter from './routes/returnWarranty';
 import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import invitesRouter from './routes/invites';
+import taxScenariosRouter from './routes/tax-scenarios';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
+import auditTokensRouter from './routes/auditTokens';
+import auditRouter from './routes/audit';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
@@ -130,6 +133,8 @@ app.use('/api/config', configRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
+app.use('/api/audit/tokens', auditTokensRouter);  // session auth — must mount BEFORE /api/audit
+app.use('/api/audit', auditRouter);               // bearer auth
 app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/search', searchRouter);
@@ -193,6 +198,10 @@ app.use('/api/household', householdRouter);
 app.use('/api/invites', invitesRouter);
 app.use('/api/net-worth', netWorthRouter);
 app.use('/api/fx', fxRouter);
+// Unified tax scenarios router (dispatches on `kind` query param).
+// Mounted BEFORE the legacy personal/corp routers so the new route wins;
+// the old mounts below now return 410 Gone for backward-compat signalling.
+app.use('/api/tax/scenarios', taxScenariosRouter);
 app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
 app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);

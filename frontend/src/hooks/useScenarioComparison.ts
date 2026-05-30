@@ -12,14 +12,14 @@ interface UseScenarioComparisonResult {
 /**
  * Compare N scenarios via the backend's compare endpoint.
  *
- * Pass `endpoint` to override the default `/api/tax/personal-scenarios/compare`
- * — corp scenarios use `/api/tax/corp-scenarios/compare`. The response shape
- * (`{ scenarios: ScenarioWithComputed[] }`) is identical across both paths, so
- * the same hook (and `ComparisonView`) works for either entity kind.
+ * The unified `/api/tax/scenarios/compare` endpoint dispatches on each
+ * scenario's entity kind, so it works for personal, corp, or mixed sets.
+ * The response shape (`{ scenarios: ScenarioWithComputed[] }`) is identical
+ * regardless of kind.
  */
 export function useScenarioComparison(
   ids: number[],
-  endpoint = '/api/tax/personal-scenarios/compare',
+  endpoint = '/api/tax/scenarios/compare',
 ): UseScenarioComparisonResult {
   const [data, setData] = useState<ScenarioWithComputed[]>([]);
   const [loading, setLoading] = useState(true);
