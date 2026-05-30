@@ -22,6 +22,8 @@ export class SecurityDividend extends Model<
   declare currency: string;
   declare source: CreationOptional<string>;
   declare fetchedAt: Date;
+  declare matchedTransactionId: CreationOptional<number | null>;
+  declare matchedAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -66,6 +68,18 @@ export function initSecurityDividend(sequelize: Sequelize): typeof SecurityDivid
         type: DataTypes.DATE,
         field: 'fetched_at',
         allowNull: false,
+      },
+      matchedTransactionId: {
+        type: DataTypes.BIGINT,
+        field: 'matched_transaction_id',
+        allowNull: true,
+        defaultValue: null,
+      },
+      matchedAt: {
+        type: DataTypes.DATE,
+        field: 'matched_at',
+        allowNull: true,
+        defaultValue: null,
       },
     } as ModelAttributes<SecurityDividend>,
     {

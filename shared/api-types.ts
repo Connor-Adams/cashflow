@@ -13,6 +13,8 @@ export type Account = {
   closedAt: string | null
   notes?: string | null       // present on GET /:id
   notesPreview?: string | null // present on GET / list
+  mergedIntoId?: number | null
+  mergedAt?: string | null
 }
 
 /**

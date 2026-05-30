@@ -38,6 +38,7 @@ import { PerformancePanel } from './portfolio-performance/PerformancePanel'
 import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { ActivityForm } from '../components/portfolio/ActivityForm'
+import { DividendsTab } from '../components/portfolio/DividendsTab'
 import {
   Dialog,
   DialogBody,
@@ -90,7 +91,7 @@ type RefreshResult = {
   }>
 }
 
-type TabKey = 'holdings' | 'performance' | 'by-security' | 'allocation' | 'by-account-type' | 'income' | 'forward-income' | 'realized'
+type TabKey = 'holdings' | 'performance' | 'by-security' | 'allocation' | 'by-account-type' | 'income' | 'forward-income' | 'realized' | 'dividends'
 
 const TAB_ITEMS: TabItem[] = [
   { value: 'holdings', label: 'Holdings' },
@@ -101,6 +102,7 @@ const TAB_ITEMS: TabItem[] = [
   { value: 'income', label: 'Income' },
   { value: 'forward-income', label: 'Forward income' },
   { value: 'realized', label: 'Realized P&L' },
+  { value: 'dividends', label: 'Dividends' },
 ]
 
 export function PortfolioPage() {
@@ -290,6 +292,10 @@ export function PortfolioPage() {
 
       <TabPanel value="realized" active={activeTab}>
         <RealizedPanel />
+      </TabPanel>
+
+      <TabPanel value="dividends" active={activeTab}>
+        <DividendsTab />
       </TabPanel>
     </div>
   )

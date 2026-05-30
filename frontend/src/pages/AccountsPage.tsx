@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
+import { Edit3, GitMerge, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -21,6 +21,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account, AccountType } from '../types/api'
+import { MergeAccountModal } from '@/components/accounts/MergeAccountModal'
 
 const CURRENCY_OPTIONS = ['CAD', 'USD', 'EUR', 'GBP'] as const
 const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
@@ -61,6 +62,9 @@ export function AccountsPage() {
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editNotes, setEditNotes] = useState('')
   const [notesError, setNotesError] = useState<string | null>(null)
+  const [mergingAccount, setMergingAccount] = useState<Account | null>(null)
+  const [mergedAccounts, setMergedAccounts] = useState<Account[]>([])
+  const [mergedLoading, setMergedLoading] = useState(false)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -84,6 +88,18 @@ export function AccountsPage() {
       if (loadRequestRef.current === requestId) {
         setLoading(false)
       }
+    }
+  }, [])
+
+  const loadMerged = useCallback(async () => {
+    setMergedLoading(true)
+    try {
+      const all = await getJson<Account[]>('/api/accounts?includeMerged=true')
+      setMergedAccounts(all.filter((a) => a.mergedIntoId != null))
+    } catch {
+      // non-critical; don't surface an error
+    } finally {
+      setMergedLoading(false)
     }
   }, [])
 
@@ -576,10 +592,21 @@ export function AccountsPage() {
                             </Button>
                           </>
                         ) : (
+                          <>
                           <Button type="button" size="sm" variant="secondary" onClick={() => startEdit(a)}>
                             <Edit3 aria-hidden="true" />
                             Edit
                           </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setMergingAccount(a)}
+                          >
+                            <GitMerge aria-hidden="true" />
+                            Merge into&hellip;
+                          </Button>
+                          </>
                         )}
                         <Button
                           type="button"
@@ -616,8 +643,68 @@ export function AccountsPage() {
           )}
         </div>
       </CollapsibleCard>
+
+      <CollapsibleCard
+        id="merged-accounts"
+        className="accountsTableCard"
+        title="Hidden / merged accounts"
+        description="Accounts that have been merged into another account. Their transactions now live on the target account."
+        actions={mergedAccounts.length > 0 ? <Badge variant="secondary">{mergedAccounts.length} merged</Badge> : undefined}
+        defaultOpen={false}
+      >
+        {mergedLoading ? (
+          <p className="pad muted">Loading…</p>
+        ) : mergedAccounts.length === 0 ? (
+          <p className="emptyState pad">No merged accounts.</p>
+        ) : (
+          <div className="tableWrap">
+            <Table className="table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Currency</TableHead>
+                  <TableHead>Merged into</TableHead>
+                  <TableHead>Merged at</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {mergedAccounts.map((a) => {
+                  const target = accounts.find((t) => t.id === a.mergedIntoId)
+                  return (
+                    <TableRow key={a.id} className="opacity-60">
+                      <TableCell>{a.name}</TableCell>
+                      <TableCell>{(a.defaultCurrency ?? 'CAD').toUpperCase()}</TableCell>
+                      <TableCell>{target?.name ?? `Account #${a.mergedIntoId}`}</TableCell>
+                      <TableCell>{a.mergedAt ? new Date(a.mergedAt).toLocaleDateString() : '—'}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CollapsibleCard>
     </div>
     {confirm.dialog}
+    {mergingAccount && (
+      <MergeAccountModal
+        source={mergingAccount}
+        accounts={accounts}
+        onClose={() => setMergingAccount(null)}
+        onSuccess={(result) => {
+          const sourceName = mergingAccount.name
+          const targetName = result.target?.name ?? 'target'
+          setMergingAccount(null)
+          void load()
+          void loadMerged()
+          showToast({
+            title: `Merged ${sourceName} into ${targetName}: moved ${result.movedTransactions} transaction${result.movedTransactions === 1 ? '' : 's'}.`,
+            variant: 'success',
+            durationMs: 6000,
+          })
+        }}
+      />
+    )}
     </>
   )
 }

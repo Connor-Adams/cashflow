@@ -1,9 +1,11 @@
 import { Router } from 'express';
+import { Op } from 'sequelize';
 import { Account, Transaction, sequelize } from '../models';
 import * as env from '../config/env';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
+import { mergeAccounts } from '../services/accountMerge';
 
 const router = Router();
 const ACCOUNT_TYPES = new Set([
@@ -23,8 +25,13 @@ function normalizeAccountType(raw: unknown): string {
 
 router.get('/', async (req, res, next) => {
   try {
+    const includeMerged = req.query.includeMerged === 'true';
+    const baseWhere = visibleAccountWhere(req);
+    const where = includeMerged
+      ? baseWhere
+      : { ...baseWhere, mergedIntoId: { [Op.is]: null } };
     const rows = await Account.findAll({
-      where: visibleAccountWhere(req),
+      where,
       order: [['name', 'ASC']],
     });
     res.json(rows.map(r => {
@@ -191,6 +198,32 @@ router.patch('/:id', async (req, res, next) => {
     }
     await account.save();
     res.json(account);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:sourceId/merge-into/:targetId', async (req, res, next) => {
+  try {
+    const sourceId = parseInt(req.params.sourceId, 10);
+    const targetId = parseInt(req.params.targetId, 10);
+    if (Number.isNaN(sourceId) || Number.isNaN(targetId)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const { household } = currentAuth(req);
+    const outcome = await mergeAccounts(sourceId, targetId, household.id);
+    if (!outcome.ok) {
+      res.status(400).json({ error: outcome.error });
+      return;
+    }
+    // Reload both accounts after the merge so the response reflects the new
+    // state (source has mergedIntoId set, target is unchanged).
+    const [source, target] = await Promise.all([
+      Account.findOne({ where: { id: sourceId } }),
+      Account.findOne({ where: { id: targetId } }),
+    ]);
+    res.json({ source, target, ...outcome.result });
   } catch (e) {
     next(e);
   }
