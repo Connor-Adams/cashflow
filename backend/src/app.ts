@@ -6,17 +6,28 @@ import healthRouter from './routes/health';
 import versionRouter from './routes/version';
 import accountsRouter from './routes/accounts';
 import transactionsRouter from './routes/transactions';
+import transfersRouter from './routes/transfers';
+import statementsRouter from './routes/statements';
 import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
 import summaryRouter from './routes/summary';
+import sankeyRouter from './routes/sankey';
+import merchantsRouter from './routes/merchants';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
+import moneyLeaksRouter from './routes/moneyLeaks';
+import reportsRouter from './routes/reports';
 import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
+import cfoBriefingsRouter from './routes/cfoBriefings';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
+import purchasesRouter from './routes/purchases';
+import reimbursementsRouter from './routes/reimbursements';
+import financialScenariosRouter from './routes/financialScenarios';
+import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
@@ -25,24 +36,40 @@ import partnerRouter from './routes/partner';
 import budgetsRouter from './routes/budgets';
 import insightsRouter from './routes/insights';
 import plannedEventsRouter from './routes/plannedEvents';
+import monthlyCloseRouter from './routes/monthlyClose';
 import calendarRouter from './routes/calendar';
 import goalsRouter from './routes/goals';
+import notificationsRouter from './routes/notifications';
+import notificationPreferencesRouter from './routes/notificationPreferences';
+import notificationsAdminRouter from './routes/admin/notificationsAdmin';
 import forecastRouter from './routes/forecast';
+import debtRouter from './routes/debt';
+import opportunityCostRouter from './routes/opportunityCost';
+import cashflowSettingsRouter from './routes/cashflowSettings';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
 import emailIntegrationsRouter from './routes/emailIntegrations';
 import netWorthRouter from './routes/netWorth';
+import fxRouter from './routes/fx';
 import portfolioRouter from './routes/portfolio';
 import taxRouter from './routes/tax';
 import businessTaxRouter from './routes/businessTax';
+import returnWarrantyRouter from './routes/returnWarranty';
+import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
+import invitesRouter from './routes/invites';
 import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
 import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import configRouter from './routes/config';
+import auditLogRouter from './routes/auditLog';
+import vaultRouter from './routes/vault';
+import financeEventsRouter from './routes/financeEvents';
+import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
+import searchRouter from './routes/search';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -99,8 +126,11 @@ app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
 app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
+app.use('/api/search', searchRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/transactions', transactionsRouter);
+app.use('/api/transfers', transfersRouter);
+app.use('/api/statements', statementsRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/categories', categoriesRouter);
@@ -109,17 +139,39 @@ app.use('/api/partner', partnerRouter);
 app.use('/api/budgets', budgetsRouter);
 app.use('/api/insights', insightsRouter);
 app.use('/api/planned-events', plannedEventsRouter);
+app.use('/api/monthly-close', monthlyCloseRouter);
 app.use('/api/calendar', calendarRouter);
 app.use('/api/goals', goalsRouter);
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/notification-preferences', notificationPreferencesRouter);
+app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);
+app.use('/api/debt', debtRouter);
+app.use('/api/opportunity-cost', opportunityCostRouter);
+app.use('/api/financial-scenarios', financialScenariosRouter);
+app.use('/api/settings/cashflow', cashflowSettingsRouter);
 app.use('/api/import', importRouter);
+// sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins
+// against any future /:id-style routes added to summaryRouter. The
+// remainder of /api/summary/* keeps flowing to summaryRouter below.
+app.use('/api/summary/sankey', sankeyRouter);
 app.use('/api/summary', summaryRouter);
+app.use('/api/merchants', merchantsRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/data-quality', dataQualityRouter);
+app.use('/api/money-leaks', moneyLeaksRouter);
+app.use('/api/audit-log', auditLogRouter);
+app.use('/api/vault', vaultRouter);
+app.use('/api/finance-events', financeEventsRouter);
+app.use('/api/sync', syncRouter);
+app.use('/api/reports', reportsRouter);
 // AI review router (issue #210) mounted BEFORE aiRouter so its /review and
 // /reviews/* paths win against any future overlap. Both share the /api/ai
 // prefix to satisfy the issue's endpoint spec.
 app.use('/api/ai', aiReviewRouter);
+// Personal CFO briefings (issue #236).
+app.use('/api/cfo', cfoBriefingsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);
@@ -128,16 +180,27 @@ app.use('/api/external-orders', externalOrdersRouter);
 app.use('/api/email', emailIntegrationsRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/household', householdRouter);
+app.use('/api/invites', invitesRouter);
 app.use('/api/net-worth', netWorthRouter);
+app.use('/api/fx', fxRouter);
 app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
 app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
+app.use('/api/tax/reserve', taxReserveRouter);
 app.use('/api/tax', taxRouter);
 // businessTaxRouter mounts /business/*, /exports/tax, /tax-tags, and
 // /transactions/:id/tax under /api. Keep it BEFORE other catch-all /api mounts.
 app.use('/api', businessTaxRouter);
+// returnWarrantyRouter mounts /return-warranty/* and
+// /transactions/:id/return-warranty under /api. Keep BEFORE other catch-all
+// mounts so its specific paths win.
+app.use('/api', returnWarrantyRouter);
 app.use('/api', receiptsRouter);
 app.use('/api', itemsRouter);
+app.use('/api', purchasesRouter);
+// reimbursementsRouter mounts /reimbursements/* and
+// /transactions/:id/reimbursable under /api (issue #216).
+app.use('/api', reimbursementsRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;

@@ -4,6 +4,7 @@ import {
   BudgetTarget,
   BUDGET_TARGET_PERIODS,
   BUDGET_TARGET_SCOPES,
+  BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS,
   type BudgetTargetPeriod,
   type BudgetTargetScope,
 } from '../models/BudgetTarget';
@@ -23,6 +24,8 @@ type NormalizedBudgetInput = {
   period: BudgetTargetPeriod;
   scope: BudgetTargetScope;
   rolloverEnabled: boolean;
+  excludeRefundedPurchases: boolean;
+  alertThresholds: number[];
 };
 
 type ValidationResult =
@@ -95,6 +98,13 @@ export function validateBudgetInput(
   }
 
   const rolloverEnabled = parseBooleanFlag(raw.rolloverEnabled);
+  const excludeRefundedPurchases = parseBooleanFlag(raw.excludeRefundedPurchases);
+
+  const thresholdsResult = validateAlertThresholds(raw.alertThresholds);
+  if (!thresholdsResult.ok) {
+    return thresholdsResult;
+  }
+  const alertThresholds = thresholdsResult.value;
 
   return {
     ok: true,
@@ -105,8 +115,60 @@ export function validateBudgetInput(
       period,
       scope,
       rolloverEnabled,
+      excludeRefundedPurchases,
+      alertThresholds,
     },
   };
+}
+
+/**
+ * Pure validator for `alertThresholds` (issue #268). Accepts:
+ *   - undefined → return defaults [80, 100, 120]
+ *   - array of integers in 1..500 → return deduped + sorted ascending
+ *   - anything else → 400
+ *
+ * Dedup + sort here so the model + cron both see the same shape regardless
+ * of input ordering, and the column doesn't bloat with `[80, 80, 80]`.
+ */
+export function validateAlertThresholds(
+  raw: unknown,
+):
+  | { ok: true; value: number[] }
+  | { ok: false; status: number; error: string } {
+  if (raw === undefined) {
+    return { ok: true, value: [...BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS] };
+  }
+  if (!Array.isArray(raw)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'alertThresholds must be an array of integers',
+    };
+  }
+  if (raw.length === 0) {
+    // Allow explicit empty list to disable alerts for this budget. The cron
+    // then has nothing to fire — consistent with a user opting out without
+    // touching their Notifications-tab channel preference.
+    return { ok: true, value: [] };
+  }
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const v of raw) {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 500) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'alertThresholds entries must be integers between 1 and 500',
+      };
+    }
+    if (!seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  out.sort((a, b) => a - b);
+  return { ok: true, value: out };
 }
 
 /**
@@ -176,6 +238,16 @@ export function validateBudgetPatch(
     out.rolloverEnabled = parseBooleanFlag(raw.rolloverEnabled);
   }
 
+  if (raw.excludeRefundedPurchases !== undefined) {
+    out.excludeRefundedPurchases = parseBooleanFlag(raw.excludeRefundedPurchases);
+  }
+
+  if (raw.alertThresholds !== undefined) {
+    const thresholdsResult = validateAlertThresholds(raw.alertThresholds);
+    if (!thresholdsResult.ok) return thresholdsResult;
+    out.alertThresholds = thresholdsResult.value;
+  }
+
   return { ok: true, value: out };
 }
 
@@ -209,6 +281,8 @@ type BudgetResponse = {
   period: BudgetTargetPeriod;
   scope: BudgetTargetScope;
   rolloverEnabled: boolean;
+  excludeRefundedPurchases: boolean;
+  alertThresholds: number[];
   createdAt: string;
   updatedAt: string;
 };
@@ -223,9 +297,34 @@ function serializeBudget(row: InstanceType<typeof BudgetTarget>): BudgetResponse
     period: row.period,
     scope: row.scope,
     rolloverEnabled: Boolean(row.rolloverEnabled),
+    excludeRefundedPurchases: Boolean(row.excludeRefundedPurchases),
+    alertThresholds: normalizeAlertThresholdsForSerialize(row.alertThresholds),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Defensive coercion for the column value at serialize time. Sqlite returns
+ * the JSON array as a JS array, but a legacy row that was inserted before
+ * the migration's default backfilled could in theory have a string-typed
+ * value; we fall back to the bundled defaults so the response never lies.
+ */
+function normalizeAlertThresholdsForSerialize(raw: unknown): number[] {
+  if (Array.isArray(raw)) {
+    return raw.map((n) => Number(n)).filter((n) => Number.isFinite(n));
+  }
+  if (typeof raw === 'string' && raw.length > 0) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((n) => Number(n)).filter((n) => Number.isFinite(n));
+      }
+    } catch {
+      // Fall through to defaults.
+    }
+  }
+  return [...BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS];
 }
 
 router.get('/', async (req, res, next) => {
@@ -623,6 +722,7 @@ async function computeStatusForBudgets(
       scope: BudgetTargetScope;
       period: BudgetTargetPeriod;
       rolloverEnabled: boolean;
+      excludeRefundedPurchases: boolean;
       periodElapsedPercent: number;
       pacingState: BudgetPacingState;
     }
@@ -642,7 +742,38 @@ async function computeStatusForBudgets(
         attributes: ['transactionId'],
         raw: true,
       });
-      const excludedIds = excluded.map((row) => row.transactionId);
+      const explicitExcludedIds = excluded.map((row) => row.transactionId);
+
+      // Issue #215: when the budget opts in to excludeRefundedPurchases,
+      // also exclude the `linked_transaction_id` of every refund row in
+      // this household+currency+date window. The refund itself is already
+      // a positive-amount row that aggregateSpendByCategory ignores (it
+      // only counts amount<0). So zeroing out the original purchase is the
+      // only thing left to do for "this charge was refunded — don't count it".
+      let refundOriginalIds: number[] = [];
+      if (budget.excludeRefundedPurchases) {
+        const refunds = await Transaction.findAll({
+          where: {
+            ...householdWhere(req),
+            currency: budget.currency,
+            txnType: 'refund',
+            linkedTransactionId: { [Op.ne]: null },
+            date: {
+              [Op.gte]: bounds.periodStart,
+              [Op.lte]: bounds.periodEnd,
+            },
+          },
+          attributes: ['linkedTransactionId'],
+          raw: true,
+        });
+        refundOriginalIds = refunds
+          .map((r) => r.linkedTransactionId)
+          .filter((v): v is number => typeof v === 'number');
+      }
+
+      const allExcludedIds = Array.from(
+        new Set<number>([...explicitExcludedIds, ...refundOriginalIds])
+      );
 
       const txWhere: WhereOptions = {
         ...householdWhere(req),
@@ -652,8 +783,8 @@ async function computeStatusForBudgets(
           [Op.lte]: bounds.periodEnd,
         },
         ...scopeWhereClause(budget.scope),
-        ...(excludedIds.length > 0
-          ? { id: { [Op.notIn]: excludedIds } }
+        ...(allExcludedIds.length > 0
+          ? { id: { [Op.notIn]: allExcludedIds } }
           : {}),
       } as WhereOptions;
 
@@ -695,6 +826,7 @@ async function computeStatusForBudgets(
         scope: budget.scope,
         period: budget.period,
         rolloverEnabled: Boolean(budget.rolloverEnabled),
+        excludeRefundedPurchases: Boolean(budget.excludeRefundedPurchases),
         periodElapsedPercent: elapsed,
         pacingState: pacingState(progress.percentUsed, elapsed),
       };
@@ -720,6 +852,8 @@ router.post('/', async (req, res, next) => {
       period: result.value.period,
       scope: result.value.scope,
       rolloverEnabled: result.value.rolloverEnabled,
+      excludeRefundedPurchases: result.value.excludeRefundedPurchases,
+      alertThresholds: result.value.alertThresholds,
     });
     res.status(201).json(serializeBudget(row));
   } catch (e) {
@@ -755,6 +889,10 @@ router.put('/:id', async (req, res, next) => {
     if (patch.scope !== undefined) row.set('scope', patch.scope);
     if (patch.rolloverEnabled !== undefined)
       row.set('rolloverEnabled', patch.rolloverEnabled);
+    if (patch.excludeRefundedPurchases !== undefined)
+      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
+    if (patch.alertThresholds !== undefined)
+      row.set('alertThresholds', patch.alertThresholds);
     await row.save();
     res.json(serializeBudget(row));
   } catch (e) {
@@ -794,6 +932,10 @@ router.patch('/:id', async (req, res, next) => {
     if (patch.scope !== undefined) row.set('scope', patch.scope);
     if (patch.rolloverEnabled !== undefined)
       row.set('rolloverEnabled', patch.rolloverEnabled);
+    if (patch.excludeRefundedPurchases !== undefined)
+      row.set('excludeRefundedPurchases', patch.excludeRefundedPurchases);
+    if (patch.alertThresholds !== undefined)
+      row.set('alertThresholds', patch.alertThresholds);
     await row.save();
     res.json(serializeBudget(row));
   } catch (e) {

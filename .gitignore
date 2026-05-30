@@ -1,5 +1,8 @@
 node_modules/
 dist/
+.expo
+.next
+.turbo
 .env
 *.sqlite
 *.sqlite-journal

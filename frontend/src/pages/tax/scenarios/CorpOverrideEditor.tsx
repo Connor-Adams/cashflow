@@ -21,18 +21,25 @@ const KEY_DEFS: KeyDef[] = [
   { key: 'corp.openingCda', label: 'Opening CDA (CAD)', inputType: 'decimal' },
 ];
 
-const INTERCORP_FIELDS = ['eligible', 'nonEligible', 'capital'] as const;
+const INTERCORP_FIELDS = ['eligible', 'nonEligible', 'capital', 'ownershipPercent'] as const;
 type IntercorpField = (typeof INTERCORP_FIELDS)[number];
 
 const INTERCORP_FIELD_LABELS: Record<IntercorpField, string> = {
   eligible: 'Eligible dividend (CAD)',
   nonEligible: 'Non-eligible dividend (CAD)',
   capital: 'Capital dividend (CAD)',
+  ownershipPercent: 'Ownership % (0..100)',
 };
 
-// Matches backend `INTERCORP_RE` in backend/src/tax/scenarios/overrideKeys.ts (P11a T1).
+// Default ownership % when an intercorp distribution row is first added. 100%
+// matches the most common wholly-owned holdco/opco shape; user can override.
+// Engine uses this for connected-vs-portfolio Part IV split (P11b T5) and GRIP
+// boost calc (P11b T6).
+const DEFAULT_OWNERSHIP_PERCENT = 100;
+
+// Matches backend `INTERCORP_RE` in backend/src/tax/scenarios/overrideKeys.ts (P11a T1, P11b T4).
 // Keep these in sync — backend is the source of truth for the registry shape.
-const INTERCORP_KEY_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital)$/;
+const INTERCORP_KEY_RE = /^intercorp\.(\d+)\.(eligible|nonEligible|capital|ownershipPercent)$/;
 
 function intercorpKeyFor(receiverEntityId: number, field: IntercorpField): string {
   return `intercorp.${receiverEntityId}.${field}`;
@@ -167,11 +174,13 @@ export function CorpOverrideEditor({ overrides, onChange, otherCorps }: Props) {
         existingReceiverIds={Object.keys(intercorpByReceiver)}
         otherCorps={otherCorps}
         onAdd={(receiverId) => {
-          // Seed all 3 fields at 0 so the receiver row is fully editable on first
-          // render — UX parity with the flat KEY_DEFS "add" which also stamps a 0.
+          // Seed all 4 fields so the receiver row is fully editable on first
+          // render — dividend fields default to 0, ownershipPercent defaults to
+          // 100 (most-common wholly-owned case). User can change any of them.
           const next = { ...overrides };
           for (const field of INTERCORP_FIELDS) {
-            next[intercorpKeyFor(receiverId, field)] = 0;
+            next[intercorpKeyFor(receiverId, field)] =
+              field === 'ownershipPercent' ? DEFAULT_OWNERSHIP_PERCENT : 0;
           }
           onChange(next);
         }}
@@ -214,17 +223,27 @@ function IntercorpReceiverList({
                 <button onClick={() => onRemove(receiverId)} style={{ marginLeft: '0.5rem' }}>×</button>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.25rem' }}>
-                {INTERCORP_FIELDS.map((field) => (
-                  <label key={field} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <span>{INTERCORP_FIELD_LABELS[field]}</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={fields[field] ?? 0}
-                      onChange={(e) => onFieldChange(receiverId, field, Number(e.target.value))}
-                    />
-                  </label>
-                ))}
+                {INTERCORP_FIELDS.map((field) => {
+                  // ownershipPercent is a 0..100 integer percentage; the other
+                  // 3 are CAD amounts (decimal). Distinct input props clamp the
+                  // value at the UI; backend `assertNumber` only enforces
+                  // finiteness, so the UI is the primary range guard for v1.
+                  const isPercent = field === 'ownershipPercent';
+                  const fallback = isPercent ? DEFAULT_OWNERSHIP_PERCENT : 0;
+                  return (
+                    <label key={field} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <span>{INTERCORP_FIELD_LABELS[field]}</span>
+                      <input
+                        type="number"
+                        step={isPercent ? 1 : 0.01}
+                        min={isPercent ? 0 : undefined}
+                        max={isPercent ? 100 : undefined}
+                        value={fields[field] ?? fallback}
+                        onChange={(e) => onFieldChange(receiverId, field, Number(e.target.value))}
+                      />
+                    </label>
+                  );
+                })}
               </div>
             </li>
           );

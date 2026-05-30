@@ -8,6 +8,7 @@ import {
   CreationOptional,
 } from 'sequelize';
 import { logger } from '../observability/logger';
+import { TRANSACTION_STATUSES, type TransactionStatus } from '../transactions/types';
 
 export class Transaction extends Model<
   InferAttributes<Transaction>,
@@ -31,6 +32,7 @@ export class Transaction extends Model<
   declare sourceReference: string | null;
   declare sourceRowFingerprint: string;
   declare sourceIdentityFingerprint: string;
+  declare status: CreationOptional<TransactionStatus>;
   declare appliedRuleId: number | null;
   declare entityId: number | null;
 
@@ -39,11 +41,16 @@ export class Transaction extends Model<
   declare autoSource: string | null;
   declare autoConfidence: string | null;
   declare linkedTransactionId: number | null;
+  declare transferPurpose: string | null;
+  declare transferLinkedAt: Date | null;
   declare isRecurring: CreationOptional<boolean>;
 
   declare autoCategory: string | null;
   declare categoryOverride: string | null;
   declare finalCategory: string | null;
+
+  declare counterpartyRaw: string | null;
+  declare counterpartyContactId: number | null;
 
   declare autoBusiness: boolean | null;
   declare businessOverride: boolean | null;
@@ -67,6 +74,21 @@ export class Transaction extends Model<
 
   declare reviewFlag: boolean;
   declare reviewedAt: Date | null;
+
+  /**
+   * Deterministic post-import confidence state assigned by
+   * computeImportConfidence (#214). NULL on legacy rows that predate the
+   * classifier — aggregator treats NULL as "unknown" so backfill is
+   * incremental. One of 'clean' | 'needs_review' when populated.
+   */
+  declare importConfidence: string | null;
+  /**
+   * JSON-encoded array of import-confidence flag tokens (e.g.
+   * ["missing_category", "needs_review"]). NULL when no flags fired.
+   * Stored as TEXT for SQLite-compat in migration round-trip tests.
+   */
+  declare importConfidenceFlags: string | null;
+
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -143,6 +165,14 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         type: DataTypes.STRING(128),
         field: 'source_identity_fingerprint',
         allowNull: false,
+      },
+      status: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        defaultValue: 'posted',
+        validate: {
+          isIn: [TRANSACTION_STATUSES],
+        },
       },
       appliedRuleId: {
         type: DataTypes.INTEGER,
@@ -282,6 +312,16 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         field: 'linked_transaction_id',
         allowNull: true,
       },
+      transferPurpose: {
+        type: DataTypes.STRING(32),
+        field: 'transfer_purpose',
+        allowNull: true,
+      },
+      transferLinkedAt: {
+        type: DataTypes.DATE,
+        field: 'transfer_linked_at',
+        allowNull: true,
+      },
       isRecurring: {
         type: DataTypes.BOOLEAN,
         field: 'is_recurring',
@@ -298,6 +338,28 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       reviewedAt: {
         type: DataTypes.DATE,
         field: 'reviewed_at',
+        allowNull: true,
+      },
+
+      importConfidence: {
+        type: DataTypes.STRING(16),
+        field: 'import_confidence',
+        allowNull: true,
+      },
+      importConfidenceFlags: {
+        type: DataTypes.TEXT,
+        field: 'import_confidence_flags',
+        allowNull: true,
+      },
+
+      counterpartyRaw: {
+        type: DataTypes.TEXT,
+        field: 'counterparty_raw',
+        allowNull: true,
+      },
+      counterpartyContactId: {
+        type: DataTypes.INTEGER,
+        field: 'counterparty_contact_id',
         allowNull: true,
       },
     } as ModelAttributes<Transaction>,
@@ -318,6 +380,53 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       });
     } catch (e) {
       logger.warn({ err: e, model: 'Transaction' }, 'ensure_category_hook_failed');
+    }
+  });
+
+  /**
+   * Version-history capture (#229). Computed in `beforeUpdate` so
+   * `previous(field)` still returns the pre-mutation value (after
+   * `afterUpdate`, Sequelize has synced the snapshot and the diff is
+   * lost). The diff is stashed on the `options` bag and consumed by the
+   * `afterUpdate` hook below, which writes a single TransactionRevision
+   * row inside the caller's SQL transaction (if any).
+   *
+   * No revision is written when nothing tracked changed — the recorder
+   * returns `null` from buildTransactionDiff in that case.
+   */
+  Transaction.addHook('beforeUpdate', (instance: Transaction, options) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { buildTransactionDiff } = require('../util/transactionRevisions') as typeof import('../util/transactionRevisions');
+      const diff = buildTransactionDiff(instance);
+      if (diff != null) {
+        (options as unknown as { _pendingRevisionDiff?: unknown })._pendingRevisionDiff = diff;
+      }
+    } catch (e) {
+      logger.warn({ err: e, model: 'Transaction' }, 'transaction_revision_diff_failed');
+    }
+  });
+  Transaction.addHook('afterUpdate', async (instance: Transaction, options) => {
+    const opts = options as unknown as {
+      _pendingRevisionDiff?: Array<{ field: string; before: unknown; after: unknown }>;
+    };
+    const diff = opts._pendingRevisionDiff;
+    if (!diff || diff.length === 0) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { recordTransactionRevision } = require('../util/transactionRevisions') as typeof import('../util/transactionRevisions');
+      await recordTransactionRevision(instance, diff, {
+        transaction: options.transaction,
+      });
+    } catch (e) {
+      logger.warn(
+        { err: e, model: 'Transaction', transactionId: instance.id },
+        'transaction_revision_record_failed',
+      );
+    } finally {
+      // Clear so a subsequent reload-then-save in the same options bag
+      // doesn't accidentally re-emit the same revision.
+      delete opts._pendingRevisionDiff;
     }
   });
   return Transaction;

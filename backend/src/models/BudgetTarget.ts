@@ -69,9 +69,32 @@ export class BudgetTarget extends Model<
    * toggle in this PR but the rollover *behavior* is a follow-up.
    */
   declare rolloverEnabled: CreationOptional<boolean>;
+  /**
+   * If true (issue #215), the budget progress route subtracts the
+   * linked-original-purchase amount of every refund whose link points at a
+   * txn inside the period bounds. Effect: a $200 purchase that's been
+   * refunded in the same period contributes $0 to budget spend.
+   */
+  declare excludeRefundedPurchases: CreationOptional<boolean>;
+  /**
+   * Which `spent/target * 100` ratios fire a proactive alert via the daily
+   * `budget_breach_check` cron (issue #268). Stored as an integer array;
+   * common defaults are `[80, 100, 120]`. The route layer validates entries
+   * are integers in 1–500; the cron iterates whatever values are present.
+   */
+  declare alertThresholds: CreationOptional<number[]>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
+
+/**
+ * Bundled defaults for `alertThresholds` on legacy + freshly-created budgets.
+ * Mirrors the migration's column default so the cron behaves identically
+ * whether or not a user has touched their per-budget settings yet.
+ */
+export const BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS: readonly number[] = [
+  80, 100, 120,
+] as const;
 
 export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
   BudgetTarget.init(
@@ -100,6 +123,18 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
         field: 'rollover_enabled',
         allowNull: false,
         defaultValue: false,
+      },
+      excludeRefundedPurchases: {
+        type: DataTypes.BOOLEAN,
+        field: 'exclude_refunded_purchases',
+        allowNull: false,
+        defaultValue: false,
+      },
+      alertThresholds: {
+        type: DataTypes.JSON,
+        field: 'alert_thresholds',
+        allowNull: false,
+        defaultValue: [...BUDGET_TARGET_DEFAULT_ALERT_THRESHOLDS],
       },
     } as ModelAttributes<BudgetTarget>,
     {

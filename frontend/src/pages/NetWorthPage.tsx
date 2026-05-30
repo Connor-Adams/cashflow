@@ -22,6 +22,11 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import { formatMoney } from '@/lib/formatMoney'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '@/lib/dateInput'
 
 type Range = '1M' | '3M' | '1Y' | 'All'
 
@@ -30,15 +35,18 @@ function rangeToParams(range: Range): {
   to: string
   granularity: 'monthly' | 'daily'
 } {
-  const today = new Date()
-  const to = today.toISOString().slice(0, 10)
+  // Anchor at UTC midnight of the user's local calendar day so the picked
+  // date matches what the user sees (issue #280). All date math uses UTC
+  // setters to stay TZ-invariant.
+  const todayUtc = fromDateInputValue(todayDateInputValue())!
+  const to = toDateInputValue(todayUtc)
   const from = (() => {
-    const d = new Date(today)
+    const d = new Date(todayUtc)
     if (range === '1M') d.setUTCDate(d.getUTCDate() - 31)
     else if (range === '3M') d.setUTCDate(d.getUTCDate() - 92)
     else if (range === '1Y') d.setUTCDate(d.getUTCDate() - 365)
     else d.setUTCFullYear(d.getUTCFullYear() - 20)
-    return d.toISOString().slice(0, 10)
+    return toDateInputValue(d)
   })()
   const granularity: 'monthly' | 'daily' =
     range === '1M' || range === '3M' ? 'daily' : 'monthly'
@@ -49,15 +57,41 @@ export function NetWorthPage() {
   const [range, setRange] = useState<Range>('1Y')
   const [editorOpen, setEditorOpen] = useState(false)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
+  const [openingErrors, setOpeningErrors] = useState<Record<number, string>>({})
   const current = useNetWorthCurrent()
   const seriesParams = useMemo(() => rangeToParams(range), [range])
   const series = useNetWorthSeries(seriesParams)
   const editorRef = useRef<HTMLDivElement>(null)
 
+  // Per-issue-262: build a set of asset accountIds so we can reject a
+  // negative opening balance on asset-side accounts (the backend already
+  // classifies via accountKind() — we surface that classification by which
+  // breakdown bucket the row landed in).
+  const assetAccountIds = useMemo(() => {
+    const out = new Set<number>()
+    for (const row of current.data?.breakdown.assets ?? []) {
+      if (row.source === 'account' && row.accountId != null) out.add(row.accountId)
+    }
+    return out
+  }, [current.data])
+
   async function saveOpening(accountId: number) {
     const raw = drafts[accountId] ?? ''
     const val = Number(raw)
     if (!Number.isFinite(val)) return
+    if (assetAccountIds.has(accountId) && val < 0) {
+      setOpeningErrors((prev) => ({
+        ...prev,
+        [accountId]: "Opening balance for an asset account can't be negative.",
+      }))
+      return
+    }
+    setOpeningErrors((prev) => {
+      if (!(accountId in prev)) return prev
+      const { [accountId]: _drop, ...rest } = prev
+      void _drop
+      return rest
+    })
     await updateOpeningBalance(accountId, {
       openingBalance: val,
       openingBalanceDate: null,
@@ -238,10 +272,18 @@ export function NetWorthPage() {
                   <TableCell>{row.label}</TableCell>
                   <TableCell>{row.currency}</TableCell>
                   <TableCell className="text-right">
-                    {row.native != null ? formatMoney(row.native, row.currency) : '—'}
+                    {row.native != null
+                      ? formatMoney(row.native, row.currency)
+                      : row.source === 'account' && !row.openingBalanceSet
+                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        : '—'}
                   </TableCell>
                   <TableCell className="text-right">
-                    {row.cadValue != null ? formatMoney(row.cadValue, 'CAD') : '—'}
+                    {row.cadValue != null
+                      ? formatMoney(row.cadValue, 'CAD')
+                      : row.source === 'account' && !row.openingBalanceSet
+                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        : '—'}
                   </TableCell>
                   <TableCell>
                     {badges.length === 0 ? (
@@ -275,37 +317,54 @@ export function NetWorthPage() {
               editableAccounts.map((row) => (
                 <div
                   key={`${row.accountId}-${row.currency}`}
-                  className="flex items-center gap-3"
+                  className="flex flex-col gap-1"
                 >
-                  <label
-                    className="w-40 truncate"
-                    htmlFor={`opening-${row.accountId}`}
-                  >
-                    {row.label}
-                    {!row.openingBalanceSet && (
-                      <span className="ml-2 text-xs text-amber-700">(unset)</span>
-                    )}
-                  </label>
-                  <input
-                    id={`opening-${row.accountId}`}
-                    aria-label={`Opening balance for ${row.label}`}
-                    type="number"
-                    className="border rounded px-2 py-1"
-                    onChange={(e) =>
-                      setDrafts((d) => ({
-                        ...d,
-                        [row.accountId]: e.target.value,
-                      }))
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() => saveOpening(row.accountId)}
-                    aria-label={`Save ${row.label}`}
-                    className="rounded border px-3 py-1 text-sm"
-                  >
-                    Save
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <label
+                      className="w-40 truncate"
+                      htmlFor={`opening-${row.accountId}`}
+                    >
+                      {row.label}
+                      {!row.openingBalanceSet && (
+                        <span className="ml-2 text-xs text-amber-700">(unset)</span>
+                      )}
+                    </label>
+                    <input
+                      id={`opening-${row.accountId}`}
+                      aria-label={`Opening balance for ${row.label}`}
+                      type="number"
+                      className="border rounded px-2 py-1"
+                      aria-invalid={openingErrors[row.accountId] ? true : undefined}
+                      aria-describedby={
+                        openingErrors[row.accountId]
+                          ? `opening-error-${row.accountId}`
+                          : undefined
+                      }
+                      onChange={(e) =>
+                        setDrafts((d) => ({
+                          ...d,
+                          [row.accountId]: e.target.value,
+                        }))
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => saveOpening(row.accountId)}
+                      aria-label={`Save ${row.label}`}
+                      className="rounded border px-3 py-1 text-sm"
+                    >
+                      Save
+                    </button>
+                  </div>
+                  {openingErrors[row.accountId] && (
+                    <span
+                      id={`opening-error-${row.accountId}`}
+                      className="error text-sm text-red-600 ml-40"
+                      role="alert"
+                    >
+                      {openingErrors[row.accountId]}
+                    </span>
+                  )}
                 </div>
               ))
             )}

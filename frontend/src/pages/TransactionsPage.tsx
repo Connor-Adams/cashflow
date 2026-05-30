@@ -7,7 +7,9 @@ import {
 } from 'react'
 import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,7 +32,9 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
+import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
+import { RefundBadge } from '../components/RefundBadge'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import {
   getJson,
@@ -38,13 +42,18 @@ import {
   postFormData,
   postJson,
 } from '../lib/api'
-import { toDateInputValue } from '../lib/dateInput'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   BulkPatchFilterResponse,
   Contact,
   Paginated,
   Transaction,
+  TransactionStatus,
   TransactionBulkPatch,
   TransactionFilterPayload,
 } from '../types/api'
@@ -114,17 +123,32 @@ function formatAiSuggestion(suggestion: AiSuggestion): string {
 }
 
 const DEFAULT_TRANSACTION_CURRENCY = 'CAD'
+const TRANSACTION_STATUS_FILTERS: Array<{ value: '' | TransactionStatus; label: string }> = [
+  { value: '', label: 'All' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'posted', label: 'Posted' },
+  { value: 'cleared', label: 'Cleared' },
+]
+
+/**
+ * Anchor for default-range calculations: UTC midnight of the user's local
+ * calendar day. Keeps the derived YYYY-MM-DD strings stable across timezones
+ * (issue #280).
+ */
+function localTodayUtcMidnight(): Date {
+  return fromDateInputValue(todayDateInputValue())!
+}
 
 function getRelativeDateRange(days: number): { from: string; to: string } {
-  const to = new Date()
+  const to = localTodayUtcMidnight()
   const from = new Date(to)
-  from.setDate(from.getDate() - days)
+  from.setUTCDate(from.getUTCDate() - days)
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDateRange(): { from: string; to: string } {
-  const to = new Date()
-  const from = new Date(to.getFullYear(), 0, 1)
+  const to = localTodayUtcMidnight()
+  const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
   return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
@@ -148,6 +172,10 @@ export function TransactionsPage() {
     'transactions.batchFilter',
     ''
   )
+  const [statusFilter, setStatusFilter] = useSessionState<'' | TransactionStatus>(
+    'transactions.status',
+    ''
+  )
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const [bulkCat, setBulkCat] = useState('')
   const [bulkBiz, setBulkBiz] = useState('')
@@ -167,6 +195,8 @@ export function TransactionsPage() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [aiEnabled, setAiEnabled] = useState(false)
   const [signalsDialogTxnId, setSignalsDialogTxnId] = useState<number | null>(null)
+  // Issue #229: per-transaction edit history viewer + restore.
+  const [revisionsDialogTxnId, setRevisionsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [itemsDrawer, setItemsDrawer] = useState<{ txnId: number; receipts: ReceiptWithItems[] } | null>(null)
@@ -196,6 +226,7 @@ export function TransactionsPage() {
     const urlImportBatch = searchParams.get('importBatch')
     const urlReviewFlag = searchParams.get('reviewFlag')
     const urlIds = searchParams.get('ids')
+    const urlStatus = searchParams.get('status')
     const hasAny =
       urlCategory != null ||
       urlCurrency != null ||
@@ -203,7 +234,8 @@ export function TransactionsPage() {
       urlDateTo != null ||
       urlImportBatch != null ||
       urlReviewFlag != null ||
-      urlIds != null
+      urlIds != null ||
+      urlStatus != null
     if (!hasAny) return
     if (urlCategory != null) setCategoryFilter(urlCategory)
     if (urlCurrency != null) setCurrency(urlCurrency.toUpperCase().slice(0, 3))
@@ -212,6 +244,9 @@ export function TransactionsPage() {
     if (urlImportBatch != null) setBatchFilter(urlImportBatch)
     if (urlReviewFlag != null) setReviewOnly(urlReviewFlag === 'true')
     if (urlIds != null) setIdsFilter(urlIds.trim())
+    if (urlStatus === 'pending' || urlStatus === 'posted' || urlStatus === 'cleared') {
+      setStatusFilter(urlStatus)
+    }
     setPage(1)
     setSearchParams({}, { replace: true })
   }, [
@@ -224,6 +259,7 @@ export function TransactionsPage() {
     setBatchFilter,
     setReviewOnly,
     setIdsFilter,
+    setStatusFilter,
   ])
 
   useEffect(() => {
@@ -244,10 +280,28 @@ export function TransactionsPage() {
       .catch(() => setCategoryHints([]))
   }, [])
 
+  // Per-issue-262: detect an impossible date range and surface inline guidance.
+  // Apply-style actions are gated on this so users don't chase missing data
+  // caused by a bad filter.
+  const dateRangeInvalid = useMemo(() => {
+    const from = dateFrom.trim()
+    const to = dateTo.trim()
+    if (!from || !to) return false
+    return from > to
+  }, [dateFrom, dateTo])
+
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current
     setLoading(true)
     setErr(null)
+    // Skip the load when the date range is impossible — return zero results
+    // would just confuse the user. The inline error under the To input tells
+    // them what to fix.
+    if (dateRangeInvalid) {
+      setRes({ data: [], page, pageSize: 25, total: 0 })
+      setLoading(false)
+      return
+    }
     try {
       const qs = new URLSearchParams({
         page: String(page),
@@ -260,6 +314,7 @@ export function TransactionsPage() {
       if (dateFrom.trim()) qs.set('dateFrom', dateFrom.trim())
       if (dateTo.trim()) qs.set('dateTo', dateTo.trim())
       if (batchFilter.trim()) qs.set('importBatch', batchFilter.trim())
+      if (statusFilter) qs.set('status', statusFilter)
       const data = await getJson<Paginated<Transaction>>(
         `/api/transactions?${qs.toString()}`,
       )
@@ -275,7 +330,7 @@ export function TransactionsPage() {
         setLoading(false)
       }
     }
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter, dateRangeInvalid])
 
   useEffect(() => {
     void load()
@@ -283,14 +338,14 @@ export function TransactionsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter])
+  }, [reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter])
 
   useEffect(() => {
     setSelectedIds(new Set())
     setBulkAiResults([])
     setAiAuditResults([])
     setAiAuditMessage(null)
-  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter])
+  }, [page, reviewOnly, currency, categoryFilter, dateFrom, dateTo, batchFilter, idsFilter, statusFilter])
 
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
@@ -467,6 +522,16 @@ export function TransactionsPage() {
               },
             }
           : null,
+        statusFilter
+          ? {
+              key: 'status',
+              label: `Status: ${TRANSACTION_STATUS_FILTERS.find((option) => option.value === statusFilter)?.label ?? statusFilter}`,
+              clear: () => {
+                setPage(1)
+                setStatusFilter('')
+              },
+            }
+          : null,
       ].filter(Boolean) as Array<{
         key: string
         label: string
@@ -483,6 +548,7 @@ export function TransactionsPage() {
       dateTo,
       batchFilter,
       idsFilter,
+      statusFilter,
       setReviewOnly,
       setCurrency,
       setCategoryFilter,
@@ -490,8 +556,21 @@ export function TransactionsPage() {
       setDateTo,
       setBatchFilter,
       setIdsFilter,
+      setStatusFilter,
     ]
   )
+
+  function clearAllFilters() {
+    setPage(1)
+    setReviewOnly(false)
+    setCurrency(DEFAULT_TRANSACTION_CURRENCY)
+    setCategoryFilter('')
+    setDateFrom('')
+    setDateTo('')
+    setBatchFilter('')
+    setIdsFilter('')
+    setStatusFilter('')
+  }
 
   async function openItemsDrawer(txnId: number) {
     setErr(null)
@@ -729,6 +808,7 @@ export function TransactionsPage() {
     if (dateFrom.trim()) payload.dateFrom = dateFrom.trim()
     if (dateTo.trim()) payload.dateTo = dateTo.trim()
     if (batchFilter.trim()) payload.importBatch = batchFilter.trim()
+    if (statusFilter) payload.status = statusFilter
     return payload
   }
 
@@ -870,6 +950,24 @@ export function TransactionsPage() {
             </Button>
           ))}
         </div>
+        <div className="quickFilters" aria-label="Transaction status filters">
+          {TRANSACTION_STATUS_FILTERS.map((option) => (
+            <Button
+              key={option.value || 'all'}
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="quickFilterButton"
+              aria-pressed={statusFilter === option.value}
+              onClick={() => {
+                setPage(1)
+                setStatusFilter(option.value)
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
         <div className="formGrid transactionsFilterGrid">
           <Label className="transactionsCheckTile">
             <span>Review only</span>
@@ -926,11 +1024,22 @@ export function TransactionsPage() {
             <Input
               type="date"
               value={dateTo}
+              aria-invalid={dateRangeInvalid ? true : undefined}
+              aria-describedby={dateRangeInvalid ? 'transactions-date-range-error' : undefined}
               onChange={(e) => {
                 setPage(1)
                 setDateTo(e.target.value)
               }}
             />
+            {dateRangeInvalid && (
+              <span
+                id="transactions-date-range-error"
+                className="error"
+                role="alert"
+              >
+                End date must be on or after start date.
+              </span>
+            )}
           </Label>
           <Label>
             Import batch
@@ -990,6 +1099,7 @@ export function TransactionsPage() {
                 setDateTo('')
                 setBatchFilter('')
                 setIdsFilter('')
+                setStatusFilter('')
               }}
             >
               Clear filters
@@ -1308,7 +1418,8 @@ export function TransactionsPage() {
               bulkApplying ||
               bulkAllApplying ||
               !buildBulkPatch() ||
-              selectedIds.size === 0
+              selectedIds.size === 0 ||
+              dateRangeInvalid
             }
             onClick={() => void applyBulk()}
           >
@@ -1321,11 +1432,14 @@ export function TransactionsPage() {
               bulkApplying ||
               bulkAllApplying ||
               !buildBulkPatch() ||
-              totalCount === 0
+              totalCount === 0 ||
+              dateRangeInvalid
             }
             onClick={() => void applyBulkToAllMatching()}
             title={
-              totalCount === 0
+              dateRangeInvalid
+                ? 'Fix the date range before applying'
+                : totalCount === 0
                 ? 'No transactions match the active filter'
                 : `Apply the bulk patch to every transaction matching the current filter (${totalCount})`
             }
@@ -1402,12 +1516,29 @@ export function TransactionsPage() {
               ) : !sortedRows.length ? (
                 <TableRow>
                   <TableCell colSpan={9} className="emptyStateCell">
-                    <p>No transactions yet — or none match your filters.</p>
-                    <p className="muted">
-                      Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
-                      placed files in the configured upload folder. Create accounts under{' '}
-                      <Link to="/accounts">Accounts</Link> if needed.
-                    </p>
+                    {activeFilters.length > 0 ? (
+                      <>
+                        <p>No transactions match this filter.</p>
+                        <p>
+                          <Button type="button" variant="outline" size="sm" onClick={clearAllFilters}>
+                            Clear filters
+                          </Button>
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          {statusFilter === 'pending'
+                            ? 'No pending transactions.'
+                            : 'No transactions yet.'}
+                        </p>
+                        <p className="muted">
+                          Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
+                          placed files in the configured upload folder. Create accounts under{' '}
+                          <Link to="/accounts">Accounts</Link> if needed.
+                        </p>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -1428,6 +1559,7 @@ export function TransactionsPage() {
                     onViewItems={(id) => void openItemsDrawer(id)}
                     onError={(msg) => setErr(msg)}
                     onOpenSignals={(id) => setSignalsDialogTxnId(id)}
+                    onOpenRevisions={(id) => setRevisionsDialogTxnId(id)}
                   />
                 ))
               )}
@@ -1498,6 +1630,22 @@ export function TransactionsPage() {
           )
         }}
       />
+      <TransactionRevisionsDialog
+        transactionId={revisionsDialogTxnId}
+        onClose={() => setRevisionsDialogTxnId(null)}
+        onRestored={(updated) => {
+          setRes((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  data: prev.data.map((r) =>
+                    r.id === updated.id ? ({ ...r, ...updated } as Transaction) : r,
+                  ),
+                }
+              : prev,
+          )
+        }}
+      />
     </div>
   )
 }
@@ -1514,6 +1662,7 @@ function TransactionRow({
   onViewItems,
   onError,
   onOpenSignals,
+  onOpenRevisions,
 }: {
   t: Transaction
   categoryOptions: string[]
@@ -1526,6 +1675,7 @@ function TransactionRow({
   onViewItems: (transactionId: number) => void
   onError: (message: string) => void
   onOpenSignals: (id: number) => void
+  onOpenRevisions: (id: number) => void
 }) {
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
@@ -1554,6 +1704,10 @@ function TransactionRow({
   const [ownershipContactId, setOwnershipContactId] = useState(
     t.ownershipContactId != null ? String(t.ownershipContactId) : ''
   )
+  const [status, setStatus] = useState<TransactionStatus>(t.status)
+  const [reimburseOpen, setReimburseOpen] = useState(false)
+  const rowConfirmAction = useConfirm()
+  const rowToast = useToast()
   const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe)
   const parsedPctPartner =
     pctPartner.trim() === '' ? null : Number(pctPartner)
@@ -1590,6 +1744,7 @@ function TransactionRow({
     setVisibility(t.visibility ?? 'private')
     setOwnershipType(t.ownershipType ?? 'me')
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
+    setStatus(t.status)
     setAiSuggestion(null)
     setAiSuggestionId(null)
   }, [t])
@@ -1597,6 +1752,35 @@ function TransactionRow({
   useEffect(() => {
     resetDraft()
   }, [resetDraft])
+
+  async function changeStatus(next: TransactionStatus) {
+    if (next === status) return
+    if (next === 'cleared') {
+      const ok = await rowConfirmAction({
+        title: 'Mark as cleared?',
+        description: 'Cleared usually comes from statement reconciliation. Continue?',
+        confirmLabel: 'Mark cleared',
+        cancelLabel: 'Cancel',
+      })
+      if (!ok) return
+    }
+    const previous = status
+    setStatus(next)
+    try {
+      await onSave(t.id, { status: next })
+      rowToast.showToast({
+        title: `Status updated to ${next[0].toUpperCase()}${next.slice(1)}`,
+        variant: 'success',
+      })
+    } catch (e) {
+      setStatus(previous)
+      rowToast.showToast({
+        title: "Couldn't update status. Try again.",
+        variant: 'destructive',
+      })
+      onError(e instanceof Error ? e.message : "Couldn't update status. Try again.")
+    }
+  }
 
   return (
     <TableRow>
@@ -1615,6 +1799,25 @@ function TransactionRow({
           <span className="txnMerchantMeta">
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
           </span>
+          {(t.counterpartyContactId != null || t.counterpartyRaw) && (
+            <span className="txnCounterparty text-xs text-muted-foreground">
+              {Number(t.amount) >= 0 ? 'from ' : 'to '}
+              {(() => {
+                if (t.counterpartyContactId != null) {
+                  const c = contacts.find((x) => x.id === t.counterpartyContactId)
+                  return c ? c.name : `contact #${t.counterpartyContactId}`
+                }
+                return t.counterpartyRaw
+              })()}
+            </span>
+          )}
+          {t.txnType === 'refund' && (
+            <RefundBadge
+              transactionId={t.id}
+              linkedTransactionId={t.linkedTransactionId}
+              currency={t.currency}
+            />
+          )}
         </div>
       </TableCell>
       <TableCell>
@@ -1722,6 +1925,33 @@ function TransactionRow({
       </TableCell>
       <TableCell>
         <div className="txnStatusCell">
+          {status === 'pending' ? (
+            <Badge
+              variant="secondary"
+              className="rounded-full bg-amber-100 text-amber-800"
+              title="Authorized but not yet posted by your bank."
+            >
+              Pending
+            </Badge>
+          ) : status === 'cleared' ? (
+            <Badge
+              variant="secondary"
+              className="rounded-full bg-blue-100 text-blue-800"
+              title="Reconciled against your statement."
+            >
+              Cleared
+            </Badge>
+          ) : null}
+          <NativeSelect
+            size="sm"
+            value={status}
+            aria-label={`Status for ${t.merchantClean}`}
+            onChange={(e) => void changeStatus(e.target.value as TransactionStatus)}
+          >
+            <NativeSelectOption value="pending">Pending</NativeSelectOption>
+            <NativeSelectOption value="posted">Posted</NativeSelectOption>
+            <NativeSelectOption value="cleared">Cleared</NativeSelectOption>
+          </NativeSelect>
           <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
             {t.reviewFlag
               ? t.autoCategory
@@ -1755,6 +1985,7 @@ function TransactionRow({
               Receipt check
             </span>
           ) : null}
+          {rowConfirmAction.dialog}
         </div>
       </TableCell>
       <TableCell className="transactionsActionsCol">
@@ -1767,6 +1998,24 @@ function TransactionRow({
             title="Show enrichment signals for this transaction"
           >
             Why?
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenRevisions(t.id)}
+            title="Show edit history for this transaction"
+          >
+            History
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setReimburseOpen(true)}
+            title="Track this as money you expect to be reimbursed"
+          >
+            Reimburse
           </Button>
           {aiEnabled ? (
             <Button
@@ -1854,7 +2103,221 @@ function TransactionRow({
             {!isDirty && t.reviewFlag ? 'Mark reviewed' : isDirty ? 'Save' : 'Saved'}
           </Button>
         </div>
+        {reimburseOpen && (
+          <MarkReimbursableDialog
+            txn={t}
+            contacts={contacts}
+            onClose={() => setReimburseOpen(false)}
+            onError={onError}
+            onSaved={() => {
+              setReimburseOpen(false)
+              rowToast.showToast({
+                title: 'Marked reimbursable',
+                variant: 'success',
+              })
+            }}
+          />
+        )}
       </TableCell>
     </TableRow>
+  )
+}
+
+/**
+ * Quick "Mark reimbursable" dialog (issue #216) — creates a reimbursement
+ * claim for this transaction via POST /api/transactions/:id/reimbursable.
+ * Party is a Contact (dropdown) or free text; amount defaults to the
+ * transaction's absolute amount.
+ *
+ * #374: when the source transaction already carries a
+ * `counterpartyContactId` (a #372-linked Contact from statement import), the
+ * dropdown is pre-filled with that contact — the most-common case is now
+ * one keystroke away. When the txn has `counterpartyRaw` only (no Contact),
+ * a single "Promote {name} and create" button hits
+ * POST /api/transactions/:id/reimbursable/promote-counterparty to create the
+ * Contact, link the txn, and create the claim in one round-trip.
+ */
+function MarkReimbursableDialog({
+  txn,
+  contacts,
+  onClose,
+  onError,
+  onSaved,
+}: {
+  txn: Transaction
+  contacts: Contact[]
+  onClose: () => void
+  onError: (message: string) => void
+  onSaved: () => void
+}) {
+  // Pre-fill from counterpartyContactId (#374 AC#1). Falls back to the
+  // legacy ownership-contact heuristic so an empty counterparty doesn't lose
+  // the existing behaviour for transactions imported before #372 landed.
+  const counterpartyPrefill = useMemo(() => {
+    if (txn.counterpartyContactId == null) return ''
+    const found = contacts.find((c) => c.id === txn.counterpartyContactId)
+    return found ? String(found.id) : ''
+  }, [txn.counterpartyContactId, contacts])
+  const [contactId, setContactId] = useState<string>(counterpartyPrefill)
+  const [partyName, setPartyName] = useState<string>('')
+  const [amount, setAmount] = useState<string>(
+    String(Math.abs(Number(txn.amount) || 0)),
+  )
+  const [dueDate, setDueDate] = useState<string>('')
+  const [notes, setNotes] = useState<string>('')
+  const [saving, setSaving] = useState(false)
+
+  // #374 AC#2: enable Promote-and-use only when the txn has raw counterparty
+  // text but no Contact link yet. (If a Contact is already linked, the
+  // pre-fill above handles it.)
+  const canPromote =
+    txn.counterpartyContactId == null &&
+    Boolean(txn.counterpartyRaw && txn.counterpartyRaw.trim() !== '')
+  const promoteName = (txn.counterpartyRaw ?? '').trim()
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!contactId && partyName.trim() === '') {
+      onError('Pick a contact or enter who owes you.')
+      return
+    }
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = {}
+      if (contactId) body.contactId = Number(contactId)
+      else body.partyName = partyName.trim()
+      if (amount.trim() !== '') body.amount = amount.trim()
+      if (dueDate) body.dueDate = dueDate
+      if (notes.trim() !== '') body.notes = notes.trim()
+      await postJson(`/api/transactions/${txn.id}/reimbursable`, body)
+      onSaved()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not mark reimbursable.')
+      setSaving(false)
+    }
+  }
+
+  async function promoteAndUse() {
+    if (!canPromote) return
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = {}
+      if (amount.trim() !== '') body.amount = amount.trim()
+      if (dueDate) body.dueDate = dueDate
+      if (notes.trim() !== '') body.notes = notes.trim()
+      await postJson(
+        `/api/transactions/${txn.id}/reimbursable/promote-counterparty`,
+        body,
+      )
+      onSaved()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not promote and create.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Mark transaction reimbursable"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <Card className="w-full max-w-md p-5">
+        <h2 className="mb-1 text-lg font-semibold">Mark reimbursable</h2>
+        <p className="muted text-sm mb-4">
+          {txn.merchantClean} · {txn.date}
+        </p>
+        {canPromote && (
+          // #374 AC#2 — one-click "Promote and use". Surfaced above the form
+          // so the common case is a single button click; the manual flow
+          // below still works for free-text or a different contact.
+          <div className="mb-4 rounded-md border border-dashed border-border bg-muted/40 p-3 text-sm">
+            <p className="muted mb-2">
+              Statement counterparty:{' '}
+              <strong className="text-foreground">{promoteName}</strong>
+            </p>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={saving}
+              onClick={() => void promoteAndUse()}
+              title="Create a Contact from this statement counterparty and use it"
+            >
+              {saving ? 'Working…' : `Promote "${promoteName}" and create claim`}
+            </Button>
+          </div>
+        )}
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          {contacts.length > 0 && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span>Who owes you? (contact)</span>
+              <NativeSelect
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+              >
+                <option value="">— free text below —</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </label>
+          )}
+          {!contactId && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span>Or type a name</span>
+              <Input
+                value={partyName}
+                onChange={(e) => setPartyName(e.target.value)}
+                placeholder="e.g. Acme Corp, Mom, BlueCross"
+                maxLength={160}
+              />
+            </label>
+          )}
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Amount expected ({txn.currency})</span>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Due date (optional)</span>
+            <Input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Notes (optional)</span>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="rounded-md border border-input bg-background/70 px-3 py-1 text-sm"
+              maxLength={4000}
+            />
+          </label>
+          <div className="mt-2 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Mark reimbursable'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </div>
   )
 }

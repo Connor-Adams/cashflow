@@ -4,6 +4,7 @@ import * as env from '../config/env';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { mergeAccounts, mergedAccountFilter } from '../services/accountMerge';
+import { pendingTotal } from '../transactions/status';
 
 const router = Router();
 const ACCOUNT_TYPES = new Set([
@@ -63,6 +64,28 @@ router.post('/', async (req, res, next) => {
       defaultCurrency: dc,
     });
     res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/:id/pending-total', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const account = await Account.findOne({ where: { id, ...visibleAccountWhere(req) } });
+    if (!account) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const asOf =
+      typeof req.query.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.asOf)
+        ? req.query.asOf
+        : null;
+    res.json(await pendingTotal({ accountId: account.id, householdId: account.householdId, asOf }));
   } catch (e) {
     next(e);
   }

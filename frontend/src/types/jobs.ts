@@ -5,6 +5,8 @@ export type JobStatus =
   | 'skipped_locked'
   | 'skipped_reentrant'
 
+export type JobRunStatus = 'running' | 'success' | 'failed' | 'skipped'
+
 export interface JobView {
   name: string
   cron: string
@@ -22,6 +24,19 @@ export interface JobView {
 export interface JobRunOutcome {
   status: JobStatus
   durationMs: number
+  jobName: string
+  runId?: number
+  queuedAt?: string
   result?: Record<string, unknown>
   error?: string
+}
+
+export interface JobRunView {
+  id: number
+  jobName: string
+  startedAt: string
+  finishedAt: string | null
+  status: JobRunStatus
+  durationMs: number | null
+  errorMessage: string | null
 }

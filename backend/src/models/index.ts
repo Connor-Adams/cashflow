@@ -23,6 +23,7 @@ import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
+import { TransactionRevision, initTransactionRevision } from './TransactionRevision';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
 import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
@@ -38,6 +39,10 @@ import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
 import { TransactionTaxMetadata, initTransactionTaxMetadata } from './TransactionTaxMetadata';
+import {
+  TransactionReturnMetadata,
+  initTransactionReturnMetadata,
+} from './TransactionReturnMetadata';
 import { TaxSlip, initTaxSlip } from './TaxSlip';
 import { Carryforward, initCarryforward } from './Carryforward';
 import { TaxReturn, initTaxReturn } from './TaxReturn';
@@ -45,6 +50,7 @@ import { ShareholderLoan, initShareholderLoan } from './ShareholderLoan';
 import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
 import { Job, initJob } from './Job';
+import { JobRun, initJobRun } from './JobRun';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -63,6 +69,38 @@ import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
+import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
+import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
+import {
+  MoneyLeakDismissal,
+  initMoneyLeakDismissal,
+} from './MoneyLeakDismissal';
+import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
+import {
+  MonthlyClosePeriod,
+  initMonthlyClosePeriod,
+} from './MonthlyClosePeriod';
+import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
+import { Purchase, initPurchase } from './Purchase';
+import { Reimbursement, initReimbursement } from './Reimbursement';
+import { Notification, initNotification } from './Notification';
+import { AuditLog, initAuditLog } from './AuditLog';
+import { FinanceEvent, initFinanceEvent } from './FinanceEvent';
+import {
+  NotificationPreference,
+  initNotificationPreference,
+} from './NotificationPreference';
+import { VaultDocument, initVaultDocument } from './VaultDocument';
+import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
+import { SavedSearch, initSavedSearch } from './SavedSearch';
+import { AccountStatement, initAccountStatement } from './AccountStatement';
+import { SyncBackup, initSyncBackup } from './SyncBackup';
+import { LiabilityAccount, initLiabilityAccount } from './LiabilityAccount';
+import {
+  DebtPayoffScenario,
+  initDebtPayoffScenario,
+} from './DebtPayoffScenario';
+import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -88,6 +126,7 @@ initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
+initTransactionRevision(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
 initHoldingSnapshot(sequelize);
@@ -103,6 +142,7 @@ initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
 initTransactionTaxMetadata(sequelize);
+initTransactionReturnMetadata(sequelize);
 initTaxSlip(sequelize);
 initCarryforward(sequelize);
 initTaxReturn(sequelize);
@@ -110,6 +150,7 @@ initShareholderLoan(sequelize);
 initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
 initJob(sequelize);
+initJobRun(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -122,6 +163,41 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initSubscription(sequelize);
 initAiReviewRun(sequelize);
+initCfoBriefing(sequelize);
+initMoneyLeakDismissal(sequelize);
+initTaxReserveSetting(sequelize);
+initMonthlyClosePeriod(sequelize);
+initMonthlyCloseTask(sequelize);
+initPurchase(sequelize);
+initReimbursement(sequelize);
+initCashflowSettings(sequelize);
+initNotification(sequelize);
+initNotificationPreference(sequelize);
+initAuditLog(sequelize);
+initVaultDocument(sequelize);
+initFinanceEvent(sequelize);
+initBudgetAlertState(sequelize);
+initSavedSearch(sequelize);
+initAccountStatement(sequelize);
+initSyncBackup(sequelize);
+initLiabilityAccount(sequelize);
+initDebtPayoffScenario(sequelize);
+initFinancialScenario(sequelize);
+
+User.hasMany(Notification, {
+  foreignKey: 'user_id',
+  as: 'notifications',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(NotificationPreference, {
+  foreignKey: 'user_id',
+  as: 'notificationPreferences',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+NotificationPreference.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -137,6 +213,17 @@ Transaction.hasOne(TransactionTaxMetadata, {
   hooks: true,
 });
 TransactionTaxMetadata.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
+Transaction.hasOne(TransactionReturnMetadata, {
+  foreignKey: 'transaction_id',
+  as: 'returnMetadata',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionReturnMetadata.belongsTo(Transaction, {
   foreignKey: 'transaction_id',
   as: 'transaction',
 });
@@ -241,6 +328,27 @@ BudgetTarget.hasMany(BudgetExclusion, {
   onDelete: 'CASCADE',
   hooks: true,
 });
+// Cascade alert-state cleanup when a budget is deleted (issue #268, AC #12).
+// Without this association the migration's FK ON DELETE CASCADE still fires
+// at the DB level, but exposing it on the ORM means future eager-loads
+// (e.g. `include: [{ model: BudgetAlertState }]`) work without ad-hoc joins.
+BudgetTarget.hasMany(BudgetAlertState, {
+  foreignKey: 'budget_target_id',
+  as: 'alertStates',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetAlertState.belongsTo(BudgetTarget, {
+  foreignKey: 'budget_target_id',
+  as: 'budget',
+});
+User.hasMany(BudgetAlertState, {
+  foreignKey: 'user_id',
+  as: 'budgetAlertStates',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+BudgetAlertState.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 BudgetExclusion.belongsTo(BudgetTarget, {
   foreignKey: 'budget_id',
   as: 'budget',
@@ -311,6 +419,17 @@ Transaction.hasMany(TransactionSignal, {
   as: 'enrichmentSignals',
 });
 TransactionSignal.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
+Transaction.hasMany(TransactionRevision, {
+  foreignKey: 'transaction_id',
+  as: 'revisions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionRevision.belongsTo(Transaction, {
   foreignKey: 'transaction_id',
   as: 'transaction',
 });
@@ -416,6 +535,25 @@ Household.hasMany(Subscription, {
 });
 Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
+Household.hasMany(MoneyLeakDismissal, {
+  foreignKey: 'household_id',
+  as: 'moneyLeakDismissals',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+MoneyLeakDismissal.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(MoneyLeakDismissal, {
+  foreignKey: 'dismissed_by_user_id',
+  as: 'moneyLeakDismissals',
+});
+MoneyLeakDismissal.belongsTo(User, {
+  foreignKey: 'dismissed_by_user_id',
+  as: 'dismissedByUser',
+});
+
 Household.hasMany(AiReviewRun, {
   foreignKey: 'household_id',
   as: 'aiReviewRuns',
@@ -431,6 +569,357 @@ User.hasMany(AiReviewRun, {
   as: 'aiReviewRuns',
 });
 AiReviewRun.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// CFO briefings (issue #236). Cascades with household; user FK for the
+// actor that requested the briefing.
+Household.hasMany(CfoBriefing, {
+  foreignKey: 'household_id',
+  as: 'cfoBriefings',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+CfoBriefing.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(CfoBriefing, {
+  foreignKey: 'user_id',
+  as: 'cfoBriefings',
+});
+CfoBriefing.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+Household.hasMany(TaxReserveSetting, {
+  foreignKey: 'household_id',
+  as: 'taxReserveSettings',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TaxReserveSetting.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
+Household.hasMany(AuditLog, {
+  foreignKey: 'household_id',
+  as: 'auditLog',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AuditLog.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(AuditLog, {
+  foreignKey: 'actor_user_id',
+  as: 'auditLogEntries',
+});
+AuditLog.belongsTo(User, {
+  foreignKey: 'actor_user_id',
+  as: 'actor',
+});
+
+Household.hasMany(VaultDocument, {
+  foreignKey: 'household_id',
+  as: 'vaultDocuments',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+VaultDocument.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(VaultDocument, {
+  foreignKey: 'uploaded_by_user_id',
+  as: 'vaultDocuments',
+});
+VaultDocument.belongsTo(User, {
+  foreignKey: 'uploaded_by_user_id',
+  as: 'uploadedByUser',
+});
+
+// Finance domain events (issue #238) — append-only stream parallel to
+// audit_log. Cascade on household delete so removing a household
+// removes its event stream too.
+Household.hasMany(FinanceEvent, {
+  foreignKey: 'household_id',
+  as: 'financeEvents',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinanceEvent.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinanceEvent, {
+  foreignKey: 'actor_user_id',
+  as: 'financeEventsEmitted',
+});
+FinanceEvent.belongsTo(User, {
+  foreignKey: 'actor_user_id',
+  as: 'actor',
+});
+
+// Monthly close (issue #227). Period cascades to tasks; deleting a
+// household removes its periods and (via the period→task cascade) tasks.
+Household.hasMany(MonthlyClosePeriod, {
+  foreignKey: 'household_id',
+  as: 'monthlyClosePeriods',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+MonthlyClosePeriod.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(MonthlyClosePeriod, {
+  foreignKey: 'user_id',
+  as: 'monthlyClosePeriods',
+});
+MonthlyClosePeriod.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+MonthlyClosePeriod.hasMany(MonthlyCloseTask, {
+  foreignKey: 'period_id',
+  as: 'tasks',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+MonthlyCloseTask.belongsTo(MonthlyClosePeriod, {
+  foreignKey: 'period_id',
+  as: 'period',
+});
+MonthlyCloseTask.belongsTo(User, {
+  foreignKey: 'completed_by_user_id',
+  as: 'completedByUser',
+});
+
+Transaction.hasOne(Purchase, {
+  foreignKey: 'transaction_id',
+  as: 'purchase',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Purchase.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+Household.hasMany(Purchase, {
+  foreignKey: 'household_id',
+  as: 'purchases',
+});
+Purchase.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(Purchase, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedPurchases',
+});
+Purchase.belongsTo(User, {
+  foreignKey: 'marked_by_user_id',
+  as: 'markedByUser',
+});
+
+// Reimbursement claims (issue #216). 1:N from the original outlay
+// transaction; a second belongsTo links the matched incoming repayment.
+// Cascade on transaction/household delete; the repayment link and party
+// Contact use SET NULL (handled at the DB level by the migration) so an
+// un-match or contact removal keeps the claim intact.
+Transaction.hasMany(Reimbursement, {
+  foreignKey: 'transaction_id',
+  as: 'reimbursements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Reimbursement.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+Transaction.hasMany(Reimbursement, {
+  foreignKey: 'repayment_transaction_id',
+  as: 'reimbursementRepayments',
+});
+Reimbursement.belongsTo(Transaction, {
+  foreignKey: 'repayment_transaction_id',
+  as: 'repaymentTransaction',
+});
+Household.hasMany(Reimbursement, {
+  foreignKey: 'household_id',
+  as: 'reimbursements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Reimbursement.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Contact.hasMany(Reimbursement, {
+  foreignKey: 'contact_id',
+  as: 'reimbursements',
+});
+Reimbursement.belongsTo(Contact, {
+  foreignKey: 'contact_id',
+  as: 'contact',
+});
+User.hasMany(Reimbursement, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdReimbursements',
+});
+Reimbursement.belongsTo(User, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdByUser',
+});
+
+// AccountStatement (issue #242). A statement belongs to one Account; an
+// Account can have many statements over time. Household and creator
+// associations mirror the Account model so authorization checks via
+// visibility + createdByUserId compose cleanly.
+Household.hasMany(AccountStatement, {
+  foreignKey: 'household_id',
+  as: 'accountStatements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Account.hasMany(AccountStatement, {
+  foreignKey: 'account_id',
+  as: 'statements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+AccountStatement.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+User.hasMany(AccountStatement, {
+  foreignKey: 'created_by_user_id',
+  as: 'accountStatements',
+});
+AccountStatement.belongsTo(User, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdByUser',
+});
+
+// CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
+// the DB level; we surface the relationship as hasOne so callers can eager
+// load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
+User.hasOne(CashflowSettings, {
+  foreignKey: 'user_id',
+  as: 'cashflowSettings',
+  onDelete: 'CASCADE',
+});
+CashflowSettings.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// SavedSearch (issue #235). One row per user-named query string; cascades
+// on user delete so we never orphan rows when a user is removed.
+User.hasMany(SavedSearch, {
+  foreignKey: 'user_id',
+  as: 'savedSearches',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedSearch.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// Financial scenario planner (issue #213). Scenarios cascade on household
+// delete and user delete. Each scenario belongs to both a household and the
+// user who created it — isolating per household is enforced by householdWhere().
+Household.hasMany(FinancialScenario, {
+  foreignKey: 'household_id',
+  as: 'financialScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialScenario.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(FinancialScenario, {
+  foreignKey: 'user_id',
+  as: 'financialScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+FinancialScenario.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// Sync backups (issue #239). No CASCADE on household delete: the audit
+// history is useful diagnostic context, so we keep the rows around even
+// if the household is later removed. The intentionally-loose FK (no
+// constraint) matches the migration.
+Household.hasMany(SyncBackup, {
+  foreignKey: 'household_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(SyncBackup, {
+  foreignKey: 'user_id',
+  as: 'syncBackups',
+});
+SyncBackup.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// LiabilityAccount (issue #202). 1:1 sidecar for an Account whose type is a
+// liability kind. account_id is UNIQUE so we surface it as hasOne; both the
+// account and household teardown cascade-remove the profile.
+Account.hasOne(LiabilityAccount, {
+  foreignKey: 'account_id',
+  as: 'liabilityProfile',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+LiabilityAccount.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+Household.hasMany(LiabilityAccount, {
+  foreignKey: 'household_id',
+  as: 'liabilityAccounts',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+LiabilityAccount.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+
+// DebtPayoffScenario (issue #202). Household-scoped saved payoff plans. The
+// creating user is kept loosely (SET NULL) so a scenario survives the user's
+// removal; the household teardown cascade-removes scenarios.
+Household.hasMany(DebtPayoffScenario, {
+  foreignKey: 'household_id',
+  as: 'debtPayoffScenarios',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+DebtPayoffScenario.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+User.hasMany(DebtPayoffScenario, {
+  foreignKey: 'user_id',
+  as: 'debtPayoffScenarios',
+});
+DebtPayoffScenario.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
@@ -461,6 +950,7 @@ export {
   ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
+  TransactionRevision,
   Security,
   InvestmentActivity,
   HoldingSnapshot,
@@ -476,6 +966,7 @@ export {
   TaxCategory,
   TaxTag,
   TransactionTaxMetadata,
+  TransactionReturnMetadata,
   TaxSlip,
   Carryforward,
   TaxReturn,
@@ -483,6 +974,7 @@ export {
   InstalmentPayment,
   ProviderJobLog,
   Job,
+  JobRun,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
   Scenario,
@@ -493,4 +985,24 @@ export {
   FinancialGoal,
   Subscription,
   AiReviewRun,
+  CfoBriefing,
+  MoneyLeakDismissal,
+  TaxReserveSetting,
+  MonthlyClosePeriod,
+  MonthlyCloseTask,
+  Purchase,
+  Reimbursement,
+  CashflowSettings,
+  Notification,
+  NotificationPreference,
+  AuditLog,
+  FinanceEvent,
+  BudgetAlertState,
+  SavedSearch,
+  VaultDocument,
+  AccountStatement,
+  SyncBackup,
+  LiabilityAccount,
+  DebtPayoffScenario,
+  FinancialScenario,
 };

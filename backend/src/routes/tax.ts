@@ -29,6 +29,72 @@ router.get('/entities', async (req, res, next) => {
   }
 });
 
+// PATCH /api/tax/entities/:id — partial entity updates.
+// Body: { associatedGroupId?: string | null }.
+// v1 supports only `associatedGroupId` on `kind=corp` entities (used to link
+// corps into a shared SBD/AAII associated group). Null clears the group. Other
+// fields are ignored. Personal entities cannot be grouped (engine ignores
+// associatedGroupId on non-corp anyway, but reject at the API for clarity).
+router.patch('/entities/:id', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const entityId = Number(req.params.id);
+    if (!Number.isInteger(entityId)) {
+      res.status(400).json({ error: 'invalid_entity_id' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { associatedGroupId?: unknown };
+    // Field must be present in the body — distinguishes "set to null" (clear)
+    // from "not specified" (no-op would be ambiguous so reject as 400).
+    if (!Object.prototype.hasOwnProperty.call(body, 'associatedGroupId')) {
+      res.status(400).json({
+        error: 'invalid_body',
+        message: 'associatedGroupId (string | null) required',
+      });
+      return;
+    }
+    const raw = body.associatedGroupId;
+    let associatedGroupId: string | null;
+    if (raw === null) {
+      associatedGroupId = null;
+    } else if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      // Empty string treated as null (clear) — UX: blanking the text input
+      // shouldn't require a separate "delete" gesture.
+      associatedGroupId = trimmed === '' ? null : trimmed;
+    } else {
+      res.status(400).json({
+        error: 'invalid_body',
+        message: 'associatedGroupId must be a string or null',
+      });
+      return;
+    }
+
+    const entity = await Entity.findByPk(entityId);
+    if (!entity) {
+      res.status(404).json({ error: 'entity_not_found' });
+      return;
+    }
+    if (entity.householdId !== household.id) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+    if (entity.kind !== 'corp') {
+      res.status(400).json({
+        error: 'invalid_kind',
+        message: 'associatedGroupId can only be set on kind=corp entities',
+      });
+      return;
+    }
+
+    await entity.update({ associatedGroupId });
+    res.status(200).json({ entity });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/tax/entities/:id/spouse — link two personal entities as spouses.
 // Body: { spouseEntityId: number }. Sets both reciprocal directions atomically.
 // Validations:

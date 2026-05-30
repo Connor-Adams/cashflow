@@ -34,6 +34,10 @@ exporters:
       job: true
   prometheus:
     endpoint: 0.0.0.0:9464
+  otlphttp/tempo:
+    endpoint: http://${env:TEMPO_HOST}:4318
+    tls:
+      insecure: true
 
 service:
   pipelines:
@@ -45,6 +49,21 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/tempo]
   telemetry:
     logs:
       level: info
+    # Expose the collector's own internal metrics (otelcol_exporter_*,
+    # otelcol_receiver_*, otelcol_processor_*) so Prometheus can scrape them
+    # over Railway's private network. The default bind is 127.0.0.1:8888,
+    # which only works inside the container; 0.0.0.0:8888 is required so the
+    # prometheus service can reach `otel-collector.railway.internal:8888`.
+    # These metrics drive the TempoExportFailing / LokiExportFailing alert
+    # rules — see
+    # https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml#L29 (tempo)
+    # https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml#L87 (loki)
+    metrics:
+      address: 0.0.0.0:8888

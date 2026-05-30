@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useConfirm } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -126,6 +127,7 @@ function categoryPreview(order?: AmazonOrder): string {
 
 export function AmazonPage() {
   const fileRef = useRef<HTMLInputElement>(null)
+  const confirm = useConfirm()
   const [orders, setOrders] = useState<AmazonOrder[]>([])
   const [txns, setTxns] = useState<AmazonTransaction[]>([])
   const [categories, setCategories] = useState<string[]>([])
@@ -138,6 +140,7 @@ export function AmazonPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<AmazonOrder | null>(null)
   const [manualOrderByTxn, setManualOrderByTxn] = useState<Record<number, string>>({})
+  const [itemPriceErrors, setItemPriceErrors] = useState<Record<number, string>>({})
 
   const refresh = useCallback(async () => {
     const [orderRows, txnRows, categoryRows] = await Promise.all([
@@ -256,6 +259,13 @@ export function AmazonPage() {
   }
 
   async function unlink(id: number) {
+    const ok = await confirm({
+      title: 'Unlink order from transaction?',
+      description: "This won't delete either. You can re-link later.",
+      confirmLabel: 'Unlink',
+      cancelLabel: 'Keep linked',
+    })
+    if (!ok) return
     setLoading(true)
     try {
       await deleteReq(`/api/amazon/links/${id}`)
@@ -283,6 +293,30 @@ export function AmazonPage() {
 
   async function updateItem(item: AmazonItem, patch: Partial<AmazonItem>) {
     if (!selectedOrder) return
+    // Validate totalPrice — block negative values per AC #1 of issue #262.
+    if (Object.prototype.hasOwnProperty.call(patch, 'totalPrice')) {
+      const raw = patch.totalPrice
+      const isEmpty = raw == null || raw === ''
+      const num = isEmpty ? null : Number(raw)
+      if (num != null && Number.isFinite(num) && num < 0) {
+        setItemPriceErrors((prev) => ({ ...prev, [item.id]: "Price can't be negative." }))
+        // Still update the local form value so the user sees what they typed,
+        // but block the network save until they fix it.
+        const nextOptimistic = { ...item, ...patch }
+        setSelectedOrder({
+          ...selectedOrder,
+          items: (selectedOrder.items ?? []).map((row) => (row.id === item.id ? nextOptimistic : row)),
+        })
+        return
+      }
+      // Clear any prior error on this item when the new value is valid (or cleared).
+      setItemPriceErrors((prev) => {
+        if (!(item.id in prev)) return prev
+        const { [item.id]: _drop, ...rest } = prev
+        void _drop
+        return rest
+      })
+    }
     const next = { ...item, ...patch }
     setSelectedOrder({
       ...selectedOrder,
@@ -298,6 +332,7 @@ export function AmazonPage() {
 
   return (
     <div className="page amazonPage">
+      {confirm.dialog}
       <div className="amazonHeader">
         <div>
           <h1>Amazon Enrichment</h1>
@@ -520,10 +555,22 @@ export function AmazonPage() {
                       <Input
                         aria-label="Item total price"
                         type="number"
+                        min="0"
                         step="0.01"
                         value={item.totalPrice ?? ''}
+                        aria-invalid={itemPriceErrors[item.id] ? true : undefined}
+                        aria-describedby={itemPriceErrors[item.id] ? `item-price-error-${item.id}` : undefined}
                         onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
                       />
+                      {itemPriceErrors[item.id] && (
+                        <span
+                          id={`item-price-error-${item.id}`}
+                          className="error"
+                          role="alert"
+                        >
+                          {itemPriceErrors[item.id]}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       {(() => {

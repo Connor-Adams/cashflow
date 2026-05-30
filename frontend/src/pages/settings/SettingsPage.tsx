@@ -6,25 +6,23 @@ import { useActiveSettingsTopTab, type SettingsTopTab } from './useActiveSetting
 
 const ALL_TOP_TABS: Array<TabItem & { superadminOnly?: boolean }> = [
   { value: 'settings', label: 'Settings' },
+  { value: 'accounts', label: 'Accounts' },
   { value: 'imports', label: 'Imports' },
   { value: 'enrichment', label: 'Enrichment' },
   { value: 'contacts', label: 'Contacts' },
-  { value: 'members', label: 'Members' },
   { value: 'budgets', label: 'Budgets' },
   { value: 'categories', label: 'Categories' },
-  { value: 'notifications', label: 'Notifications' },
-  { value: 'jobs', label: 'Jobs' },
+  { value: 'jobs', label: 'Jobs', superadminOnly: true },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   settings: '/settings/display',
+  accounts: '/settings/accounts',
   imports: '/settings/imports',
   enrichment: '/settings/enrichment',
   contacts: '/settings/contacts',
-  members: '/settings/members',
   budgets: '/settings/budgets',
   categories: '/settings/categories',
-  notifications: '/settings/notifications',
   jobs: '/settings/jobs',
 }
 

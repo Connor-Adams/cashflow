@@ -158,6 +158,29 @@
   .sidebar__versionValue { @apply truncate; }
   .sidebar__versionDrift { @apply mt-1 uppercase tracking-wider; font-size: 0.65rem; }
 
+  .sidebar__section {
+    @apply flex flex-col;
+  }
+  .sidebar__sectionHeader {
+    @apply flex w-full cursor-pointer items-center justify-between px-3 py-1 text-xs font-semibold uppercase tracking-wider;
+    color: var(--muted-foreground);
+    background: none;
+    border: none;
+    transition: color 150ms;
+  }
+  .sidebar__sectionHeader:hover {
+    color: var(--foreground);
+  }
+  .sidebar__sectionChevron {
+    @apply h-3 w-3 shrink-0 transition-transform duration-200;
+  }
+  .sidebar__sectionChevron--collapsed {
+    transform: rotate(-90deg);
+  }
+  .sidebar__sectionItems {
+    @apply flex flex-col gap-0.5;
+  }
+
   /* ─── Brand pieces (sidebar reuses; kept stable) ─────────────────── */
 
   .brandLockup {

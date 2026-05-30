@@ -7,15 +7,42 @@ services:
     volumes:
       - loki-data:/loki
 
+  tempo:
+    build: ./tempo
+    ports:
+      - "3200:3200"
+      - "4319:4318"   # OTLP HTTP — collector uses 4318; tempo reuses; remap to 4319 to avoid clash
+    volumes:
+      - tempo-data:/var/tempo
+
   otel-collector:
     build: ./otel-collector
+    networks:
+      default:
+        aliases:
+          - otel-collector.railway.internal
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
-      - "9464:9464"   # Prometheus scrape endpoint
+      - "9464:9464"   # Prometheus scrape endpoint (app metrics)
+      - "8888:8888"   # Collector self-telemetry (otelcol_*) for alerts
     environment:
       - LOKI_HOST=loki
+      - TEMPO_HOST=tempo
       - PUBLIC_FRONTEND_ORIGIN=localhost:5173
+    depends_on:
+      - loki
+      - tempo
+
+  grafana:
+    build: ./grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
     depends_on:
       - loki
 
@@ -31,3 +58,5 @@ services:
 volumes:
   loki-data:
   prometheus-data:
+  grafana-data:
+  tempo-data:

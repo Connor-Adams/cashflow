@@ -1,0 +1,38 @@
+# infra/tempo/config.yaml — single-binary Tempo on Railway with local filesystem storage.
+
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  trace_idle_period: 10s
+  max_block_bytes: 1_000_000
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 168h        # 7 days
+    compacted_block_retention: 1h
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/traces
+    pool:
+      max_workers: 100
+      queue_depth: 10000

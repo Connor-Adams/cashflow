@@ -2,6 +2,7 @@
 import pino, { type LoggerOptions } from 'pino';
 import { context as otelContext, trace } from '@opentelemetry/api';
 import { als } from './requestContext';
+import { createOtlpDestination } from './otlpDestination';
 
 const isDev = process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
@@ -14,6 +15,8 @@ const baseOptions: LoggerOptions = {
     env: process.env.NODE_ENV ?? 'development',
   },
   formatters: {
+    // Emit `level: "info"` instead of pino's numeric default — matches OTel
+    // `severity_text` convention and Loki's expectations.
     level: (label) => ({ level: label }),
   },
   mixin() {
@@ -43,73 +46,6 @@ const baseOptions: LoggerOptions = {
   timestamp: pino.stdTimeFunctions.isoTime,
 };
 
-function buildOtlpTransport() {
-  if (!otlpEnabled) return undefined;
-  try {
-    const transport = pino.transport({
-      target: 'pino-opentelemetry-transport',
-      options: {
-        loggerName: 'cashflow-backend',
-        serviceVersion: process.env.GIT_SHA ?? 'dev',
-        resourceAttributes: {
-          'service.name': 'cashflow-backend',
-          'deployment.environment': process.env.NODE_ENV ?? 'development',
-          'service.version': process.env.GIT_SHA ?? 'dev',
-        },
-        logRecordProcessorOptions: {
-          recordProcessorType: 'batch',
-          exporterOptions: {
-            protocol: 'http/protobuf',
-            // Per otlp-logger v2 ProtobufExporterOptions, the URL goes inside protobufExporterOptions, not at this level.
-            protobufExporterOptions: {
-              url: `${otlpEndpoint!.replace(/\/$/, '')}/v1/logs`,
-            },
-          },
-        },
-      },
-    });
-
-    // Stream-level error: surfaces "the worker has exited" on each emit after worker death.
-    transport.on('error', (err: Error) => {
-      // eslint-disable-next-line no-console
-      console.error('[observability][diag] stream error:', err && err.message);
-    });
-
-    // Underlying Node worker-thread events: only fire ONCE on actual exit/crash.
-    // thread-stream exposes the worker as `transport.worker`. Hook it before the
-    // worker has a chance to die.
-    const worker = (transport as unknown as { worker?: import('node:worker_threads').Worker }).worker;
-    if (worker) {
-      worker.on('exit', (code: number) => {
-        // eslint-disable-next-line no-console
-        console.error(`[observability][diag] WORKER EXIT code=${code}`);
-      });
-      worker.on('error', (err: Error) => {
-        // eslint-disable-next-line no-console
-        console.error('[observability][diag] WORKER ERROR:', err && err.message);
-        // eslint-disable-next-line no-console
-        if (err && err.stack) console.error(err.stack);
-      });
-      worker.on('message', (msg: unknown) => {
-        // pino-abstract-transport emits 'WARNING' messages on issues like uncaught errors.
-        if (msg && typeof msg === 'object' && 'code' in msg) {
-          // eslint-disable-next-line no-console
-          console.error('[observability][diag] WORKER MSG:', JSON.stringify(msg));
-        }
-      });
-    } else {
-      // eslint-disable-next-line no-console
-      console.error('[observability][diag] no worker reference exposed on transport');
-    }
-
-    return transport;
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[observability][diag] init threw:', err);
-    return undefined;
-  }
-}
-
 let logger: pino.Logger;
 
 if (isDev) {
@@ -128,12 +64,21 @@ if (isDev) {
   });
 } else {
   // Prod / test: stdout is always written synchronously via the destination
-  // arg. OTLP is added in parallel via pino.multistream so a transport failure
-  // never kills stdout.
-  const otlpTransport = buildOtlpTransport();
+  // arg. OTLP is added in parallel via pino.multistream so a destination
+  // failure never kills stdout. All work happens on the main event loop —
+  // no worker threads, no thread-stream.
+  const otlpDestination = otlpEnabled
+    ? createOtlpDestination({
+        endpoint: otlpEndpoint!,
+        serviceName: 'cashflow-backend',
+        serviceVersion: process.env.GIT_SHA ?? 'dev',
+        environment: process.env.NODE_ENV ?? 'development',
+      })
+    : undefined;
+
   const streams: Parameters<typeof pino.multistream>[0] = [
     { level: 'trace', stream: process.stdout },
-    ...(otlpTransport ? [{ level: 'trace' as const, stream: otlpTransport }] : []),
+    ...(otlpDestination ? [{ level: 'trace' as const, stream: otlpDestination }] : []),
   ];
   logger = pino(baseOptions, pino.multistream(streams));
 }

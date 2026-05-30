@@ -40,6 +40,10 @@ import { findMerchantMemory } from '../ai/merchantMemory';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
 import {
+  computeImportConfidence,
+  serializeFlags,
+} from './computeImportConfidence';
+import {
   enrichmentRecurringMinSupport,
   enrichmentAmazonLinkThreshold,
   enrichmentRefundWindowDays,
@@ -413,12 +417,28 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       });
 
       const f = enriched.fields;
+      const accountVisibility: 'private' | 'shared' =
+        account.visibility === 'shared' ? 'shared' : 'private';
+      const confidence = computeImportConfidence({
+        reviewFlag: f.reviewFlag,
+        finalCategory: f.autoCategory,
+        autoCategory: f.autoCategory,
+        autoSplitType: f.autoSplitType,
+        finalSplitType:
+          f.autoSplitType === 'partner' || f.autoSplitType === 'shared'
+            ? f.autoSplitType
+            : 'me',
+        txnType: f.txnType,
+        accountVisibility,
+        linkedTransactionId: f.linkedTransactionId,
+        amount: v.amount,
+      });
 
       const txn = Transaction.build({
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         createdByUserId: opts.userId ?? account.ownerUserId ?? null,
-        visibility: account.visibility === 'shared' ? 'shared' : 'private',
+        visibility: accountVisibility,
         ownershipType:
           f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
@@ -451,6 +471,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         isRecurring: f.isRecurring,
         reviewFlag: f.reviewFlag,
         reviewedAt: null,
+        importConfidence: confidence.state,
+        importConfidenceFlags: serializeFlags(confidence.flags),
       });
 
       recomputeTransactionAmounts(txn);
@@ -493,6 +515,8 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               date: v.date,
               currency: v.currency,
               memory,
+              accountVisibility,
+              txnType: f.txnType,
             });
           }
         }
@@ -527,6 +551,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         finishedAt: new Date(),
         householdId: opts.householdId ?? account.householdId ?? null,
         createdByUserId: opts.userId ?? account.ownerUserId ?? null,
+        // #231: structured batch metadata so the batch detail view can
+        // surface account + profile + per-stage counts without rebuilding
+        // them from the wire.
+        accountId: account.id,
+        profileId,
+        insertedCount: inserted,
+        skippedDuplicateCount: skippedDup,
+        rowErrorsCount: rowErrors,
       },
       { transaction: t }
     );
@@ -592,6 +624,10 @@ type ColdRow = {
   date: string;
   currency: string;
   memory: MerchantMemoryMatch | null;
+  /** Captured at insert-time so post-AI confidence reclassification doesn't
+   *  need to round-trip through the DB. */
+  accountVisibility: 'private' | 'shared';
+  txnType: string;
 };
 
 export function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
@@ -642,6 +678,24 @@ export function aiSuggestionToSignal(sug: {
 
 async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
   const merged = mergeSignals([...c.signals, aiSignal]);
+  // Re-classify import confidence with the merged enrichment fields. An AI
+  // suggestion that fills a category and turns reviewFlag off should move
+  // the row from 'needs_review' back to 'clean' on the dashboard.
+  const confidence = computeImportConfidence({
+    reviewFlag: merged.fields.reviewFlag,
+    finalCategory: merged.fields.autoCategory,
+    autoCategory: merged.fields.autoCategory,
+    autoSplitType: merged.fields.autoSplitType,
+    finalSplitType:
+      merged.fields.autoSplitType === 'partner' ||
+      merged.fields.autoSplitType === 'shared'
+        ? merged.fields.autoSplitType
+        : 'me',
+    txnType: c.txnType,
+    accountVisibility: c.accountVisibility,
+    linkedTransactionId: merged.fields.linkedTransactionId,
+    amount: c.amount,
+  });
   try {
     await Transaction.update(
       {
@@ -653,6 +707,8 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: n
         autoSource: merged.fields.autoSource,
         autoConfidence: merged.fields.autoConfidence,
         reviewFlag: merged.fields.reviewFlag,
+        importConfidence: confidence.state,
+        importConfidenceFlags: serializeFlags(confidence.flags),
       },
       { where: { id: c.txnId } },
     );
@@ -1339,6 +1395,14 @@ export async function importWsHoldingsFile(opts: {
         finishedAt: new Date(),
         householdId: opts.householdId,
         createdByUserId: opts.userId,
+        // #231: holdings imports target many accounts in a single batch; we
+        // capture skippedUnknownAccount as the duplicate-equivalent and
+        // leave accountId NULL because no single account owns the batch.
+        accountId: null,
+        profileId: null,
+        insertedCount: inserted + updated,
+        skippedDuplicateCount: skippedUnknownAccount,
+        rowErrorsCount: errors.length,
       },
       { transaction: t },
     );

@@ -5,6 +5,7 @@ import { currentAuth } from '../auth/middleware';
 import { isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
+import { withRevisionContext } from '../util/transactionRevisions';
 import { scoreTransactionSuggestion, type TransactionFinalSnapshot } from './evaluateSuggestion';
 import type { AiSuggestion as TransactionSuggestion } from './suggestTransaction';
 
@@ -29,7 +30,8 @@ export async function createTrackedSuggestion(params: {
     | 'amazon_item_categories'
     | 'receipt_extract'
     | 'financial_insight'
-    | 'rule_proposal';
+    | 'rule_proposal'
+    | 'counterparty_promotion';
   inputSnapshot: unknown;
   output: unknown;
   model?: string | null;
@@ -129,7 +131,17 @@ export async function applyTransactionSuggestion(
   txn.set('reviewFlag', false);
   txn.set('reviewedAt', new Date());
   recomputeTransactionAmounts(txn);
-  await txn.save();
+  // Tag the resulting revision with provenance so the timeline can render
+  // "AI suggestion accepted by <user>" with a clickable suggestion link.
+  const { user } = currentAuth(req);
+  await withRevisionContext(
+    {
+      changedByUserId: user.id,
+      source: 'ai_suggestion',
+      aiSuggestionId: suggestion.id,
+    },
+    () => txn.save(),
+  );
   await markTransactionSuggestionOutcome(req, suggestion.id, txn);
   return serializeTransaction(txn);
 }

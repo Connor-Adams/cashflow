@@ -13,6 +13,32 @@ export type Account = {
   closedAt: string | null
 }
 
+/**
+ * Classified business purpose of a transfer pair (issue #222).
+ *
+ * - `owner_draw`: money moved from a business/corp account to a personal account
+ *   for the owner's personal use. Treated as draws, not expenses.
+ * - `owner_contribution`: money moved from a personal account into a
+ *   business/corp account. Equity contribution, not income.
+ * - `reimbursement`: business reimbursing a personal account for an
+ *   out-of-pocket business expense.
+ * - `investment`: cash moving to/from an investment account (e.g. brokerage
+ *   funding). Does not contribute to spend or income.
+ * - `internal`: money moving between accounts owned by the same entity
+ *   (e.g. chequing → savings within the same person/corp).
+ * - `income`: money from outside the household landing as a "transfer" by
+ *   shape — payroll, dividend received from an external entity, etc. Only
+ *   the inbound leg has a counterpart; this is the rare case where the user
+ *   forces income classification on a money-movement event.
+ */
+export type TransferPurpose =
+  | 'owner_draw'
+  | 'owner_contribution'
+  | 'reimbursement'
+  | 'investment'
+  | 'internal'
+  | 'income'
+
 export type AccountType =
   | 'checking'
   | 'savings'
@@ -21,6 +47,83 @@ export type AccountType =
   | 'loan'
   | 'cash'
   | 'other'
+
+export type TransactionStatus = 'pending' | 'posted' | 'cleared'
+
+/**
+ * Account statement record (issue #242). One row per statement period
+ * (e.g. a single monthly credit-card statement). The reconciliation flow
+ * compares `closingBalance` against the per-account sum of transactions
+ * in the period window plus `openingBalance`.
+ */
+export type AccountStatement = {
+  id: number
+  householdId: number
+  accountId: number
+  createdByUserId: number | null
+  visibility: 'private' | 'shared'
+  /** YYYY-MM-DD (inclusive). */
+  periodStart: string
+  /** YYYY-MM-DD (inclusive). */
+  periodEnd: string
+  openingBalance: number
+  closingBalance: number
+  currency: string
+  sourceFilename: string | null
+  notes: string | null
+  /** ISO timestamp; null when not yet reconciled. */
+  reconciledAt: string | null
+  varianceExplanation: string | null
+  createdAt: string
+  updatedAt: string
+  account?: {
+    id: number
+    name: string
+    shortCode: string | null
+    defaultCurrency: string | null
+  } | null
+}
+
+/**
+ * Statement reconciliation math output (issue #242). Returned alongside
+ * the statement on detail/patch/reconcile responses so the UI can render
+ * variance and balance without re-deriving.
+ */
+export type StatementReconciliation = {
+  expectedClosing: number
+  variance: number
+  transactionCount: number
+  transactionTotal: number
+  isBalanced: boolean
+}
+
+/** Transaction shape returned inside the statement detail payload. */
+export type StatementTransaction = {
+  id: number
+  date: string
+  amount: number
+  currency: string
+  merchantClean: string
+  merchantRaw: string
+  finalCategory: string | null
+  txnType: string
+  linkedTransactionId: number | null
+  transferPurpose: TransferPurpose | null
+  status: TransactionStatus
+}
+
+export type StatementDetailResponse = {
+  data: AccountStatement
+  reconciliation: StatementReconciliation
+  transactions: StatementTransaction[]
+}
+
+export type StatementListResponse = {
+  data: AccountStatement[]
+  page: number
+  pageSize: number
+  total: number
+}
 
 export type Transaction = {
   id: number
@@ -39,6 +142,7 @@ export type Transaction = {
   notes: string | null
   sourceReference: string | null
   sourceRowFingerprint: string
+  status: TransactionStatus
   appliedRuleId: number | null
   autoCategory: string | null
   categoryOverride: string | null
@@ -70,13 +174,72 @@ export type Transaction = {
   autoConfidence: 'high' | 'medium' | 'low' | null
   /** Linked sibling transaction id (refund→original, transfer→sibling) */
   linkedTransactionId: number | null
+  /**
+   * Classified business purpose of a transfer pair. Set on both sides of a
+   * linked transfer. Null until a user (or rule) classifies it.
+   * @see issue #222
+   */
+  transferPurpose: TransferPurpose | null
+  /** When the transfer pair was linked (manually or by enrichment). */
+  transferLinkedAt: string | null
   /** True when the detect-recurring stage flagged this as a recurring/subscription charge */
   isRecurring: boolean
   /** Count of attached receipt files */
   receiptCount?: number
   /** Receipt extraction mismatches that need review */
   receiptWarnings?: string[]
+  /**
+   * Deterministic post-import confidence state (#214). NULL on legacy rows
+   * imported before the classifier; one of 'clean' | 'needs_review' when
+   * populated.
+   */
+  importConfidence?: 'clean' | 'needs_review' | null
+  /**
+   * JSON-encoded array of flag tokens fired by the classifier
+   * (e.g. ["missing_category","needs_review"]). NULL when no flags fired.
+   */
+  importConfidenceFlags?: string | null
+  /**
+   * Source/dest counterparty extracted from the statement line for
+   * checking/savings/cash accounts (e.g. "JANE DOE" from
+   * "INTERAC E-TFR FROM JANE DOE"). NULL when no pattern matched or the
+   * account is out of scope (#372).
+   */
+  counterpartyRaw: string | null
+  /**
+   * Optional FK to `contacts.id` when the user has promoted the raw
+   * counterparty into a structured Contact. NULL until promoted.
+   */
+  counterpartyContactId: number | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
+}
+
+/**
+ * Discrete flag tokens emitted by computeImportConfidence (#214). Frontend
+ * uses these to render filter chips in the Review Inbox + tile breakdown on
+ * the dashboard.
+ */
+export const IMPORT_CONFIDENCE_FLAG_TOKENS = [
+  'needs_review',
+  'missing_category',
+  'missing_split',
+  'likely_duplicate',
+  'possible_refund_pair',
+  'missing_receipt',
+] as const
+
+export type ImportConfidenceFlagToken =
+  (typeof IMPORT_CONFIDENCE_FLAG_TOKENS)[number]
+
+export type ImportHealthResponse = {
+  total: number
+  clean: number
+  needsReview: number
+  unknown: number
+  /** 0..1 — share of CLASSIFIED rows that are clean. 0 when no classified rows. */
+  cleanPercent: number
+  byFlag: Partial<Record<ImportConfidenceFlagToken, number>>
+  currency: string | null
 }
 
 export type EnrichmentSignal = {
@@ -87,6 +250,105 @@ export type EnrichmentSignal = {
   fields: Record<string, unknown>
   rationale: string | null
   createdAt: string
+}
+
+/**
+ * Per-field explanation of why a transaction has its current category, split,
+ * business flag, notes, and review state. Issue #230.
+ *
+ * The backend route GET /api/transactions/:id/explanation returns this shape.
+ * Dates are serialized as ISO-8601 strings over the wire (JSON has no Date).
+ */
+export type ExplanationSource =
+  | 'rule'
+  | 'manual'
+  | 'ai'
+  | 'import-default'
+  | 'fallback'
+
+export type ManualEditAttribution = {
+  /** ISO-8601 timestamp of the row's most recent update. */
+  at: string
+  actorUserId: number | null
+  actorDisplayName: string | null
+}
+
+export type AiSuggestionAttribution = {
+  id: number
+  /** ISO-8601 timestamp the suggestion was generated. */
+  createdAt: string
+  status: 'accepted' | 'edited'
+  model: string | null
+}
+
+export type AppliedRuleAttribution = {
+  id: number
+  merchantPattern: string
+  category: string | null
+}
+
+export type CategoryExplanation = {
+  source: ExplanationSource
+  value: string | null
+  message: string
+  autoValue?: string | null
+  overrideValue?: string | null
+  appliedRule?: AppliedRuleAttribution
+  aiSuggestion?: AiSuggestionAttribution
+  manualEdit?: ManualEditAttribution
+  /** Human-readable autoSource token when source is 'import-default'. */
+  autoSourceLabel?: string
+  /** Free-text rationale carried from the underlying enrichment signal. */
+  signalRationale?: string
+}
+
+export type SplitExplanation = {
+  source: ExplanationSource
+  value: string
+  message: string
+  autoValue?: string | null
+  overrideValue?: string | null
+  appliedRule?: AppliedRuleAttribution
+  aiSuggestion?: AiSuggestionAttribution
+  manualEdit?: ManualEditAttribution
+  autoSourceLabel?: string
+  signalRationale?: string
+}
+
+export type BusinessExplanation = {
+  source: ExplanationSource
+  value: boolean
+  message: string
+  autoValue?: string | null
+  overrideValue?: string | null
+  appliedRule?: AppliedRuleAttribution
+  aiSuggestion?: AiSuggestionAttribution
+  manualEdit?: ManualEditAttribution
+  autoSourceLabel?: string
+  signalRationale?: string
+}
+
+export type NotesExplanation = {
+  source: 'manual' | 'none'
+  value: string | null
+  message: string
+  manualEdit?: ManualEditAttribution
+}
+
+export type ReviewExplanation = {
+  state: 'cleared' | 'needs-review' | 'never-flagged'
+  /** ISO-8601 timestamp of the last review-state change, or null. */
+  lastChangedAt: string | null
+  message: string
+}
+
+export type TransactionExplanation = {
+  transactionId: number
+  category: CategoryExplanation
+  split: SplitExplanation
+  business: BusinessExplanation
+  notes: NotesExplanation
+  review: ReviewExplanation
 }
 
 export type EnrichmentStats = {
@@ -129,11 +391,50 @@ export type EnrichmentBackfillProgress =
     }
   | { kind: 'error'; message: string; txnId?: number }
 
+/**
+ * NDJSON stream events for POST /api/transactions/counterparty/backfill
+ * (issue #376). Mirrors EnrichmentBackfillProgress in shape so the UI can
+ * reuse the same feed-rendering pattern.
+ */
+export type CounterpartyBackfillProgress =
+  | {
+      kind: 'progress'
+      txnId: number
+      merchantRaw: string
+      counterpartyRaw: string | null
+    }
+  | {
+      kind: 'summary'
+      processed: number
+      extracted: number
+      skipped: number
+      elapsedMs: number
+      dryRun: boolean
+    }
+  | { kind: 'error'; message: string; txnId?: number }
+
+export type CounterpartyBackfillStatus = {
+  running: boolean
+  lastRunAt: string | null
+  nextAllowedAt: string | null
+  lastSummary: {
+    processed: number
+    extracted: number
+    elapsedMs: number
+  } | null
+  rateLimitMs: number
+}
+
 export type Contact = {
   id: number
   householdId: number
   name: string
   notes: string | null
+  /**
+   * #375 — flags the household's partner Contact. Drives the Partner
+   * Fairness dashboard's partner_inflows / non_partner_inflows split.
+   */
+  isPartner: boolean
 }
 
 export type Category = {
@@ -1044,3 +1345,112 @@ export type PortfolioPerformance = {
   byAccount: PortfolioPerformanceByAccount[];
   caveats: PortfolioPerformanceCaveats;
 };
+
+// ---------------------------------------------------------------------------
+// Debt payoff planner (issue #202)
+// ---------------------------------------------------------------------------
+
+export type DebtPayoffStrategy = 'avalanche' | 'snowball' | 'custom'
+
+/** A liability account joined with its debt profile + derived owed balance. */
+export type DebtLiability = {
+  accountId: number
+  name: string
+  accountType: string
+  currency: string
+  /** Amount currently owed, as a positive number. */
+  balance: number
+  /** APR as a percent (e.g. 19.99). */
+  interestRate: number
+  minimumPayment: number
+  /** Optional owed-balance override; null when derived from transactions. */
+  statementBalance: number | null
+  /** Optional day-of-month (1-31) the payment is due. */
+  dueDay: number | null
+}
+
+/** One debt's line within a payoff month. */
+export type PayoffMonthDebtLine = {
+  debtId: number
+  payment: number
+  interest: number
+  principal: number
+  endingBalance: number
+}
+
+/** One month of the amortization schedule. */
+export type PayoffMonth = {
+  month: number
+  perDebt: PayoffMonthDebtLine[]
+  totalPaid: number
+  totalInterest: number
+}
+
+/** A single scheduled monthly debt outflow (for the forecast). */
+export type PayoffScheduledPayment = {
+  date: string
+  amount: number
+}
+
+/** The full computed payoff plan returned by the debt endpoints. */
+export type DebtPayoffPlan = {
+  strategy: DebtPayoffStrategy
+  /** Debt (account) ids in the order they are targeted. */
+  order: number[]
+  months: PayoffMonth[]
+  /** payoffMonthByDebt[id] = 1-based month the debt cleared, or null. */
+  payoffMonthByDebt: Record<number, number | null>
+  totalMonths: number
+  totalInterest: number
+  totalPaid: number
+  scheduledPayments: PayoffScheduledPayment[]
+  /** True when minimum payments cannot keep pace with interest. */
+  stalled: boolean
+}
+
+/** avalanche-vs-snowball comparison returned by GET /api/debt. */
+export type DebtPayoffComparison = {
+  avalanche: DebtPayoffPlan
+  snowball: DebtPayoffPlan
+  /** snowball.totalInterest - avalanche.totalInterest (>= 0). */
+  interestSaved: number
+}
+
+/** Response shape of GET /api/debt. */
+export type DebtOverview = {
+  currency: string
+  totalOwed: number
+  totalMinimumPayment: number
+  extraMonthlyPayment: number
+  liabilities: DebtLiability[]
+  comparison: DebtPayoffComparison | null
+}
+
+/** A persisted saved scenario row. */
+export type DebtPayoffScenario = {
+  id: number
+  householdId: number
+  userId: number | null
+  name: string
+  strategy: DebtPayoffStrategy
+  extraMonthlyPayment: string
+  payloadJson: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape of POST /api/debt/scenarios and GET /api/debt/scenarios/:id. */
+export type DebtScenarioResponse = {
+  scenario: DebtPayoffScenario
+  plan: DebtPayoffPlan
+  liabilities?: DebtLiability[]
+}
+
+/** A liability profile row returned by PUT /api/debt/accounts/:accountId. */
+export type DebtLiabilityProfile = {
+  accountId: number
+  interestRate: number
+  minimumPayment: number
+  statementBalance: number | null
+  dueDay: number | null
+}
