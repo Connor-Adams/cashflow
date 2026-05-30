@@ -106,3 +106,75 @@ test('docs document the restart-policy decision so the audit trail is in-repo', 
   // The alert rule file must be referenced so readers can find it.
   assert.match(docs, /infra\/grafana\/provisioning\/alerting/);
 });
+
+test('each alert has a unique, anchored runbook_url so the on-call lands on the specific remediation', () => {
+  const rules = readFileSync(
+    'infra/grafana/provisioning/alerting/observability-stack.yaml',
+    'utf8',
+  );
+  const urls = [...rules.matchAll(/runbook_url:\s*'([^']+)'/g)].map((m) => m[1]);
+  assert.ok(urls.length >= 3, 'each alert must declare a runbook_url');
+
+  // Every runbook_url must include a fragment (#section) — pointing the on-call
+  // at a section, not the top of the doc. Sharing the same generic anchor
+  // across N alerts is the failure mode this guards against.
+  for (const url of urls) {
+    assert.ok(url.includes('#'), `runbook_url has no fragment anchor: ${url}`);
+  }
+  const unique = new Set(urls);
+  assert.equal(
+    unique.size,
+    urls.length,
+    `runbook_url collisions — each alert must point at its own subsection: ${[...unique].join(', ')}`,
+  );
+
+  // Each fragment must resolve to an actual heading in observability.md, so
+  // the link is not just a guess.
+  const docs = readFileSync('docs/observability.md', 'utf8');
+  const headingAnchors = new Set(
+    [...docs.matchAll(/^#+\s+(.+?)\s*$/gm)].map(([, h]) =>
+      h
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '-'),
+    ),
+  );
+  for (const url of urls) {
+    const anchor = url.split('#')[1];
+    assert.ok(
+      headingAnchors.has(anchor),
+      `runbook_url '#${anchor}' does not resolve to a heading in docs/observability.md`,
+    );
+  }
+});
+
+test('observability docs and comments do not link to tool homepages instead of specific findings', () => {
+  // The pattern this guards against: comments that "explain" an alert by
+  // linking to grafana.com or prometheus.io instead of the specific alert
+  // rule / panel / metric the comment refers to. Tool homepages tell the
+  // on-call nothing they don't already know.
+  const sources = {
+    'docs/observability.md': readFileSync('docs/observability.md', 'utf8'),
+    'infra/grafana/provisioning/alerting/observability-stack.yaml': readFileSync(
+      'infra/grafana/provisioning/alerting/observability-stack.yaml',
+      'utf8',
+    ),
+    'infra/otel-collector/config.yaml': readFileSync('infra/otel-collector/config.yaml', 'utf8'),
+    'infra/prometheus/prometheus.yml': readFileSync('infra/prometheus/prometheus.yml', 'utf8'),
+  };
+  const banned = [
+    /https?:\/\/(?:www\.)?grafana\.com\/?(?:\s|$|"|\))/i,
+    /https?:\/\/(?:www\.)?prometheus\.io\/?(?:\s|$|"|\))/i,
+    /https?:\/\/grafana\.github\.io\/?(?:\s|$|"|\))/i,
+  ];
+  for (const [path, body] of Object.entries(sources)) {
+    for (const re of banned) {
+      assert.doesNotMatch(
+        body,
+        re,
+        `${path} links to a tool homepage; link to the specific alert rule, dashboard, or metric instead`,
+      );
+    }
+  }
+});

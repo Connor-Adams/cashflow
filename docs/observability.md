@@ -136,7 +136,7 @@ Tempo receives traces from the otel-collector and makes them queryable in Grafan
 1. **Create the `tempo` Railway service.**
    - New Service → "Deploy from Docker image".
    - Image: `ghcr.io/connor-adams/cashflow-tempo:main` (initially) — bump to `:production` once a release has tagged it.
-   - Add a persistent volume, mount at `/var/tempo`, size 10GB. **The mount path MUST be `/var/tempo`** — do NOT mount at `/tempo`, which would shadow the `grafana/tempo` binary at `/tempo` and fail-start the container. The storage paths in `infra/tempo/config.yaml` (`storage.trace.wal.path` and `storage.trace.local.path`) are hard-pinned under `/var/tempo`; the regression-guard test `backend/test/tempoConfig.test.ts` asserts this in CI.
+   - Add a persistent volume, mount at `/var/tempo`, size 10GB. **The mount path MUST be `/var/tempo`** — using the bare `/tempo` path would shadow the `grafana/tempo` binary and fail-start the container. The storage paths in `infra/tempo/config.yaml` (`storage.trace.wal.path` and `storage.trace.local.path`) are hard-pinned under `/var/tempo`; the regression-guard test `backend/test/tempoConfig.test.ts` asserts this in CI.
    - Set service name to `tempo` (Railway exposes it as `tempo.railway.internal` in private networking).
    - Set env var: `PORT=3200`.
    - Deploy.
@@ -275,26 +275,74 @@ ordering requirement that an ALWAYS policy would violate.
 `ALWAYS` covers the crash case but not the "container running, pipeline
 unhealthy" case (e.g. tempo accepts the TCP connection but rejects writes due
 to a corrupt block or full disk). For that, Grafana provisions a set of
-alert rules from `infra/grafana/provisioning/alerting/observability-stack.yaml`:
-
-- `TempoExportFailing` —
-  `rate(otelcol_exporter_send_failed_spans_total{exporter="otlphttp/tempo"}[5m]) > 0`
-- `LokiExportFailing` —
-  `rate(otelcol_exporter_send_failed_log_records_total{exporter="loki"}[5m]) > 0`
-- `OtelCollectorScrapeDown` —
-  `up{job="cashflow-otel-collector"} == 0`
+alert rules from [`infra/grafana/provisioning/alerting/observability-stack.yaml`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml).
+Each rule's `runbook_url` annotation points at the matching subsection below
+so the on-call engineer lands on the exact remediation, not this page's top.
 
 These rules read the otel-collector's own self-telemetry metrics, which
 require two supporting changes already in this repo:
 
-1. `infra/otel-collector/config.yaml` binds `service.telemetry.metrics.address`
+1. [`infra/otel-collector/config.yaml`](https://github.com/Connor-Adams/cashflow/blob/main/infra/otel-collector/config.yaml) binds `service.telemetry.metrics.address`
    to `0.0.0.0:8888` (default is loopback-only).
-2. `infra/prometheus/prometheus.yml` adds a `cashflow-otel-collector-self`
+2. [`infra/prometheus/prometheus.yml`](https://github.com/Connor-Adams/cashflow/blob/main/infra/prometheus/prometheus.yml) adds a `cashflow-otel-collector-self`
    scrape job pointed at `otel-collector.railway.internal:8888`.
 
 The 5-minute rate window plus `for: 1m` keeps the worst-case alert latency
 under 6 minutes, satisfying the issue #371 SLO of "surface tempo downtime
 within 5 minutes."
+
+#### TempoExportFailing
+
+**Rule:** [`cashflow-tempo-export-failing`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml#L29) — fires when
+`rate(otelcol_exporter_send_failed_spans_total{exporter="otlphttp/tempo"}[5m]) > 0`
+for ≥1m.
+
+**What it means:** the otel-collector is connecting to `tempo.railway.internal:4318`
+but tempo is refusing or failing the write. Possible causes: tempo container
+hung, disk full, mounted volume detached, ingester WAL corrupt.
+
+**Remediation:**
+1. `railway logs -s tempo -n 100` — look for `error` lines around the start of the alert window.
+2. `railway ssh -s tempo "df -h /var/tempo"` — if `/var/tempo` is missing or full, that's the cause; see [Creating a missing tempo volume](#creating-a-missing-tempo-volume).
+3. If logs show graceful shutdown / `Tempo stopped`, the restart policy did not catch a clean exit — confirm `restartPolicyType: ALWAYS` is set on the service.
+4. Fast unstick: `railway redeploy --service tempo --yes`.
+5. Verify recovery via [Verifying the volume mount](#verifying-the-volume-mount) step 3, then watch `otelcol_exporter_send_failed_spans_total` return to 0.
+
+#### LokiExportFailing
+
+**Rule:** [`cashflow-loki-export-failing`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml#L87) — fires when
+`rate(otelcol_exporter_send_failed_log_records_total{exporter="loki"}[5m]) > 0`
+for ≥1m.
+
+**What it means:** the otel-collector cannot push log records to
+`loki.railway.internal:3100/loki/api/v1/push`. Loki is most likely down,
+out of disk, or the loki ingester is rejecting writes for label cardinality.
+
+**Remediation:**
+1. `railway logs -s loki -n 100` — `error` lines, especially `level=error msg="error processing requests"` or `permission denied` (Loki has historic UID-vs-volume-perm issues).
+2. `railway ssh -s loki "df -h /loki"` — out of disk → bump the volume; rejection by ingester → check for runaway label cardinality.
+3. If logs are silent and the container is just stopped, `railway redeploy --service loki --yes`.
+4. Confirm recovery: `otelcol_exporter_send_failed_log_records_total{exporter="loki"}` flattens, and `{service_name="cashflow-backend"}` queries in Grafana Explore return fresh lines.
+
+#### OtelCollectorScrapeDown
+
+**Rule:** [`cashflow-otel-collector-scrape-down`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml#L144) — fires when
+`up{job="cashflow-otel-collector"} == 0` for ≥5m.
+
+**What it means:** Prometheus cannot scrape the otel-collector at
+`otel-collector.railway.internal:9464`. Without this scrape, the
+TempoExportFailing and LokiExportFailing rules have no data — this alert is
+the last line of defense for the whole pipeline.
+
+**Remediation:**
+1. `railway logs -s otel-collector -n 100` — confirm the collector is running and serving metrics.
+2. `railway logs -s prometheus -n 100` — look for `scrape failed` / DNS errors on the cashflow-otel-collector job; possible Railway private-network drop.
+3. If both services are up but Prometheus still can't scrape, hit
+   `http://prometheus.railway.internal:9090/api/v1/targets` from a sibling service (e.g.
+   `railway run --service grafana curl ...`) — check `lastError` for the scrape target.
+4. If the collector is the problem, `railway redeploy --service otel-collector --yes`. If
+   Prometheus is the problem, `railway redeploy --service prometheus --yes`.
+5. Recovery: `up{job="cashflow-otel-collector"}` returns to `1`; TempoExportFailing/LokiExportFailing become evaluable again.
 
 ### Verification
 

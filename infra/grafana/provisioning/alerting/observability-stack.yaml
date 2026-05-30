@@ -2,18 +2,25 @@
 #
 # These alerts catch the case where the otel-collector is up but tempo, loki,
 # or prometheus is silently failing — the same failure mode that caused the
-# 2026-05-29 tempo SIGTERM-without-restart incident (issue #371).
+# 2026-05-29 tempo SIGTERM-without-restart incident
+# (https://github.com/Connor-Adams/cashflow/issues/371).
 #
 # The primary fix for that incident is Railway `restartPolicyType: ALWAYS`
-# on tempo, loki, and prometheus (documented in docs/observability.md). These
-# alerts are defense in depth for cases where the container is technically
-# running but the pipeline is unhealthy.
+# on tempo, loki, and prometheus, documented here:
+#   https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#decision-restartpolicytype-always-for-tempo-loki-prometheus
+# These alerts are defense in depth for cases where the container is
+# technically running but the pipeline is unhealthy.
 #
-# Data prerequisites:
-# - prometheus must scrape `otel-collector.railway.internal:8888`
-#   (configured in infra/prometheus/prometheus.yml).
-# - otel-collector must bind self-telemetry to 0.0.0.0:8888
-#   (configured in infra/otel-collector/config.yaml).
+# Each rule below carries a `runbook_url` annotation pointing at its own
+# subsection of docs/observability.md so the on-call engineer lands on the
+# specific remediation, not the top of the page.
+#
+# Data prerequisites — without these the rules have no data and tempo can be
+# silently down again:
+# - prometheus must scrape `otel-collector.railway.internal:8888`. Wired up in
+#   https://github.com/Connor-Adams/cashflow/blob/main/infra/prometheus/prometheus.yml
+# - otel-collector must bind self-telemetry to 0.0.0.0:8888. Wired up in
+#   https://github.com/Connor-Adams/cashflow/blob/main/infra/otel-collector/config.yaml
 #
 # SLO: tempo/loki/prometheus downtime must surface within 5 minutes. A 5m
 # rate window plus `for: 1m` keeps the worst-case alert latency under 6
@@ -79,7 +86,7 @@ groups:
             with `railway redeploy --service tempo --yes`. Restart policy is
             `ALWAYS` so a crash should self-heal — this alert means the
             crash loop is failing or the service is hung.
-          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#service-reliability'
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#tempoexportfailing'
         labels:
           severity: critical
           component: tempo
@@ -136,7 +143,7 @@ groups:
             Check the loki Railway service status. Restart policy is
             `ALWAYS` so a crash should self-heal — this alert means the
             crash loop is failing or the service is hung.
-          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#service-reliability'
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#lokiexportfailing'
         labels:
           severity: critical
           component: loki
@@ -193,7 +200,7 @@ groups:
             Without a working collector + prometheus, the TempoExportFailing
             and LokiExportFailing alerts cannot fire — this alert is the
             last line of defense for the whole pipeline.
-          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#service-reliability'
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#otelcollectorscrapedown'
         labels:
           severity: critical
           component: otel-collector
