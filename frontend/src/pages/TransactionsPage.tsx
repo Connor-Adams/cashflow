@@ -9,6 +9,7 @@ import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -1679,6 +1680,7 @@ function TransactionRow({
     t.ownershipContactId != null ? String(t.ownershipContactId) : ''
   )
   const [status, setStatus] = useState<TransactionStatus>(t.status)
+  const [reimburseOpen, setReimburseOpen] = useState(false)
   const rowConfirmAction = useConfirm()
   const rowToast = useToast()
   const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe)
@@ -1981,6 +1983,15 @@ function TransactionRow({
           >
             History
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setReimburseOpen(true)}
+            title="Track this as money you expect to be reimbursed"
+          >
+            Reimburse
+          </Button>
           {aiEnabled ? (
             <Button
               type="button"
@@ -2067,7 +2078,157 @@ function TransactionRow({
             {!isDirty && t.reviewFlag ? 'Mark reviewed' : isDirty ? 'Save' : 'Saved'}
           </Button>
         </div>
+        {reimburseOpen && (
+          <MarkReimbursableDialog
+            txn={t}
+            contacts={contacts}
+            onClose={() => setReimburseOpen(false)}
+            onError={onError}
+            onSaved={() => {
+              setReimburseOpen(false)
+              rowToast.showToast({
+                title: 'Marked reimbursable',
+                variant: 'success',
+              })
+            }}
+          />
+        )}
       </TableCell>
     </TableRow>
+  )
+}
+
+/**
+ * Quick "Mark reimbursable" dialog (issue #216) — creates a reimbursement
+ * claim for this transaction via POST /api/transactions/:id/reimbursable.
+ * Party is a Contact (dropdown) or free text; amount defaults to the
+ * transaction's absolute amount.
+ */
+function MarkReimbursableDialog({
+  txn,
+  contacts,
+  onClose,
+  onError,
+  onSaved,
+}: {
+  txn: Transaction
+  contacts: Contact[]
+  onClose: () => void
+  onError: (message: string) => void
+  onSaved: () => void
+}) {
+  const [contactId, setContactId] = useState<string>('')
+  const [partyName, setPartyName] = useState<string>('')
+  const [amount, setAmount] = useState<string>(
+    String(Math.abs(Number(txn.amount) || 0)),
+  )
+  const [dueDate, setDueDate] = useState<string>('')
+  const [notes, setNotes] = useState<string>('')
+  const [saving, setSaving] = useState(false)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!contactId && partyName.trim() === '') {
+      onError('Pick a contact or enter who owes you.')
+      return
+    }
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = {}
+      if (contactId) body.contactId = Number(contactId)
+      else body.partyName = partyName.trim()
+      if (amount.trim() !== '') body.amount = amount.trim()
+      if (dueDate) body.dueDate = dueDate
+      if (notes.trim() !== '') body.notes = notes.trim()
+      await postJson(`/api/transactions/${txn.id}/reimbursable`, body)
+      onSaved()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not mark reimbursable.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Mark transaction reimbursable"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <Card className="w-full max-w-md p-5">
+        <h2 className="mb-1 text-lg font-semibold">Mark reimbursable</h2>
+        <p className="muted text-sm mb-4">
+          {txn.merchantClean} · {txn.date}
+        </p>
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          {contacts.length > 0 && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span>Who owes you? (contact)</span>
+              <NativeSelect
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+              >
+                <option value="">— free text below —</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </label>
+          )}
+          {!contactId && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span>Or type a name</span>
+              <Input
+                value={partyName}
+                onChange={(e) => setPartyName(e.target.value)}
+                placeholder="e.g. Acme Corp, Mom, BlueCross"
+                maxLength={160}
+              />
+            </label>
+          )}
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Amount expected ({txn.currency})</span>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Due date (optional)</span>
+            <Input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span>Notes (optional)</span>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="rounded-md border border-input bg-background/70 px-3 py-1 text-sm"
+              maxLength={4000}
+            />
+          </label>
+          <div className="mt-2 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Mark reimbursable'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </div>
   )
 }

@@ -46,6 +46,7 @@ import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
+import { ReimbursementsPage } from './pages/ReimbursementsPage'
 import { AiInboxPage } from './pages/AiInboxPage'
 import { AiReviewsPage } from './pages/AiReviewsPage'
 import { CfoBriefingPage } from './pages/CfoBriefingPage'
@@ -102,6 +103,7 @@ function AppRoutes() {
           <Route path="monthly-close" element={<MonthlyClosePage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="return-warranty" element={<ReturnWarrantyPage />} />
+          <Route path="reimbursements" element={<ReimbursementsPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
             <Route element={<SettingsTabLayout />}>
