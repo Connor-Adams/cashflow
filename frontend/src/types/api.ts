@@ -120,6 +120,14 @@ export type SubscriptionStatus =
   | 'ignored'
   | 'unknown'
 
+/** Billing cadence of a subscription (Cashflow #291 — user-editable). */
+export type SubscriptionCadence =
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'annual'
+
 /** One row of the /api/subscriptions response. */
 export type Subscription = {
   id: number
@@ -128,7 +136,7 @@ export type Subscription = {
   normalizedName: string
   amount: string
   currency: string
-  cadence: 'monthly' | 'weekly'
+  cadence: SubscriptionCadence
   lastChargeDate: string
   nextExpectedDate: string | null
   status: SubscriptionStatus
@@ -149,8 +157,22 @@ export type SubscriptionsResponse = {
 /** PATCH /api/subscriptions/:id request body — only user-curated fields. */
 export type SubscriptionPatch = {
   status?: SubscriptionStatus
+  cadence?: SubscriptionCadence
   cancellationUrl?: string | null
   notes?: string | null
+}
+
+/** Allowed cancel-impact forecast horizons (months). */
+export type CancelImpactHorizon = 6 | 12 | 24
+
+/** Response shape for GET /api/subscriptions/:id/cancel-impact. */
+export type CancelImpact = {
+  /** Projected total spend over the horizon (== potential savings). */
+  amount: number
+  currency: string
+  /** Number of expected occurrences inside the horizon. */
+  count: number
+  horizonMonths: number
 }
 
 /** Response shape for GET /api/subscriptions/summary. */

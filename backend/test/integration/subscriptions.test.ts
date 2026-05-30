@@ -203,6 +203,152 @@ test('PATCH /api/subscriptions/:id rejects invalid status', async () => {
   assert.equal(res.status, 400);
 });
 
+// ----- #291: editable cadence -----
+
+test('PATCH /api/subscriptions/:id accepts cadence and recomputes annual cost (AC #1, #2)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const netflix = (
+    list.body.items as Array<{
+      id: number;
+      normalizedName: string;
+      amount: string;
+    }>
+  ).find((i) => i.normalizedName === 'netflix');
+  assert.ok(netflix);
+  const perPeriod = Number(netflix!.amount); // 15.99
+
+  const patched = await primaryAgent
+    .patch(`/api/subscriptions/${netflix!.id}`)
+    .send({ cadence: 'annual' });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.cadence, 'annual');
+  // Annualized cost for an annual cadence equals the per-period amount.
+  assert.equal(Number(patched.body.annualizedCost), Number(perPeriod.toFixed(4)));
+
+  // Restore monthly so later tests see the original cadence; annual cost goes
+  // back to amount * 12.
+  const restored = await primaryAgent
+    .patch(`/api/subscriptions/${netflix!.id}`)
+    .send({ cadence: 'monthly' });
+  assert.equal(restored.status, 200);
+  assert.equal(restored.body.cadence, 'monthly');
+  assert.equal(Number(restored.body.annualizedCost), Number((perPeriod * 12).toFixed(4)));
+});
+
+test('PATCH /api/subscriptions/:id rejects an invalid cadence with INVALID_CADENCE (AC #1)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  const res = await primaryAgent
+    .patch(`/api/subscriptions/${id}`)
+    .send({ cadence: 'fortnightly' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'INVALID_CADENCE');
+});
+
+test('PATCH /api/subscriptions/:id accepts each of the five cadence values (AC #2)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  for (const cadence of ['weekly', 'monthly', 'quarterly', 'semiannual', 'annual']) {
+    const res = await primaryAgent
+      .patch(`/api/subscriptions/${id}`)
+      .send({ cadence });
+    assert.equal(res.status, 200, `cadence ${cadence} should be accepted`);
+    assert.equal(res.body.cadence, cadence);
+  }
+  // Leave the row on monthly for downstream tests.
+  await primaryAgent.patch(`/api/subscriptions/${id}`).send({ cadence: 'monthly' });
+});
+
+// ----- #291: cancel-impact endpoint -----
+
+test('GET /api/subscriptions/:id/cancel-impact projects monthly spend over 12 months (AC #3, #5)', async () => {
+  // Seed a clean $20/mo subscription so the AC #5 numbers are exact.
+  await seedRecurringCharges(primaryHouseholdId, primaryAccountId, 'AcmePlus', 20, 4);
+  const list = await primaryAgent.get('/api/subscriptions');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string; cadence: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  assert.equal(acme!.cadence, 'monthly');
+
+  const res = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=12`,
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.amount, 240);
+  assert.equal(res.body.count, 12);
+  assert.equal(res.body.horizonMonths, 12);
+  assert.equal(res.body.currency, 'CAD');
+});
+
+test('GET cancel-impact reflects a corrected cadence (annual → count 1, AC #5)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  // Correct the cadence to annual; the per-period amount ($20) is unchanged,
+  // so a 12-month horizon now sees exactly one $20 occurrence.
+  await primaryAgent.patch(`/api/subscriptions/${acme!.id}`).send({ cadence: 'annual' });
+  const res = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=12`,
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.count, 1);
+  assert.equal(res.body.amount, 20);
+  // Restore for tidiness.
+  await primaryAgent.patch(`/api/subscriptions/${acme!.id}`).send({ cadence: 'monthly' });
+});
+
+test('GET cancel-impact rejects a horizon outside {6, 12, 24} (AC #4)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  for (const bad of ['18', '1', '0', 'abc', '12.5']) {
+    const res = await primaryAgent.get(
+      `/api/subscriptions/${id}/cancel-impact?horizonMonths=${bad}`,
+    );
+    assert.equal(res.status, 400, `horizonMonths=${bad} should be rejected`);
+  }
+});
+
+test('GET cancel-impact accepts the 6 and 24 month horizons (AC #4)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  const six = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=6`,
+  );
+  assert.equal(six.status, 200);
+  assert.equal(six.body.amount, 120);
+  assert.equal(six.body.count, 6);
+  const twentyFour = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=24`,
+  );
+  assert.equal(twentyFour.status, 200);
+  assert.equal(twentyFour.body.amount, 480);
+  assert.equal(twentyFour.body.count, 24);
+});
+
+test('GET cancel-impact does not leak another household subscription (AC #12)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  const res = await otherAgent.get(
+    `/api/subscriptions/${id}/cancel-impact?horizonMonths=12`,
+  );
+  assert.equal(res.status, 404);
+});
+
+test('PATCH cadence is rejected across households (AC #12)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  const res = await otherAgent
+    .patch(`/api/subscriptions/${id}`)
+    .send({ cadence: 'annual' });
+  assert.equal(res.status, 404);
+});
+
 test('PATCH /api/subscriptions/:id rejects non-http cancellationUrl', async () => {
   const list = await primaryAgent.get('/api/subscriptions?refresh=0');
   const id = (list.body.items as Array<{ id: number }>)[0].id;

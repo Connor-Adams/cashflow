@@ -3,7 +3,9 @@ import { Op } from 'sequelize';
 import {
   Subscription,
   SUBSCRIPTION_STATUSES,
+  SUBSCRIPTION_CADENCES,
   type SubscriptionStatus,
+  type SubscriptionCadence,
 } from '../models/Subscription';
 import { Transaction } from '../models';
 import { num } from '../util/numbers';
@@ -15,10 +17,16 @@ import {
   type RecurringInputTxn,
 } from './recurring';
 import {
+  annualizeCost,
   mergeDetectionWithExisting,
   normalizeMerchantName,
   type ExistingSubscriptionRow,
 } from '../subscriptions/detect';
+import {
+  ALLOWED_HORIZON_MONTHS,
+  computeCancelImpact,
+  isAllowedHorizon,
+} from '../subscriptions/cancelImpact';
 
 const router = Router();
 
@@ -70,6 +78,7 @@ function serialize(row: InstanceType<typeof Subscription>): SubscriptionResponse
 
 interface SubscriptionPatch {
   status?: SubscriptionStatus;
+  cadence?: SubscriptionCadence;
   cancellationUrl?: string | null;
   notes?: string | null;
 }
@@ -79,9 +88,11 @@ type PatchValidation =
   | { ok: false; status: number; error: string };
 
 /**
- * Pure validator for PATCH /api/subscriptions/:id bodies. Only three
- * user-curated fields are mutable from this endpoint — everything else
- * (amount, cadence, category, …) is derived from detection and gets
+ * Pure validator for PATCH /api/subscriptions/:id bodies. The user-curated
+ * fields are mutable from this endpoint: status, cancellationUrl, notes, and
+ * cadence. Cadence is special — it is detection-derived but a user may correct
+ * a misdetected value (annual misread as monthly), so an explicit edit sticks.
+ * Everything else (amount, category, …) is derived from detection and gets
  * overwritten on the next refresh, so allowing PATCH on those would be
  * surprising and pointless.
  */
@@ -100,6 +111,18 @@ export function validateSubscriptionPatch(
       };
     }
     value.status = candidate as SubscriptionStatus;
+  }
+
+  if (raw.cadence !== undefined) {
+    const candidate = String(raw.cadence);
+    if (!(SUBSCRIPTION_CADENCES as readonly string[]).includes(candidate)) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'INVALID_CADENCE',
+      };
+    }
+    value.cadence = candidate as SubscriptionCadence;
   }
 
   if (raw.cancellationUrl !== undefined) {
@@ -381,12 +404,70 @@ router.patch('/:id', async (req, res, next) => {
     }
     const patch = result.value;
     if (patch.status !== undefined) row.set('status', patch.status);
+    if (patch.cadence !== undefined) {
+      row.set('cadence', patch.cadence);
+      // Keep the derived annual cost consistent with the corrected cadence so
+      // the summary rollup and any cached annual figures stay accurate until
+      // the next detection refresh. The per-period `amount` is unchanged.
+      row.set(
+        'annualizedCost',
+        annualizeCost(Number(row.amount), patch.cadence).toFixed(4),
+      );
+    }
     if (patch.cancellationUrl !== undefined) {
       row.set('cancellationUrl', patch.cancellationUrl);
     }
     if (patch.notes !== undefined) row.set('notes', patch.notes);
     await row.save();
     res.json(serialize(row));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/subscriptions/:id/cancel-impact?horizonMonths=6|12|24
+ *
+ * Projects the total spend on this subscription over the next N months at its
+ * current cadence — i.e. how much the user would save by cancelling. Scoped to
+ * the caller's household (404 otherwise). Rejects horizons outside {6, 12, 24}.
+ */
+router.get('/:id/cancel-impact', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+
+    const horizonMonths = Number(req.query.horizonMonths);
+    if (!isAllowedHorizon(horizonMonths)) {
+      res.status(400).json({
+        error: `horizonMonths must be one of: ${ALLOWED_HORIZON_MONTHS.join(', ')}`,
+      });
+      return;
+    }
+
+    const row = await Subscription.findOne({
+      where: { id, ...householdWhere(req) },
+    });
+    if (!row) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
+    const impact = computeCancelImpact({
+      perPeriodAmount: Number(row.amount),
+      cadence: row.cadence,
+      horizonMonths,
+    });
+
+    res.json({
+      amount: impact.amount,
+      currency: row.currency,
+      count: impact.count,
+      horizonMonths: impact.horizonMonths,
+    });
   } catch (e) {
     next(e);
   }

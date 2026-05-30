@@ -17,9 +17,7 @@ import type {
   SubscriptionCadence,
   SubscriptionStatus,
 } from '../models/Subscription';
-
-const WEEKS_PER_YEAR = 52;
-const MONTHS_PER_YEAR = 12;
+import { periodsPerYear } from './cancelImpact';
 
 /**
  * Conservative threshold for "price went up". Real-world subscriptions
@@ -39,14 +37,15 @@ export const PRICE_INCREASE_THRESHOLD = 0.1;
  * total a user would spend at the current cadence and amount. Amounts come
  * in as negative numbers for charges per the codebase convention; we take
  * the absolute value so callers don't have to remember the sign.
+ *
+ * Multiplies the per-period charge by the cadence's occurrences-per-year
+ * (52 weekly, 12 monthly, 4 quarterly, 2 semiannual, 1 annual).
  */
 export function annualizeCost(
   amount: number,
   cadence: SubscriptionCadence,
 ): number {
-  const abs = Math.abs(amount);
-  if (cadence === 'weekly') return abs * WEEKS_PER_YEAR;
-  return abs * MONTHS_PER_YEAR;
+  return Math.abs(amount) * periodsPerYear(cadence);
 }
 
 /**

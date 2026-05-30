@@ -18,7 +18,10 @@
  */
 
 import type { MoneyLeakType } from './../models/MoneyLeakDismissal';
-import type { SubscriptionStatus } from './../models/Subscription';
+import type {
+  SubscriptionCadence,
+  SubscriptionStatus,
+} from './../models/Subscription';
 
 // Re-export for convenience.
 export type { MoneyLeakType } from './../models/MoneyLeakDismissal';
@@ -33,7 +36,7 @@ export interface LeakSubscription {
   normalizedName: string;
   currency: string;
   amount: number;
-  cadence: 'monthly' | 'weekly';
+  cadence: SubscriptionCadence;
   annualizedCost: number;
   status: SubscriptionStatus;
   priceChangeDetected: boolean;
