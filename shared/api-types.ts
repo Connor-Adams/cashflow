@@ -11,6 +11,9 @@ export type Account = {
   shortCode: string | null
   defaultCurrency: string | null
   closedAt: string | null
+  notes: string | null
+  /** First 100 chars of notes (list endpoint only). Undefined on detail/create responses. */
+  notesPreview?: string | null
 }
 
 /**

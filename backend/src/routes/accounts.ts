@@ -21,13 +21,26 @@ function normalizeAccountType(raw: unknown): string {
   return ACCOUNT_TYPES.has(value) ? value : 'checking';
 }
 
+const NOTES_MAX = 4000;
+
+function validateNotes(raw: unknown): { value: string | null; error?: string } {
+  if (raw === undefined || raw === null) return { value: null };
+  const trimmed = String(raw).trim();
+  if (trimmed.length > NOTES_MAX) return { value: null, error: 'NOTES_TOO_LONG' };
+  return { value: trimmed || null };
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const rows = await Account.findAll({
       where: visibleAccountWhere(req),
       order: [['name', 'ASC']],
     });
-    res.json(rows);
+    const payload = rows.map((r) => ({
+      ...r.toJSON(),
+      notesPreview: r.notes ? r.notes.slice(0, 100) : null,
+    }));
+    res.json(payload);
   } catch (e) {
     next(e);
   }
@@ -36,12 +49,17 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, notes: rawNotes } = (req.body || {}) as Record<
       string,
       unknown
     >;
     if (!name) {
       res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const notesResult = validateNotes(rawNotes);
+    if (notesResult.error) {
+      res.status(400).json({ error: notesResult.error });
       return;
     }
     const dc =
@@ -57,8 +75,27 @@ router.post('/', async (req, res, next) => {
       accountType: normalizeAccountType(accountType),
       shortCode: (shortCode as string) || null,
       defaultCurrency: dc,
+      notes: notesResult.value,
     });
     res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const account = await Account.findOne({ where: { id, ...visibleAccountWhere(req) } });
+    if (!account) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    res.json(account);
   } catch (e) {
     next(e);
   }
@@ -98,7 +135,7 @@ router.patch('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt, notes: rawNotes } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -146,6 +183,14 @@ router.patch('/:id', async (req, res, next) => {
         }
         account.set('closedAt', raw);
       }
+    }
+    if (rawNotes !== undefined) {
+      const notesResult = validateNotes(rawNotes);
+      if (notesResult.error) {
+        res.status(400).json({ error: notesResult.error });
+        return;
+      }
+      account.set('notes', notesResult.value);
     }
     await account.save();
     res.json(account);

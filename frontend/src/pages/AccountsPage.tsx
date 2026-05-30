@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
@@ -46,6 +47,7 @@ export function AccountsPage() {
   const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -85,6 +87,11 @@ export function AccountsPage() {
       setErr('Name is required')
       return
     }
+    const notesRaw = String(fd.get('notes') ?? '').trim()
+    if (notesRaw.length > 4000) {
+      setErr('Notes must be 4000 characters or fewer')
+      return
+    }
     setSaving(true)
     setErr(null)
     try {
@@ -97,6 +104,7 @@ export function AccountsPage() {
           undefined,
         accountType: String(fd.get('accountType') ?? 'checking'),
         visibility: String(fd.get('visibility') ?? 'private'),
+        notes: notesRaw || null,
       })
       form.reset()
       await load()
@@ -164,12 +172,17 @@ export function AccountsPage() {
   async function saveCard(id: number) {
     const name = editName.trim()
     const defaultCurrency = editCurrency.trim().toUpperCase()
+    const notes = editNotes.trim() || null
     if (!name) {
       setErr('Name is required')
       return
     }
     if (!defaultCurrency) {
       setErr('Default currency is required')
+      return
+    }
+    if (editNotes.trim().length > 4000) {
+      setErr('Notes must be 4000 characters or fewer')
       return
     }
     setErr(null)
@@ -182,6 +195,7 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
+        notes,
       })
       setEditingId(null)
       setEditName('')
@@ -191,6 +205,7 @@ export function AccountsPage() {
       setEditAccountType('checking')
       setEditVisibility('private')
       setEditClosedAt('')
+      setEditNotes('')
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -206,6 +221,7 @@ export function AccountsPage() {
     setEditAccountType('checking')
     setEditVisibility('private')
     setEditClosedAt('')
+    setEditNotes('')
   }
 
   function startEdit(account: Account) {
@@ -217,6 +233,7 @@ export function AccountsPage() {
     setEditAccountType(account.accountType ?? 'checking')
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
+    setEditNotes(account.notes ?? '')
   }
 
   const accountCount = accounts.length
@@ -343,6 +360,19 @@ export function AccountsPage() {
             </select>
           </Label>
         </div>
+        <Label htmlFor="accounts-create-notes">
+          Notes
+          <Textarea
+            id="accounts-create-notes"
+            name="notes"
+            placeholder="Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account."
+            maxLength={4000}
+            rows={3}
+          />
+          <span className="muted" style={{ fontSize: '0.75rem' }}>
+            0/4000
+          </span>
+        </Label>
         <Button type="submit" disabled={saving}>
           <Plus aria-hidden="true" />
           {saving ? 'Saving…' : 'Create account'}
@@ -374,13 +404,14 @@ export function AccountsPage() {
                 <TableHead>Default currency</TableHead>
                 <TableHead>Visibility</TableHead>
                 <TableHead>Closed</TableHead>
+                <TableHead>Notes</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
-                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={8} />
+                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
               ) : (
                 accounts.map((a) => (
@@ -483,6 +514,34 @@ export function AccountsPage() {
                         />
                       ) : a.closedAt ? (
                         <Badge variant="secondary">Closed {a.closedAt}</Badge>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {editingId === a.id ? (
+                        <div>
+                          <Textarea
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            placeholder="Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account."
+                            rows={3}
+                            maxLength={4000}
+                          />
+                          <span
+                            className="muted"
+                            style={{
+                              fontSize: '0.75rem',
+                              color: editNotes.trim().length > 3800 ? 'var(--color-destructive)' : undefined,
+                            }}
+                          >
+                            {editNotes.trim().length}/4000
+                          </span>
+                        </div>
+                      ) : a.notesPreview ? (
+                        <span title={a.notes ?? undefined} style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>
+                          {a.notesPreview.length >= 100 ? `${a.notesPreview}…` : a.notesPreview}
+                        </span>
                       ) : (
                         '—'
                       )}
