@@ -82,6 +82,7 @@ import {
 } from './MonthlyClosePeriod';
 import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 import { Purchase, initPurchase } from './Purchase';
+import { Reimbursement, initReimbursement } from './Reimbursement';
 import { Notification, initNotification } from './Notification';
 import { AuditLog, initAuditLog } from './AuditLog';
 import { FinanceEvent, initFinanceEvent } from './FinanceEvent';
@@ -162,6 +163,7 @@ initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
 initPurchase(sequelize);
+initReimbursement(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
@@ -716,6 +718,56 @@ Purchase.belongsTo(User, {
   as: 'markedByUser',
 });
 
+// Reimbursement claims (issue #216). 1:N from the original outlay
+// transaction; a second belongsTo links the matched incoming repayment.
+// Cascade on transaction/household delete; the repayment link and party
+// Contact use SET NULL (handled at the DB level by the migration) so an
+// un-match or contact removal keeps the claim intact.
+Transaction.hasMany(Reimbursement, {
+  foreignKey: 'transaction_id',
+  as: 'reimbursements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Reimbursement.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+Transaction.hasMany(Reimbursement, {
+  foreignKey: 'repayment_transaction_id',
+  as: 'reimbursementRepayments',
+});
+Reimbursement.belongsTo(Transaction, {
+  foreignKey: 'repayment_transaction_id',
+  as: 'repaymentTransaction',
+});
+Household.hasMany(Reimbursement, {
+  foreignKey: 'household_id',
+  as: 'reimbursements',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Reimbursement.belongsTo(Household, {
+  foreignKey: 'household_id',
+  as: 'household',
+});
+Contact.hasMany(Reimbursement, {
+  foreignKey: 'contact_id',
+  as: 'reimbursements',
+});
+Reimbursement.belongsTo(Contact, {
+  foreignKey: 'contact_id',
+  as: 'contact',
+});
+User.hasMany(Reimbursement, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdReimbursements',
+});
+Reimbursement.belongsTo(User, {
+  foreignKey: 'created_by_user_id',
+  as: 'createdByUser',
+});
+
 // AccountStatement (issue #242). A statement belongs to one Account; an
 // Account can have many statements over time. Household and creator
 // associations mirror the Account model so authorization checks via
@@ -860,6 +912,7 @@ export {
   MonthlyClosePeriod,
   MonthlyCloseTask,
   Purchase,
+  Reimbursement,
   CashflowSettings,
   Notification,
   NotificationPreference,

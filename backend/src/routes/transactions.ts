@@ -155,6 +155,27 @@ export function buildTransactionFilterWhere(
       [Op.like]: `%"${source.confidenceFlag.replace(/[^a-z_]/gi, '')}"%`,
     };
   }
+  // reimbursable=true|false (issue #216): restrict to transactions that DO /
+  // DO NOT have a reimbursement claim, via an id IN / NOT IN subquery. We AND
+  // it with any existing `where.id` constraint (e.g. ?ids=) using Op.and so the
+  // two id predicates compose instead of one clobbering the other.
+  if (source.reimbursable === 'true' || source.reimbursable === 'false') {
+    const op = source.reimbursable === 'true' ? 'IN' : 'NOT IN';
+    const idClause = sequelize.literal(
+      `(SELECT transaction_id FROM reimbursements)`,
+    );
+    const reimbursableCond = { [op === 'IN' ? Op.in : Op.notIn]: idClause };
+    if ('id' in where) {
+      const existingId = (where as Record<string | symbol, unknown>).id;
+      delete (where as Record<string | symbol, unknown>).id;
+      (where as Record<symbol, unknown>)[Op.and] = [
+        { id: existingId },
+        { id: reimbursableCond },
+      ];
+    } else {
+      (where as Record<string, unknown>).id = reimbursableCond;
+    }
+  }
   return where;
 }
 
