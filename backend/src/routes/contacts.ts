@@ -1,7 +1,12 @@
 import { Router } from 'express';
-import { Contact } from '../models';
+import { Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import {
+  summarizeOpenForContact,
+  todayIso,
+  type ReimbursementRow,
+} from '../reimbursements/serialize';
 
 const router = Router();
 
@@ -12,6 +17,73 @@ router.get('/', async (req, res, next) => {
       order: [['name', 'ASC']],
     });
     res.json(rows);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * #374 — Contact detail. Returns the Contact plus an `openReimbursements`
+ * aggregate so the UI can render "Open reimbursements: $X across Y items" and
+ * the per-item list without a second round-trip. Only effectively-open claims
+ * (`expected` or derived-overdue) count toward the aggregate; received and
+ * waived are excluded by `summarizeOpenForContact`.
+ *
+ * Each item in `openReimbursements.items` is a fully-serialized
+ * `ReimbursementView` so the frontend reuses the same shape it already
+ * renders on /reimbursements.
+ */
+router.get('/:id', async (req, res, next) => {
+  try {
+    currentAuth(req);
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const contact = await Contact.findOne({
+      where: { id, ...householdWhere(req) },
+    });
+    if (!contact) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const today = todayIso();
+    const rows = await Reimbursement.findAll({
+      where: { ...householdWhere(req), contactId: id },
+      include: [
+        { model: Contact, as: 'contact', attributes: ['id', 'name'], required: false },
+        {
+          model: Transaction,
+          as: 'transaction',
+          attributes: ['id', 'date', 'merchantClean', 'amount', 'currency'],
+          required: false,
+        },
+        {
+          model: Transaction,
+          as: 'repaymentTransaction',
+          attributes: ['id', 'date', 'merchantClean', 'amount', 'currency'],
+          required: false,
+        },
+      ],
+      order: [
+        ['due_date', 'ASC'],
+        ['created_at', 'DESC'],
+      ],
+    });
+    const open = summarizeOpenForContact(
+      rows.map((r) => r as unknown as ReimbursementRow),
+      today,
+    );
+    res.json({
+      id: contact.id,
+      householdId: contact.householdId,
+      name: contact.name,
+      notes: contact.notes,
+      isPartner: contact.isPartner,
+      openReimbursements: open,
+      today,
+    });
   } catch (e) {
     next(e);
   }

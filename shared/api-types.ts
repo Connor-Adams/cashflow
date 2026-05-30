@@ -1345,3 +1345,112 @@ export type PortfolioPerformance = {
   byAccount: PortfolioPerformanceByAccount[];
   caveats: PortfolioPerformanceCaveats;
 };
+
+// ---------------------------------------------------------------------------
+// Debt payoff planner (issue #202)
+// ---------------------------------------------------------------------------
+
+export type DebtPayoffStrategy = 'avalanche' | 'snowball' | 'custom'
+
+/** A liability account joined with its debt profile + derived owed balance. */
+export type DebtLiability = {
+  accountId: number
+  name: string
+  accountType: string
+  currency: string
+  /** Amount currently owed, as a positive number. */
+  balance: number
+  /** APR as a percent (e.g. 19.99). */
+  interestRate: number
+  minimumPayment: number
+  /** Optional owed-balance override; null when derived from transactions. */
+  statementBalance: number | null
+  /** Optional day-of-month (1-31) the payment is due. */
+  dueDay: number | null
+}
+
+/** One debt's line within a payoff month. */
+export type PayoffMonthDebtLine = {
+  debtId: number
+  payment: number
+  interest: number
+  principal: number
+  endingBalance: number
+}
+
+/** One month of the amortization schedule. */
+export type PayoffMonth = {
+  month: number
+  perDebt: PayoffMonthDebtLine[]
+  totalPaid: number
+  totalInterest: number
+}
+
+/** A single scheduled monthly debt outflow (for the forecast). */
+export type PayoffScheduledPayment = {
+  date: string
+  amount: number
+}
+
+/** The full computed payoff plan returned by the debt endpoints. */
+export type DebtPayoffPlan = {
+  strategy: DebtPayoffStrategy
+  /** Debt (account) ids in the order they are targeted. */
+  order: number[]
+  months: PayoffMonth[]
+  /** payoffMonthByDebt[id] = 1-based month the debt cleared, or null. */
+  payoffMonthByDebt: Record<number, number | null>
+  totalMonths: number
+  totalInterest: number
+  totalPaid: number
+  scheduledPayments: PayoffScheduledPayment[]
+  /** True when minimum payments cannot keep pace with interest. */
+  stalled: boolean
+}
+
+/** avalanche-vs-snowball comparison returned by GET /api/debt. */
+export type DebtPayoffComparison = {
+  avalanche: DebtPayoffPlan
+  snowball: DebtPayoffPlan
+  /** snowball.totalInterest - avalanche.totalInterest (>= 0). */
+  interestSaved: number
+}
+
+/** Response shape of GET /api/debt. */
+export type DebtOverview = {
+  currency: string
+  totalOwed: number
+  totalMinimumPayment: number
+  extraMonthlyPayment: number
+  liabilities: DebtLiability[]
+  comparison: DebtPayoffComparison | null
+}
+
+/** A persisted saved scenario row. */
+export type DebtPayoffScenario = {
+  id: number
+  householdId: number
+  userId: number | null
+  name: string
+  strategy: DebtPayoffStrategy
+  extraMonthlyPayment: string
+  payloadJson: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** Response shape of POST /api/debt/scenarios and GET /api/debt/scenarios/:id. */
+export type DebtScenarioResponse = {
+  scenario: DebtPayoffScenario
+  plan: DebtPayoffPlan
+  liabilities?: DebtLiability[]
+}
+
+/** A liability profile row returned by PUT /api/debt/accounts/:accountId. */
+export type DebtLiabilityProfile = {
+  accountId: number
+  interestRate: number
+  minimumPayment: number
+  statementBalance: number | null
+  dueDay: number | null
+}

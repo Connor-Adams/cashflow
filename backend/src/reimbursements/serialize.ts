@@ -484,6 +484,42 @@ function addMoney(a: string, b: string): string {
   return ((toCents(a) + toCents(b)) / 10_000).toFixed(4);
 }
 
+// ---------- Per-Contact open-claims aggregate (#374) ----------
+
+export interface ContactOpenReimbursements {
+  /** Number of effectively-open claims (expected or derived-overdue). */
+  count: number;
+  /** Outstanding amount per currency as fixed-4 strings. */
+  byCurrency: Record<string, string>;
+  /** The open claim rows themselves, fully serialized. */
+  items: ReimbursementView[];
+}
+
+/**
+ * #374 — given a contact's reimbursement rows (already loaded with the
+ * INCLUDE shape the routes use), summarize the **open** ones. Drives the
+ * "Open reimbursements: $X across Y items" counter and per-item list on the
+ * contact detail UI. Received and waived claims are excluded.
+ */
+export function summarizeOpenForContact(
+  rows: ReimbursementRow[],
+  today: string = todayIso(),
+): ContactOpenReimbursements {
+  const items: ReimbursementView[] = [];
+  const byCurrency: Record<string, string> = {};
+  for (const r of rows) {
+    const eff = computeEffectiveStatus(r, today);
+    if (eff !== 'expected' && eff !== 'overdue') continue;
+    const view = serializeReimbursement(r, today);
+    items.push(view);
+    byCurrency[view.currency] = addMoney(
+      byCurrency[view.currency] ?? '0.0000',
+      String(view.amount),
+    );
+  }
+  return { count: items.length, byCurrency, items };
+}
+
 /**
  * Group outstanding + received reimbursements by (party, currency) for the
  * dashboard. `party` keys on contactId when present, else the lowercased

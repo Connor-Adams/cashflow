@@ -2223,6 +2223,14 @@ function TransactionRow({
  * claim for this transaction via POST /api/transactions/:id/reimbursable.
  * Party is a Contact (dropdown) or free text; amount defaults to the
  * transaction's absolute amount.
+ *
+ * #374: when the source transaction already carries a
+ * `counterpartyContactId` (a #372-linked Contact from statement import), the
+ * dropdown is pre-filled with that contact — the most-common case is now
+ * one keystroke away. When the txn has `counterpartyRaw` only (no Contact),
+ * a single "Promote {name} and create" button hits
+ * POST /api/transactions/:id/reimbursable/promote-counterparty to create the
+ * Contact, link the txn, and create the claim in one round-trip.
  */
 function MarkReimbursableDialog({
   txn,
@@ -2237,7 +2245,15 @@ function MarkReimbursableDialog({
   onError: (message: string) => void
   onSaved: () => void
 }) {
-  const [contactId, setContactId] = useState<string>('')
+  // Pre-fill from counterpartyContactId (#374 AC#1). Falls back to the
+  // legacy ownership-contact heuristic so an empty counterparty doesn't lose
+  // the existing behaviour for transactions imported before #372 landed.
+  const counterpartyPrefill = useMemo(() => {
+    if (txn.counterpartyContactId == null) return ''
+    const found = contacts.find((c) => c.id === txn.counterpartyContactId)
+    return found ? String(found.id) : ''
+  }, [txn.counterpartyContactId, contacts])
+  const [contactId, setContactId] = useState<string>(counterpartyPrefill)
   const [partyName, setPartyName] = useState<string>('')
   const [amount, setAmount] = useState<string>(
     String(Math.abs(Number(txn.amount) || 0)),
@@ -2245,6 +2261,14 @@ function MarkReimbursableDialog({
   const [dueDate, setDueDate] = useState<string>('')
   const [notes, setNotes] = useState<string>('')
   const [saving, setSaving] = useState(false)
+
+  // #374 AC#2: enable Promote-and-use only when the txn has raw counterparty
+  // text but no Contact link yet. (If a Contact is already linked, the
+  // pre-fill above handles it.)
+  const canPromote =
+    txn.counterpartyContactId == null &&
+    Boolean(txn.counterpartyRaw && txn.counterpartyRaw.trim() !== '')
+  const promoteName = (txn.counterpartyRaw ?? '').trim()
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -2268,6 +2292,25 @@ function MarkReimbursableDialog({
     }
   }
 
+  async function promoteAndUse() {
+    if (!canPromote) return
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = {}
+      if (amount.trim() !== '') body.amount = amount.trim()
+      if (dueDate) body.dueDate = dueDate
+      if (notes.trim() !== '') body.notes = notes.trim()
+      await postJson(
+        `/api/transactions/${txn.id}/reimbursable/promote-counterparty`,
+        body,
+      )
+      onSaved()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not promote and create.')
+      setSaving(false)
+    }
+  }
+
   return (
     <div
       role="dialog"
@@ -2283,6 +2326,27 @@ function MarkReimbursableDialog({
         <p className="muted text-sm mb-4">
           {txn.merchantClean} · {txn.date}
         </p>
+        {canPromote && (
+          // #374 AC#2 — one-click "Promote and use". Surfaced above the form
+          // so the common case is a single button click; the manual flow
+          // below still works for free-text or a different contact.
+          <div className="mb-4 rounded-md border border-dashed border-border bg-muted/40 p-3 text-sm">
+            <p className="muted mb-2">
+              Statement counterparty:{' '}
+              <strong className="text-foreground">{promoteName}</strong>
+            </p>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={saving}
+              onClick={() => void promoteAndUse()}
+              title="Create a Contact from this statement counterparty and use it"
+            >
+              {saving ? 'Working…' : `Promote "${promoteName}" and create claim`}
+            </Button>
+          </div>
+        )}
         <form onSubmit={submit} className="flex flex-col gap-3">
           {contacts.length > 0 && (
             <label className="flex flex-col gap-1 text-sm">
