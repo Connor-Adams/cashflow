@@ -21,6 +21,7 @@ import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
 import cfoBriefingsRouter from './routes/cfoBriefings';
+import reviewItemsRouter from './routes/reviewItems';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
@@ -182,6 +183,9 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/ai', aiReviewRouter);
 // Personal CFO briefings (issue #236).
 app.use('/api/cfo', cfoBriefingsRouter);
+// Unified read-side fold of all review-item sources (issue #378). Read-only;
+// per-source write endpoints are unchanged.
+app.use('/api/review-items', reviewItemsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);

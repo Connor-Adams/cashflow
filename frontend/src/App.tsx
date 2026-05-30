@@ -56,9 +56,7 @@ import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
 import { LargePurchasesPage } from './pages/LargePurchasesPage'
-import { AiInboxPage } from './pages/AiInboxPage'
-import { AiReviewsPage } from './pages/AiReviewsPage'
-import { CfoBriefingPage } from './pages/CfoBriefingPage'
+import { UnifiedInboxPage } from './pages/UnifiedInboxPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { AskCashflowPage } from './pages/AskCashflowPage'
@@ -145,9 +143,22 @@ function AppRoutes() {
             <Route path="jobs" element={<JobsTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
           </Route>
-          <Route path="ai/inbox" element={<AiInboxPage />} />
-          <Route path="ai/reviews" element={<AiReviewsPage />} />
-          <Route path="cfo/briefings" element={<CfoBriefingPage />} />
+          {/* Unified review-items inbox (issue #378) replaces the separate AI
+              inbox / AI reviews / CFO briefings list surfaces. Old routes
+              redirect, preselecting the matching saved view. */}
+          <Route path="inbox" element={<UnifiedInboxPage />} />
+          <Route
+            path="ai/inbox"
+            element={<Navigate to="/inbox?view=ai-suggestions-pending" replace />}
+          />
+          <Route
+            path="ai/reviews"
+            element={<Navigate to="/inbox?view=review-queue-pending" replace />}
+          />
+          <Route
+            path="cfo/briefings"
+            element={<Navigate to="/inbox?view=cfo-briefings-pending" replace />}
+          />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<AskCashflowPage />} />
