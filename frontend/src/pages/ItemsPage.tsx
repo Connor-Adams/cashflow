@@ -112,9 +112,15 @@ export function ItemsPage() {
         <ItemsBrowse filters={filters} onOpenItem={openItem} />
       </TabPanel>
       <TabPanel value="analyze" active={tab}>
-        <div className="rounded-lg border p-6 text-center space-y-2">
+        <div className="rounded-lg border p-6 text-center space-y-3">
           <p className="font-semibold">Analyze items — coming soon</p>
           <p className="text-sm text-muted-foreground">This view will summarize spending and trends by item.</p>
+          <a
+            href="/settings"
+            className="inline-flex items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+          >
+            Subscribe to updates
+          </a>
         </div>
       </TabPanel>
       <TabPanel value="search" active={tab}>

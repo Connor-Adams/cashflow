@@ -170,6 +170,17 @@ export function ReviewInboxPage() {
   const categoryPickerRef = useRef<HTMLDivElement>(null)
   const tableWrapRef = useRef<HTMLDivElement>(null)
 
+  // Auto-dismiss the first-visit shortcuts hint after 4 seconds and persist
+  // the flag so it never shows again.
+  useEffect(() => {
+    if (!showShortcutHint) return
+    const timer = window.setTimeout(() => {
+      setShowShortcutHint(false)
+      try { localStorage.setItem('seenReviewInboxShortcuts', 'true') } catch { /* ignore */ }
+    }, 4000)
+    return () => window.clearTimeout(timer)
+  }, [showShortcutHint])
+
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
@@ -531,10 +542,35 @@ export function ReviewInboxPage() {
         title="Review Inbox"
         description="Clear imported transactions by selecting similar rows and applying one decision."
         actions={
-          <Button type="button" variant="secondary" onClick={() => void load()}>
-            <RefreshCw aria-hidden="true" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  showShortcutsHelp()
+                  if (showShortcutHint) {
+                    setShowShortcutHint(false)
+                    try { localStorage.setItem('seenReviewInboxShortcuts', 'true') } catch { /* ignore */ }
+                  }
+                }}
+                aria-label="Show keyboard shortcuts"
+              >
+                <Keyboard aria-hidden="true" />
+                Shortcuts (?)
+              </Button>
+              {showShortcutHint && (
+                <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-0.5 text-xs text-background z-10">
+                  Press ? anytime for keyboard shortcuts.
+                </span>
+              )}
+            </div>
+            <Button type="button" variant="secondary" onClick={() => void load()}>
+              <RefreshCw aria-hidden="true" />
+              Refresh
+            </Button>
+          </div>
         }
       />
 
