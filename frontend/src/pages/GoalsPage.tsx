@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
+import { useNavigate } from 'react-router-dom'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { safeNum } from '../lib/num'
@@ -209,6 +210,7 @@ function buildPatch(form: FormState): FinancialGoalPatch | null {
 export function GoalsPage() {
   const { showToast } = useToast()
   const confirm = useConfirm()
+  const navigate = useNavigate()
 
   const [goals, setGoals] = useState<FinancialGoal[]>([])
   const [projections, setProjections] = useState<Record<number, GoalProjectionResponse>>({})
@@ -293,6 +295,7 @@ export function GoalsPage() {
         title: 'Goal added',
         description: `${input.name} — target ${formatMoney(input.targetAmount, input.currency)}`,
         variant: 'success',
+        action: { label: 'See in forecast →', onClick: () => navigate('/forecast') },
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not add goal'
@@ -335,7 +338,7 @@ export function GoalsPage() {
       await putGoal(editId, patch)
       cancelEdit()
       await loadGoals()
-      showToast({ title: 'Goal updated', variant: 'success' })
+      showToast({ title: 'Goal updated', variant: 'success', action: { label: 'See in forecast →', onClick: () => navigate('/forecast') } })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save goal'
       showToast({
