@@ -33,6 +33,7 @@ import { RulesPage } from './pages/RulesPage'
 import { AuditLogPage } from './pages/AuditLogPage'
 import { SyncPage } from './pages/SyncPage'
 import { TransactionsPage } from './pages/TransactionsPage'
+import { TransactionsLayout } from './pages/TransactionsLayout'
 import { TransfersPage } from './pages/TransfersPage'
 import { StatementsPage } from './pages/StatementsPage'
 import { ItemsPage } from './pages/ItemsPage'
@@ -86,12 +87,22 @@ function AppRoutes() {
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="review" element={<ReviewInboxPage />} />
-          <Route path="refunds" element={<RefundsReviewPage />} />
-          <Route path="transactions" element={<TransactionsPage />} />
-          <Route path="transfers" element={<TransfersPage />} />
+          <Route path="refunds" element={<Navigate to="/transactions/refunds" replace />} />
+          <Route path="transactions" element={<TransactionsLayout />}>
+            <Route index element={<TransactionsPage />} />
+            <Route path="refunds" element={<RefundsReviewPage />} />
+            <Route path="transfers" element={<TransfersPage />} />
+            <Route path="purchases" element={<PurchasesPage />} />
+            <Route path="large" element={<LargePurchasesPage />} />
+            <Route path="returns" element={<ReturnWarrantyPage />} />
+            <Route path="items" element={<ItemsPage />} />
+            <Route path="search" element={<SearchPage />} />
+            <Route path="leaks" element={<MoneyLeaksPage />} />
+          </Route>
+          <Route path="transfers" element={<Navigate to="/transactions/transfers" replace />} />
           <Route path="statements" element={<StatementsPage />} />
-          <Route path="items" element={<ItemsPage />} />
-          <Route path="purchases" element={<PurchasesPage />} />
+          <Route path="items" element={<Navigate to="/transactions/items" replace />} />
+          <Route path="purchases" element={<Navigate to="/transactions/purchases" replace />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
@@ -108,7 +119,7 @@ function AppRoutes() {
           <Route path="scenarios" element={<ScenariosPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
-          <Route path="money-leaks" element={<MoneyLeaksPage />} />
+          <Route path="money-leaks" element={<Navigate to="/transactions/leaks" replace />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsLayout />}>
@@ -123,9 +134,9 @@ function AppRoutes() {
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
           <Route path="tax" element={<TaxPage />} />
-          <Route path="return-warranty" element={<ReturnWarrantyPage />} />
+          <Route path="return-warranty" element={<Navigate to="/transactions/returns" replace />} />
           <Route path="reimbursements" element={<ReimbursementsPage />} />
-          <Route path="large-purchases" element={<LargePurchasesPage />} />
+          <Route path="large-purchases" element={<Navigate to="/transactions/large" replace />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
             <Route element={<SettingsTabLayout />}>
@@ -165,7 +176,7 @@ function AppRoutes() {
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<Navigate to="/chat" replace />} />
-          <Route path="search" element={<SearchPage />} />
+          <Route path="search" element={<Navigate to="/transactions/search" replace />} />
           <Route path="vault" element={<VaultPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
