@@ -28,6 +28,7 @@ export class User extends Model<
    * retries.
    */
   declare lastDigestSentAt: CreationOptional<Date | null>;
+  declare lastSeenChangelogVersion: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -67,6 +68,12 @@ export function initUser(sequelize: Sequelize): typeof User {
       lastDigestSentAt: {
         type: DataTypes.DATE,
         field: 'last_digest_sent_at',
+        allowNull: true,
+        defaultValue: null,
+      },
+      lastSeenChangelogVersion: {
+        type: DataTypes.STRING(64),
+        field: 'last_seen_changelog_version',
         allowNull: true,
         defaultValue: null,
       },

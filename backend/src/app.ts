@@ -52,6 +52,7 @@ import debtRouter from './routes/debt';
 import creditCardsRouter from './routes/creditCards';
 import opportunityCostRouter from './routes/opportunityCost';
 import cashflowSettingsRouter from './routes/cashflowSettings';
+import changelogRouter from './routes/changelog';
 import preferencesRouter from './routes/preferences';
 import onboardingRouter from './routes/onboarding';
 import clientLogsRouter from './routes/clientLogs';
@@ -157,6 +158,7 @@ app.use('/api/users/me/notifications', usersNotificationsRouter);
 // The old standalone path is retained only to return 410 Gone (see the route
 // file) so any stale client surfaces loudly instead of silently breaking.
 app.use('/api/notification-preferences', notificationPreferencesRouter);
+app.use('/api/changelog', changelogRouter);
 app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);
 app.use('/api/debt', debtRouter);
