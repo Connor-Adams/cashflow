@@ -7,6 +7,7 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { ReportsLayout } from './pages/ReportsLayout'
 import { ExplainMonthPage } from './pages/ExplainMonthPage'
 import { LifestyleInflationPage } from './pages/LifestyleInflationPage'
 import { SavingsRatePage } from './pages/SavingsRatePage'
@@ -60,7 +61,6 @@ import { LargePurchasesPage } from './pages/LargePurchasesPage'
 import { UnifiedInboxPage } from './pages/UnifiedInboxPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
-import { AskCashflowPage } from './pages/AskCashflowPage'
 import { SearchPage } from './pages/SearchPage'
 import { VaultPage } from './pages/VaultPage'
 import { ScenariosPage } from './pages/ScenariosPage'
@@ -111,15 +111,14 @@ function AppRoutes() {
           <Route path="money-leaks" element={<MoneyLeaksPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
-          <Route path="reports" element={<ReportsPage />} />
-          <Route path="audit-log" element={<AuditLogPage />} />
-          <Route path="sync" element={<SyncPage />} />
-          <Route path="reports/explain-month" element={<ExplainMonthPage />} />
-          <Route
-            path="reports/lifestyle-inflation"
-            element={<LifestyleInflationPage />}
-          />
-          <Route path="reports/savings-rate" element={<SavingsRatePage />} />
+          <Route path="reports" element={<ReportsLayout />}>
+            <Route index element={<ReportsPage />} />
+            <Route path="explain-month" element={<ExplainMonthPage />} />
+            <Route path="lifestyle-inflation" element={<LifestyleInflationPage />} />
+            <Route path="savings-rate" element={<SavingsRatePage />} />
+          </Route>
+          <Route path="audit-log" element={<Navigate to="/settings/audit-log" replace />} />
+          <Route path="sync" element={<Navigate to="/settings/backup" replace />} />
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
@@ -144,6 +143,8 @@ function AppRoutes() {
             <Route path="jobs" element={<JobsTab />} />
             <Route path="whatsnew" element={<WhatsNewTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
+            <Route path="audit-log" element={<AuditLogPage />} />
+            <Route path="backup" element={<SyncPage />} />
           </Route>
           {/* Unified review-items inbox (issue #378) replaces the separate AI
               inbox / AI reviews / CFO briefings list surfaces. Old routes
@@ -163,7 +164,7 @@ function AppRoutes() {
           />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
-          <Route path="ask" element={<AskCashflowPage />} />
+          <Route path="ask" element={<Navigate to="/chat" replace />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="vault" element={<VaultPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -19,6 +19,8 @@ const ALL_TOP_TABS: Array<
   { value: 'feedback', label: 'Feedback', ownerOnly: true },
   { value: 'jobs', label: 'Jobs' },
   { value: 'whatsnew', label: "What's new" },
+  { value: 'audit-log', label: 'Audit log' },
+  { value: 'backup', label: 'Backup & sync' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -34,6 +36,8 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   feedback: '/settings/feedback',
   jobs: '/settings/jobs',
   whatsnew: '/settings/whatsnew',
+  'audit-log': '/settings/audit-log',
+  backup: '/settings/backup',
 }
 
 export function SettingsPage() {
