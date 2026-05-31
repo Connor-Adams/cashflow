@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Tabs } from '../components/ui/tabs'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
@@ -39,6 +39,7 @@ export function TaxPage() {
   // local `useState` here matches the prevailing pattern (URL query params
   // would be cleaner if tab state already used them, but it doesn't).
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
+  const yearSelectRef = useRef<HTMLSelectElement>(null)
 
   useEffect(() => {
     if (year === null && years && years.length > 0) {
@@ -46,14 +47,32 @@ export function TaxPage() {
     }
   }, [years, year])
 
+  // Cmd/Ctrl+K focuses the year picker from anywhere on the page.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        const el = yearSelectRef.current
+        if (!el) return
+        e.preventDefault()
+        el.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   return (
     <section>
       <header style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
         <h1>Tax</h1>
         {years && year !== null && (
-          <label>
+          <label title="Cmd/Ctrl+K to focus">
             Year{' '}
-            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            <select
+              ref={yearSelectRef}
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+            >
               {years.map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}

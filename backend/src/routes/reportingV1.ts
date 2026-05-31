@@ -7,7 +7,7 @@
  */
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { Account, Transaction, PlannedEvent } from '../models';
+import { Account, FinanceEvent, PlannedEvent, Subscription, TaxReserveSetting, Transaction } from '../models';
 import {
   aggregateDashboard,
   type AccountRow,
@@ -402,6 +402,398 @@ router.get('/projections', async (req, res, next) => {
       dailyPoints: forecast.dailyPoints,
       eventCount: occurrences.length,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Categories that represent essential living costs for runway calculation.
+ * Partial case-insensitive match on finalCategory.
+ */
+const ESSENTIAL_KEYWORDS = [
+  'rent', 'mortgage', 'housing', 'utilities', 'grocery', 'groceries', 'food',
+  'insurance', 'transport', 'transit', 'healthcare', 'medical', 'prescription',
+  'internet', 'phone', 'childcare', 'debt', 'loan',
+];
+
+function isEssential(category: string | null): boolean {
+  if (!category) return false;
+  const lc = category.toLowerCase();
+  return ESSENTIAL_KEYWORDS.some((kw) => lc.includes(kw));
+}
+
+/**
+ * GET /api/v1/runway
+ *
+ * Liquid cash balance + monthly burn split (essential vs lifestyle) + runway months.
+ * ?window=90 (days to average burn over, default 90, max 365)
+ * ?currency=CAD
+ */
+router.get('/runway', async (req, res, next) => {
+  try {
+    const { household } = req.reportingAuth!;
+    const today = todayIso();
+    const targetCcy = parseCurrency(req.query.currency) ?? 'CAD';
+    const window = Math.min(365, Math.max(30, parseInt(String(req.query.window ?? '90'), 10) || 90));
+    const windowStart = daysAgo(window);
+
+    const accounts = await Account.findAll({
+      where: {
+        householdId: household.id,
+        closedAt: { [Op.or]: [null, { [Op.gt]: today }] },
+      },
+      attributes: ['id', 'accountType', 'defaultCurrency'],
+      raw: true,
+    });
+    const liquidIds = (accounts as unknown as Array<{ id: number; accountType: string | null; defaultCurrency: string | null }>)
+      .filter((a) => ['checking', 'savings', 'cash'].includes(a.accountType ?? ''))
+      .map((a) => a.id);
+
+    let liquidCash = 0;
+    if (liquidIds.length > 0) {
+      const bal = await Transaction.findAll({
+        where: { accountId: liquidIds, date: { [Op.lte]: today } },
+        attributes: [[Transaction.sequelize!.fn('SUM', Transaction.sequelize!.col('amount')), 'total']],
+        raw: true,
+      });
+      liquidCash = Number((bal[0] as unknown as { total: string | null }).total ?? 0) || 0;
+    }
+
+    // Fetch spend transactions for the window (negative amounts = spend).
+    const txns = await Transaction.findAll({
+      where: {
+        householdId: household.id,
+        date: { [Op.between]: [windowStart, today] },
+      },
+      attributes: ['amount', 'finalCategory', 'currency', 'txnType'],
+      raw: true,
+    });
+
+    let totalSpend = 0;
+    let essentialSpend = 0;
+    for (const t of txns as unknown as Array<{ amount: string; finalCategory: string | null; currency: string; txnType: string | null }>) {
+      const amt = Number(t.amount);
+      if (!Number.isFinite(amt) || amt >= 0) continue; // skip income / zero
+      const spend = Math.abs(amt);
+      totalSpend += spend;
+      if (isEssential(t.finalCategory)) essentialSpend += spend;
+    }
+
+    const months = window / 30;
+    const averageMonthlyBurn = totalSpend / months;
+    const essentialMonthlyBurn = essentialSpend / months;
+    const lifestyleMonthlyBurn = averageMonthlyBurn - essentialMonthlyBurn;
+    const runwayMonths = averageMonthlyBurn > 0 ? liquidCash / averageMonthlyBurn : null;
+    const conservativeRunwayMonths = essentialMonthlyBurn > 0 ? liquidCash / essentialMonthlyBurn : null;
+
+    res.json({
+      asOf: today,
+      currency: targetCcy,
+      windowDays: window,
+      liquidCash,
+      averageMonthlyBurn: Math.round(averageMonthlyBurn * 100) / 100,
+      essentialMonthlyBurn: Math.round(essentialMonthlyBurn * 100) / 100,
+      lifestyleMonthlyBurn: Math.round(lifestyleMonthlyBurn * 100) / 100,
+      runwayMonths: runwayMonths != null ? Math.round(runwayMonths * 10) / 10 : null,
+      conservativeRunwayMonths: conservativeRunwayMonths != null ? Math.round(conservativeRunwayMonths * 10) / 10 : null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/v1/spending/by-category
+ *
+ * Per-category spend with share, count, and trend vs the previous same-length period.
+ * ?from=YYYY-MM-DD&to=YYYY-MM-DD (default: last 30 days)
+ * ?currency=CAD
+ */
+router.get('/spending/by-category', async (req, res, next) => {
+  try {
+    const { household } = req.reportingAuth!;
+    const today = todayIso();
+    const from =
+      typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)
+        ? req.query.from
+        : daysAgo(30);
+    const to =
+      typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)
+        ? req.query.to
+        : today;
+
+    const periodDays = Math.max(1, (new Date(to).getTime() - new Date(from).getTime()) / 86_400_000);
+    const prevTo = from;
+    const prevFrom = new Date(new Date(from).getTime() - periodDays * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+
+    const [current, previous] = await Promise.all([
+      Transaction.findAll({
+        where: { householdId: household.id, date: { [Op.between]: [from, to] } },
+        attributes: ['amount', 'finalCategory'],
+        raw: true,
+      }),
+      Transaction.findAll({
+        where: { householdId: household.id, date: { [Op.between]: [prevFrom, prevTo] } },
+        attributes: ['amount', 'finalCategory'],
+        raw: true,
+      }),
+    ]);
+
+    type Row = { amount: string; finalCategory: string | null };
+    function accumulate(rows: Row[]) {
+      const map = new Map<string, { spend: number; count: number }>();
+      for (const t of rows) {
+        const amt = Number(t.amount);
+        if (!Number.isFinite(amt) || amt >= 0) continue;
+        const key = t.finalCategory ?? '(uncategorized)';
+        const entry = map.get(key) ?? { spend: 0, count: 0 };
+        entry.spend += Math.abs(amt);
+        entry.count += 1;
+        map.set(key, entry);
+      }
+      return map;
+    }
+
+    const curr = accumulate(current as unknown as Row[]);
+    const prev = accumulate(previous as unknown as Row[]);
+    const totalSpend = [...curr.values()].reduce((s, v) => s + v.spend, 0);
+
+    const categories = [...curr.entries()]
+      .sort(([, a], [, b]) => b.spend - a.spend)
+      .map(([category, { spend, count }]) => {
+        const prevSpend = prev.get(category)?.spend ?? 0;
+        const trend =
+          prevSpend === 0
+            ? 'new'
+            : spend > prevSpend * 1.05
+              ? 'up'
+              : spend < prevSpend * 0.95
+                ? 'down'
+                : 'flat';
+        return {
+          category,
+          spend: Math.round(spend * 100) / 100,
+          share: totalSpend > 0 ? Math.round((spend / totalSpend) * 10000) / 100 : 0,
+          count,
+          prevSpend: Math.round(prevSpend * 100) / 100,
+          trend,
+        };
+      });
+
+    res.json({ from, to, totalSpend: Math.round(totalSpend * 100) / 100, categories });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/v1/recurring
+ *
+ * Unified list of all recurring money movements: active subscriptions +
+ * recurring PlannedEvents.
+ */
+router.get('/recurring', async (req, res, next) => {
+  try {
+    const { household } = req.reportingAuth!;
+    const today = todayIso();
+
+    const [subscriptions, planned] = await Promise.all([
+      Subscription.findAll({
+        where: { householdId: household.id, status: 'active' },
+        attributes: ['id', 'merchantName', 'amount', 'currency', 'cadence', 'annualizedCost', 'nextExpectedDate', 'category'],
+        raw: true,
+      }),
+      PlannedEvent.findAll({
+        where: {
+          householdId: household.id,
+          status: 'pending',
+          recurrenceRule: { [Op.ne]: null },
+        },
+        attributes: ['id', 'name', 'amount', 'currency', 'type', 'expectedDate', 'recurrenceRule'],
+        raw: true,
+      }),
+    ]);
+
+    type SubRow = { id: number; merchantName: string; amount: string; currency: string; cadence: string; annualizedCost: string; nextExpectedDate: string | null; category: string | null };
+    type EventRow = { id: number; name: string; amount: string; currency: string; type: string | null; expectedDate: string; recurrenceRule: string | null };
+
+    const items = [
+      ...(subscriptions as unknown as SubRow[]).map((s) => ({
+        source: 'subscription' as const,
+        id: s.id,
+        name: s.merchantName,
+        amount: Number(s.amount),
+        annualizedCost: Number(s.annualizedCost),
+        currency: s.currency,
+        cadence: s.cadence,
+        category: s.category,
+        nextDate: s.nextExpectedDate,
+        recurrenceRule: null,
+        direction: 'out' as const,
+      })),
+      ...(planned as unknown as EventRow[]).map((p) => {
+        const direction =
+          ['income', 'refund'].includes(p.type ?? '') ? 'in' as const :
+          ['transfer', 'savings_contribution'].includes(p.type ?? '') ? 'neutral' as const : 'out' as const;
+        return {
+          source: 'planned_event' as const,
+          id: p.id,
+          name: p.name,
+          amount: Number(p.amount),
+          annualizedCost: null,
+          currency: p.currency,
+          cadence: null,
+          category: null,
+          nextDate: p.expectedDate,
+          recurrenceRule: p.recurrenceRule,
+          direction,
+        };
+      }),
+    ];
+
+    res.json({ asOf: today, count: items.length, items });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/v1/tax
+ *
+ * Tax reserve digest for the household: reserve settings + current year reserve estimate.
+ * ?year=2025 (default: current year)
+ */
+router.get('/tax', async (req, res, next) => {
+  try {
+    const { household } = req.reportingAuth!;
+    const today = todayIso();
+    const year =
+      typeof req.query.year === 'string' && /^\d{4}$/.test(req.query.year)
+        ? parseInt(req.query.year, 10)
+        : new Date().getUTCFullYear();
+
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+
+    const [settings, yearTxns] = await Promise.all([
+      TaxReserveSetting.findAll({
+        where: { householdId: household.id },
+        attributes: ['currency', 'reservePercent', 'note'],
+        raw: true,
+      }),
+      Transaction.findAll({
+        where: {
+          householdId: household.id,
+          date: { [Op.between]: [yearStart, yearEnd <= today ? yearEnd : today] },
+        },
+        attributes: ['amount', 'currency', 'finalBusiness'],
+        raw: true,
+      }),
+    ]);
+
+    type SettingRow = { currency: string; reservePercent: string; note: string | null };
+    type TxnRow = { amount: string; currency: string; finalBusiness: boolean | null };
+
+    const incomePerCurrency = new Map<string, number>();
+    for (const t of yearTxns as unknown as TxnRow[]) {
+      const amt = Number(t.amount);
+      if (!Number.isFinite(amt) || amt <= 0) continue;
+      const cur = t.currency ?? 'CAD';
+      incomePerCurrency.set(cur, (incomePerCurrency.get(cur) ?? 0) + amt);
+    }
+
+    const reserves = (settings as unknown as SettingRow[]).map((s) => {
+      const pct = Number(s.reservePercent);
+      const yearIncome = incomePerCurrency.get(s.currency) ?? 0;
+      const recommendedReserve = yearIncome * (Number.isFinite(pct) ? pct : 0);
+      return {
+        currency: s.currency,
+        reservePercent: Number.isFinite(pct) ? pct : null,
+        yearIncome: Math.round(yearIncome * 100) / 100,
+        recommendedReserve: Math.round(recommendedReserve * 100) / 100,
+        note: s.note ?? null,
+      };
+    });
+
+    res.json({ year, asOf: today, reserves });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/v1/events
+ *
+ * Human-meaningful financial timeline from the FinanceEvent log.
+ * Returns semantic events relevant to the household, with type remapped to
+ * user-facing labels.
+ * ?from=YYYY-MM-DD&to=YYYY-MM-DD (default: last 30 days)
+ * ?limit=100 (max 500)&offset=0
+ */
+router.get('/events', async (req, res, next) => {
+  try {
+    const { household } = req.reportingAuth!;
+    const today = todayIso();
+    const from =
+      typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)
+        ? req.query.from
+        : daysAgo(30);
+    const to =
+      typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)
+        ? req.query.to
+        : today;
+    const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? '100'), 10) || 100));
+    const offset = Math.max(0, parseInt(String(req.query.offset ?? '0'), 10) || 0);
+
+    const { count, rows } = await FinanceEvent.findAndCountAll({
+      where: {
+        householdId: household.id,
+        occurredAt: { [Op.between]: [`${from}T00:00:00.000Z`, `${to}T23:59:59.999Z`] },
+      },
+      order: [['occurredAt', 'DESC']],
+      limit,
+      offset,
+      attributes: ['id', 'type', 'entityType', 'entityId', 'payload', 'occurredAt'],
+    });
+
+    // Remap system event type strings to user-friendly labels.
+    const TYPE_LABEL: Record<string, string> = {
+      'transaction.created': 'Transaction recorded',
+      'transaction.updated': 'Transaction updated',
+      'transaction.deleted': 'Transaction removed',
+      'import.committed': 'Statements imported',
+      'rule.created': 'Rule created',
+      'rule.updated': 'Rule updated',
+      'rule.deleted': 'Rule deleted',
+      'goal.created': 'Goal set',
+      'goal.updated': 'Goal updated',
+      'goal.achieved': 'Goal achieved',
+      'budget.created': 'Budget created',
+      'budget.updated': 'Budget updated',
+      'planned_event.created': 'Planned event added',
+      'planned_event.updated': 'Planned event updated',
+      'account.created': 'Account opened',
+      'account.updated': 'Account updated',
+      'subscription.created': 'Subscription detected',
+      'subscription.updated': 'Subscription updated',
+      'reimbursement.created': 'Reimbursement tracked',
+      'reimbursement.updated': 'Reimbursement updated',
+    };
+
+    const events = rows.map((e) => ({
+      id: e.id,
+      type: e.type,
+      label: TYPE_LABEL[e.type] ?? e.type,
+      entityType: e.entityType,
+      entityId: e.entityId,
+      occurredAt: e.occurredAt,
+      payload: e.payload,
+    }));
+
+    res.json({ from, to, total: count, limit, offset, events });
   } catch (e) {
     next(e);
   }

@@ -93,7 +93,8 @@ export function RulesPage() {
           '/api/rules/auto-suggestions'
         )
         nextAuto = r.suggestions ?? []
-      } catch {
+      } catch (e) {
+        console.warn('[RulesPage] auto-suggestions endpoint failed:', e)
         nextAuto = []
       }
       if (loadRequestRef.current === requestId) {
