@@ -16,7 +16,7 @@ import {
   isAllowedHorizon,
   periodsPerYear,
 } from '../src/subscriptions/cancelImpact';
-import { SUBSCRIPTION_CADENCES } from '../src/models/Subscription';
+import { SUBSCRIPTION_CADENCES } from '../src/models/PlannedEvent';
 
 test('ALLOWED_HORIZON_MONTHS is exactly {6, 12, 24}', () => {
   assert.deepEqual([...ALLOWED_HORIZON_MONTHS], [6, 12, 24]);

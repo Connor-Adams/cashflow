@@ -36,7 +36,7 @@
  * is supposed to surface neglect, not nag everyone with N>0 noise.
  */
 import { Op, type WhereOptions } from 'sequelize';
-import { Subscription, Transaction } from '../models';
+import { PlannedEvent, Transaction } from '../models';
 import { aggregateReceiptCompleteness, type CompletenessResult } from './receiptCompleteness';
 import { NON_SPEND_TXN_TYPES } from './classifyTransactionFlow';
 import {
@@ -191,12 +191,13 @@ export async function aggregateDataQuality(input: {
     },
   });
 
-  // Stale subscriptions: status='unknown' is the bucket the classifier
-  // assigns when it can't decide between active/cancelled/trial. We keep
-  // ignored and cancelled out of the count so users aren't penalized for
-  // already-resolved rows.
-  const staleSubscriptions = await Subscription.count({
-    where: { ...input.subscriptionScope, status: 'unknown' },
+  // Stale subscriptions: legacy status='unknown' is the bucket the classifier
+  // assigns when it can't decide between active/cancelled/trial. On the merged
+  // PlannedEvent model (kind='subscription') that maps to statusUncertain=true.
+  // We keep ignored and cancelled out of the count so users aren't penalized
+  // for already-resolved rows.
+  const staleSubscriptions = await PlannedEvent.count({
+    where: { ...input.subscriptionScope, kind: 'subscription', statusUncertain: true },
   });
 
   // Review backlog: every txn flagged for manual review, regardless of
