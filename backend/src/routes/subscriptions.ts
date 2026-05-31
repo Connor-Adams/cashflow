@@ -7,7 +7,7 @@ import {
   type SubscriptionStatus,
   type SubscriptionCadence,
 } from '../models/Subscription';
-import { Transaction } from '../models';
+import { Transaction, SubscriptionPriceChange } from '../models';
 import { num } from '../util/numbers';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
@@ -34,6 +34,14 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_WINDOW_DAYS = 180;
 const DEFAULT_MIN_OCCURRENCES = 3;
 
+interface PendingPriceChange {
+  id: number;
+  prevCents: number;
+  newCents: number;
+  pctChange: string;
+  detectedOn: string;
+}
+
 interface SubscriptionResponse {
   id: number;
   householdId: number;
@@ -52,9 +60,13 @@ interface SubscriptionResponse {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  pendingPriceChange: PendingPriceChange | null;
 }
 
-function serialize(row: InstanceType<typeof Subscription>): SubscriptionResponse {
+function serialize(
+  row: InstanceType<typeof Subscription>,
+  pendingPriceChange: PendingPriceChange | null = null,
+): SubscriptionResponse {
   return {
     id: row.id,
     householdId: row.householdId,
@@ -73,6 +85,7 @@ function serialize(row: InstanceType<typeof Subscription>): SubscriptionResponse
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    pendingPriceChange,
   };
 }
 
@@ -308,7 +321,37 @@ router.get('/', async (req, res, next) => {
         ['merchantName', 'ASC'],
       ],
     });
-    res.json({ items: rows.map(serialize) });
+
+    // Fetch all unacknowledged price-change rows for this household in one
+    // query, then build a map from subscriptionId to the pending change.
+    const priceChangeRows = await SubscriptionPriceChange.findAll({
+      where: { householdId: auth.household.id, acknowledgedAt: null },
+      attributes: ['id', 'subscriptionId', 'previousAmountCents', 'newAmountCents', 'pctChange', 'detectedOn'],
+      raw: true,
+    });
+    type PriceChangeRaw = {
+      id: number;
+      subscriptionId: number;
+      previousAmountCents: number;
+      newAmountCents: number;
+      pctChange: string;
+      detectedOn: string;
+    };
+    const pendingMap = new Map<number, PendingPriceChange>();
+    for (const pc of priceChangeRows as unknown as PriceChangeRaw[]) {
+      // If multiple unacknowledged rows exist for a subscription, keep latest (first inserted with highest id).
+      if (!pendingMap.has(pc.subscriptionId)) {
+        pendingMap.set(pc.subscriptionId, {
+          id: pc.id,
+          prevCents: pc.previousAmountCents,
+          newCents: pc.newAmountCents,
+          pctChange: pc.pctChange,
+          detectedOn: pc.detectedOn,
+        });
+      }
+    }
+
+    res.json({ items: rows.map((row) => serialize(row, pendingMap.get(row.id) ?? null)) });
   } catch (e) {
     next(e);
   }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -405,6 +406,26 @@ function LeakGroup({
                 {formatMoney(item.monthlyImpact, item.currency)}/mo •{' '}
                 {formatMoney(item.annualImpact, item.currency)}/yr
               </div>
+              {(item.leakType === 'subscription_price_increase' ||
+                item.leakType === 'small_subscription' ||
+                item.leakType === 'duplicate_service') && (
+                <Link
+                  to="/subscriptions"
+                  className="muted text-xs underline"
+                  style={{ marginTop: 4, display: 'inline-block' }}
+                >
+                  View source →
+                </Link>
+              )}
+              {item.leakType === 'recurring_fee' && (
+                <Link
+                  to="/recurring"
+                  className="muted text-xs underline"
+                  style={{ marginTop: 4, display: 'inline-block' }}
+                >
+                  View source →
+                </Link>
+              )}
             </div>
             <Button
               type="button"

@@ -3,7 +3,7 @@ import { Op } from 'sequelize';
 import { Account, LiabilityAccount, PlannedEvent, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
-import { balanceAtDate } from '../networth/balanceAtDate';
+import { currentOwed, utilizationPct } from '../cards/utilization';
 import { computeSafeToSpend, type SafeToSpendResult } from '../cashflow/safeToSpend';
 
 /**
@@ -98,6 +98,10 @@ type CardRow = {
   autopayType: string | null;
   autopayAmount: number | null;
   paymentAccountId: number | null;
+  /** User-entered credit limit, or null. Positive number when set. */
+  creditLimit: number | null;
+  /** currentBalance / creditLimit × 100, or null when either is missing. */
+  utilizationPct: number | null;
   /** Next calendar due date derived from dueDay relative to asOf, or null. */
   nextDueDate: string | null;
   /** Whole days until nextDueDate (>= 0), or null when no dueDay set. */
@@ -105,23 +109,6 @@ type CardRow = {
   /** True when a payment is due within DUE_SOON_DAYS. */
   dueSoon: boolean;
 };
-
-/**
- * Current owed balance for a credit card, derived from its transaction stream.
- * Card balances are negative (charges outweigh payments); we surface the
- * magnitude as a positive "owed" figure. A positive balance (credit on the
- * card) yields 0 owed.
- */
-async function currentOwed(
-  account: InstanceType<typeof Account>,
-  asOf: string,
-): Promise<number> {
-  const balances = await balanceAtDate(account, asOf);
-  const ccy = account.defaultCurrency ?? 'CAD';
-  const match = balances.find((b) => b.currency === ccy) ?? balances[0];
-  const raw = match ? match.amount : 0;
-  return raw < 0 ? Math.abs(raw) : 0;
-}
 
 /** Assemble the household's credit cards joined with their liability profiles. */
 async function loadCards(req: Request, asOf: string): Promise<CardRow[]> {
@@ -144,6 +131,11 @@ async function loadCards(req: Request, asOf: string): Promise<CardRow[]> {
     const dueDay = profile ? profile.dueDay : null;
     const due = dueDay != null ? nextDueDate(dueDay, asOf) : null;
     const daysUntilDue = due != null ? daysBetween(asOf, due) : null;
+    const creditLimit =
+      profile && profile.creditLimit != null ? Number(profile.creditLimit) : null;
+    // Closed cards are dimmed in the UI and don't carry meaningful utilization;
+    // suppress the pct so the badge logic on the frontend just hides itself.
+    const isClosed = Boolean(account.closedAt && account.closedAt <= asOf);
     rows.push({
       accountId: account.id,
       name: account.name,
@@ -159,6 +151,8 @@ async function loadCards(req: Request, asOf: string): Promise<CardRow[]> {
       autopayType: profile ? profile.autopayType : null,
       autopayAmount: profile && profile.autopayAmount != null ? Number(profile.autopayAmount) : null,
       paymentAccountId: profile ? profile.paymentAccountId : null,
+      creditLimit,
+      utilizationPct: isClosed ? null : utilizationPct(currentBalance, creditLimit),
       nextDueDate: due,
       daysUntilDue,
       dueSoon: daysUntilDue != null && daysUntilDue >= 0 && daysUntilDue <= DUE_SOON_DAYS,
@@ -203,6 +197,7 @@ type CardProfileInput = {
   autopayType: string | null;
   autopayAmount: number | null;
   paymentAccountId: number | null;
+  creditLimit: number | null;
 };
 
 function validateCardProfileInput(
@@ -220,6 +215,7 @@ function validateCardProfileInput(
     autopayType: existing ? existing.autopayType : null,
     autopayAmount: existing && existing.autopayAmount != null ? Number(existing.autopayAmount) : null,
     paymentAccountId: existing ? existing.paymentAccountId : null,
+    creditLimit: existing && existing.creditLimit != null ? Number(existing.creditLimit) : null,
   };
 
   let statementBalance = def.statementBalance;
@@ -325,6 +321,19 @@ function validateCardProfileInput(
     autopayAmount = null;
   }
 
+  let creditLimit = def.creditLimit;
+  if ('creditLimit' in raw) {
+    if (raw.creditLimit == null || raw.creditLimit === '') {
+      creditLimit = null;
+    } else {
+      const n = Number(raw.creditLimit);
+      if (!Number.isFinite(n) || n <= 0) {
+        return { ok: false, status: 400, error: 'creditLimit must be greater than 0 or null' };
+      }
+      creditLimit = n;
+    }
+  }
+
   return {
     ok: true,
     value: {
@@ -336,6 +345,7 @@ function validateCardProfileInput(
       autopayType,
       autopayAmount,
       paymentAccountId,
+      creditLimit,
     },
   };
 }
@@ -350,6 +360,7 @@ type CardProfileResponse = {
   autopayType: string | null;
   autopayAmount: number | null;
   paymentAccountId: number | null;
+  creditLimit: number | null;
 };
 
 function serializeProfile(row: InstanceType<typeof LiabilityAccount>): CardProfileResponse {
@@ -363,6 +374,7 @@ function serializeProfile(row: InstanceType<typeof LiabilityAccount>): CardProfi
     autopayType: row.autopayType,
     autopayAmount: row.autopayAmount != null ? Number(row.autopayAmount) : null,
     paymentAccountId: row.paymentAccountId,
+    creditLimit: row.creditLimit != null ? Number(row.creditLimit) : null,
   };
 }
 
@@ -427,6 +439,7 @@ router.put('/:accountId', async (req, res, next) => {
       existing.set('autopayType', v.autopayType);
       existing.set('autopayAmount', v.autopayAmount == null ? null : v.autopayAmount.toFixed(4));
       existing.set('paymentAccountId', v.paymentAccountId);
+      existing.set('creditLimit', v.creditLimit == null ? null : v.creditLimit.toFixed(4));
       await existing.save();
       row = existing;
     } else {
@@ -441,6 +454,7 @@ router.put('/:accountId', async (req, res, next) => {
         autopayType: v.autopayType,
         autopayAmount: v.autopayAmount == null ? null : v.autopayAmount.toFixed(4),
         paymentAccountId: v.paymentAccountId,
+        creditLimit: v.creditLimit == null ? null : v.creditLimit.toFixed(4),
       });
     }
 

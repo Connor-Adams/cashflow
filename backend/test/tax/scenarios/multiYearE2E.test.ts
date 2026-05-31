@@ -121,7 +121,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
   // The POST handler auto-creates the baseline if missing and returns the
   // freshly-minted fork. We want the BASELINE itself (not the fork) as the
   // anchor for /project-next-year, so list and pick it out.
-  const initialPost = await authed.post('/api/tax/personal-scenarios').send({
+  const initialPost = await authed.post('/api/tax/scenarios/personal').send({
     entityId,
     year: 2024,
     name: 'E2E Anchor Fork',
@@ -133,7 +133,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
     `expected 201 from initial POST, got ${initialPost.status}: ${JSON.stringify(initialPost.body)}`,
   );
   const list2024 = await authed.get(
-    `/api/tax/personal-scenarios?entityId=${entityId}&year=2024`,
+    `/api/tax/scenarios/personal?entityId=${entityId}&year=2024`,
   );
   assert.equal(list2024.status, 200);
   const baseline2024 = list2024.body.scenarios.find(
@@ -144,7 +144,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
 
   // ----- Step 3: POST /project-next-year → creates 2025 projection_root -----
   const proj2025Res = await authed
-    .post(`/api/tax/personal-scenarios/${baseline2024.id}/project-next-year`)
+    .post(`/api/tax/scenarios/personal/${baseline2024.id}/project-next-year`)
     .send({});
   assert.equal(
     proj2025Res.status,
@@ -158,7 +158,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
 
   // ----- Step 4: /chain returns both scenarios in year order -----
   const chain2 = await authed.get(
-    `/api/tax/personal-scenarios/${baseline2024.id}/chain`,
+    `/api/tax/scenarios/personal/${baseline2024.id}/chain`,
   );
   assert.equal(chain2.status, 200);
   assert.equal(chain2.body.chain.length, 2);
@@ -173,7 +173,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
   // Scenario row and wire next_year_id directly — Task 5 implementer report
   // documented this same approach for the chain walker test.
   const projNextOnProjRes = await authed
-    .post(`/api/tax/personal-scenarios/${proj2025Id}/project-next-year`)
+    .post(`/api/tax/scenarios/personal/${proj2025Id}/project-next-year`)
     .send({});
   assert.equal(
     projNextOnProjRes.status,
@@ -201,7 +201,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
 
   // ----- Step 6: /chain returns all 3 in year order -----
   const chain3 = await authed.get(
-    `/api/tax/personal-scenarios/${baseline2024.id}/chain`,
+    `/api/tax/scenarios/personal/${baseline2024.id}/chain`,
   );
   assert.equal(chain3.status, 200);
   assert.equal(chain3.body.chain.length, 3);
@@ -213,7 +213,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
 
   // Walking back from the leaf yields the same chain.
   const chain3FromLeaf = await authed.get(
-    `/api/tax/personal-scenarios/${proj2026.id}/chain`,
+    `/api/tax/scenarios/personal/${proj2026.id}/chain`,
   );
   assert.equal(chain3FromLeaf.status, 200);
   const yearsFromLeaf = chain3FromLeaf.body.chain.map(
@@ -254,7 +254,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
   // projection_root: project-from-prev-year supplies base facts, then
   // applyOverrides layers the override on top.
   const fork2025Res = await authed
-    .post(`/api/tax/personal-scenarios/${proj2025Id}/fork`)
+    .post(`/api/tax/scenarios/personal/${proj2025Id}/fork`)
     .send({ name: '2025 high salary' });
   assert.equal(
     fork2025Res.status,
@@ -264,7 +264,7 @@ test('full multi-year chain: 2024 baseline → 2025 projection → 2026 projecti
   const fork2025Id = fork2025Res.body.scenario.id;
   // Set an override via PATCH (POST /:id/fork starts with an empty override map).
   const patch = await authed
-    .patch(`/api/tax/personal-scenarios/${fork2025Id}`)
+    .patch(`/api/tax/scenarios/personal/${fork2025Id}`)
     .send({ overrides: { 'income.employment': 150000 } });
   assert.equal(
     patch.status,

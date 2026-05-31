@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import type { Span } from '@opentelemetry/api';
 import { Job, JobRun } from '../models';
 import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
+import { runJobSpan } from '../observability/jobSpan';
+import { recordJobRun } from '../observability/metrics';
 import { withContext } from '../observability/requestContext';
 import { resolveJobConfig } from './configResolver';
 import { withAdvisoryLock } from './pgLock';
@@ -64,7 +67,13 @@ export interface TickOptions {
 }
 
 export async function tick(def: JobDefinition, opts: TickOptions = {}): Promise<TickOutcome> {
-  return withContext({ jobName: def.name, tickId: randomUUID() }, () => tickInner(def, opts));
+  const tickId = randomUUID();
+  return withContext({ jobName: def.name, tickId }, () =>
+    runJobSpan(
+      { spanName: `job.${def.name}`, jobName: def.name, tickId },
+      (span) => tickInner(def, opts, span),
+    ),
+  );
 }
 
 async function createRun(jobName: string, startedAt: Date): Promise<JobRun | null> {
@@ -129,7 +138,7 @@ async function notifyFailure(
   }));
 }
 
-async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOutcome> {
+async function tickInner(def: JobDefinition, opts: TickOptions, span?: Span): Promise<TickOutcome> {
   const startedAt = new Date();
   const cfg = await resolveJobConfig(def);
   if (!cfg.enabled) {
@@ -194,6 +203,8 @@ async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOut
     });
     await finishRun(run, { status: 'success', durationMs });
     await pruneRuns(def.name);
+    span?.setAttribute('cashflow.job.result', 'success');
+    recordJobRun(def.name, 'success', durationMs);
     logger.info({ name: def.name, durationMs }, 'job_tick_ok');
     return { status: 'ok', durationMs, result: summary, ...runMeta };
   } catch (err) {
@@ -209,6 +220,9 @@ async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOut
     await finishRun(run, { status: 'failed', durationMs, errorMessage: truncated });
     await notifyFailure(def, run, truncated, opts.failureNotificationUserIds);
     await pruneRuns(def.name);
+    span?.setAttribute('cashflow.job.result', 'failure');
+    span?.recordException(err as Error);
+    recordJobRun(def.name, 'failure', durationMs);
     logger.error({ err, name: def.name, durationMs }, 'job_tick_failed');
     return { status: 'error', durationMs, error: message, ...runMeta };
   } finally {

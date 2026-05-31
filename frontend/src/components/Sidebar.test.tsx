@@ -1,0 +1,58 @@
+import React from 'react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { Sidebar } from './Sidebar'
+
+void React
+
+vi.mock('../lib/useAuth', () => ({
+  useAuth: () => ({ user: { displayName: 'Tester', globalRole: null }, logout: vi.fn() }),
+}))
+vi.mock('../hooks/useTheme', () => ({
+  useTheme: () => ({ theme: 'light', toggleTheme: vi.fn() }),
+}))
+vi.mock('@/hooks/useAiInboxCount', () => ({ useAiInboxCount: () => ({ count: 0 }) }))
+vi.mock('@/hooks/useInsightsCount', () => ({ useInsightsCount: () => ({ count: 0 }) }))
+vi.mock('@/hooks/useAiStatus', () => ({ useAiStatus: () => ({ openai: true }) }))
+vi.mock('../lib/version', () => ({
+  FRONTEND_VERSION: 'test',
+  useBackendVersion: () => ({ status: 'ok', version: 'test' }),
+}))
+
+function renderSidebar() {
+  return render(
+    <MemoryRouter>
+      <Sidebar open={false} onClose={() => {}} />
+    </MemoryRouter>,
+  )
+}
+
+describe('Sidebar rail (PR 0)', () => {
+  it('drops items folded elsewhere', () => {
+    renderSidebar()
+    for (const name of [
+      'Ask Cashflow',
+      'Audit log',
+      'Backup & sync',
+      'Explain month',
+      'Lifestyle inflation',
+      'Savings rate',
+    ]) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+  })
+
+  it('relocates Amazon and Credit cards into the Money section', () => {
+    renderSidebar()
+    const moneyHeader = screen.getByRole('button', { name: /Money/ })
+    const moneySection = moneyHeader.closest('.sidebar__section') as HTMLElement
+    expect(within(moneySection).getByRole('link', { name: 'Amazon' })).toBeInTheDocument()
+    expect(within(moneySection).getByRole('link', { name: 'Credit cards' })).toBeInTheDocument()
+  })
+
+  it('keeps Chat reachable (Ask folds into it)', () => {
+    renderSidebar()
+    expect(screen.getByRole('link', { name: 'Chat' })).toBeInTheDocument()
+  })
+})

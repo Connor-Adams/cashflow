@@ -15,9 +15,14 @@ const ALL_TOP_TABS: Array<
   { value: 'budgets', label: 'Budgets' },
   { value: 'categories', label: 'Categories' },
   { value: 'labels', label: 'Labels' },
+  { value: 'saved-filters', label: 'Saved filters' },
   { value: 'notifications', label: 'Notifications' },
   { value: 'feedback', label: 'Feedback', ownerOnly: true },
   { value: 'jobs', label: 'Jobs' },
+  { value: 'whatsnew', label: "What's new" },
+  { value: 'audit-tokens', label: 'AI audit tokens' },
+  { value: 'audit-log', label: 'Audit log' },
+  { value: 'backup', label: 'Backup & sync' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -29,9 +34,14 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   budgets: '/settings/budgets',
   categories: '/settings/categories',
   labels: '/settings/labels',
+  'saved-filters': '/settings/saved-filters',
   notifications: '/settings/notifications',
   feedback: '/settings/feedback',
   jobs: '/settings/jobs',
+  whatsnew: '/settings/whatsnew',
+  'audit-tokens': '/settings/audit-tokens',
+  'audit-log': '/settings/audit-log',
+  backup: '/settings/backup',
 }
 
 export function SettingsPage() {

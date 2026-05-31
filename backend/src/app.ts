@@ -15,12 +15,14 @@ import sankeyRouter from './routes/sankey';
 import merchantsRouter from './routes/merchants';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
+import subscriptionPriceChangesRouter from './routes/subscriptionPriceChanges';
 import moneyLeaksRouter from './routes/moneyLeaks';
 import reportsRouter from './routes/reports';
 import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
 import cfoBriefingsRouter from './routes/cfoBriefings';
+import reviewItemsRouter from './routes/reviewItems';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
@@ -44,12 +46,16 @@ import calendarRouter from './routes/calendar';
 import goalsRouter from './routes/goals';
 import notificationsRouter from './routes/notifications';
 import notificationPreferencesRouter from './routes/notificationPreferences';
+import usersNotificationsRouter from './routes/usersNotifications';
 import notificationsAdminRouter from './routes/admin/notificationsAdmin';
 import forecastRouter from './routes/forecast';
 import debtRouter from './routes/debt';
 import creditCardsRouter from './routes/creditCards';
 import opportunityCostRouter from './routes/opportunityCost';
 import cashflowSettingsRouter from './routes/cashflowSettings';
+import activationStateRouter from './routes/activationState';
+import savedFiltersRouter from './routes/savedFilters';
+import changelogRouter from './routes/changelog';
 import preferencesRouter from './routes/preferences';
 import onboardingRouter from './routes/onboarding';
 import clientLogsRouter from './routes/clientLogs';
@@ -66,10 +72,14 @@ import returnWarrantyRouter from './routes/returnWarranty';
 import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import invitesRouter from './routes/invites';
-import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
-import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
+import taxScenariosRouter from './routes/tax-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
+import reportingTokensRouter from './routes/reportingTokens';
+import reportingRouter from './routes/reporting';
+import { reportingAuth } from './auth/reportingAuth';
+import auditTokensRouter from './routes/auditTokens';
+import auditRouter from './routes/audit';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
@@ -77,10 +87,12 @@ import financeEventsRouter from './routes/financeEvents';
 import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
+import incomeRouter from './routes/income';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
+import { ServerErrorEvent } from './models';
 
 const app = express();
 
@@ -131,6 +143,10 @@ app.use('/api/config', configRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
+app.use('/api/v1/tokens', reportingTokensRouter);
+app.use('/api/v1', reportingAuth, reportingRouter);
+app.use('/api/audit/tokens', auditTokensRouter);
+app.use('/api/audit', auditRouter);
 app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/search', searchRouter);
@@ -151,7 +167,13 @@ app.use('/api/monthly-close', monthlyCloseRouter);
 app.use('/api/calendar', calendarRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/notifications', notificationsRouter);
+// Notification preferences folded under the user namespace (issue #379):
+// the live endpoints are /api/users/me/notifications/preferences[/:type].
+app.use('/api/users/me/notifications', usersNotificationsRouter);
+// The old standalone path is retained only to return 410 Gone (see the route
+// file) so any stale client surfaces loudly instead of silently breaking.
 app.use('/api/notification-preferences', notificationPreferencesRouter);
+app.use('/api/changelog', changelogRouter);
 app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);
 app.use('/api/debt', debtRouter);
@@ -159,6 +181,8 @@ app.use('/api/credit-cards', creditCardsRouter);
 app.use('/api/opportunity-cost', opportunityCostRouter);
 app.use('/api/financial-scenarios', financialScenariosRouter);
 app.use('/api/settings/cashflow', cashflowSettingsRouter);
+app.use('/api/activation-state', activationStateRouter);
+app.use('/api/saved-filters', savedFiltersRouter);
 app.use('/api/preferences', preferencesRouter);
 app.use('/api/onboarding', onboardingRouter);
 app.use('/api/import', importRouter);
@@ -170,6 +194,7 @@ app.use('/api/summary', summaryRouter);
 app.use('/api/merchants', merchantsRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/subscription-price-changes', subscriptionPriceChangesRouter);
 app.use('/api/data-quality', dataQualityRouter);
 app.use('/api/money-leaks', moneyLeaksRouter);
 app.use('/api/audit-log', auditLogRouter);
@@ -183,6 +208,9 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/ai', aiReviewRouter);
 // Personal CFO briefings (issue #236).
 app.use('/api/cfo', cfoBriefingsRouter);
+// Unified read-side fold of all review-item sources (issue #378). Read-only;
+// per-source write endpoints are unchanged.
+app.use('/api/review-items', reviewItemsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);
@@ -195,8 +223,18 @@ app.use('/api/household', householdRouter);
 app.use('/api/invites', invitesRouter);
 app.use('/api/net-worth', netWorthRouter);
 app.use('/api/fx', fxRouter);
-app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
-app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
+// Unified scenario route (issue #377): /api/tax/scenarios/:kind folds the
+// former /api/tax/personal-scenarios + /api/tax/corp-scenarios. The old paths
+// now return 410 Gone — every internal caller (the frontend hooks) moved to the
+// unified path in the same change, so nothing should hit these.
+app.use(['/api/tax/personal-scenarios', '/api/tax/corp-scenarios'], (_req, res) => {
+  res.status(410).json({
+    error: 'gone',
+    message:
+      'This endpoint moved to /api/tax/scenarios/:kind (kind ∈ {personal, corp}).',
+  });
+});
+app.use('/api/tax/scenarios', taxScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
 app.use('/api/tax/reserve', taxReserveRouter);
 app.use('/api/tax', taxRouter);
@@ -219,6 +257,8 @@ app.use('/api', largePurchaseReviewRouter);
 // feedbackRouter mounts /feedback and /feedback/:id/resolve under /api
 // (issue #295). Behind the global requireAuth above.
 app.use('/api', feedbackRouter);
+
+app.use('/api/income', incomeRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;
@@ -255,6 +295,23 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
+  const status = (err as { status?: number })?.status ?? 500;
+  if (status >= 500) {
+    void ServerErrorEvent.create({
+      householdId: req.auth?.household.id ?? req.auditAuth?.household.id ?? null,
+      userId: req.auth?.user.id ?? req.auditAuth?.user.id ?? null,
+      method: req.method,
+      path: req.originalUrl.slice(0, 512),
+      status,
+      message: String((err as Error)?.message ?? '').slice(0, 4000),
+      stack: String((err as Error)?.stack ?? '').slice(0, 8000),
+      requestId: req.requestId ?? null,
+    }).catch(() => undefined);
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);

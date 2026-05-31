@@ -20,8 +20,10 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
+import { useNavigate } from 'react-router-dom'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safeNum } from '../lib/num'
 import type {
   Account,
   FinancialGoal,
@@ -208,6 +210,7 @@ function buildPatch(form: FormState): FinancialGoalPatch | null {
 export function GoalsPage() {
   const { showToast } = useToast()
   const confirm = useConfirm()
+  const navigate = useNavigate()
 
   const [goals, setGoals] = useState<FinancialGoal[]>([])
   const [projections, setProjections] = useState<Record<number, GoalProjectionResponse>>({})
@@ -292,6 +295,7 @@ export function GoalsPage() {
         title: 'Goal added',
         description: `${input.name} — target ${formatMoney(input.targetAmount, input.currency)}`,
         variant: 'success',
+        action: { label: 'See in forecast →', onClick: () => navigate('/forecast') },
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not add goal'
@@ -334,7 +338,7 @@ export function GoalsPage() {
       await putGoal(editId, patch)
       cancelEdit()
       await loadGoals()
-      showToast({ title: 'Goal updated', variant: 'success' })
+      showToast({ title: 'Goal updated', variant: 'success', action: { label: 'See in forecast →', onClick: () => navigate('/forecast') } })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save goal'
       showToast({
@@ -507,35 +511,39 @@ export function GoalsPage() {
                             />
                           </div>
                           <div className="muted text-xs">
-                            {formatMoney(Number(row.currentAmount), row.currency)}
+                            {safeNum(row.currentAmount) !== null
+                              ? formatMoney(safeNum(row.currentAmount)!, row.currency)
+                              : <em className="text-muted-foreground">(unset)</em>}
                             {' / '}
-                            {formatMoney(Number(row.targetAmount), row.currency)}
+                            {safeNum(row.targetAmount) !== null
+                              ? formatMoney(safeNum(row.targetAmount)!, row.currency)
+                              : <em className="text-muted-foreground">(unset)</em>}
                             {' '}
                             ({progress.toFixed(0)}%)
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {formatMoney(Number(row.targetAmount), row.currency)}
+                        {safeNum(row.targetAmount) !== null
+                          ? formatMoney(safeNum(row.targetAmount)!, row.currency)
+                          : <em className="text-muted-foreground">(unset)</em>}
                       </TableCell>
                       <TableCell>{row.targetDate ?? '—'}</TableCell>
                       <TableCell>
                         {row.monthlyContribution == null
                           ? '—'
-                          : formatMoney(
-                              Number(row.monthlyContribution),
-                              row.currency,
-                            )}
+                          : safeNum(row.monthlyContribution) !== null
+                            ? formatMoney(safeNum(row.monthlyContribution)!, row.currency)
+                            : <em className="text-muted-foreground">(unset)</em>}
                       </TableCell>
                       <TableCell>
                         {projection?.requiredMonthlyContribution ? (
                           <div className="text-xs">
                             <div>
                               Need{' '}
-                              {formatMoney(
-                                Number(projection.requiredMonthlyContribution),
-                                row.currency,
-                              )}
+                              {safeNum(projection.requiredMonthlyContribution) !== null
+                                ? formatMoney(safeNum(projection.requiredMonthlyContribution)!, row.currency)
+                                : <em className="text-muted-foreground">(unset)</em>}
                               /mo
                             </div>
                             {projection.projectedCompletionDate ? (

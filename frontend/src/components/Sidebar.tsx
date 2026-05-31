@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart3,
-  BookOpen,
   BookOpenCheck,
   FileCheck2,
   Calculator,
@@ -20,9 +19,8 @@ import {
   ClipboardCheck,
   Droplet,
   Filter,
-  Flame,
-  PiggyBank,
   Globe,
+  Inbox,
   Lightbulb,
   LineChart,
   LayoutDashboard,
@@ -34,13 +32,9 @@ import {
   RefreshCw,
   RotateCcw,
   ArrowLeftRight,
-  Save,
-  Search,
+  DollarSign,
   Settings,
   Shield,
-  Sparkles,
-  Stethoscope,
-  BriefcaseBusiness,
   BadgeDollarSign,
   Sun,
   Moon,
@@ -81,9 +75,8 @@ const navSections: NavSection[] = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
       { to: '/review', label: 'Review', icon: ClipboardCheck },
-      { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
+      { to: '/inbox', label: 'Inbox', icon: Inbox },
       { to: '/chat', label: 'Chat', icon: MessageSquare },
-      { to: '/ask', label: 'Ask Cashflow', icon: Search },
     ],
   },
   {
@@ -91,6 +84,8 @@ const navSections: NavSection[] = [
     label: 'Money',
     items: [
       { to: '/accounts', label: 'Accounts', icon: CreditCard },
+      { to: '/income', label: 'Income', icon: DollarSign },
+      { to: '/credit-cards', label: 'Credit cards', icon: CreditCard },
       { to: '/transactions', label: 'Transactions', icon: ReceiptText },
       { to: '/refunds', label: 'Refunds', icon: Undo2 },
       { to: '/reimbursements', label: 'Reimbursements', icon: HandCoins },
@@ -100,6 +95,7 @@ const navSections: NavSection[] = [
       { to: '/items', label: 'Items', icon: Package },
       { to: '/purchases', label: 'Purchases', icon: PackageCheck },
       { to: '/import', label: 'Import', icon: Upload },
+      { to: '/amazon', label: 'Amazon', icon: PackageSearch },
       { to: '/recurring', label: 'Recurring', icon: Repeat },
       { to: '/subscriptions', label: 'Subscriptions', icon: RefreshCw },
       { to: '/return-warranty', label: 'Returns & warranties', icon: RotateCcw },
@@ -116,7 +112,6 @@ const navSections: NavSection[] = [
       { to: '/goals', label: 'Goals', icon: Target },
       { to: '/forecast', label: 'Forecast', icon: TrendingUp },
       { to: '/debt', label: 'Debt payoff', icon: Landmark },
-      { to: '/credit-cards', label: 'Credit cards', icon: CreditCard },
       { to: '/opportunity-cost', label: 'Opportunity cost', icon: Calculator },
       { to: '/scenarios', label: 'Scenarios', icon: GitCompare },
     ],
@@ -127,7 +122,6 @@ const navSections: NavSection[] = [
     items: [
       { to: '/portfolio', label: 'Portfolio', icon: LineChart },
       { to: '/net-worth', label: 'Net worth', icon: Coins },
-      { to: '/amazon', label: 'Amazon', icon: PackageSearch },
     ],
   },
   {
@@ -135,25 +129,10 @@ const navSections: NavSection[] = [
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-      { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
-      { to: '/cfo/briefings', label: 'CFO briefing', icon: BriefcaseBusiness },
       { to: '/insights', label: 'Insights', icon: Lightbulb },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
-      { to: '/reports/explain-month', label: 'Explain month', icon: BookOpen },
-      {
-        to: '/reports/lifestyle-inflation',
-        label: 'Lifestyle inflation',
-        icon: Flame,
-      },
-      {
-        to: '/reports/savings-rate',
-        label: 'Savings rate',
-        icon: PiggyBank,
-      },
       { to: '/sankey', label: 'Cashflow', icon: Waypoints },
-      { to: '/audit-log', label: 'Audit log', icon: Shield },
       { to: '/vault', label: 'Vault', icon: Lock },
-      { to: '/sync', label: 'Backup & sync', icon: Save },
       { to: '/currency', label: 'Currency', icon: Globe },
       { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
       { to: '/tax', label: 'Tax', icon: Calculator },
@@ -255,7 +234,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     if (aiStatus?.openai === true) return navSections
     return navSections.map((section) => ({
       ...section,
-      items: section.items.filter((i) => i.to !== '/chat' && i.to !== '/ask'),
+      items: section.items.filter((i) => i.to !== '/chat'),
     }))
   }, [aiStatus])
 
@@ -304,7 +283,7 @@ function SidebarNavSections({
   const { count: insightsCount } = useInsightsCount()
 
   function badgeFor(to: string): number {
-    if (to === '/ai/inbox') return aiInboxCount
+    if (to === '/inbox') return aiInboxCount
     if (to === '/insights') return insightsCount
     return 0
   }

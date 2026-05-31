@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { SortableTableHead } from '@/components/table/SortableTableHead'
+import { useUrlSort, type SortDir } from '../hooks/useUrlSort'
 import { RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
@@ -36,6 +38,7 @@ import { DividendsTab } from '../components/portfolio/DividendsTab'
 import { PerformancePanel } from './portfolio-performance/PerformancePanel'
 import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safePct } from '../lib/num'
 import type {
   PortfolioAllocation,
   PortfolioBySecurity,
@@ -96,6 +99,8 @@ const TAB_ITEMS: TabItem[] = [
   { value: 'realized', label: 'Realized P&L' },
 ]
 
+const ALLOC_SORT_FIELDS = ['symbol', 'marketValue', 'pctOfPortfolio'] as const
+
 export function PortfolioPage() {
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
   const [allocation, setAllocation] = useState<PortfolioAllocation | null>(null)
@@ -112,6 +117,13 @@ export function PortfolioPage() {
   const [quotesAsOf, setQuotesAsOf] = useState<number | null>(null)
   const [now, setNow] = useState<number>(() => Date.now())
 
+  const { sort: allocSort, dir: allocDir, toggle: toggleAllocSort } = useUrlSort(ALLOC_SORT_FIELDS)
+
+  const allocSortQs = useMemo(() => {
+    if (!allocSort) return ''
+    return `?sort=${allocSort}&dir=${allocDir}`
+  }, [allocSort, allocDir])
+
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
@@ -119,7 +131,7 @@ export function PortfolioPage() {
       const [summaryRes, allocRes, bySecRes, sparkRes] =
         await Promise.all([
           getJson<PortfolioSummary>('/api/portfolio'),
-          getJson<PortfolioAllocation>('/api/portfolio/allocation'),
+          getJson<PortfolioAllocation>(`/api/portfolio/allocation${allocSortQs}`),
           getJson<PortfolioBySecurity>('/api/portfolio/by-security'),
           getJson<PortfolioSparklines>('/api/portfolio/sparklines?range=30d'),
         ])
@@ -143,7 +155,7 @@ export function PortfolioPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [allocSortQs])
 
   useEffect(() => {
     void load()
@@ -266,7 +278,7 @@ export function PortfolioPage() {
       </TabPanel>
 
       <TabPanel value="allocation" active={activeTab}>
-        <AllocationPanel data={allocation} />
+        <AllocationPanel data={allocation} sort={allocSort} dir={allocDir} onSort={toggleAllocSort} />
       </TabPanel>
 
       <TabPanel value="by-account-type" active={activeTab}>
@@ -609,7 +621,14 @@ function BySecurityPanel({
 
 /* ---------------------- Allocation tab ---------------------- */
 
-function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
+type AllocationPanelProps = {
+  data: PortfolioAllocation | null
+  sort: string | null
+  dir: SortDir
+  onSort: (field: string) => void
+}
+
+function AllocationPanel({ data, sort, dir, onSort }: AllocationPanelProps) {
   const empty =
     !data ||
     (data.byAssetType.length === 0 &&
@@ -674,9 +693,9 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Group</TableHead>
-                <TableHead>Bucket</TableHead>
-                <TableHead>Market value</TableHead>
-                <TableHead>%</TableHead>
+                <SortableTableHead field="symbol" label="Bucket" currentSort={sort} dir={dir} onSort={onSort} />
+                <SortableTableHead field="marketValue" label="Market value" currentSort={sort} dir={dir} onSort={onSort} />
+                <SortableTableHead field="pctOfPortfolio" label="%" currentSort={sort} dir={dir} onSort={onSort} />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -687,7 +706,7 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
                     {row.assetType} ({row.currency})
                   </TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
+                  <TableCell>{safePct(row.percentage)}</TableCell>
                 </TableRow>
               ))}
               {data!.bySecurity.slice(0, 20).map((row) => (
@@ -697,7 +716,7 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
                     {row.symbol} ({row.currency})
                   </TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
+                  <TableCell>{safePct(row.percentage)}</TableCell>
                 </TableRow>
               ))}
               {data!.byAccount.map((row) => (
@@ -707,7 +726,7 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
                     {row.accountName} ({row.currency})
                   </TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
+                  <TableCell>{safePct(row.percentage)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

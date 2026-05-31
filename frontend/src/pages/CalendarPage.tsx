@@ -18,7 +18,7 @@ import {
   type FormEvent,
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
+import { Calendar as CalendarIcon, CalendarPlus, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -511,8 +511,26 @@ export function CalendarPage() {
                     </div>
                     <div className="row" style={{ gap: '0.25rem' }}>
                       <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
+                        {ev.recurrenceRule ? (
+                          <Repeat
+                            aria-hidden="true"
+                            className="mr-1 inline-block h-3 w-3"
+                          />
+                        ) : (
+                          <CalendarPlus
+                            aria-hidden="true"
+                            className="mr-1 inline-block h-3 w-3"
+                          />
+                        )}
                         {ev.kindLabel}
                       </Badge>
+                      <Link
+                        to={ev.recurrenceRule ? '/recurring' : '/planned'}
+                        className="text-xs underline text-muted-foreground"
+                        onClick={() => setDayDialogIso(null)}
+                      >
+                        View source
+                      </Link>
                       <Button
                         size="sm"
                         variant="secondary"
@@ -713,6 +731,7 @@ type MonthGridViewProps = {
 }
 
 function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: MonthGridViewProps) {
+  const navigate = useNavigate()
   return (
     <Card className="accountsFormCard">
       <div
@@ -762,9 +781,18 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
               {visible.map((ev, i) => (
                 <span
                   key={`${ev.id}-${i}`}
-                  className={`text-xs truncate rounded px-1 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
-                  title={`${ev.kindLabel}: ${ev.name}`}
+                  role="link"
+                  tabIndex={0}
+                  className={`text-xs truncate rounded px-1 cursor-pointer hover:opacity-80 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
+                  title={ev.recurrenceRule ? 'Recurring charge' : 'Planned event'}
+                  onClick={(e) => { e.stopPropagation(); navigate(ev.recurrenceRule ? '/recurring' : '/planned') }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); navigate(ev.recurrenceRule ? '/recurring' : '/planned') } }}
                 >
+                  {ev.recurrenceRule ? (
+                    <Repeat aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
+                  ) : (
+                    <CalendarPlus aria-hidden="true" className="mr-0.5 inline-block h-2.5 w-2.5" />
+                  )}
                   {ev.name}
                 </span>
               ))}
@@ -843,8 +871,25 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                 </div>
                 <div className="row" style={{ gap: '0.25rem' }}>
                   <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
+                    {ev.recurrenceRule ? (
+                      <Repeat
+                        aria-hidden="true"
+                        className="mr-1 inline-block h-3 w-3"
+                      />
+                    ) : (
+                      <CalendarPlus
+                        aria-hidden="true"
+                        className="mr-1 inline-block h-3 w-3"
+                      />
+                    )}
                     {ev.kindLabel}
                   </Badge>
+                  <Link
+                    to={ev.recurrenceRule ? '/recurring' : '/planned'}
+                    className="text-xs underline text-muted-foreground"
+                  >
+                    View source
+                  </Link>
                   <Button
                     size="sm"
                     variant="secondary"

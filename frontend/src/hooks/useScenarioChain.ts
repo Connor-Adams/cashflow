@@ -18,7 +18,7 @@ interface UseScenarioChainResult {
  * Walks the multi-year scenario chain forward via `next_year_id` from `id`'s
  * year-N anchor, returning `[{scenario, computed}]` entries in year order.
  *
- * Backed by `GET /api/tax/personal-scenarios/:id/chain`.
+ * Backed by `GET /api/tax/scenarios/personal/:id/chain`.
  *
  * When `id` is null, clears state and returns `data: null` without fetching.
  */
@@ -39,7 +39,7 @@ export function useScenarioChain(id: number | null): UseScenarioChainResult {
     setLoading(true);
     setError(null);
     getJson<{ chain: ScenarioChainEntry[] }>(
-      `/api/tax/personal-scenarios/${id}/chain`,
+      `/api/tax/scenarios/personal/${id}/chain`,
     )
       .then((d) => { if (!cancelled) { setData(d.chain); setLoading(false); } })
       .catch((e: unknown) => {

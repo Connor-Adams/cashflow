@@ -61,6 +61,7 @@ export class CashflowSettings extends Model<
    * first successful onboarding import.
    */
   declare onboardingDismissedAt: CreationOptional<Date | null>;
+  declare dismissedActivationCards: CreationOptional<string[]>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -139,6 +140,12 @@ export function initCashflowSettings(sequelize: Sequelize): typeof CashflowSetti
         field: 'onboarding_dismissed_at',
         allowNull: true,
         defaultValue: null,
+      },
+      dismissedActivationCards: {
+        type: DataTypes.JSONB,
+        field: 'dismissed_activation_cards',
+        allowNull: false,
+        defaultValue: [],
       },
     } as ModelAttributes<CashflowSettings>,
     {

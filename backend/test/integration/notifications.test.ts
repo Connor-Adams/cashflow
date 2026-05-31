@@ -1,6 +1,8 @@
 /**
- * Integration tests for /api/notifications and /api/notification-preferences
- * (issue #266). Spins up a real Postgres test database (via pgTestDb helper)
+ * Integration tests for /api/notifications and the user-namespaced
+ * notification preferences (/api/users/me/notifications/preferences, folded
+ * there by issue #379; the old /api/notification-preferences path now 410s).
+ * Spins up a real Postgres test database (via pgTestDb helper)
  * so the JSON column, indexes, and unique constraint actually exercise the
  * production dialect — sqlite is too forgiving for these.
  *
@@ -252,16 +254,23 @@ test('GET /api/notifications does not leak rows from another user (AC #13)', asy
   }
 });
 
-// ---- notification-preferences -------------------------------------------
+// ---- notification preferences (folded under user namespace, issue #379) --
+//
+// Live path: GET  /api/users/me/notifications/preferences
+//            PATCH /api/users/me/notifications/preferences/:type
+// The old /api/notification-preferences path now returns 410 Gone (asserted
+// in the dedicated test further down).
 
-test('GET /api/notification-preferences returns defaults for unknown types (AC #8)', async () => {
+const PREFS_PATH = '/api/users/me/notifications/preferences';
+
+test('GET /api/users/me/notifications/preferences returns defaults for unknown types (AC #8)', async () => {
   const { enqueueNotification } = await import('../../src/notifications/index.js');
   // Seed a notification of a never-before-seen type for primary.
   await enqueueNotification(primaryUserId, 'subscription.price_change', {
     title: 'Price change',
     body: 'Netflix increased',
   });
-  const res = await primaryAgent.get('/api/notification-preferences');
+  const res = await primaryAgent.get(PREFS_PATH);
   assert.equal(res.status, 200);
   const rows = res.body.data as Array<{
     type: string;
@@ -274,9 +283,9 @@ test('GET /api/notification-preferences returns defaults for unknown types (AC #
   assert.equal(found?.channelEmail, false);
 });
 
-test('PATCH /api/notification-preferences/:type upserts a preference (AC #9)', async () => {
+test('PATCH /api/users/me/notifications/preferences/:type upserts a preference (AC #9)', async () => {
   const res = await primaryAgent
-    .patch('/api/notification-preferences/budget.breach')
+    .patch(`${PREFS_PATH}/budget.breach`)
     .send({ channelInApp: false, channelEmail: true });
   assert.equal(res.status, 200);
   assert.equal(res.body.type, 'budget.breach');
@@ -284,8 +293,8 @@ test('PATCH /api/notification-preferences/:type upserts a preference (AC #9)', a
   assert.equal(res.body.channelEmail, true);
 });
 
-test('PATCH /api/notification-preferences/:type persists across calls', async () => {
-  const list = await primaryAgent.get('/api/notification-preferences');
+test('PATCH /api/users/me/notifications/preferences/:type persists across calls', async () => {
+  const list = await primaryAgent.get(PREFS_PATH);
   const found = (
     list.body.data as Array<{ type: string; channelInApp: boolean; channelEmail: boolean }>
   ).find((r) => r.type === 'budget.breach');
@@ -294,9 +303,9 @@ test('PATCH /api/notification-preferences/:type persists across calls', async ()
   assert.equal(found?.channelEmail, true);
 });
 
-test('PATCH /api/notification-preferences/:type rejects non-boolean body', async () => {
+test('PATCH /api/users/me/notifications/preferences/:type rejects non-boolean body', async () => {
   const res = await primaryAgent
-    .patch('/api/notification-preferences/budget.breach')
+    .patch(`${PREFS_PATH}/budget.breach`)
     .send({ channelInApp: 'no' });
   assert.equal(res.status, 400);
 });
@@ -315,17 +324,17 @@ test('enqueueNotification respects PATCHed mute (AC #2)', async () => {
   assert.equal(after.body.count, before.body.count);
 });
 
-test('PATCH /api/notification-preferences with empty body leaves the row as-is', async () => {
+test('PATCH /api/users/me/notifications/preferences with empty body leaves the row as-is', async () => {
   // Re-fetch the budget.breach pref (channelInApp=false, channelEmail=true).
   const res = await primaryAgent
-    .patch('/api/notification-preferences/budget.breach')
+    .patch(`${PREFS_PATH}/budget.breach`)
     .send({});
   assert.equal(res.status, 200);
   assert.equal(res.body.channelInApp, false);
   assert.equal(res.body.channelEmail, true);
 });
 
-test('notification-preferences are user-scoped (AC #13)', async () => {
+test('notification preferences are user-scoped (AC #13)', async () => {
   // Primary set budget.breach to channelInApp=false. Other user should
   // see *defaults* (channelInApp=true) for the same type.
   // First, ensure other has at least one budget.breach event so the type
@@ -335,13 +344,34 @@ test('notification-preferences are user-scoped (AC #13)', async () => {
     title: 'Other budget',
     body: 'body',
   });
-  const res = await otherAgent.get('/api/notification-preferences');
+  const res = await otherAgent.get(PREFS_PATH);
   const found = (
     res.body.data as Array<{ type: string; channelInApp: boolean; channelEmail: boolean }>
   ).find((r) => r.type === 'budget.breach');
   assert.ok(found, 'expected budget.breach row in other user list');
   assert.equal(found?.channelInApp, true, "other user's pref must use defaults, not primary's");
   assert.equal(found?.channelEmail, false);
+});
+
+// ---- old path is gone (issue #379, AC #2) -------------------------------
+
+test('GET /api/notification-preferences (old path) returns 410 Gone', async () => {
+  const res = await primaryAgent.get('/api/notification-preferences');
+  assert.equal(res.status, 410);
+  assert.equal(res.body.error, 'gone');
+  assert.match(
+    res.body.message,
+    /\/api\/users\/me\/notifications\/preferences/,
+    'the 410 body should point at the new path',
+  );
+});
+
+test('PATCH /api/notification-preferences/:type (old path) returns 410 Gone', async () => {
+  const res = await primaryAgent
+    .patch('/api/notification-preferences/budget.breach')
+    .send({ channelInApp: true });
+  assert.equal(res.status, 410);
+  assert.equal(res.body.error, 'gone');
 });
 
 // ---- AC #3 sanity: no email is sent ------------------------------------

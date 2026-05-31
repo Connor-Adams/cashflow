@@ -73,7 +73,7 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
     setLoading(true);
     setError(null);
     getJson<{ scenarios: Scenario[] }>(
-      `/api/tax/personal-scenarios?entityId=${entityId}&year=${year}`,
+      `/api/tax/scenarios/personal?entityId=${entityId}&year=${year}`,
     )
       .then((d) => { if (!cancelled) { setScenarios(d.scenarios); setLoading(false); } })
       .catch((e: unknown) => {
@@ -90,7 +90,7 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
   const create = useCallback<UseScenariosResult['create']>(
     async (input) => {
       const body = await postJson<{ scenario: Scenario }>(
-        '/api/tax/personal-scenarios',
+        '/api/tax/scenarios/personal',
         { entityId, year, ...input },
       );
       reload();
@@ -102,7 +102,7 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
   const patch = useCallback<UseScenariosResult['patch']>(
     async (id, body) => {
       const result = await patchJson<{ scenario: Scenario }>(
-        `/api/tax/personal-scenarios/${id}`,
+        `/api/tax/scenarios/personal/${id}`,
         body,
       );
       reload();
@@ -114,7 +114,7 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
   const fork = useCallback<UseScenariosResult['fork']>(
     async (id, name) => {
       const body = await postJson<{ scenario: Scenario }>(
-        `/api/tax/personal-scenarios/${id}/fork`,
+        `/api/tax/scenarios/personal/${id}/fork`,
         name ? { name } : {},
       );
       reload();
@@ -125,7 +125,7 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
 
   const remove = useCallback<UseScenariosResult['remove']>(
     async (id) => {
-      await deleteReq(`/api/tax/personal-scenarios/${id}`);
+      await deleteReq(`/api/tax/scenarios/personal/${id}`);
       reload();
     },
     [reload],
@@ -138,7 +138,7 @@ export function useScenarios(entityId: number, year: number): UseScenariosResult
   const projectNextYear = useCallback<UseScenariosResult['projectNextYear']>(
     async (id, input) => {
       const body = await postJson<{ scenario: Scenario }>(
-        `/api/tax/personal-scenarios/${id}/project-next-year`,
+        `/api/tax/scenarios/personal/${id}/project-next-year`,
         input ?? {},
       );
       reload();
@@ -183,7 +183,7 @@ export function useScenarioDetail(id: number | null): UseScenarioDetailResult {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getJson<ScenarioWithComputed>(`/api/tax/personal-scenarios/${id}`)
+    getJson<ScenarioWithComputed>(`/api/tax/scenarios/personal/${id}`)
       .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
       .catch((e: unknown) => {
         if (!cancelled) {
