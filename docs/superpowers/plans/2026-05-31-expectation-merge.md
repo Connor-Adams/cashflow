@@ -26,7 +26,7 @@ All commands run from `backend/`.
 ### Task 1: Migration M1 — add columns + partial unique index to `planned_events`
 
 **Files:**
-- Create: `backend/src/migrations/20260531000001-expectation-absorb-columns.js`
+- Create: `backend/src/migrations/20260611000001-expectation-absorb-columns.js`
 - Test: `backend/test/migrations/expectationAbsorbMigration.test.ts`
 
 - [ ] **Step 1: Write the failing migration test**
@@ -55,7 +55,7 @@ before(async () => {
     status: { type: DataTypes.STRING(32), allowNull: false, defaultValue: 'planned' },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260531000001-expectation-absorb-columns.js');
+  migration = require('../../src/migrations/20260611000001-expectation-absorb-columns.js');
 });
 
 after(async () => { await sequelize.close(); });
@@ -91,12 +91,12 @@ test('M1 down removes the added columns', async () => {
 - [ ] **Step 2: Run the test, verify it fails**
 
 Run: `yarn tsx --import ./test/setup.ts --test test/migrations/expectationAbsorbMigration.test.ts`
-Expected: FAIL — `Cannot find module '.../20260531000001-expectation-absorb-columns.js'`
+Expected: FAIL — `Cannot find module '.../20260611000001-expectation-absorb-columns.js'`
 
 - [ ] **Step 3: Write the migration**
 
 ```javascript
-// backend/src/migrations/20260531000001-expectation-absorb-columns.js
+// backend/src/migrations/20260611000001-expectation-absorb-columns.js
 'use strict';
 
 /**
@@ -158,7 +158,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/migrations/20260531000001-expectation-absorb-columns.js backend/test/migrations/expectationAbsorbMigration.test.ts
+git add backend/src/migrations/20260611000001-expectation-absorb-columns.js backend/test/migrations/expectationAbsorbMigration.test.ts
 git commit -m "feat(expectation): M1 — add subscription columns + kind to planned_events"
 ```
 
@@ -492,7 +492,7 @@ git commit -m "feat(expectation): subscriptions route reads/writes merged model 
 ### Task 4: Migration M2 — copy `subscriptions` rows into `planned_events`
 
 **Files:**
-- Create: `backend/src/migrations/20260531000002-expectation-absorb-data.js`
+- Create: `backend/src/migrations/20260611000002-expectation-absorb-data.js`
 - Test: `backend/test/migrations/expectationAbsorbDataMigration.test.ts`
 
 - [ ] **Step 1: Write the failing test**
@@ -551,9 +551,9 @@ before(async () => {
     updated_at: { type: DataTypes.DATE, allowNull: false },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  m1 = require('../../src/migrations/20260531000001-expectation-absorb-columns.js');
+  m1 = require('../../src/migrations/20260611000001-expectation-absorb-columns.js');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  m2 = require('../../src/migrations/20260531000002-expectation-absorb-data.js');
+  m2 = require('../../src/migrations/20260611000002-expectation-absorb-data.js');
   await m1.up(qi, Sequelize);
   const now = new Date();
   await qi.bulkInsert('household_members', [{ household_id: 1, user_id: 7, role: 'owner' }]);
@@ -603,7 +603,7 @@ Expected: FAIL — M2 module not found.
 - [ ] **Step 3: Write M2 (JS-side copy via `bulkInsert` for cross-dialect safety)**
 
 ```javascript
-// backend/src/migrations/20260531000002-expectation-absorb-data.js
+// backend/src/migrations/20260611000002-expectation-absorb-data.js
 'use strict';
 
 /**
@@ -681,7 +681,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/migrations/20260531000002-expectation-absorb-data.js backend/test/migrations/expectationAbsorbDataMigration.test.ts
+git add backend/src/migrations/20260611000002-expectation-absorb-data.js backend/test/migrations/expectationAbsorbDataMigration.test.ts
 git commit -m "feat(expectation): M2 — copy subscriptions into planned_events"
 ```
 
@@ -810,7 +810,7 @@ git commit -m "test(expectation): endpoint parity coverage for the fold"
 ### Task 7: Migration M3 — drop `subscriptions` + delete the model
 
 **Files:**
-- Create: `backend/src/migrations/20260531000003-drop-subscriptions.js`
+- Create: `backend/src/migrations/20260611000003-drop-subscriptions.js`
 - Delete: `backend/src/models/Subscription.ts`
 - Modify: `backend/src/models/index.ts` (remove Subscription import `:70`, init `:171`, registry `:1059`, association `:564-570`)
 - Test: `backend/test/migrations/dropSubscriptionsMigration.test.ts`
@@ -842,7 +842,7 @@ before(async () => {
     household_id: { type: DataTypes.INTEGER, allowNull: false },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260531000003-drop-subscriptions.js');
+  migration = require('../../src/migrations/20260611000003-drop-subscriptions.js');
 });
 after(async () => { await sequelize.close(); });
 
@@ -861,7 +861,7 @@ test('up drops subscriptions; down recreates it', async () => {
 - [ ] **Step 4: Write M3** (copy the `up` body of `20260530000002-subscriptions.js` verbatim into this migration's `down`, so a rollback recreates the table + indexes):
 
 ```javascript
-// backend/src/migrations/20260531000003-drop-subscriptions.js
+// backend/src/migrations/20260611000003-drop-subscriptions.js
 'use strict';
 /** Expectation fold — Phase A1, M3. Drop the subscriptions table now that all
  * reads/writes go through planned_events (kind='subscription'). Irreversible in
@@ -938,7 +938,7 @@ git commit -m "docs(spine): Expectation gains cancelled state; Subscription fold
 ### Task 9: Rename `planned_events` → `expectations`, `PlannedEvent` → `Expectation`
 
 **Files:**
-- Create: `backend/src/migrations/20260531000004-rename-planned-events-to-expectations.js`
+- Create: `backend/src/migrations/20260611000004-rename-planned-events-to-expectations.js`
 - Rename: `backend/src/models/PlannedEvent.ts` → `backend/src/models/Expectation.ts`
 - Modify: every importer (~14 backend files; mechanical find/replace)
 - Test: `backend/test/migrations/renameExpectationsMigration.test.ts`
@@ -948,7 +948,7 @@ git commit -m "docs(spine): Expectation gains cancelled state; Subscription fold
 - [ ] **Step 2: Migration**
 
 ```javascript
-// backend/src/migrations/20260531000004-rename-planned-events-to-expectations.js
+// backend/src/migrations/20260611000004-rename-planned-events-to-expectations.js
 'use strict';
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {

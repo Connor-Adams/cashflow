@@ -20,7 +20,7 @@ before(async () => {
     status: { type: DataTypes.STRING(32), allowNull: false, defaultValue: 'planned' },
   });
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  migration = require('../../src/migrations/20260531000001-expectation-absorb-columns.js');
+  migration = require('../../src/migrations/20260611000001-expectation-absorb-columns.js');
 });
 
 after(async () => { await sequelize.close(); });
