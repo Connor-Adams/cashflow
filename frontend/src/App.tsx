@@ -52,6 +52,7 @@ import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { LabelsTab } from './pages/settings/tabs/LabelsTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
+import { DataTab } from './pages/settings/tabs/DataTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
@@ -146,6 +147,7 @@ function AppRoutes() {
             <Route path="jobs" element={<JobsTab />} />
             <Route path="whatsnew" element={<WhatsNewTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
+            <Route path="data" element={<DataTab />} />
           </Route>
           {/* Unified review-items inbox (issue #378) replaces the separate AI
               inbox / AI reviews / CFO briefings list surfaces. Old routes

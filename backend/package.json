@@ -26,6 +26,8 @@
     "@opentelemetry/sdk-metrics": "^2.7.1",
     "@opentelemetry/sdk-node": "^0.218.0",
     "@opentelemetry/semantic-conventions": "^1.41.1",
+    "@types/archiver": "^7.0.0",
+    "archiver": "^8.0.0",
     "cors": "^2.8.5",
     "cron-parser": "^5.5.0",
     "csv-parse": "^5.6.0",

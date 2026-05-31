@@ -7,6 +7,8 @@ const backendRoot = path.join(__dirname, '..', '..');
 
 export type EnvConfig = {
   csvUploadDir: string;
+  exportDir: string;
+  exportSigningSecret: string;
   changelogDir: string;
   databaseUrl: string | null;
   databasePath: string;
@@ -109,6 +111,10 @@ export function loadEnvConfig(
 ): EnvConfig {
   const csvUploadDir =
     e.CSV_UPLOAD_DIR || path.join(backendRoot, 'uploads', 'csv');
+  const exportDir =
+    e.EXPORT_DIR || path.join(backendRoot, 'uploads', 'exports');
+  const exportSigningSecret =
+    e.EXPORT_SIGNING_SECRET || 'cashflow-export-signing-secret-change-in-prod';
   const changelogDir =
     e.CHANGELOG_DIR || path.join(backendRoot, '..', 'docs', 'changelog');
 
@@ -158,6 +164,8 @@ export function loadEnvConfig(
 
   return {
     csvUploadDir,
+    exportDir,
+    exportSigningSecret,
     changelogDir,
     databaseUrl,
     databasePath,
@@ -297,6 +305,8 @@ export function parseDividendDedupDays(raw: string | undefined): number {
 const resolved = loadEnvConfig(process.env as Record<string, string | undefined>);
 
 export const csvUploadDir = resolved.csvUploadDir;
+export const exportDir = resolved.exportDir;
+export const exportSigningSecret = resolved.exportSigningSecret;
 export const changelogDir = resolved.changelogDir;
 export const databaseUrl = resolved.databaseUrl;
 export const databasePath = resolved.databasePath;

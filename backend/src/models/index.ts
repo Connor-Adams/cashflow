@@ -111,6 +111,7 @@ import { Label, initLabel } from './Label';
 import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
 import { Feedback, initFeedback } from './Feedback';
 import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
+import { DataExport, initDataExport } from './DataExport';
 import {
   SubscriptionPriceChange,
   initSubscriptionPriceChange,
@@ -205,6 +206,7 @@ initLabel(sequelize);
 initTransactionLabel(sequelize);
 initFeedback(sequelize);
 initIncomeEntry(sequelize);
+initDataExport(sequelize);
 initSubscriptionPriceChange(sequelize);
 initSavedFilter(sequelize);
 
@@ -1100,4 +1102,5 @@ export {
   IncomeEntry,
   SubscriptionPriceChange,
   SavedFilter,
+  DataExport,
 };
