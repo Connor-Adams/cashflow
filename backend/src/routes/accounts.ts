@@ -6,6 +6,7 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
 import { currentOwed, utilizationPct } from '../cards/utilization';
+import { renderUserMarkdown } from '../services/markdownSanitize';
 
 const CREDIT_CARD_TYPE = 'credit_card';
 
@@ -24,8 +25,19 @@ async function enrichAccount(
   account: InstanceType<typeof Account>,
   profileByAccount: Map<number, InstanceType<typeof LiabilityAccount>>,
   asOf: string,
+  opts?: { includeFullNotes?: boolean },
 ): Promise<Record<string, unknown>> {
   const base = account.toJSON() as Record<string, unknown>;
+  const rawNotes = account.notes;
+  const trimmedNotes = rawNotes?.trim() ?? null;
+  if (opts?.includeFullNotes) {
+    base.notes = rawNotes;
+    base.notesHtml = trimmedNotes ? renderUserMarkdown(trimmedNotes) : null;
+  } else {
+    // List endpoint: return only a short preview, not the full markdown.
+    base.notesPreview = trimmedNotes ? trimmedNotes.slice(0, 100) : null;
+    delete base.notes;
+  }
   if (account.accountType !== CREDIT_CARD_TYPE) {
     base.creditLimit = null;
     base.currentBalance = null;
@@ -85,12 +97,15 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType } = (req.body || {}) as Record<
-      string,
-      unknown
-    >;
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, notes } =
+      (req.body || {}) as Record<string, unknown>;
     if (!name) {
       res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const notesValue = notes != null ? String(notes) : null;
+    if (notesValue !== null && notesValue.trim().length > 4000) {
+      res.status(400).json({ error: 'NOTES_TOO_LONG' });
       return;
     }
     const dc =
@@ -106,8 +121,31 @@ router.post('/', async (req, res, next) => {
       accountType: normalizeAccountType(accountType),
       shortCode: (shortCode as string) || null,
       defaultCurrency: dc,
+      notes: notesValue?.trim() || null,
     });
     res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const account = await Account.findOne({ where: { id, ...visibleAccountWhere(req) } });
+    if (!account) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const profile = await LiabilityAccount.findOne({ where: { accountId: account.id } });
+    const profileByAccount = new Map<number, InstanceType<typeof LiabilityAccount>>();
+    if (profile) profileByAccount.set(profile.accountId, profile);
+    const enriched = await enrichAccount(account, profileByAccount, todayIso(), { includeFullNotes: true });
+    res.json(enriched);
   } catch (e) {
     next(e);
   }
@@ -148,8 +186,9 @@ router.patch('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt, creditLimit } =
-      (req.body || {}) as Record<string, unknown>;
+    const {
+      name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt, creditLimit, notes,
+    } = (req.body || {}) as Record<string, unknown>;
     if (name !== undefined) {
       const value = String(name).trim();
       if (!value) {
@@ -222,6 +261,15 @@ router.patch('/:id', async (req, res, next) => {
       }
     }
 
+    if (notes !== undefined) {
+      const notesValue = notes === null || notes === '' ? null : String(notes);
+      if (notesValue !== null && notesValue.trim().length > 4000) {
+        res.status(400).json({ error: 'NOTES_TOO_LONG' });
+        return;
+      }
+      account.set('notes', notesValue?.trim() || null);
+    }
+
     await account.save();
 
     if (nextCreditLimit !== undefined) {
@@ -245,7 +293,7 @@ router.patch('/:id', async (req, res, next) => {
     const profile = await LiabilityAccount.findOne({ where: { accountId: account.id } });
     const profileByAccount = new Map<number, InstanceType<typeof LiabilityAccount>>();
     if (profile) profileByAccount.set(profile.accountId, profile);
-    const enriched = await enrichAccount(account, profileByAccount, todayIso());
+    const enriched = await enrichAccount(account, profileByAccount, todayIso(), { includeFullNotes: true });
     res.json(enriched);
   } catch (e) {
     next(e);

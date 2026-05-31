@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +22,8 @@ import { useToast } from '@/components/ui/toast'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account, AccountType } from '../types/api'
+
+const NOTES_MAX = 4000
 
 function formatMoney(value: number | null | undefined, currency: string | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—'
@@ -62,6 +64,7 @@ export function AccountsPage() {
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editCreditLimit, setEditCreditLimit] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -204,6 +207,11 @@ export function AccountsPage() {
         creditLimitPayload = n
       }
     }
+    const notesValue = editNotes.trim()
+    if (notesValue.length > NOTES_MAX) {
+      setErr(`Notes must be ${NOTES_MAX} characters or fewer.`)
+      return
+    }
     setErr(null)
     try {
       const payload: Record<string, unknown> = {
@@ -214,6 +222,7 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
+        notes: notesValue || null,
       }
       if (creditLimitPayload !== undefined) payload.creditLimit = creditLimitPayload
       await patchJson<Account>(`/api/accounts/${id}`, payload)
@@ -226,7 +235,8 @@ export function AccountsPage() {
       setEditVisibility('private')
       setEditClosedAt('')
       setEditCreditLimit('')
-      showToast({ title: 'Limit saved.', variant: 'success', durationMs: 2000 })
+      setEditNotes('')
+      showToast({ title: 'Notes saved.', variant: 'success', durationMs: 2000 })
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -243,9 +253,10 @@ export function AccountsPage() {
     setEditVisibility('private')
     setEditClosedAt('')
     setEditCreditLimit('')
+    setEditNotes('')
   }
 
-  function startEdit(account: Account) {
+  async function startEdit(account: Account) {
     setEditingId(account.id)
     setEditName(account.name)
     setEditOwner((account.owner as 'me' | 'partner' | 'joint') ?? 'me')
@@ -255,6 +266,13 @@ export function AccountsPage() {
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
     setEditCreditLimit(account.creditLimit != null ? String(account.creditLimit) : '')
+    setEditNotes('')
+    try {
+      const full = await getJson<Account>(`/api/accounts/${account.id}`)
+      setEditNotes(full.notes ?? '')
+    } catch {
+      setEditNotes(account.notesPreview ?? '')
+    }
   }
 
   const accountCount = accounts.length
@@ -423,7 +441,8 @@ export function AccountsPage() {
                 ))
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
+                  <React.Fragment key={a.id}>
+                  <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -448,7 +467,14 @@ export function AccountsPage() {
                           placeholder="Account name"
                         />
                       ) : (
-                        a.name
+                        <div>
+                          {a.name}
+                          {a.notesPreview ? (
+                            <div className="text-xs text-muted-foreground truncate max-w-xs mt-0.5">
+                              {a.notesPreview}
+                            </div>
+                          ) : null}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>
@@ -549,7 +575,7 @@ export function AccountsPage() {
                           type="button"
                           size="sm"
                           variant="secondary"
-                          onClick={() => startEdit(a)}
+                          onClick={() => void startEdit(a)}
                         >
                           Set credit limit
                         </Button>
@@ -577,7 +603,7 @@ export function AccountsPage() {
                             </Button>
                           </>
                         ) : (
-                          <Button type="button" size="sm" variant="secondary" onClick={() => startEdit(a)}>
+                          <Button type="button" size="sm" variant="secondary" onClick={() => void startEdit(a)}>
                             <Edit3 aria-hidden="true" />
                             Edit
                           </Button>
@@ -594,6 +620,38 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId === a.id && (
+                    <TableRow key={`${a.id}-notes`}>
+                      <TableCell colSpan={9} className="pt-0 pb-2">
+                        <Label className="flex flex-col gap-1 px-1">
+                          Notes
+                          <textarea
+                            className="min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            placeholder="Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account."
+                            maxLength={NOTES_MAX + 100}
+                          />
+                          <span className={`text-xs self-end ${editNotes.length > 3800 ? 'text-rose-500' : 'text-muted-foreground'}`}>
+                            {editNotes.length}/{NOTES_MAX}
+                          </span>
+                        </Label>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {editingId !== a.id && a.notesPreview ? (
+                    <TableRow key={`${a.id}-notes-view`}>
+                      <TableCell colSpan={9} className="pt-0 pb-2">
+                        <div className="px-1">
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Notes</p>
+                          <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                            {a.notesPreview}
+                          </p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                  </React.Fragment>
                 ))
               )}
             </TableBody>
