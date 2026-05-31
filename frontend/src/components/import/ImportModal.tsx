@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Dialog,
   DialogHeader,
@@ -11,6 +12,7 @@ import { Alert, type AlertVariant } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useToast } from '@/components/ui/toast'
 import { getJson, postFormData } from '../../lib/api'
 import { formatParseErrorLines } from '../../lib/formatParseErrors'
 import type { Account } from '../../types/api'
@@ -124,6 +126,8 @@ export function ImportModal({
   onCommitted,
   onAccountsChanged,
 }: ImportModalProps) {
+  const navigate = useNavigate()
+  const { showToast } = useToast()
   const [files, setFiles] = useState<File[]>([])
   const [autoMode, setAutoMode] = useState<DetectedMode>('standard')
   const [overrideMode, setOverrideMode] = useState<DetectedMode | null>(null)
@@ -193,6 +197,17 @@ export function ImportModal({
     setFiles((prev) => prev.filter((_, i) => i !== idx))
   }
 
+  function celebrateImport(txnCount: number) {
+    if (txnCount <= 0) return
+    showToast({
+      variant: 'success',
+      title: `${txnCount} transaction${txnCount === 1 ? '' : 's'} imported`,
+      description: 'Head to the dashboard to see suggested next steps.',
+      durationMs: 8000,
+      action: { label: 'Go to dashboard', onClick: () => navigate('/') },
+    })
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (files.length === 0) {
@@ -222,6 +237,8 @@ export function ImportModal({
           title: `PDF bundle: ${ok}/${results.length} imported, ${acctNew} new account(s), ${dupes} dupes skipped`,
           lines,
         })
+        const txns = results.reduce((s, r) => s + r.insertedTransactions, 0)
+        celebrateImport(txns)
         if (acctNew > 0 && onAccountsChanged) onAccountsChanged()
         else onCommitted()
         reset()
@@ -239,6 +256,7 @@ export function ImportModal({
           title: `WS bundle: ${ok}/${results.length} imported · ${inserted} row(s)`,
           lines,
         })
+        celebrateImport(inserted)
         if (onAccountsChanged) onAccountsChanged()
         else onCommitted()
         reset()
@@ -278,6 +296,7 @@ export function ImportModal({
               : `Imported ${result.inserted ?? 0} row(s) · batch "${result.batchLabel ?? ''}" · dupes ${result.skippedDuplicates ?? 0}`,
             lines: result.parseErrors?.length ? formatParseErrorLines(result.parseErrors) : undefined,
           })
+          if (!result.skipped) celebrateImport(result.inserted ?? 0)
         } else {
           files.forEach((f) => fd.append('files', f))
           const out = await postFormData<MultiUploadResponse>(MULTI_URL, fd)
@@ -288,6 +307,7 @@ export function ImportModal({
             title: `Imported ${inserted} row(s) across ${imported}/${out.results.length} file(s)`,
             lines: out.results.slice(0, 8).map((r) => `${r.file}: ${r.skipped ? `skipped (${r.reason ?? 'unknown'})` : `${r.inserted ?? 0} row(s)`}`),
           })
+          celebrateImport(inserted)
         }
         onCommitted()
         reset()

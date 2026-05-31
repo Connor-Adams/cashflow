@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Tabs, TabPanel } from '@/components/ui/tabs'
 import { ItemsBrowse } from '@/components/items/ItemsBrowse'
 import { ItemsSearch } from '@/components/items/ItemsSearch'
@@ -112,9 +112,27 @@ export function ItemsPage() {
         <ItemsBrowse filters={filters} onOpenItem={openItem} />
       </TabPanel>
       <TabPanel value="analyze" active={tab}>
-        <div className="rounded-lg border p-6 text-center space-y-2">
-          <p className="font-semibold">Analyze items — coming soon</p>
-          <p className="text-sm text-muted-foreground">This view will summarize spending and trends by item.</p>
+        <div className="rounded-lg border p-8 text-center space-y-3">
+          <p className="font-semibold">Item analytics</p>
+          <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+            Top spend by item, brand spend bars, and unit-price trend are on the roadmap.
+            Import a receipt to add item-level data first.
+          </p>
+          <div className="flex justify-center gap-3 pt-1">
+            <Link
+              to="/import"
+              className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent"
+            >
+              Go to import
+            </Link>
+            <button
+              type="button"
+              onClick={() => setTab('browse')}
+              className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent"
+            >
+              Browse items
+            </button>
+          </div>
         </div>
       </TabPanel>
       <TabPanel value="search" active={tab}>

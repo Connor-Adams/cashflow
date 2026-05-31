@@ -30,6 +30,7 @@ import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
+import { NextActionCards } from '@/components/dashboard/NextActionCards'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { useInsightsSeen } from '@/hooks/useInsightsSeen'
@@ -303,6 +304,8 @@ export function DashboardPage() {
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
   const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
   const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
+  const [hasGoals, setHasGoals] = useState(true) // Optimistically hide until we know
+  const [hasPartner, setHasPartner] = useState(true)
   // Recurring charges, fetched separately so a /api/recurring failure
   // never tanks the rest of the dashboard. Empty list on failure or
   // initial load.
@@ -403,6 +406,17 @@ export function DashboardPage() {
       cancelled = true
     }
   }, [currency])
+
+  // Fetch goals + member count for next-action cards. Best-effort; failures leave
+  // the defaults (optimistically hidden) so errors don't add noise.
+  useEffect(() => {
+    void getJson<{ data: unknown[] }>('/api/goals')
+      .then((r) => setHasGoals(r.data.length > 0))
+      .catch(() => setHasGoals(true))
+    void getJson<unknown[]>('/api/household/members')
+      .then((r) => setHasPartner(r.length > 1))
+      .catch(() => setHasPartner(true))
+  }, [])
 
   // Sort most-at-risk first; ties broken by category label so layout is
   // deterministic between renders. Overall budgets ("null" category) get a
@@ -926,6 +940,13 @@ export function DashboardPage() {
           />
         </CardContent>
       </Card>
+
+      <NextActionCards
+        hasBudgets={budgetProgress.length > 0}
+        hasGoals={hasGoals}
+        reviewCount={summaryStats.reviewCount}
+        hasPartner={hasPartner}
+      />
 
       <div
         className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
