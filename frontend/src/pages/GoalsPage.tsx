@@ -22,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { clampPct, safePct, safeNum } from '../lib/num'
 import type {
   Account,
   FinancialGoal,
@@ -483,6 +484,8 @@ export function GoalsPage() {
                   const projection = projections[row.id]
                   const progress = projection?.progressPercent ?? 0
                   const projStatus = projection?.status ?? 'active'
+                  const currentAmt = safeNum(row.currentAmount)
+                  const targetAmt = safeNum(row.targetAmount)
                   return (
                     <TableRow key={row.id}>
                       <TableCell>
@@ -496,34 +499,40 @@ export function GoalsPage() {
                           <div
                             className="h-2 w-32 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
                             role="progressbar"
-                            aria-valuenow={Math.round(progress)}
+                            aria-valuenow={clampPct(progress)}
                             aria-valuemin={0}
                             aria-valuemax={100}
                             aria-label={`Progress for ${row.name}`}
                           >
                             <div
                               className="h-full bg-emerald-500 dark:bg-emerald-400"
-                              style={{ width: `${progress}%` }}
+                              style={{ width: `${clampPct(progress)}%` }}
                             />
                           </div>
                           <div className="muted text-xs">
-                            {formatMoney(Number(row.currentAmount), row.currency)}
+                            {currentAmt === null
+                              ? <span className="italic text-muted-foreground">(unset)</span>
+                              : formatMoney(currentAmt, row.currency)}
                             {' / '}
-                            {formatMoney(Number(row.targetAmount), row.currency)}
+                            {targetAmt === null
+                              ? <span className="italic text-muted-foreground">(unset)</span>
+                              : formatMoney(targetAmt, row.currency)}
                             {' '}
-                            ({progress.toFixed(0)}%)
+                            ({safePct(progress, { digits: 0 })})
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {formatMoney(Number(row.targetAmount), row.currency)}
+                        {targetAmt === null
+                          ? <span className="italic text-muted-foreground">(unset)</span>
+                          : formatMoney(targetAmt, row.currency)}
                       </TableCell>
                       <TableCell>{row.targetDate ?? '—'}</TableCell>
                       <TableCell>
                         {row.monthlyContribution == null
                           ? '—'
                           : formatMoney(
-                              Number(row.monthlyContribution),
+                              safeNum(row.monthlyContribution) ?? 0,
                               row.currency,
                             )}
                       </TableCell>
@@ -533,7 +542,7 @@ export function GoalsPage() {
                             <div>
                               Need{' '}
                               {formatMoney(
-                                Number(projection.requiredMonthlyContribution),
+                                safeNum(projection.requiredMonthlyContribution) ?? 0,
                                 row.currency,
                               )}
                               /mo

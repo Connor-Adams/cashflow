@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { postJson } from '@/lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safeNum } from '../lib/num'
 
 /**
  * Opportunity-cost calculator (issue #252): "what if I invested this money
@@ -85,6 +86,7 @@ export function OpportunityCostCalculator({
   const [result, setResult] = useState<CalculationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   function reset() {
     setMode(defaults.mode)
@@ -94,19 +96,34 @@ export function OpportunityCostCalculator({
     setHorizonYears(defaults.horizonYears)
     setResult(null)
     setError(null)
+    setFieldErrors({})
   }
 
   async function calculate(event?: React.FormEvent) {
     event?.preventDefault()
     setError(null)
+
+    const errs: Record<string, string> = {}
+    const parsedAmount = safeNum(amount)
+    if (parsedAmount === null || parsedAmount <= 0) errs.amount = 'Enter a positive number.'
+    const parsedReturn = safeNum(returnPercent)
+    if (parsedReturn === null || parsedReturn < 0) errs.returnPercent = 'Enter a positive number.'
+    const parsedHorizon = safeNum(horizonYears)
+    if (parsedHorizon === null || parsedHorizon <= 0) errs.horizonYears = 'Enter a positive number.'
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs)
+      return
+    }
+    setFieldErrors({})
+
     setLoading(true)
     try {
       const payload: Record<string, unknown> = {
         mode,
-        amount: Number(amount),
-        horizonYears: Number(horizonYears),
+        amount: parsedAmount,
+        horizonYears: parsedHorizon,
         // Percent in the UI, decimal on the wire.
-        annualReturnRate: Number(returnPercent) / 100,
+        annualReturnRate: parsedReturn! / 100,
       }
       if (mode === 'recurring') payload.cadence = cadence
 
@@ -164,6 +181,11 @@ export function OpportunityCostCalculator({
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
             />
+            {fieldErrors.amount ? (
+              <span className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+                {fieldErrors.amount}
+              </span>
+            ) : null}
           </Label>
 
           {mode === 'recurring' ? (
@@ -193,6 +215,11 @@ export function OpportunityCostCalculator({
               value={returnPercent}
               onChange={(e) => setReturnPercent(e.target.value)}
             />
+            {fieldErrors.returnPercent ? (
+              <span className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+                {fieldErrors.returnPercent}
+              </span>
+            ) : null}
           </Label>
 
           <Label>
@@ -205,6 +232,11 @@ export function OpportunityCostCalculator({
               value={horizonYears}
               onChange={(e) => setHorizonYears(e.target.value)}
             />
+            {fieldErrors.horizonYears ? (
+              <span className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+                {fieldErrors.horizonYears}
+              </span>
+            ) : null}
           </Label>
         </div>
 
