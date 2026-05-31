@@ -26,8 +26,8 @@ import {
   MONEY_LEAK_TYPES,
   type MoneyLeakType,
 } from '../models/MoneyLeakDismissal';
-import { Subscription } from '../models/Subscription';
-import { Transaction } from '../models';
+import { PlannedEvent, Transaction } from '../models';
+import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { num } from '../util/numbers';
@@ -136,24 +136,28 @@ router.get('/', async (req, res, next) => {
     const auth = currentAuth(req);
     const currency = parseCurrency(req.query.currency);
 
-    // 1. Active subscriptions for this household.
-    const subRows = await Subscription.findAll({
-      where: { ...householdWhere(req) },
+    // 1. Subscriptions for this household — now folded into planned_events as
+    //    kind='subscription' (Expectation merge). serializeSubscription maps a
+    //    merged row back to the legacy Subscription DTO the detector expects.
+    const subRows = await PlannedEvent.findAll({
+      where: { ...householdWhere(req), kind: 'subscription' },
     });
-    const subscriptions: LeakSubscription[] = subRows.map((row) => ({
-      id: row.id,
-      merchantName: row.merchantName,
-      normalizedName: row.normalizedName,
-      currency: row.currency,
-      amount: Number(row.amount),
-      cadence: row.cadence,
-      annualizedCost: Number(row.annualizedCost),
-      status: row.status,
-      priceChangeDetected: Boolean(row.priceChangeDetected),
-      category: row.category,
-      lastChargeDate: row.lastChargeDate,
-      nextExpectedDate: row.nextExpectedDate,
-    }));
+    const subscriptions: LeakSubscription[] = subRows
+      .map(serializeSubscription)
+      .map((row) => ({
+        id: row.id,
+        merchantName: row.merchantName,
+        normalizedName: row.normalizedName,
+        currency: row.currency,
+        amount: Number(row.amount),
+        cadence: row.cadence,
+        annualizedCost: Number(row.annualizedCost),
+        status: row.status,
+        priceChangeDetected: Boolean(row.priceChangeDetected),
+        category: row.category,
+        lastChargeDate: row.lastChargeDate,
+        nextExpectedDate: row.nextExpectedDate,
+      }));
 
     // 2. Recurring transaction groups (180d window) — for recurring_fee.
     const sinceRecurring = new Date(

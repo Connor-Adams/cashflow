@@ -246,6 +246,7 @@ router.get('/', async (req, res, next) => {
     // started long before the window).
     const eventWhere: WhereOptions = {
       ...householdWhere(req),
+      kind: 'planned',
       currency: forecastCurrency,
       status: 'planned',
       expectedDate: { [Op.lte]: dateTo },

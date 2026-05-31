@@ -607,11 +607,12 @@ router.post('/:accountId/mark-paid', async (req, res, next) => {
         res.status(400).json({ error: 'plannedEventId must be a positive integer' });
         return;
       }
-      plannedEvent = await PlannedEvent.findOne({ where: { id, ...householdWhere(req) } });
+      plannedEvent = await PlannedEvent.findOne({ where: { id, kind: 'planned', ...householdWhere(req) } });
     } else {
       plannedEvent = await PlannedEvent.findOne({
         where: {
           ...householdWhere(req),
+          kind: 'planned',
           accountId,
           source: 'credit_card',
           status: 'planned',

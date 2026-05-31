@@ -128,6 +128,7 @@ export async function buildReviewActionItems(
       PlannedEvent.findAll({
         where: {
           householdId,
+          kind: 'planned',
           status: 'planned',
           expectedDate: {
             [Op.lt]: periodEnd,
