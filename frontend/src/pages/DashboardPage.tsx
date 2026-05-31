@@ -308,6 +308,7 @@ export function DashboardPage() {
   // initial load.
   const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
   const [recurringLoading, setRecurringLoading] = useState(true)
+  const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -429,6 +430,12 @@ export function DashboardPage() {
       cancelled = true
     }
   }, [currency])
+
+  useEffect(() => {
+    void getJson<unknown[]>('/api/subscription-price-changes?status=unack')
+      .then((rows) => setPriceChangeCount(rows.length))
+      .catch(() => setPriceChangeCount(0))
+  }, [])
 
   const currencies = useMemo(() => {
     const s = new Set<string>()
@@ -965,6 +972,21 @@ export function DashboardPage() {
               <a href="#ai-insights-tile" className="text-sm font-semibold underline">
                 Jump to insights
               </a>
+            }
+          />
+        )}
+        {priceChangeCount > 0 && (
+          <BentoTile
+            span={12}
+            rows={1}
+            variant="destructive"
+            role="status"
+            aria-live="polite"
+            label={`${priceChangeCount} subscription price change${priceChangeCount === 1 ? '' : 's'} this month`}
+            actions={
+              <Link to="/subscriptions?priceChange=unack" className="text-sm font-semibold underline">
+                Review
+              </Link>
             }
           />
         )}

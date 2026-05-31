@@ -113,6 +113,10 @@ import { Feedback, initFeedback } from './Feedback';
 import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
 import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
 import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
+import {
+  SubscriptionPriceChange,
+  initSubscriptionPriceChange,
+} from './SubscriptionPriceChange';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -204,6 +208,7 @@ initFeedback(sequelize);
 initClientErrorEvent(sequelize);
 initServerErrorEvent(sequelize);
 initIncomeEntry(sequelize);
+initSubscriptionPriceChange(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -1097,4 +1102,5 @@ export {
   ClientErrorEvent,
   ServerErrorEvent,
   IncomeEntry,
+  SubscriptionPriceChange,
 };

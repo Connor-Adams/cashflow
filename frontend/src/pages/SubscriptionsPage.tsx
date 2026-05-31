@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CancelImpactCard } from '@/components/subscriptions/CancelImpactCard'
-import { getJson, patchJson } from '../lib/api'
+import { getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   CancelImpact,
@@ -411,21 +411,72 @@ function SubscriptionRow({
   // cancel-impact preview is hidden (there's nothing left to save). (#291 AC #11)
   const isCancelled = item.status === 'cancelled'
   const [showImpact, setShowImpact] = useState(false)
+  const [priceDrawerOpen, setPriceDrawerOpen] = useState(false)
+  const [pendingChange, setPendingChange] = useState(item.pendingPriceChange)
+  const { toast } = useToast()
+
+  async function acknowledgePriceChange() {
+    if (!pendingChange) return
+    try {
+      await postJson(`/api/subscription-price-changes/${pendingChange.id}/acknowledge`, {})
+      setPendingChange(null)
+      setPriceDrawerOpen(false)
+      toast({ title: 'Acknowledged.' })
+    } catch {
+      toast({ title: 'Failed to acknowledge', variant: 'destructive' })
+    }
+  }
+
+  const pctNum = pendingChange ? parseFloat(pendingChange.pctChange) : 0
+  const pctLabel = pendingChange
+    ? `${pctNum >= 0 ? '↑' : '↓'} ${Math.abs(pctNum).toFixed(1)}%`
+    : ''
 
   return (
     <TableRow>
       <TableCell>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {item.merchantName}
-          {item.priceChangeDetected && (
+          {pendingChange ? (
+            <Badge
+              variant={pctNum >= 0 ? 'destructive' : 'default'}
+              title={`Went from ${formatMoney(pendingChange.prevCents / 100, item.currency)} to ${formatMoney(pendingChange.newCents / 100, item.currency)} on ${pendingChange.detectedOn}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setPriceDrawerOpen(true)}
+            >
+              Price {pctLabel}
+            </Badge>
+          ) : item.priceChangeDetected ? (
             <Badge
               variant="destructive"
               title="Price has increased since the last refresh"
             >
               <AlertTriangle size={12} aria-hidden="true" /> price up
             </Badge>
-          )}
+          ) : null}
         </div>
+        {priceDrawerOpen && pendingChange && (
+          <Dialog open={priceDrawerOpen} onOpenChange={setPriceDrawerOpen}>
+            <DialogHeader>
+              <DialogTitle>{item.merchantName} price changed</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p>
+                Previously {formatMoney(pendingChange.prevCents / 100, item.currency)} / month →
+                {' '}Now {formatMoney(pendingChange.newCents / 100, item.currency)} / month.
+                Detected from charges on {pendingChange.detectedOn}.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPriceDrawerOpen(false)}>
+                Close
+              </Button>
+              <Button onClick={() => { void acknowledgePriceChange() }}>
+                Acknowledge
+              </Button>
+            </DialogFooter>
+          </Dialog>
+        )}
         {item.cancellationUrl && (
           <a
             href={item.cancellationUrl}

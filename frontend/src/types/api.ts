@@ -154,6 +154,13 @@ export type Subscription = {
   category: string | null
   annualizedCost: string
   priceChangeDetected: boolean
+  pendingPriceChange: {
+    id: number
+    prevCents: number
+    newCents: number
+    pctChange: string
+    detectedOn: string
+  } | null
   cancellationUrl: string | null
   notes: string | null
   createdAt: string
