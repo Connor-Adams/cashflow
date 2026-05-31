@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -62,6 +62,8 @@ export function AccountsPage() {
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editCreditLimit, setEditCreditLimit] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
+  const [notesError, setNotesError] = useState<string | null>(null)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -204,7 +206,13 @@ export function AccountsPage() {
         creditLimitPayload = n
       }
     }
+    const notesTrimmed = editNotes.trim()
+    if (notesTrimmed.length > 4000) {
+      setNotesError('Notes must be 4000 characters or fewer.')
+      return
+    }
     setErr(null)
+    setNotesError(null)
     try {
       const payload: Record<string, unknown> = {
         name,
@@ -214,9 +222,10 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
+        notes: notesTrimmed || null,
       }
       if (creditLimitPayload !== undefined) payload.creditLimit = creditLimitPayload
-      await patchJson<Account>(`/api/accounts/${id}`, payload)
+      const updated = await patchJson<Account>(`/api/accounts/${id}`, payload)
       setEditingId(null)
       setEditName('')
       setEditOwner('me')
@@ -226,10 +235,22 @@ export function AccountsPage() {
       setEditVisibility('private')
       setEditClosedAt('')
       setEditCreditLimit('')
-      showToast({ title: 'Limit saved.', variant: 'success', durationMs: 2000 })
+      setEditNotes('')
+      const notesChanged = notesTrimmed !== (updated.notes ?? '')
+      showToast({
+        title: notesChanged ? 'Notes saved.' : 'Account saved.',
+        variant: 'success',
+        durationMs: 2000,
+      })
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not update account')
+      const msg = e instanceof Error ? e.message : 'Could not update account'
+      if (msg === 'NOTES_TOO_LONG') {
+        setNotesError('Notes must be 4000 characters or fewer.')
+      } else {
+        showToast({ title: "Couldn't save notes. Try again.", variant: 'destructive' })
+        setErr(msg)
+      }
     }
   }
 
@@ -243,6 +264,8 @@ export function AccountsPage() {
     setEditVisibility('private')
     setEditClosedAt('')
     setEditCreditLimit('')
+    setEditNotes('')
+    setNotesError(null)
   }
 
   function startEdit(account: Account) {
@@ -255,6 +278,8 @@ export function AccountsPage() {
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
     setEditCreditLimit(account.creditLimit != null ? String(account.creditLimit) : '')
+    setEditNotes(account.notes ?? account.notesPreview ?? '')
+    setNotesError(null)
   }
 
   const accountCount = accounts.length
@@ -423,7 +448,8 @@ export function AccountsPage() {
                 ))
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
+                  <React.Fragment key={a.id}>
+                  <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -448,7 +474,14 @@ export function AccountsPage() {
                           placeholder="Account name"
                         />
                       ) : (
-                        a.name
+                        <div>
+                          <span>{a.name}</span>
+                          {a.notesPreview && (
+                            <p className="text-xs text-muted-foreground mt-0.5 max-w-xs truncate" title={a.notesPreview}>
+                              {a.notesPreview}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>
@@ -594,6 +627,39 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId === a.id && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="py-3 px-4 bg-muted/20">
+                        <label className="block text-sm font-medium mb-1" htmlFor={`notes-${a.id}`}>
+                          Notes
+                          <span className="ml-1 text-xs text-muted-foreground font-normal">
+                            Routing numbers, custodian contacts, tax-id references — anything you want to remember about this account.
+                          </span>
+                        </label>
+                        <textarea
+                          id={`notes-${a.id}`}
+                          rows={6}
+                          value={editNotes}
+                          onChange={(e) => {
+                            setEditNotes(e.target.value)
+                            setNotesError(e.target.value.trim().length > 4000 ? 'Notes must be 4000 characters or fewer.' : null)
+                          }}
+                          className="w-full rounded border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                          placeholder="Optional notes…"
+                          maxLength={4100}
+                        />
+                        <div className="flex justify-between items-center mt-1">
+                          <span className={`text-xs ${editNotes.trim().length > 3800 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                            {editNotes.trim().length}/4000
+                          </span>
+                          {notesError && (
+                            <span className="text-xs text-destructive">{notesError}</span>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
                 ))
               )}
             </TableBody>

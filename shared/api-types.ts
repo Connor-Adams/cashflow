@@ -19,6 +19,10 @@ export type Account = {
   /** currentBalance / creditLimit × 100, or null when either is missing or
    *  the card is closed. Frontend renders the badge tier from this. */
   utilizationPct?: number | null
+  /** First 100 chars of notes (list endpoint). Null when empty. */
+  notesPreview?: string | null
+  /** Full notes markdown text (detail/PATCH endpoint only). */
+  notes?: string | null
 }
 
 /**
