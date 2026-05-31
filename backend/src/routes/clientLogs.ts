@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { ClientLogLevel, ClientLogPayload } from '@cashflow/shared';
 import { logger } from '../observability/logger';
+import { pushClientError } from '../audit/clientErrorBuffer';
 
 const router = Router();
 
@@ -62,6 +63,15 @@ router.post('/', clientLogLimiter, (req, res) => {
     householdId: req.auth?.household.id,
     ...fields,
   }, event);
+
+  if (level === 'error' && message) {
+    pushClientError({
+      ts: new Date().toISOString(),
+      message,
+      url: path,
+      householdId: req.auth?.household.id,
+    });
+  }
 
   res.status(204).end();
 });

@@ -73,6 +73,7 @@ import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import auditTokensRouter from './routes/auditTokens';
 import auditRouter from './routes/audit';
+import { pushServerError } from './audit/serverErrorBuffer';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
@@ -292,6 +293,13 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   };
   if (responseStatus >= 500) {
     logger.error({ ...requestContext, err }, 'request_failed');
+    pushServerError({
+      ts: new Date().toISOString(),
+      message: err instanceof Error ? err.message : String(err),
+      path: _req.originalUrl || _req.url,
+      statusCode: responseStatus,
+      householdId: _req.auth?.household.id,
+    });
   } else {
     logger.warn({
       ...requestContext,
