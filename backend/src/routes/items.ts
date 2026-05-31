@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Op, type WhereOptions } from 'sequelize';
+import { Op, QueryTypes, type WhereOptions } from 'sequelize';
 import type { Request } from 'express';
 import { ExternalOrder, ExternalOrderItem, Receipt, Transaction, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
@@ -464,6 +464,180 @@ router.post('/external-order-items/bulk-patch', async (req, res, next) => {
     res.json({ updated: result });
   } catch (e) {
     next(e);
+  }
+});
+
+// GET /items/analyze — summarize spending by item and brand (issue #435)
+router.get('/items/analyze', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const { from, to } = req.query as Record<string, string | undefined>;
+
+    const dateCond = from && to
+      ? `AND t.date BETWEEN :from AND :to`
+      : from
+        ? `AND t.date >= :from`
+        : to
+          ? `AND t.date <= :to`
+          : '';
+
+    type TopItemRow = { name: string; brand: string | null; totalCents: number; count: number; lastBoughtOn: string | null };
+    type BrandRow = { brand: string; totalCents: number };
+
+    // Top items by total spend
+    const topItems = await sequelize.query<TopItemRow>(
+      `SELECT
+        eoi.title AS name,
+        eoi.brand AS brand,
+        COALESCE(SUM(CAST(eoi.total_price AS REAL) * 100), 0) AS totalCents,
+        COUNT(*) AS count,
+        MAX(t.date) AS lastBoughtOn
+      FROM external_order_items eoi
+      JOIN external_orders eo ON eo.id = eoi.external_order_id
+      JOIN receipts r ON r.external_order_id = eo.id
+      JOIN transactions t ON t.id = r.transaction_id
+      WHERE eo.household_id = :householdId
+        ${dateCond}
+      GROUP BY eoi.title, eoi.brand
+      ORDER BY totalCents DESC
+      LIMIT 50`,
+      {
+        replacements: { householdId: household.id, from, to },
+        type: QueryTypes.SELECT,
+      },
+    );
+
+    // Brand totals
+    const brandRows = await sequelize.query<BrandRow>(
+      `SELECT
+        COALESCE(eoi.brand, 'Unknown') AS brand,
+        COALESCE(SUM(CAST(eoi.total_price AS REAL) * 100), 0) AS totalCents
+      FROM external_order_items eoi
+      JOIN external_orders eo ON eo.id = eoi.external_order_id
+      JOIN receipts r ON r.external_order_id = eo.id
+      JOIN transactions t ON t.id = r.transaction_id
+      WHERE eo.household_id = :householdId
+        ${dateCond}
+      GROUP BY brand
+      ORDER BY totalCents DESC`,
+      {
+        replacements: { householdId: household.id, from, to },
+        type: QueryTypes.SELECT,
+      },
+    );
+
+    // Currency detection
+    type CurrencyRow = { currency: string; cnt: number };
+    const currencies = await sequelize.query<CurrencyRow>(
+      `SELECT t.currency, COUNT(*) AS cnt
+      FROM external_order_items eoi
+      JOIN external_orders eo ON eo.id = eoi.external_order_id
+      JOIN receipts r ON r.external_order_id = eo.id
+      JOIN transactions t ON t.id = r.transaction_id
+      WHERE eo.household_id = :householdId
+        ${dateCond}
+      GROUP BY t.currency
+      ORDER BY cnt DESC`,
+      { replacements: { householdId: household.id, from, to }, type: QueryTypes.SELECT },
+    );
+    const currencyUsed = currencies[0]?.currency ?? 'CAD';
+    const currencyOthers = currencies.slice(1).map((c) => c.currency);
+
+    // Top 10 brands + Other
+    const top10Brands = brandRows.slice(0, 10);
+    const otherTotal = brandRows.slice(10).reduce((s, r) => s + Number(r.totalCents), 0);
+    const byBrand = [
+      ...top10Brands.map((r) => ({ brand: r.brand, totalCents: Number(r.totalCents) })),
+      ...(otherTotal > 0 ? [{ brand: 'Other', totalCents: otherTotal }] : []),
+    ];
+
+    res.json({
+      topItems: topItems.map((r) => ({
+        name: r.name,
+        brand: r.brand,
+        totalCents: Number(r.totalCents),
+        count: Number(r.count),
+        lastBoughtOn: r.lastBoughtOn,
+      })),
+      byBrand,
+      currencyUsed,
+      currencyOthers,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /items/analyze/trend — price trend for a specific item (issue #435)
+router.get('/items/analyze/trend', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const { itemName, brand, from, to } = req.query as Record<string, string | undefined>;
+    if (!itemName) {
+      res.status(400).json({ error: 'itemName is required' });
+      return;
+    }
+
+    const dateCond = from && to
+      ? `AND t.date BETWEEN :from AND :to`
+      : from ? `AND t.date >= :from` : to ? `AND t.date <= :to` : '';
+    const brandCond = brand ? `AND eoi.brand = :brand` : '';
+
+    type PricePoint = { date: string; unitPriceCents: number | null; quantity: string | null; unit: string | null };
+    const points = await sequelize.query<PricePoint>(
+      `SELECT
+        t.date,
+        CAST(eoi.unit_price AS REAL) * 100 AS unitPriceCents,
+        eoi.quantity,
+        eoi.unit
+      FROM external_order_items eoi
+      JOIN external_orders eo ON eo.id = eoi.external_order_id
+      JOIN receipts r ON r.external_order_id = eo.id
+      JOIN transactions t ON t.id = r.transaction_id
+      WHERE eo.household_id = :householdId
+        AND eoi.title = :itemName
+        ${brandCond}
+        ${dateCond}
+      ORDER BY t.date ASC`,
+      {
+        replacements: { householdId: household.id, itemName, brand, from, to },
+        type: QueryTypes.SELECT,
+      },
+    );
+
+    // Check for mixed units
+    const units = new Set(points.map((p) => p.unit));
+    const hasNullQty = points.some((p) => p.quantity == null);
+    const hasNonNullQty = points.some((p) => p.quantity != null);
+    const mixedUnits = (hasNullQty && hasNonNullQty) || units.size > 1;
+
+    // Simple linear regression for price trend
+    const validPoints = points.filter((p) => p.unitPriceCents != null);
+    let slopePerYear: number | null = null;
+    if (validPoints.length >= 2) {
+      const t0 = new Date(validPoints[0].date).getTime();
+      const xs = validPoints.map((p) => (new Date(p.date).getTime() - t0) / 86400000); // days
+      const ys = validPoints.map((p) => p.unitPriceCents!);
+      const n = xs.length;
+      const sumX = xs.reduce((a, b) => a + b, 0);
+      const sumY = ys.reduce((a, b) => a + b, 0);
+      const sumXY = xs.reduce((s, x, i) => s + x * ys[i], 0);
+      const sumX2 = xs.reduce((s, x) => s + x * x, 0);
+      const denom = n * sumX2 - sumX * sumX;
+      if (denom !== 0) {
+        const slope = (n * sumXY - sumX * sumY) / denom; // cents/day
+        const avgPrice = sumY / n;
+        slopePerYear = avgPrice !== 0 ? (slope * 365) / avgPrice : null;
+      }
+    }
+
+    res.json({
+      points: points.map((p) => ({ date: p.date, unitPriceCents: p.unitPriceCents })),
+      slopePerYear,
+      mixedUnits,
+    });
+  } catch (err) {
+    next(err);
   }
 });
 
