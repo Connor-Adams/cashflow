@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { DollarSign, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -132,7 +132,7 @@ interface LogDialogProps {
 }
 
 function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
-  const { toast } = useToast()
+  const { showToast } = useToast()
   const [form, setForm] = useState<FormState>(emptyForm())
   const [saving, setSaving] = useState(false)
   const [grossError, setGrossError] = useState('')
@@ -213,9 +213,9 @@ function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
       }
       onSaved(saved)
       onOpenChange(false)
-      toast({ title: editing ? 'Income updated' : 'Income logged' })
+      showToast({ title: editing ? 'Income updated' : 'Income logged' })
     } catch (err) {
-      toast({
+      showToast({
         title: editing ? 'Failed to update' : 'Failed to log income',
         description: err instanceof Error ? err.message : 'Unknown error',
         variant: 'destructive',
@@ -329,7 +329,7 @@ function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
 }
 
 export function IncomePage() {
-  const { toast } = useToast()
+  const { showToast } = useToast()
   const [entries, setEntries] = useState<IncomeEntry[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -344,11 +344,11 @@ export function IncomePage() {
       setEntries(data.items)
       setTotal(data.total)
     } catch {
-      toast({ title: 'Failed to load income', variant: 'destructive' })
+      showToast({ title: 'Failed to load income', variant: 'destructive' })
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [showToast])
 
   useEffect(() => {
     void load()
@@ -383,9 +383,9 @@ export function IncomePage() {
       await deleteReq(`/api/income/${entry.id}`)
       setEntries((prev) => prev.filter((e) => e.id !== entry.id))
       setTotal((t) => t - 1)
-      toast({ title: 'Entry deleted' })
+      showToast({ title: 'Entry deleted' })
     } catch {
-      toast({ title: 'Failed to delete entry', variant: 'destructive' })
+      showToast({ title: 'Failed to delete entry', variant: 'destructive' })
     } finally {
       setDeleting(null)
     }
@@ -443,12 +443,13 @@ export function IncomePage() {
         </TableHeader>
         <TableBody>
           {loading ? (
-            <SkeletonRow cols={7} rows={5} />
+            Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonRow key={i} cols={7} />
+            ))
           ) : entries.length === 0 ? (
             <EmptyTableRow
-              cols={7}
-              icon={<DollarSign className="h-8 w-8 text-muted-foreground/40" />}
-              message="No income entries yet. Click 'Log income' to add one."
+              colSpan={7}
+              title="No income entries yet. Click 'Log income' to add one."
             />
           ) : (
             entries.map((entry) => (

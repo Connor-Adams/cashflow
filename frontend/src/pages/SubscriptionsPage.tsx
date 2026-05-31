@@ -413,7 +413,7 @@ function SubscriptionRow({
   const [showImpact, setShowImpact] = useState(false)
   const [priceDrawerOpen, setPriceDrawerOpen] = useState(false)
   const [pendingChange, setPendingChange] = useState(item.pendingPriceChange)
-  const { toast } = useToast()
+  const { showToast } = useToast()
 
   async function acknowledgePriceChange() {
     if (!pendingChange) return
@@ -421,9 +421,9 @@ function SubscriptionRow({
       await postJson(`/api/subscription-price-changes/${pendingChange.id}/acknowledge`, {})
       setPendingChange(null)
       setPriceDrawerOpen(false)
-      toast({ title: 'Acknowledged.' })
+      showToast({ title: 'Acknowledged.' })
     } catch {
-      toast({ title: 'Failed to acknowledge', variant: 'destructive' })
+      showToast({ title: 'Failed to acknowledge', variant: 'destructive' })
     }
   }
 

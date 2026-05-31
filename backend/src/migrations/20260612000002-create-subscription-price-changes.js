@@ -59,11 +59,8 @@ module.exports = {
     await addIndex(
       queryInterface,
       'subscription_price_changes',
-      ['household_id', 'detected_on'],
-      {
-        name: 'spc_household_detected_on',
-        order: { detected_on: 'DESC' },
-      },
+      ['household_id', { name: 'detected_on', order: 'DESC' }],
+      { name: 'spc_household_detected_on' },
     );
 
     await addIndex(
@@ -73,7 +70,7 @@ module.exports = {
       {
         name: 'spc_unique_unack',
         unique: true,
-        where: 'acknowledged_at IS NULL',
+        where: { acknowledged_at: null },
       },
     );
   },

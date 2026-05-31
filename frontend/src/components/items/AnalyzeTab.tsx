@@ -199,7 +199,9 @@ export function AnalyzeTab() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <SkeletonRow cols={5} rows={5} />
+                Array.from({ length: 5 }).map((_, i) => (
+                  <SkeletonRow key={i} cols={5} />
+                ))
               ) : (
                 data?.topItems.map((item) => (
                   <TableRow
@@ -219,7 +221,7 @@ export function AnalyzeTab() {
                 ))
               )}
               {!loading && data?.topItems.length === 0 && (
-                <EmptyTableRow cols={5} message="No items match this filter." />
+                <EmptyTableRow colSpan={5} title="No items match this filter." />
               )}
             </TableBody>
           </Table>
@@ -256,7 +258,7 @@ export function AnalyzeTab() {
                   tickFormatter={(v: number) => formatMoney(v / 100, cur)}
                 />
                 <Tooltip
-                  formatter={(v: number) => [formatMoney(v / 100, cur), 'Unit price']}
+                  formatter={(v) => [formatMoney(Number(v) / 100, cur), 'Unit price']}
                 />
                 <Line
                   type="monotone"
@@ -291,7 +293,7 @@ export function AnalyzeTab() {
                 />
                 <YAxis type="category" dataKey="brand" tick={{ fontSize: 11 }} width={80} />
                 <Tooltip
-                  formatter={(v: number) => [formatMoney(v / 100, cur), 'Spend']}
+                  formatter={(v) => [formatMoney(Number(v) / 100, cur), 'Spend']}
                 />
                 <Bar dataKey="totalCents" fill="var(--primary)" radius={[0, 3, 3, 0]} />
               </BarChart>

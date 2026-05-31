@@ -515,13 +515,11 @@ export function CalendarPage() {
                           <Repeat
                             aria-hidden="true"
                             className="mr-1 inline-block h-3 w-3"
-                            title="Recurring charge"
                           />
                         ) : (
                           <CalendarPlus
                             aria-hidden="true"
                             className="mr-1 inline-block h-3 w-3"
-                            title="Planned event"
                           />
                         )}
                         {ev.kindLabel}
@@ -877,13 +875,11 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                       <Repeat
                         aria-hidden="true"
                         className="mr-1 inline-block h-3 w-3"
-                        title="Recurring charge"
                       />
                     ) : (
                       <CalendarPlus
                         aria-hidden="true"
                         className="mr-1 inline-block h-3 w-3"
-                        title="Planned event"
                       />
                     )}
                     {ev.kindLabel}
