@@ -5,6 +5,12 @@ import { currentAuth } from '../auth/middleware';
 import { householdWhere, isSuperadmin, visibleTransactionWhere } from '../auth/scope';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
 import {
+  exportRulesForHousehold,
+  importRulesForHousehold,
+  EXPORT_SCHEMA_VERSION,
+  type RulesExport,
+} from '../services/ruleExportImport';
+import {
   findAutoRuleSuggestions,
   findRuleProposals,
   merchantPatternFor,
@@ -678,6 +684,69 @@ router.post('/auto-suggestions/:id/dismiss', aiSuggestLimiter, async (req, res, 
       },
     });
     res.status(201).json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/export', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const payload = await exportRulesForHousehold(household.id, user.id);
+    const date = payload.exportedAt.slice(0, 10);
+    res
+      .set('Content-Type', 'application/json')
+      .set('Content-Disposition', `attachment; filename="cashflow-rules-${date}.json"`)
+      .json(payload);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/import', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const b = (req.body || {}) as Record<string, unknown>;
+
+    if (b.schemaVersion !== undefined) {
+      // Accept top-level payload (the exported JSON posted directly)
+      if (b.schemaVersion !== EXPORT_SCHEMA_VERSION) {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION' });
+        return;
+      }
+    } else if (b.json) {
+      // Accept { json: <RulesExport>, mode }
+      const inner = b.json as Record<string, unknown>;
+      if (inner?.schemaVersion !== EXPORT_SCHEMA_VERSION) {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION' });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: 'Missing json payload' });
+      return;
+    }
+
+    const payload: RulesExport =
+      b.schemaVersion !== undefined
+        ? (b as unknown as RulesExport)
+        : (b.json as RulesExport);
+    const mode = (b.mode as string) ?? 'append';
+    if (mode !== 'append' && mode !== 'replace') {
+      res.status(400).json({ error: 'INVALID_MODE' });
+      return;
+    }
+    if (!Array.isArray(payload.rules)) {
+      res.status(400).json({ error: 'Invalid payload: rules must be an array' });
+      return;
+    }
+
+    const result = await importRulesForHousehold(
+      payload,
+      mode as 'append' | 'replace',
+      household.id,
+      user.id,
+    );
+    res.json(result);
   } catch (e) {
     next(e);
   }

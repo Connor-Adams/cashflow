@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Download, Upload } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
 import {
@@ -14,6 +16,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
+import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
 
@@ -61,9 +64,31 @@ export function RulesPage() {
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
+
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const res = await fetch('/api/rules/export', { credentials: 'include', cache: 'no-store' })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const today = new Date().toISOString().slice(0, 10)
+      a.href = url
+      a.download = `cashflow-rules-${today}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      showToast({ title: 'Could not export rules.', variant: 'destructive' })
+    } finally {
+      setExporting(false)
+    }
+  }
   const categoryLabels = useMemo(
     () => categoryHints.map((hint) => hint.label),
     [categoryHints]
@@ -239,6 +264,34 @@ export function RulesPage() {
       <PageHeader
         title="Rules"
         description="Match merchants on import so category, business, and split defaults land in the right place."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleExport()}
+              disabled={exporting || rules.length === 0}
+              title={rules.length === 0 ? 'No rules to export.' : undefined}
+            >
+              <Download aria-hidden="true" />
+              {exporting ? 'Exporting…' : 'Export rules'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowImportModal(true)}
+            >
+              <Upload aria-hidden="true" />
+              Import rules
+            </Button>
+          </>
+        }
+      />
+      <ImportRulesModal
+        open={showImportModal}
+        onOpenChange={setShowImportModal}
+        existingRuleCount={rules.length}
+        onImported={() => void load()}
       />
       {err && <span className="error">{err}</span>}
       <RulesHealthSection onAfterCreate={() => void load()} />
