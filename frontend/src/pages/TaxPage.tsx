@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Tabs } from '../components/ui/tabs'
+import { YearJump } from '../components/tax/YearJump'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
 import { SlipsTab } from './tax/SlipsTab'
@@ -29,17 +30,21 @@ function pickDefaultYear(years: number[]): number {
   return years[years.length - 1]
 }
 
+function isTextInput(el: Element | null): boolean {
+  if (!el) return false
+  const tag = el.tagName
+  if (tag === 'TEXTAREA') return true
+  if (tag === 'INPUT' && (el as HTMLInputElement).type === 'text') return true
+  if ((el as HTMLElement).isContentEditable) return true
+  return false
+}
+
 export function TaxPage() {
   const [tab, setTab] = useState('overview')
   const { years, error: yearsError } = useTaxYears()
   const [year, setYear] = useState<number | null>(null)
-  // Active household plan id is lifted here so the picker on Overview and the
-  // OwnerCompPlannerTab consumer stay in sync without prop-drilling through
-  // a context. TaxPage already keeps tab + year state with `useState`, so a
-  // local `useState` here matches the prevailing pattern (URL query params
-  // would be cleaner if tab state already used them, but it doesn't).
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
-  const yearSelectRef = useRef<HTMLSelectElement>(null)
+  const yearInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (year === null && years && years.length > 0) {
@@ -50,8 +55,9 @@ export function TaxPage() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        if (isTextInput(document.activeElement)) return
         e.preventDefault()
-        yearSelectRef.current?.focus()
+        yearInputRef.current?.focus()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -63,20 +69,12 @@ export function TaxPage() {
       <header style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
         <h1>Tax</h1>
         {years && year !== null && (
-          <label>
-            Year{' '}
-            <select
-              ref={yearSelectRef}
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              aria-label="Tax year (Cmd+K to focus)"
-              title="Tax year — press Cmd+K (or Ctrl+K) to jump here from anywhere"
-            >
-              {years.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </label>
+          <YearJump
+            ref={yearInputRef}
+            years={years}
+            value={year}
+            onChange={setYear}
+          />
         )}
         {yearsError && <span className="error">Failed to load years: {yearsError}</span>}
       </header>
