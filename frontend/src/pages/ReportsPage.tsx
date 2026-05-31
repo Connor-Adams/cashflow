@@ -1074,7 +1074,7 @@ export function ReportsPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={formSubmitting}>
+            <Button type="submit" disabled={formSubmitting || Boolean(formAmountError) || Boolean(formDateError)}>
               {formSubmitting ? 'Saving...' : 'Save settlement'}
             </Button>
           </DialogFooter>
