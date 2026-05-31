@@ -8,6 +8,7 @@ import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import {
@@ -62,6 +63,7 @@ export function AccountsPage() {
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editCreditLimit, setEditCreditLimit] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -214,6 +216,7 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
+        notes: editNotes.trim() || null,
       }
       if (creditLimitPayload !== undefined) payload.creditLimit = creditLimitPayload
       await patchJson<Account>(`/api/accounts/${id}`, payload)
@@ -226,6 +229,7 @@ export function AccountsPage() {
       setEditVisibility('private')
       setEditClosedAt('')
       setEditCreditLimit('')
+      setEditNotes('')
       showToast({ title: 'Limit saved.', variant: 'success', durationMs: 2000 })
       await load()
     } catch (e) {
@@ -243,6 +247,7 @@ export function AccountsPage() {
     setEditVisibility('private')
     setEditClosedAt('')
     setEditCreditLimit('')
+    setEditNotes('')
   }
 
   function startEdit(account: Account) {
@@ -255,6 +260,7 @@ export function AccountsPage() {
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
     setEditCreditLimit(account.creditLimit != null ? String(account.creditLimit) : '')
+    setEditNotes(account.notes ?? '')
   }
 
   const accountCount = accounts.length
@@ -594,6 +600,25 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId === a.id ? (
+                    <TableRow key={`${a.id}-notes`}>
+                      <TableCell colSpan={9} className="pt-0 pb-3">
+                        <Label className="block">
+                          <span className="mb-1 block text-xs text-muted-foreground">Notes</span>
+                          <Textarea
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            placeholder="Routing number, custodian contact, tax-ID…"
+                            maxLength={4000}
+                            rows={3}
+                          />
+                          <span className="mt-1 block text-right text-xs text-muted-foreground">
+                            {editNotes.length}/4000
+                          </span>
+                        </Label>
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
                 ))
               )}
             </TableBody>

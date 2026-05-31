@@ -85,7 +85,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType } = (req.body || {}) as Record<
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, notes } = (req.body || {}) as Record<
       string,
       unknown
     >;
@@ -97,6 +97,7 @@ router.post('/', async (req, res, next) => {
       defaultCurrency != null && String(defaultCurrency).trim() !== ''
         ? String(defaultCurrency).trim().toUpperCase().slice(0, 3)
         : env.defaultCurrency;
+    const notesValue = notes != null && String(notes).trim() ? String(notes).trim().slice(0, 4000) : null;
     const row = await Account.create({
       name: String(name),
       owner: (owner as string) || 'me',
@@ -106,6 +107,7 @@ router.post('/', async (req, res, next) => {
       accountType: normalizeAccountType(accountType),
       shortCode: (shortCode as string) || null,
       defaultCurrency: dc,
+      notes: notesValue,
     });
     res.status(201).json(row);
   } catch (e) {
@@ -148,7 +150,7 @@ router.patch('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt, creditLimit } =
+    const { name, owner, shortCode, defaultCurrency, visibility, accountType, closedAt, creditLimit, notes } =
       (req.body || {}) as Record<string, unknown>;
     if (name !== undefined) {
       const value = String(name).trim();
@@ -194,6 +196,10 @@ router.patch('/:id', async (req, res, next) => {
         }
         account.set('closedAt', raw);
       }
+    }
+
+    if (notes !== undefined) {
+      account.set('notes', notes == null || String(notes).trim() === '' ? null : String(notes).trim().slice(0, 4000));
     }
 
     // creditLimit lives on the liability_accounts sidecar (#437). Only valid

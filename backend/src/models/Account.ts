@@ -34,6 +34,7 @@ export class Account extends Model<
   declare openingBalance: CreationOptional<string>;
   declare openingBalanceDate: CreationOptional<string | null>;
   declare closedAt: CreationOptional<string | null>;
+  declare notes: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -109,6 +110,11 @@ export function initAccount(sequelize: Sequelize): typeof Account {
       closedAt: {
         type: DataTypes.DATEONLY,
         field: 'closed_at',
+        allowNull: true,
+        defaultValue: null,
+      },
+      notes: {
+        type: DataTypes.TEXT,
         allowNull: true,
         defaultValue: null,
       },
