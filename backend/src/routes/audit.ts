@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { auditAuth } from '../auth/auditAuth';
 import {
   Account,
@@ -9,6 +9,9 @@ import {
   Subscription,
   PlannedEvent,
   FinancialGoal,
+  Job,
+  ImportHistory,
+  sequelize,
 } from '../models';
 import { getIntegrity } from '../audit/integrity';
 import { getClientErrors } from '../audit/clientErrorBuffer';
@@ -189,6 +192,74 @@ router.get('/summary', async (req, res, next) => {
       integrity,
       clientErrorCount: clientErrors.length,
       serverErrorCount: serverErrors.length,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/audit/health-deep — DB connectivity + migration state (#388)
+router.get('/health-deep', async (_req, res, next) => {
+  try {
+    const t0 = Date.now();
+    await sequelize.authenticate();
+    const dbLatencyMs = Date.now() - t0;
+
+    // Query SequelizeMeta for the last applied migration name.
+    let lastMigration: string | null = null;
+    let migrationsOk = true;
+    try {
+      const rows = await sequelize.query<{ name: string }>(
+        'SELECT name FROM "SequelizeMeta" ORDER BY name DESC LIMIT 1',
+        { type: QueryTypes.SELECT },
+      );
+      lastMigration = rows[0]?.name ?? null;
+    } catch {
+      migrationsOk = false;
+    }
+
+    res.json({
+      db: { ok: true, latencyMs: dbLatencyMs },
+      migrations: { ok: migrationsOk, lastApplied: lastMigration },
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/audit/freshness — job heartbeats + import recency (#389)
+router.get('/freshness', async (_req, res, next) => {
+  try {
+    const now = Date.now();
+
+    const [jobs, lastImport] = await Promise.all([
+      Job.findAll({ attributes: ['name', 'lastRunAt', 'lastFinishedAt', 'lastStatus'], raw: true }),
+      ImportHistory.findOne({ order: [['created_at', 'DESC']], attributes: ['createdAt'], raw: true }),
+    ]);
+
+    const jobFreshness = jobs.map((j) => ({
+      name: j.name,
+      lastRunAt: j.lastRunAt ? (j.lastRunAt as unknown as Date).toISOString() : null,
+      lastFinishedAt: j.lastFinishedAt ? (j.lastFinishedAt as unknown as Date).toISOString() : null,
+      lastStatus: j.lastStatus ?? null,
+      ageSeconds: j.lastFinishedAt
+        ? Math.floor((now - new Date(j.lastFinishedAt as unknown as Date).getTime()) / 1000)
+        : null,
+    }));
+
+    const importCreatedAt = (lastImport as { createdAt?: Date } | null)?.createdAt;
+    const importFreshness = importCreatedAt
+      ? {
+          lastImportAt: importCreatedAt.toISOString(),
+          ageSeconds: Math.floor((now - importCreatedAt.getTime()) / 1000),
+        }
+      : { lastImportAt: null, ageSeconds: null };
+
+    res.json({
+      jobs: jobFreshness,
+      imports: importFreshness,
       generatedAt: new Date().toISOString(),
     });
   } catch (e) {

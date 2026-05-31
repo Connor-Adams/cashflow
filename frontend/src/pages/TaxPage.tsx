@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Tabs } from '../components/ui/tabs'
+import { NativeSelect, NativeSelectOption } from '../components/ui/native-select'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
 import { SlipsTab } from './tax/SlipsTab'
@@ -33,40 +34,77 @@ export function TaxPage() {
   const [tab, setTab] = useState('overview')
   const { years, error: yearsError } = useTaxYears()
   const [year, setYear] = useState<number | null>(null)
-  // Active household plan id is lifted here so the picker on Overview and the
-  // OwnerCompPlannerTab consumer stay in sync without prop-drilling through
-  // a context. TaxPage already keeps tab + year state with `useState`, so a
-  // local `useState` here matches the prevailing pattern (URL query params
-  // would be cleaner if tab state already used them, but it doesn't).
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
-
+  const [tabNotFound, setTabNotFound] = useState(false)
   useEffect(() => {
     if (year === null && years && years.length > 0) {
       setYear(pickDefaultYear(years))
     }
   }, [years, year])
 
+  // Reset the 404 indicator whenever the year or tab changes.
+  useEffect(() => { setTabNotFound(false) }, [year, tab])
+
+  const stepYear = useCallback((delta: number) => {
+    if (!years || year === null) return
+    const idx = years.indexOf(year)
+    const next = years[idx + delta]
+    if (next !== undefined) setYear(next)
+  }, [years, year])
+
+  // Ctrl+Left / Ctrl+Right navigate between years without grabbing the
+  // arrow keys that the Tabs component uses for tab switching.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!e.ctrlKey && !e.metaKey) return
+      if (e.key === 'ArrowLeft') { e.preventDefault(); stepYear(-1) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); stepYear(1) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [stepYear])
+
   return (
     <section>
       <header style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
         <h1>Tax</h1>
-        {years && year !== null && (
-          <label>
-            Year{' '}
-            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+        {years && years.length > 0 && year !== null ? (
+          <label className="flex items-center gap-1.5 text-sm">
+            <span className="text-muted-foreground">Year</span>
+            <NativeSelect
+              aria-label="Tax year"
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="w-24"
+            >
               {years.map((y) => (
-                <option key={y} value={y}>{y}</option>
+                <NativeSelectOption key={y} value={y}>{y}</NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
+            <span className="text-xs text-muted-foreground" title="Ctrl+Left / Ctrl+Right">⌃←→</span>
           </label>
+        ) : null}
+        {yearsError && (
+          <span role="alert" className="text-sm text-rose-600 dark:text-rose-400">
+            Failed to load years: {yearsError}
+          </span>
         )}
-        {yearsError && <span className="error">Failed to load years: {yearsError}</span>}
+        {years && years.length === 0 && !yearsError && (
+          <span className="text-sm text-muted-foreground">
+            No tax years found — import transactions to get started.
+          </span>
+        )}
       </header>
-      <Tabs items={TABS} value={tab} onValueChange={setTab} />
+      <Tabs items={TABS} value={tab} onValueChange={setTab} className="mt-4" />
+      {tabNotFound && year !== null && (
+        <p role="alert" className="mt-3 text-sm text-muted-foreground">
+          No data for {year} in this view. Try a different year or import transactions.
+        </p>
+      )}
       {year === null ? (
-        <p className="muted">Loading…</p>
+        <p className="muted mt-4">Loading…</p>
       ) : (
-        <>
+        <div className="mt-4">
           {tab === 'overview' && (
             <OverviewTab
               year={year}
@@ -82,7 +120,7 @@ export function TaxPage() {
           {tab === 'planner' && <OwnerCompPlannerTab activePlanId={activePlanId} />}
           {tab === 'hygiene' && <TaxHygieneTab year={year} />}
           {tab === 'reserve' && <TaxReserveTab year={year} />}
-        </>
+        </div>
       )}
     </section>
   )

@@ -336,6 +336,121 @@ router.patch('/:id', async (req, res, next) => {
  * Rate-limited because the suggestion query can be expensive on large
  * histories — CodeQL flags this as authorisation without rate limiting.
  */
+// GET /export — download all household rules as JSON (issue #438)
+router.get('/export', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const rules = await Rule.findAll({
+      where: { householdId: household.id },
+      order: [['priority', 'DESC'], ['id', 'ASC']],
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    const userHash = String(user.id).padStart(8, '0').slice(-8);
+    const payload = {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      exportedBy: userHash,
+      rules: rules.map((r) => ({
+        merchantPattern: r.merchantPattern,
+        matchKind: r.matchKind,
+        priority: r.priority,
+        category: r.category,
+        isBusiness: r.isBusiness,
+        splitType: r.splitType,
+        pctMe: r.pctMe,
+        pctPartner: r.pctPartner,
+        effectiveFrom: r.effectiveFrom,
+        effectiveTo: r.effectiveTo,
+      })),
+    };
+    const filename = `cashflow-rules-${today}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.json(payload);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /import — import rules from JSON (issue #438)
+router.post('/import', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const body = req.body as { json?: unknown; mode?: string };
+    const parsed = body.json as Record<string, unknown> | undefined;
+
+    if (!parsed || typeof parsed !== 'object') {
+      res.status(400).json({ error: 'json is required' });
+      return;
+    }
+    if (parsed.schemaVersion !== 1) {
+      res.status(400).json({ error: 'Unsupported schemaVersion — only version 1 is supported' });
+      return;
+    }
+    const mode = body.mode === 'replace' ? 'replace' : 'append';
+    const incomingRules = Array.isArray(parsed.rules) ? (parsed.rules as Record<string, unknown>[]) : [];
+    const today = new Date().toISOString().slice(0, 10);
+
+    let imported = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    await sequelize.transaction(async (t) => {
+      if (mode === 'replace') {
+        await Rule.destroy({ where: { householdId: household.id }, transaction: t });
+      }
+
+      // Get existing rule names for append de-dup
+      const existingPatterns = mode === 'append'
+        ? new Set(
+            (await Rule.findAll({ where: { householdId: household.id }, attributes: ['merchantPattern'], transaction: t }))
+              .map((r) => r.merchantPattern),
+          )
+        : new Set<string>();
+
+      for (const rule of incomingRules) {
+        try {
+          if (typeof rule.merchantPattern !== 'string' || !rule.merchantPattern) {
+            errors.push('Skipped rule with missing merchantPattern');
+            skipped++;
+            continue;
+          }
+          let pattern = rule.merchantPattern as string;
+          if (mode === 'append' && existingPatterns.has(pattern)) {
+            pattern = `${pattern} (imported ${today})`;
+          }
+          await Rule.create(
+            {
+              merchantPattern: pattern,
+              matchKind: typeof rule.matchKind === 'string' ? rule.matchKind : 'contains',
+              priority: typeof rule.priority === 'number' ? rule.priority : 0,
+              category: typeof rule.category === 'string' ? rule.category : null,
+              isBusiness: Boolean(rule.isBusiness),
+              splitType: typeof rule.splitType === 'string' ? rule.splitType : 'none',
+              pctMe: typeof rule.pctMe === 'string' ? rule.pctMe : null,
+              pctPartner: typeof rule.pctPartner === 'string' ? rule.pctPartner : null,
+              effectiveFrom: typeof rule.effectiveFrom === 'string' ? rule.effectiveFrom : null,
+              effectiveTo: typeof rule.effectiveTo === 'string' ? rule.effectiveTo : null,
+              householdId: household.id,
+              createdByUserId: user.id,
+            } as never,
+            { transaction: t },
+          );
+          existingPatterns.add(pattern);
+          imported++;
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : String(err));
+          skipped++;
+        }
+      }
+    });
+
+    res.json({ imported, skipped, errors });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/auto-suggestions', aiSuggestLimiter, async (req, res, next) => {
   try {
     const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
@@ -718,6 +833,113 @@ router.delete('/:id', async (req, res, next) => {
       payload: auditSnapshot,
     });
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/rules/export — download all rules as JSON (#438)
+router.get('/export', async (req, res, next) => {
+  try {
+    const rules = await Rule.findAll({
+      where: householdWhere(req),
+      order: [['priority', 'DESC'], ['id', 'ASC']],
+      raw: true,
+    });
+    const exportPayload = rules.map((r) => ({
+      merchantPattern: r.merchantPattern,
+      matchKind: r.matchKind,
+      priority: r.priority,
+      category: r.category,
+      isBusiness: r.isBusiness,
+      splitType: r.splitType,
+      pctMe: r.pctMe,
+      pctPartner: r.pctPartner,
+      effectiveFrom: r.effectiveFrom,
+      effectiveTo: r.effectiveTo,
+    }));
+    const filename = `cashflow-rules-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.json({ version: 1, exportedAt: new Date().toISOString(), rules: exportPayload });
+  } catch (e) {
+    next(e);
+  }
+});
+
+type RuleImportRow = {
+  merchantPattern?: unknown;
+  matchKind?: unknown;
+  priority?: unknown;
+  category?: unknown;
+  isBusiness?: unknown;
+  splitType?: unknown;
+  pctMe?: unknown;
+  pctPartner?: unknown;
+  effectiveFrom?: unknown;
+  effectiveTo?: unknown;
+};
+
+// POST /api/rules/import — upload a previously exported JSON and upsert rules (#438)
+router.post('/import', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const rows = body.rules;
+    const mode = body.mode === 'replace' ? 'replace' : 'append';
+    if (!Array.isArray(rows)) {
+      res.status(400).json({ error: 'body.rules must be an array' });
+      return;
+    }
+    const errors: string[] = [];
+    const toCreate: Parameters<typeof Rule.create>[0][] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] as RuleImportRow;
+      if (!r.merchantPattern || typeof r.merchantPattern !== 'string') {
+        errors.push(`Row ${i}: merchantPattern is required`);
+        continue;
+      }
+      const fromParsed = parseEffectiveDate(r.effectiveFrom);
+      const toParsed = parseEffectiveDate(r.effectiveTo);
+      if (!fromParsed.ok) { errors.push(`Row ${i}: effectiveFrom ${fromParsed.error}`); continue; }
+      if (!toParsed.ok) { errors.push(`Row ${i}: effectiveTo ${toParsed.error}`); continue; }
+      toCreate.push({
+        merchantPattern: r.merchantPattern,
+        householdId: household.id,
+        createdByUserId: user.id,
+        matchKind: typeof r.matchKind === 'string' ? r.matchKind : 'substring',
+        priority: typeof r.priority === 'number' ? r.priority : 0,
+        category: typeof r.category === 'string' ? r.category : null,
+        isBusiness: Boolean(r.isBusiness),
+        splitType: typeof r.splitType === 'string' ? r.splitType : 'me',
+        pctMe: r.pctMe != null ? String(r.pctMe) : null,
+        pctPartner: r.pctPartner != null ? String(r.pctPartner) : null,
+        effectiveFrom: fromParsed.value,
+        effectiveTo: toParsed.value,
+      });
+    }
+
+    if (errors.length > 0) {
+      res.status(422).json({ error: 'Validation errors', details: errors });
+      return;
+    }
+
+    if (mode === 'replace') {
+      await Rule.destroy({ where: { householdId: household.id } });
+    }
+
+    const created = await Rule.bulkCreate(toCreate as unknown as object[]);
+    for (const row of created) {
+      scheduleRuleBackfill(household.id, {
+        merchantPattern: row.merchantPattern,
+        matchKind: row.matchKind,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+      }, 'import');
+    }
+
+    res.status(201).json({ imported: created.length });
   } catch (e) {
     next(e);
   }

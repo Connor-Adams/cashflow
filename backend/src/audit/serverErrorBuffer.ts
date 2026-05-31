@@ -14,3 +14,9 @@ export function getServerErrors(householdId: number): ServerErrorEntry[] {
 export function getAllServerErrors(): ServerErrorEntry[] {
   return [...buffer];
 }
+
+export function trimServerErrors(): number {
+  const before = buffer.length;
+  buffer.splice(0, buffer.length);
+  return before;
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { safeNum } from '@/lib/num'
 import { Edit3, Plus, Target, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -393,6 +393,12 @@ export function GoalsPage() {
         title="Goals"
         description="Savings targets, sinking funds, and recurring expense reserves (emergency fund, vacation, taxes, annual insurance)."
       />
+      <p className="mb-4 text-sm text-muted-foreground">
+        Want to see when you'll hit these targets?{' '}
+        <Link to="/forecast" className="text-primary underline-offset-4 hover:underline">
+          Open the forecast →
+        </Link>
+      </p>
       <Card className="accountsFormCard">
         <div className="accountsCardHeader">
           <div>

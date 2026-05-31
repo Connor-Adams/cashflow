@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
+import { Button } from '@/components/ui/button'
 import {
   Table,
   TableBody,
@@ -15,6 +16,7 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
 import { deleteReq, getJson, postJson } from '../lib/api'
+import { ImportRulesModal } from '@/components/rules/ImportRulesModal'
 import type { Rule } from '../types/api'
 
 type CategoryHint = {
@@ -62,6 +64,7 @@ export function RulesPage() {
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const loadRequestRef = useRef(0)
+  const [importModalOpen, setImportModalOpen] = useState(false)
   const confirm = useConfirm()
   const { showToast } = useToast()
   const categoryLabels = useMemo(
@@ -233,12 +236,38 @@ export function RulesPage() {
     }
   }
 
+  async function handleExport() {
+    try {
+      const base = import.meta.env.VITE_API_BASE ?? ''
+      const res = await fetch(`${base}/api/rules/export`, { credentials: 'include' })
+      if (!res.ok) { showToast({ title: 'Export failed', variant: 'destructive' }); return; }
+      const blob = await res.blob()
+      const cd = res.headers.get('content-disposition') ?? ''
+      const match = cd.match(/filename="([^"]+)"/)
+      const filename = match?.[1] ?? 'cashflow-rules.json'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      showToast({ title: 'Export failed', variant: 'destructive' })
+    }
+  }
+
   return (
     <>
     <div className="page">
       <PageHeader
         title="Rules"
         description="Match merchants on import so category, business, and split defaults land in the right place."
+        actions={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => void handleExport()}>Export rules</Button>
+            <Button variant="outline" size="sm" onClick={() => setImportModalOpen(true)}>Import rules</Button>
+          </div>
+        }
       />
       {err && <span className="error">{err}</span>}
       <RulesHealthSection onAfterCreate={() => void load()} />
@@ -480,6 +509,12 @@ export function RulesPage() {
       </section>
     </div>
     {confirm.dialog}
+    {importModalOpen && (
+      <ImportRulesModal
+        onClose={() => setImportModalOpen(false)}
+        onImported={() => { void load(); setImportModalOpen(false); }}
+      />
+    )}
     </>
   )
 }

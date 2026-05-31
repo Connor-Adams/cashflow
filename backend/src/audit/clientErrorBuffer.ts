@@ -14,3 +14,9 @@ export function getClientErrors(householdId: number): ClientErrorEntry[] {
 export function getAllClientErrors(): ClientErrorEntry[] {
   return [...buffer];
 }
+
+export function trimClientErrors(): number {
+  const before = buffer.length;
+  buffer.splice(0, buffer.length);
+  return before;
+}

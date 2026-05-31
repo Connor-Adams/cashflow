@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -230,6 +230,12 @@ export function PlannedEventsPage() {
         title="Planned events"
         description="Future income, expenses, transfers, and goal contributions. Powers forecast, calendar, and safe-to-spend."
       />
+      <p className="mb-4 text-sm text-muted-foreground">
+        See events on a timeline?{' '}
+        <Link to="/calendar" className="text-primary underline-offset-4 hover:underline">
+          Open the calendar →
+        </Link>
+      </p>
       <Card className="accountsFormCard">
         <div className="accountsCardHeader">
           <div>

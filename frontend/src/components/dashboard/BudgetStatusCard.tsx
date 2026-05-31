@@ -93,6 +93,12 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
       label="Budget status"
       description="Where each budget sits this period — at a glance."
     >
+      <Link
+        to="/budgets"
+        className="mb-2 inline-block text-xs text-primary underline-offset-4 hover:underline"
+      >
+        View full budget breakdown →
+      </Link>
       <ul
         className="flex flex-col gap-2"
         data-testid="budget-status-list"

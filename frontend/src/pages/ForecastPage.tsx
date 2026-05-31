@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -194,6 +194,13 @@ export function ForecastPage() {
           }
         />
       ) : null}
+
+      <p className="mb-4 text-sm text-muted-foreground">
+        Tracking goals?{' '}
+        <Link to="/goals" className="text-primary underline-offset-4 hover:underline">
+          See how this forecast affects your goals →
+        </Link>
+      </p>
 
       {/* Summary tiles */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
