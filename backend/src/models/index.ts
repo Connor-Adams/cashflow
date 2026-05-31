@@ -35,6 +35,8 @@ import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailInteg
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
+import { UserReportingToken, initUserReportingToken } from './UserReportingToken';
+import { UserAuditToken, initUserAuditToken } from './UserAuditToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
@@ -108,6 +110,14 @@ import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 import { Label, initLabel } from './Label';
 import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
 import { Feedback, initFeedback } from './Feedback';
+import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
+import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
+import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
+import {
+  SubscriptionPriceChange,
+  initSubscriptionPriceChange,
+} from './SubscriptionPriceChange';
+import { SavedFilter, initSavedFilter } from './SavedFilter';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -145,6 +155,8 @@ initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
+initUserReportingToken(sequelize);
+initUserAuditToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
@@ -194,6 +206,11 @@ initFinancialScenario(sequelize);
 initLabel(sequelize);
 initTransactionLabel(sequelize);
 initFeedback(sequelize);
+initClientErrorEvent(sequelize);
+initServerErrorEvent(sequelize);
+initIncomeEntry(sequelize);
+initSubscriptionPriceChange(sequelize);
+initSavedFilter(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -979,6 +996,16 @@ DebtPayoffScenario.belongsTo(User, {
   as: 'user',
 });
 
+// SavedFilter (issue #272). One row per user-named filter preset scoped to a
+// page. Cascades on user delete; no household scope (filters are personal).
+User.hasMany(SavedFilter, {
+  foreignKey: 'user_id',
+  as: 'savedFilters',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedFilter.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 // In-app feedback / bug reports (issue #295). Scoped to both the submitting
 // user and their household; both cascade on delete so removing either removes
 // the feedback. The owner-only inbox lists via householdWhere().
@@ -1035,6 +1062,8 @@ export {
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,
+  UserReportingToken,
+  UserAuditToken,
   Entity,
   TaxCategory,
   TaxTag,
@@ -1082,4 +1111,9 @@ export {
   Label,
   TransactionLabel,
   Feedback,
+  ClientErrorEvent,
+  ServerErrorEvent,
+  IncomeEntry,
+  SubscriptionPriceChange,
+  SavedFilter,
 };

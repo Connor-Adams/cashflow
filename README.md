@@ -217,6 +217,8 @@ commands, CI parity, project layout, and git hooks.
 Design specs and implementation plans live under
 [docs/superpowers/](docs/superpowers).
 
+AI-agent audit loop (verifying a deploy is healthy): [docs/agent-audit.md](docs/agent-audit.md).
+
 ## License
 
 Copyright (c) 2026 Connor Adams. All rights reserved.

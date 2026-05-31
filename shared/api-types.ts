@@ -19,6 +19,8 @@ export type Account = {
   /** currentBalance / creditLimit × 100, or null when either is missing or
    *  the card is closed. Frontend renders the badge tier from this. */
   utilizationPct?: number | null
+  /** Free-form notes (max 4000 chars). Markdown rendered on the detail view. */
+  notes?: string | null
 }
 
 /**
@@ -501,6 +503,7 @@ export type Rule = {
   effectiveFrom: string | null
   effectiveTo: string | null
   usageCount?: number
+  updatedAt?: string
 }
 
 export type Paginated<T> = {
@@ -1059,6 +1062,7 @@ export type ItemRow = {
   qty: number
   unitPrice: number | null
   totalPrice: number | null
+  currency: string
   taxShare: number
   categoryEffective: string | null
   categoryOverride: string | null

@@ -51,9 +51,12 @@ import { MembersTab } from './pages/settings/tabs/MembersTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { LabelsTab } from './pages/settings/tabs/LabelsTab'
+import { SavedFiltersTab } from './pages/settings/tabs/SavedFiltersTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
+import { AuditTokensTab } from './pages/settings/tabs/AuditTokensTab'
+import { IncomePage } from './pages/IncomePage'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
@@ -122,6 +125,7 @@ function AppRoutes() {
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
+          <Route path="income" element={<IncomePage />} />
           <Route path="tax" element={<TaxPage />} />
           <Route path="return-warranty" element={<ReturnWarrantyPage />} />
           <Route path="reimbursements" element={<ReimbursementsPage />} />
@@ -140,9 +144,11 @@ function AppRoutes() {
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="labels" element={<LabelsTab />} />
+            <Route path="saved-filters" element={<SavedFiltersTab />} />
             <Route path="jobs" element={<JobsTab />} />
             <Route path="whatsnew" element={<WhatsNewTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
+            <Route path="audit-tokens" element={<AuditTokensTab />} />
             <Route path="audit-log" element={<AuditLogPage />} />
             <Route path="backup" element={<SyncPage />} />
           </Route>

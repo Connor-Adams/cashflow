@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CancelImpactCard } from '@/components/subscriptions/CancelImpactCard'
-import { getJson, patchJson } from '../lib/api'
+import { getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   CancelImpact,
@@ -99,6 +99,7 @@ export function SubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [rowErrors, setRowErrors] = useState<Map<number, { message: string; retry: () => Promise<void> }>>(new Map())
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -140,6 +141,7 @@ export function SubscriptionsPage() {
         `/api/subscriptions/${id}`,
         patch,
       )
+      setRowErrors((prev) => { const m = new Map(prev); m.delete(id); return m; })
       setData((prev) =>
         prev
           ? {
@@ -156,7 +158,15 @@ export function SubscriptionsPage() {
       })
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Update failed'
-      showToast({ title: message, variant: 'destructive' })
+      const sub = data?.items.find((item) => item.id === id)
+      setRowErrors((prev) => new Map(prev).set(id, {
+        message,
+        retry: () => updateStatus(id, status),
+      }))
+      showToast({
+        title: `Couldn't update ${sub?.merchantName ?? 'subscription'}: ${message}`,
+        variant: 'destructive',
+      })
     }
   }
 
@@ -292,6 +302,7 @@ export function SubscriptionsPage() {
                     item={item}
                     onStatusChange={updateStatus}
                     onCadenceChange={updateCadence}
+                    rowError={rowErrors.get(item.id)}
                   />
                 ))
               )}
@@ -387,10 +398,12 @@ function SubscriptionRow({
   item,
   onStatusChange,
   onCadenceChange,
+  rowError,
 }: {
   item: Subscription
   onStatusChange: (id: number, status: SubscriptionStatus) => Promise<void>
   onCadenceChange: (id: number, cadence: SubscriptionCadence) => Promise<void>
+  rowError?: { message: string; retry: () => Promise<void> }
 }) {
   const annual = Number(item.annualizedCost)
   const amount = Number(item.amount)
@@ -398,21 +411,72 @@ function SubscriptionRow({
   // cancel-impact preview is hidden (there's nothing left to save). (#291 AC #11)
   const isCancelled = item.status === 'cancelled'
   const [showImpact, setShowImpact] = useState(false)
+  const [priceDrawerOpen, setPriceDrawerOpen] = useState(false)
+  const [pendingChange, setPendingChange] = useState(item.pendingPriceChange)
+  const { showToast } = useToast()
+
+  async function acknowledgePriceChange() {
+    if (!pendingChange) return
+    try {
+      await postJson(`/api/subscription-price-changes/${pendingChange.id}/acknowledge`, {})
+      setPendingChange(null)
+      setPriceDrawerOpen(false)
+      showToast({ title: 'Acknowledged.' })
+    } catch {
+      showToast({ title: 'Failed to acknowledge', variant: 'destructive' })
+    }
+  }
+
+  const pctNum = pendingChange ? parseFloat(pendingChange.pctChange) : 0
+  const pctLabel = pendingChange
+    ? `${pctNum >= 0 ? '↑' : '↓'} ${Math.abs(pctNum).toFixed(1)}%`
+    : ''
 
   return (
     <TableRow>
       <TableCell>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {item.merchantName}
-          {item.priceChangeDetected && (
+          {pendingChange ? (
+            <Badge
+              variant={pctNum >= 0 ? 'destructive' : 'default'}
+              title={`Went from ${formatMoney(pendingChange.prevCents / 100, item.currency)} to ${formatMoney(pendingChange.newCents / 100, item.currency)} on ${pendingChange.detectedOn}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setPriceDrawerOpen(true)}
+            >
+              Price {pctLabel}
+            </Badge>
+          ) : item.priceChangeDetected ? (
             <Badge
               variant="destructive"
               title="Price has increased since the last refresh"
             >
               <AlertTriangle size={12} aria-hidden="true" /> price up
             </Badge>
-          )}
+          ) : null}
         </div>
+        {priceDrawerOpen && pendingChange && (
+          <Dialog open={priceDrawerOpen} onOpenChange={setPriceDrawerOpen}>
+            <DialogHeader>
+              <DialogTitle>{item.merchantName} price changed</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p>
+                Previously {formatMoney(pendingChange.prevCents / 100, item.currency)} / month →
+                {' '}Now {formatMoney(pendingChange.newCents / 100, item.currency)} / month.
+                Detected from charges on {pendingChange.detectedOn}.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPriceDrawerOpen(false)}>
+                Close
+              </Button>
+              <Button onClick={() => { void acknowledgePriceChange() }}>
+                Acknowledge
+              </Button>
+            </DialogFooter>
+          </Dialog>
+        )}
         {item.cancellationUrl && (
           <a
             href={item.cancellationUrl}
@@ -475,6 +539,23 @@ function SubscriptionRow({
             showImpact={showImpact}
             onToggleImpact={() => setShowImpact((v) => !v)}
           />
+          {rowError && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} role="alert">
+              <span
+                style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-destructive, red)', flexShrink: 0 }}
+                aria-hidden="true"
+              />
+              <span className="text-xs text-destructive">{rowError.message}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void rowError.retry()}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
         </div>
         {!isCancelled && showImpact && (
           <CancelImpactCard
