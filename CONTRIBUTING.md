@@ -100,3 +100,19 @@ yarn dupes        # jscpd — writes reports/jscpd/html/
 ## Git hooks
 
 After `yarn install`, Husky runs `yarn prepare`. Staged `frontend/**/*.{ts,tsx}` files trigger **`yarn workspace frontend run lint`** on commit (via [lint-staged](https://github.com/lint-staged/lint-staged)). To skip once: `git commit --no-verify`.
+
+## Code-audit findings and issue triage
+
+The `audit-new-findings` workflow opens GitHub issues automatically when fallow or jscpd
+detect new dead code, complexity regressions, or duplication on pushes to `main`.
+
+- Issues are labelled `chore` + `code-audit` + `audit:dead-code` / `audit:complexity` / `audit:dupe`.
+- To suppress a known-good symbol from future findings, add a `// fallow-ignore-*` comment or extend `.fallowrc.json`.
+- Do **not** mark an audit issue as Won't Fix without a suppression — the next push will re-open it.
+
+## Grafana alert issues
+
+Firing Grafana alerts automatically become `bug` + `incident` issues (see `docs/observability.md`
+for the contact-point setup). When you fix the underlying cause and the alert resolves, the issue
+is automatically closed. If you need to close it manually before the alert resolves, add an
+`alert:<name>` label so the dedup logic still works when the alert fires again.

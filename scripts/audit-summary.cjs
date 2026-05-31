@@ -111,6 +111,134 @@ function healthBadge(h) {
   return `  ·  Health **${score.grade}** (${score.score}/100)`;
 }
 
+// ── Baseline diff mode ────────────────────────────────────────────────────
+// Usage: node scripts/audit-summary.cjs --diff-issues <baseline.json>
+//
+// Reads current audit reports, diffs against the baseline, and writes JSON to
+// stdout: { newFindings: [...], baseline: {...} }
+// where each finding is { type, title, body, labels: string[] }.
+// The caller (audit-new-findings.yml) iterates newFindings to open issues.
+//
+// Baseline schema: { unusedFiles: string[], categoryCounts: Record<string,number> }
+
+function buildBaseline(dc, h, jscpdData) {
+  const unusedFiles = (dc && dc.unused_files || []).map((f) => f.path);
+  const categoryCounts = {};
+  for (const [key] of DEADCODE_CATEGORIES) {
+    if (key !== 'unused_files') {
+      categoryCounts[key] = (dc && dc.summary && dc.summary[key]) || 0;
+    }
+  }
+  // Health: critical + high
+  const s = h && h.summary;
+  categoryCounts['health_critical'] = (s && s.severity_critical_count) || 0;
+  categoryCounts['health_high']     = (s && s.severity_high_count)     || 0;
+  // jscpd clone count
+  const tot = jscpdData && jscpdData.statistics && jscpdData.statistics.total;
+  categoryCounts['jscpd_clones'] = (tot && tot.clones) || 0;
+  return { unusedFiles, categoryCounts };
+}
+
+function diffFindings(prev, curr, dc, h, jscpdData, sha, repoUrl) {
+  const findings = [];
+  const blobBase = sha ? `${repoUrl}/blob/${sha}/` : null;
+
+  // New unused files
+  const prevFiles = new Set(prev.unusedFiles || []);
+  for (const f of (dc && dc.unused_files || [])) {
+    if (!prevFiles.has(f.path)) {
+      const fileUrl = blobBase ? `${blobBase}${f.path}` : f.path;
+      findings.push({
+        type: 'dead-code',
+        title: `[chore] unused file \`${f.path}\``,
+        body: `**Rule:** unused file\n**File:** ${fileUrl}\n\nThis file has no importers. Remove it or add a \`// fallow-ignore-unused-files\` suppression if it is intentionally kept.`,
+        labels: ['chore', 'code-audit', 'audit:dead-code'],
+      });
+    }
+  }
+
+  // Category count increases
+  const categoryLabels = {
+    unused_exports:       ['chore', 'code-audit', 'audit:dead-code'],
+    unused_types:         ['chore', 'code-audit', 'audit:dead-code'],
+    unused_class_members: ['chore', 'code-audit', 'audit:dead-code'],
+    unused_enum_members:  ['chore', 'code-audit', 'audit:dead-code'],
+    duplicate_exports:    ['chore', 'code-audit', 'audit:dead-code'],
+    unused_dependencies:  ['chore', 'code-audit', 'audit:dead-code'],
+    unlisted_dependencies:['chore', 'code-audit', 'audit:dead-code'],
+    unresolved_imports:   ['chore', 'code-audit', 'audit:dead-code'],
+    circular_dependencies:['chore', 'code-audit', 'audit:dead-code'],
+    private_type_leaks:   ['chore', 'code-audit', 'audit:dead-code'],
+  };
+  for (const [key, labels] of Object.entries(categoryLabels)) {
+    const prevCount = (prev.categoryCounts && prev.categoryCounts[key]) || 0;
+    const currCount = (curr.categoryCounts && curr.categoryCounts[key]) || 0;
+    if (currCount > prevCount) {
+      const label = DEADCODE_CATEGORIES.find(([k]) => k === key)?.[1] ?? key;
+      findings.push({
+        type: 'dead-code',
+        title: `[chore] ${currCount - prevCount} new ${label.toLowerCase()} finding(s)`,
+        body: `**Rule:** ${key}\n**Count before:** ${prevCount}\n**Count after:** ${currCount}\n**Delta:** +${currCount - prevCount}\n\nRun \`yarn audit:code\` locally and inspect the fallow dead-code report for the specific symbols.`,
+        labels,
+      });
+    }
+  }
+
+  // Health regression (new critical or high findings)
+  const prevCrit = (prev.categoryCounts && prev.categoryCounts['health_critical']) || 0;
+  const currCrit = (curr.categoryCounts && curr.categoryCounts['health_critical']) || 0;
+  const prevHigh = (prev.categoryCounts && prev.categoryCounts['health_high'])     || 0;
+  const currHigh = (curr.categoryCounts && curr.categoryCounts['health_high'])     || 0;
+  if (currCrit > prevCrit || currHigh > prevHigh) {
+    findings.push({
+      type: 'complexity',
+      title: `[chore] new complexity findings (critical: +${currCrit - prevCrit}, high: +${currHigh - prevHigh})`,
+      body: `**Rule:** cyclomatic complexity\n**Critical before/after:** ${prevCrit} → ${currCrit}\n**High before/after:** ${prevHigh} → ${currHigh}\n\nRun \`yarn audit:code\` locally and inspect the fallow health report for the specific functions.`,
+      labels: ['chore', 'code-audit', 'audit:complexity'],
+    });
+  }
+
+  // jscpd clone increase
+  const prevClones = (prev.categoryCounts && prev.categoryCounts['jscpd_clones']) || 0;
+  const currClones = (curr.categoryCounts && curr.categoryCounts['jscpd_clones']) || 0;
+  if (currClones > prevClones) {
+    findings.push({
+      type: 'duplication',
+      title: `[chore] ${currClones - prevClones} new code duplication clone(s)`,
+      body: `**Rule:** jscpd duplication\n**Clones before:** ${prevClones}\n**Clones after:** ${currClones}\n**Delta:** +${currClones - prevClones}\n\nRun \`yarn jscpd\` locally and inspect the HTML report in \`reports/jscpd/\` for the specific duplicate blocks.`,
+      labels: ['chore', 'code-audit', 'audit:dupe'],
+    });
+  }
+
+  return findings;
+}
+
+const diffFlagIdx = process.argv.indexOf('--diff-issues');
+if (diffFlagIdx !== -1) {
+  const baselineFile = process.argv[diffFlagIdx + 1];
+  const sha     = process.env.GITHUB_SHA     ?? '';
+  const repoUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY
+    ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`
+    : 'https://github.com/Connor-Adams/cashflow';
+
+  const deadcode = readJson(DEADCODE_JSON);
+  const health   = readJson(HEALTH_JSON);
+  const jscpd    = readJson(JSCPD_JSON);
+
+  let prev = { unusedFiles: [], categoryCounts: {} };
+  if (baselineFile) {
+    try { prev = JSON.parse(fs.readFileSync(baselineFile, 'utf8')); } catch { /* first run */ }
+  }
+
+  const curr         = buildBaseline(deadcode, health, jscpd);
+  const newFindings  = diffFindings(prev, curr, deadcode, health, jscpd, sha, repoUrl);
+
+  process.stdout.write(JSON.stringify({ newFindings, baseline: curr }, null, 2) + '\n');
+  process.exit(0);
+}
+
+// ── Normal markdown-summary mode ──────────────────────────────────────────
+
 const deadcode = readJson(DEADCODE_JSON);
 const health = readJson(HEALTH_JSON);
 const jscpd = readJson(JSCPD_JSON);

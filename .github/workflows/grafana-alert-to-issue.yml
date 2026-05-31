@@ -1,0 +1,130 @@
+name: Grafana alert → GitHub issue
+
+# Triggered by Grafana contact point via repo-dispatch. Configure Grafana's
+# webhook contact point to POST to:
+#   https://api.github.com/repos/Connor-Adams/cashflow/dispatches
+# with Bearer token (PAT or GITHUB_TOKEN equivalent) and body:
+#   { "event_type": "grafana-alert", "client_payload": { <alert fields> } }
+#
+# Required client_payload fields:
+#   alertname  - Grafana alert rule name (e.g. "TempoExportFailing")
+#   status     - "firing" | "resolved"
+#   severity   - "critical" | "high" | "warn" | "info"
+#   component  - service label (e.g. "tempo", "backend", "otel-collector")
+# Optional:
+#   summary, description, runbook_url, grafana_panel_url, expr
+
+on:
+  repository_dispatch:
+    types: [grafana-alert]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Handle alert
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const p = context.payload.client_payload ?? {};
+            const alertname  = String(p.alertname  ?? 'unknown-alert');
+            const status     = String(p.status     ?? 'firing');
+            const severity   = String(p.severity   ?? 'warn');
+            const component  = String(p.component  ?? 'unknown');
+            const summary    = String(p.summary    ?? '');
+            const description= String(p.description ?? '');
+            const runbookUrl = String(p.runbook_url ?? '');
+            const panelUrl   = String(p.grafana_panel_url ?? '');
+            const expr       = String(p.expr       ?? '');
+
+            // Label used to correlate duplicate firings of the same alert.
+            const alertLabel = `alert:${alertname}`;
+
+            // ── Find an existing open issue for this alert ────────────────
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: alertLabel,
+              per_page: 10,
+            });
+            const openIssue = existing[0] ?? null;
+
+            if (status === 'resolved') {
+              if (!openIssue) {
+                core.info(`Alert ${alertname} resolved — no open issue found, nothing to do.`);
+                return;
+              }
+              // Comment + close.
+              await github.rest.issues.createComment({
+                owner:    context.repo.owner,
+                repo:     context.repo.repo,
+                issue_number: openIssue.number,
+                body: `**Alert resolved** at ${new Date().toISOString()}\n\nGrafana reports \`${alertname}\` is back to normal.`,
+              });
+              await github.rest.issues.update({
+                owner:    context.repo.owner,
+                repo:     context.repo.repo,
+                issue_number: openIssue.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+              core.info(`Closed issue #${openIssue.number} for resolved alert ${alertname}.`);
+              return;
+            }
+
+            // ── Firing ────────────────────────────────────────────────────
+            const now = new Date().toISOString();
+            const lines = [
+              `**Alert:** \`${alertname}\``,
+              `**Severity:** ${severity}`,
+              `**Component:** ${component}`,
+              `**Fired at:** ${now}`,
+              '',
+            ];
+            if (summary)     lines.push(`**Summary:** ${summary}`, '');
+            if (description) lines.push(`**Description:** ${description}`, '');
+            if (expr)        lines.push(`**Expression:**\n\`\`\`promql\n${expr}\n\`\`\``, '');
+            if (runbookUrl)  lines.push(`**Runbook:** ${runbookUrl}`, '');
+            if (panelUrl)    lines.push(`**Grafana panel:** ${panelUrl}`, '');
+
+            if (openIssue) {
+              // Dedup: add a comment to the existing issue.
+              await github.rest.issues.createComment({
+                owner:    context.repo.owner,
+                repo:     context.repo.repo,
+                issue_number: openIssue.number,
+                body: `**Alert re-fired** at ${now}\n\n${lines.join('\n')}`,
+              });
+              core.info(`Commented on existing issue #${openIssue.number} for ${alertname}.`);
+            } else {
+              // Ensure the dedup label exists.
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  name:  alertLabel,
+                });
+              } catch {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  name:  alertLabel,
+                  color: 'e11d48',
+                  description: `Auto-label for Grafana alert ${alertname}`,
+                });
+              }
+
+              const { data: issue } = await github.rest.issues.create({
+                owner:  context.repo.owner,
+                repo:   context.repo.repo,
+                title:  `[alert] ${alertname} on ${component}`,
+                labels: ['bug', 'incident', `severity:${severity}`, `component:${component}`, alertLabel],
+                body:   lines.join('\n'),
+              });
+              core.info(`Created issue #${issue.number} for ${alertname}.`);
+            }

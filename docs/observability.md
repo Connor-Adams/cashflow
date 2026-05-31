@@ -439,3 +439,62 @@ Each log record landing in Loki carries these fields (via the pino → OTLP tran
 - `resources.service.version`: the `GIT_SHA` env var (or `dev` locally)
 
 Every log carries `trace_id` and `span_id` automatically — the pino mixin reads them from the active OTel context set by the NodeSDK (Phase 3).
+
+## Alert → GitHub issue automation
+
+Grafana alerts are wired to automatically create GitHub issues via the
+`.github/workflows/grafana-alert-to-issue.yml` workflow.
+
+### How it works
+
+1. **Grafana contact point** — configure a webhook contact point that POSTs to:
+   ```
+   https://api.github.com/repos/Connor-Adams/cashflow/dispatches
+   ```
+   with `Authorization: Bearer <PAT>` and body:
+   ```json
+   {
+     "event_type": "grafana-alert",
+     "client_payload": {
+       "alertname": "TempoExportFailing",
+       "status": "firing",
+       "severity": "critical",
+       "component": "tempo",
+       "summary": "...",
+       "description": "...",
+       "runbook_url": "...",
+       "grafana_panel_url": "...",
+       "expr": "<promql>"
+     }
+   }
+   ```
+
+2. **Firing** — the workflow searches for an open issue labelled `alert:<alertname>`.
+   - If none exists: creates a `bug` issue with `incident`, `severity:*`, `component:*`, and `alert:*` labels.
+   - If one exists: adds a comment (deduplication — no duplicate issues).
+
+3. **Resolved** — the workflow adds a "resolved" comment and closes the issue.
+
+### Required PAT
+
+Create a fine-grained PAT (or classic PAT with `repo` scope) for the Grafana service account.
+Store it as `GRAFANA_DISPATCH_TOKEN` in the repository secrets. The PAT needs **issues: write** and **contents: read**.
+
+## Code-audit findings → GitHub issues
+
+The `.github/workflows/audit-new-findings.yml` workflow runs on every push to `main`.
+It runs fallow and jscpd, diffs against the previous audit baseline (stored as a workflow artifact named `audit-baseline`),
+and opens one `chore` issue per new finding with `code-audit` and `audit:dead-code` / `audit:complexity` / `audit:dupe` labels.
+
+### Seeding the baseline (first activation)
+
+To avoid a flood of issues on the first run, seed the baseline before enabling the workflow:
+
+```sh
+node scripts/audit-summary.cjs --diff-issues /dev/null | jq .baseline > /tmp/baseline.json
+# Upload as the audit-baseline artifact via the Actions UI, or commit temporarily:
+mkdir -p .fallow && cp /tmp/baseline.json .fallow/baseline.json
+git add .fallow/baseline.json && git commit -m "chore: seed audit baseline"
+git push
+# After the first workflow run creates the artifact, delete the committed file.
+```

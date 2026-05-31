@@ -1,0 +1,104 @@
+name: Audit — new findings → issues
+
+# Runs on every push to main. Diffs the current audit results against the
+# previous baseline (stored as a workflow artifact) and opens one chore issue
+# per new finding. The updated baseline is re-uploaded so the next run compares
+# against today's snapshot — not the initial state.
+#
+# First run: no baseline artifact → every current finding is "new". To avoid
+# issue spam on first activation, seed the baseline by running:
+#   node scripts/audit-summary.cjs --diff-issues /dev/null | jq .baseline \
+#     > .fallow/baseline.json
+# commit that file, then delete it after the first workflow run creates an
+# artifact (the artifact takes over from that point).
+
+on:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: audit-findings-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diff-and-file:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Create reports directory
+        run: mkdir -p reports/jscpd
+
+      - name: Dead code & complexity (fallow)
+        run: |
+          yarn --silent fallow dead-code --format json > reports/fallow-deadcode.json || true
+          yarn --silent fallow health    --format json > reports/fallow-health.json   || true
+
+      - name: Duplicate code (jscpd)
+        run: yarn jscpd --reporters json || true
+
+      - name: Download previous baseline
+        id: baseline-dl
+        uses: actions/download-artifact@v4
+        with:
+          name: audit-baseline
+          path: /tmp/audit-baseline
+        continue-on-error: true
+
+      - name: Compute new findings
+        id: diff
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          BASELINE_FILE=/tmp/audit-baseline/baseline.json
+          [ -f "$BASELINE_FILE" ] || BASELINE_FILE=/dev/null
+          node scripts/audit-summary.cjs --diff-issues "$BASELINE_FILE" > /tmp/diff-output.json
+          # Save updated baseline for upload.
+          mkdir -p /tmp/audit-baseline-new
+          jq .baseline /tmp/diff-output.json > /tmp/audit-baseline-new/baseline.json
+          # Count new findings.
+          COUNT=$(jq '.newFindings | length' /tmp/diff-output.json)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Found $COUNT new finding(s)."
+
+      - name: Open issues for new findings
+        if: steps.diff.outputs.count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diff = JSON.parse(fs.readFileSync('/tmp/diff-output.json', 'utf8'));
+            for (const f of diff.newFindings) {
+              const { data: issue } = await github.rest.issues.create({
+                owner:  context.repo.owner,
+                repo:   context.repo.repo,
+                title:  f.title,
+                labels: f.labels,
+                body:   f.body,
+              });
+              console.log(`Created issue #${issue.number}: ${f.title}`);
+            }
+
+      - name: Upload updated baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-baseline
+          path: /tmp/audit-baseline-new/baseline.json
+          retention-days: 90
+          overwrite: true
