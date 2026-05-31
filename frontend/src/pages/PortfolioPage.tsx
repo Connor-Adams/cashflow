@@ -35,6 +35,7 @@ import { ForwardIncomePanel } from './portfolio-forward-income/ForwardIncomePane
 import { PerformancePanel } from './portfolio-performance/PerformancePanel'
 import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safePct } from '../lib/num'
 import type {
   PortfolioAllocation,
   PortfolioBySecurity,
@@ -681,7 +682,7 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
                     {row.assetType} ({row.currency})
                   </TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
+                  <TableCell>{safePct(row.percentage)}</TableCell>
                 </TableRow>
               ))}
               {data!.bySecurity.slice(0, 20).map((row) => (
@@ -691,7 +692,7 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
                     {row.symbol} ({row.currency})
                   </TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
+                  <TableCell>{safePct(row.percentage)}</TableCell>
                 </TableRow>
               ))}
               {data!.byAccount.map((row) => (
@@ -701,7 +702,7 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
                     {row.accountName} ({row.currency})
                   </TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{row.percentage.toFixed(1)}%</TableCell>
+                  <TableCell>{safePct(row.percentage)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

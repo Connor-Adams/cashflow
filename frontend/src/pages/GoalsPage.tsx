@@ -22,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { safeNum, clampPct } from '../lib/num'
 import type {
   Account,
   FinancialGoal,
@@ -481,7 +482,7 @@ export function GoalsPage() {
                     )
                   }
                   const projection = projections[row.id]
-                  const progress = projection?.progressPercent ?? 0
+                  const progress = clampPct(projection?.progressPercent ?? 0)
                   const projStatus = projection?.status ?? 'active'
                   return (
                     <TableRow key={row.id}>
@@ -507,9 +508,9 @@ export function GoalsPage() {
                             />
                           </div>
                           <div className="muted text-xs">
-                            {formatMoney(Number(row.currentAmount), row.currency)}
+                            {formatMoney(safeNum(Number(row.currentAmount)) ?? 0, row.currency)}
                             {' / '}
-                            {formatMoney(Number(row.targetAmount), row.currency)}
+                            {formatMoney(safeNum(Number(row.targetAmount)) ?? 0, row.currency)}
                             {' '}
                             ({progress.toFixed(0)}%)
                           </div>
