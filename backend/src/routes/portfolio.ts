@@ -2481,4 +2481,138 @@ router.get('/performance', async (req, res, next) => {
   }
 });
 
+// POST /api/portfolio/activities — manual corporate-action entry
+const CORPORATE_ACTION_TYPES = [
+  'buy', 'sell', 'split', 'reinvestment',
+  'dividend_in_kind', 'spin_off', 'merger', 'return_of_capital',
+  'transfer_in', 'transfer_out',
+] as const;
+
+type CorporateActionType = (typeof CORPORATE_ACTION_TYPES)[number];
+
+router.post('/activities', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = req.body as {
+      accountId?: unknown;
+      securityId?: unknown;
+      activityType?: unknown;
+      tradeDate?: unknown;
+      quantity?: unknown;
+      amount?: unknown;
+      fees?: unknown;
+      splitRatio?: unknown;
+      recipientSecurityId?: unknown;
+      costBasisAllocationPct?: unknown;
+      cashComponent?: unknown;
+      description?: unknown;
+    };
+
+    const accountId = Number(body.accountId);
+    if (!Number.isFinite(accountId)) {
+      res.status(400).json({ error: 'accountId is required' });
+      return;
+    }
+
+    const { Account: AccountModel } = await import('../models');
+    const account = await AccountModel.findOne({
+      where: { id: accountId, householdId: household.id },
+    });
+    if (!account) {
+      res.status(404).json({ error: 'account not found' });
+      return;
+    }
+
+    const activityType = String(body.activityType ?? '');
+    if (!CORPORATE_ACTION_TYPES.includes(activityType as CorporateActionType)) {
+      res.status(400).json({
+        error: 'INVALID_ACTIVITY_TYPE',
+        message: `activityType must be one of: ${CORPORATE_ACTION_TYPES.join(', ')}`,
+      });
+      return;
+    }
+
+    const tradeDate = typeof body.tradeDate === 'string' ? body.tradeDate : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) {
+      res.status(400).json({ error: 'tradeDate must be YYYY-MM-DD' });
+      return;
+    }
+
+    const numOrNull = (v: unknown): number | null => {
+      if (v == null || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const quantity = numOrNull(body.quantity);
+    const amount = numOrNull(body.amount);
+    const costBasisAllocationPct = numOrNull(body.costBasisAllocationPct);
+    const cashComponent = numOrNull(body.cashComponent);
+
+    // Type-specific validation
+    if (activityType === 'dividend_in_kind') {
+      if (quantity == null || quantity <= 0) {
+        res.status(400).json({ error: 'MISSING_QUANTITY', message: 'Shares received (quantity) is required' });
+        return;
+      }
+    }
+    if (activityType === 'spin_off') {
+      if (quantity == null || quantity <= 0) {
+        res.status(400).json({ error: 'MISSING_QUANTITY', message: 'Shares received (quantity) is required' });
+        return;
+      }
+      if (!body.recipientSecurityId) {
+        res.status(400).json({ error: 'MISSING_RECIPIENT', message: 'Pick the new security (recipientSecurityId)' });
+        return;
+      }
+      if (costBasisAllocationPct == null || costBasisAllocationPct <= 0 || costBasisAllocationPct > 1) {
+        res.status(400).json({ error: 'INVALID_ALLOCATION', message: 'Allocation must be between 0 and 1' });
+        return;
+      }
+    }
+    if (activityType === 'merger') {
+      if (quantity == null || quantity <= 0) {
+        res.status(400).json({ error: 'MISSING_QUANTITY', message: 'Shares received (quantity) is required' });
+        return;
+      }
+      if (!body.recipientSecurityId) {
+        res.status(400).json({ error: 'MISSING_RECIPIENT', message: 'Pick the new security (recipientSecurityId)' });
+        return;
+      }
+    }
+    if (activityType === 'return_of_capital') {
+      if (amount == null || amount <= 0) {
+        res.status(400).json({ error: 'MISSING_AMOUNT', message: 'Amount returned is required' });
+        return;
+      }
+    }
+
+    const activity = await InvestmentActivity.create({
+      accountId,
+      householdId: household.id,
+      securityId: body.securityId != null ? Number(body.securityId) : null,
+      activityType,
+      tradeDate,
+      settlementDate: null,
+      description: typeof body.description === 'string' ? body.description : `Manual ${activityType}`,
+      quantity: quantity != null ? String(quantity) : null,
+      price: null,
+      amount: amount != null ? String(amount) : null,
+      fees: numOrNull(body.fees) != null ? String(numOrNull(body.fees)) : null,
+      splitRatio: numOrNull(body.splitRatio) != null ? String(numOrNull(body.splitRatio)) : null,
+      currency: account.defaultCurrency ?? 'CAD',
+      sourceReference: null,
+      sourceRowFingerprint: `manual-${Date.now()}-${Math.random()}`,
+      importBatch: `manual-${tradeDate}`,
+      recipientSecurityId: body.recipientSecurityId != null ? Number(body.recipientSecurityId) : null,
+      costBasisAllocationPct: costBasisAllocationPct != null ? String(costBasisAllocationPct) : null,
+      cashComponent: cashComponent != null ? String(cashComponent) : null,
+    });
+
+    res.status(201).json(activity.toJSON());
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

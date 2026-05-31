@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { Plus, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   Bar,
@@ -36,6 +36,7 @@ import { AccountTypePanel } from './portfolio-account-type/AccountTypePanel'
 import { ForwardIncomePanel } from './portfolio-forward-income/ForwardIncomePanel'
 import { PerformancePanel } from './portfolio-performance/PerformancePanel'
 import { getJson, postJson } from '../lib/api'
+import { CorporateActionForm, type SecurityOption } from '../components/portfolio/CorporateActionForm'
 import { formatMoney } from '../lib/formatMoney'
 import { safePct } from '../lib/num'
 import type {
@@ -259,7 +260,7 @@ export function PortfolioPage() {
       </TabPanel>
 
       <TabPanel value="holdings" active={activeTab}>
-        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} />
+        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} onActivitySaved={() => void load()} />
       </TabPanel>
 
       <TabPanel value="by-security" active={activeTab}>
@@ -297,12 +298,15 @@ function HoldingsPanel({
   summary,
   accountsById,
   sparklines,
+  onActivitySaved,
 }: {
   summary: PortfolioSummary | null
   accountsById: Map<number, PortfolioSummary['accounts'][number]>
   sparklines: Map<number, PortfolioSparklinePoint[]>
+  onActivitySaved: () => void
 }) {
   const [sort, setSort] = useState<SortState<HoldingField>>({ field: 'marketValue', dir: 'desc' })
+  const [showActionForm, setShowActionForm] = useState(false)
   const sortedHoldings = sortBy(summary?.holdings ?? [], sort.field, sort.dir)
   return (
     <>
@@ -433,6 +437,15 @@ function HoldingsPanel({
               Trades, dividends, fees, transfers, and other imported brokerage rows.
             </p>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setShowActionForm((v) => !v)}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Record corporate action
+          </Button>
         </div>
         <div className="transactionsTableWrap">
           <Table className="table transactionsTable">
@@ -487,6 +500,26 @@ function HoldingsPanel({
           </Table>
         </div>
       </Card>
+
+      {showActionForm && (
+        <CorporateActionForm
+          accounts={(summary?.accounts ?? []) as import('@cashflow/shared').Account[]}
+          securities={
+            (summary?.holdings ?? [])
+              .filter((h) => h.security != null)
+              .map((h) => ({
+                id: h.security!.id,
+                symbol: h.security!.symbol,
+                name: h.security!.name ?? h.security!.symbol,
+              }))
+              .filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i) as SecurityOption[]
+          }
+          onSaved={() => {
+            setShowActionForm(false)
+            onActivitySaved()
+          }}
+        />
+      )}
     </>
   )
 }

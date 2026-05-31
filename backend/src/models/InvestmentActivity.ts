@@ -29,6 +29,9 @@ export class InvestmentActivity extends Model<
   declare sourceReference: string | null;
   declare sourceRowFingerprint: string;
   declare importBatch: string;
+  declare recipientSecurityId: CreationOptional<number | null>;
+  declare costBasisAllocationPct: CreationOptional<string | null>;
+  declare cashComponent: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -94,6 +97,24 @@ export function initInvestmentActivity(
         type: DataTypes.STRING(128),
         field: 'import_batch',
         allowNull: false,
+      },
+      recipientSecurityId: {
+        type: DataTypes.INTEGER,
+        field: 'recipient_security_id',
+        allowNull: true,
+        defaultValue: null,
+      },
+      costBasisAllocationPct: {
+        type: DataTypes.DECIMAL(5, 4),
+        field: 'cost_basis_allocation_pct',
+        allowNull: true,
+        defaultValue: null,
+      },
+      cashComponent: {
+        type: DataTypes.DECIMAL(18, 4),
+        field: 'cash_component',
+        allowNull: true,
+        defaultValue: null,
       },
     } as ModelAttributes<InvestmentActivity>,
     {

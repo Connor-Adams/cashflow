@@ -49,6 +49,11 @@ export type AcbActivity = {
    * split. Total cost is preserved across the split.
    */
   splitRatio?: number | null;
+  /** For spin_off and merger: fraction of the source security's cost basis
+   *  transferred to the recipient security (0..1). */
+  costBasisAllocationPct?: number | null;
+  /** For merger: cash per share received in addition to the new security. */
+  cashComponent?: number | null;
 };
 
 /** Position state recorded after each buy/sell event. */
@@ -366,6 +371,78 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         totalCost: newTotalCost,
         acbPerUnit: newAcb,
       };
+      timeline.push(state);
+    } else if (type === 'dividend_in_kind') {
+      // Stock dividend (dividend in kind): issuer distributes additional shares.
+      // No cash changes hands; new shares increase the position. The total cost
+      // basis is unchanged — it is spread across the larger share count, lowering
+      // per-unit ACB. CRA: non-taxable; new shares' ACB = old_total_basis / new_total_shares.
+      if (activity.quantity == null) {
+        warnings.push(
+          `DIVIDEND_IN_KIND activity ${activity.id} on ${activity.tradeDate} missing quantity; ignored`
+        );
+        continue;
+      }
+      const newQuantity = state.quantity + activity.quantity;
+      const newAcb = newQuantity > EPS ? state.totalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: state.totalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'spin_off') {
+      // Spin-off: a portion of the source security's cost basis is reallocated
+      // to the recipient security (tracked separately). The source security's
+      // quantity is unchanged; only its total cost is reduced by the allocation pct.
+      const pct = activity.costBasisAllocationPct ?? 0;
+      if (pct <= 0 || pct > 1) {
+        warnings.push(
+          `SPIN_OFF activity ${activity.id} on ${activity.tradeDate}: costBasisAllocationPct must be in (0,1]; ignored`
+        );
+        continue;
+      }
+      const allocated = state.totalCost * pct;
+      const newTotalCost = state.totalCost - allocated;
+      const newAcb = state.quantity > EPS ? newTotalCost / state.quantity : 0;
+      warnings.push(
+        `SPIN_OFF activity ${activity.id}: $${allocated.toFixed(2)} of cost basis transferred to recipient security; record a corresponding buy/transfer_in on that security`
+      );
+      state = {
+        asOf: activity.tradeDate,
+        quantity: state.quantity,
+        totalCost: newTotalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'merger') {
+      // Merger/acquisition: the source security's entire position is exchanged for
+      // the recipient security (+ optional cash component). The source position
+      // closes; its basis (minus cash proceeds) transfers to the recipient.
+      // Cash component per share is treated as proceeds and generates a gain/loss.
+      const qty = state.quantity;
+      const cashPerShare = activity.cashComponent ?? 0;
+      const cashProceeds = qty * cashPerShare;
+      const basisTransferred = state.totalCost - cashProceeds;
+      if (cashProceeds > 0) {
+        const gainOnCash = cashProceeds - (state.quantity > EPS ? qty * state.acbPerUnit : 0);
+        realizedEvents.push({
+          activityId: activity.id,
+          tradeDate: activity.tradeDate,
+          qtySold: 0,
+          proceeds: cashProceeds,
+          acbPerUnitAtSale: state.acbPerUnit,
+          costRemoved: qty * state.acbPerUnit,
+          realizedGain: gainOnCash,
+          currency: activity.currency || currency,
+        });
+        realizedTotal += gainOnCash;
+      }
+      warnings.push(
+        `MERGER activity ${activity.id}: position closed; $${Math.max(0, basisTransferred).toFixed(2)} basis transferred to recipient security; record a corresponding transfer_in on that security`
+      );
+      state = { asOf: activity.tradeDate, quantity: 0, totalCost: 0, acbPerUnit: 0 };
       timeline.push(state);
     }
     // All other activity types (dividend, interest, fee, ambiguous
