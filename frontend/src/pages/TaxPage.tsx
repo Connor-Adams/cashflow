@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tabs } from '../components/ui/tabs'
+import { YearJump, type YearJumpHandle } from '../components/tax/YearJump'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
 import { SlipsTab } from './tax/SlipsTab'
@@ -23,10 +24,23 @@ const TABS = [
   { value: 'reserve', label: 'Reserve' },
 ]
 
+const HINT_KEY = 'cashflow.tax.cmdKHintSeen'
+
 function pickDefaultYear(years: number[]): number {
   const prev = new Date().getUTCFullYear() - 1
   if (years.includes(prev)) return prev
   return years[years.length - 1]
+}
+
+function isTextInput(el: Element | null): boolean {
+  if (!el) return false
+  const tag = el.tagName
+  if (tag === 'TEXTAREA') return true
+  if (tag === 'INPUT') {
+    const type = (el as HTMLInputElement).type.toLowerCase()
+    return type === 'text' || type === 'search' || type === 'email' || type === 'url' || type === 'number' || type === 'password'
+  }
+  return (el as HTMLElement).isContentEditable
 }
 
 export function TaxPage() {
@@ -35,7 +49,8 @@ export function TaxPage() {
   const [year, setYear] = useState<number | null>(null)
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
   const [tabNotFound, setTabNotFound] = useState(false)
-  const yearInputRef = useRef<HTMLInputElement>(null)
+  const [showHint, setShowHint] = useState(false)
+  const yearJumpRef = useRef<YearJumpHandle>(null)
 
   useEffect(() => {
     if (year === null && years && years.length > 0) {
@@ -46,6 +61,16 @@ export function TaxPage() {
   // Reset the 404 indicator whenever the year or tab changes.
   useEffect(() => { setTabNotFound(false) }, [year, tab])
 
+  // Show the Cmd-K hint once on first visit to TaxPage.
+  useEffect(() => {
+    if (!localStorage.getItem(HINT_KEY)) {
+      setShowHint(true)
+      localStorage.setItem(HINT_KEY, '1')
+      const t = setTimeout(() => setShowHint(false), 4000)
+      return () => clearTimeout(t)
+    }
+  }, [])
+
   const stepYear = useCallback((delta: number) => {
     if (!years || year === null) return
     const idx = years.indexOf(year)
@@ -55,16 +80,16 @@ export function TaxPage() {
 
   // Ctrl+Left / Ctrl+Right navigate between years without grabbing the
   // arrow keys that the Tabs component uses for tab switching.
-  // Ctrl/Cmd+K focuses the year combobox.
+  // Ctrl/Cmd+K focuses the year combobox — guard against firing from text inputs.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!e.ctrlKey && !e.metaKey) return
       if (e.key === 'ArrowLeft') { e.preventDefault(); stepYear(-1) }
       if (e.key === 'ArrowRight') { e.preventDefault(); stepYear(1) }
       if (e.key === 'k' || e.key === 'K') {
+        if (isTextInput(document.activeElement)) return
         e.preventDefault()
-        yearInputRef.current?.focus()
-        yearInputRef.current?.select()
+        yearJumpRef.current?.focus()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -78,23 +103,7 @@ export function TaxPage() {
         {years && years.length > 0 && year !== null ? (
           <label className="flex items-center gap-1.5 text-sm">
             <span className="text-muted-foreground">Year</span>
-            <input
-              ref={yearInputRef}
-              aria-label="Tax year"
-              list="tax-year-list"
-              defaultValue={year}
-              key={year}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (years.includes(n)) setYear(n)
-              }}
-              className="w-24 rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <datalist id="tax-year-list">
-              {years.map((y) => (
-                <option key={y} value={y} />
-              ))}
-            </datalist>
+            <YearJump ref={yearJumpRef} years={years} value={year} onChange={setYear} />
             <span className="text-xs text-muted-foreground" title="Ctrl+Left / Ctrl+Right · Ctrl+K to jump">⌃←→ ⌃K</span>
           </label>
         ) : null}
@@ -109,6 +118,11 @@ export function TaxPage() {
           </span>
         )}
       </header>
+      {showHint && (
+        <p className="mt-1 text-xs text-muted-foreground" role="status" aria-live="polite">
+          Press Cmd-K to jump to a year.
+        </p>
+      )}
       <Tabs items={TABS} value={tab} onValueChange={setTab} className="mt-4" />
       {tabNotFound && year !== null && (
         <p role="alert" className="mt-3 text-sm text-muted-foreground">

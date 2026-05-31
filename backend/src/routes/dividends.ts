@@ -49,7 +49,7 @@ function serializeDividend(div: SecurityDividend & { security?: Security; matche
 router.get('/', async (req, res, next) => {
   try {
     const auth = currentAuth(req);
-    const { householdId } = auth;
+    const householdId = auth.household.id;
     const status = typeof req.query.status === 'string' ? req.query.status : 'unmatched';
     const windowMonths = Number(req.query.windowMonths) || 12;
     const today = new Date().toISOString().slice(0, 10);
@@ -118,7 +118,7 @@ router.get('/', async (req, res, next) => {
 router.get('/:id/candidates', async (req, res, next) => {
   try {
     const auth = currentAuth(req);
-    const { householdId } = auth;
+    const householdId = auth.household.id;
     const dividendId = Number(req.params.id);
 
     const div = await SecurityDividend.findByPk(dividendId, {
@@ -172,7 +172,7 @@ router.get('/:id/candidates', async (req, res, next) => {
 router.post('/:id/match', async (req, res, next) => {
   try {
     const auth = currentAuth(req);
-    const { householdId } = auth;
+    const householdId = auth.household.id;
     const dividendId = Number(req.params.id);
     const { transactionId } = req.body as { transactionId?: unknown };
 
@@ -216,7 +216,7 @@ router.post('/:id/match', async (req, res, next) => {
 router.post('/:id/unmatch', async (req, res, next) => {
   try {
     const auth = currentAuth(req);
-    const { householdId } = auth;
+    const householdId = auth.household.id;
     const dividendId = Number(req.params.id);
 
     const div = await SecurityDividend.findByPk(dividendId, {

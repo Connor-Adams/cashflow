@@ -45,14 +45,22 @@ export function Tabs({ items, value, onValueChange, className, id }: TabsProps) 
             tabIndex={isActive ? 0 : -1}
             onClick={() => onValueChange(item.value)}
             onKeyDown={(event) => {
-              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
-              event.preventDefault()
               const idx = items.findIndex((i) => i.value === value)
-              const next =
-                event.key === 'ArrowRight'
-                  ? items[(idx + 1) % items.length]
-                  : items[(idx - 1 + items.length) % items.length]
-              if (next) onValueChange(next.value)
+              if (event.key === 'ArrowRight') {
+                event.preventDefault()
+                const next = items[(idx + 1) % items.length]
+                if (next) onValueChange(next.value)
+              } else if (event.key === 'ArrowLeft') {
+                event.preventDefault()
+                const prev = items[(idx - 1 + items.length) % items.length]
+                if (prev) onValueChange(prev.value)
+              } else if (event.key === 'Home') {
+                event.preventDefault()
+                if (items[0]) onValueChange(items[0].value)
+              } else if (event.key === 'End') {
+                event.preventDefault()
+                if (items[items.length - 1]) onValueChange(items[items.length - 1].value)
+              }
             }}
             className={cn(
               'inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',

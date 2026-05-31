@@ -28,7 +28,7 @@ defineJob({
         for (const member of owners) {
           for (const div of stale) {
             await enqueueNotification(member.userId, 'dividend.unmatched', {
-              severity: 'warning',
+              severity: 'warn',
               title: 'Unmatched dividend',
               body: `A dividend payment due ${div.paymentDate ?? div.exDividendDate} has not been matched to a transaction. Visit the Portfolio → Dividends tab to review.`,
               dataJson: { securityDividendId: div.id, securityId: div.securityId },

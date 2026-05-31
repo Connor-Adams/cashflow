@@ -32,6 +32,7 @@ function num(v: unknown): number | null {
 router.post('/', async (req, res, next) => {
   try {
     const auth = currentAuth(req);
+    const householdId = auth.household.id;
     const {
       activityType,
       securityId,
@@ -109,7 +110,7 @@ router.post('/', async (req, res, next) => {
 
     const activity = await InvestmentActivity.create({
       accountId: Number(accountId),
-      householdId: auth.householdId ?? null,
+      householdId: householdId ?? null,
       securityId: Number(securityId),
       activityType: type,
       tradeDate: String(tradeDate),
