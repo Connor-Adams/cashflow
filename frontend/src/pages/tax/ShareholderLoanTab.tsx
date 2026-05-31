@@ -86,7 +86,7 @@ export function ShareholderLoanTab() {
             </select>
           </label>
           <label>
-            Amount ($){' '}
+            Amount{' '}
             <input
               type="number"
               step="0.01"
@@ -145,7 +145,7 @@ function LoanRow({ loan }: { loan: ShareholderLoanDto }) {
     <tr>
       <td>{loan.date}</td>
       <td>{KIND_LABELS[loan.kind] ?? loan.kind}</td>
-      <td>${loan.amount}</td>
+      <td>{Number(loan.amount).toFixed(2)}</td>
       <td>{loan.description ?? '—'}</td>
     </tr>
   );

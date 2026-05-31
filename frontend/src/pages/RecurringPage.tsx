@@ -5,11 +5,12 @@ import { EmptyTableRow } from '@/components/ui/empty-state'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
+import { SortableTableHead, sortBy } from '@/components/ui/sortable-table-head'
+import type { SortState } from '@/components/ui/sortable-table-head'
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
@@ -62,7 +63,11 @@ export function RecurringPage() {
     return Array.from(found).sort()
   }, [data, currency])
 
-  const visibleItems = data?.items ?? []
+  type RecurringField = 'merchant' | 'cadence' | 'avgAmount' | 'amountStability' | 'lastSeen' | 'nextExpected' | 'category'
+  const [sort, setSort] = useState<SortState<RecurringField>>({ field: 'merchant', dir: 'asc' })
+
+  const rawItems = data?.items ?? []
+  const visibleItems = sortBy(rawItems, sort.field, sort.dir)
   const windowDays = data?.windowDays ?? 180
   const minOccurrences = data?.minOccurrences ?? 3
 
@@ -97,13 +102,13 @@ export function RecurringPage() {
           <Table className="table">
             <TableHeader>
               <TableRow>
-                <TableHead>Merchant</TableHead>
-                <TableHead>Cadence</TableHead>
-                <TableHead>Avg amount</TableHead>
-                <TableHead>Stability</TableHead>
-                <TableHead>Last seen</TableHead>
-                <TableHead>Next expected</TableHead>
-                <TableHead>Category</TableHead>
+                <SortableTableHead field="merchant" sort={sort} onSort={setSort}>Merchant</SortableTableHead>
+                <SortableTableHead field="cadence" sort={sort} onSort={setSort}>Cadence</SortableTableHead>
+                <SortableTableHead field="avgAmount" sort={sort} onSort={setSort}>Avg amount</SortableTableHead>
+                <SortableTableHead field="amountStability" sort={sort} onSort={setSort}>Stability</SortableTableHead>
+                <SortableTableHead field="lastSeen" sort={sort} onSort={setSort}>Last seen</SortableTableHead>
+                <SortableTableHead field="nextExpected" sort={sort} onSort={setSort}>Next expected</SortableTableHead>
+                <SortableTableHead field="category" sort={sort} onSort={setSort}>Category</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

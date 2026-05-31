@@ -1061,6 +1061,7 @@ export type ItemRow = {
   qty: number
   unitPrice: number | null
   totalPrice: number | null
+  currency: string | null
   taxShare: number
   categoryEffective: string | null
   categoryOverride: string | null

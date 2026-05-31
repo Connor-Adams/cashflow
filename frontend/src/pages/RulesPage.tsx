@@ -3,6 +3,8 @@ import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirm } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/ui/page-header'
+import { SortableTableHead, sortBy } from '@/components/ui/sortable-table-head'
+import type { SortState } from '@/components/ui/sortable-table-head'
 import {
   Table,
   TableBody,
@@ -67,6 +69,8 @@ export function RulesPage() {
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append')
   const [importing, setImporting] = useState(false)
   const importFileRef = useRef<HTMLInputElement | null>(null)
+  type RuleField = 'merchantPattern' | 'matchKind' | 'priority' | 'category' | 'usageCount'
+  const [ruleSort, setRuleSort] = useState<SortState<RuleField>>({ field: 'priority', dir: 'desc' })
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -576,13 +580,13 @@ export function RulesPage() {
           <Table className="table">
             <TableHeader>
               <TableRow>
-                <TableHead>Pattern</TableHead>
-                <TableHead>Match</TableHead>
-                <TableHead>Pri</TableHead>
-                <TableHead>Category</TableHead>
+                <SortableTableHead field="merchantPattern" sort={ruleSort} onSort={setRuleSort}>Pattern</SortableTableHead>
+                <SortableTableHead field="matchKind" sort={ruleSort} onSort={setRuleSort}>Match</SortableTableHead>
+                <SortableTableHead field="priority" sort={ruleSort} onSort={setRuleSort}>Pri</SortableTableHead>
+                <SortableTableHead field="category" sort={ruleSort} onSort={setRuleSort}>Category</SortableTableHead>
                 <TableHead>Biz</TableHead>
                 <TableHead>Split</TableHead>
-                <TableHead>Usage</TableHead>
+                <SortableTableHead field="usageCount" sort={ruleSort} onSort={setRuleSort}>Usage</SortableTableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
@@ -597,7 +601,7 @@ export function RulesPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rules.map((r) => (
+                sortBy(rules, ruleSort.field, ruleSort.dir).map((r) => (
                   <TableRow
                     key={r.id}
                     ref={r.id === focusedId ? focusedRowRef : undefined}

@@ -20,6 +20,8 @@ import { Sparkline } from '@/components/ui/sparkline'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
+import { SortableTableHead, sortBy } from '@/components/ui/sortable-table-head'
+import type { SortState } from '@/components/ui/sortable-table-head'
 import {
   Table,
   TableBody,
@@ -289,6 +291,8 @@ export function PortfolioPage() {
 
 /* ---------------------- Holdings tab ---------------------- */
 
+type HoldingField = 'quantity' | 'marketValue' | 'costBasis' | 'unrealizedGainLoss' | 'weightPct' | 'yieldOnCostPct'
+
 function HoldingsPanel({
   summary,
   accountsById,
@@ -298,6 +302,8 @@ function HoldingsPanel({
   accountsById: Map<number, PortfolioSummary['accounts'][number]>
   sparklines: Map<number, PortfolioSparklinePoint[]>
 }) {
+  const [sort, setSort] = useState<SortState<HoldingField>>({ field: 'marketValue', dir: 'desc' })
+  const sortedHoldings = sortBy(summary?.holdings ?? [], sort.field, sort.dir)
   return (
     <>
       <Card className="transactionsTableCard">
@@ -317,21 +323,21 @@ function HoldingsPanel({
                 <TableHead>Account</TableHead>
                 <TableHead>Symbol</TableHead>
                 <TableHead>Name</TableHead>
-                <TableHead>Qty</TableHead>
+                <SortableTableHead field="quantity" sort={sort} onSort={setSort}>Qty</SortableTableHead>
                 <TableHead>Price</TableHead>
-                <TableHead>Market value</TableHead>
-                <TableHead>Cost basis</TableHead>
-                <TableHead>Unrealized</TableHead>
+                <SortableTableHead field="marketValue" sort={sort} onSort={setSort}>Market value</SortableTableHead>
+                <SortableTableHead field="costBasis" sort={sort} onSort={setSort}>Cost basis</SortableTableHead>
+                <SortableTableHead field="unrealizedGainLoss" sort={sort} onSort={setSort}>Unrealized</SortableTableHead>
                 <TableHead>Today</TableHead>
                 <TableHead>30d Δ</TableHead>
-                <TableHead>Weight</TableHead>
-                <TableHead>Yield</TableHead>
+                <SortableTableHead field="weightPct" sort={sort} onSort={setSort}>Weight</SortableTableHead>
+                <SortableTableHead field="yieldOnCostPct" sort={sort} onSort={setSort}>Yield</SortableTableHead>
                 <TableHead>30d</TableHead>
                 <TableHead>As of</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(summary?.holdings ?? []).map((holding) => (
+              {sortedHoldings.map((holding) => (
                 <TableRow key={holding.id}>
                   <TableCell>
                     {accountsById.get(holding.accountId)?.name ?? holding.accountId}
@@ -407,7 +413,7 @@ function HoldingsPanel({
                   <TableCell>{holding.statementDate}</TableCell>
                 </TableRow>
               ))}
-              {summary && summary.holdings.length === 0 && (
+              {summary && sortedHoldings.length === 0 && (
                 <EmptyTableRow
                   colSpan={14}
                   title="No holdings imported yet."
@@ -487,6 +493,8 @@ function HoldingsPanel({
 
 /* ---------------------- By-security tab ---------------------- */
 
+type BySecurityField = 'totalQuantity' | 'totalCostBasis' | 'totalMarketValue' | 'unrealizedGainLoss' | 'weightPct'
+
 function BySecurityPanel({
   data,
   sparklines,
@@ -494,7 +502,8 @@ function BySecurityPanel({
   data: PortfolioBySecurity | null
   sparklines: Map<number, PortfolioSparklinePoint[]>
 }) {
-  const rows = data?.rows ?? []
+  const [sort, setSort] = useState<SortState<BySecurityField>>({ field: 'totalMarketValue', dir: 'desc' })
+  const rows = sortBy(data?.rows ?? [], sort.field, sort.dir)
   return (
     <Card className="transactionsTableCard">
       <div className="transactionsPanelHeader">
@@ -513,13 +522,13 @@ function BySecurityPanel({
               <TableHead>Symbol</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Asset type</TableHead>
-              <TableHead>Total qty</TableHead>
-              <TableHead>Total cost basis</TableHead>
-              <TableHead>Total market value</TableHead>
-              <TableHead>Unrealized</TableHead>
+              <SortableTableHead field="totalQuantity" sort={sort} onSort={setSort}>Total qty</SortableTableHead>
+              <SortableTableHead field="totalCostBasis" sort={sort} onSort={setSort}>Total cost basis</SortableTableHead>
+              <SortableTableHead field="totalMarketValue" sort={sort} onSort={setSort}>Total market value</SortableTableHead>
+              <SortableTableHead field="unrealizedGainLoss" sort={sort} onSort={setSort}>Unrealized</SortableTableHead>
               <TableHead>Today</TableHead>
               <TableHead>30d Δ</TableHead>
-              <TableHead>Weight</TableHead>
+              <SortableTableHead field="weightPct" sort={sort} onSort={setSort}>Weight</SortableTableHead>
               <TableHead>Total Return</TableHead>
               <TableHead>Accounts</TableHead>
               <TableHead>30d</TableHead>
