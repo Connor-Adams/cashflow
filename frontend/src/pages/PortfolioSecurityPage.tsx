@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/table'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { AddCorporateActionModal } from '../components/portfolio/AddCorporateActionModal'
 import { AboutCard } from './portfolio-security/AboutCard'
 import { AnalystRecCard } from './portfolio-security/AnalystRecCard'
 import { DividendHistoryCard } from './portfolio-security/DividendHistoryCard'
@@ -52,6 +53,7 @@ export function PortfolioSecurityPage() {
   const [overview, setOverview] = useState<PortfolioSecurityOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [addCorporateActionOpen, setAddCorporateActionOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -211,6 +213,11 @@ export function PortfolioSecurityPage() {
               Chronological buys, sells, dividends, interest, and other rows. Running position is per-account.
             </p>
           </div>
+          {data?.perAccount[0] && (
+            <Button size="sm" variant="outline" onClick={() => setAddCorporateActionOpen(true)}>
+              + Corporate action
+            </Button>
+          )}
         </div>
         <div className="transactionsTableWrap">
           <Table className="table transactionsTable">
@@ -284,6 +291,16 @@ export function PortfolioSecurityPage() {
           </Table>
         </div>
       </Card>
+
+      {addCorporateActionOpen && data?.perAccount[0] && (
+        <AddCorporateActionModal
+          securityId={Number(id)}
+          accountId={data.perAccount[0].accountId}
+          currency={data.perAccount[0].acb.currency ?? 'CAD'}
+          onClose={() => setAddCorporateActionOpen(false)}
+          onSaved={() => { setAddCorporateActionOpen(false); void load() }}
+        />
+      )}
     </div>
   )
 }

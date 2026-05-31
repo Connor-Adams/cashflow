@@ -32,6 +32,7 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { LabelChipPicker } from '../components/transactions/LabelChipPicker'
+import { SavedFiltersDropdown } from '../components/transactions/SavedFiltersDropdown'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
@@ -600,6 +601,35 @@ export function TransactionsPage() {
     setIdsFilter('')
     setStatusFilter('')
     setLabelsFilter([])
+  }
+
+  // Build the current filter state as a plain string map for SavedFiltersDropdown.
+  const currentFiltersSnapshot = useMemo(() => {
+    const f: Record<string, string> = {}
+    if (dateFrom) f.dateFrom = dateFrom
+    if (dateTo) f.dateTo = dateTo
+    if (categoryFilter) f.category = categoryFilter
+    if (currency !== DEFAULT_TRANSACTION_CURRENCY) f.currency = currency
+    if (statusFilter) f.status = statusFilter
+    if (batchFilter) f.importBatch = batchFilter
+    if (reviewOnly) f.reviewOnly = 'true'
+    if (labelsFilter.length > 0) f.labels = labelsFilter.join(',')
+    return f
+  }, [dateFrom, dateTo, categoryFilter, currency, statusFilter, batchFilter, reviewOnly, labelsFilter])
+
+  // Apply a saved filter: restore all filter state from the stored JSON.
+  function applyFilterJson(filterJson: Record<string, string>) {
+    setPage(1)
+    setDateFrom(filterJson.dateFrom ?? '')
+    setDateTo(filterJson.dateTo ?? '')
+    setCategoryFilter(filterJson.category ?? '')
+    setCurrency(filterJson.currency ?? DEFAULT_TRANSACTION_CURRENCY)
+    setStatusFilter((filterJson.status ?? '') as '' | TransactionStatus)
+    setBatchFilter(filterJson.importBatch ?? '')
+    setReviewOnly(filterJson.reviewOnly === 'true')
+    setLabelsFilter(
+      filterJson.labels ? filterJson.labels.split(',').map(Number).filter(Number.isFinite) : []
+    )
   }
 
   async function openItemsDrawer(txnId: number) {
@@ -1286,6 +1316,10 @@ export function TransactionsPage() {
               Clear filters
             </Button>
           )}
+          <SavedFiltersDropdown
+            currentFilters={currentFiltersSnapshot}
+            onApply={applyFilterJson}
+          />
           <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </Button>

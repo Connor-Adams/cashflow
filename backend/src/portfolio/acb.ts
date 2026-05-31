@@ -49,6 +49,8 @@ export type AcbActivity = {
    * split. Total cost is preserved across the split.
    */
   splitRatio?: number | null;
+  /** For `dividend_in_kind`: shares received as stock dividend. */
+  dividendInKindShares?: number | null;
 };
 
 /** Position state recorded after each buy/sell event. */
@@ -367,9 +369,30 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'dividend_in_kind') {
+      // Stock dividend (shares received instead of cash).
+      // CRA: the new shares are acquired at zero incremental cost — the
+      // total cost base is unchanged, but quantity increases, so per-unit
+      // ACB decreases. Not a taxable event at receipt (taxed on eventual sale).
+      const shares = activity.dividendInKindShares ?? activity.quantity;
+      if (shares == null || shares <= 0) {
+        warnings.push(
+          `DIVIDEND_IN_KIND activity ${activity.id} on ${activity.tradeDate} missing or invalid share count; ignored`
+        );
+        continue;
+      }
+      const newQuantity = state.quantity + shares;
+      const newAcb = newQuantity > EPS ? state.totalCost / newQuantity : 0;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: newQuantity,
+        totalCost: state.totalCost,
+        acbPerUnit: newAcb,
+      };
+      timeline.push(state);
     }
-    // All other activity types (dividend, interest, fee, ambiguous
-    // 'transfer' for cash CONT/withdrawals, other) are intentionally
+    // All other activity types (dividend, interest, fee, spin_off, merger,
+    // ambiguous 'transfer' for cash CONT/withdrawals, other) are intentionally
     // ignored — they don't shift the weighted-average ACB. We do NOT
     // filter them out of the input (the caller may still want to see
     // them in their stream).

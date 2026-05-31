@@ -25,6 +25,9 @@ export class InvestmentActivity extends Model<
   declare amount: string | null;
   declare fees: string | null;
   declare splitRatio: string | null;
+  declare recipientSecurityId: number | null;
+  declare costBasisAllocationPct: string | null;
+  declare cashComponent: string | null;
   declare currency: string;
   declare sourceReference: string | null;
   declare sourceRowFingerprint: string;
@@ -77,6 +80,21 @@ export function initInvestmentActivity(
       splitRatio: {
         type: DataTypes.DECIMAL(10, 6),
         field: 'split_ratio',
+        allowNull: true,
+      },
+      recipientSecurityId: {
+        type: DataTypes.INTEGER,
+        field: 'recipient_security_id',
+        allowNull: true,
+      },
+      costBasisAllocationPct: {
+        type: DataTypes.DECIMAL(5, 4),
+        field: 'cost_basis_allocation_pct',
+        allowNull: true,
+      },
+      cashComponent: {
+        type: DataTypes.DECIMAL(18, 4),
+        field: 'cash_component',
         allowNull: true,
       },
       currency: { type: DataTypes.STRING(3), allowNull: false },

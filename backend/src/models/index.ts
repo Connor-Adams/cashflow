@@ -115,6 +115,7 @@ import {
   SubscriptionPriceChange,
   initSubscriptionPriceChange,
 } from './SubscriptionPriceChange';
+import { SavedFilter, initSavedFilter } from './SavedFilter';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -205,6 +206,7 @@ initTransactionLabel(sequelize);
 initFeedback(sequelize);
 initIncomeEntry(sequelize);
 initSubscriptionPriceChange(sequelize);
+initSavedFilter(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -1097,4 +1099,5 @@ export {
   Feedback,
   IncomeEntry,
   SubscriptionPriceChange,
+  SavedFilter,
 };
