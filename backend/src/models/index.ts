@@ -343,6 +343,14 @@ SecurityDividend.belongsTo(Security, {
   foreignKey: 'security_id',
   as: 'security',
 });
+SecurityDividend.belongsTo(Transaction, {
+  foreignKey: 'matched_transaction_id',
+  as: 'matchedTransaction',
+});
+Transaction.hasMany(SecurityDividend, {
+  foreignKey: 'matched_transaction_id',
+  as: 'matchedDividends',
+});
 User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
 Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(HouseholdMember, { foreignKey: 'household_id', as: 'members' });
