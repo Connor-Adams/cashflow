@@ -59,7 +59,6 @@ import { LargePurchasesPage } from './pages/LargePurchasesPage'
 import { UnifiedInboxPage } from './pages/UnifiedInboxPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
-import { AskCashflowPage } from './pages/AskCashflowPage'
 import { SearchPage } from './pages/SearchPage'
 import { VaultPage } from './pages/VaultPage'
 import { ScenariosPage } from './pages/ScenariosPage'
@@ -161,7 +160,7 @@ function AppRoutes() {
           />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="chat" element={<ChatPage />} />
-          <Route path="ask" element={<AskCashflowPage />} />
+          <Route path="ask" element={<Navigate to="/chat" replace />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="vault" element={<VaultPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
