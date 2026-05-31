@@ -40,9 +40,17 @@ describe('ItemsPage', () => {
     expect(screen.getByRole('tab', { name: /search/i })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('analyze tab renders coming-soon placeholder', () => {
+  it('analyze tab renders the analytics view', async () => {
+    vi.mocked(api.getJson).mockResolvedValue({
+      topItems: [],
+      byBrand: [],
+      currencyUsed: 'CAD',
+      currencyOthers: [],
+    })
     renderAt('/items?tab=analyze')
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /analyze/i })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText(/no item-level data yet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument()
   })
 
   it('filter chip change refetches', async () => {
