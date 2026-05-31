@@ -55,4 +55,21 @@ describe('Sidebar rail (PR 0)', () => {
     renderSidebar()
     expect(screen.getByRole('link', { name: 'Chat' })).toBeInTheDocument()
   })
+
+  it('drops the Transaction-family items folded into /transactions tabs (PR 1)', () => {
+    renderSidebar()
+    for (const name of [
+      'Refunds',
+      'Transfers',
+      'Purchases',
+      'Large purchases',
+      'Returns & warranties',
+      'Items',
+      'Smart search',
+      'Money leaks',
+    ]) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+    expect(screen.getByRole('link', { name: 'Transactions' })).toBeInTheDocument()
+  })
 })
