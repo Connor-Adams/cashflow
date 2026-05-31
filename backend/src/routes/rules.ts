@@ -88,14 +88,35 @@ function parseEffectiveDate(
 
 const router = Router();
 
+const RULES_SORT_FIELDS: Record<string, [string, string][]> = {
+  name: [['merchant_pattern', 'ASC']],
+  matchType: [['match_kind', 'ASC'], ['priority', 'DESC']],
+  priority: [['priority', 'DESC'], ['id', 'DESC']],
+  updatedAt: [['updated_at', 'DESC']],
+};
+
 router.get('/', async (req, res, next) => {
   try {
+    const sortField = req.query.sort ? String(req.query.sort) : null;
+    const sortDir = String(req.query.dir ?? 'asc') === 'desc' ? 'DESC' : 'ASC';
+
+    let order: [string, string][];
+    if (sortField) {
+      if (!RULES_SORT_FIELDS[sortField]) {
+        res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+        return;
+      }
+      // For fields with a secondary sort, flip the primary dir; keep secondary as-is.
+      order = RULES_SORT_FIELDS[sortField].map((pair, i) =>
+        i === 0 ? [pair[0], sortDir] : pair,
+      );
+    } else {
+      order = [['priority', 'DESC'], ['id', 'DESC']];
+    }
+
     const rules = await Rule.findAll({
       where: householdWhere(req),
-      order: [
-        ['priority', 'DESC'],
-        ['id', 'DESC'],
-      ],
+      order: order as [string, string][],
     });
     const out = [];
     for (const r of rules) {

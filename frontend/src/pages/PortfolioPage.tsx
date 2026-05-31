@@ -21,6 +21,7 @@ import { Sparkline } from '@/components/ui/sparkline'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
+import { SortableTableHead } from '@/components/ui/sortable-table-head'
 import {
   Table,
   TableBody,
@@ -604,12 +605,77 @@ function BySecurityPanel({
 
 /* ---------------------- Allocation tab ---------------------- */
 
+type AllocBreakdownRow = {
+  key: string
+  group: string
+  bucket: string
+  currency: string
+  marketValue: number
+  percentage: number
+}
+
+type AllocSortField = 'group' | 'bucket' | 'marketValue' | 'percentage'
+
 function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
+  const [allocSort, setAllocSort] = useState<AllocSortField | null>(null)
+  const [allocDir, setAllocDir] = useState<'asc' | 'desc'>('asc')
+
+  const toggleAllocSort = useCallback((field: string) => {
+    const f = field as AllocSortField
+    if (allocSort !== f) {
+      setAllocSort(f)
+      setAllocDir('asc')
+    } else if (allocDir === 'asc') {
+      setAllocDir('desc')
+    } else {
+      setAllocSort(null)
+      setAllocDir('asc')
+    }
+  }, [allocSort, allocDir])
+
   const empty =
     !data ||
     (data.byAssetType.length === 0 &&
       data.bySecurity.length === 0 &&
       data.byAccount.length === 0)
+
+  const breakdownRows = useMemo<AllocBreakdownRow[]>(() => {
+    if (!data) return []
+    const rows: AllocBreakdownRow[] = [
+      ...data.byAssetType.map((r) => ({
+        key: `assetType|${r.assetType}|${r.currency}`,
+        group: 'Asset type',
+        bucket: `${r.assetType} (${r.currency})`,
+        currency: r.currency,
+        marketValue: r.marketValue,
+        percentage: r.percentage,
+      })),
+      ...data.bySecurity.slice(0, 20).map((r) => ({
+        key: `security|${r.securityId}|${r.currency}`,
+        group: 'Security',
+        bucket: `${r.symbol} (${r.currency})`,
+        currency: r.currency,
+        marketValue: r.marketValue,
+        percentage: r.percentage,
+      })),
+      ...data.byAccount.map((r) => ({
+        key: `account|${r.accountId}|${r.currency}`,
+        group: 'Account',
+        bucket: `${r.accountName} (${r.currency})`,
+        currency: r.currency,
+        marketValue: r.marketValue,
+        percentage: r.percentage,
+      })),
+    ]
+    if (!allocSort) return rows
+    return [...rows].sort((a, b) => {
+      const av = allocSort === 'marketValue' || allocSort === 'percentage' ? a[allocSort] : a[allocSort].toLowerCase()
+      const bv = allocSort === 'marketValue' || allocSort === 'percentage' ? b[allocSort] : b[allocSort].toLowerCase()
+      if (av < bv) return allocDir === 'asc' ? -1 : 1
+      if (av > bv) return allocDir === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [data, allocSort, allocDir])
 
   if (empty) {
     return (
@@ -668,39 +734,17 @@ function AllocationPanel({ data }: { data: PortfolioAllocation | null }) {
           <Table className="table transactionsTable">
             <TableHeader>
               <TableRow>
-                <TableHead>Group</TableHead>
-                <TableHead>Bucket</TableHead>
-                <TableHead>Market value</TableHead>
-                <TableHead>%</TableHead>
+                <SortableTableHead field="group" currentSort={allocSort} dir={allocDir} onSort={toggleAllocSort}>Group</SortableTableHead>
+                <SortableTableHead field="bucket" currentSort={allocSort} dir={allocDir} onSort={toggleAllocSort}>Bucket</SortableTableHead>
+                <SortableTableHead field="marketValue" currentSort={allocSort} dir={allocDir} onSort={toggleAllocSort}>Market value</SortableTableHead>
+                <SortableTableHead field="percentage" currentSort={allocSort} dir={allocDir} onSort={toggleAllocSort}>%</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data!.byAssetType.map((row) => (
-                <TableRow key={`assetType|${row.assetType}|${row.currency}`}>
-                  <TableCell>Asset type</TableCell>
-                  <TableCell>
-                    {row.assetType} ({row.currency})
-                  </TableCell>
-                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{safePct(row.percentage)}</TableCell>
-                </TableRow>
-              ))}
-              {data!.bySecurity.slice(0, 20).map((row) => (
-                <TableRow key={`security|${row.securityId}|${row.currency}`}>
-                  <TableCell>Security</TableCell>
-                  <TableCell>
-                    {row.symbol} ({row.currency})
-                  </TableCell>
-                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{safePct(row.percentage)}</TableCell>
-                </TableRow>
-              ))}
-              {data!.byAccount.map((row) => (
-                <TableRow key={`account|${row.accountId}|${row.currency}`}>
-                  <TableCell>Account</TableCell>
-                  <TableCell>
-                    {row.accountName} ({row.currency})
-                  </TableCell>
+              {breakdownRows.map((row) => (
+                <TableRow key={row.key}>
+                  <TableCell>{row.group}</TableCell>
+                  <TableCell>{row.bucket}</TableCell>
                   <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
                   <TableCell>{safePct(row.percentage)}</TableCell>
                 </TableRow>

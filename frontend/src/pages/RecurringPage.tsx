@@ -5,35 +5,40 @@ import { EmptyTableRow } from '@/components/ui/empty-state'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
+import { SortableTableHead } from '@/components/ui/sortable-table-head'
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { useSessionState } from '../lib/useSessionState'
+import { useUrlSort } from '../hooks/useUrlSort'
 import type { RecurringResponse } from '../types/api'
 
 const DEFAULT_CURRENCY = 'CAD'
 const COLUMN_COUNT = 7
+
+type RecurringSortField = 'merchant' | 'amount' | 'cadence' | 'nextOccurrence' | 'lastSeenAt'
 
 export function RecurringPage() {
   const [currency, setCurrency] = useSessionState('recurring.currency', DEFAULT_CURRENCY)
   const [data, setData] = useState<RecurringResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const { sort, dir, setSort } = useUrlSort<RecurringSortField>()
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
     const c = currency.trim()
     if (c) params.set('currency', c.toUpperCase().slice(0, 3))
+    if (sort) { params.set('sort', sort); params.set('dir', dir) }
     const s = params.toString()
     return s ? `?${s}` : ''
-  }, [currency])
+  }, [currency, sort, dir])
 
   useEffect(() => {
     let cancelled = false
@@ -93,17 +98,15 @@ export function RecurringPage() {
         title="Recurring merchants"
         description={`Detected charges that repeat within the last ${windowDays} days.`}
       >
-        <div className="tableWrap" aria-busy={loading}>
+        <div className="tableWrap overflow-y-auto" aria-busy={loading}>
           <Table className="table">
             <TableHeader>
               <TableRow>
-                <TableHead>Merchant</TableHead>
-                <TableHead>Cadence</TableHead>
-                <TableHead>Avg amount</TableHead>
-                <TableHead>Stability</TableHead>
-                <TableHead>Last seen</TableHead>
-                <TableHead>Next expected</TableHead>
-                <TableHead>Category</TableHead>
+                <SortableTableHead field="merchant" currentSort={sort} dir={dir} onSort={setSort}>Merchant</SortableTableHead>
+                <SortableTableHead field="cadence" currentSort={sort} dir={dir} onSort={setSort}>Cadence</SortableTableHead>
+                <SortableTableHead field="amount" currentSort={sort} dir={dir} onSort={setSort}>Avg amount</SortableTableHead>
+                <SortableTableHead field="lastSeenAt" currentSort={sort} dir={dir} onSort={setSort}>Last seen</SortableTableHead>
+                <SortableTableHead field="nextOccurrence" currentSort={sort} dir={dir} onSort={setSort}>Next expected</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -127,10 +130,10 @@ export function RecurringPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>{formatMoney(item.avgAmount, item.currency)}</TableCell>
-                    <TableCell>{Math.round(item.amountStability * 100)}%</TableCell>
                     <TableCell>{item.lastSeen}</TableCell>
                     <TableCell>{item.nextExpected}</TableCell>
                     <TableCell>{item.category ?? '—'}</TableCell>
+                    <TableCell>{Math.round(item.amountStability * 100)}%</TableCell>
                   </TableRow>
                 ))
               )}

@@ -12,6 +12,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { SortableTableHead } from '@/components/ui/sortable-table-head'
+import { useUrlSort } from '@/hooks/useUrlSort'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
@@ -41,9 +43,12 @@ type AutoRuleSuggestion = RuleProposal & {
   reasoning: string
 }
 
+type RulesSortField = 'name' | 'matchType' | 'priority' | 'updatedAt'
+
 export function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([])
   const [searchParams] = useSearchParams()
+  const { sort: rulesSort, dir: rulesDir, setSort: setRulesSort } = useUrlSort<RulesSortField>()
   const focusedId = (() => {
     const raw = searchParams.get('focus')
     if (raw == null) return null
@@ -77,7 +82,8 @@ export function RulesPage() {
     const requestId = ++loadRequestRef.current
     setErr(null)
     try {
-      const nextRules = await getJson<Rule[]>('/api/rules')
+      const rulesQs = rulesSort ? `?sort=${rulesSort}&dir=${rulesDir}` : ''
+      const nextRules = await getJson<Rule[]>(`/api/rules${rulesQs}`)
       const nextProposals = await getJson<{ proposals: RuleProposal[] }>(
         '/api/ai/rule-proposals'
       )
@@ -110,7 +116,8 @@ export function RulesPage() {
 
   useEffect(() => {
     void load()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rulesSort, rulesDir])
 
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
@@ -467,9 +474,10 @@ export function RulesPage() {
           <Table className="table">
             <TableHeader>
               <TableRow>
-                <TableHead>Pattern</TableHead>
-                <TableHead>Match</TableHead>
-                <TableHead>Pri</TableHead>
+                <SortableTableHead field="name" currentSort={rulesSort} dir={rulesDir} onSort={setRulesSort}>Pattern</SortableTableHead>
+                <SortableTableHead field="matchType" currentSort={rulesSort} dir={rulesDir} onSort={setRulesSort}>Match</SortableTableHead>
+                <SortableTableHead field="priority" currentSort={rulesSort} dir={rulesDir} onSort={setRulesSort}>Pri</SortableTableHead>
+                <SortableTableHead field="updatedAt" currentSort={rulesSort} dir={rulesDir} onSort={setRulesSort}>Updated</SortableTableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Biz</TableHead>
                 <TableHead>Split</TableHead>
