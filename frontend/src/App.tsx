@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { Layout } from './components/Layout'
 import { AccountsPage } from './pages/AccountsPage'
+import { AccountsLayout, ScenariosLayout, PortfolioLayout } from './pages/RouteTabsLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
@@ -88,7 +89,12 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<DashboardPage />} />
-          <Route path="accounts" element={<AccountsPage />} />
+          <Route path="accounts" element={<AccountsLayout />}>
+            <Route index element={<AccountsPage />} />
+            <Route path="credit-cards" element={<CreditCardPlannerPage />} />
+            <Route path="debt" element={<DebtPage />} />
+            <Route path="statements" element={<StatementsPage />} />
+          </Route>
           <Route path="review" element={<ReviewInboxPage />} />
           <Route path="refunds" element={<Navigate to="/transactions/refunds" replace />} />
           <Route path="transactions" element={<TransactionsLayout />}>
@@ -103,23 +109,30 @@ function AppRoutes() {
             <Route path="leaks" element={<MoneyLeaksPage />} />
           </Route>
           <Route path="transfers" element={<Navigate to="/transactions/transfers" replace />} />
-          <Route path="statements" element={<StatementsPage />} />
+          <Route path="statements" element={<Navigate to="/accounts/statements" replace />} />
           <Route path="items" element={<Navigate to="/transactions/items" replace />} />
           <Route path="purchases" element={<Navigate to="/transactions/purchases" replace />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
-          <Route path="portfolio" element={<PortfolioPage />} />
-          <Route path="portfolio/security/:id" element={<PortfolioSecurityPage />} />
-          <Route path="net-worth" element={<NetWorthPage />} />
+          <Route path="portfolio" element={<PortfolioLayout />}>
+            <Route index element={<PortfolioPage />} />
+            <Route path="net-worth" element={<NetWorthPage />} />
+            <Route path="security/:id" element={<PortfolioSecurityPage />} />
+          </Route>
+          <Route path="net-worth" element={<Navigate to="/portfolio/net-worth" replace />} />
           <Route path="amazon" element={<AmazonPage />} />
           <Route path="planned" element={<PlannedEventsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="goals" element={<GoalsPage />} />
           <Route path="forecast" element={<ForecastPage />} />
-          <Route path="debt" element={<DebtPage />} />
-          <Route path="credit-cards" element={<CreditCardPlannerPage />} />
-          <Route path="opportunity-cost" element={<OpportunityCostPage />} />
-          <Route path="scenarios" element={<ScenariosPage />} />
+          <Route path="debt" element={<Navigate to="/accounts/debt" replace />} />
+          <Route path="credit-cards" element={<Navigate to="/accounts/credit-cards" replace />} />
+          <Route path="opportunity-cost" element={<Navigate to="/scenarios/opportunity-cost" replace />} />
+          <Route path="scenarios" element={<ScenariosLayout />}>
+            <Route index element={<ScenariosPage />} />
+            <Route path="tax" element={<TaxPage />} />
+            <Route path="opportunity-cost" element={<OpportunityCostPage />} />
+          </Route>
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
           <Route path="money-leaks" element={<Navigate to="/transactions/leaks" replace />} />
@@ -137,7 +150,7 @@ function AppRoutes() {
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
           <Route path="income" element={<IncomePage />} />
-          <Route path="tax" element={<TaxPage />} />
+          <Route path="tax" element={<Navigate to="/scenarios/tax" replace />} />
           <Route path="return-warranty" element={<Navigate to="/transactions/returns" replace />} />
           <Route path="reimbursements" element={<ReimbursementsPage />} />
           <Route path="large-purchases" element={<Navigate to="/transactions/large" replace />} />
