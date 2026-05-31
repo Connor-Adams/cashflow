@@ -43,6 +43,7 @@ describe('SettingsPage shell', () => {
       'Labels',
       'Notifications',
       'Jobs',
+      "What's new",
       'Audit log',
       'Backup & sync',
     ])

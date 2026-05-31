@@ -12,6 +12,7 @@ export type SettingsTopTab =
   | 'notifications'
   | 'feedback'
   | 'jobs'
+  | 'whatsnew'
   | 'audit-log'
   | 'backup'
 
@@ -29,6 +30,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isNotifications = useMatch('/settings/notifications')
   const isFeedback = useMatch('/settings/feedback')
   const isJobs = useMatch('/settings/jobs')
+  const isWhatsnew = useMatch('/settings/whatsnew')
   const isAuditLog = useMatch('/settings/audit-log')
   const isBackup = useMatch('/settings/backup')
 
@@ -43,6 +45,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   if (isNotifications) return 'notifications'
   if (isFeedback) return 'feedback'
   if (isJobs) return 'jobs'
+  if (isWhatsnew) return 'whatsnew'
   if (isAuditLog) return 'audit-log'
   if (isBackup) return 'backup'
   return 'settings'
