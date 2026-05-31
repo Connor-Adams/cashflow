@@ -148,6 +148,217 @@ groups:
           severity: critical
           component: loki
 
+      - uid: cashflow-backend-down
+        title: BackendDown
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'absent(cashflow_up) == 1'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: 'Backend process is not exporting the cashflow_up heartbeat'
+          description: |
+            The cashflow_up metric is absent — the backend may be crashed or
+            failing to reach the OTel collector. Restart the backend service.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#backenddown'
+        labels:
+          severity: critical
+          component: backend
+
+      - uid: cashflow-high-5xx-rate
+        title: HighHttp5xxRate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'sum(rate(cashflow_http_server_requests_total{http_response_status_code=~"5.."}[5m])) / sum(rate(cashflow_http_server_requests_total[5m])) > 0.02'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'HTTP 5xx error rate above 2%'
+          description: |
+            More than 2% of HTTP requests to cashflow-backend are returning
+            5xx errors over the last 5 minutes. Investigate recent deploys,
+            upstream dependencies, or DB health.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#highhttP5xxrate'
+        labels:
+          severity: critical
+          component: backend
+
+      - uid: cashflow-high-p99-latency
+        title: HighRouteLatencyP99
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'histogram_quantile(0.99, sum by (le) (rate(cashflow_http_server_duration_milliseconds_bucket[5m]))) > 1000'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'P99 HTTP latency above 1000ms'
+          description: |
+            The 99th percentile HTTP response time is above 1 second over the
+            last 5 minutes. Check DB query times, external API calls, and
+            memory pressure.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#highroutelatencyp99'
+        labels:
+          severity: warning
+          component: backend
+
+      - uid: cashflow-outbound-dep-failing
+        title: OutboundDependencyFailing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: 'rate(http_client_request_duration_seconds_count{http_response_status_code=~"5.."}[10m]) / rate(http_client_request_duration_seconds_count[10m]) > 0.05'
+              intervalMs: 60000
+              maxDataPoints: 43200
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+                  type: query
+              expression: A
+        noDataState: NoData
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: 'Outbound HTTP dependency failure rate above 5%'
+          description: |
+            More than 5% of outbound HTTP requests from cashflow-backend are
+            receiving 5xx responses over the last 10 minutes. An external
+            dependency (e.g. OpenAI, Yahoo Finance, SMTP) may be degraded.
+          runbook_url: 'https://github.com/Connor-Adams/cashflow/blob/main/docs/observability.md#outbounddependencyfailing'
+        labels:
+          severity: warning
+          component: backend
+
       - uid: cashflow-otel-collector-scrape-down
         title: OtelCollectorScrapeDown
         condition: C

@@ -81,6 +81,40 @@ if (meterProvider) {
 
 const meter = metrics.getMeter('cashflow-backend');
 
+// Heartbeat gauge — always 1 when the backend is running (issue #418).
+const upGauge = meter.createObservableGauge('cashflow.up', {
+  description: 'Heartbeat gauge — always 1 when the backend is running',
+});
+upGauge.addCallback((result) => { result.observe(1); });
+
+// DB connection pool gauges (issue #419).
+const dbPoolSize = meter.createObservableGauge('cashflow.db.pool.size', { description: 'Total DB connection pool size' });
+const dbPoolInUse = meter.createObservableGauge('cashflow.db.pool.in_use', { description: 'Borrowed DB connections' });
+const dbPoolWaiting = meter.createObservableGauge('cashflow.db.pool.waiting', { description: 'Pending pool acquire requests' });
+const dbPoolAvailable = meter.createObservableGauge('cashflow.db.pool.available', { description: 'Idle DB connections' });
+
+export function registerDbPoolMetrics(pool: { size: number; borrowed: number; pending: number; available: number }): void {
+  dbPoolSize.addCallback((r) => r.observe(pool.size));
+  dbPoolInUse.addCallback((r) => r.observe(pool.borrowed));
+  dbPoolWaiting.addCallback((r) => r.observe(pool.pending));
+  dbPoolAvailable.addCallback((r) => r.observe(pool.available));
+}
+
+// Job RED metrics (issue #416).
+export const jobRunCounter = meter.createCounter('cashflow.job.runs', { description: 'Job tick outcomes' });
+export const jobDurationHistogram = meter.createHistogram('cashflow.job.duration', { description: 'Job tick duration', unit: 'ms' });
+
+const jobLastSuccessMap = new Map<string, number>();
+export function recordJobLastSuccess(jobName: string): void {
+  jobLastSuccessMap.set(jobName, Date.now() / 1000);
+}
+const jobLastSuccessGauge = meter.createObservableGauge('cashflow.job.last_success_timestamp_seconds', { description: 'Unix timestamp of last successful job run' });
+jobLastSuccessGauge.addCallback((result) => {
+  for (const [job, ts] of jobLastSuccessMap) {
+    result.observe(ts, { job });
+  }
+});
+
 const requestCounter = meter.createCounter('cashflow.http.server.requests', {
   description: 'Total HTTP requests served by cashflow-backend',
 });

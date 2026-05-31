@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Sequelize } from 'sequelize';
 import * as env from './config/env';
+import { registerDbPoolMetrics } from './observability/metrics';
 
 function createSequelize(): Sequelize {
   if (env.databaseUrl) {
@@ -39,3 +40,14 @@ function createSequelize(): Sequelize {
 }
 
 export const sequelize = createSequelize();
+
+// Register DB pool metrics if the connection pool exposes a pool object (#419).
+// In SQLite mode the connectionManager.pool does not exist — guard with try/catch.
+try {
+  const poolObj = (sequelize as unknown as { connectionManager?: { pool?: Record<string, unknown> } }).connectionManager?.pool;
+  if (poolObj) {
+    registerDbPoolMetrics(poolObj as { size: number; borrowed: number; pending: number; available: number });
+  }
+} catch {
+  // Pool not accessible in this dialect — skip silently.
+}

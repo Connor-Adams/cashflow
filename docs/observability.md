@@ -324,6 +324,60 @@ out of disk, or the loki ingester is rejecting writes for label cardinality.
 3. If logs are silent and the container is just stopped, `railway redeploy --service loki --yes`.
 4. Confirm recovery: `otelcol_exporter_send_failed_log_records_total{exporter="loki"}` flattens, and `{service_name="cashflow-backend"}` queries in Grafana Explore return fresh lines.
 
+#### BackendDown
+
+**Rule:** [`cashflow-backend-down`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml) — fires when
+`absent(cashflow_up) == 1` for ≥2m.
+
+**What it means:** Backend process is not exporting the cashflow_up heartbeat metric. The backend may be crashed or failing to reach the OTel collector. Restart the backend service.
+
+**Remediation:**
+1. Check the backend Railway service status — confirm it is running.
+2. `railway logs -s cashflow-backend -n 100` — look for crash/exit logs.
+3. If the backend is running but `cashflow_up` is absent, confirm `OTEL_EXPORTER_OTLP_ENDPOINT` is set and the otel-collector is reachable.
+4. Fast unstick: `railway redeploy --service cashflow-backend --yes`.
+
+#### HighHttp5xxRate
+
+**Rule:** [`cashflow-high-5xx-rate`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml) — fires when
+`sum(rate(cashflow_http_server_requests_total{http_response_status_code=~"5.."}[5m])) / sum(rate(cashflow_http_server_requests_total[5m])) > 0.02`
+for ≥5m.
+
+**What it means:** More than 2% of HTTP requests are returning 5xx errors. A recent deploy, DB issue, or external dependency may be causing errors.
+
+**Remediation:**
+1. Check Grafana Tempo for recent error traces — filter by `http.response_status_code >= 500`.
+2. `railway logs -s cashflow-backend -n 200` — look for unhandled exceptions or `request_failed` log lines.
+3. Check DB connectivity: `railway logs -s cashflow-backend | grep "SequelizeConnectionError"`.
+4. If a recent deploy caused the regression, roll back via Railway dashboard.
+
+#### HighRouteLatencyP99
+
+**Rule:** [`cashflow-high-p99-latency`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml) — fires when
+`histogram_quantile(0.99, sum by (le) (rate(cashflow_http_server_duration_milliseconds_bucket[5m]))) > 1000`
+for ≥5m.
+
+**What it means:** P99 HTTP response time exceeds 1 second. DB query times, external API calls, or memory pressure are the likely culprits.
+
+**Remediation:**
+1. In Grafana, filter Tempo traces by `duration > 1s` — identify the slow routes.
+2. Check DB pool metrics (`cashflow_db_pool_waiting`) — if pending > 0, the pool may be saturated.
+3. Check if an external API (OpenAI, Yahoo Finance) is responding slowly.
+
+#### OutboundDependencyFailing
+
+**Rule:** [`cashflow-outbound-dep-failing`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml) — fires when
+`rate(http_client_request_duration_seconds_count{http_response_status_code=~"5.."}[10m]) / rate(http_client_request_duration_seconds_count[10m]) > 0.05`
+for ≥10m.
+
+**What it means:** More than 5% of outbound HTTP requests from cashflow-backend are receiving 5xx responses. An external dependency (e.g. OpenAI, Yahoo Finance, SMTP relay) is likely degraded.
+
+**Remediation:**
+1. Check `http.server.address` label on the failing metric to identify the dependency.
+2. Check the dependency's status page.
+3. If OpenAI: verify API key and rate limits in `railway logs -s cashflow-backend | grep "openai"`.
+4. If Yahoo Finance: the integration may be rate-limited; consider disabling the `yahoo_quote` job temporarily.
+
 #### OtelCollectorScrapeDown
 
 **Rule:** [`cashflow-otel-collector-scrape-down`](https://github.com/Connor-Adams/cashflow/blob/main/infra/grafana/provisioning/alerting/observability-stack.yaml#L144) — fires when

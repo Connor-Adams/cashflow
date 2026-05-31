@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { Job, JobRun } from '../models';
 import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
-import { withContext } from '../observability/requestContext';
+import { als, withContext } from '../observability/requestContext';
+import { jobRunCounter, jobDurationHistogram, recordJobLastSuccess } from '../observability/metrics';
+import { runWithJobSpan } from '../observability/jobSpan';
 import { resolveJobConfig } from './configResolver';
 import { withAdvisoryLock } from './pgLock';
 import { pruneJobRuns } from './runRetention';
@@ -162,40 +164,47 @@ async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOut
     queuedAt: startedAt.toISOString(),
   };
 
+  const tickId = als.getStore()?.tickId ?? 'unknown';
   const t0 = Date.now();
   try {
-    const lockResult = await withAdvisoryLock(def.name, () => def.handler());
-    const durationMs = Date.now() - t0;
-    if (!lockResult.acquired) {
+    const outcome = await runWithJobSpan(def.name, tickId, async (_span) => {
+      const lockResult = await withAdvisoryLock(def.name, () => def.handler());
+      const durationMs = Date.now() - t0;
+      if (!lockResult.acquired) {
+        await upsertState(def.name, {
+          lastFinishedAt: new Date(),
+          lastStatus: 'skipped_locked',
+          lastDurationMs: durationMs,
+          lastError: null,
+        });
+        await finishRun(run, { status: 'skipped', durationMs });
+        await pruneRuns(def.name);
+        return { status: 'skipped_locked' as const, durationMs, ...runMeta };
+      }
+      const handlerResult = lockResult.value;
+      const summary =
+        handlerResult && typeof handlerResult === 'object' && 'summary' in handlerResult
+          ? (handlerResult as { summary?: Record<string, unknown> }).summary
+          : undefined;
+      const lastResultJson = summary
+        ? truncate(JSON.stringify(summary), RESULT_MAX)
+        : null;
       await upsertState(def.name, {
         lastFinishedAt: new Date(),
-        lastStatus: 'skipped_locked',
+        lastStatus: 'ok',
         lastDurationMs: durationMs,
         lastError: null,
+        lastResultJson,
       });
-      await finishRun(run, { status: 'skipped', durationMs });
+      await finishRun(run, { status: 'success', durationMs });
       await pruneRuns(def.name);
-      return { status: 'skipped_locked', durationMs, ...runMeta };
-    }
-    const handlerResult = lockResult.value;
-    const summary =
-      handlerResult && typeof handlerResult === 'object' && 'summary' in handlerResult
-        ? (handlerResult as { summary?: Record<string, unknown> }).summary
-        : undefined;
-    const lastResultJson = summary
-      ? truncate(JSON.stringify(summary), RESULT_MAX)
-      : null;
-    await upsertState(def.name, {
-      lastFinishedAt: new Date(),
-      lastStatus: 'ok',
-      lastDurationMs: durationMs,
-      lastError: null,
-      lastResultJson,
+      jobRunCounter.add(1, { job: def.name, result: 'success' });
+      jobDurationHistogram.record(durationMs, { job: def.name });
+      recordJobLastSuccess(def.name);
+      logger.info({ name: def.name, durationMs }, 'job_tick_ok');
+      return { status: 'ok' as const, durationMs, result: summary, ...runMeta };
     });
-    await finishRun(run, { status: 'success', durationMs });
-    await pruneRuns(def.name);
-    logger.info({ name: def.name, durationMs }, 'job_tick_ok');
-    return { status: 'ok', durationMs, result: summary, ...runMeta };
+    return outcome;
   } catch (err) {
     const durationMs = Date.now() - t0;
     const message = err instanceof Error ? err.message : String(err);
@@ -209,6 +218,8 @@ async function tickInner(def: JobDefinition, opts: TickOptions): Promise<TickOut
     await finishRun(run, { status: 'failed', durationMs, errorMessage: truncated });
     await notifyFailure(def, run, truncated, opts.failureNotificationUserIds);
     await pruneRuns(def.name);
+    jobRunCounter.add(1, { job: def.name, result: 'failure' });
+    jobDurationHistogram.record(durationMs, { job: def.name });
     logger.error({ err, name: def.name, durationMs }, 'job_tick_failed');
     return { status: 'error', durationMs, error: message, ...runMeta };
   } finally {
