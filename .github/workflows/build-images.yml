@@ -72,10 +72,10 @@ jobs:
         run: |
           set -euo pipefail
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          SHA_SHORT=$(git rev-parse --short HEAD)
+          SHA=$(git rev-parse HEAD)
           APP_VERSION=$(git describe --tags --always --dirty)
           echo "image=ghcr.io/${REPO_LC}-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
-          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ${{ matrix.name }}
@@ -85,7 +85,7 @@ jobs:
           file: ${{ matrix.file }}
           push: true
           tags: |
-            ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.sha_short }}
+            ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.sha }}
             ${{ steps.meta.outputs.image }}:main
           build-args: |
             VITE_API_BASE=${{ secrets.VITE_API_BASE }}
