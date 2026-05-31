@@ -1064,6 +1064,7 @@ export type ItemRow = {
   unitPrice: number | null
   totalPrice: number | null
   taxShare: number
+  currency: string | null
   categoryEffective: string | null
   categoryOverride: string | null
   businessUseEffective: boolean

@@ -18,12 +18,26 @@ router.get('/years', (_req, res) => {
   res.json({ years: supportedYears() });
 });
 
+const JURISDICTION_CURRENCY: Record<string, string> = {
+  CA: 'CAD', US: 'USD', GB: 'GBP', AU: 'AUD', NZ: 'NZD', EU: 'EUR',
+};
+
+function entityCurrency(jurisdiction: string | null): string {
+  if (!jurisdiction) return 'CAD';
+  return JURISDICTION_CURRENCY[jurisdiction.toUpperCase().slice(0, 2)] ?? 'CAD';
+}
+
 // GET /api/tax/entities — list all entities for the authenticated household.
 router.get('/entities', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
     const entities = await Entity.findAll({ where: { householdId: household.id } });
-    res.json({ entities });
+    res.json({
+      entities: entities.map((e) => ({
+        ...e.toJSON(),
+        currency: entityCurrency(e.jurisdiction),
+      })),
+    });
   } catch (err) {
     next(err);
   }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { patchJson } from '@/lib/api'
+import { formatMoney } from '@/lib/formatMoney'
 import { useItemAllocation } from '@/hooks/useItems'
 import type { ItemRow } from '@cashflow/shared'
 
@@ -109,9 +110,9 @@ export function ItemDetailDrawer({ itemId, item, onClose, onPatched }: Props) {
           <dt>Quantity</dt>
           <dd>{item.qty}</dd>
           <dt>Unit price</dt>
-          <dd>{item.unitPrice != null ? `$${item.unitPrice.toFixed(2)}` : '—'}</dd>
+          <dd>{item.unitPrice != null ? formatMoney(item.unitPrice, item.currency ?? 'USD') : '—'}</dd>
           <dt>Total price</dt>
-          <dd>{item.totalPrice != null ? `$${item.totalPrice.toFixed(2)}` : '—'}</dd>
+          <dd>{item.totalPrice != null ? formatMoney(item.totalPrice, item.currency ?? 'USD') : '—'}</dd>
         </dl>
 
         <section className="mt-6">
@@ -148,13 +149,13 @@ export function ItemDetailDrawer({ itemId, item, onClose, onPatched }: Props) {
           {!loading && alloc && alloc.txnId != null && (
             <dl className="grid grid-cols-2 gap-2 text-sm">
               <dt>Allocated total</dt>
-              <dd>${alloc.allocatedTotal?.toFixed(2)}</dd>
+              <dd>{alloc.allocatedTotal != null ? formatMoney(alloc.allocatedTotal, item.currency ?? 'USD') : '—'}</dd>
               <dt>Category bucket</dt>
               <dd>{alloc.categoryBucket ?? '—'}</dd>
               <dt>Linked txn</dt>
               <dd>#{alloc.txnId}</dd>
               <dt>Txn amount</dt>
-              <dd>${alloc.txnAmount?.toFixed(2)}</dd>
+              <dd>{alloc.txnAmount != null ? formatMoney(alloc.txnAmount, item.currency ?? 'USD') : '—'}</dd>
               <dt>% of txn</dt>
               <dd>{alloc.percentOfTxn?.toFixed(1)}%</dd>
               {alloc.linkedTxnIds.length > 1 && (

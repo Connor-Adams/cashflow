@@ -65,6 +65,7 @@ function mapItemToRow(it: ExternalOrderItem): ItemRow {
     unitPrice: num(it.unitPrice),
     totalPrice: num(it.totalPrice),
     taxShare: 0,
+    currency: order.currency ?? null,
     categoryEffective: effectiveCategory(it),
     categoryOverride: it.categoryOverride,
     businessUseEffective: effectiveBusinessUse(it),

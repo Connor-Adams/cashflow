@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useShareholderLoans, type ShareholderLoanKind, type ShareholderLoanDto } from '../../hooks/useShareholderLoans';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
+import { formatMoney } from '../../lib/formatMoney';
 
 const KIND_LABELS: Record<ShareholderLoanKind, string> = {
   advance: 'Advance (corp to owner)',
@@ -86,7 +87,7 @@ export function ShareholderLoanTab() {
             </select>
           </label>
           <label>
-            Amount ($){' '}
+            Amount ({corpEntity?.currency ?? 'CAD'}){' '}
             <input
               type="number"
               step="0.01"
@@ -130,7 +131,7 @@ export function ShareholderLoanTab() {
             </thead>
             <tbody>
               {loans.map((loan) => (
-                <LoanRow key={loan.id} loan={loan} />
+                <LoanRow key={loan.id} loan={loan} currency={corpEntity?.currency ?? 'CAD'} />
               ))}
             </tbody>
           </table>
@@ -140,13 +141,14 @@ export function ShareholderLoanTab() {
   );
 }
 
-function LoanRow({ loan }: { loan: ShareholderLoanDto }) {
+function LoanRow({ loan, currency }: { loan: ShareholderLoanDto; currency: string }) {
   return (
     <tr>
       <td>{loan.date}</td>
       <td>{KIND_LABELS[loan.kind] ?? loan.kind}</td>
-      <td>${loan.amount}</td>
+      <td>{formatMoney(parseFloat(loan.amount), currency)}</td>
       <td>{loan.description ?? '—'}</td>
     </tr>
   );
 }
+

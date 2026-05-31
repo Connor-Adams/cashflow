@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'
+import { formatMoney } from '@/lib/formatMoney'
 import type { ItemRow } from '@cashflow/shared'
 
 type GroupBy = 'receipt' | 'category' | 'none'
@@ -137,7 +138,7 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
                 </button>
                 <span className="text-muted-foreground">{r.categoryEffective ?? '—'}</span>
                 <span className="w-16 text-right">
-                  {r.totalPrice != null ? `$${r.totalPrice.toFixed(2)}` : '—'}
+                  {r.totalPrice != null ? formatMoney(r.totalPrice, r.currency ?? 'USD') : '—'}
                 </span>
               </li>
             ))}

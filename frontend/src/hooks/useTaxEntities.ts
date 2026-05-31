@@ -16,6 +16,8 @@ export type TaxEntity = {
   // it on personal entities; backend PATCH /api/tax/entities/:id rejects
   // setting it on non-corp.
   associatedGroupId: string | null;
+  /** ISO 4217 currency derived from the entity's jurisdiction on the backend. */
+  currency: string;
 };
 
 export function useTaxEntities() {
