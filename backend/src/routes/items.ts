@@ -5,6 +5,7 @@ import { ExternalOrder, ExternalOrderItem, Receipt, Transaction, sequelize } fro
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
 import type { ItemRow, ItemsListResponse } from '@cashflow/shared';
+import { analyzeItems, trendForItem } from '../services/itemAnalytics';
 
 const router = Router();
 
@@ -463,6 +464,76 @@ router.post('/external-order-items/bulk-patch', async (req, res, next) => {
     });
 
     res.json({ updated: result });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/items/analyze/trend?itemName=&brand=&from=&to=
+router.get('/items/analyze/trend', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const txnWhere = visibleTransactionWhere(req);
+
+    const itemName = typeof req.query.itemName === 'string' ? req.query.itemName : '';
+    const brand = typeof req.query.brand === 'string' ? req.query.brand : '';
+    if (!itemName || !brand) {
+      res.status(400).json({ error: 'itemName and brand are required' });
+      return;
+    }
+
+    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+    if (from && to && from > to) {
+      res.status(400).json({ error: 'INVALID_RANGE', message: 'from must be <= to' });
+      return;
+    }
+
+    const result = await trendForItem({
+      householdId: household.id,
+      txnWhere,
+      from,
+      to,
+      itemName,
+      brand,
+    });
+
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/items/analyze?from=&to=&vendors=&categories=
+router.get('/items/analyze', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const txnWhere = visibleTransactionWhere(req);
+
+    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+    if (from && to && from > to) {
+      res.status(400).json({ error: 'INVALID_RANGE', message: 'from must be <= to' });
+      return;
+    }
+
+    const arrOf = (k: string): string[] | undefined => {
+      const v = req.query[k];
+      if (typeof v === 'string') return v.split(',').filter(Boolean);
+      if (Array.isArray(v)) return (v as string[]).filter((s) => typeof s === 'string' && s);
+      return undefined;
+    };
+
+    const result = await analyzeItems({
+      householdId: household.id,
+      txnWhere,
+      from,
+      to,
+      vendors: arrOf('vendors'),
+      categories: arrOf('categories'),
+    });
+
+    res.json(result);
   } catch (e) {
     next(e);
   }
