@@ -30,6 +30,7 @@ import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
+import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { useInsightsSeen } from '@/hooks/useInsightsSeen'
@@ -933,6 +934,8 @@ export function DashboardPage() {
           />
         </CardContent>
       </Card>
+
+      <ActivationCardDeck />
 
       <div
         className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
