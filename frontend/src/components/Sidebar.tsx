@@ -11,6 +11,7 @@ import {
   CheckSquare,
   ChevronDown,
   Coins,
+  DollarSign,
   HandCoins,
   Landmark,
   Package,
@@ -103,6 +104,7 @@ const navSections: NavSection[] = [
       { to: '/return-warranty', label: 'Returns & warranties', icon: RotateCcw },
       { to: '/large-purchases', label: 'Large purchases', icon: BadgeDollarSign },
       { to: '/money-leaks', label: 'Money leaks', icon: Droplet },
+      { to: '/income', label: 'Income', icon: DollarSign },
     ],
   },
   {

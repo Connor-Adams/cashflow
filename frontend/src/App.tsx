@@ -64,6 +64,7 @@ import { AskCashflowPage } from './pages/AskCashflowPage'
 import { SearchPage } from './pages/SearchPage'
 import { VaultPage } from './pages/VaultPage'
 import { ScenariosPage } from './pages/ScenariosPage'
+import { IncomePage } from './pages/IncomePage'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import { ToastProvider } from './components/ui/toast'
@@ -107,6 +108,7 @@ function AppRoutes() {
           <Route path="opportunity-cost" element={<OpportunityCostPage />} />
           <Route path="scenarios" element={<ScenariosPage />} />
           <Route path="recurring" element={<RecurringPage />} />
+          <Route path="income" element={<IncomePage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
           <Route path="money-leaks" element={<MoneyLeaksPage />} />
           <Route path="rules" element={<RulesPage />} />
