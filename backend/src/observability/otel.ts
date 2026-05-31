@@ -18,6 +18,7 @@ import {
 // under "moduleResolution": "node". Use the string literal directly.
 const ATTR_DEPLOYMENT_ENVIRONMENT_NAME = 'deployment.environment.name';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runtime-node';
 import { AlsSpanProcessor } from './alsSpanProcessor';
 
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
@@ -40,8 +41,12 @@ if (otlpEnabled) {
         '@opentelemetry/instrumentation-fs': { enabled: false },
         '@opentelemetry/instrumentation-dns': { enabled: false },
         '@opentelemetry/instrumentation-net': { enabled: false },
+        // Disabled here so we can register RuntimeNodeInstrumentation explicitly below
+        // (avoids duplicate registration when auto-instrumentations-node includes it).
+        '@opentelemetry/instrumentation-runtime-node': { enabled: false },
         // HTTP + Express + Sequelize + Undici are what we care about; they're enabled by default.
       }),
+      new RuntimeNodeInstrumentation(),
     ],
   });
 
