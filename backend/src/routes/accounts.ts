@@ -200,7 +200,7 @@ router.patch('/:id', async (req, res, next) => {
     if (notes !== undefined) {
       const raw = notes === null ? null : String(notes);
       if (raw !== null && raw.length > 4000) {
-        res.status(400).json({ error: 'notes must be 4000 characters or fewer' });
+        res.status(400).json({ error: 'NOTES_TOO_LONG' });
         return;
       }
       account.set('notes', raw === '' ? null : raw);

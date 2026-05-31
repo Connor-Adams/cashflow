@@ -229,7 +229,7 @@ export function AccountsPage() {
       setEditClosedAt('')
       setEditCreditLimit('')
       setEditNotes('')
-      showToast({ title: 'Limit saved.', variant: 'success', durationMs: 2000 })
+      showToast({ title: 'Account saved.', variant: 'success', durationMs: 2000 })
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -623,7 +623,10 @@ export function AccountsPage() {
                             placeholder="Routing number, custodian, tax ID, or any per-account reminder…"
                             style={{ width: '100%', resize: 'vertical' }}
                           />
-                          <span className="text-xs muted" aria-live="polite">
+                          <span
+                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'muted'}`}
+                            aria-live="polite"
+                          >
                             {editNotes.length}/4000
                           </span>
                         </div>
