@@ -1,5 +1,5 @@
 import { Account, Transaction } from '../models';
-import { Op } from 'sequelize';
+import { Op, QueryTypes } from 'sequelize';
 import { sequelize } from '../db';
 
 export async function getIntegrity(householdId: number) {
@@ -43,7 +43,7 @@ export async function getIntegrity(householdId: number) {
   // Orphans — transactions with no matching account
   const orphanResult = await sequelize.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM transactions t LEFT JOIN accounts a ON a.id = t.account_id WHERE a.id IS NULL`,
-    { type: 'SELECT' },
+    { type: QueryTypes.SELECT },
   );
   const orphaned = Number(orphanResult[0]?.count ?? 0);
 
