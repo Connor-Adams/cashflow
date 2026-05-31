@@ -89,6 +89,11 @@ export class Transaction extends Model<
    */
   declare importConfidenceFlags: string | null;
 
+  /** Manual income entry fields (issue #434). Null on imported transactions. */
+  declare incomeSource: CreationOptional<string | null>;
+  declare grossAmount: CreationOptional<string | null>;
+  declare taxWithheld: CreationOptional<string | null>;
+
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -360,6 +365,21 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       counterpartyContactId: {
         type: DataTypes.INTEGER,
         field: 'counterparty_contact_id',
+        allowNull: true,
+      },
+      incomeSource: {
+        type: DataTypes.STRING(32),
+        field: 'income_source',
+        allowNull: true,
+      },
+      grossAmount: {
+        type: DataTypes.DECIMAL(15, 4),
+        field: 'gross_amount',
+        allowNull: true,
+      },
+      taxWithheld: {
+        type: DataTypes.DECIMAL(15, 4),
+        field: 'tax_withheld',
         allowNull: true,
       },
     } as ModelAttributes<Transaction>,

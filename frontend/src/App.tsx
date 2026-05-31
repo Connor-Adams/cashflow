@@ -56,6 +56,7 @@ import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { AuditTokensTab } from './pages/settings/tabs/AuditTokensTab'
 import { ReportingTokensTab } from './pages/settings/tabs/ReportingTokensTab'
 import { TaxPage } from './pages/TaxPage'
+import { IncomePage } from './pages/IncomePage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
 import { LargePurchasesPage } from './pages/LargePurchasesPage'
@@ -103,6 +104,7 @@ function AppRoutes() {
           <Route path="planned" element={<PlannedEventsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="goals" element={<GoalsPage />} />
+          <Route path="income" element={<IncomePage />} />
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="debt" element={<DebtPage />} />
           <Route path="credit-cards" element={<CreditCardPlannerPage />} />

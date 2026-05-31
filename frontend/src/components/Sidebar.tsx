@@ -109,6 +109,7 @@ const navSections: NavSection[] = [
     id: 'planning',
     label: 'Planning',
     items: [
+      { to: '/income', label: 'Log income', icon: BadgeDollarSign },
       { to: '/planned', label: 'Planned', icon: CalendarClock },
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/goals', label: 'Goals', icon: Target },
