@@ -1,6 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tabs } from '../components/ui/tabs'
-import { NativeSelect, NativeSelectOption } from '../components/ui/native-select'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
 import { SlipsTab } from './tax/SlipsTab'
@@ -36,6 +35,8 @@ export function TaxPage() {
   const [year, setYear] = useState<number | null>(null)
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
   const [tabNotFound, setTabNotFound] = useState(false)
+  const yearInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
     if (year === null && years && years.length > 0) {
       setYear(pickDefaultYear(years))
@@ -54,11 +55,17 @@ export function TaxPage() {
 
   // Ctrl+Left / Ctrl+Right navigate between years without grabbing the
   // arrow keys that the Tabs component uses for tab switching.
+  // Ctrl/Cmd+K focuses the year combobox.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!e.ctrlKey && !e.metaKey) return
       if (e.key === 'ArrowLeft') { e.preventDefault(); stepYear(-1) }
       if (e.key === 'ArrowRight') { e.preventDefault(); stepYear(1) }
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault()
+        yearInputRef.current?.focus()
+        yearInputRef.current?.select()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -71,17 +78,24 @@ export function TaxPage() {
         {years && years.length > 0 && year !== null ? (
           <label className="flex items-center gap-1.5 text-sm">
             <span className="text-muted-foreground">Year</span>
-            <NativeSelect
+            <input
+              ref={yearInputRef}
               aria-label="Tax year"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="w-24"
-            >
+              list="tax-year-list"
+              defaultValue={year}
+              key={year}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (years.includes(n)) setYear(n)
+              }}
+              className="w-24 rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <datalist id="tax-year-list">
               {years.map((y) => (
-                <NativeSelectOption key={y} value={y}>{y}</NativeSelectOption>
+                <option key={y} value={y} />
               ))}
-            </NativeSelect>
-            <span className="text-xs text-muted-foreground" title="Ctrl+Left / Ctrl+Right">⌃←→</span>
+            </datalist>
+            <span className="text-xs text-muted-foreground" title="Ctrl+Left / Ctrl+Right · Ctrl+K to jump">⌃←→ ⌃K</span>
           </label>
         ) : null}
         {yearsError && (

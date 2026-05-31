@@ -31,6 +31,8 @@ export type EnvConfig = {
   weeklyDigestCron: string;
   budgetBreachCheckEnabled: boolean;
   budgetBreachCheckCron: string;
+  subscriptionPriceCheckEnabled: boolean;
+  subscriptionPriceCheckCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -147,6 +149,10 @@ export function loadEnvConfig(
     nodeEnv,
   );
   const budgetBreachCheckCron = e.BUDGET_BREACH_CHECK_CRON?.trim() || '0 8 * * *';
+  const subscriptionPriceCheckEnabled =
+    parseBudgetBreachCheckEnabled(e.SUBSCRIPTION_PRICE_CHECK_ENABLED, nodeEnv);
+  const subscriptionPriceCheckCron =
+    e.SUBSCRIPTION_PRICE_CHECK_CRON?.trim() || '0 6 * * *';
 
   return {
     csvUploadDir,
@@ -174,6 +180,8 @@ export function loadEnvConfig(
     weeklyDigestCron,
     budgetBreachCheckEnabled,
     budgetBreachCheckCron,
+    subscriptionPriceCheckEnabled,
+    subscriptionPriceCheckCron,
   };
 }
 
@@ -310,6 +318,8 @@ export const weeklyDigestEnabled = resolved.weeklyDigestEnabled;
 export const weeklyDigestCron = resolved.weeklyDigestCron;
 export const budgetBreachCheckEnabled = resolved.budgetBreachCheckEnabled;
 export const budgetBreachCheckCron = resolved.budgetBreachCheckCron;
+export const subscriptionPriceCheckEnabled = resolved.subscriptionPriceCheckEnabled;
+export const subscriptionPriceCheckCron = resolved.subscriptionPriceCheckCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];

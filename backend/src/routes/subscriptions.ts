@@ -27,6 +27,8 @@ import {
   computeCancelImpact,
   isAllowedHorizon,
 } from '../subscriptions/cancelImpact';
+import { SubscriptionPriceChange } from '../models/SubscriptionPriceChange';
+import { detectSubscriptionPriceChanges } from '../subscriptions/detectPriceChanges';
 
 const router = Router();
 
@@ -81,6 +83,7 @@ interface SubscriptionPatch {
   cadence?: SubscriptionCadence;
   cancellationUrl?: string | null;
   notes?: string | null;
+  priceChangeDetected?: false;
 }
 
 type PatchValidation =
@@ -155,6 +158,14 @@ export function validateSubscriptionPatch(
       const candidate = String(raw.notes).slice(0, 2000);
       value.notes = candidate;
     }
+  }
+
+  // priceChangeDetected can only be set to false (acknowledge a price change).
+  if (raw.priceChangeDetected !== undefined) {
+    if (raw.priceChangeDetected !== false) {
+      return { ok: false, status: 400, error: 'priceChangeDetected may only be set to false' };
+    }
+    value.priceChangeDetected = false;
   }
 
   return { ok: true, value };
@@ -418,6 +429,7 @@ router.patch('/:id', async (req, res, next) => {
       row.set('cancellationUrl', patch.cancellationUrl);
     }
     if (patch.notes !== undefined) row.set('notes', patch.notes);
+    if (patch.priceChangeDetected !== undefined) row.set('priceChangeDetected', false);
     await row.save();
     res.json(serialize(row));
   } catch (e) {
@@ -468,6 +480,98 @@ router.get('/:id/cancel-impact', async (req, res, next) => {
       count: impact.count,
       horizonMonths: impact.horizonMonths,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/subscriptions/price-changes
+ * List pending (unacknowledged) price changes for the household.
+ */
+router.get('/price-changes', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    const rows = await SubscriptionPriceChange.findAll({
+      where: {
+        householdId: auth.household.id,
+        acknowledgedAt: { [Op.is]: null as unknown as null },
+      },
+      order: [['detected_on', 'DESC']],
+    });
+    // Resolve merchant names by joining with subscriptions.
+    const subIds = [...new Set(rows.map((r) => r.subscriptionId))];
+    const subs = await Subscription.findAll({
+      where: { id: subIds, ...householdWhere(req) },
+      attributes: ['id', 'merchantName', 'currency'],
+    });
+    const subMap = new Map(subs.map((s) => [s.id, s]));
+    res.json({
+      data: rows.map((r) => ({
+        id: r.id,
+        subscriptionId: r.subscriptionId,
+        merchantName: subMap.get(r.subscriptionId)?.merchantName ?? '—',
+        previousAmount: String(r.previousAmount),
+        newAmount: String(r.newAmount),
+        currency: r.currency,
+        detectedOn: r.detectedOn,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/subscriptions/price-changes/:id/acknowledge
+ * Acknowledge a price-change record. Clears priceChangeDetected on the
+ * subscription if no other unacknowledged changes remain.
+ */
+router.post('/price-changes/:id/acknowledge', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const record = await SubscriptionPriceChange.findOne({
+      where: { id, householdId: auth.household.id },
+    });
+    if (!record) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    await record.update({ acknowledgedAt: new Date() });
+
+    // Clear the flag on the subscription if no other pending changes remain.
+    const remaining = await SubscriptionPriceChange.count({
+      where: {
+        subscriptionId: record.subscriptionId,
+        acknowledgedAt: { [Op.is]: null as unknown as null },
+      },
+    });
+    if (remaining === 0) {
+      await Subscription.update(
+        { priceChangeDetected: false },
+        { where: { id: record.subscriptionId, ...householdWhere(req) } },
+      );
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/subscriptions/price-changes/detect
+ * Manually trigger price-change detection for the household.
+ */
+router.post('/price-changes/detect', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    const result = await detectSubscriptionPriceChanges(auth.household.id);
+    res.json(result);
   } catch (e) {
     next(e);
   }

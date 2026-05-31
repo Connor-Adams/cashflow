@@ -167,6 +167,8 @@ export function ReportsPage() {
   const [formNotes, setFormNotes] = useState<string>('')
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [formAmountError, setFormAmountError] = useState<string | null>(null)
+  const [formDateError, setFormDateError] = useState<string | null>(null)
   const { showToast } = useToast()
   const confirm = useConfirm()
 
@@ -353,13 +355,34 @@ export function ReportsPage() {
 
   function openSettlementDialog() {
     setFormError(null)
-    setFormContactId(contacts.length > 0 ? String(contacts[0].id) : '')
+    setFormAmountError(null)
+    setFormDateError(null)
+    setFormContactId('')
     setFormDirection('i_paid_partner')
     setFormCurrency(currency || DEFAULT_REPORTS_CURRENCY)
     setFormAmount('')
     setFormDate(todayDateInputValue())
     setFormNotes('')
     setDialogOpen(true)
+  }
+
+  function handleAmountChange(val: string) {
+    setFormAmount(val)
+    const n = Number(val)
+    if (val === '' || !Number.isFinite(n) || n <= 0) {
+      setFormAmountError('Amount must be greater than zero')
+    } else {
+      setFormAmountError(null)
+    }
+  }
+
+  function handleDateChange(val: string) {
+    setFormDate(val)
+    if (!val) {
+      setFormDateError('Date is required')
+    } else {
+      setFormDateError(null)
+    }
   }
 
   async function submitSettlement(event: FormEvent<HTMLFormElement>) {
@@ -945,16 +968,20 @@ export function ReportsPage() {
                   onChange={(e) => setFormContactId(e.target.value)}
                   required
                 >
-                  {contacts.length === 0 && (
+                  {contacts.length === 0 ? (
                     <NativeSelectOption value="">
-                      No contacts available
+                      No contacts — add one in Settings first
                     </NativeSelectOption>
+                  ) : (
+                    <>
+                      <NativeSelectOption value="">Select a contact…</NativeSelectOption>
+                      {contacts.map((c) => (
+                        <NativeSelectOption key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </NativeSelectOption>
+                      ))}
+                    </>
                   )}
-                  {contacts.map((c) => (
-                    <NativeSelectOption key={c.id} value={String(c.id)}>
-                      {c.name}
-                    </NativeSelectOption>
-                  ))}
                 </NativeSelect>
               </Label>
               <Label htmlFor="settlement-direction">
@@ -999,9 +1026,15 @@ export function ReportsPage() {
                   step="0.01"
                   min="0.01"
                   value={formAmount}
-                  onChange={(e) => setFormAmount(e.target.value)}
+                  onChange={(e) => handleAmountChange(e.target.value)}
+                  aria-describedby={formAmountError ? 'settlement-amount-error' : undefined}
                   required
                 />
+                {formAmountError && (
+                  <span id="settlement-amount-error" className="text-xs text-destructive mt-0.5 block">
+                    {formAmountError}
+                  </span>
+                )}
               </Label>
               <Label htmlFor="settlement-date">
                 Date
@@ -1009,9 +1042,15 @@ export function ReportsPage() {
                   id="settlement-date"
                   type="date"
                   value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
+                  onChange={(e) => handleDateChange(e.target.value)}
+                  aria-describedby={formDateError ? 'settlement-date-error' : undefined}
                   required
                 />
+                {formDateError && (
+                  <span id="settlement-date-error" className="text-xs text-destructive mt-0.5 block">
+                    {formDateError}
+                  </span>
+                )}
               </Label>
               <Label htmlFor="settlement-notes">
                 Notes
@@ -1033,7 +1072,10 @@ export function ReportsPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={formSubmitting}>
+            <Button
+              type="submit"
+              disabled={formSubmitting || !!formAmountError || !!formDateError}
+            >
               {formSubmitting ? 'Saving...' : 'Save settlement'}
             </Button>
           </DialogFooter>

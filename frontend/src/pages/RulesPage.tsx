@@ -60,6 +60,7 @@ export function RulesPage() {
 
   const [proposals, setProposals] = useState<RuleProposal[]>([])
   const [autoSuggestions, setAutoSuggestions] = useState<AutoRuleSuggestion[]>([])
+  const [suggestionsUnavailable, setSuggestionsUnavailable] = useState(false)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -90,7 +91,9 @@ export function RulesPage() {
           '/api/rules/auto-suggestions'
         )
         nextAuto = r.suggestions ?? []
-      } catch {
+      } catch (err) {
+        console.warn('[RulesPage] auto-suggestions endpoint failed:', err)
+        setSuggestionsUnavailable(true)
         nextAuto = []
       }
       if (loadRequestRef.current === requestId) {
@@ -335,6 +338,9 @@ export function RulesPage() {
         <button type="submit">Add rule</button>
       </form>
 
+      {suggestionsUnavailable && (
+        <p className="muted text-sm">Auto-rule suggestions are temporarily unavailable.</p>
+      )}
       {autoSuggestions.length > 0 && (
         <section className="card rulesTableCard">
           <div className="rulesCardHeader">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -25,6 +25,8 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CancelImpactCard } from '@/components/subscriptions/CancelImpactCard'
+import { PriceChangeChip } from '@/components/subscriptions/PriceChangeChip'
+import { PriceChangeDrawer } from '@/components/subscriptions/PriceChangeDrawer'
 import { getJson, patchJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
@@ -99,6 +101,8 @@ export function SubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [rowErrors, setRowErrors] = useState<Map<number, string>>(new Map())
+  const [priceChangeItem, setPriceChangeItem] = useState<Subscription | null>(null)
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -133,7 +137,21 @@ export function SubscriptionsPage() {
     }
   }, [queryString])
 
+  function clearRowError(id: number) {
+    setRowErrors((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Map(prev)
+      next.delete(id)
+      return next
+    })
+  }
+
+  function setRowError(id: number, message: string) {
+    setRowErrors((prev) => new Map(prev).set(id, message))
+  }
+
   async function updateStatus(id: number, status: SubscriptionStatus) {
+    clearRowError(id)
     try {
       const patch: SubscriptionPatch = { status }
       const updated = await patchJson<Subscription>(
@@ -156,6 +174,7 @@ export function SubscriptionsPage() {
       })
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Update failed'
+      setRowError(id, message)
       showToast({ title: message, variant: 'destructive' })
     }
   }
@@ -194,7 +213,7 @@ export function SubscriptionsPage() {
         title: `Updated cadence to ${CADENCE_LABEL[cadence]}.`,
         variant: 'success',
       })
-    } catch {
+    } catch (e) {
       // Revert the optimistic change.
       if (previous) {
         setData((prev) =>
@@ -208,6 +227,8 @@ export function SubscriptionsPage() {
             : prev,
         )
       }
+      const message = e instanceof Error ? e.message : "Couldn't update cadence."
+      setRowError(id, message)
       showToast({
         title: "Couldn't update cadence. Try again.",
         variant: 'destructive',
@@ -221,9 +242,18 @@ export function SubscriptionsPage() {
     }
   }
 
+  function clearPriceChangeFlag(id: number) {
+    setData((prev) =>
+      prev
+        ? { ...prev, items: prev.items.map((item) => item.id === id ? { ...item, priceChangeDetected: false } : item) }
+        : prev,
+    )
+  }
+
   const visibleItems = data?.items ?? []
 
   return (
+    <>
     <div className="page">
       <PageHeader
         title="Subscriptions"
@@ -290,6 +320,9 @@ export function SubscriptionsPage() {
                   <SubscriptionRow
                     key={item.id}
                     item={item}
+                    rowError={rowErrors.get(item.id) ?? null}
+                    onClearError={() => clearRowError(item.id)}
+                    onShowPriceChange={() => setPriceChangeItem(item)}
                     onStatusChange={updateStatus}
                     onCadenceChange={updateCadence}
                   />
@@ -300,6 +333,19 @@ export function SubscriptionsPage() {
         </div>
       </CollapsibleCard>
     </div>
+
+    {priceChangeItem && (
+      <PriceChangeDrawer
+        subscriptionId={priceChangeItem.id}
+        merchantName={priceChangeItem.merchantName}
+        onClose={() => setPriceChangeItem(null)}
+        onAcknowledged={() => {
+          clearPriceChangeFlag(priceChangeItem.id)
+          setPriceChangeItem(null)
+        }}
+      />
+    )}
+    </>
   )
 }
 
@@ -385,10 +431,16 @@ function SummaryStat({
 
 function SubscriptionRow({
   item,
+  rowError,
+  onClearError,
+  onShowPriceChange,
   onStatusChange,
   onCadenceChange,
 }: {
   item: Subscription
+  rowError: string | null
+  onClearError: () => void
+  onShowPriceChange: () => void
   onStatusChange: (id: number, status: SubscriptionStatus) => Promise<void>
   onCadenceChange: (id: number, cadence: SubscriptionCadence) => Promise<void>
 }) {
@@ -400,17 +452,20 @@ function SubscriptionRow({
   const [showImpact, setShowImpact] = useState(false)
 
   return (
-    <TableRow>
+    <>
+    <TableRow className={rowError ? 'border-l-2 border-l-destructive' : undefined}>
       <TableCell>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {item.merchantName}
           {item.priceChangeDetected && (
-            <Badge
-              variant="destructive"
-              title="Price has increased since the last refresh"
-            >
-              <AlertTriangle size={12} aria-hidden="true" /> price up
-            </Badge>
+            <PriceChangeChip onClick={onShowPriceChange} />
+          )}
+          {rowError && (
+            <span
+              className="inline-block size-2 rounded-full bg-destructive"
+              aria-hidden="true"
+              title={rowError}
+            />
           )}
         </div>
         {item.cancellationUrl && (
@@ -484,6 +539,24 @@ function SubscriptionRow({
         )}
       </TableCell>
     </TableRow>
+    {rowError && (
+      <TableRow>
+        <TableCell
+          colSpan={COLUMN_COUNT}
+          className="py-1 text-xs text-destructive bg-destructive/5"
+        >
+          <span>{rowError}</span>
+          <button
+            type="button"
+            className="ml-2 underline hover:no-underline"
+            onClick={onClearError}
+          >
+            Dismiss
+          </button>
+        </TableCell>
+      </TableRow>
+    )}
+    </>
   )
 }
 

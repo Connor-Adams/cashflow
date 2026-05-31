@@ -171,6 +171,7 @@ export type SubscriptionPatch = {
   cadence?: SubscriptionCadence
   cancellationUrl?: string | null
   notes?: string | null
+  priceChangeDetected?: false
 }
 
 /** Allowed cancel-impact forecast horizons (months). */

@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -416,9 +417,13 @@ function ReimbursementRow({
               variant="outline"
               size="sm"
               onClick={() => onMatch(row)}
-              title="Find and link the repayment transaction"
+              title={
+                row.repaymentTransactionId != null
+                  ? 'Already matched — open to re-link'
+                  : 'Find and link the repayment transaction'
+              }
             >
-              Match
+              {row.repaymentTransactionId != null ? 'Re-match' : 'Match'}
             </Button>
           )}
           {row.status !== 'received' && (
@@ -518,6 +523,8 @@ function MatchDialog({
     }
   }
 
+  const hasContact = row.contactId != null
+
   return (
     <div
       role="dialog"
@@ -534,13 +541,57 @@ function MatchDialog({
           {row.partyLabel} · {formatMoney(Number(row.amount) || 0, row.currency)}
           {row.dueDate ? ` · due ${row.dueDate}` : ''}
         </p>
+
+        {!hasContact && !loading && (
+          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+            <p className="text-amber-800 dark:text-amber-200">
+              This reimbursement has no linked contact.{' '}
+              <Link
+                to="/settings/contacts"
+                className="underline hover:no-underline"
+                onClick={onClose}
+              >
+                Add a contact
+              </Link>{' '}
+              to make future matching easier.
+            </p>
+          </div>
+        )}
+
         {loading ? (
           <p className="muted text-sm">Searching for likely repayments…</p>
         ) : candidates.length === 0 ? (
-          <p className="muted text-sm">
-            No likely repayment transactions found. The repayment should be an
-            incoming credit in {row.currency} on or after the original charge.
-          </p>
+          <div className="space-y-3">
+            <p className="muted text-sm">
+              No likely repayment transactions found. The repayment should be an
+              incoming credit in {row.currency} on or after the original charge.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                title="Go to items to widen date range"
+              >
+                Widen date range
+              </Button>
+              <Link to="/accounts" onClick={onClose}>
+                <Button type="button" variant="outline" size="sm">
+                  Check account selection
+                </Button>
+              </Link>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                title="Edit this reimbursement's date"
+              >
+                Edit reimbursement date
+              </Button>
+            </div>
+          </div>
         ) : (
           <ul className="flex flex-col gap-2">
             {candidates.map((c) => (
