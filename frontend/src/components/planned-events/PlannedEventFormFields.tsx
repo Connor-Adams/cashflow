@@ -13,6 +13,7 @@ import {
   PLANNED_EVENT_TYPE_OPTIONS,
   type FormState,
 } from './plannedEventForm'
+import { RecurrencePicker } from './RecurrencePicker'
 
 type PlannedEventFormFieldsProps = {
   form: FormState
@@ -125,14 +126,11 @@ export function PlannedEventFormFields({
         </NativeSelect>
       </Label>
       <Label htmlFor={`${idPrefix}-recurrence`}>
-        Recurrence rule (optional)
-        <Input
-          id={`${idPrefix}-recurrence`}
+        Recurrence
+        <RecurrencePicker
           value={form.recurrenceRule}
-          onChange={(e) =>
-            setForm((prev) => ({ ...prev, recurrenceRule: e.target.value }))
-          }
-          placeholder="FREQ=MONTHLY;BYMONTHDAY=1"
+          onChange={(rrule) => setForm((prev) => ({ ...prev, recurrenceRule: rrule }))}
+          anchorDate={form.expectedDate || undefined}
         />
       </Label>
       {showStatus ? (
