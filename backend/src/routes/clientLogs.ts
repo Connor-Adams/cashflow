@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { ClientLogLevel, ClientLogPayload } from '@cashflow/shared';
 import { logger } from '../observability/logger';
+import { ClientErrorEvent } from '../models';
 
 const router = Router();
 
@@ -62,6 +63,21 @@ router.post('/', clientLogLimiter, (req, res) => {
     householdId: req.auth?.household.id,
     ...fields,
   }, event);
+
+  // Persist error/warn events to the ring buffer for /api/audit/client-errors.
+  // Best-effort: never fail the request if this errors.
+  if (level === 'error' || level === 'warn') {
+    void ClientErrorEvent.create({
+      householdId: req.auth?.household.id ?? null,
+      userId: req.auth?.user.id ?? null,
+      level,
+      event: event !== 'frontend_log' ? event.slice(0, 128) : null,
+      message: (message ?? '').slice(0, 4000),
+      path: path?.slice(0, 512) ?? null,
+      requestId: (requestId ?? req.requestId ?? null)?.slice(0, 64) ?? null,
+      fieldsJson: fields ? JSON.stringify(fields).slice(0, 4000) : null,
+    }).catch(() => undefined);
+  }
 
   res.status(204).end();
 });

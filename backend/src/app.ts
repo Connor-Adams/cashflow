@@ -71,6 +71,8 @@ import invitesRouter from './routes/invites';
 import taxScenariosRouter from './routes/tax-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
+import auditTokensRouter from './routes/auditTokens';
+import auditRouter from './routes/audit';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
@@ -132,6 +134,8 @@ app.use('/api/config', configRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
+app.use('/api/audit/tokens', auditTokensRouter);
+app.use('/api/audit', auditRouter);
 app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/search', searchRouter);
@@ -274,6 +278,39 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+// Server-error ring-buffer tap (#393). Runs before the main error handler;
+// persists 5xx errors best-effort so /api/audit/server-errors can surface them.
+app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
+  try {
+    const code = getErrorCode(err);
+    const status = getErrorStatus(err, code);
+    if (status >= 500) {
+      const { ServerErrorEvent } = require('./models') as typeof import('./models');
+      const householdId =
+        (req as Request & { auth?: { household?: { id?: number } }; auditAuth?: { household?: { id?: number } } })
+          .auth?.household?.id ??
+        (req as Request & { auditAuth?: { household?: { id?: number } } }).auditAuth?.household?.id ??
+        null;
+      const userId =
+        (req as Request & { auth?: { user?: { id?: number } } }).auth?.user?.id ??
+        null;
+      void ServerErrorEvent.create({
+        householdId: householdId ?? null,
+        userId: userId ?? null,
+        method: req.method,
+        path: req.originalUrl.slice(0, 512),
+        status,
+        message: err instanceof Error ? err.message.slice(0, 4000) : String(err).slice(0, 4000),
+        stack: err instanceof Error ? (err.stack ?? null)?.slice(0, 8000) ?? null : null,
+        requestId: (req as Request & { requestId?: string }).requestId ?? null,
+      }).catch(() => undefined);
+    }
+  } catch {
+    // never block the error chain
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);
