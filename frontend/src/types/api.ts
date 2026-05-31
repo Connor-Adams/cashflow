@@ -11,6 +11,8 @@ export type {
   BySecurityAccountBreakdown,
   BySecurityRow,
   Category,
+  Label,
+  TransactionLabelRef,
   Contact,
   EnrichmentBackfillProgress,
   EnrichmentSignal,
@@ -91,6 +93,15 @@ export type {
   DebtOverview,
   DebtPayoffScenario,
   DebtScenarioResponse,
+  CardPaymentStrategy,
+  CardAutopayType,
+  CreditCard,
+  CreditCardsOverview,
+  CreditCardProfile,
+  CreditUtilizationByCurrency,
+  CardPaymentPlannedEvent,
+  CardSafeToSpendImpact,
+  CreditCardPaymentResponse,
 } from '@cashflow/shared'
 
 /** Response item from GET /api/recurring — one detected recurring merchant. */
@@ -120,6 +131,14 @@ export type SubscriptionStatus =
   | 'ignored'
   | 'unknown'
 
+/** Billing cadence of a subscription (Cashflow #291 — user-editable). */
+export type SubscriptionCadence =
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'annual'
+
 /** One row of the /api/subscriptions response. */
 export type Subscription = {
   id: number
@@ -128,7 +147,7 @@ export type Subscription = {
   normalizedName: string
   amount: string
   currency: string
-  cadence: 'monthly' | 'weekly'
+  cadence: SubscriptionCadence
   lastChargeDate: string
   nextExpectedDate: string | null
   status: SubscriptionStatus
@@ -149,8 +168,22 @@ export type SubscriptionsResponse = {
 /** PATCH /api/subscriptions/:id request body — only user-curated fields. */
 export type SubscriptionPatch = {
   status?: SubscriptionStatus
+  cadence?: SubscriptionCadence
   cancellationUrl?: string | null
   notes?: string | null
+}
+
+/** Allowed cancel-impact forecast horizons (months). */
+export type CancelImpactHorizon = 6 | 12 | 24
+
+/** Response shape for GET /api/subscriptions/:id/cancel-impact. */
+export type CancelImpact = {
+  /** Projected total spend over the horizon (== potential savings). */
+  amount: number
+  currency: string
+  /** Number of expected occurrences inside the horizon. */
+  count: number
+  horizonMonths: number
 }
 
 /** Response shape for GET /api/subscriptions/summary. */
@@ -364,6 +397,53 @@ export type LifestyleInflationResponse = {
   currency: string | null
   windowMonths: string[]
   byCurrency: LifestyleCurrencyTrend[]
+}
+
+// --- Savings rate dashboard (GET /api/reports/savings-rate) ---
+// Tracks the user's "true" savings rate over a rolling window: of the income
+// that came in, what fraction was kept as cash savings, investment
+// contributions, and debt-principal paydown rather than spent. See
+// backend/src/summary/savingsRate.ts (Cashflow #246). Scope is the same
+// personal/shared/business/all dimension as the other reports.
+
+/** One month of savings-rate components for a single currency. */
+export type SavingsRateMonthlyPoint = {
+  month: string
+  income: number
+  spending: number
+  savings: number
+  investments: number
+  debtPrincipal: number
+  /** (savings + [investments] + [debtPrincipal]) / income, as a percentage.
+   *  Null when the month had no income (avoids divide-by-zero). */
+  savingsRatePct: number | null
+}
+
+/** Window-level totals for a currency, plus the overall savings rate. */
+export type SavingsRateTotals = {
+  income: number
+  spending: number
+  savings: number
+  investments: number
+  debtPrincipal: number
+  /** Savings rate on the window totals; null when total income is zero. */
+  savingsRatePct: number | null
+}
+
+export type SavingsRateCurrencySummary = {
+  currency: string
+  series: SavingsRateMonthlyPoint[]
+  totals: SavingsRateTotals
+}
+
+export type SavingsRateResponse = {
+  anchorMonth: string
+  scope: LifestyleScope
+  currency: string | null
+  windowMonths: string[]
+  includeInvestments: boolean
+  includeDebtPrincipal: boolean
+  byCurrency: SavingsRateCurrencySummary[]
 }
 
 /** Direction of a partner-balance settlement record. */
@@ -1317,6 +1397,14 @@ export type CashflowSettings = {
    * times in the trailing 90 days. Default 3, bounded 2..50.
    */
   counterpartyPromotionThreshold: number;
+  /** #375 — Partner Fairness "exclude non-partner inflows" toggle. */
+  excludeNonPartnerInflows: boolean;
+  /**
+   * #259 — ISO8601 timestamp the user dismissed/completed first-run
+   * onboarding, or null if they never did. The onboarding gate reads this
+   * (with the active-account count) to decide whether to show the wizard.
+   */
+  onboardingDismissedAt: string | null;
 };
 
 export type SafeToSpendBreakdown = {

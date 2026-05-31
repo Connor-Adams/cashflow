@@ -21,16 +21,20 @@ import aiRouter from './routes/ai';
 import aiQueryRouter from './routes/aiQuery';
 import aiReviewRouter from './routes/aiReview';
 import cfoBriefingsRouter from './routes/cfoBriefings';
+import reviewItemsRouter from './routes/reviewItems';
 import chatRouter from './routes/chat';
 import receiptsRouter from './routes/receipts';
 import itemsRouter from './routes/items';
 import purchasesRouter from './routes/purchases';
 import reimbursementsRouter from './routes/reimbursements';
+import largePurchaseReviewRouter from './routes/largePurchaseReview';
+import feedbackRouter from './routes/feedback';
 import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
 import categoriesRouter from './routes/categories';
+import labelsRouter from './routes/labels';
 import settlementsRouter from './routes/settlements';
 import partnerRouter from './routes/partner';
 import budgetsRouter from './routes/budgets';
@@ -41,12 +45,16 @@ import calendarRouter from './routes/calendar';
 import goalsRouter from './routes/goals';
 import notificationsRouter from './routes/notifications';
 import notificationPreferencesRouter from './routes/notificationPreferences';
+import usersNotificationsRouter from './routes/usersNotifications';
 import notificationsAdminRouter from './routes/admin/notificationsAdmin';
 import forecastRouter from './routes/forecast';
 import debtRouter from './routes/debt';
+import creditCardsRouter from './routes/creditCards';
 import opportunityCostRouter from './routes/opportunityCost';
 import cashflowSettingsRouter from './routes/cashflowSettings';
 import changelogRouter from './routes/changelog';
+import preferencesRouter from './routes/preferences';
+import onboardingRouter from './routes/onboarding';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
 import externalOrdersRouter from './routes/externalOrders';
@@ -60,8 +68,7 @@ import returnWarrantyRouter from './routes/returnWarranty';
 import taxReserveRouter from './routes/taxReserve';
 import householdRouter from './routes/household';
 import invitesRouter from './routes/invites';
-import taxPersonalScenariosRouter from './routes/tax-personal-scenarios';
-import taxCorpScenariosRouter from './routes/tax-corp-scenarios';
+import taxScenariosRouter from './routes/tax-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
 import configRouter from './routes/config';
@@ -135,6 +142,7 @@ app.use('/api/statements', statementsRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/categories', categoriesRouter);
+app.use('/api/labels', labelsRouter);
 app.use('/api/settlements', settlementsRouter);
 app.use('/api/partner', partnerRouter);
 app.use('/api/budgets', budgetsRouter);
@@ -144,14 +152,22 @@ app.use('/api/monthly-close', monthlyCloseRouter);
 app.use('/api/calendar', calendarRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/notifications', notificationsRouter);
+// Notification preferences folded under the user namespace (issue #379):
+// the live endpoints are /api/users/me/notifications/preferences[/:type].
+app.use('/api/users/me/notifications', usersNotificationsRouter);
+// The old standalone path is retained only to return 410 Gone (see the route
+// file) so any stale client surfaces loudly instead of silently breaking.
 app.use('/api/notification-preferences', notificationPreferencesRouter);
 app.use('/api/changelog', changelogRouter);
 app.use('/api/admin/notifications', notificationsAdminRouter);
 app.use('/api/forecast', forecastRouter);
 app.use('/api/debt', debtRouter);
+app.use('/api/credit-cards', creditCardsRouter);
 app.use('/api/opportunity-cost', opportunityCostRouter);
 app.use('/api/financial-scenarios', financialScenariosRouter);
 app.use('/api/settings/cashflow', cashflowSettingsRouter);
+app.use('/api/preferences', preferencesRouter);
+app.use('/api/onboarding', onboardingRouter);
 app.use('/api/import', importRouter);
 // sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins
 // against any future /:id-style routes added to summaryRouter. The
@@ -174,6 +190,9 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/ai', aiReviewRouter);
 // Personal CFO briefings (issue #236).
 app.use('/api/cfo', cfoBriefingsRouter);
+// Unified read-side fold of all review-item sources (issue #378). Read-only;
+// per-source write endpoints are unchanged.
+app.use('/api/review-items', reviewItemsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/ai', aiQueryRouter);
 app.use('/api/chat', chatRouter);
@@ -185,8 +204,18 @@ app.use('/api/household', householdRouter);
 app.use('/api/invites', invitesRouter);
 app.use('/api/net-worth', netWorthRouter);
 app.use('/api/fx', fxRouter);
-app.use('/api/tax/personal-scenarios', taxPersonalScenariosRouter);
-app.use('/api/tax/corp-scenarios', taxCorpScenariosRouter);
+// Unified scenario route (issue #377): /api/tax/scenarios/:kind folds the
+// former /api/tax/personal-scenarios + /api/tax/corp-scenarios. The old paths
+// now return 410 Gone — every internal caller (the frontend hooks) moved to the
+// unified path in the same change, so nothing should hit these.
+app.use(['/api/tax/personal-scenarios', '/api/tax/corp-scenarios'], (_req, res) => {
+  res.status(410).json({
+    error: 'gone',
+    message:
+      'This endpoint moved to /api/tax/scenarios/:kind (kind ∈ {personal, corp}).',
+  });
+});
+app.use('/api/tax/scenarios', taxScenariosRouter);
 app.use('/api/tax/household-plans', taxHouseholdPlansRouter);
 app.use('/api/tax/reserve', taxReserveRouter);
 app.use('/api/tax', taxRouter);
@@ -203,6 +232,12 @@ app.use('/api', purchasesRouter);
 // reimbursementsRouter mounts /reimbursements/* and
 // /transactions/:id/reimbursable under /api (issue #216).
 app.use('/api', reimbursementsRouter);
+// largePurchaseReviewRouter mounts /large-purchases/* and
+// /transactions/:id/large-purchase-review under /api (issue #244).
+app.use('/api', largePurchaseReviewRouter);
+// feedbackRouter mounts /feedback and /feedback/:id/resolve under /api
+// (issue #295). Behind the global requireAuth above.
+app.use('/api', feedbackRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;

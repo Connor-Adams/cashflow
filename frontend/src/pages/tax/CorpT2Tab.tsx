@@ -401,7 +401,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
             <ComparisonView
               ids={compareIds}
               onClose={() => setCompareIds([])}
-              endpoint="/api/tax/corp-scenarios/compare"
+              endpoint="/api/tax/scenarios/corp/compare"
             />
           )}
         </div>

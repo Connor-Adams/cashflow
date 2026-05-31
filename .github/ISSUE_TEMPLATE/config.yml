@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Primitives spine
+    url: https://github.com/Connor-Adams/cashflow/blob/main/docs/superpowers/specs/2026-05-30-cashflow-primitives-design.md
+    about: The 13 primitives and the build rule. Read before proposing a feature.

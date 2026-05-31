@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getJson, patchJson } from '@/lib/api'
-import type { NetWorthCurrent, NetWorthSeries } from '@/types/api'
+import type {
+  CreditUtilizationByCurrency,
+  NetWorthCurrent,
+  NetWorthSeries,
+} from '@/types/api'
 
 type AsyncState<T> = { data: T | null; loading: boolean; error: Error | null }
 
@@ -43,6 +47,10 @@ export function useNetWorthCurrent(asOf?: string) {
     ? `/api/net-worth/current?asOf=${asOf}`
     : '/api/net-worth/current'
   return useFetch<NetWorthCurrent>(path)
+}
+
+export function useCreditUtilization() {
+  return useFetch<CreditUtilizationByCurrency[]>('/api/net-worth/credit-utilization')
 }
 
 export function useNetWorthSeries(

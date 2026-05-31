@@ -7,7 +7,7 @@
  *      mirrors routes-corp-scenarios.test.ts).
  *   2. Create 2 corp entities (Opco + Holdco) directly via `Entity.create`
  *      (there is no `POST /api/tax/entities` route in the current API).
- *   3. POST `/api/tax/corp-scenarios` to create one fork per corp (the route
+ *   3. POST `/api/tax/scenarios/corp` to create one fork per corp (the route
  *      auto-creates baselines on the fly).
  *   4. POST `/api/tax/household-plans` to create the plan; PATCH it to link
  *      both corp scenario forks.
@@ -121,7 +121,7 @@ test('P11a E2E: opco→holdco non-eligible dividend routed via household-plan co
   // 1. Create the Opco fork. POST auto-creates the baseline; this fork starts
   //    with empty overrides so we can PATCH them in step 4 (exercising the
   //    intercorp.<id>.<field> validator path from Task 1).
-  const opcoCreate = await authed.post('/api/tax/corp-scenarios').send({
+  const opcoCreate = await authed.post('/api/tax/scenarios/corp').send({
     entityId: opcoEntityId,
     year: 2025,
     name: 'Opco fork',
@@ -133,7 +133,7 @@ test('P11a E2E: opco→holdco non-eligible dividend routed via household-plan co
   // 2. Create the Holdco fork. Plain baseline-derived fork; no overrides — it
   //    just needs to exist in the plan so the intercorp router accepts the
   //    receiver entity ID.
-  const holdcoCreate = await authed.post('/api/tax/corp-scenarios').send({
+  const holdcoCreate = await authed.post('/api/tax/scenarios/corp').send({
     entityId: holdcoEntityId,
     year: 2025,
     name: 'Holdco fork',
@@ -158,7 +158,7 @@ test('P11a E2E: opco→holdco non-eligible dividend routed via household-plan co
   //    key path through `validateOverrideMap` on the corp-scenarios PATCH
   //    handler. If Task 1's registry hook isn't wired the PATCH 400s here.
   const patchOpco = await authed
-    .patch(`/api/tax/corp-scenarios/${opcoScenarioId}`)
+    .patch(`/api/tax/scenarios/corp/${opcoScenarioId}`)
     .send({
       overrides: {
         'corp.activeIncome': 200000,

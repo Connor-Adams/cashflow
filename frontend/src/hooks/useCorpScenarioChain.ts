@@ -19,7 +19,7 @@ interface UseCorpScenarioChainResult {
  * `id`'s year-N anchor, returning `[{scenario, computed}]` entries in year
  * order.
  *
- * Backed by `GET /api/tax/corp-scenarios/:id/chain`.
+ * Backed by `GET /api/tax/scenarios/corp/:id/chain`.
  *
  * When `id` is null, clears state and returns `data: null` without fetching.
  */
@@ -40,7 +40,7 @@ export function useCorpScenarioChain(id: number | null): UseCorpScenarioChainRes
     setLoading(true);
     setError(null);
     getJson<{ chain: CorpScenarioChainEntry[] }>(
-      `/api/tax/corp-scenarios/${id}/chain`,
+      `/api/tax/scenarios/corp/${id}/chain`,
     )
       .then((d) => { if (!cancelled) { setData(d.chain); setLoading(false); } })
       .catch((e: unknown) => {

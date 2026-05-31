@@ -7,6 +7,7 @@ import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { NotificationBell } from './notifications/NotificationBell'
 import { WhatsNewBell } from './changelog/WhatsNewBell'
+import { FeedbackButton } from './feedback/FeedbackButton'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -84,6 +85,7 @@ export function Layout() {
             </button>
             <WhatsNewBell />
             <NotificationBell />
+            <FeedbackButton />
           </div>
         </header>
 

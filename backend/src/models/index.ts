@@ -83,6 +83,10 @@ import {
 import { MonthlyCloseTask, initMonthlyCloseTask } from './MonthlyCloseTask';
 import { Purchase, initPurchase } from './Purchase';
 import { Reimbursement, initReimbursement } from './Reimbursement';
+import {
+  TransactionLargePurchaseReview,
+  initTransactionLargePurchaseReview,
+} from './TransactionLargePurchaseReview';
 import { Notification, initNotification } from './Notification';
 import { AuditLog, initAuditLog } from './AuditLog';
 import { FinanceEvent, initFinanceEvent } from './FinanceEvent';
@@ -101,6 +105,9 @@ import {
   initDebtPayoffScenario,
 } from './DebtPayoffScenario';
 import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
+import { Label, initLabel } from './Label';
+import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
+import { Feedback, initFeedback } from './Feedback';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -170,6 +177,7 @@ initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
 initPurchase(sequelize);
 initReimbursement(sequelize);
+initTransactionLargePurchaseReview(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
@@ -183,6 +191,32 @@ initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
 initDebtPayoffScenario(sequelize);
 initFinancialScenario(sequelize);
+initLabel(sequelize);
+initTransactionLabel(sequelize);
+initFeedback(sequelize);
+
+// Transaction labels (issue #270). belongsToMany both directions so a
+// transaction can `include` its labels and a label can resolve its
+// transactions, through the join model. hasMany on the join model itself
+// powers the usageCount aggregate in GET /api/labels.
+Household.hasMany(Label, { foreignKey: 'household_id', as: 'labels' });
+Label.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Transaction.belongsToMany(Label, {
+  through: TransactionLabel,
+  foreignKey: 'transaction_id',
+  otherKey: 'label_id',
+  as: 'labels',
+});
+Label.belongsToMany(Transaction, {
+  through: TransactionLabel,
+  foreignKey: 'label_id',
+  otherKey: 'transaction_id',
+  as: 'transactions',
+});
+Label.hasMany(TransactionLabel, { foreignKey: 'label_id', as: 'links' });
+TransactionLabel.belongsTo(Label, { foreignKey: 'label_id', as: 'label' });
+Transaction.hasMany(TransactionLabel, { foreignKey: 'transaction_id', as: 'labelLinks' });
+TransactionLabel.belongsTo(Transaction, { foreignKey: 'transaction_id', as: 'transaction' });
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -810,6 +844,20 @@ AccountStatement.belongsTo(User, {
   as: 'createdByUser',
 });
 
+// Large purchase review sidecar (issue #244). 1:1 with transactions; mirrors
+// the return-metadata sidecar pattern. Cascade on transaction delete so the
+// sidecar is never orphaned.
+Transaction.hasOne(TransactionLargePurchaseReview, {
+  foreignKey: 'transaction_id',
+  as: 'largePurchaseReview',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+TransactionLargePurchaseReview.belongsTo(Transaction, {
+  foreignKey: 'transaction_id',
+  as: 'transaction',
+});
+
 // CashflowSettings is a singleton per user (issue #199). UNIQUE(user_id) at
 // the DB level; we surface the relationship as hasOne so callers can eager
 // load via `include: [{ model: CashflowSettings, as: 'cashflowSettings' }]`.
@@ -901,6 +949,13 @@ LiabilityAccount.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
 });
+// Credit-card payment planner (#243). The funding (cash) account a card's
+// bill is paid from. SET NULL at the DB level (see the cc-fields migration) so
+// deleting the funding account unlinks the profile rather than removing it.
+LiabilityAccount.belongsTo(Account, {
+  foreignKey: 'payment_account_id',
+  as: 'paymentAccount',
+});
 
 // DebtPayoffScenario (issue #202). Household-scoped saved payoff plans. The
 // creating user is kept loosely (SET NULL) so a scenario survives the user's
@@ -923,6 +978,24 @@ DebtPayoffScenario.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
+
+// In-app feedback / bug reports (issue #295). Scoped to both the submitting
+// user and their household; both cascade on delete so removing either removes
+// the feedback. The owner-only inbox lists via householdWhere().
+User.hasMany(Feedback, {
+  foreignKey: 'user_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Household.hasMany(Feedback, {
+  foreignKey: 'household_id',
+  as: 'feedback',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+Feedback.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
 export {
   sequelize,
@@ -992,6 +1065,7 @@ export {
   MonthlyCloseTask,
   Purchase,
   Reimbursement,
+  TransactionLargePurchaseReview,
   CashflowSettings,
   Notification,
   NotificationPreference,
@@ -1005,4 +1079,7 @@ export {
   LiabilityAccount,
   DebtPayoffScenario,
   FinancialScenario,
+  Label,
+  TransactionLabel,
+  Feedback,
 };

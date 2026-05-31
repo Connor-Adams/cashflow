@@ -36,6 +36,10 @@ import {
   lifestyleInflation,
   type LifestyleInflationTxnRow,
 } from '../summary/lifestyleInflation';
+import {
+  savingsRate,
+  type SavingsRateTxnRow,
+} from '../summary/savingsRate';
 import { scopeWhereClause } from './budgets';
 import { getOpenAiConfig } from '../config/openai';
 import { openaiJson } from '../ai/openaiJson';
@@ -468,6 +472,137 @@ router.get('/lifestyle-inflation', async (req, res, next) => {
       transactions,
       currency,
       outpaceThresholdPct,
+    });
+
+    res.json({
+      anchorMonth: anchor,
+      scope,
+      currency: currency ?? null,
+      ...result,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Fetch transactions across the whole window for the savings-rate report.
+ * Joins each row's account_type (via a per-household account-type map) so the
+ * aggregator can tell a deposit into a savings account from spend on a card.
+ */
+async function fetchSavingsRateTransactions(
+  req: Parameters<typeof currentAuth>[0],
+  fromDate: string,
+  toDate: string,
+  currency: string | null,
+  scope: LifestyleScope,
+): Promise<SavingsRateTxnRow[]> {
+  const where: WhereOptions = {
+    ...visibleTransactionWhere(req),
+    ...scopeFilter(scope),
+    date: { [Op.between]: [fromDate, toDate] },
+  };
+  if (currency) (where as Record<string, unknown>).currency = currency;
+
+  const [rows, accounts] = await Promise.all([
+    Transaction.findAll({
+      where,
+      attributes: ['accountId', 'date', 'currency', 'amount', 'txnType', 'transferPurpose'],
+      raw: true,
+    }),
+    Account.findAll({
+      where: visibleAccountWhere(req),
+      attributes: ['id', 'accountType'],
+      raw: true,
+    }),
+  ]);
+
+  const accountTypeById = new Map<number, string | null>(
+    (accounts as unknown as Array<{ id: number; accountType: string | null }>).map((a) => [
+      a.id,
+      a.accountType,
+    ]),
+  );
+
+  type RawRow = {
+    accountId: number;
+    date: string;
+    currency: string;
+    amount: unknown;
+    txnType: string | null;
+    transferPurpose: string | null;
+  };
+  return (rows as unknown as RawRow[]).map((r) => ({
+    date: r.date,
+    currency: r.currency,
+    amount: r.amount,
+    txnType: r.txnType,
+    transferPurpose: r.transferPurpose,
+    accountType: accountTypeById.get(r.accountId) ?? null,
+  }));
+}
+
+/**
+ * GET /api/reports/savings-rate (Cashflow #246).
+ *
+ * Tracks the user's "true" savings rate over a rolling window of months: of
+ * the income that came in, what fraction was kept as cash savings, investment
+ * contributions, and debt-principal paydown rather than spent. Returns, per
+ * currency: a monthly income / spending / savings / investments / debt-
+ * principal series with a per-month savings-rate percentage, plus window
+ * totals and an overall savings rate.
+ *
+ * Query params:
+ *   month                — anchor month YYYY-MM (default: current month). The window ends here.
+ *   months               — window size, clamped to [2, 36] (default 12).
+ *   currency             — 3-letter filter, or omit for all currencies.
+ *   scope                — personal | shared | business | all (default all).
+ *   includeInvestments   — count investment contributions toward the rate (default true).
+ *   includeDebtPrincipal — count debt-principal paydown toward the rate (default true).
+ */
+router.get('/savings-rate', async (req, res, next) => {
+  try {
+    const auth = currentAuth(req);
+    void auth; // throws if unauthenticated.
+
+    const anchor =
+      req.query.month != null && req.query.month !== ''
+        ? parseMonth(req.query.month)
+        : currentMonth();
+    if (!anchor) {
+      res.status(400).json({
+        error: 'month must be in YYYY-MM format (e.g. 2026-05)',
+      });
+      return;
+    }
+    const windowMonths = parseWindowMonths(req.query.months);
+    const currency = parseCurrency(req.query.currency);
+    const scope = parseScope(req.query.scope);
+    // Both inclusions default to true; an explicitly-present flag set to a
+    // falsey value (false/0/no/off) turns it off.
+    const includeInvestments =
+      req.query.includeInvestments == null ? true : parseBool(req.query.includeInvestments);
+    const includeDebtPrincipal =
+      req.query.includeDebtPrincipal == null ? true : parseBool(req.query.includeDebtPrincipal);
+
+    const months = buildMonthWindow(anchor, windowMonths);
+    const fromDate = monthBounds(months[0]).from;
+    const toDate = monthBounds(months[months.length - 1]).to;
+
+    const transactions = await fetchSavingsRateTransactions(
+      req,
+      fromDate,
+      toDate,
+      currency,
+      scope,
+    );
+
+    const result = savingsRate({
+      months,
+      transactions,
+      currency,
+      includeInvestments,
+      includeDebtPrincipal,
     });
 
     res.json({

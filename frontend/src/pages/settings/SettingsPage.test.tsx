@@ -40,6 +40,7 @@ describe('SettingsPage shell', () => {
       'Members',
       'Budgets',
       'Categories',
+      'Labels',
       'Notifications',
       'Jobs',
       "What's new",

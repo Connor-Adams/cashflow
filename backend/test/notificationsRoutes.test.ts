@@ -7,7 +7,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseLimit, parseUnreadOnly } from '../src/routes/notifications';
-import { validateNotificationPreferencePatch } from '../src/routes/notificationPreferences';
+// After the #379 fold the preference patch validator lives in the single
+// notification service module, not the (now-410) standalone prefs route.
+import { validateNotificationPreferencePatch } from '../src/notifications/index';
 
 test('parseLimit: default when missing', () => {
   assert.equal(parseLimit(undefined), 20);

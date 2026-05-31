@@ -21,7 +21,9 @@ import {
   Droplet,
   Filter,
   Flame,
+  PiggyBank,
   Globe,
+  Inbox,
   Lightbulb,
   LineChart,
   LayoutDashboard,
@@ -37,9 +39,7 @@ import {
   Search,
   Settings,
   Shield,
-  Sparkles,
-  Stethoscope,
-  BriefcaseBusiness,
+  BadgeDollarSign,
   Sun,
   Moon,
   GitCompare,
@@ -79,7 +79,7 @@ const navSections: NavSection[] = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
       { to: '/review', label: 'Review', icon: ClipboardCheck },
-      { to: '/ai/inbox', label: 'AI Inbox', icon: Sparkles },
+      { to: '/inbox', label: 'Inbox', icon: Inbox },
       { to: '/chat', label: 'Chat', icon: MessageSquare },
       { to: '/ask', label: 'Ask Cashflow', icon: Search },
     ],
@@ -101,6 +101,7 @@ const navSections: NavSection[] = [
       { to: '/recurring', label: 'Recurring', icon: Repeat },
       { to: '/subscriptions', label: 'Subscriptions', icon: RefreshCw },
       { to: '/return-warranty', label: 'Returns & warranties', icon: RotateCcw },
+      { to: '/large-purchases', label: 'Large purchases', icon: BadgeDollarSign },
       { to: '/money-leaks', label: 'Money leaks', icon: Droplet },
     ],
   },
@@ -113,6 +114,7 @@ const navSections: NavSection[] = [
       { to: '/goals', label: 'Goals', icon: Target },
       { to: '/forecast', label: 'Forecast', icon: TrendingUp },
       { to: '/debt', label: 'Debt payoff', icon: Landmark },
+      { to: '/credit-cards', label: 'Credit cards', icon: CreditCard },
       { to: '/opportunity-cost', label: 'Opportunity cost', icon: Calculator },
       { to: '/scenarios', label: 'Scenarios', icon: GitCompare },
     ],
@@ -131,8 +133,6 @@ const navSections: NavSection[] = [
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-      { to: '/ai/reviews', label: 'AI Reviews', icon: Stethoscope },
-      { to: '/cfo/briefings', label: 'CFO briefing', icon: BriefcaseBusiness },
       { to: '/insights', label: 'Insights', icon: Lightbulb },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
       { to: '/reports/explain-month', label: 'Explain month', icon: BookOpen },
@@ -140,6 +140,11 @@ const navSections: NavSection[] = [
         to: '/reports/lifestyle-inflation',
         label: 'Lifestyle inflation',
         icon: Flame,
+      },
+      {
+        to: '/reports/savings-rate',
+        label: 'Savings rate',
+        icon: PiggyBank,
       },
       { to: '/sankey', label: 'Cashflow', icon: Waypoints },
       { to: '/audit-log', label: 'Audit log', icon: Shield },
@@ -295,7 +300,7 @@ function SidebarNavSections({
   const { count: insightsCount } = useInsightsCount()
 
   function badgeFor(to: string): number {
-    if (to === '/ai/inbox') return aiInboxCount
+    if (to === '/inbox') return aiInboxCount
     if (to === '/insights') return insightsCount
     return 0
   }
