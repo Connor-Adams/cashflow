@@ -14,7 +14,7 @@ type Props = {
 export function ImportRulesModal({ onClose, onImported }: Props) {
   const { showToast } = useToast()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [parsed, setParsed] = useState<{ version?: number; rules?: unknown[] } | null>(null)
+  const [parsed, setParsed] = useState<{ schemaVersion?: number; rules?: unknown[] } | null>(null)
   const [parseError, setParseError] = useState<string | null>(null)
   const [mode, setMode] = useState<'append' | 'replace'>('append')
   const [submitting, setSubmitting] = useState(false)
@@ -33,9 +33,9 @@ export function ImportRulesModal({ onClose, onImported }: Props) {
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        const json = JSON.parse(reader.result as string) as { version?: number; rules?: unknown[] }
-        if (json.version !== 1) {
-          setParseError('Unsupported version — only version 1 is supported')
+        const json = JSON.parse(reader.result as string) as { schemaVersion?: number; rules?: unknown[] }
+        if (json.schemaVersion !== 1) {
+          setParseError('Unsupported version — only schemaVersion 1 is supported')
           return
         }
         setParsed(json)
@@ -55,7 +55,7 @@ export function ImportRulesModal({ onClose, onImported }: Props) {
     setSubmitting(true)
     try {
       const result = await postJson<ImportResult>('/api/rules/import', {
-        rules: parsed?.rules ?? [],
+        json: parsed,
         mode,
       })
       showToast({
