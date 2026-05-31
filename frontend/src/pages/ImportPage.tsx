@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
 import { ImportModal } from '../components/import/ImportModal'
 import { ImportHistoryTable } from '../components/import/ImportHistoryTable'
+import { useToast } from '@/components/ui/toast'
 import { getJson } from '../lib/api'
 import type { Account } from '../types/api'
 
@@ -19,6 +20,7 @@ import type { Account } from '../types/api'
  */
 export function ImportPage() {
   const navigate = useNavigate()
+  const { showToast } = useToast()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountsError, setAccountsError] = useState(false)
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
@@ -54,7 +56,15 @@ export function ImportPage() {
         open={modalOpen}
         onOpenChange={setModalOpen}
         accounts={accounts}
-        onCommitted={() => setHistoryRefreshKey((k) => k + 1)}
+        onCommitted={() => {
+          setHistoryRefreshKey((k) => k + 1)
+          showToast({
+            title: 'Import complete!',
+            description: 'Head to Review to categorize any uncategorized transactions.',
+            variant: 'success',
+            durationMs: 6000,
+          })
+        }}
         onAccountsChanged={() => {
           loadAccounts()
           setHistoryRefreshKey((k) => k + 1)

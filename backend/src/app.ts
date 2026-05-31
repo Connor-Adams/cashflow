@@ -55,6 +55,7 @@ import opportunityCostRouter from './routes/opportunityCost';
 import cashflowSettingsRouter from './routes/cashflowSettings';
 import changelogRouter from './routes/changelog';
 import preferencesRouter from './routes/preferences';
+import activationStateRouter from './routes/activationState';
 import onboardingRouter from './routes/onboarding';
 import clientLogsRouter from './routes/clientLogs';
 import amazonRouter from './routes/amazon';
@@ -179,6 +180,7 @@ app.use('/api/opportunity-cost', opportunityCostRouter);
 app.use('/api/financial-scenarios', financialScenariosRouter);
 app.use('/api/settings/cashflow', cashflowSettingsRouter);
 app.use('/api/preferences', preferencesRouter);
+app.use('/api/activation-state', activationStateRouter);
 app.use('/api/onboarding', onboardingRouter);
 app.use('/api/import', importRouter);
 // sankeyRouter mounts before summaryRouter so /api/summary/sankey/* wins

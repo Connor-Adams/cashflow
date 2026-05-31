@@ -30,6 +30,7 @@ import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
+import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { useInsightsSeen } from '@/hooks/useInsightsSeen'
@@ -852,6 +853,7 @@ export function DashboardPage() {
         title="Dashboard"
         description="Totals stay in each currency. Filter by currency and date range."
       />
+      <ActivationCardDeck />
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
 
