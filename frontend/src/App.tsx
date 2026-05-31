@@ -7,6 +7,7 @@ import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { ReportsLayout } from './pages/ReportsLayout'
 import { ExplainMonthPage } from './pages/ExplainMonthPage'
 import { LifestyleInflationPage } from './pages/LifestyleInflationPage'
 import { SavingsRatePage } from './pages/SavingsRatePage'
@@ -109,15 +110,14 @@ function AppRoutes() {
           <Route path="money-leaks" element={<MoneyLeaksPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
-          <Route path="reports" element={<ReportsPage />} />
+          <Route path="reports" element={<ReportsLayout />}>
+            <Route index element={<ReportsPage />} />
+            <Route path="explain-month" element={<ExplainMonthPage />} />
+            <Route path="lifestyle-inflation" element={<LifestyleInflationPage />} />
+            <Route path="savings-rate" element={<SavingsRatePage />} />
+          </Route>
           <Route path="audit-log" element={<Navigate to="/settings/audit-log" replace />} />
           <Route path="sync" element={<Navigate to="/settings/backup" replace />} />
-          <Route path="reports/explain-month" element={<ExplainMonthPage />} />
-          <Route
-            path="reports/lifestyle-inflation"
-            element={<LifestyleInflationPage />}
-          />
-          <Route path="reports/savings-rate" element={<SavingsRatePage />} />
           <Route path="sankey" element={<SankeyPage />} />
           <Route path="currency" element={<CurrencyPage />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
