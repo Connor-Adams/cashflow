@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import { getJson } from '@/lib/api'
 import { CategoryIcon } from '../CategoryIcon'
 import { BentoTile } from './BentoTile'
@@ -71,7 +73,18 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
       </BentoTile>
     )
   }
-  if (!items || items.length === 0) return null
+  if (!items || items.length === 0) {
+    return (
+      <BentoTile span={6} rows={1} label="Budget status" description="Track your spending against targets.">
+        <div className="flex flex-col items-center justify-center gap-3 py-4 text-center">
+          <p className="text-sm text-muted-foreground">Set a budget to see pacing here.</p>
+          <Button size="sm" variant="outline" asChild>
+            <Link to="/settings/budgets">Set a budget</Link>
+          </Button>
+        </div>
+      </BentoTile>
+    )
+  }
 
   return (
     <BentoTile

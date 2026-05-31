@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -352,6 +353,14 @@ function SummaryStat({
   )
 }
 
+const LEAK_SOURCE_ROUTE: Record<MoneyLeakType, string> = {
+  subscription_price_increase: '/subscriptions',
+  small_subscription: '/subscriptions',
+  duplicate_service: '/subscriptions',
+  recurring_fee: '/recurring',
+  delivery_fee_high: '/recurring',
+}
+
 function LeakGroup({
   leakType,
   items,
@@ -405,6 +414,13 @@ function LeakGroup({
                 {formatMoney(item.monthlyImpact, item.currency)}/mo •{' '}
                 {formatMoney(item.annualImpact, item.currency)}/yr
               </div>
+              <Link
+                to={LEAK_SOURCE_ROUTE[leakType]}
+                className="text-xs text-primary underline-offset-2 hover:underline"
+                style={{ marginTop: 4, display: 'inline-block' }}
+              >
+                View source →
+              </Link>
             </div>
             <Button
               type="button"

@@ -18,7 +18,7 @@ import {
   type FormEvent,
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -501,7 +501,15 @@ export function CalendarPage() {
                         aria-hidden="true"
                       />
                       <div>
-                        <div className="font-medium">{ev.name}</div>
+                        <div className="font-medium flex items-center gap-1">
+                          {ev.name}
+                          {ev.recurrenceRule ? (
+                            <Repeat
+                              aria-label="Recurring"
+                              className="h-3 w-3 text-muted-foreground"
+                            />
+                          ) : null}
+                        </div>
                         <div className="muted text-xs">
                           {ev.kindLabel} ·{' '}
                           {formatMoney(Number(ev.amount), ev.currency)}
@@ -510,6 +518,9 @@ export function CalendarPage() {
                       </div>
                     </div>
                     <div className="row" style={{ gap: '0.25rem' }}>
+                      <Button size="sm" variant="ghost" asChild>
+                        <Link to="/forecast">Forecast →</Link>
+                      </Button>
                       <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                         {ev.kindLabel}
                       </Badge>
@@ -762,9 +773,12 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
               {visible.map((ev, i) => (
                 <span
                   key={`${ev.id}-${i}`}
-                  className={`text-xs truncate rounded px-1 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
-                  title={`${ev.kindLabel}: ${ev.name}`}
+                  className={`text-xs truncate rounded px-1 inline-flex items-center gap-0.5 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
+                  title={`${ev.kindLabel}: ${ev.name}${ev.recurrenceRule ? ' (recurring)' : ''}`}
                 >
+                  {ev.recurrenceRule ? (
+                    <Repeat aria-hidden="true" className="h-2.5 w-2.5 shrink-0" />
+                  ) : null}
                   {ev.name}
                 </span>
               ))}
@@ -833,7 +847,12 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                     aria-hidden="true"
                   />
                   <div>
-                    <div className="font-medium">{ev.name}</div>
+                    <div className="font-medium flex items-center gap-1">
+                      {ev.name}
+                      {ev.recurrenceRule ? (
+                        <Repeat aria-label="Recurring" className="h-3 w-3 text-muted-foreground" />
+                      ) : null}
+                    </div>
                     <div className="muted text-xs">
                       {ev.kindLabel} ·{' '}
                       {formatMoney(Number(ev.amount), ev.currency)}
@@ -842,6 +861,9 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                   </div>
                 </div>
                 <div className="row" style={{ gap: '0.25rem' }}>
+                  <Button size="sm" variant="ghost" asChild>
+                    <Link to="/forecast">Forecast →</Link>
+                  </Button>
                   <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                     {ev.kindLabel}
                   </Badge>
