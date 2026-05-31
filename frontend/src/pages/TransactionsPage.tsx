@@ -32,6 +32,7 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { LabelChipPicker } from '../components/transactions/LabelChipPicker'
+import { SavedFiltersDropdown, type FilterSnapshot } from '../components/transactions/SavedFiltersDropdown'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
@@ -295,6 +296,29 @@ export function TransactionsPage() {
   // Per-issue-262: detect an impossible date range and surface inline guidance.
   // Apply-style actions are gated on this so users don't chase missing data
   // caused by a bad filter.
+  const currentFilterSnapshot: FilterSnapshot = {
+    reviewOnly,
+    currency,
+    dateFrom,
+    dateTo,
+    categoryFilter,
+    batchFilter,
+    statusFilter,
+    labelsFilter,
+  }
+
+  const applyFilterSnapshot = useCallback((snap: FilterSnapshot) => {
+    setReviewOnly(snap.reviewOnly)
+    setCurrency(snap.currency)
+    setDateFrom(snap.dateFrom)
+    setDateTo(snap.dateTo)
+    setCategoryFilter(snap.categoryFilter)
+    setBatchFilter(snap.batchFilter)
+    setStatusFilter(snap.statusFilter as '' | import('../types/api').TransactionStatus)
+    setLabelsFilter(snap.labelsFilter)
+    setPage(1)
+  }, [setReviewOnly, setCurrency, setDateFrom, setDateTo, setCategoryFilter, setBatchFilter, setStatusFilter, setLabelsFilter, setPage])
+
   const dateRangeInvalid = useMemo(() => {
     const from = dateFrom.trim()
     const to = dateTo.trim()
@@ -1071,6 +1095,10 @@ export function TransactionsPage() {
             </p>
           </div>
           <div className="transactionsToolbarMeta">
+            <SavedFiltersDropdown
+              current={currentFilterSnapshot}
+              onApply={applyFilterSnapshot}
+            />
             <span className="transactionsPanelBadge">
               {reviewOnly ? 'Review queue' : 'All transactions'}
             </span>

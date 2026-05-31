@@ -97,6 +97,7 @@ import {
 import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
+import { SavedFilter, initSavedFilter } from './SavedFilter';
 import { AccountStatement, initAccountStatement } from './AccountStatement';
 import { SyncBackup, initSyncBackup } from './SyncBackup';
 import { LiabilityAccount, initLiabilityAccount } from './LiabilityAccount';
@@ -194,6 +195,7 @@ initVaultDocument(sequelize);
 initFinanceEvent(sequelize);
 initBudgetAlertState(sequelize);
 initSavedSearch(sequelize);
+initSavedFilter(sequelize);
 initAccountStatement(sequelize);
 initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
@@ -893,6 +895,8 @@ User.hasMany(SavedSearch, {
   hooks: true,
 });
 SavedSearch.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(SavedFilter, { foreignKey: 'user_id', as: 'savedFilters', onDelete: 'CASCADE', hooks: true });
+SavedFilter.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 // Financial scenario planner (issue #213). Scenarios cascade on household
 // delete and user delete. Each scenario belongs to both a household and the
@@ -1086,6 +1090,7 @@ export {
   FinanceEvent,
   BudgetAlertState,
   SavedSearch,
+  SavedFilter,
   VaultDocument,
   AccountStatement,
   SyncBackup,
