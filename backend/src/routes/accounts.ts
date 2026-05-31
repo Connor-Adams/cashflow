@@ -6,6 +6,7 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
 import { currentOwed, utilizationPct } from '../cards/utilization';
+import { mergeAccounts } from '../services/accountMerge';
 
 const CREDIT_CARD_TYPE = 'credit_card';
 
@@ -79,8 +80,13 @@ function normalizeAccountType(raw: unknown): string {
 
 router.get('/', async (req, res, next) => {
   try {
+    const includeMerged = req.query.includeMerged === 'true';
+    const baseWhere = visibleAccountWhere(req);
+    const where = includeMerged
+      ? baseWhere
+      : { ...baseWhere, mergedIntoId: null };
     const rows = await Account.findAll({
-      where: visibleAccountWhere(req),
+      where,
       order: [['name', 'ASC']],
     });
     const ccIds = rows.filter((a) => a.accountType === CREDIT_CARD_TYPE).map((a) => a.id);
@@ -308,6 +314,36 @@ router.patch('/:id', async (req, res, next) => {
     const enriched = await enrichAccount(account, profileByAccount, todayIso(), { fullNotes: true });
     res.json(enriched);
   } catch (e) {
+    next(e);
+  }
+});
+
+// POST /:sourceId/merge-into/:targetId — merge source into target (#287)
+router.post('/:sourceId/merge-into/:targetId', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const sourceId = parseInt(req.params.sourceId, 10);
+    const targetId = parseInt(req.params.targetId, 10);
+    if (Number.isNaN(sourceId) || Number.isNaN(targetId)) {
+      res.status(400).json({ error: 'INVALID_ID' });
+      return;
+    }
+    const result = await mergeAccounts(sourceId, targetId, household.id);
+    res.json({
+      movedTransactions: result.movedTransactions,
+      movedPlannedEvents: result.movedPlannedEvents,
+      movedIncomeEntries: result.movedIncomeEntries,
+      movedInvestmentActivities: result.movedInvestmentActivities,
+      source: result.source,
+      target: result.target,
+    });
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code === 'SAME_ID') { res.status(400).json({ error: 'SAME_ID' }); return; }
+    if (code === 'NOT_FOUND') { res.status(404).json({ error: 'NOT_FOUND' }); return; }
+    if (code === 'SOURCE_ALREADY_MERGED') { res.status(400).json({ error: 'SOURCE_ALREADY_MERGED', message: (e as Error).message }); return; }
+    if (code === 'TARGET_NOT_MERGEABLE') { res.status(400).json({ error: 'TARGET_NOT_MERGEABLE', message: (e as Error).message }); return; }
+    if (code === 'CURRENCY_MISMATCH') { res.status(400).json({ error: 'CURRENCY_MISMATCH', message: (e as Error).message }); return; }
     next(e);
   }
 });

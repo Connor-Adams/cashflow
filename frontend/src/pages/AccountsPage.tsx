@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Edit3, GitMerge, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
+import { MergeAccountModal } from '@/components/accounts/MergeAccountModal'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account, AccountType } from '../types/api'
 
@@ -50,6 +51,9 @@ const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [mergedAccounts, setMergedAccounts] = useState<Account[]>([])
+  const [showMerged, setShowMerged] = useState(false)
+  const [merging, setMerging] = useState<Account | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -75,9 +79,13 @@ export function AccountsPage() {
     setLoading(true)
     setErr(null)
     try {
-      const nextAccounts = await getJson<Account[]>('/api/accounts')
+      const [nextAccounts, allAccounts] = await Promise.all([
+        getJson<Account[]>('/api/accounts'),
+        getJson<Account[]>('/api/accounts?includeMerged=true'),
+      ])
       if (loadRequestRef.current === requestId) {
         setAccounts(nextAccounts)
+        setMergedAccounts(allAccounts.filter((a) => a.mergedIntoId != null))
       }
     } catch (e) {
       if (loadRequestRef.current === requestId) {
@@ -618,6 +626,17 @@ export function AccountsPage() {
                         <Button
                           type="button"
                           size="sm"
+                          variant="outline"
+                          title={accounts.filter((other) => other.id !== a.id && (other.defaultCurrency ?? 'CAD').toUpperCase() === (a.defaultCurrency ?? 'CAD').toUpperCase()).length === 0 ? 'Need at least two same-currency accounts to merge.' : 'Merge this account into another'}
+                          disabled={accounts.filter((other) => other.id !== a.id && (other.defaultCurrency ?? 'CAD').toUpperCase() === (a.defaultCurrency ?? 'CAD').toUpperCase()).length === 0}
+                          onClick={() => setMerging(a)}
+                        >
+                          <GitMerge aria-hidden="true" />
+                          Merge into…
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
                           variant="destructive"
                           onClick={() => void removeAccount(a)}
                         >
@@ -673,6 +692,63 @@ export function AccountsPage() {
       </CollapsibleCard>
     </div>
     {confirm.dialog}
+
+    {mergedAccounts.length > 0 && (
+      <div className="mt-6">
+        <button
+          type="button"
+          className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground mb-2"
+          onClick={() => setShowMerged((v) => !v)}
+        >
+          {showMerged ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          Hidden / merged accounts ({mergedAccounts.length})
+        </button>
+        {showMerged && (
+          <Card className="p-4">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Merged into</TableHead>
+                  <TableHead>Merged at</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {mergedAccounts.map((a) => {
+                  const target = accounts.find((t) => t.id === a.mergedIntoId) ??
+                    mergedAccounts.find((t) => t.id === a.mergedIntoId)
+                  return (
+                    <TableRow key={a.id} className="opacity-60">
+                      <TableCell>{a.name}</TableCell>
+                      <TableCell>{target?.name ?? `Account #${a.mergedIntoId ?? '?'}`}</TableCell>
+                      <TableCell>{a.mergedAt ? new Date(a.mergedAt).toLocaleDateString() : '—'}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </Card>
+        )}
+      </div>
+    )}
+
+    {merging && (
+      <MergeAccountModal
+        source={merging}
+        eligibleTargets={accounts.filter(
+          (a) =>
+            a.id !== merging.id &&
+            (a.defaultCurrency ?? 'CAD').toUpperCase() ===
+              (merging.defaultCurrency ?? 'CAD').toUpperCase() &&
+            !a.mergedIntoId,
+        )}
+        onClose={() => setMerging(null)}
+        onMerged={async () => {
+          setMerging(null)
+          await load()
+        }}
+      />
+    )}
     </>
   )
 }

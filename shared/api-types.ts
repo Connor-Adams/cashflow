@@ -23,6 +23,10 @@ export type Account = {
   notesPreview?: string | null
   /** Full notes markdown text (detail/PATCH endpoint only). */
   notes?: string | null
+  /** Set when this account has been soft-merged into another (#287). */
+  mergedIntoId?: number | null
+  /** Timestamp when the merge was performed. */
+  mergedAt?: string | null
 }
 
 /**
