@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CancelImpactCard } from '@/components/subscriptions/CancelImpactCard'
-import { getJson, patchJson } from '../lib/api'
+import { getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   CancelImpact,
@@ -108,30 +108,27 @@ export function SubscriptionsPage() {
     return s ? `?${s}` : ''
   }, [statusFilter])
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setErr(null)
-      try {
-        const [list, sum] = await Promise.all([
-          getJson<SubscriptionsResponse>(`/api/subscriptions${queryString}`),
-          // Pass refresh=0 to summary so we don't run detection twice on a single page load.
-          getJson<SubscriptionsSummary>(`/api/subscriptions/summary?refresh=0`),
-        ])
-        if (!cancelled) {
-          setData(list)
-          setSummary(sum)
-        }
-      } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
+  const load = useCallback(async () => {
+    setLoading(true)
+    setErr(null)
+    try {
+      const [list, sum] = await Promise.all([
+        getJson<SubscriptionsResponse>(`/api/subscriptions${queryString}`),
+        // Pass refresh=0 to summary so we don't run detection twice on a single page load.
+        getJson<SubscriptionsSummary>(`/api/subscriptions/summary?refresh=0`),
+      ])
+      setData(list)
+      setSummary(sum)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Error')
+    } finally {
+      setLoading(false)
     }
+  }, [queryString])
+
+  useEffect(() => {
+    void load()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryString])
 
   async function updateStatus(id: number, status: SubscriptionStatus) {
@@ -304,6 +301,7 @@ export function SubscriptionsPage() {
                     rowError={rowErrors.get(item.id) ?? null}
                     onStatusChange={updateStatus}
                     onCadenceChange={updateCadence}
+                    onRefresh={() => void load()}
                   />
                 ))
               )}
@@ -395,16 +393,85 @@ function SummaryStat({
   )
 }
 
+function PriceChangeChip({
+  pc,
+  merchantName,
+  onAcknowledged,
+}: {
+  pc: NonNullable<Subscription['pendingPriceChange']>
+  merchantName: string
+  onAcknowledged: () => void
+}) {
+  const { showToast } = useToast()
+  const [open, setOpen] = useState(false)
+  const [acking, setAcking] = useState(false)
+  const isIncrease = pc.pctChange >= 0
+  const prevAmt = pc.prevCents / 100
+  const newAmt = pc.newCents / 100
+  const pctAbs = Math.abs(pc.pctChange).toFixed(1)
+
+  async function acknowledge() {
+    setAcking(true)
+    try {
+      await postJson(`/api/subscription-price-changes/${pc.id}/acknowledge`, {})
+      setOpen(false)
+      onAcknowledged()
+      showToast({ title: 'Acknowledged.', variant: 'success', durationMs: 3000 })
+    } catch {
+      showToast({ title: 'Failed to acknowledge. Try again.', variant: 'destructive' })
+    } finally {
+      setAcking(false)
+    }
+  }
+
+  return (
+    <>
+      <Badge
+        variant={isIncrease ? 'destructive' : 'default'}
+        title={`Went from ${formatMoney(prevAmt, pc.currency)} to ${formatMoney(newAmt, pc.currency)} on ${pc.detectedOn}`}
+        className="cursor-pointer"
+        onClick={() => setOpen(true)}
+      >
+        {isIncrease ? '↑' : '↓'} Price {isIncrease ? '+' : '-'}{pctAbs}%
+      </Badge>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setOpen(false)} aria-hidden="true" />
+          <aside
+            role="dialog"
+            aria-label={`Price change for ${merchantName}`}
+            className="fixed inset-y-0 right-0 z-50 w-[360px] max-w-full overflow-y-auto border-l border-border bg-card p-6"
+          >
+            <h2 className="text-lg font-semibold mb-4">{merchantName} price changed</h2>
+            <p className="text-sm mb-4">
+              Previously {formatMoney(prevAmt, pc.currency)} / month → Now {formatMoney(newAmt, pc.currency)} / month.{' '}
+              Detected from charges on {pc.detectedOn}.
+            </p>
+            <div className="flex gap-2 mt-6">
+              <Button onClick={() => void acknowledge()} disabled={acking}>
+                {acking ? 'Saving…' : 'Acknowledge'}
+              </Button>
+              <Button variant="ghost" onClick={() => setOpen(false)}>Close</Button>
+            </div>
+          </aside>
+        </>
+      )}
+    </>
+  )
+}
+
 function SubscriptionRow({
   item,
   rowError,
   onStatusChange,
   onCadenceChange,
+  onRefresh,
 }: {
   item: Subscription
   rowError: string | null
   onStatusChange: (id: number, status: SubscriptionStatus) => Promise<void>
   onCadenceChange: (id: number, cadence: SubscriptionCadence) => Promise<void>
+  onRefresh: () => void
 }) {
   const annual = Number(item.annualizedCost)
   const amount = Number(item.amount)
@@ -418,14 +485,17 @@ function SubscriptionRow({
       <TableCell>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {item.merchantName}
-          {item.priceChangeDetected && (
-            <Badge
-              variant="destructive"
-              title="Price has increased since the last refresh"
-            >
-              <AlertTriangle size={12} aria-hidden="true" /> price up
+          {item.pendingPriceChange ? (
+            <PriceChangeChip
+              pc={item.pendingPriceChange}
+              merchantName={item.merchantName}
+              onAcknowledged={onRefresh}
+            />
+          ) : item.priceChangeDetected ? (
+            <Badge variant="secondary" title="Price change previously detected">
+              <AlertTriangle size={12} aria-hidden="true" /> price changed
             </Badge>
-          )}
+          ) : null}
         </div>
         {item.cancellationUrl && (
           <a

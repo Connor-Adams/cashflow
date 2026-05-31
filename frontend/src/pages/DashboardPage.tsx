@@ -311,6 +311,7 @@ export function DashboardPage() {
   // initial load.
   const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
   const [recurringLoading, setRecurringLoading] = useState(true)
+  const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -416,6 +417,9 @@ export function DashboardPage() {
     void getJson<unknown[]>('/api/household/members')
       .then((r) => setHasPartner(r.length > 1))
       .catch(() => setHasPartner(true))
+    void getJson<{ id: number }[]>('/api/subscription-price-changes?status=unack')
+      .then((r) => setPriceChangeCount(r.length))
+      .catch(() => setPriceChangeCount(0))
   }, [])
 
   // Sort most-at-risk first; ties broken by category label so layout is
@@ -947,6 +951,19 @@ export function DashboardPage() {
         reviewCount={summaryStats.reviewCount}
         hasPartner={hasPartner}
       />
+      {priceChangeCount > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+          <span className="font-medium text-amber-800 dark:text-amber-200">
+            {priceChangeCount} subscription price change{priceChangeCount === 1 ? '' : 's'} detected
+          </span>
+          <Link
+            to="/subscriptions?priceChange=unack"
+            className="text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
+          >
+            Review →
+          </Link>
+        </div>
+      )}
 
       <div
         className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"

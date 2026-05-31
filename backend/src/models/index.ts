@@ -112,6 +112,10 @@ import { UserAuditToken, initUserAuditToken } from './UserAuditToken';
 import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
 import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
 import { UserReportingToken, initUserReportingToken } from './UserReportingToken';
+import {
+  SubscriptionPriceChange,
+  initSubscriptionPriceChange,
+} from './SubscriptionPriceChange';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -202,6 +206,7 @@ initUserAuditToken(sequelize);
 initClientErrorEvent(sequelize);
 initServerErrorEvent(sequelize);
 initUserReportingToken(sequelize);
+initSubscriptionPriceChange(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -1094,4 +1099,5 @@ export {
   ClientErrorEvent,
   ServerErrorEvent,
   UserReportingToken,
+  SubscriptionPriceChange,
 };

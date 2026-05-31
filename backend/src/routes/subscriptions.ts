@@ -7,7 +7,7 @@ import {
   type SubscriptionStatus,
   type SubscriptionCadence,
 } from '../models/Subscription';
-import { Transaction } from '../models';
+import { SubscriptionPriceChange, Transaction } from '../models';
 import { num } from '../util/numbers';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
@@ -34,6 +34,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_WINDOW_DAYS = 180;
 const DEFAULT_MIN_OCCURRENCES = 3;
 
+type PendingPriceChange = {
+  id: number;
+  prevCents: number;
+  newCents: number;
+  pctChange: number;
+  detectedOn: string;
+  currency: string;
+} | null;
+
 interface SubscriptionResponse {
   id: number;
   householdId: number;
@@ -48,13 +57,17 @@ interface SubscriptionResponse {
   category: string | null;
   annualizedCost: string;
   priceChangeDetected: boolean;
+  pendingPriceChange: PendingPriceChange;
   cancellationUrl: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-function serialize(row: InstanceType<typeof Subscription>): SubscriptionResponse {
+function serialize(
+  row: InstanceType<typeof Subscription>,
+  pendingPriceChange: PendingPriceChange = null,
+): SubscriptionResponse {
   return {
     id: row.id,
     householdId: row.householdId,
@@ -69,6 +82,7 @@ function serialize(row: InstanceType<typeof Subscription>): SubscriptionResponse
     category: row.category,
     annualizedCost: String(row.annualizedCost),
     priceChangeDetected: Boolean(row.priceChangeDetected),
+    pendingPriceChange,
     cancellationUrl: row.cancellationUrl,
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
@@ -308,7 +322,32 @@ router.get('/', async (req, res, next) => {
         ['merchantName', 'ASC'],
       ],
     });
-    res.json({ items: rows.map(serialize) });
+
+    const { household } = currentAuth(req);
+    const priceChanges = await SubscriptionPriceChange.findAll({
+      where: { householdId: household.id, acknowledgedAt: null },
+      order: [['detected_on', 'DESC']],
+    });
+    const priceChangeMap = new Map<number, InstanceType<typeof SubscriptionPriceChange>>();
+    for (const pc of priceChanges) {
+      if (!priceChangeMap.has(pc.subscriptionId)) {
+        priceChangeMap.set(pc.subscriptionId, pc);
+      }
+    }
+
+    res.json({
+      items: rows.map((row) => {
+        const pc = priceChangeMap.get(row.id) ?? null;
+        return serialize(row, pc ? {
+          id: pc.id,
+          prevCents: pc.previousAmountCents,
+          newCents: pc.newAmountCents,
+          pctChange: Number(pc.pctChange),
+          detectedOn: pc.detectedOn,
+          currency: pc.currency,
+        } : null);
+      }),
+    });
   } catch (e) {
     next(e);
   }

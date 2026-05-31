@@ -140,6 +140,15 @@ export type SubscriptionCadence =
   | 'annual'
 
 /** One row of the /api/subscriptions response. */
+export type PendingPriceChange = {
+  id: number
+  prevCents: number
+  newCents: number
+  pctChange: number
+  detectedOn: string
+  currency: string
+} | null
+
 export type Subscription = {
   id: number
   householdId: number
@@ -154,6 +163,7 @@ export type Subscription = {
   category: string | null
   annualizedCost: string
   priceChangeDetected: boolean
+  pendingPriceChange: PendingPriceChange
   cancellationUrl: string | null
   notes: string | null
   createdAt: string
