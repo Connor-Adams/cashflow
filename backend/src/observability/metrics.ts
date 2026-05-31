@@ -90,6 +90,27 @@ const requestDuration = meter.createHistogram('cashflow.http.server.duration', {
   unit: 'ms',
 });
 
+const jobRunsCounter = meter.createCounter('cashflow.job.runs', {
+  description: 'Total background-job ticks by result',
+});
+
+const jobDurationHistogram = meter.createHistogram('cashflow.job.duration', {
+  description: 'Background-job tick duration',
+  unit: 'ms',
+});
+
+const jobLastSuccessMap = new Map<string, number>();
+
+meter
+  .createObservableGauge('cashflow.job.last_success_timestamp_seconds', {
+    description: 'Unix timestamp (s) of the most recent successful tick per job',
+  })
+  .addCallback((obs) => {
+    for (const [job, ts] of jobLastSuccessMap) {
+      obs.observe(ts, { 'cashflow.job.name': job });
+    }
+  });
+
 type SequelizePool = {
   _count: number;
   _inUseObjects: { size?: number; length?: number } | null;
@@ -186,6 +207,18 @@ export function recordHttpRequest(input: HttpMetricInput & { durationMs: number 
     },
     input,
   );
+}
+
+export function recordJobRun(
+  jobName: string,
+  result: 'success' | 'failure',
+  durationMs: number,
+): void {
+  jobRunsCounter.add(1, { 'cashflow.job.name': jobName, 'cashflow.job.result': result });
+  jobDurationHistogram.record(durationMs, { 'cashflow.job.name': jobName });
+  if (result === 'success') {
+    jobLastSuccessMap.set(jobName, Date.now() / 1000);
+  }
 }
 
 export async function shutdownMetrics(): Promise<void> {
