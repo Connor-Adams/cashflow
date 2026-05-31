@@ -83,6 +83,7 @@ import financeEventsRouter from './routes/financeEvents';
 import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
+import incomeRouter from './routes/income';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
@@ -248,6 +249,8 @@ app.use('/api', largePurchaseReviewRouter);
 // feedbackRouter mounts /feedback and /feedback/:id/resolve under /api
 // (issue #295). Behind the global requireAuth above.
 app.use('/api', feedbackRouter);
+
+app.use('/api/income', incomeRouter);
 
 type ErrorWithMetadata = {
   code?: unknown;

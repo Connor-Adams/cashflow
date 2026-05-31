@@ -35,6 +35,7 @@ import {
   RefreshCw,
   RotateCcw,
   ArrowLeftRight,
+  DollarSign,
   Save,
   Search,
   Settings,
@@ -89,6 +90,7 @@ const navSections: NavSection[] = [
     label: 'Money',
     items: [
       { to: '/accounts', label: 'Accounts', icon: CreditCard },
+      { to: '/income', label: 'Income', icon: DollarSign },
       { to: '/transactions', label: 'Transactions', icon: ReceiptText },
       { to: '/refunds', label: 'Refunds', icon: Undo2 },
       { to: '/reimbursements', label: 'Reimbursements', icon: HandCoins },
