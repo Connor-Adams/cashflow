@@ -505,6 +505,10 @@ Household.hasMany(PlannedEvent, {
   onDelete: 'CASCADE',
   hooks: true,
 });
+Household.hasMany(PlannedEvent, {
+  foreignKey: 'household_id',
+  as: 'expectations',
+});
 PlannedEvent.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
