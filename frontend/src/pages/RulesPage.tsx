@@ -469,6 +469,8 @@ export function RulesPage() {
               <option value="shared">shared</option>
             </select>
           </label>
+          {newSplitType === 'shared' && (
+          <>
           <label>
             Your share (%)
             <input
@@ -501,6 +503,8 @@ export function RulesPage() {
               }}
             />
           </label>
+          </>
+          )}
           {newSplitType === 'shared' && (
             <div style={{ gridColumn: '1 / -1' }}>
               <span className="muted" style={{ fontSize: 12 }}>Must sum to 100%</span>
