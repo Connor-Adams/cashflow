@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Calendar, Edit3, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -77,6 +78,7 @@ async function putPlannedEvent(
 
 export function PlannedEventsPage() {
   const { showToast } = useToast()
+  const navigate = useNavigate()
   const confirm = useConfirm()
 
   const [events, setEvents] = useState<PlannedEvent[]>([])
@@ -358,6 +360,17 @@ export function PlannedEventsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="row">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              const date = row.expectedDate ?? row.startDate ?? ''
+                              navigate(`/forecast${date ? `?date=${date}` : ''}`)
+                            }}
+                          >
+                            View in forecast →
+                          </Button>
                           <Button
                             type="button"
                             size="sm"

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -97,6 +98,7 @@ function buildEventDescription(e: ForecastEvent): string {
 
 export function ForecastPage() {
   const { showToast } = useToast()
+  const navigate = useNavigate()
   const [range, setRange] = useState<ForecastRange>('30d')
   const [pendingId, setPendingId] = useState<number | null>(null)
 
@@ -391,6 +393,14 @@ export function ForecastPage() {
                       loading
                         ? 'Loading…'
                         : 'Add a planned event or wait until recurring charges are detected.'
+                    }
+                    actions={
+                      !loading ? (
+                        <>
+                          <Button variant="default" onClick={() => navigate('/planned/new')}>Add planned event</Button>
+                          <Button variant="outline" onClick={() => navigate('/recurring')}>View recurring</Button>
+                        </>
+                      ) : undefined
                     }
                   />
                 </TableCell>

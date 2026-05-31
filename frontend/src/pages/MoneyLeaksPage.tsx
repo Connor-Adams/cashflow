@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -352,6 +353,22 @@ function SummaryStat({
   )
 }
 
+function leakSourcePath(item: MoneyLeakItem): string {
+  const subscriptionId = typeof item.meta?.subscriptionId === 'number' ? item.meta.subscriptionId : null;
+  if (subscriptionId != null) return '/subscriptions';
+  switch (item.leakType) {
+    case 'subscription_price_increase':
+    case 'small_subscription':
+    case 'duplicate_service':
+      return '/subscriptions';
+    case 'recurring_fee':
+    case 'delivery_fee_high':
+      return '/recurring';
+    default:
+      return '/subscriptions';
+  }
+}
+
 function LeakGroup({
   leakType,
   items,
@@ -404,6 +421,14 @@ function LeakGroup({
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 {formatMoney(item.monthlyImpact, item.currency)}/mo •{' '}
                 {formatMoney(item.annualImpact, item.currency)}/yr
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <Link
+                  to={leakSourcePath(item)}
+                  className="text-xs underline text-primary"
+                >
+                  View source →
+                </Link>
               </div>
             </div>
             <Button

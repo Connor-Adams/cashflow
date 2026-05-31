@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { safeNum } from '@/lib/num'
 import { Edit3, Plus, Target, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -208,6 +209,7 @@ function buildPatch(form: FormState): FinancialGoalPatch | null {
 
 export function GoalsPage() {
   const { showToast } = useToast()
+  const navigate = useNavigate()
   const confirm = useConfirm()
 
   const [goals, setGoals] = useState<FinancialGoal[]>([])
@@ -293,6 +295,7 @@ export function GoalsPage() {
         title: 'Goal added',
         description: `${input.name} — target ${formatMoney(input.targetAmount, input.currency)}`,
         variant: 'success',
+        action: { label: 'See in forecast →', onClick: () => navigate('/forecast') },
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not add goal'

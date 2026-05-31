@@ -18,7 +18,7 @@ import {
   type FormEvent,
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -760,13 +760,26 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
             >
               <span className="text-xs font-medium">{cell.day}</span>
               {visible.map((ev, i) => (
-                <span
+                <button
                   key={`${ev.id}-${i}`}
-                  className={`text-xs truncate rounded px-1 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
+                  type="button"
+                  className={`text-xs truncate rounded px-1 flex items-center gap-0.5 w-full text-left ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
                   title={`${ev.kindLabel}: ${ev.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (ev.recurrenceRule) {
+                      navigate('/recurring');
+                    } else {
+                      navigate(`/planned/${ev.id}`);
+                    }
+                  }}
                 >
-                  {ev.name}
-                </span>
+                  {ev.recurrenceRule
+                    ? <Repeat aria-hidden="true" className="inline-block shrink-0" style={{ width: 10, height: 10 }} />
+                    : <CalendarIcon aria-hidden="true" className="inline-block shrink-0" style={{ width: 10, height: 10 }} />
+                  }
+                  <span className="truncate">{ev.name}</span>
+                </button>
               ))}
               {hidden > 0 ? (
                 <span className="muted text-xs">+{hidden} more</span>
