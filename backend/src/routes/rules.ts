@@ -877,4 +877,64 @@ router.post('/import', async (req, res, next) => {
   }
 });
 
+// POST /api/rules/preview-pattern — count matching transactions for a pattern.
+// Returns { matches, sample } (matches capped at 500).
+router.post('/preview-pattern', async (req, res, next) => {
+  try {
+    const { pattern, matchType } = (req.body ?? {}) as { pattern?: unknown; matchType?: unknown };
+    const patternStr = pattern != null ? String(pattern) : '';
+    const kindStr = matchType != null ? String(matchType) : 'substring';
+
+    if (kindStr === 'regex') {
+      try {
+        new RegExp(patternStr, 'i');
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        res.status(400).json({ error: 'INVALID_PATTERN', message });
+        return;
+      }
+    }
+
+    const where = {
+      ...householdWhere(req),
+      ...visibleTransactionWhere(req),
+    };
+
+    const allTxns = await Transaction.findAll({
+      where,
+      attributes: ['id', 'merchantClean', 'merchantRaw', 'date', 'amount', 'currency', 'finalCategory'],
+      order: [['date', 'DESC']],
+      limit: 2000,
+      raw: true,
+    });
+
+    type Row = { id: number; merchantClean: string | null; merchantRaw: string | null; date: string; amount: string | number; currency: string; finalCategory: string | null };
+
+    let matches = 0;
+    const sample: Row[] = [];
+    for (const t of allTxns as unknown as Row[]) {
+      const merchant = (t.merchantClean || t.merchantRaw || '').toLowerCase();
+      let ok = false;
+      if (kindStr === 'regex') {
+        try {
+          ok = new RegExp(patternStr, 'i').test(merchant);
+        } catch {
+          ok = false;
+        }
+      } else {
+        ok = merchant.includes(patternStr.toLowerCase());
+      }
+      if (ok) {
+        matches++;
+        if (sample.length < 5) sample.push(t);
+        if (matches >= 500) break;
+      }
+    }
+
+    res.json({ matches, sample });
+  } catch (e) {
+    next(e);
+  }
+});
+
 export default router;
