@@ -18,6 +18,7 @@ import {
 // under "moduleResolution": "node". Use the string literal directly.
 const ATTR_DEPLOYMENT_ENVIRONMENT_NAME = 'deployment.environment.name';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { AlsSpanProcessor } from './alsSpanProcessor';
 
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
 const otlpEnabled = !!otlpEndpoint && process.env.OTEL_SDK_DISABLED !== 'true';
@@ -32,6 +33,7 @@ if (otlpEnabled) {
     traceExporter: new OTLPTraceExporter({
       url: `${otlpEndpoint.replace(/\/$/, '')}/v1/traces`,
     }),
+    spanProcessors: [new AlsSpanProcessor()],
     instrumentations: [
       getNodeAutoInstrumentations({
         // Filter noisy/unwanted auto-instrumentations.
