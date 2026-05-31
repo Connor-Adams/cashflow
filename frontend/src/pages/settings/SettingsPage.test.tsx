@@ -43,7 +43,15 @@ describe('SettingsPage shell', () => {
       'Labels',
       'Notifications',
       'Jobs',
+      'Audit log',
+      'Backup & sync',
     ])
+  })
+
+  it('hosts Audit log and Backup & sync as top tabs', () => {
+    renderAt('/settings/display')
+    expect(screen.getByRole('tab', { name: 'Audit log' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Backup & sync' })).toBeInTheDocument()
   })
 
   it('marks Settings tab active for /settings/display', () => {

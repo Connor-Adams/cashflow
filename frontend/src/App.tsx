@@ -110,8 +110,8 @@ function AppRoutes() {
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<PartnerFairnessPage />} />
           <Route path="reports" element={<ReportsPage />} />
-          <Route path="audit-log" element={<AuditLogPage />} />
-          <Route path="sync" element={<SyncPage />} />
+          <Route path="audit-log" element={<Navigate to="/settings/audit-log" replace />} />
+          <Route path="sync" element={<Navigate to="/settings/backup" replace />} />
           <Route path="reports/explain-month" element={<ExplainMonthPage />} />
           <Route
             path="reports/lifestyle-inflation"
@@ -141,6 +141,8 @@ function AppRoutes() {
             <Route path="labels" element={<LabelsTab />} />
             <Route path="jobs" element={<JobsTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
+            <Route path="audit-log" element={<AuditLogPage />} />
+            <Route path="backup" element={<SyncPage />} />
           </Route>
           {/* Unified review-items inbox (issue #378) replaces the separate AI
               inbox / AI reviews / CFO briefings list surfaces. Old routes
