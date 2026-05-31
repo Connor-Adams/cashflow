@@ -6,6 +6,7 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
 import { currentOwed, utilizationPct } from '../cards/utilization';
+import { mergeAccounts } from '../services/accountMerge';
 
 const CREDIT_CARD_TYPE = 'credit_card';
 
@@ -61,8 +62,13 @@ function normalizeAccountType(raw: unknown): string {
 
 router.get('/', async (req, res, next) => {
   try {
+    const includeMerged = req.query.includeMerged === 'true';
+    const baseWhere = visibleAccountWhere(req) as Record<string | symbol, unknown>;
+    if (!includeMerged) {
+      baseWhere.mergedIntoId = null;
+    }
     const rows = await Account.findAll({
-      where: visibleAccountWhere(req),
+      where: baseWhere,
       order: [['name', 'ASC']],
     });
     const ccIds = rows.filter((a) => a.accountType === CREDIT_CARD_TYPE).map((a) => a.id);
@@ -275,6 +281,27 @@ router.delete('/:id', async (req, res, next) => {
       await account.destroy({ transaction: t });
     });
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:sourceId/merge-into/:targetId', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const sourceId = Number(req.params.sourceId);
+    const targetId = Number(req.params.targetId);
+    if (!Number.isFinite(sourceId) || !Number.isFinite(targetId)) {
+      res.status(400).json({ error: 'invalid account ids' });
+      return;
+    }
+    const result = await mergeAccounts(sourceId, targetId, household.id);
+    res.json({
+      movedTransactions: result.movedTransactions,
+      movedPlannedEvents: result.movedPlannedEvents,
+      source: result.source.toJSON(),
+      target: result.target.toJSON(),
+    });
   } catch (e) {
     next(e);
   }

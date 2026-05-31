@@ -21,6 +21,10 @@ export type Account = {
   utilizationPct?: number | null
   /** Free-text notes (max 4000 chars). */
   notes?: string | null
+  /** If non-null, this account was merged into the given account ID. */
+  mergedIntoId?: number | null
+  /** Timestamp when the merge happened. */
+  mergedAt?: string | null
 }
 
 /**
