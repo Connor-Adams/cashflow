@@ -88,10 +88,12 @@ export function StatementsPage() {
     setLoading(true)
     setErr(null)
     try {
-      const qs = filterAccountId
-        ? `?accountId=${encodeURIComponent(filterAccountId)}&pageSize=100`
-        : '?pageSize=100'
-      const l = await getJson<StatementListResponse>(`/api/statements${qs}`)
+      // Use account-scoped URL when filtering by account (#403).
+      const base = filterAccountId
+        ? `/api/accounts/${encodeURIComponent(filterAccountId)}/statements`
+        : '/api/statements'
+      const qs = '?pageSize=100'
+      const l = await getJson<StatementListResponse>(`${base}${qs}`)
       setList(l)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Error')
@@ -156,9 +158,8 @@ export function StatementsPage() {
       setSubmitting(true)
       try {
         const created = await postJson<{ data: AccountStatement }>(
-          '/api/statements',
+          `/api/accounts/${accountId}/statements`,
           {
-            accountId,
             periodStart: formPeriodStart,
             periodEnd: formPeriodEnd,
             openingBalance: opening,

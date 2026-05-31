@@ -45,7 +45,9 @@ import {
   isBalanced,
 } from '../statements/computeReconciliation';
 
-const router = Router();
+// mergeParams so the router can read :accountId when mounted under
+// /api/accounts/:accountId/statements (issue #403).
+const router = Router({ mergeParams: true });
 
 // Statement endpoints touch the database on every call. Add the shared
 // AI-tier rate limiter to defend against burst writes / abuse. The limiter
@@ -132,7 +134,9 @@ async function loadVisibleStatement(
 router.post('/', async (req, res, next) => {
   try {
     const body = (req.body || {}) as Record<string, unknown>;
-    const accountId = asNumberId(body.accountId);
+    // When mounted under /api/accounts/:accountId/statements, the URL param
+    // takes precedence over the body field (issue #403).
+    const accountId = asNumberId((req.params as Record<string, string>).accountId ?? body.accountId);
     if (accountId == null) {
       res.status(400).json({ error: 'accountId must be a positive integer' });
       return;
@@ -271,8 +275,10 @@ router.get('/', async (req, res, next) => {
     );
     const offset = (page - 1) * pageSize;
     const where: Record<string, unknown> = { ...visibleStatementWhere(req) };
-    if (req.query.accountId) {
-      const aid = asNumberId(req.query.accountId);
+    // Prefer :accountId from URL (account-scoped mount) over ?accountId query param.
+    const accountIdSource = (req.params as Record<string, string>).accountId ?? req.query.accountId;
+    if (accountIdSource) {
+      const aid = asNumberId(accountIdSource);
       if (aid != null) where.accountId = aid;
     }
     if (req.query.status === 'reconciled') {

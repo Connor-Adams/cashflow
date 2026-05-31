@@ -152,6 +152,8 @@ app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/accounts', accountsRouter);
+// Canonical account-scoped URL (issue #403); flat /api/statements kept for backwards compat.
+app.use('/api/accounts/:accountId/statements', statementsRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/transfers', transfersRouter);
 app.use('/api/statements', statementsRouter);
