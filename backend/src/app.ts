@@ -31,6 +31,7 @@ import largePurchaseReviewRouter from './routes/largePurchaseReview';
 import feedbackRouter from './routes/feedback';
 import incomeRouter from './routes/income';
 import corporateActionsRouter from './routes/corporateActions';
+import dividendsRouter from './routes/dividends';
 import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
@@ -167,6 +168,7 @@ app.use('/api/calendar', calendarRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/income', incomeRouter);
 app.use('/api/corporate-actions', corporateActionsRouter);
+app.use('/api/dividends', dividendsRouter);
 app.use('/api/notifications', notificationsRouter);
 // Notification preferences folded under the user namespace (issue #379):
 // the live endpoints are /api/users/me/notifications/preferences[/:type].

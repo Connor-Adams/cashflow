@@ -1191,6 +1191,45 @@ export type PortfolioSecurityDividends = {
   backfill: BackfillStatus;
 };
 
+export type DividendRow = {
+  id: number;
+  securityId: number;
+  securitySymbol: string | null;
+  securityName: string | null;
+  exDividendDate: string;
+  paymentDate: string | null;
+  recordDate: string | null;
+  amount: number;
+  currency: string;
+  matchedTransactionId: number | null;
+  matchedAt: string | null;
+  matchedAmount: number | null;
+  variancePct: number | null;
+  hasVarianceFlag: boolean;
+};
+
+export type DividendCandidate = {
+  id: number;
+  date: string;
+  accountId: number;
+  amount: number;
+  currency: string;
+  merchantRaw: string;
+  merchantClean: string;
+  score: number;
+};
+
+export type DividendCandidatesResponse = {
+  dividendId: number;
+  expectedAmount: number;
+  currency: string;
+  candidates: DividendCandidate[];
+};
+
+export type DividendsResponse = {
+  dividends: DividendRow[];
+};
+
 export type PortfolioSecurityOverview = {
   securityId: number;
   sector: string | null;

@@ -20,6 +20,7 @@ export type EnvConfig = {
   quoteTickCron: string;
   quoteMinAgeHours: number;
   dividendReconcileEnabled: boolean;
+  dividendReconcileCron: string;
   dividendDedupDays: number;
   forwardIncomeEnabled: boolean;
   forwardIncomeCron: string;
@@ -129,6 +130,7 @@ export function loadEnvConfig(
     e.DIVIDEND_RECONCILE_ENABLED,
     nodeEnv,
   );
+  const dividendReconcileCron = e.DIVIDEND_RECONCILE_CRON?.trim() || '0 5 * * *';
   const dividendDedupDays = parseDividendDedupDays(e.DIVIDEND_DEDUP_DAYS);
   const forwardIncomeEnabled = parseForwardIncomeEnabled(e.FORWARD_INCOME_ENABLED, nodeEnv);
   const forwardIncomeCron = e.FORWARD_INCOME_CRON?.trim() || '0 2 * * *';
@@ -169,6 +171,7 @@ export function loadEnvConfig(
     quoteTickCron,
     quoteMinAgeHours,
     dividendReconcileEnabled,
+    dividendReconcileCron,
     dividendDedupDays,
     forwardIncomeEnabled,
     forwardIncomeCron,
@@ -307,6 +310,7 @@ export const quoteSchedulerEnabled = resolved.quoteSchedulerEnabled;
 export const quoteTickCron = resolved.quoteTickCron;
 export const quoteMinAgeHours = resolved.quoteMinAgeHours;
 export const dividendReconcileEnabled = resolved.dividendReconcileEnabled;
+export const dividendReconcileCron = resolved.dividendReconcileCron;
 export const dividendDedupDays = resolved.dividendDedupDays;
 export const forwardIncomeEnabled = resolved.forwardIncomeEnabled;
 export const forwardIncomeCron = resolved.forwardIncomeCron;
