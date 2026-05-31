@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Tabs } from '../components/ui/tabs'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
@@ -39,12 +39,24 @@ export function TaxPage() {
   // local `useState` here matches the prevailing pattern (URL query params
   // would be cleaner if tab state already used them, but it doesn't).
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
+  const yearSelectRef = useRef<HTMLSelectElement>(null)
 
   useEffect(() => {
     if (year === null && years && years.length > 0) {
       setYear(pickDefaultYear(years))
     }
   }, [years, year])
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        yearSelectRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   return (
     <section>
@@ -53,7 +65,13 @@ export function TaxPage() {
         {years && year !== null && (
           <label>
             Year{' '}
-            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            <select
+              ref={yearSelectRef}
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              aria-label="Tax year (Cmd+K to focus)"
+              title="Tax year — press Cmd+K (or Ctrl+K) to jump here from anywhere"
+            >
               {years.map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
