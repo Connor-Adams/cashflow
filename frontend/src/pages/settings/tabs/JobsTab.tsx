@@ -1,9 +1,11 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, Copy, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useConfirm } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import { getJson, patchJson, postJson } from '../../../lib/api'
+import { listAuditTokens, mintAuditToken, revokeAuditToken, type AuditTokenRow } from '../../../lib/auditTokens'
 import type { JobRunOutcome, JobRunView, JobView } from '../../../types/jobs'
 
 function formatRelative(iso: string | null): string {
@@ -327,6 +329,158 @@ export function JobsTab() {
                 </Fragment>
               )
             })}
+          </tbody>
+        </table>
+      )}
+
+      <AuditTokensSection />
+    </div>
+  )
+}
+
+function AuditTokensSection() {
+  const [tokens, setTokens] = useState<AuditTokenRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+  const [minting, setMinting] = useState(false)
+  const [newLabel, setNewLabel] = useState('')
+  const [newPlaintext, setNewPlaintext] = useState<string | null>(null)
+  const { showToast } = useToast()
+  const confirm = useConfirm()
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const rows = await listAuditTokens()
+      if (mountedRef.current) setTokens(rows)
+    } catch (e) {
+      if (mountedRef.current) setErr(e instanceof Error ? e.message : 'Failed to load tokens')
+    } finally {
+      if (mountedRef.current) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  async function mint() {
+    setMinting(true)
+    setErr(null)
+    setNewPlaintext(null)
+    try {
+      const result = await mintAuditToken(newLabel.trim() || 'Audit')
+      if (!mountedRef.current) return
+      setNewPlaintext(result.plaintext)
+      setNewLabel('')
+      await load()
+    } catch (e) {
+      if (mountedRef.current) setErr(e instanceof Error ? e.message : 'Mint failed')
+    } finally {
+      if (mountedRef.current) setMinting(false)
+    }
+  }
+
+  async function revoke(token: AuditTokenRow) {
+    const ok = await confirm({
+      title: 'Revoke audit token?',
+      description: `"${token.label}" will stop working immediately. Any agent using it will get 401 errors.`,
+      confirmLabel: 'Revoke',
+      destructive: true,
+    })
+    if (!ok) return
+    try {
+      await revokeAuditToken(token.id)
+      setTokens((prev) => prev.filter((t) => t.id !== token.id))
+      showToast({ title: 'Token revoked', variant: 'success' })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Revoke failed')
+    }
+  }
+
+  function copy(text: string) {
+    void navigator.clipboard.writeText(text).then(() =>
+      showToast({ title: 'Copied to clipboard', durationMs: 2000 })
+    )
+  }
+
+  return (
+    <div className="space-y-3 pt-6 border-t border-border">
+      <div>
+        <h2 className="text-lg font-semibold">Audit tokens</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Bearer tokens for read-only AI/agent access to <code>/api/audit/*</code> endpoints.
+          Tokens begin with <code>cfa_</code>. Plaintext is shown once on mint.
+        </p>
+      </div>
+
+      {err && <p className="text-sm text-red-600">{err}</p>}
+
+      {newPlaintext && (
+        <div className="rounded-md border border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950 p-3">
+          <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200 mb-1">
+            Token created — copy it now. It will not be shown again.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="text-xs break-all text-emerald-900 dark:text-emerald-100 flex-1">{newPlaintext}</code>
+            <Button type="button" variant="outline" size="sm" onClick={() => copy(newPlaintext)}>
+              <Copy className="size-3" /> Copy
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          placeholder="Label (optional)"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          maxLength={64}
+          className="border border-border bg-card rounded-md px-3 py-1.5 text-sm w-48"
+        />
+        <Button type="button" onClick={() => void mint()} disabled={minting}>
+          {minting ? 'Minting…' : 'Mint token'}
+        </Button>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : tokens.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No active audit tokens.</p>
+      ) : (
+        <table className="dataTable w-full text-sm">
+          <thead>
+            <tr>
+              <th className="text-left">Label</th>
+              <th className="text-left">Created</th>
+              <th className="text-left">Last used</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {tokens.map((t) => (
+              <tr key={t.id}>
+                <td>{t.label}</td>
+                <td>{new Date(t.createdAt).toLocaleDateString()}</td>
+                <td>{t.lastUsedAt ? new Date(t.lastUsedAt).toLocaleDateString() : 'Never'}</td>
+                <td>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void revoke(t)}
+                    title="Revoke this token"
+                  >
+                    <Trash2 className="size-3" /> Revoke
+                  </Button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
