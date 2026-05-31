@@ -18,7 +18,7 @@ import {
   type FormEvent,
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Trash2 } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Edit3, Plus, Repeat, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -762,10 +762,13 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
               {visible.map((ev, i) => (
                 <span
                   key={`${ev.id}-${i}`}
-                  className={`text-xs truncate rounded px-1 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
-                  title={`${ev.kindLabel}: ${ev.name}`}
+                  className={`text-xs truncate rounded px-1 inline-flex items-center gap-0.5 ${CALENDAR_EVENT_BG_CLASS[ev.type]}`}
+                  title={`${ev.recurrenceRule ? 'Recurring' : 'Planned'}: ${ev.kindLabel} — ${ev.name}`}
                 >
-                  {ev.name}
+                  {ev.recurrenceRule ? (
+                    <Repeat size={9} aria-label="Recurring" className="shrink-0" />
+                  ) : null}
+                  <span className="truncate">{ev.name}</span>
                 </span>
               ))}
               {hidden > 0 ? (

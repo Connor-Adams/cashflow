@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, ArrowRight, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -55,6 +56,14 @@ const TYPE_LABEL: Record<MoneyLeakType, string> = {
   recurring_fee: 'Recurring fees',
   duplicate_service: 'Duplicate services',
   delivery_fee_high: 'Delivery fees',
+}
+
+const TYPE_SOURCE_PATH: Record<MoneyLeakType, string> = {
+  subscription_price_increase: '/subscriptions',
+  small_subscription: '/subscriptions',
+  duplicate_service: '/subscriptions',
+  recurring_fee: '/recurring',
+  delivery_fee_high: '/recurring',
 }
 
 const TYPE_ORDER: MoneyLeakType[] = [
@@ -404,6 +413,14 @@ function LeakGroup({
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 {formatMoney(item.monthlyImpact, item.currency)}/mo •{' '}
                 {formatMoney(item.annualImpact, item.currency)}/yr
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <Link
+                  to={TYPE_SOURCE_PATH[leakType]}
+                  className="muted text-xs inline-flex items-center gap-1 hover:underline"
+                >
+                  View source <ArrowRight size={11} aria-hidden="true" />
+                </Link>
               </div>
             </div>
             <Button

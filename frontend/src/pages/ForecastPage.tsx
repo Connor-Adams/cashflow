@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -9,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Calendar } from 'lucide-react'
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Calendar, Plus, Repeat } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -388,9 +389,23 @@ export function ForecastPage() {
                   <EmptyState
                     title="No upcoming events"
                     description={
-                      loading
-                        ? 'Loading…'
-                        : 'Add a planned event or wait until recurring charges are detected.'
+                      loading ? (
+                        'Loading…'
+                      ) : (
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          <span>Nothing scheduled yet.</span>
+                          <Link to="/planned/new">
+                            <Button size="sm" variant="outline" type="button">
+                              <Plus aria-hidden="true" size={14} /> Add planned event
+                            </Button>
+                          </Link>
+                          <Link to="/recurring">
+                            <Button size="sm" variant="ghost" type="button">
+                              <Repeat aria-hidden="true" size={14} /> View recurring
+                            </Button>
+                          </Link>
+                        </span>
+                      )
                     }
                   />
                 </TableCell>
