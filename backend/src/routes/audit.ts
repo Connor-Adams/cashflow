@@ -7,6 +7,7 @@ import { runIntegrity } from '../audit/integrity';
 import { runClientErrors } from '../audit/clientErrors';
 import { runServerErrors } from '../audit/serverErrors';
 import { runRouteProbe } from '../audit/routeProbe';
+import { runSummary } from '../audit/summary';
 
 const router = Router();
 
@@ -84,6 +85,19 @@ router.get('/route-probe', async (req, res, next) => {
   try {
     const { user } = req.auditAuth!;
     const result = await runRouteProbe(user.id);
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/summary', async (req, res, next) => {
+  try {
+    const { user, household } = req.auditAuth!;
+    const windowRaw = typeof req.query.windowMinutes === 'string'
+      ? parseInt(req.query.windowMinutes, 10)
+      : undefined;
+    const result = await runSummary(user.id, household.id, { windowMinutes: windowRaw });
     res.json(result);
   } catch (e) {
     next(e);

@@ -18,6 +18,7 @@ import './jobs/definitions/usdCadBackfill';
 import './jobs/definitions/weeklyDigest';
 import './jobs/definitions/budgetBreachCheck';
 import './jobs/definitions/jobRunCleanup';
+import './jobs/definitions/auditBufferTrim';
 import { startAllJobs } from './jobs';
 
 const uploadDir = env.csvUploadDir;
