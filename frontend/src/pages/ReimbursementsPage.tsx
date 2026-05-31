@@ -30,6 +30,7 @@ import { Tabs, TabPanel } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson, patchJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import type { Contact } from '@cashflow/shared'
 import type {
   ReimbursementStatus,
   ReimbursementView,
@@ -475,25 +476,32 @@ function MatchDialog({
   onLinked: () => void
 }) {
   const { showToast } = useToast()
+  const [contacts, setContacts] = useState<Contact[] | null>(null)
   const [candidates, setCandidates] = useState<RepaymentCandidate[]>([])
   const [loading, setLoading] = useState(true)
+  const [candidateError, setCandidateError] = useState<string | null>(null)
   const [linkingId, setLinkingId] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
+      setCandidateError(null)
       try {
+        const contactList = await getJson<Contact[]>('/api/contacts')
+        if (cancelled) return
+        setContacts(contactList)
+        if (contactList.length === 0) {
+          setLoading(false)
+          return
+        }
         const res = await getJson<RepaymentCandidatesResponse>(
           `/api/reimbursements/${row.id}/match-candidates`,
         )
         if (!cancelled) setCandidates(res.data)
       } catch (e) {
         if (!cancelled) {
-          showToast({
-            title: e instanceof Error ? e.message : 'Failed to load candidates',
-            variant: 'destructive',
-          })
+          setCandidateError(e instanceof Error ? e.message : 'Failed to load candidates')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -503,7 +511,7 @@ function MatchDialog({
     return () => {
       cancelled = true
     }
-  }, [row.id, showToast])
+  }, [row.id])
 
   async function link(transactionId: number) {
     setLinkingId(transactionId)
@@ -524,6 +532,7 @@ function MatchDialog({
   }
 
   const hasContact = row.contactId != null
+  const noContacts = contacts !== null && contacts.length === 0
 
   return (
     <div
@@ -542,30 +551,50 @@ function MatchDialog({
           {row.dueDate ? ` · due ${row.dueDate}` : ''}
         </p>
 
-        {!hasContact && !loading && (
-          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
-            <p className="text-amber-800 dark:text-amber-200">
-              This reimbursement has no linked contact.{' '}
-              <Link
-                to="/settings/contacts"
-                className="underline hover:no-underline"
-                onClick={onClose}
-              >
-                Add a contact
-              </Link>{' '}
-              to make future matching easier.
-            </p>
-          </div>
-        )}
-
         {loading ? (
           <p className="muted text-sm">Searching for likely repayments…</p>
+        ) : noContacts ? (
+          <div className="space-y-3">
+            <p className="font-medium">No contacts yet.</p>
+            <p className="muted text-sm">Reimbursements track who owes you. Add a contact first.</p>
+            <Link to="/settings/contacts" onClick={onClose}>
+              <Button type="button" size="sm">Add a contact</Button>
+            </Link>
+          </div>
+        ) : candidateError ? (
+          <div className="space-y-2">
+            <p className="text-sm text-destructive">Couldn't load candidates. {candidateError}</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => {
+              setCandidateError(null)
+              setLoading(true)
+              void getJson<RepaymentCandidatesResponse>(`/api/reimbursements/${row.id}/match-candidates`)
+                .then((res) => setCandidates(res.data))
+                .catch((e) => setCandidateError(e instanceof Error ? e.message : 'Retry failed'))
+                .finally(() => setLoading(false))
+            }}>Retry</Button>
+          </div>
         ) : candidates.length === 0 ? (
           <div className="space-y-3">
+            {!hasContact && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+                <p className="text-amber-800 dark:text-amber-200">
+                  This reimbursement has no linked contact.{' '}
+                  <Link
+                    to="/settings/contacts"
+                    className="underline hover:no-underline"
+                    onClick={onClose}
+                  >
+                    Add a contact
+                  </Link>{' '}
+                  to make future matching easier.
+                </p>
+              </div>
+            )}
             <p className="muted text-sm">
               No likely repayment transactions found. The repayment should be an
               incoming credit in {row.currency} on or after the original charge.
             </p>
+            <p className="text-sm font-medium">Try one of these:</p>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
