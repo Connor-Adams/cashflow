@@ -4,6 +4,7 @@ import { getJson } from '@/lib/api'
 import { CategoryIcon } from '../CategoryIcon'
 import { BentoTile } from './BentoTile'
 import type { BudgetProgress, BudgetStatusResponse } from '@/types/api'
+import { safeNum } from '@/lib/num'
 
 type Props = {
   /**
@@ -85,11 +86,12 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
       >
         {items.map((item) => {
           const pct = item.percentUsed
+          const pctNum = safeNum(pct) ?? undefined
           // Status mirrors the alert vocabulary (80, 100). Anything past
           // 100 is "over"; anything at-or-past 80 is "at risk"; below is
           // "on track".
           const status: 'ok' | 'risk' | 'over' =
-            pct >= 100 ? 'over' : pct >= 80 ? 'risk' : 'ok'
+            !Number.isFinite(safeNum(pct) as number) ? 'ok' : pct >= 100 ? 'over' : pct >= 80 ? 'risk' : 'ok'
           // Lookup table for JIT-safe Tailwind classes — `status` is a
           // runtime string so we can't template the class names.
           const pillClass: Record<typeof status, string> = {
@@ -115,10 +117,10 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
               </span>
               <span className="inline-flex items-center gap-2 shrink-0">
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {Math.round(pct)}%
+                  {Number.isFinite(pct) ? Math.round(pct) + '%' : '—%'}
                 </span>
                 <span
-                  className={`px-2 py-0.5 text-xs rounded-full ${pillClass[status]}`}
+                  className={`px-2 py-0.5 text-xs rounded-full ${Number.isFinite(pctNum) ? pillClass[status] : pillClass['ok']}`}
                   data-testid={`budget-status-pill-${item.budgetId}`}
                 >
                   {pillLabel[status]}

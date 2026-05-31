@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { safeNum } from '@/lib/num'
 import { Edit3, Plus, Target, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -507,35 +508,31 @@ export function GoalsPage() {
                             />
                           </div>
                           <div className="muted text-xs">
-                            {formatMoney(Number(row.currentAmount), row.currency)}
+                            {safeNum(row.currentAmount) !== null ? formatMoney(safeNum(row.currentAmount)!, row.currency) : <span className="italic text-muted-foreground">(unset)</span>}
                             {' / '}
-                            {formatMoney(Number(row.targetAmount), row.currency)}
+                            {safeNum(row.targetAmount) !== null ? formatMoney(safeNum(row.targetAmount)!, row.currency) : <span className="italic text-muted-foreground">(unset)</span>}
                             {' '}
                             ({progress.toFixed(0)}%)
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {formatMoney(Number(row.targetAmount), row.currency)}
+                        {safeNum(row.targetAmount) !== null ? formatMoney(safeNum(row.targetAmount)!, row.currency) : <span className="italic text-muted-foreground">(unset)</span>}
                       </TableCell>
                       <TableCell>{row.targetDate ?? '—'}</TableCell>
                       <TableCell>
                         {row.monthlyContribution == null
                           ? '—'
-                          : formatMoney(
-                              Number(row.monthlyContribution),
-                              row.currency,
-                            )}
+                          : safeNum(row.monthlyContribution) !== null
+                            ? formatMoney(safeNum(row.monthlyContribution)!, row.currency)
+                            : <span className="italic text-muted-foreground">(unset)</span>}
                       </TableCell>
                       <TableCell>
                         {projection?.requiredMonthlyContribution ? (
                           <div className="text-xs">
                             <div>
                               Need{' '}
-                              {formatMoney(
-                                Number(projection.requiredMonthlyContribution),
-                                row.currency,
-                              )}
+                              {safeNum(projection.requiredMonthlyContribution) !== null ? formatMoney(safeNum(projection.requiredMonthlyContribution)!, row.currency) : <span className="italic text-muted-foreground">(unset)</span>}
                               /mo
                             </div>
                             {projection.projectedCompletionDate ? (

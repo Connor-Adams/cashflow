@@ -8,6 +8,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { PortfolioSecurityOverview } from '../../types/api'
+import { clampPct } from '@/lib/num'
 
 export type FundFactsCardProps = {
   overview: PortfolioSecurityOverview | null
@@ -262,7 +263,7 @@ function AllocationBar({ rows }: { rows: AllocationRow[] }) {
         <div
           key={row.label}
           style={{
-            width: `${(row.fraction / total) * 100}%`,
+            width: `${clampPct((row.fraction / total) * 100)}%`,
             background: row.color,
           }}
           title={`${row.label}: ${formatPercent(row.fraction)}`}
