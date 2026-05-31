@@ -30,6 +30,10 @@ import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
 import { SecurityDailyPrice, initSecurityDailyPrice } from './SecurityDailyPrice';
 import { SecurityDividend, initSecurityDividend } from './SecurityDividend';
+import {
+  DividendReconciliation,
+  initDividendReconciliation,
+} from './DividendReconciliation';
 import { FxRate, initFxRate } from './FxRate';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
@@ -150,6 +154,7 @@ initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
 initSecurityDailyPrice(sequelize);
 initSecurityDividend(sequelize);
+initDividendReconciliation(sequelize);
 initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
@@ -344,6 +349,22 @@ Security.hasMany(SecurityDividend, {
 SecurityDividend.belongsTo(Security, {
   foreignKey: 'security_id',
   as: 'security',
+});
+SecurityDividend.hasMany(DividendReconciliation, {
+  foreignKey: 'security_dividend_id',
+  as: 'reconciliations',
+});
+DividendReconciliation.belongsTo(SecurityDividend, {
+  foreignKey: 'security_dividend_id',
+  as: 'dividend',
+});
+DividendReconciliation.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+DividendReconciliation.belongsTo(Transaction, {
+  foreignKey: 'matched_transaction_id',
+  as: 'matchedTransaction',
 });
 User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
 Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
@@ -1108,6 +1129,7 @@ export {
   LiabilityAccount,
   DebtPayoffScenario,
   FinancialScenario,
+  DividendReconciliation,
   Label,
   TransactionLabel,
   Feedback,
