@@ -13,10 +13,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { SortableTableHead } from '@/components/table/SortableTableHead'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { useSessionState } from '../lib/useSessionState'
+import { useUrlSort } from '../hooks/useUrlSort'
 import type { RecurringResponse } from '../types/api'
+
+const RECURRING_SORT_FIELDS = ['merchant', 'amount', 'cadence', 'nextOccurrence', 'lastSeenAt'] as const
 
 const DEFAULT_CURRENCY = 'CAD'
 const COLUMN_COUNT = 7
@@ -26,14 +30,16 @@ export function RecurringPage() {
   const [data, setData] = useState<RecurringResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const { sort, dir, toggle } = useUrlSort(RECURRING_SORT_FIELDS)
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
     const c = currency.trim()
     if (c) params.set('currency', c.toUpperCase().slice(0, 3))
+    if (sort) { params.set('sort', sort); params.set('dir', dir) }
     const s = params.toString()
     return s ? `?${s}` : ''
-  }, [currency])
+  }, [currency, sort, dir])
 
   useEffect(() => {
     let cancelled = false
@@ -97,12 +103,12 @@ export function RecurringPage() {
           <Table className="table">
             <TableHeader>
               <TableRow>
-                <TableHead>Merchant</TableHead>
-                <TableHead>Cadence</TableHead>
-                <TableHead>Avg amount</TableHead>
+                <SortableTableHead field="merchant" label="Merchant" currentSort={sort} dir={dir} onSort={toggle} />
+                <SortableTableHead field="cadence" label="Cadence" currentSort={sort} dir={dir} onSort={toggle} />
+                <SortableTableHead field="amount" label="Avg amount" currentSort={sort} dir={dir} onSort={toggle} />
                 <TableHead>Stability</TableHead>
-                <TableHead>Last seen</TableHead>
-                <TableHead>Next expected</TableHead>
+                <SortableTableHead field="lastSeenAt" label="Last seen" currentSort={sort} dir={dir} onSort={toggle} />
+                <SortableTableHead field="nextOccurrence" label="Next expected" currentSort={sort} dir={dir} onSort={toggle} />
                 <TableHead>Category</TableHead>
               </TableRow>
             </TableHeader>

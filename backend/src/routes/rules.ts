@@ -89,14 +89,38 @@ function parseEffectiveDate(
 
 const router = Router();
 
+const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const;
+type RulesSortField = typeof RULES_SORT_FIELDS[number];
+const RULES_SORT_COLUMN_MAP: Record<RulesSortField, string> = {
+  name: 'merchantPattern',
+  matchType: 'matchKind',
+  priority: 'priority',
+  updatedAt: 'updatedAt',
+};
+
 router.get('/', async (req, res, next) => {
   try {
+    const sortParam = req.query.sort as string | undefined;
+    const dirParam = req.query.dir as string | undefined;
+
+    if (sortParam !== undefined && !RULES_SORT_FIELDS.includes(sortParam as RulesSortField)) {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+    if (dirParam !== undefined && dirParam !== 'asc' && dirParam !== 'desc') {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+
+    const sortField = sortParam as RulesSortField | undefined;
+    const dir = (dirParam ?? 'desc') as 'asc' | 'desc';
+    const order: [string, string][] = sortField
+      ? [[RULES_SORT_COLUMN_MAP[sortField], dir.toUpperCase()]]
+      : [['priority', 'DESC'], ['id', 'DESC']];
+
     const rules = await Rule.findAll({
       where: householdWhere(req),
-      order: [
-        ['priority', 'DESC'],
-        ['id', 'DESC'],
-      ],
+      order: order as [string, string][],
     });
     const out = [];
     for (const r of rules) {

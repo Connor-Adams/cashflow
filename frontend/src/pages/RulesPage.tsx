@@ -12,12 +12,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { SortableTableHead } from '@/components/table/SortableTableHead'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
 import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
+import { useUrlSort } from '../hooks/useUrlSort'
 import type { Rule } from '../types/api'
+
+const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const
 
 type CategoryHint = {
   label: string
@@ -51,6 +55,9 @@ export function RulesPage() {
     return Number.isInteger(n) && n > 0 ? n : null
   })()
   const focusedRowRef = useRef<HTMLTableRowElement | null>(null)
+  const { sort: rulesSort, dir: rulesDir, toggle: toggleRulesSort } = useUrlSort(RULES_SORT_FIELDS)
+  const rulesSortRef = useRef({ sort: rulesSort, dir: rulesDir })
+  rulesSortRef.current = { sort: rulesSort, dir: rulesDir }
 
   useEffect(() => {
     if (focusedId == null) return
@@ -135,7 +142,9 @@ export function RulesPage() {
     const requestId = ++loadRequestRef.current
     setErr(null)
     try {
-      const nextRules = await getJson<Rule[]>('/api/rules')
+      const { sort: s, dir: d } = rulesSortRef.current
+      const ruleQs = s ? `?sort=${s}&dir=${d}` : ''
+      const nextRules = await getJson<Rule[]>(`/api/rules${ruleQs}`)
       const nextProposals = await getJson<{ proposals: RuleProposal[] }>(
         '/api/ai/rule-proposals'
       )
@@ -167,7 +176,7 @@ export function RulesPage() {
 
   useEffect(() => {
     void load()
-  }, [])
+  }, [rulesSort, rulesDir])
 
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
@@ -628,24 +637,25 @@ export function RulesPage() {
           </div>
           <span className="transactionsPanelBadge">{rules.length} rules</span>
         </div>
-        <div className="tableWrap">
-          <Table className="table">
+        <div className="transactionsTableWrap">
+          <Table className="table transactionsTable">
             <TableHeader>
               <TableRow>
-                <TableHead>Pattern</TableHead>
-                <TableHead>Match</TableHead>
-                <TableHead>Pri</TableHead>
+                <SortableTableHead field="name" label="Pattern" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+                <SortableTableHead field="matchType" label="Match" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+                <SortableTableHead field="priority" label="Pri" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
                 <TableHead>Category</TableHead>
                 <TableHead>Biz</TableHead>
                 <TableHead>Split</TableHead>
                 <TableHead>Usage</TableHead>
+                <SortableTableHead field="updatedAt" label="Updated" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rules.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="emptyStateCell">
+                  <TableCell colSpan={9} className="emptyStateCell">
                     <p>No rules yet. Add a pattern above to start automating imports.</p>
                     <p className="muted">
                       Rules set default category, business flag, and split for matching merchants on import.
@@ -666,6 +676,7 @@ export function RulesPage() {
                     <TableCell>{r.isBusiness ? 'yes' : ''}</TableCell>
                     <TableCell>{r.splitType}</TableCell>
                     <TableCell>{r.usageCount ?? 0}</TableCell>
+                    <TableCell className="text-muted-foreground">{r.updatedAt ? r.updatedAt.slice(0, 10) : '—'}</TableCell>
                     <TableCell>
                       <button type="button" onClick={() => void remove(r)}>
                         Delete
