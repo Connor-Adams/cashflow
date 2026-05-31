@@ -445,12 +445,37 @@ router.get('/allocation', async (req, res, next) => {
         });
       }
     }
-    const bySecurity = [...securityBuckets.values()]
-      .map((row) => ({
-        ...row,
-        percentage: pct(row.currency, row.marketValue),
-      }))
-      .sort((a, b) => b.marketValue - a.marketValue);
+    const ALLOC_SORT_FIELDS = ['symbol', 'marketValue', 'pctOfPortfolio'] as const;
+    type AllocSortField = typeof ALLOC_SORT_FIELDS[number];
+
+    const sortParam = req.query.sort as string | undefined;
+    const dirParam = req.query.dir as string | undefined;
+
+    if (sortParam !== undefined && !ALLOC_SORT_FIELDS.includes(sortParam as AllocSortField)) {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+    if (dirParam !== undefined && dirParam !== 'asc' && dirParam !== 'desc') {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+
+    const allocSortField = sortParam as AllocSortField | undefined;
+    const allocDir = (dirParam ?? 'desc') as 'asc' | 'desc';
+    const allocMul = allocDir === 'asc' ? 1 : -1;
+
+    const bySecurityRaw = [...securityBuckets.values()].map((row) => ({
+      ...row,
+      percentage: pct(row.currency, row.marketValue),
+    }));
+
+    const bySecurity = allocSortField
+      ? bySecurityRaw.sort((a, b) => {
+          if (allocSortField === 'symbol') return a.symbol.localeCompare(b.symbol) * allocMul;
+          if (allocSortField === 'pctOfPortfolio') return (a.percentage - b.percentage) * allocMul;
+          return (a.marketValue - b.marketValue) * allocMul;
+        })
+      : bySecurityRaw.sort((a, b) => b.marketValue - a.marketValue);
 
     // By account.
     const accountBuckets = new Map<

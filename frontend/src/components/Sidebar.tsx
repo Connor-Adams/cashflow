@@ -26,6 +26,7 @@ import {
   ReceiptText,
   Repeat,
   RefreshCw,
+  DollarSign,
   Settings,
   Shield,
   Sun,
@@ -75,6 +76,7 @@ const navSections: NavSection[] = [
     label: 'Money',
     items: [
       { to: '/accounts', label: 'Accounts', icon: CreditCard },
+      { to: '/income', label: 'Income', icon: DollarSign },
       { to: '/credit-cards', label: 'Credit cards', icon: CreditCard },
       { to: '/transactions', label: 'Transactions', icon: ReceiptText },
       { to: '/reimbursements', label: 'Reimbursements', icon: HandCoins },

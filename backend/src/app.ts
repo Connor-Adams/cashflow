@@ -15,6 +15,7 @@ import sankeyRouter from './routes/sankey';
 import merchantsRouter from './routes/merchants';
 import recurringRouter from './routes/recurring';
 import subscriptionsRouter from './routes/subscriptions';
+import subscriptionPriceChangesRouter from './routes/subscriptionPriceChanges';
 import moneyLeaksRouter from './routes/moneyLeaks';
 import reportsRouter from './routes/reports';
 import aiRouter from './routes/ai';
@@ -52,6 +53,8 @@ import debtRouter from './routes/debt';
 import creditCardsRouter from './routes/creditCards';
 import opportunityCostRouter from './routes/opportunityCost';
 import cashflowSettingsRouter from './routes/cashflowSettings';
+import activationStateRouter from './routes/activationState';
+import savedFiltersRouter from './routes/savedFilters';
 import changelogRouter from './routes/changelog';
 import preferencesRouter from './routes/preferences';
 import onboardingRouter from './routes/onboarding';
@@ -62,6 +65,7 @@ import emailIntegrationsRouter from './routes/emailIntegrations';
 import netWorthRouter from './routes/netWorth';
 import fxRouter from './routes/fx';
 import portfolioRouter from './routes/portfolio';
+import dividendsRouter from './routes/dividends';
 import taxRouter from './routes/tax';
 import businessTaxRouter from './routes/businessTax';
 import returnWarrantyRouter from './routes/returnWarranty';
@@ -71,6 +75,11 @@ import invitesRouter from './routes/invites';
 import taxScenariosRouter from './routes/tax-scenarios';
 import taxHouseholdPlansRouter from './routes/tax-household-plans';
 import captureRouter, { captureCors } from './routes/capture';
+import reportingTokensRouter from './routes/reportingTokens';
+import reportingRouter from './routes/reporting';
+import { reportingAuth } from './auth/reportingAuth';
+import auditTokensRouter from './routes/auditTokens';
+import auditRouter from './routes/audit';
 import configRouter from './routes/config';
 import auditLogRouter from './routes/auditLog';
 import vaultRouter from './routes/vault';
@@ -78,10 +87,12 @@ import financeEventsRouter from './routes/financeEvents';
 import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
+import incomeRouter from './routes/income';
 import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
+import { ServerErrorEvent } from './models';
 
 const app = express();
 
@@ -132,6 +143,10 @@ app.use('/api/config', configRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/client-logs', clientLogsRouter);
 app.use('/api/capture', captureRouter);
+app.use('/api/v1/tokens', reportingTokensRouter);
+app.use('/api/v1', reportingAuth, reportingRouter);
+app.use('/api/audit/tokens', auditTokensRouter);
+app.use('/api/audit', auditRouter);
 app.use('/api', requireAuth);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/search', searchRouter);
@@ -166,6 +181,8 @@ app.use('/api/credit-cards', creditCardsRouter);
 app.use('/api/opportunity-cost', opportunityCostRouter);
 app.use('/api/financial-scenarios', financialScenariosRouter);
 app.use('/api/settings/cashflow', cashflowSettingsRouter);
+app.use('/api/activation-state', activationStateRouter);
+app.use('/api/saved-filters', savedFiltersRouter);
 app.use('/api/preferences', preferencesRouter);
 app.use('/api/onboarding', onboardingRouter);
 app.use('/api/import', importRouter);
@@ -177,6 +194,7 @@ app.use('/api/summary', summaryRouter);
 app.use('/api/merchants', merchantsRouter);
 app.use('/api/recurring', recurringRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/subscription-price-changes', subscriptionPriceChangesRouter);
 app.use('/api/data-quality', dataQualityRouter);
 app.use('/api/money-leaks', moneyLeaksRouter);
 app.use('/api/audit-log', auditLogRouter);
@@ -200,6 +218,7 @@ app.use('/api/amazon', amazonRouter);
 app.use('/api/external-orders', externalOrdersRouter);
 app.use('/api/email', emailIntegrationsRouter);
 app.use('/api/portfolio', portfolioRouter);
+app.use('/api/dividends', dividendsRouter);
 app.use('/api/household', householdRouter);
 app.use('/api/invites', invitesRouter);
 app.use('/api/net-worth', netWorthRouter);
@@ -239,6 +258,8 @@ app.use('/api', largePurchaseReviewRouter);
 // (issue #295). Behind the global requireAuth above.
 app.use('/api', feedbackRouter);
 
+app.use('/api/income', incomeRouter);
+
 type ErrorWithMetadata = {
   code?: unknown;
   status?: unknown;
@@ -274,6 +295,23 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
+  const status = (err as { status?: number })?.status ?? 500;
+  if (status >= 500) {
+    void ServerErrorEvent.create({
+      householdId: req.auth?.household.id ?? req.auditAuth?.household.id ?? null,
+      userId: req.auth?.user.id ?? req.auditAuth?.user.id ?? null,
+      method: req.method,
+      path: req.originalUrl.slice(0, 512),
+      status,
+      message: String((err as Error)?.message ?? '').slice(0, 4000),
+      stack: String((err as Error)?.stack ?? '').slice(0, 8000),
+      requestId: req.requestId ?? null,
+    }).catch(() => undefined);
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);

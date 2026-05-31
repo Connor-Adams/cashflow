@@ -19,6 +19,8 @@ export type Account = {
   /** currentBalance / creditLimit × 100, or null when either is missing or
    *  the card is closed. Frontend renders the badge tier from this. */
   utilizationPct?: number | null
+  /** Free-form notes (max 4000 chars). Markdown rendered on the detail view. */
+  notes?: string | null
 }
 
 /**
@@ -501,6 +503,7 @@ export type Rule = {
   effectiveFrom: string | null
   effectiveTo: string | null
   usageCount?: number
+  updatedAt?: string
 }
 
 export type Paginated<T> = {
@@ -1059,6 +1062,7 @@ export type ItemRow = {
   qty: number
   unitPrice: number | null
   totalPrice: number | null
+  currency: string
   taxShare: number
   categoryEffective: string | null
   categoryOverride: string | null
@@ -1485,6 +1489,67 @@ export type DebtLiabilityProfile = {
   dueDay: number | null
 }
 
+// ── Dividend payout reconciliation (issue #305) ──────────────────────────────
+
+export type DividendReconciliationStatus = 'upcoming' | 'matched' | 'unmatched'
+
+/** A matched or unmatched dividend reconciliation row. */
+export type DividendReconciliationRow = {
+  reconciliationId: number
+  securityDividendId: number
+  accountId: number
+  accountName: string | null
+  symbol: string | null
+  securityName: string | null
+  exDividendDate: string
+  paymentDate: string | null
+  /** per-share amount (string decimal). */
+  perShareAmount: string
+  shares: string | null
+  expectedAmount: number | null
+  actualAmount: number | null
+  currency: string | null
+  matchedTransactionId: number | null
+  matchedAt: string | null
+  matchSource: string
+  variancePct: number | null
+  varianceFlag: boolean
+}
+
+/** An upcoming (future-payment) dividend on a held security. */
+export type DividendUpcomingRow = {
+  securityDividendId: number
+  symbol: string | null
+  securityName: string | null
+  exDividendDate: string
+  paymentDate: string | null
+  perShareAmount: string
+  currency: string
+}
+
+/** GET /api/dividends response (the `data` shape depends on `status`). */
+export type DividendListResponse = {
+  status: DividendReconciliationStatus
+  windowMonths: number
+  data: DividendReconciliationRow[] | DividendUpcomingRow[]
+}
+
+/** A candidate transaction for the manual-match modal. */
+export type DividendCandidate = {
+  id: number
+  accountId: number
+  amount: number
+  date: string
+  merchant: string | null
+  currency: string
+  score: number | null
+  warning: 'debit' | 'wrong_account' | null
+}
+
+/** GET /api/dividends/:id/candidates response. */
+export type DividendCandidatesResponse = {
+  candidates: DividendCandidate[]
+}
 // ---------------------------------------------------------------------------
 // Credit-card payment planner (#243) — operational bill management.
 // ---------------------------------------------------------------------------

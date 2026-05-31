@@ -18,7 +18,7 @@ test('promotion waits for all source images before retagging and redeploying', (
   for (const svc of ['BACKEND', 'FRONTEND', 'OTEL_COLLECTOR', 'LOKI', 'PROMETHEUS', 'GRAFANA', 'TEMPO']) {
     assert.match(
       workflow,
-      new RegExp(`docker buildx imagetools inspect "\\$${svc}:sha-\\$SHA_SHORT"`),
+      new RegExp(`docker buildx imagetools inspect "\\$${svc}:sha-\\$SHA"`),
       `image-wait must inspect ${svc}`,
     );
   }

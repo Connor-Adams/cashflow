@@ -32,6 +32,8 @@ import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { LabelChipPicker } from '../components/transactions/LabelChipPicker'
+import { SavedFiltersDropdown } from '../components/transactions/SavedFiltersDropdown'
+import type { SavedFilter } from '../components/transactions/SavedFiltersDropdown'
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
@@ -210,6 +212,7 @@ export function TransactionsPage() {
   // Issue #229: per-transaction edit history viewer + restore.
   const [revisionsDialogTxnId, setRevisionsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
+  const [hintsError, setHintsError] = useState(false)
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [itemsDrawer, setItemsDrawer] = useState<{ txnId: number; receipts: ReceiptWithItems[] } | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
@@ -288,8 +291,8 @@ export function TransactionsPage() {
 
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
-      .then((data) => setCategoryHints(data.categories))
-      .catch(() => setCategoryHints([]))
+      .then((data) => { setCategoryHints(data.categories); setHintsError(false) })
+      .catch(() => { setCategoryHints([]); setHintsError(true) })
   }, [])
 
   // Per-issue-262: detect an impossible date range and surface inline guidance.
@@ -599,6 +602,30 @@ export function TransactionsPage() {
     setIdsFilter('')
     setStatusFilter('')
     setLabelsFilter([])
+  }
+
+  const currentFilterSnapshot = useMemo<SavedFilter['filterJson']>(() => ({
+    ...(reviewOnly ? { reviewOnly: true } : {}),
+    ...(currency ? { currency } : {}),
+    ...(dateFrom ? { dateFrom } : {}),
+    ...(dateTo ? { dateTo } : {}),
+    ...(categoryFilter ? { categoryFilter } : {}),
+    ...(batchFilter ? { batchFilter } : {}),
+    ...(statusFilter ? { statusFilter } : {}),
+    ...(labelsFilter.length > 0 ? { labelsFilter } : {}),
+  }), [reviewOnly, currency, dateFrom, dateTo, categoryFilter, batchFilter, statusFilter, labelsFilter])
+
+  function applySavedFilter(filterJson: SavedFilter['filterJson']) {
+    setPage(1)
+    setReviewOnly(filterJson.reviewOnly === true)
+    setCurrency(typeof filterJson.currency === 'string' ? filterJson.currency : DEFAULT_TRANSACTION_CURRENCY)
+    setDateFrom(typeof filterJson.dateFrom === 'string' ? filterJson.dateFrom : '')
+    setDateTo(typeof filterJson.dateTo === 'string' ? filterJson.dateTo : '')
+    setCategoryFilter(typeof filterJson.categoryFilter === 'string' ? filterJson.categoryFilter : '')
+    setBatchFilter(typeof filterJson.batchFilter === 'string' ? filterJson.batchFilter : '')
+    setStatusFilter(typeof filterJson.statusFilter === 'string' ? filterJson.statusFilter as '' : '')
+    setLabelsFilter(Array.isArray(filterJson.labelsFilter) ? filterJson.labelsFilter as number[] : [])
+    setIdsFilter('')
   }
 
   async function openItemsDrawer(txnId: number) {
@@ -1154,6 +1181,9 @@ export function TransactionsPage() {
               options={categoryLabels}
               placeholder="e.g. Groceries"
             />
+            {hintsError && (
+              <span className="text-xs text-muted-foreground">Hints unavailable</span>
+            )}
           </Label>
           <Label>
             From
@@ -1285,6 +1315,10 @@ export function TransactionsPage() {
               Clear filters
             </Button>
           )}
+          <SavedFiltersDropdown
+            currentFilter={currentFilterSnapshot}
+            onApply={applySavedFilter}
+          />
           <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </Button>

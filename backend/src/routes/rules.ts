@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { Op, QueryTypes } from 'sequelize';
+import crypto from 'crypto';
 import { Rule, Transaction, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, isSuperadmin, visibleTransactionWhere } from '../auth/scope';
@@ -88,14 +89,38 @@ function parseEffectiveDate(
 
 const router = Router();
 
+const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const;
+type RulesSortField = typeof RULES_SORT_FIELDS[number];
+const RULES_SORT_COLUMN_MAP: Record<RulesSortField, string> = {
+  name: 'merchantPattern',
+  matchType: 'matchKind',
+  priority: 'priority',
+  updatedAt: 'updatedAt',
+};
+
 router.get('/', async (req, res, next) => {
   try {
+    const sortParam = req.query.sort as string | undefined;
+    const dirParam = req.query.dir as string | undefined;
+
+    if (sortParam !== undefined && !RULES_SORT_FIELDS.includes(sortParam as RulesSortField)) {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+    if (dirParam !== undefined && dirParam !== 'asc' && dirParam !== 'desc') {
+      res.status(400).json({ error: 'INVALID_SORT_FIELD' });
+      return;
+    }
+
+    const sortField = sortParam as RulesSortField | undefined;
+    const dir = (dirParam ?? 'desc') as 'asc' | 'desc';
+    const order: [string, string][] = sortField
+      ? [[RULES_SORT_COLUMN_MAP[sortField], dir.toUpperCase()]]
+      : [['priority', 'DESC'], ['id', 'DESC']];
+
     const rules = await Rule.findAll({
       where: householdWhere(req),
-      order: [
-        ['priority', 'DESC'],
-        ['id', 'DESC'],
-      ],
+      order: order as [string, string][],
     });
     const out = [];
     for (const r of rules) {
@@ -718,6 +743,219 @@ router.delete('/:id', async (req, res, next) => {
       payload: auditSnapshot,
     });
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+const EXPORT_SCHEMA_VERSION = 1;
+
+type ExportedRule = {
+  merchantPattern: string;
+  matchKind: string;
+  priority: number;
+  category: string | null;
+  isBusiness: boolean;
+  splitType: string;
+  pctMe: string | null;
+  pctPartner: string | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+};
+
+router.get('/export', async (req, res, next) => {
+  try {
+    const { user } = currentAuth(req);
+    const rules = await Rule.findAll({
+      where: householdWhere(req),
+      order: [['priority', 'DESC'], ['id', 'DESC']],
+    });
+    const exportedRules: ExportedRule[] = rules.map((r) => ({
+      merchantPattern: r.merchantPattern,
+      matchKind: r.matchKind,
+      priority: r.priority,
+      category: r.category,
+      isBusiness: r.isBusiness,
+      splitType: r.splitType,
+      pctMe: r.pctMe != null ? String(r.pctMe) : null,
+      pctPartner: r.pctPartner != null ? String(r.pctPartner) : null,
+      effectiveFrom: r.effectiveFrom,
+      effectiveTo: r.effectiveTo,
+    }));
+    const today = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="cashflow-rules-${today}.json"`);
+    res.json({
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      exportedBy: crypto.createHash('sha256').update(String(user.id)).digest('hex').slice(0, 16),
+      rules: exportedRules,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/import', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const body = (req.body || {}) as Record<string, unknown>;
+
+    const mode = body.mode;
+    if (mode !== 'append' && mode !== 'replace') {
+      res.status(400).json({ error: 'INVALID_MODE', message: "mode must be 'append' or 'replace'" });
+      return;
+    }
+
+    const json = body.json as Record<string, unknown> | undefined;
+    if (!json || typeof json !== 'object') {
+      res.status(400).json({ error: 'INVALID_JSON', message: "json is required" });
+      return;
+    }
+    if (json.schemaVersion !== EXPORT_SCHEMA_VERSION) {
+      if (typeof json.schemaVersion === 'number' && json.schemaVersion > EXPORT_SCHEMA_VERSION) {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION', message: 'This file is from a newer version of Cashflow.' });
+      } else {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION', message: 'Invalid or unsupported schemaVersion.' });
+      }
+      return;
+    }
+
+    const rawRules = Array.isArray(json.rules) ? json.rules as unknown[] : [];
+    const today = new Date().toISOString().slice(0, 10);
+
+    const validated: ExportedRule[] = [];
+    const errors: { name: string; reason: string }[] = [];
+
+    for (const r of rawRules) {
+      if (!r || typeof r !== 'object') {
+        errors.push({ name: '(unknown)', reason: 'not an object' });
+        continue;
+      }
+      const rule = r as Record<string, unknown>;
+      if (!rule.merchantPattern || typeof rule.merchantPattern !== 'string') {
+        errors.push({ name: String(rule.merchantPattern ?? '(unknown)'), reason: 'merchantPattern is required' });
+        continue;
+      }
+      const fromParsed = parseEffectiveDate(rule.effectiveFrom ?? null);
+      if (!fromParsed.ok) {
+        errors.push({ name: rule.merchantPattern, reason: `effectiveFrom ${fromParsed.error}` });
+        continue;
+      }
+      const toParsed = parseEffectiveDate(rule.effectiveTo ?? null);
+      if (!toParsed.ok) {
+        errors.push({ name: rule.merchantPattern, reason: `effectiveTo ${toParsed.error}` });
+        continue;
+      }
+      validated.push({
+        merchantPattern: rule.merchantPattern,
+        matchKind: typeof rule.matchKind === 'string' ? rule.matchKind : 'substring',
+        priority: typeof rule.priority === 'number' ? rule.priority : 0,
+        category: typeof rule.category === 'string' ? rule.category : null,
+        isBusiness: Boolean(rule.isBusiness),
+        splitType: typeof rule.splitType === 'string' ? rule.splitType : 'me',
+        pctMe: rule.pctMe != null ? String(rule.pctMe) : null,
+        pctPartner: rule.pctPartner != null ? String(rule.pctPartner) : null,
+        effectiveFrom: fromParsed.value,
+        effectiveTo: toParsed.value,
+      });
+    }
+
+    let imported = 0;
+
+    await sequelize.transaction(async (t) => {
+      if (mode === 'replace') {
+        await Rule.destroy({ where: { householdId: household.id }, transaction: t });
+      }
+
+      const existingPatterns = mode === 'append'
+        ? new Set((await Rule.findAll({ where: { householdId: household.id }, attributes: ['merchantPattern'], transaction: t })).map((r) => r.merchantPattern))
+        : new Set<string>();
+
+      for (const rule of validated) {
+        let name = rule.merchantPattern;
+        if (mode === 'append' && existingPatterns.has(name)) {
+          name = `${name} (imported ${today})`;
+        }
+        await Rule.create({
+          merchantPattern: name,
+          householdId: household.id,
+          createdByUserId: user.id,
+          matchKind: rule.matchKind,
+          priority: rule.priority,
+          category: rule.category,
+          isBusiness: rule.isBusiness,
+          splitType: rule.splitType,
+          pctMe: rule.pctMe,
+          pctPartner: rule.pctPartner,
+          effectiveFrom: rule.effectiveFrom,
+          effectiveTo: rule.effectiveTo,
+        }, { transaction: t });
+        imported++;
+      }
+    });
+
+    res.json({ imported, skipped: errors.length, errors });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/rules/preview-pattern — count matching transactions for a pattern.
+// Returns { matches, sample } (matches capped at 500).
+router.post('/preview-pattern', async (req, res, next) => {
+  try {
+    const { pattern, matchType } = (req.body ?? {}) as { pattern?: unknown; matchType?: unknown };
+    const patternStr = pattern != null ? String(pattern) : '';
+    const kindStr = matchType != null ? String(matchType) : 'substring';
+
+    if (kindStr === 'regex') {
+      try {
+        new RegExp(patternStr, 'i');
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        res.status(400).json({ error: 'INVALID_PATTERN', message });
+        return;
+      }
+    }
+
+    const where = {
+      ...householdWhere(req),
+      ...visibleTransactionWhere(req),
+    };
+
+    const allTxns = await Transaction.findAll({
+      where,
+      attributes: ['id', 'merchantClean', 'merchantRaw', 'date', 'amount', 'currency', 'finalCategory'],
+      order: [['date', 'DESC']],
+      limit: 2000,
+      raw: true,
+    });
+
+    type Row = { id: number; merchantClean: string | null; merchantRaw: string | null; date: string; amount: string | number; currency: string; finalCategory: string | null };
+
+    let matches = 0;
+    const sample: Row[] = [];
+    for (const t of allTxns as unknown as Row[]) {
+      const merchant = (t.merchantClean || t.merchantRaw || '').toLowerCase();
+      let ok = false;
+      if (kindStr === 'regex') {
+        try {
+          ok = new RegExp(patternStr, 'i').test(merchant);
+        } catch {
+          ok = false;
+        }
+      } else {
+        ok = merchant.includes(patternStr.toLowerCase());
+      }
+      if (ok) {
+        matches++;
+        if (sample.length < 5) sample.push(t);
+        if (matches >= 500) break;
+      }
+    }
+
+    res.json({ matches, sample });
   } catch (e) {
     next(e);
   }

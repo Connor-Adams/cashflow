@@ -56,9 +56,9 @@ jobs:
           else
             COMMIT_SHA=$OBJ_SHA
           fi
-          SHA_SHORT=$(echo "$COMMIT_SHA" | cut -c1-7)
+          SHA=$COMMIT_SHA
 
-          echo "sha_short=$SHA_SHORT" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "backend=ghcr.io/${REPO_LC}-backend" >> "$GITHUB_OUTPUT"
           echo "frontend=ghcr.io/${REPO_LC}-frontend" >> "$GITHUB_OUTPUT"
           echo "otel_collector=ghcr.io/${REPO_LC}-otel-collector" >> "$GITHUB_OUTPUT"
@@ -66,7 +66,7 @@ jobs:
           echo "prometheus=ghcr.io/${REPO_LC}-prometheus" >> "$GITHUB_OUTPUT"
           echo "grafana=ghcr.io/${REPO_LC}-grafana" >> "$GITHUB_OUTPUT"
           echo "tempo=ghcr.io/${REPO_LC}-tempo" >> "$GITHUB_OUTPUT"
-          echo "Released tag $RELEASE_TAG -> commit $COMMIT_SHA (short $SHA_SHORT)"
+          echo "Released tag $RELEASE_TAG -> commit $COMMIT_SHA"
 
       - name: Verify source images exist for this commit
         env:
@@ -77,18 +77,18 @@ jobs:
           PROMETHEUS: ${{ steps.resolve.outputs.prometheus }}
           GRAFANA: ${{ steps.resolve.outputs.grafana }}
           TEMPO: ${{ steps.resolve.outputs.tempo }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
-          echo "Inspecting source images at :sha-$SHA_SHORT"
+          echo "Inspecting source images at :sha-$SHA"
           for attempt in $(seq 1 "$IMAGE_WAIT_ATTEMPTS"); do
-            if docker buildx imagetools inspect "$BACKEND:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$FRONTEND:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$OTEL_COLLECTOR:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$LOKI:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$PROMETHEUS:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$GRAFANA:sha-$SHA_SHORT" > /dev/null 2>&1 && \
-              docker buildx imagetools inspect "$TEMPO:sha-$SHA_SHORT" > /dev/null 2>&1; then
+            if docker buildx imagetools inspect "$BACKEND:sha-$SHA" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$FRONTEND:sha-$SHA" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$OTEL_COLLECTOR:sha-$SHA" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$LOKI:sha-$SHA" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$PROMETHEUS:sha-$SHA" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$GRAFANA:sha-$SHA" > /dev/null 2>&1 && \
+              docker buildx imagetools inspect "$TEMPO:sha-$SHA" > /dev/null 2>&1; then
               echo "Source images are available."
               exit 0
             fi
@@ -100,91 +100,91 @@ jobs:
           done
 
           echo "Source images are not available after $(( IMAGE_WAIT_ATTEMPTS * IMAGE_WAIT_SECONDS )) seconds:" >&2
-          echo "  $BACKEND:sha-$SHA_SHORT" >&2
-          echo "  $FRONTEND:sha-$SHA_SHORT" >&2
-          echo "  $OTEL_COLLECTOR:sha-$SHA_SHORT" >&2
-          echo "  $LOKI:sha-$SHA_SHORT" >&2
-          echo "  $PROMETHEUS:sha-$SHA_SHORT" >&2
-          echo "  $GRAFANA:sha-$SHA_SHORT" >&2
-          echo "  $TEMPO:sha-$SHA_SHORT" >&2
+          echo "  $BACKEND:sha-$SHA" >&2
+          echo "  $FRONTEND:sha-$SHA" >&2
+          echo "  $OTEL_COLLECTOR:sha-$SHA" >&2
+          echo "  $LOKI:sha-$SHA" >&2
+          echo "  $PROMETHEUS:sha-$SHA" >&2
+          echo "  $GRAFANA:sha-$SHA" >&2
+          echo "  $TEMPO:sha-$SHA" >&2
           exit 1
 
       - name: Re-tag backend image as release version and :production
         env:
           BACKEND: ${{ steps.resolve.outputs.backend }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "$BACKEND:$RELEASE_TAG" \
             --tag "$BACKEND:production" \
-            "$BACKEND:sha-$SHA_SHORT"
+            "$BACKEND:sha-$SHA"
 
       - name: Re-tag frontend image as release version and :production
         env:
           FRONTEND: ${{ steps.resolve.outputs.frontend }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "$FRONTEND:$RELEASE_TAG" \
             --tag "$FRONTEND:production" \
-            "$FRONTEND:sha-$SHA_SHORT"
+            "$FRONTEND:sha-$SHA"
 
       - name: Re-tag otel-collector image as release version and :production
         env:
           OTEL_COLLECTOR: ${{ steps.resolve.outputs.otel_collector }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "$OTEL_COLLECTOR:$RELEASE_TAG" \
             --tag "$OTEL_COLLECTOR:production" \
-            "$OTEL_COLLECTOR:sha-$SHA_SHORT"
+            "$OTEL_COLLECTOR:sha-$SHA"
 
       - name: Re-tag loki image as release version and :production
         env:
           LOKI: ${{ steps.resolve.outputs.loki }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "$LOKI:$RELEASE_TAG" \
             --tag "$LOKI:production" \
-            "$LOKI:sha-$SHA_SHORT"
+            "$LOKI:sha-$SHA"
 
       - name: Re-tag prometheus image as release version and :production
         env:
           PROMETHEUS: ${{ steps.resolve.outputs.prometheus }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "$PROMETHEUS:$RELEASE_TAG" \
             --tag "$PROMETHEUS:production" \
-            "$PROMETHEUS:sha-$SHA_SHORT"
+            "$PROMETHEUS:sha-$SHA"
 
       - name: Re-tag grafana image as release version and :production
         env:
           GRAFANA: ${{ steps.resolve.outputs.grafana }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "$GRAFANA:$RELEASE_TAG" \
             --tag "$GRAFANA:production" \
-            "$GRAFANA:sha-$SHA_SHORT"
+            "$GRAFANA:sha-$SHA"
 
       - name: Re-tag tempo image as release version and :production
         env:
           TEMPO: ${{ steps.resolve.outputs.tempo }}
-          SHA_SHORT: ${{ steps.resolve.outputs.sha_short }}
+          SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
             --tag "$TEMPO:$RELEASE_TAG" \
             --tag "$TEMPO:production" \
-            "$TEMPO:sha-$SHA_SHORT"
+            "$TEMPO:sha-$SHA"
 
       - name: Install Railway CLI
         run: |

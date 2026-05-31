@@ -41,9 +41,11 @@ describe('SettingsPage shell', () => {
       'Budgets',
       'Categories',
       'Labels',
+      'Saved filters',
       'Notifications',
       'Jobs',
       "What's new",
+      'AI audit tokens',
       'Audit log',
       'Backup & sync',
     ])

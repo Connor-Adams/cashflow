@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirm } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -11,11 +12,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { SortableTableHead } from '@/components/table/SortableTableHead'
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
+import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
+import { useUrlSort } from '../hooks/useUrlSort'
 import type { Rule } from '../types/api'
+
+const RULES_SORT_FIELDS = ['name', 'matchType', 'priority', 'updatedAt'] as const
 
 type CategoryHint = {
   label: string
@@ -49,6 +55,9 @@ export function RulesPage() {
     return Number.isInteger(n) && n > 0 ? n : null
   })()
   const focusedRowRef = useRef<HTMLTableRowElement | null>(null)
+  const { sort: rulesSort, dir: rulesDir, toggle: toggleRulesSort } = useUrlSort(RULES_SORT_FIELDS)
+  const rulesSortRef = useRef({ sort: rulesSort, dir: rulesDir })
+  rulesSortRef.current = { sort: rulesSort, dir: rulesDir }
 
   useEffect(() => {
     if (focusedId == null) return
@@ -61,6 +70,8 @@ export function RulesPage() {
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [exportLoading, setExportLoading] = useState(false)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -69,11 +80,71 @@ export function RulesPage() {
     [categoryHints]
   )
 
+  // Controlled state for the new-rule form to enable inline validation.
+  const [newPattern, setNewPattern] = useState('')
+  const [newMatchKind, setNewMatchKind] = useState('substring')
+  const [newSplitType, setNewSplitType] = useState('me')
+  const [newPctMe, setNewPctMe] = useState('')
+  const [newPctPartner, setNewPctPartner] = useState('')
+  const [shareError, setShareError] = useState<string | null>(null)
+  const [patternError, setPatternError] = useState<string | null>(null)
+  const [previewState, setPreviewState] = useState<
+    null | 'counting' | { matches: number } | { error: string }
+  >(null)
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const validateShares = useCallback((pctMe: string, pctPartner: string, splitType: string) => {
+    if (splitType !== 'shared') { setShareError(null); return true; }
+    const me = parseFloat(pctMe)
+    const partner = parseFloat(pctPartner)
+    if (!isNaN(me) && !isNaN(partner)) {
+      const sum = Math.round((me + partner) * 10) / 10
+      if (Math.abs(sum - 100) > 0.05) {
+        setShareError(`Shares must add to 100% (current: ${sum}%)`)
+        return false
+      }
+    }
+    setShareError(null)
+    return true
+  }, [])
+
+  const fetchPreview = useCallback(async (pattern: string, matchKind: string) => {
+    if (!pattern) { setPreviewState(null); return; }
+    setPreviewState('counting')
+    try {
+      const result = await postJson<{ matches: number }>('/api/rules/preview-pattern', {
+        pattern,
+        matchType: matchKind,
+      })
+      setPreviewState({ matches: result.matches })
+      setPatternError(null)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Invalid pattern'
+      setPreviewState({ error: message })
+      if (matchKind === 'regex') setPatternError(`Invalid pattern: ${message}`)
+    }
+  }, [])
+
+  const schedulePreview = useCallback((pattern: string, matchKind: string) => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current)
+    previewTimerRef.current = setTimeout(() => {
+      void fetchPreview(pattern, matchKind)
+    }, 300)
+  }, [fetchPreview])
+
+  const isNewFormValid = useMemo(() => {
+    if (shareError) return false
+    if (patternError) return false
+    return true
+  }, [shareError, patternError])
+
   async function load() {
     const requestId = ++loadRequestRef.current
     setErr(null)
     try {
-      const nextRules = await getJson<Rule[]>('/api/rules')
+      const { sort: s, dir: d } = rulesSortRef.current
+      const ruleQs = s ? `?sort=${s}&dir=${d}` : ''
+      const nextRules = await getJson<Rule[]>(`/api/rules${ruleQs}`)
       const nextProposals = await getJson<{ proposals: RuleProposal[] }>(
         '/api/ai/rule-proposals'
       )
@@ -87,7 +158,8 @@ export function RulesPage() {
           '/api/rules/auto-suggestions'
         )
         nextAuto = r.suggestions ?? []
-      } catch {
+      } catch (err) {
+        console.warn('[RulesPage] auto-suggestions endpoint failed:', err)
         nextAuto = []
       }
       if (loadRequestRef.current === requestId) {
@@ -104,7 +176,7 @@ export function RulesPage() {
 
   useEffect(() => {
     void load()
-  }, [])
+  }, [rulesSort, rulesDir])
 
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
@@ -112,12 +184,39 @@ export function RulesPage() {
       .catch(() => setCategoryHints([]))
   }, [])
 
+  async function handleExport() {
+    setExportLoading(true)
+    try {
+      const resp = await fetch('/api/rules/export', { credentials: 'include' })
+      if (!resp.ok) throw new Error(`Export failed: ${resp.status}`)
+      const blob = await resp.blob()
+      const today = new Date().toISOString().slice(0, 10)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `cashflow-rules-${today}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      showToast({ title: e instanceof Error ? e.message : 'Export failed', variant: 'destructive' })
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const form = e.currentTarget
     const fd = new FormData(form)
+    if (!validateShares(newPctMe, newPctPartner, newSplitType)) return
+    if (patternError) return
     setErr(null)
     try {
+      // Convert share values from 0–100 (display) to 0–1 (stored).
+      const pctMeRaw = fd.get('pctMe') ? String(fd.get('pctMe')) : null
+      const pctPartnerRaw = fd.get('pctPartner') ? String(fd.get('pctPartner')) : null
+      const pctMe = pctMeRaw ? String(parseFloat(pctMeRaw) / 100) : null
+      const pctPartner = pctPartnerRaw ? String(parseFloat(pctPartnerRaw) / 100) : null
       await postJson('/api/rules', {
         merchantPattern: String(fd.get('merchantPattern') ?? ''),
         matchKind: String(fd.get('matchKind') ?? 'substring'),
@@ -125,11 +224,19 @@ export function RulesPage() {
         category: String(fd.get('category') ?? '') || null,
         isBusiness: fd.get('isBusiness') === 'on',
         splitType: String(fd.get('splitType') ?? 'me'),
-        pctMe: fd.get('pctMe') ? String(fd.get('pctMe')) : null,
-        pctPartner: fd.get('pctPartner') ? String(fd.get('pctPartner')) : null,
+        pctMe,
+        pctPartner,
       })
       form.reset()
       setRuleCategory('')
+      setNewPattern('')
+      setNewMatchKind('substring')
+      setNewSplitType('me')
+      setNewPctMe('')
+      setNewPctPartner('')
+      setShareError(null)
+      setPatternError(null)
+      setPreviewState(null)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create rule')
@@ -239,6 +346,21 @@ export function RulesPage() {
       <PageHeader
         title="Rules"
         description="Match merchants on import so category, business, and split defaults land in the right place."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => void handleExport()}
+              disabled={exportLoading || rules.length === 0}
+              title={rules.length === 0 ? 'No rules to export.' : undefined}
+            >
+              {exportLoading ? 'Exporting…' : 'Export rules'}
+            </Button>
+            <Button variant="outline" onClick={() => setImportModalOpen(true)}>
+              Import rules
+            </Button>
+          </>
+        }
       />
       {err && <span className="error">{err}</span>}
       <RulesHealthSection onAfterCreate={() => void load()} />
@@ -257,14 +379,60 @@ export function RulesPage() {
         <div className="formGrid rulesFormGrid">
           <label>
             Pattern
-            <input name="merchantPattern" required placeholder="merchant text" />
+            <input
+              name="merchantPattern"
+              required
+              placeholder="merchant text"
+              value={newPattern}
+              onChange={(e) => {
+                setNewPattern(e.target.value)
+                schedulePreview(e.target.value, newMatchKind)
+              }}
+              onBlur={() => {
+                if (newMatchKind === 'regex' && newPattern) {
+                  void fetchPreview(newPattern, newMatchKind)
+                }
+              }}
+            />
+            {previewState === 'counting' && (
+              <span className="muted" style={{ fontSize: 12, fontStyle: 'italic' }}>Counting…</span>
+            )}
+            {previewState !== null && previewState !== 'counting' && (
+              'error' in previewState ? (
+                <span style={{ fontSize: 12, color: 'var(--color-destructive, #dc2626)' }}>
+                  Invalid pattern: {previewState.error}
+                </span>
+              ) : (
+                <span className="muted" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                  {previewState.matches >= 500
+                    ? 'matches 500+ existing transactions'
+                    : `matches ${previewState.matches} existing transaction${previewState.matches === 1 ? '' : 's'}`}
+                </span>
+              )
+            )}
           </label>
           <label>
-            Match
-            <select name="matchKind" defaultValue="substring">
+            Match type
+            <select
+              name="matchKind"
+              value={newMatchKind}
+              onChange={(e) => {
+                setNewMatchKind(e.target.value)
+                setPatternError(null)
+                schedulePreview(newPattern, e.target.value)
+              }}
+            >
               <option value="substring">substring</option>
               <option value="regex">regex</option>
             </select>
+            <span className="muted" style={{ fontSize: 12 }}>
+              substring matches any part of the description; regex is for patterns (advanced).
+            </span>
+            {patternError && (
+              <span style={{ fontSize: 12, color: 'var(--color-destructive, #dc2626)' }} role="alert">
+                {patternError}
+              </span>
+            )}
           </label>
           <label>
             Priority
@@ -288,22 +456,67 @@ export function RulesPage() {
           </label>
           <label>
             Split
-            <select name="splitType" defaultValue="me">
+            <select
+              name="splitType"
+              value={newSplitType}
+              onChange={(e) => {
+                setNewSplitType(e.target.value)
+                validateShares(newPctMe, newPctPartner, e.target.value)
+              }}
+            >
               <option value="me">me</option>
               <option value="partner">partner</option>
               <option value="shared">shared</option>
             </select>
           </label>
+          {newSplitType === 'shared' && (
+          <>
           <label>
-            pct_me (0–1)
-            <input name="pctMe" placeholder="0.5" />
+            Your share (%)
+            <input
+              name="pctMe"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              placeholder="50"
+              value={newPctMe}
+              onChange={(e) => {
+                setNewPctMe(e.target.value)
+                validateShares(e.target.value, newPctPartner, newSplitType)
+              }}
+            />
           </label>
           <label>
-            pct_partner (0–1)
-            <input name="pctPartner" placeholder="0.5" />
+            Partner's share (%)
+            <input
+              name="pctPartner"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              placeholder="50"
+              value={newPctPartner}
+              onChange={(e) => {
+                setNewPctPartner(e.target.value)
+                validateShares(newPctMe, e.target.value, newSplitType)
+              }}
+            />
           </label>
+          </>
+          )}
+          {newSplitType === 'shared' && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <span className="muted" style={{ fontSize: 12 }}>Must sum to 100%</span>
+              {shareError && (
+                <span style={{ fontSize: 12, color: 'var(--color-destructive, #dc2626)', marginLeft: 8 }} role="alert">
+                  {shareError}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        <button type="submit">Add rule</button>
+        <button type="submit" disabled={!isNewFormValid}>Add rule</button>
       </form>
 
       {autoSuggestions.length > 0 && (
@@ -428,24 +641,25 @@ export function RulesPage() {
           </div>
           <span className="transactionsPanelBadge">{rules.length} rules</span>
         </div>
-        <div className="tableWrap">
-          <Table className="table">
+        <div className="transactionsTableWrap">
+          <Table className="table transactionsTable">
             <TableHeader>
               <TableRow>
-                <TableHead>Pattern</TableHead>
-                <TableHead>Match</TableHead>
-                <TableHead>Pri</TableHead>
+                <SortableTableHead field="name" label="Pattern" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+                <SortableTableHead field="matchType" label="Match" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+                <SortableTableHead field="priority" label="Pri" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
                 <TableHead>Category</TableHead>
                 <TableHead>Biz</TableHead>
                 <TableHead>Split</TableHead>
                 <TableHead>Usage</TableHead>
+                <SortableTableHead field="updatedAt" label="Updated" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rules.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="emptyStateCell">
+                  <TableCell colSpan={9} className="emptyStateCell">
                     <p>No rules yet. Add a pattern above to start automating imports.</p>
                     <p className="muted">
                       Rules set default category, business flag, and split for matching merchants on import.
@@ -466,6 +680,7 @@ export function RulesPage() {
                     <TableCell>{r.isBusiness ? 'yes' : ''}</TableCell>
                     <TableCell>{r.splitType}</TableCell>
                     <TableCell>{r.usageCount ?? 0}</TableCell>
+                    <TableCell className="text-muted-foreground">{r.updatedAt ? r.updatedAt.slice(0, 10) : '—'}</TableCell>
                     <TableCell>
                       <button type="button" onClick={() => void remove(r)}>
                         Delete
@@ -480,6 +695,12 @@ export function RulesPage() {
       </section>
     </div>
     {confirm.dialog}
+    <ImportRulesModal
+      open={importModalOpen}
+      onOpenChange={setImportModalOpen}
+      currentRuleCount={rules.length}
+      onSuccess={() => void load()}
+    />
     </>
   )
 }
