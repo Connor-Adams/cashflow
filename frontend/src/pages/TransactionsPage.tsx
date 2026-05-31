@@ -277,7 +277,7 @@ export function TransactionsPage() {
   useEffect(() => {
     void getJson<Contact[]>('/api/contacts')
       .then(setContacts)
-      .catch(() => {})
+      .catch(() => setContacts([]))
   }, [])
 
   useEffect(() => {

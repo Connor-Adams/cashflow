@@ -60,6 +60,9 @@ export function RulesPage() {
   const [autoSuggestions, setAutoSuggestions] = useState<AutoRuleSuggestion[]>([])
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
+  const [ruleSplitType, setRuleSplitType] = useState('me')
+  const [rulePctMe, setRulePctMe] = useState('')
+  const [rulePctPartner, setRulePctPartner] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
@@ -118,18 +121,30 @@ export function RulesPage() {
     const fd = new FormData(form)
     setErr(null)
     try {
+      const pctMeNum = rulePctMe.trim() ? Number(rulePctMe) / 100 : null;
+      const pctPartnerNum = rulePctPartner.trim() ? Number(rulePctPartner) / 100 : null;
+      if (ruleSplitType === 'shared' && pctMeNum !== null && pctPartnerNum !== null) {
+        const sum = pctMeNum + pctPartnerNum;
+        if (Math.abs(sum - 1) > 0.001) {
+          setErr(`Shares must add to 100% (current: ${Math.round(sum * 100)}%)`)
+          return;
+        }
+      }
       await postJson('/api/rules', {
         merchantPattern: String(fd.get('merchantPattern') ?? ''),
         matchKind: String(fd.get('matchKind') ?? 'substring'),
         priority: Number(fd.get('priority') ?? 0),
         category: String(fd.get('category') ?? '') || null,
         isBusiness: fd.get('isBusiness') === 'on',
-        splitType: String(fd.get('splitType') ?? 'me'),
-        pctMe: fd.get('pctMe') ? String(fd.get('pctMe')) : null,
-        pctPartner: fd.get('pctPartner') ? String(fd.get('pctPartner')) : null,
+        splitType: ruleSplitType,
+        pctMe: pctMeNum !== null ? String(pctMeNum) : null,
+        pctPartner: pctPartnerNum !== null ? String(pctPartnerNum) : null,
       })
       form.reset()
       setRuleCategory('')
+      setRuleSplitType('me')
+      setRulePctMe('')
+      setRulePctPartner('')
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create rule')
@@ -260,10 +275,10 @@ export function RulesPage() {
             <input name="merchantPattern" required placeholder="merchant text" />
           </label>
           <label>
-            Match
+            Match type
             <select name="matchKind" defaultValue="substring">
-              <option value="substring">substring</option>
-              <option value="regex">regex</option>
+              <option value="substring">Contains (plain text)</option>
+              <option value="regex">Regex (advanced)</option>
             </select>
           </label>
           <label>
@@ -288,20 +303,60 @@ export function RulesPage() {
           </label>
           <label>
             Split
-            <select name="splitType" defaultValue="me">
-              <option value="me">me</option>
-              <option value="partner">partner</option>
-              <option value="shared">shared</option>
+            <select
+              name="splitType"
+              value={ruleSplitType}
+              onChange={(e) => setRuleSplitType(e.target.value)}
+            >
+              <option value="me">Mine</option>
+              <option value="partner">Partner's</option>
+              <option value="shared">Shared</option>
             </select>
           </label>
-          <label>
-            pct_me (0–1)
-            <input name="pctMe" placeholder="0.5" />
-          </label>
-          <label>
-            pct_partner (0–1)
-            <input name="pctPartner" placeholder="0.5" />
-          </label>
+          {ruleSplitType === 'shared' && (
+            <>
+              <label>
+                Your share (%)
+                <input
+                  name="pctMe"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="50"
+                  value={rulePctMe}
+                  onChange={(e) => setRulePctMe(e.target.value)}
+                />
+              </label>
+              <label>
+                Partner's share (%)
+                <input
+                  name="pctPartner"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="50"
+                  value={rulePctPartner}
+                  onChange={(e) => setRulePctPartner(e.target.value)}
+                />
+              </label>
+              {(() => {
+                const me = Number(rulePctMe) || 0;
+                const partner = Number(rulePctPartner) || 0;
+                const sum = me + partner;
+                return rulePctMe && rulePctPartner && Math.abs(sum - 100) > 0.1 ? (
+                  <p style={{ color: 'var(--color-destructive)', fontSize: '0.8rem', gridColumn: '1 / -1' }}>
+                    Shares must add to 100% (current: {sum}%)
+                  </p>
+                ) : (
+                  <p style={{ color: 'var(--color-muted-foreground)', fontSize: '0.8rem', gridColumn: '1 / -1' }}>
+                    Must sum to 100%
+                  </p>
+                );
+              })()}
+            </>
+          )}
         </div>
         <button type="submit">Add rule</button>
       </form>
