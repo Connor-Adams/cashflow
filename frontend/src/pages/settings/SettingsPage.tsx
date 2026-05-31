@@ -21,6 +21,8 @@ const ALL_TOP_TABS: Array<
   { value: 'jobs', label: 'Jobs' },
   { value: 'whatsnew', label: "What's new" },
   { value: 'audit-tokens', label: 'AI audit tokens' },
+  { value: 'audit-log', label: 'Audit log' },
+  { value: 'backup', label: 'Backup & sync' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -38,6 +40,8 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   jobs: '/settings/jobs',
   whatsnew: '/settings/whatsnew',
   'audit-tokens': '/settings/audit-tokens',
+  'audit-log': '/settings/audit-log',
+  backup: '/settings/backup',
 }
 
 export function SettingsPage() {

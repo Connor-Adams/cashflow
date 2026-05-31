@@ -15,6 +15,8 @@ export type SettingsTopTab =
   | 'jobs'
   | 'whatsnew'
   | 'audit-tokens'
+  | 'audit-log'
+  | 'backup'
 
 export function useActiveSettingsTopTab(): SettingsTopTab {
   const isDisplay = useMatch('/settings/display')
@@ -33,6 +35,8 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isJobs = useMatch('/settings/jobs')
   const isWhatsnew = useMatch('/settings/whatsnew')
   const isAuditTokens = useMatch('/settings/audit-tokens')
+  const isAuditLog = useMatch('/settings/audit-log')
+  const isBackup = useMatch('/settings/backup')
 
   if (isDisplay || isGmail || isPartnerInvite) return 'settings'
   if (isImports) return 'imports'
@@ -48,5 +52,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   if (isJobs) return 'jobs'
   if (isWhatsnew) return 'whatsnew'
   if (isAuditTokens) return 'audit-tokens'
+  if (isAuditLog) return 'audit-log'
+  if (isBackup) return 'backup'
   return 'settings'
 }
