@@ -183,6 +183,171 @@ function buildItemWhere(f: Filters): WhereOptions {
   return and.length > 0 ? { [Op.and]: and } : {};
 }
 
+// GET /analyze — top items by spend, by-vendor breakdown
+router.get('/items/analyze', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const { from, to, currency: currencyFilter } = req.query as Record<string, string | undefined>;
+
+    const orderWhere: Record<string, unknown> = { householdId: household.id };
+    if (from) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.gte]: from };
+    if (to) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.lte]: to };
+
+    const items = await ExternalOrderItem.findAll({
+      include: [
+        {
+          model: ExternalOrder,
+          as: 'order',
+          required: true,
+          where: orderWhere,
+          attributes: ['id', 'vendor', 'orderDate', 'currency'],
+        },
+      ],
+      attributes: ['id', 'title', 'unitPrice', 'totalPrice', 'quantity'],
+    });
+
+    type OrderedItem = ExternalOrderItem & { order: ExternalOrder };
+
+    // Group by currency; pick the most-used one
+    const currencyMap = new Map<string, number>();
+    for (const it of items as OrderedItem[]) {
+      const cur = (it.order.currency ?? 'CAD').toUpperCase();
+      currencyMap.set(cur, (currencyMap.get(cur) ?? 0) + 1);
+    }
+    const sortedCurrencies = [...currencyMap.entries()].sort((a, b) => b[1] - a[1]);
+    const primaryCurrency = currencyFilter?.toUpperCase() ?? sortedCurrencies[0]?.[0] ?? 'CAD';
+    const currencyOthers = sortedCurrencies
+      .map(([c]) => c)
+      .filter((c) => c !== primaryCurrency);
+
+    const filtered = (items as OrderedItem[]).filter(
+      (it) => (it.order.currency ?? 'CAD').toUpperCase() === primaryCurrency,
+    );
+
+    // Aggregate by title
+    const byTitle = new Map<string, { totalCents: number; count: number; lastBoughtOn: string; vendor: string }>();
+    for (const it of filtered) {
+      const key = (it.title ?? '').toLowerCase().trim();
+      const price = Number(it.totalPrice ?? it.unitPrice) * (it.totalPrice ? 1 : Number(it.quantity ?? 1));
+      const cents = Math.round((isFinite(price) ? price : 0) * 100);
+      const date = it.order.orderDate ?? '';
+      const existing = byTitle.get(key)
+      if (existing) {
+        existing.totalCents += cents;
+        existing.count++;
+        if (date > existing.lastBoughtOn) existing.lastBoughtOn = date;
+      } else {
+        byTitle.set(key, { totalCents: cents, count: 1, lastBoughtOn: date, vendor: it.order.vendor ?? '' });
+      }
+    }
+
+    const topItems = [...byTitle.entries()]
+      .sort((a, b) => b[1].totalCents - a[1].totalCents)
+      .slice(0, 50)
+      .map(([name, v]) => ({
+        name: name.slice(0, 1).toUpperCase() + name.slice(1),
+        vendor: v.vendor,
+        totalCents: v.totalCents,
+        count: v.count,
+        lastBoughtOn: v.lastBoughtOn || null,
+      }));
+
+    // By vendor (top 10 + Other)
+    const byVendor = new Map<string, number>();
+    for (const it of filtered) {
+      const vendor = (it.order.vendor ?? 'Unknown').trim();
+      const price = Number(it.totalPrice ?? it.unitPrice) * (it.totalPrice ? 1 : Number(it.quantity ?? 1));
+      const cents = Math.round((isFinite(price) ? price : 0) * 100);
+      byVendor.set(vendor, (byVendor.get(vendor) ?? 0) + cents);
+    }
+    const vendorsSorted = [...byVendor.entries()].sort((a, b) => b[1] - a[1]);
+    const top10 = vendorsSorted.slice(0, 10);
+    const otherCents = vendorsSorted.slice(10).reduce((s, [, v]) => s + v, 0);
+    const byBrand = top10.map(([brand, totalCents]) => ({ brand, totalCents }));
+    if (otherCents > 0) byBrand.push({ brand: 'Other', totalCents: otherCents });
+
+    res.json({ topItems, byBrand, currencyUsed: primaryCurrency, currencyOthers });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /items/analyze/trend — unit-price trend for a specific item+vendor
+router.get('/items/analyze/trend', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const { itemName, vendor: vendorFilter, from, to } = req.query as Record<string, string | undefined>;
+    if (!itemName) {
+      res.status(400).json({ error: 'INVALID_RANGE', message: 'itemName is required' });
+      return;
+    }
+
+    const orderWhere: Record<string, unknown> = { householdId: household.id };
+    if (from) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.gte]: from };
+    if (to) orderWhere.orderDate = { ...(orderWhere.orderDate as object ?? {}), [Op.lte]: to };
+    if (vendorFilter) orderWhere.vendor = vendorFilter;
+
+    const items = await ExternalOrderItem.findAll({
+      where: { title: { [Op.like]: `%${itemName}%` } },
+      include: [
+        {
+          model: ExternalOrder,
+          as: 'order',
+          required: true,
+          where: orderWhere,
+          attributes: ['id', 'vendor', 'orderDate', 'currency'],
+        },
+      ],
+      attributes: ['id', 'title', 'unitPrice', 'totalPrice', 'quantity'],
+      order: [[{ model: ExternalOrder, as: 'order' }, 'orderDate', 'ASC']],
+    });
+
+    type OrderedItem = ExternalOrderItem & { order: ExternalOrder };
+
+    const points: Array<{ date: string; unitPriceCents: number }> = [];
+    const units = new Set<string>();
+    for (const it of items as OrderedItem[]) {
+      const date = it.order.orderDate;
+      if (!date) continue;
+      const qty = Number(it.quantity ?? 1) || 1;
+      const total = Number(it.totalPrice ?? null);
+      const unit = Number(it.unitPrice ?? null);
+      let unitPriceCents: number | null = null;
+      if (isFinite(unit) && unit > 0) {
+        unitPriceCents = Math.round(unit * 100);
+      } else if (isFinite(total) && total > 0) {
+        unitPriceCents = Math.round((total / qty) * 100);
+      }
+      if (unitPriceCents === null) continue;
+      // Detect mixed units heuristically: different quantities on the same item name
+      units.add(String(qty));
+      points.push({ date, unitPriceCents });
+    }
+
+    const mixedUnits = units.size > 1;
+
+    // Compute slope (linear regression, pct per year)
+    let slopePerYear: number | null = null;
+    if (points.length >= 3) {
+      const xs = points.map((_p, i) => i);
+      const ys = points.map((p) => p.unitPriceCents);
+      const n = xs.length;
+      const meanX = xs.reduce((s, x) => s + x, 0) / n;
+      const meanY = ys.reduce((s, y) => s + y, 0) / n;
+      const num2 = xs.reduce((s, x, i) => s + (x - meanX) * (ys[i] - meanY), 0);
+      const den = xs.reduce((s, x) => s + (x - meanX) ** 2, 0);
+      const slope = den !== 0 ? num2 / den : 0;
+      // Convert: slope is per index. Rough assumption: ~12 indices per year (monthly rebuy)
+      const indicesPerYear = Math.max(1, n / Math.max(1, (new Date(points[n-1].date).getFullYear() - new Date(points[0].date).getFullYear()) || 1));
+      if (meanY !== 0) slopePerYear = (slope * indicesPerYear) / meanY;
+    }
+
+    res.json({ points, slopePerYear, mixedUnits });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/items', async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
