@@ -210,6 +210,7 @@ export function TransactionsPage() {
   // Issue #229: per-transaction edit history viewer + restore.
   const [revisionsDialogTxnId, setRevisionsDialogTxnId] = useState<number | null>(null)
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
+  const [hintsLoadError, setHintsLoadError] = useState(false)
   const [attachForTxnId, setAttachForTxnId] = useState<number | null>(null)
   const [itemsDrawer, setItemsDrawer] = useState<{ txnId: number; receipts: ReceiptWithItems[] } | null>(null)
   const [bulkAiBusy, setBulkAiBusy] = useState(false)
@@ -288,8 +289,8 @@ export function TransactionsPage() {
 
   useEffect(() => {
     void getJson<{ categories: CategoryHint[] }>('/api/transactions/category-hints')
-      .then((data) => setCategoryHints(data.categories))
-      .catch(() => setCategoryHints([]))
+      .then((data) => { setCategoryHints(data.categories); setHintsLoadError(false) })
+      .catch(() => { setCategoryHints([]); setHintsLoadError(true) })
   }, [])
 
   // Per-issue-262: detect an impossible date range and surface inline guidance.
@@ -1823,6 +1824,7 @@ export function TransactionsPage() {
         onClose={() => setItemsDrawer(null)}
         receipts={itemsDrawer?.receipts ?? []}
         categoryHints={categoryLabels}
+        hintsUnavailable={hintsLoadError}
         onExtract={onExtractReceipt}
       />
       <EnrichmentSignalsDialog

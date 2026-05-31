@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { safeNum } from '@/lib/num'
+import { clampPct, safeNum, safePct } from '@/lib/num'
 import { Edit3, Plus, Target, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -506,14 +506,14 @@ export function GoalsPage() {
                           <div
                             className="h-2 w-32 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
                             role="progressbar"
-                            aria-valuenow={Math.round(progress)}
+                            aria-valuenow={Math.round(clampPct(progress))}
                             aria-valuemin={0}
                             aria-valuemax={100}
                             aria-label={`Progress for ${row.name}`}
                           >
                             <div
                               className="h-full bg-emerald-500 dark:bg-emerald-400"
-                              style={{ width: `${progress}%` }}
+                              style={{ width: `${clampPct(progress)}%` }}
                             />
                           </div>
                           <div className="muted text-xs">
@@ -521,7 +521,7 @@ export function GoalsPage() {
                             {' / '}
                             {safeNum(row.targetAmount) !== null ? formatMoney(safeNum(row.targetAmount)!, row.currency) : <span className="italic text-muted-foreground">(unset)</span>}
                             {' '}
-                            ({progress.toFixed(0)}%)
+                            ({safePct(progress, { digits: 0 })})
                           </div>
                         </div>
                       </TableCell>

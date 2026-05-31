@@ -7,6 +7,7 @@ type Props = {
   onClose: () => void
   receipts: ReceiptWithItems[]
   categoryHints: string[]
+  hintsUnavailable?: boolean
   onExtract: (receiptId: number) => Promise<void>
 }
 
@@ -195,6 +196,7 @@ export default function ReceiptItemsDrawer({
   onClose,
   receipts,
   categoryHints,
+  hintsUnavailable,
   onExtract,
 }: Props) {
   if (!open) return null
@@ -207,6 +209,9 @@ export default function ReceiptItemsDrawer({
           Close
         </button>
       </div>
+      {hintsUnavailable && (
+        <p style={{ fontSize: '0.75rem', color: 'var(--muted-foreground)' }}>Hints unavailable</p>
+      )}
 
       {receipts.map((receipt) => (
         <ReceiptPanel
