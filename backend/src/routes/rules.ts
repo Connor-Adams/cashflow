@@ -781,6 +781,46 @@ router.post('/import', async (req, res, next) => {
   }
 });
 
+router.post('/preview-pattern', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const body = req.body as { pattern?: unknown; matchType?: unknown };
+    const pattern = typeof body.pattern === 'string' ? body.pattern : '';
+    const matchType = body.matchType === 'regex' ? 'regex' : 'substring';
+    const CAP = 500;
+    const FETCH_LIMIT = 10000;
+
+    let re: RegExp | null = null;
+    if (matchType === 'regex') {
+      try {
+        re = new RegExp(pattern, 'i');
+      } catch (e) {
+        res.status(400).json({ error: 'INVALID_PATTERN', message: e instanceof Error ? e.message : 'Invalid regex' });
+        return;
+      }
+    }
+
+    const rows = await Transaction.findAll({
+      where: { householdId: household.id },
+      attributes: ['id', 'date', 'merchantClean', 'merchantRaw', 'amount', 'currency'],
+      order: [['date', 'DESC']],
+      limit: FETCH_LIMIT,
+    });
+
+    const patternLower = pattern.toLowerCase();
+    const matched = rows.filter((r) => {
+      const clean = (r.merchantClean || '').toLowerCase();
+      return re ? re.test(r.merchantClean || '') : clean.includes(patternLower);
+    });
+
+    const capped = matched.length > CAP;
+    const sample = matched.slice(0, 5);
+    res.json({ matches: Math.min(matched.length, CAP), capped, sample });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.delete('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);

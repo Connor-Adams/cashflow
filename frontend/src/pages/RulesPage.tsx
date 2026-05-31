@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirm } from '@/components/ui/dialog'
@@ -65,12 +65,40 @@ export function RulesPage() {
   const [ruleSplitType, setRuleSplitType] = useState('me')
   const [rulePctMe, setRulePctMe] = useState('')
   const [rulePctPartner, setRulePctPartner] = useState('')
+  const [rulePattern, setRulePattern] = useState('')
+  const [ruleMatchKind, setRuleMatchKind] = useState<'substring' | 'regex'>('substring')
+  const [patternError, setPatternError] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ matches: number; capped: boolean } | 'loading' | null>(null)
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append')
   const [importing, setImporting] = useState(false)
   const importFileRef = useRef<HTMLInputElement | null>(null)
   type RuleField = 'merchantPattern' | 'matchKind' | 'priority' | 'category' | 'usageCount'
   const [ruleSort, setRuleSort] = useState<SortState<RuleField>>({ field: 'priority', dir: 'desc' })
+  const fetchPreview = useCallback(async (pattern: string, matchKind: 'substring' | 'regex') => {
+    if (!pattern) { setPreview(null); setPatternError(null); return }
+    setPreview('loading')
+    setPatternError(null)
+    try {
+      const result = await postJson<{ matches: number; capped: boolean }>('/api/rules/preview-pattern', { pattern, matchType: matchKind })
+      setPreview(result)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      if (msg.includes('INVALID_PATTERN') || msg.includes('Invalid regex') || msg.includes('400')) {
+        setPatternError(`Invalid pattern: ${msg}`)
+        setPreview(null)
+      } else {
+        setPreview(null)
+      }
+    }
+  }, [])
+
+  const schedulePreview = useCallback((pattern: string, matchKind: 'substring' | 'regex') => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current)
+    previewTimerRef.current = setTimeout(() => { void fetchPreview(pattern, matchKind) }, 300)
+  }, [fetchPreview])
+
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -139,8 +167,8 @@ export function RulesPage() {
         }
       }
       await postJson('/api/rules', {
-        merchantPattern: String(fd.get('merchantPattern') ?? ''),
-        matchKind: String(fd.get('matchKind') ?? 'substring'),
+        merchantPattern: rulePattern,
+        matchKind: ruleMatchKind,
         priority: Number(fd.get('priority') ?? 0),
         category: String(fd.get('category') ?? '') || null,
         isBusiness: fd.get('isBusiness') === 'on',
@@ -153,6 +181,10 @@ export function RulesPage() {
       setRuleSplitType('me')
       setRulePctMe('')
       setRulePctPartner('')
+      setRulePattern('')
+      setRuleMatchKind('substring')
+      setPreview(null)
+      setPatternError(null)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create rule')
@@ -319,16 +351,55 @@ export function RulesPage() {
           </span>
         </div>
         <div className="formGrid rulesFormGrid">
-          <label>
-            Pattern
-            <input name="merchantPattern" required placeholder="merchant text" />
-          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <label>
+              Pattern
+              <input
+                name="merchantPattern"
+                required
+                placeholder="merchant text"
+                value={rulePattern}
+                onChange={(e) => {
+                  setRulePattern(e.target.value)
+                  schedulePreview(e.target.value, ruleMatchKind)
+                }}
+                onBlur={() => {
+                  if (ruleMatchKind === 'regex' && rulePattern) {
+                    void fetchPreview(rulePattern, ruleMatchKind)
+                  }
+                }}
+              />
+            </label>
+            {patternError && (
+              <p style={{ color: 'var(--color-destructive)', fontSize: '0.8rem' }}>{patternError}</p>
+            )}
+            {!patternError && preview === 'loading' && (
+              <p style={{ color: 'var(--color-muted-foreground)', fontSize: '0.8rem', fontStyle: 'italic' }}>Counting…</p>
+            )}
+            {!patternError && preview !== 'loading' && preview != null && (
+              <p style={{ color: 'var(--color-muted-foreground)', fontSize: '0.8rem', fontStyle: 'italic' }}>
+                matches {preview.capped ? '500+' : preview.matches} existing transaction{preview.matches === 1 ? '' : 's'}
+              </p>
+            )}
+          </div>
           <label>
             Match type
-            <select name="matchKind" defaultValue="substring">
+            <select
+              name="matchKind"
+              value={ruleMatchKind}
+              onChange={(e) => {
+                const mk = e.target.value as 'substring' | 'regex'
+                setRuleMatchKind(mk)
+                setPatternError(null)
+                schedulePreview(rulePattern, mk)
+              }}
+            >
               <option value="substring">Contains (plain text)</option>
               <option value="regex">Regex (advanced)</option>
             </select>
+            <p style={{ color: 'var(--color-muted-foreground)', fontSize: '0.75rem', marginTop: '0.2rem' }}>
+              substring matches any part of the description; regex is for patterns (advanced).
+            </p>
           </label>
           <label>
             Priority
@@ -407,7 +478,18 @@ export function RulesPage() {
             </>
           )}
         </div>
-        <button type="submit">Add rule</button>
+        {(() => {
+          const me = Number(rulePctMe) || 0
+          const partner = Number(rulePctPartner) || 0
+          const shareSumInvalid =
+            ruleSplitType === 'shared' && rulePctMe && rulePctPartner && Math.abs(me + partner - 100) > 0.1
+          const disabled = !!patternError || !!shareSumInvalid
+          return (
+            <button type="submit" disabled={disabled}>
+              Add rule
+            </button>
+          )
+        })()}
       </form>
 
       {autoSuggestions.length > 0 && (
