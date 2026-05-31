@@ -87,6 +87,7 @@ import { attachAuth, requireAuth } from './auth/middleware';
 import { logger } from './observability/logger';
 import { requestLogger } from './observability/requestLogger';
 import { withContext } from './observability/requestContext';
+import { ServerErrorEvent } from './models';
 
 const app = express();
 
@@ -283,6 +284,23 @@ const getErrorMessage = (err: unknown): string => {
 
   return 'Internal Server Error';
 };
+
+app.use((err: unknown, req: Request, _res: Response, next: NextFunction) => {
+  const status = (err as { status?: number })?.status ?? 500;
+  if (status >= 500) {
+    void ServerErrorEvent.create({
+      householdId: req.auth?.household.id ?? req.auditAuth?.household.id ?? null,
+      userId: req.auth?.user.id ?? req.auditAuth?.user.id ?? null,
+      method: req.method,
+      path: req.originalUrl.slice(0, 512),
+      status,
+      message: String((err as Error)?.message ?? '').slice(0, 4000),
+      stack: String((err as Error)?.stack ?? '').slice(0, 8000),
+      requestId: req.requestId ?? null,
+    }).catch(() => undefined);
+  }
+  next(err);
+});
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const code = getErrorCode(err);

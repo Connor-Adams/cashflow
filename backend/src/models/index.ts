@@ -110,6 +110,8 @@ import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
 import { Label, initLabel } from './Label';
 import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
 import { Feedback, initFeedback } from './Feedback';
+import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
+import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -198,6 +200,8 @@ initFinancialScenario(sequelize);
 initLabel(sequelize);
 initTransactionLabel(sequelize);
 initFeedback(sequelize);
+initClientErrorEvent(sequelize);
+initServerErrorEvent(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -1088,4 +1092,6 @@ export {
   Label,
   TransactionLabel,
   Feedback,
+  ClientErrorEvent,
+  ServerErrorEvent,
 };
