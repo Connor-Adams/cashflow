@@ -99,6 +99,7 @@ export function SubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [rowErrors, setRowErrors] = useState<Map<number, { message: string; retry: () => Promise<void> }>>(new Map())
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -140,6 +141,7 @@ export function SubscriptionsPage() {
         `/api/subscriptions/${id}`,
         patch,
       )
+      setRowErrors((prev) => { const m = new Map(prev); m.delete(id); return m; })
       setData((prev) =>
         prev
           ? {
@@ -156,7 +158,15 @@ export function SubscriptionsPage() {
       })
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Update failed'
-      showToast({ title: message, variant: 'destructive' })
+      const sub = data?.items.find((item) => item.id === id)
+      setRowErrors((prev) => new Map(prev).set(id, {
+        message,
+        retry: () => updateStatus(id, status),
+      }))
+      showToast({
+        title: `Couldn't update ${sub?.merchantName ?? 'subscription'}: ${message}`,
+        variant: 'destructive',
+      })
     }
   }
 
@@ -292,6 +302,7 @@ export function SubscriptionsPage() {
                     item={item}
                     onStatusChange={updateStatus}
                     onCadenceChange={updateCadence}
+                    rowError={rowErrors.get(item.id)}
                   />
                 ))
               )}
@@ -387,10 +398,12 @@ function SubscriptionRow({
   item,
   onStatusChange,
   onCadenceChange,
+  rowError,
 }: {
   item: Subscription
   onStatusChange: (id: number, status: SubscriptionStatus) => Promise<void>
   onCadenceChange: (id: number, cadence: SubscriptionCadence) => Promise<void>
+  rowError?: { message: string; retry: () => Promise<void> }
 }) {
   const annual = Number(item.annualizedCost)
   const amount = Number(item.amount)
@@ -475,6 +488,23 @@ function SubscriptionRow({
             showImpact={showImpact}
             onToggleImpact={() => setShowImpact((v) => !v)}
           />
+          {rowError && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} role="alert">
+              <span
+                style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-destructive, red)', flexShrink: 0 }}
+                aria-hidden="true"
+              />
+              <span className="text-xs text-destructive">{rowError.message}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void rowError.retry()}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
         </div>
         {!isCancelled && showImpact && (
           <CancelImpactCard
