@@ -67,7 +67,7 @@ not. That difference is load-bearing; the shared columns are not.
 | Primitive | Status machine | Folds (current models) | Identity |
 |-----------|----------------|------------------------|----------|
 | **Transaction** | imported → categorized → reconciled | + TransactionRevision, TransactionSignal, TransactionOrderLink, TransactionTaxMetadata, TransactionReturnMetadata | posted money movement |
-| **Expectation** | planned → posted → skipped / ignored | PlannedEvent + Subscription (one-shot vs recurring = field) | *expected* money movement |
+| **Expectation** | planned → posted → skipped / ignored / cancelled | PlannedEvent + Subscription folded into one table (`kind='planned'\|'subscription'`; `cadence` column for recurring) — shipped 2026-05-31 | *expected* money movement |
 | **Account** | open → archived | + AccountStatement (period child, not a twin) | store of value |
 | **Holding** | held → closed | + Security, SecurityPrice/Daily/Dividend (ref data); HoldingSnapshot, PortfolioDailySnapshot, ForwardProjection (derivations) | investment position |
 | **Principal** | active | User, Household, HouseholdMember, Entity (`personal\|corp`) | who owns money |
