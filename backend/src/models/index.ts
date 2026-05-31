@@ -117,6 +117,7 @@ import {
   SubscriptionPriceChange,
   initSubscriptionPriceChange,
 } from './SubscriptionPriceChange';
+import { SavedFilter, initSavedFilter } from './SavedFilter';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -209,6 +210,7 @@ initClientErrorEvent(sequelize);
 initServerErrorEvent(sequelize);
 initIncomeEntry(sequelize);
 initSubscriptionPriceChange(sequelize);
+initSavedFilter(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
 // transaction can `include` its labels and a label can resolve its
@@ -994,6 +996,16 @@ DebtPayoffScenario.belongsTo(User, {
   as: 'user',
 });
 
+// SavedFilter (issue #272). One row per user-named filter preset scoped to a
+// page. Cascades on user delete; no household scope (filters are personal).
+User.hasMany(SavedFilter, {
+  foreignKey: 'user_id',
+  as: 'savedFilters',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedFilter.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 // In-app feedback / bug reports (issue #295). Scoped to both the submitting
 // user and their household; both cascade on delete so removing either removes
 // the feedback. The owner-only inbox lists via householdWhere().
@@ -1103,4 +1115,5 @@ export {
   ServerErrorEvent,
   IncomeEntry,
   SubscriptionPriceChange,
+  SavedFilter,
 };

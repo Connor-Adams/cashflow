@@ -50,6 +50,7 @@ import { MembersTab } from './pages/settings/tabs/MembersTab'
 import { BudgetsTab } from './pages/settings/tabs/BudgetsTab'
 import { CategoriesTab } from './pages/settings/tabs/CategoriesTab'
 import { LabelsTab } from './pages/settings/tabs/LabelsTab'
+import { SavedFiltersTab } from './pages/settings/tabs/SavedFiltersTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
@@ -144,6 +145,7 @@ function AppRoutes() {
             <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="labels" element={<LabelsTab />} />
+            <Route path="saved-filters" element={<SavedFiltersTab />} />
             <Route path="jobs" element={<JobsTab />} />
             <Route path="whatsnew" element={<WhatsNewTab />} />
             <Route path="feedback" element={<FeedbackInboxTab />} />
