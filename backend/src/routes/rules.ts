@@ -683,6 +683,104 @@ router.post('/auto-suggestions/:id/dismiss', aiSuggestLimiter, async (req, res, 
   }
 });
 
+router.get('/export', async (req, res, next) => {
+  try {
+    const { user } = currentAuth(req);
+    const rules = await Rule.findAll({
+      where: householdWhere(req),
+      order: [
+        ['priority', 'DESC'],
+        ['id', 'ASC'],
+      ],
+    });
+    const exportedAt = new Date().toISOString();
+    const payload = {
+      schemaVersion: 1,
+      exportedAt,
+      exportedBy: String(user.id),
+      rules: rules.map((r) => ({
+        merchantPattern: r.merchantPattern,
+        matchKind: r.matchKind,
+        priority: r.priority,
+        category: r.category,
+        isBusiness: r.isBusiness,
+        splitType: r.splitType,
+        pctMe: r.pctMe,
+        pctPartner: r.pctPartner,
+        effectiveFrom: r.effectiveFrom,
+        effectiveTo: r.effectiveTo,
+      })),
+    };
+    const dateStr = exportedAt.slice(0, 10);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="cashflow-rules-${dateStr}.json"`,
+    );
+    res.json(payload);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/import', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const body = (req.body || {}) as Record<string, unknown>;
+    const mode = body.mode === 'replace' ? 'replace' : 'append';
+    const rawRules = Array.isArray(body.rules) ? body.rules : [];
+    if (rawRules.length === 0) {
+      res.status(400).json({ error: 'rules array is required and must be non-empty' });
+      return;
+    }
+    if (rawRules.length > 2000) {
+      res.status(400).json({ error: 'Cannot import more than 2000 rules at once' });
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    let existing: Rule[] = [];
+    if (mode === 'append') {
+      existing = await Rule.findAll({ where: householdWhere(req) });
+    }
+    const existingPatterns = new Set(existing.map((r) => r.merchantPattern));
+
+    await sequelize.transaction(async (t) => {
+      if (mode === 'replace') {
+        await Rule.destroy({ where: householdWhere(req), transaction: t });
+      }
+      for (const raw of rawRules) {
+        if (!raw || typeof raw !== 'object') continue;
+        const r = raw as Record<string, unknown>;
+        let pattern = String(r.merchantPattern ?? '').slice(0, 512);
+        if (!pattern) continue;
+        if (mode === 'append' && existingPatterns.has(pattern)) {
+          pattern = `${pattern} (imported ${today})`.slice(0, 512);
+        }
+        await Rule.create({
+          merchantPattern: pattern,
+          householdId: household.id,
+          createdByUserId: user.id,
+          matchKind: typeof r.matchKind === 'string' ? r.matchKind : 'substring',
+          priority: typeof r.priority === 'number' ? r.priority : 0,
+          category: typeof r.category === 'string' ? r.category : null,
+          isBusiness: Boolean(r.isBusiness),
+          splitType: typeof r.splitType === 'string' ? r.splitType : 'me',
+          pctMe: r.pctMe != null ? String(r.pctMe) : null,
+          pctPartner: r.pctPartner != null ? String(r.pctPartner) : null,
+          effectiveFrom: typeof r.effectiveFrom === 'string' ? r.effectiveFrom : null,
+          effectiveTo: typeof r.effectiveTo === 'string' ? r.effectiveTo : null,
+        }, { transaction: t });
+      }
+    });
+
+    res.json({ imported: rawRules.length, mode });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.delete('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);

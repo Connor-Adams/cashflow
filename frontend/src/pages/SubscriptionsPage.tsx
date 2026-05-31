@@ -99,6 +99,7 @@ export function SubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [rowErrors, setRowErrors] = useState<Map<number, string>>(new Map())
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -134,6 +135,7 @@ export function SubscriptionsPage() {
   }, [queryString])
 
   async function updateStatus(id: number, status: SubscriptionStatus) {
+    const name = data?.items.find((item) => item.id === id)?.merchantName ?? 'subscription'
     try {
       const patch: SubscriptionPatch = { status }
       const updated = await patchJson<Subscription>(
@@ -150,13 +152,22 @@ export function SubscriptionsPage() {
             }
           : prev,
       )
+      setRowErrors((prev) => {
+        const m = new Map(prev)
+        m.delete(id)
+        return m
+      })
       showToast({
         title: `Marked as ${status}`,
         variant: 'success',
       })
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Update failed'
-      showToast({ title: message, variant: 'destructive' })
+      setRowErrors((prev) => new Map(prev).set(id, message))
+      showToast({
+        title: `Couldn't update ${name}: ${message}`,
+        variant: 'destructive',
+      })
     }
   }
 
@@ -290,6 +301,7 @@ export function SubscriptionsPage() {
                   <SubscriptionRow
                     key={item.id}
                     item={item}
+                    rowError={rowErrors.get(item.id) ?? null}
                     onStatusChange={updateStatus}
                     onCadenceChange={updateCadence}
                   />
@@ -385,10 +397,12 @@ function SummaryStat({
 
 function SubscriptionRow({
   item,
+  rowError,
   onStatusChange,
   onCadenceChange,
 }: {
   item: Subscription
+  rowError: string | null
   onStatusChange: (id: number, status: SubscriptionStatus) => Promise<void>
   onCadenceChange: (id: number, cadence: SubscriptionCadence) => Promise<void>
 }) {
@@ -400,7 +414,7 @@ function SubscriptionRow({
   const [showImpact, setShowImpact] = useState(false)
 
   return (
-    <TableRow>
+    <TableRow className={rowError ? 'bg-destructive/5' : ''}>
       <TableCell>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {item.merchantName}
@@ -476,6 +490,23 @@ function SubscriptionRow({
             onToggleImpact={() => setShowImpact((v) => !v)}
           />
         </div>
+        {rowError && (
+          <div className="mt-1 flex items-center gap-2 text-xs text-destructive">
+            <span>⚠ {rowError}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-auto p-0 text-xs underline text-destructive hover:text-destructive"
+              onClick={() => {
+                const nextStatus = item.status as SubscriptionStatus
+                void onStatusChange(item.id, nextStatus)
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
         {!isCancelled && showImpact && (
           <CancelImpactCard
             subscriptionId={item.id}

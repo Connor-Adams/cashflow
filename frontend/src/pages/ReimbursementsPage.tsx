@@ -10,6 +10,7 @@
  * the app.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ import { Tabs, TabPanel } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson, patchJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import type { Contact } from '../types/api'
 import type {
   ReimbursementStatus,
   ReimbursementView,
@@ -416,7 +418,12 @@ function ReimbursementRow({
               variant="outline"
               size="sm"
               onClick={() => onMatch(row)}
-              title="Find and link the repayment transaction"
+              disabled={row.repaymentTransaction != null}
+              title={
+                row.repaymentTransaction != null
+                  ? 'Reimbursement already matched'
+                  : 'Find and link the repayment transaction'
+              }
             >
               Match
             </Button>
@@ -470,6 +477,7 @@ function MatchDialog({
   onLinked: () => void
 }) {
   const { showToast } = useToast()
+  const [contacts, setContacts] = useState<Contact[] | null>(null)
   const [candidates, setCandidates] = useState<RepaymentCandidate[]>([])
   const [loading, setLoading] = useState(true)
   const [linkingId, setLinkingId] = useState<number | null>(null)
@@ -479,10 +487,16 @@ function MatchDialog({
     async function load() {
       setLoading(true)
       try {
-        const res = await getJson<RepaymentCandidatesResponse>(
-          `/api/reimbursements/${row.id}/match-candidates`,
-        )
-        if (!cancelled) setCandidates(res.data)
+        const [contactList, res] = await Promise.all([
+          getJson<Contact[]>('/api/contacts'),
+          getJson<RepaymentCandidatesResponse>(
+            `/api/reimbursements/${row.id}/match-candidates`,
+          ),
+        ])
+        if (!cancelled) {
+          setContacts(contactList)
+          setCandidates(res.data)
+        }
       } catch (e) {
         if (!cancelled) {
           showToast({
@@ -536,11 +550,31 @@ function MatchDialog({
         </p>
         {loading ? (
           <p className="muted text-sm">Searching for likely repayments…</p>
+        ) : contacts !== null && contacts.length === 0 ? (
+          <div className="rounded-md border border-border p-4 text-sm space-y-2">
+            <p className="font-medium">No contacts yet.</p>
+            <p className="muted">
+              Reimbursements track who owes you. Add a contact first so you can
+              associate repayments with the right person.
+            </p>
+            <Link
+              to="/settings/contacts"
+              className="inline-flex items-center text-primary underline-offset-2 hover:underline text-sm font-medium"
+              onClick={onClose}
+            >
+              Add a contact →
+            </Link>
+          </div>
         ) : candidates.length === 0 ? (
-          <p className="muted text-sm">
-            No likely repayment transactions found. The repayment should be an
-            incoming credit in {row.currency} on or after the original charge.
-          </p>
+          <div className="space-y-2 text-sm">
+            <p className="muted">No likely repayment transactions found.</p>
+            <ul className="list-disc pl-4 muted text-xs space-y-1">
+              <li>Make sure the repayment has been imported into Cashflow.</li>
+              <li>The credit should be in {row.currency} on or after the original charge date.</li>
+              <li>Check that the correct account was included in the import.</li>
+              <li>Widen the search by editing the expected date on this reimbursement.</li>
+            </ul>
+          </div>
         ) : (
           <ul className="flex flex-col gap-2">
             {candidates.map((c) => (

@@ -64,6 +64,9 @@ export function RulesPage() {
   const [rulePctMe, setRulePctMe] = useState('')
   const [rulePctPartner, setRulePctPartner] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [importMode, setImportMode] = useState<'append' | 'replace'>('append')
+  const [importing, setImporting] = useState(false)
+  const importFileRef = useRef<HTMLInputElement | null>(null)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -245,6 +248,47 @@ export function RulesPage() {
       })
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not dismiss suggestion')
+    }
+  }
+
+  async function importRules() {
+    const file = importFileRef.current?.files?.[0]
+    if (!file) {
+      showToast({ title: 'Choose a JSON file first.', variant: 'destructive' })
+      return
+    }
+    if (importMode === 'replace') {
+      const ok = await confirm({
+        title: 'Replace all rules?',
+        description: 'This will permanently delete all existing rules and replace them with the imported ones. This cannot be undone.',
+        confirmLabel: 'Replace',
+        cancelLabel: 'Cancel',
+        destructive: true,
+      })
+      if (!ok) return
+    }
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text) as { rules?: unknown[] }
+      const rules = parsed.rules ?? (Array.isArray(parsed) ? parsed : [])
+      const result = await postJson<{ imported: number; mode: string }>(
+        '/api/rules/import',
+        { rules, mode: importMode },
+      )
+      if (importFileRef.current) importFileRef.current.value = ''
+      await load()
+      showToast({
+        title: `Imported ${result.imported} rule${result.imported === 1 ? '' : 's'} (${importMode} mode)`,
+        variant: 'success',
+      })
+    } catch (e) {
+      showToast({
+        title: e instanceof Error ? e.message : 'Import failed',
+        variant: 'destructive',
+      })
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -472,6 +516,50 @@ export function RulesPage() {
           </div>
         </section>
       )}
+
+      <section className="card">
+        <div className="rulesCardHeader">
+          <div>
+            <h2>Export / Import</h2>
+            <p className="muted">Back up your rules or share them with a co-user.</p>
+          </div>
+        </div>
+        <div className="formGrid" style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <a
+              href="/api/rules/export"
+              download
+              className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent"
+            >
+              Download rules JSON
+            </a>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".json,application/json"
+              className="text-sm"
+            />
+            <select
+              value={importMode}
+              onChange={(e) => setImportMode(e.target.value as 'append' | 'replace')}
+              className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="append">Append (merge with existing)</option>
+              <option value="replace">Replace (delete all, then import)</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => void importRules()}
+              disabled={importing}
+              className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-accent disabled:opacity-50"
+            >
+              {importing ? 'Importing…' : 'Import rules'}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section className="card rulesTableCard">
         <div className="rulesCardHeader">
