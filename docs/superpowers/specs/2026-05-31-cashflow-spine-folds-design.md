@@ -1,7 +1,7 @@
-# Cashflow Spine Folds — Expectation merge + Proposal-apply unify
+# Cashflow Spine Folds — Expectation merge + proposal-apply unify
 
 **Date:** 2026-05-31
-**Status:** Draft (pending review)
+**Status:** Approved; refined post-grounding 2026-05-31
 **Type:** Refactor / spine convergence
 **Reference:** `docs/superpowers/specs/2026-05-30-cashflow-primitives-design.md`
 
@@ -50,11 +50,14 @@ One primitive **Expectation** = *expected money movement*, folding `PlannedEvent
 (one-shot) and `Subscription` (recurring) discriminated by a `kind` field. Per
 spine doc `:70`, `:93-97`.
 
-**Approach: fold the model/table only — keep every route and page.** The handlers
-for `/planned-events`, `/subscriptions`, `/recurring`, `/money-leaks`, `/calendar`
-keep their URLs and UIs; they read `Expectation` filtered by `kind`. This preserves
-every feature (the stated constraint) and minimizes blast radius — recurrence-aware
-consumers that already speak `recurrenceRule` pick up subscriptions for free.
+**Approach: fold the model/table only — keep every route, page, and DTO shape.**
+The handlers for `/planned-events`, `/subscriptions`, `/recurring`,
+`/money-leaks`, `/calendar` keep their URLs; their serializers map the merged rows
+back to today's response shapes, so **the frontend is unchanged**. This is a
+backend-internal fold. Behaviour is preserved by every reader filtering on `kind`
+— `kind='planned'` consumers (forecast, calendar, safe-to-spend, CFO, AI review,
+financial scenarios, debt, credit-card) see exactly what they see today;
+`kind='subscription'` consumers (subscriptions, money-leaks, reports) likewise.
 
 ### Status machine (spine amendment)
 
@@ -71,11 +74,10 @@ planned → posted → skipped / ignored / cancelled
 - `cancelled` — user ended the underlying service (distinct from `ignored`:
   provenance is a deliberate cancellation).
 
-**This amends the adopted spine.** The plan must update
-`primitives-design.md:70` to `planned → posted → skipped / ignored / cancelled`
-and note the addition; also reconcile the convergence-path note (`:163`,
-"add cadence") with the `recurrence_rule`-canonical decision below. Flagged as a
-spine change, not silent.
+**This amends the adopted spine.** The plan must update `primitives-design.md:70`
+to `planned → posted → skipped / ignored / cancelled` and note the addition; also
+reconcile the convergence-path note (`:163`, "add cadence") — `cadence` is indeed
+kept as a column (see Schema). Flagged as a spine change, not silent.
 
 Source-status reconciliation on migration:
 
@@ -88,20 +90,24 @@ Source-status reconciliation on migration:
 | Subscription | active | planned | standing recurring = "expected" |
 | Subscription | cancelled | cancelled | distinct terminal |
 | Subscription | ignored | ignored | |
-| Subscription | unknown | planned | + `statusUncertain = true` |
+| Subscription | unknown | planned | + `status_uncertain = true` |
 
 `posted` / `skipped` apply only to one-shot rows; recurring rows are standing
-(individual occurrences are derived, not persisted), so they live in
-`planned` until `ignored`/`cancelled`.
+(individual occurrences are derived, not persisted), so they live in `planned`
+until `ignored`/`cancelled`.
 
 ### Schema
 
-`expectations` = current `planned_events` columns (unchanged) plus:
+`expectations` (initially still `planned_events` — see Migration) = current
+`planned_events` columns (unchanged) plus:
 
 | New column | Type | Purpose |
 |---|---|---|
 | `kind` | STRING(16) NOT NULL default `'planned'` | discriminator `'planned' \| 'subscription'` |
-| `normalized_name` | STRING(255) null | subscription identity (detection) |
+| `cadence` | STRING(16) null | subscription billing cadence (weekly/monthly/quarterly/semiannual/annual) |
+| `normalized_name` | STRING(255) null | subscription identity (detection + unique index) |
+| `last_charge_date` | DATEONLY null | subscription last-seen charge |
+| `next_expected_date` | DATEONLY null | subscription next-expected charge (lossless; distinct from `expected_date`) |
 | `annualized_cost` | DECIMAL(14,4) null | subscription rollup |
 | `price_change_detected` | BOOLEAN not-null default false | subscription alert |
 | `cancellation_url` | TEXT null | subscription |
@@ -113,32 +119,33 @@ Existing-column reuse for subscription data (no new column needed):
 | Subscription field | → Expectation column |
 |---|---|
 | `merchantName` | `name` |
-| `cadence` (monthly/weekly) | `recurrence_rule` (RRULE `FREQ=MONTHLY\|WEEKLY`) |
-| `nextExpectedDate` | `expected_date` (nullable) |
 | `amount`, `currency`, `notes`, timestamps | same-named columns |
 
-**Recurrence representation decision:** `recurrence_rule` (RRULE) is the *single*
-canonical recurrence field. Subscription `cadence` converts to an RRULE on
-migration; `cadence` is **not** stored — the subscriptions UI/detection derive it
-from `FREQ`. Rationale: the 14 PlannedEvent consumers (`forecast`, `calendar`,
-`safeToSpend`, `expandRecurrence`, `briefingBuilder`, `reviewRunner`) already
-expand `recurrence_rule`; giving subscriptions an RRULE includes them with zero
-per-consumer change. Storing a parallel `cadence` would force every expander to
-handle two recurrence shapes. (Trade-off is reversible at review.)
+**Recurrence representation:** `recurrence_rule` (RRULE) stays the recurrence field
+for `kind='planned'` rows; `cadence` is the recurrence field for
+`kind='subscription'` rows. They are `kind`-gated — not two sources of truth for
+one row — and this exactly matches today's behaviour (planned readers expand
+`recurrence_rule`; subscription readers read `cadence`). No RRULE conversion. This
+reverses an earlier "recurrence_rule canonical" call: that was justified by
+subscriptions riding the forecast expanders for free, but behaviour-preservation
+requires `kind`-filtering, so subscriptions never enter those expanders — leaving
+conversion as pure added risk (5 cadence values, `annualized_cost` re-derivation).
 
-Column relaxations / defaults for `kind='subscription'` rows:
+Backfill (NOT NULL preserved — **no `ALTER COLUMN`**, which SQLite can't do without
+a table rebuild) for `kind='subscription'` rows:
 
-- `user_id` → nullable (subscriptions are household-scoped, no user). Relaxing
-  NOT NULL is a safe migration.
-- `type` → `'expense'`; `source` → `'recurring_detection'` (already a valid
-  `PlannedEventSource` value); `account_id`, `linked_transaction_id` → null.
-- `expected_date` → nullable (subscriptions may lack a known next charge date;
-  `nextExpectedDate` is already nullable). Confirm no reader assumes non-null.
+- `user_id` ← the household's owner `HouseholdMember.userId` (subscriptions are
+  household-scoped; pick the owner). Stays NOT NULL.
+- `expected_date` ← `next_expected_date ?? last_charge_date` (`last_charge_date` is
+  always present on a Subscription). Stays NOT NULL.
+- `type` ← `'expense'`; `source` ← `'recurring_detection'` (already a valid
+  `PlannedEventSource`); `account_id`, `linked_transaction_id` ← null.
 
 Index: add partial unique index `(household_id, normalized_name, currency) WHERE
 kind = 'subscription'` (preserves the current `subscriptions` uniqueness without
-constraining planned rows). Confirm partial-index support on the target engine
-(Postgres prod; sqlite dev both support `WHERE` indexes via Sequelize `where`).
+constraining planned rows). Sequelize `addIndex(..., { where: { kind:
+'subscription' }, unique: true })` emits a partial index on both Postgres (prod)
+and SQLite (dev/test).
 
 ### MoneyLeak / dismissals
 
@@ -146,75 +153,95 @@ constraining planned rows). Confirm partial-index support on the target engine
   recomputes on read). Correct per spine `:95`.
 - **`money_leak_dismissals` stays its own table.** 3 of 5 leak types
   (`recurring_fee`, `duplicate_service`, `delivery_fee_high`) dismiss a *derived
-  pattern* with no Expectation row to flag — it is Observation-shaped, not an
-  Expectation field. Do not fold it.
+  pattern* with no Expectation row to flag — Observation-shaped, not an Expectation
+  field. Do not fold it.
 
 ### Migration (prod-safe; additive, reversible until final drop)
 
-1. `rename planned_events → expectations`. Add the new columns above; backfill
-   `kind = 'planned'`. Relax `user_id` to nullable.
-2. Insert `subscriptions` rows into `expectations` as `kind = 'subscription'`
-   with the field mapping + status reconciliation above (`cadence`→RRULE,
-   `merchantName`→`name`, etc.). Add the partial unique index.
-3. Cut over writers to `Expectation`:
-   - `refreshDetectedSubscriptions` (`routes/subscriptions.ts` — sole subscription
-     writer) writes `kind='subscription'` Expectation rows.
-   - `routes/debt.ts` (`source:'debt'`), `routes/creditCards.ts`
-     (`source:'credit_card'`), `routes/plannedEvents.ts` CRUD → `Expectation`.
-4. Point all readers at `Expectation` (filtered by `kind` where the old code was
-   subscription-specific). Verify row counts + spot-parity per household.
-5. **Drop `subscriptions`** only after parity verification. This is the
-   irreversible step.
+Two phases so the risky data move is separate from cosmetic renaming, and each
+phase is independently shippable.
 
-Reversibility: steps 1–4 are additive; the old `subscriptions` table is untouched
-until step 5, so a rollback before drop is a writer/reader revert.
+**Phase A1 — absorb (data fold; table stays `planned_events`):**
+
+1. Migration M1: add the new columns to `planned_events`; backfill existing rows
+   `kind='planned'`; add the partial unique index. (No data copy yet.)
+2. Model + code: `PlannedEvent` gains the new fields; `subscriptions` route
+   reads/writes `planned_events` with `kind='subscription'`; its serializer maps
+   merged rows back to the existing Subscription DTO. Other subscription readers
+   (money-leaks, reports) switch to the merged model. Planned readers add an
+   explicit `kind='planned'` filter (behaviour-preserving).
+3. Migration M2: copy `subscriptions` rows into `planned_events` as
+   `kind='subscription'` with the field mapping + status reconciliation + backfill
+   above. Run with code already handling `kind` so no writes are lost.
+4. Verify parity (counts + endpoint spot-checks per household).
+5. Migration M3: **drop `subscriptions`.** The irreversible step — only after
+   parity. Steps 1–4 leave `subscriptions` untouched, so rollback before M3 is a
+   reader/writer revert.
+
+**Phase A2 — rename (cosmetic; optional, separately shippable):**
+
+6. Migration M4: `renameTable('planned_events', 'expectations')`. Rename the model
+   `PlannedEvent` → `Expectation` and update imports across the ~14 backend files
+   (mechanical; no data risk). Endpoints + DTOs unchanged.
 
 ### Blast radius
 
-14 backend files touch `PlannedEvent`, 9 touch `Subscription` (3 type-only),
-12 frontend files. **Zero incoming FKs** to either table (only Sequelize
-associations; `PlannedEvent.linked_transaction_id` points outward to
-`transactions`) — nothing cascades on rename/drop. **Re-verify the no-FK claim
-immediately before step 5.**
+14 backend files touch `PlannedEvent`, 9 touch `Subscription` (3 type-only).
+**Frontend: none** (endpoints + DTOs preserved). **Zero incoming FKs** to either
+table (only Sequelize associations; `PlannedEvent.linked_transaction_id` points
+outward) — nothing cascades on rename/drop. **Re-verify the no-FK claim
+immediately before M3.**
 
 Key touch-points:
 - Backend model: `models/PlannedEvent.ts`, `models/Subscription.ts`,
   associations in `models/index.ts:502-535` (PlannedEvent: Household/User/Account/
-  Transaction) and `:564-570` (Subscription: Household only).
+  Transaction) and `:564-570` (Subscription: Household only). The two
+  `Household.hasMany` aliases (`as: 'plannedEvents'`, `as: 'subscriptions'`)
+  reconcile to one `as: 'expectations'` (update any eager-load `include` that uses
+  the old aliases).
 - Backend readers: `routes/{plannedEvents,calendar,subscriptions,moneyLeaks,
   reports,financialScenarios,forecast,debt,creditCards}.ts`,
   `cashflow/safeToSpend.ts`, `cfo/briefingBuilder.ts`, `ai/reviewRunner.ts`,
   `summary/{dataQuality,explainMonth}.ts`, `forecast/expandRecurrence.ts`,
   `subscriptions/detect.ts`, `money_leaks/detect.ts`, `import/rollbackImportBatch.ts`.
-- Frontend: `pages/{PlannedEvents,Calendar,Subscriptions,Recurring,Dashboard,
-  MoneyLeaks}Page.tsx`, `components/subscriptions/CancelImpactCard.tsx`,
-  `components/dashboard/RecurringThisMonthTile.tsx`, `hooks/{useForecast,
-  useSafeToSpend}.ts`. Shared types in `frontend/src/types/api.ts`
-  (PlannedEvent + Subscription DTO blocks).
+- Sole subscription writer: `refreshDetectedSubscriptions` (`routes/subscriptions.ts:170-273`).
+- Planned writers: `routes/debt.ts` (`source:'debt'`), `routes/creditCards.ts`
+  (`source:'credit_card'`), `routes/plannedEvents.ts` CRUD.
 
 ### Testing
 
-- Migration test: seed both tables, run migration, assert every row mapped with
-  correct `kind`, status, RRULE, and uniqueness; assert counts match.
-- Reader parity: existing `plannedEvents`, `subscriptions`, `moneyLeaks`,
-  `forecast`, `calendar`, `safeToSpend`, `explainMonth`, `dataQuality` tests pass
-  unchanged (endpoints stable).
-- New: a recurring Expectation (`kind='subscription'`) appears in forecast/calendar
-  expansion via `recurrence_rule` exactly as the old subscription did.
-- `cancelled` and `statusUncertain` round-trip through the subscriptions endpoint.
+Test infra (verbatim-confirmed): backend uses `node:test` via `tsx`. Unit +
+migration tests: `yarn test` (SQLite in-memory). Integration tests:
+`yarn test:integration` (real Postgres via `setupPgTestDb`). Migrations:
+`yarn db:migrate` (sequelize-cli).
+
+- Migration test (mirror `test/migrations/plannedEventsMigration.test.ts`, SQLite
+  `:memory:`): M1 adds columns with correct nullability + partial unique index;
+  M2 maps every subscription row (status, cadence, dates, owner `user_id`); M3
+  drops cleanly. Run `up`/`down`.
+- Integration parity (mirror `test/integration/plannedEvents.test.ts`, Postgres,
+  `seed()` + session-cookie `request.agent`): `/api/subscriptions`,
+  `/api/subscriptions/summary`, `/api/money-leaks`, `/api/planned-events`,
+  `/api/forecast`, `/api/calendar` return byte-identical shapes pre/post fold.
+- New: a `kind='subscription'` row does NOT appear in `/api/forecast` or
+  `/api/calendar` (kind filter holds); `cancelled` + `status_uncertain` round-trip
+  through `/api/subscriptions`.
 
 ### Risks
 
-- **RRULE conversion fidelity** — weekly/monthly cadence must produce an RRULE that
-  `expandRecurrence` expands to the same dates the subscription implied. Test both.
-- **`user_id` nullability** — confirm no reader assumes non-null `user_id` on
-  planned events (grep before migrating).
-- **Detection writer cutover** — `refreshDetectedSubscriptions` upsert keyed on
-  `(household_id, normalized_name, currency)` must target the partial unique index.
+- **`expected_date` backfill** — `last_charge_date` is the guaranteed-present
+  fallback; assert non-null post-M2.
+- **Owner `user_id` lookup** — every household must have an owner
+  `HouseholdMember`; assert during M2, fail loudly if missing.
+- **Partial unique index** — confirm Sequelize emits the `WHERE kind='subscription'`
+  clause on both engines; test a duplicate insert is rejected only for subscriptions.
+- **Reader leakage** — the chief behavioural risk is a planned reader forgetting
+  the `kind='planned'` filter and picking up subscriptions. The forecast/calendar
+  parity tests above are the guard.
 
 ---
 
-## Part B — Proposal-apply unify
+## Part B — proposal-apply unify
 
 ### Current
 
@@ -254,14 +281,16 @@ Both run the identical core: load+authorize Transaction → mutate →
 
 ## Sequencing
 
-Independent. **Expectation first** (the migration; highest value, highest risk),
-**proposal-apply second** (small, no schema). The spine-doc amendment (Part A
-status machine) lands with Part A.
+Independent, and split into two plans (one per fold). **Expectation first** (the
+migration; highest value, highest risk), **proposal-apply second** (small, no
+schema). Within Expectation, Phase A1 (absorb) ships before Phase A2 (rename). The
+spine-doc amendment lands with Phase A1.
 
 ## Open verification items (resolve during implementation, not left as TBD)
 
 - Re-confirm zero incoming FKs to `planned_events` / `subscriptions` immediately
-  before the `subscriptions` drop.
-- Confirm no reader assumes non-null `planned_events.user_id`.
-- Confirm partial-index support on the prod engine and that Sequelize emits it for
-  both prod + dev.
+  before M3.
+- Confirm every household has an owner `HouseholdMember` before M2 (owner backfill
+  for subscription `user_id`).
+- Confirm Sequelize emits the partial `WHERE kind='subscription'` unique index on
+  Postgres and SQLite.
