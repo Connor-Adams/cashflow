@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { Op, QueryTypes } from 'sequelize';
+import crypto from 'crypto';
 import { Rule, Transaction, sequelize } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, isSuperadmin, visibleTransactionWhere } from '../auth/scope';
@@ -718,6 +719,159 @@ router.delete('/:id', async (req, res, next) => {
       payload: auditSnapshot,
     });
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+const EXPORT_SCHEMA_VERSION = 1;
+
+type ExportedRule = {
+  merchantPattern: string;
+  matchKind: string;
+  priority: number;
+  category: string | null;
+  isBusiness: boolean;
+  splitType: string;
+  pctMe: string | null;
+  pctPartner: string | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+};
+
+router.get('/export', async (req, res, next) => {
+  try {
+    const { user } = currentAuth(req);
+    const rules = await Rule.findAll({
+      where: householdWhere(req),
+      order: [['priority', 'DESC'], ['id', 'DESC']],
+    });
+    const exportedRules: ExportedRule[] = rules.map((r) => ({
+      merchantPattern: r.merchantPattern,
+      matchKind: r.matchKind,
+      priority: r.priority,
+      category: r.category,
+      isBusiness: r.isBusiness,
+      splitType: r.splitType,
+      pctMe: r.pctMe != null ? String(r.pctMe) : null,
+      pctPartner: r.pctPartner != null ? String(r.pctPartner) : null,
+      effectiveFrom: r.effectiveFrom,
+      effectiveTo: r.effectiveTo,
+    }));
+    const today = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="cashflow-rules-${today}.json"`);
+    res.json({
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      exportedBy: crypto.createHash('sha256').update(String(user.id)).digest('hex').slice(0, 16),
+      rules: exportedRules,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/import', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const body = (req.body || {}) as Record<string, unknown>;
+
+    const mode = body.mode;
+    if (mode !== 'append' && mode !== 'replace') {
+      res.status(400).json({ error: 'INVALID_MODE', message: "mode must be 'append' or 'replace'" });
+      return;
+    }
+
+    const json = body.json as Record<string, unknown> | undefined;
+    if (!json || typeof json !== 'object') {
+      res.status(400).json({ error: 'INVALID_JSON', message: "json is required" });
+      return;
+    }
+    if (json.schemaVersion !== EXPORT_SCHEMA_VERSION) {
+      if (typeof json.schemaVersion === 'number' && json.schemaVersion > EXPORT_SCHEMA_VERSION) {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION', message: 'This file is from a newer version of Cashflow.' });
+      } else {
+        res.status(400).json({ error: 'UNSUPPORTED_VERSION', message: 'Invalid or unsupported schemaVersion.' });
+      }
+      return;
+    }
+
+    const rawRules = Array.isArray(json.rules) ? json.rules as unknown[] : [];
+    const today = new Date().toISOString().slice(0, 10);
+
+    const validated: ExportedRule[] = [];
+    const errors: { name: string; reason: string }[] = [];
+
+    for (const r of rawRules) {
+      if (!r || typeof r !== 'object') {
+        errors.push({ name: '(unknown)', reason: 'not an object' });
+        continue;
+      }
+      const rule = r as Record<string, unknown>;
+      if (!rule.merchantPattern || typeof rule.merchantPattern !== 'string') {
+        errors.push({ name: String(rule.merchantPattern ?? '(unknown)'), reason: 'merchantPattern is required' });
+        continue;
+      }
+      const fromParsed = parseEffectiveDate(rule.effectiveFrom ?? null);
+      if (!fromParsed.ok) {
+        errors.push({ name: rule.merchantPattern, reason: `effectiveFrom ${fromParsed.error}` });
+        continue;
+      }
+      const toParsed = parseEffectiveDate(rule.effectiveTo ?? null);
+      if (!toParsed.ok) {
+        errors.push({ name: rule.merchantPattern, reason: `effectiveTo ${toParsed.error}` });
+        continue;
+      }
+      validated.push({
+        merchantPattern: rule.merchantPattern,
+        matchKind: typeof rule.matchKind === 'string' ? rule.matchKind : 'substring',
+        priority: typeof rule.priority === 'number' ? rule.priority : 0,
+        category: typeof rule.category === 'string' ? rule.category : null,
+        isBusiness: Boolean(rule.isBusiness),
+        splitType: typeof rule.splitType === 'string' ? rule.splitType : 'me',
+        pctMe: rule.pctMe != null ? String(rule.pctMe) : null,
+        pctPartner: rule.pctPartner != null ? String(rule.pctPartner) : null,
+        effectiveFrom: fromParsed.value,
+        effectiveTo: toParsed.value,
+      });
+    }
+
+    let imported = 0;
+
+    await sequelize.transaction(async (t) => {
+      if (mode === 'replace') {
+        await Rule.destroy({ where: { householdId: household.id }, transaction: t });
+      }
+
+      const existingPatterns = mode === 'append'
+        ? new Set((await Rule.findAll({ where: { householdId: household.id }, attributes: ['merchantPattern'], transaction: t })).map((r) => r.merchantPattern))
+        : new Set<string>();
+
+      for (const rule of validated) {
+        let name = rule.merchantPattern;
+        if (mode === 'append' && existingPatterns.has(name)) {
+          name = `${name} (imported ${today})`;
+        }
+        await Rule.create({
+          merchantPattern: name,
+          householdId: household.id,
+          createdByUserId: user.id,
+          matchKind: rule.matchKind,
+          priority: rule.priority,
+          category: rule.category,
+          isBusiness: rule.isBusiness,
+          splitType: rule.splitType,
+          pctMe: rule.pctMe,
+          pctPartner: rule.pctPartner,
+          effectiveFrom: rule.effectiveFrom,
+          effectiveTo: rule.effectiveTo,
+        }, { transaction: t });
+        imported++;
+      }
+    });
+
+    res.json({ imported, skipped: errors.length, errors });
   } catch (e) {
     next(e);
   }

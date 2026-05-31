@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useConfirm } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -14,6 +15,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
+import { ImportRulesModal } from '../components/rules/ImportRulesModal'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import type { Rule } from '../types/api'
 
@@ -61,6 +63,8 @@ export function RulesPage() {
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [ruleCategory, setRuleCategory] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [exportLoading, setExportLoading] = useState(false)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -111,6 +115,26 @@ export function RulesPage() {
       .then((data) => setCategoryHints(data.categories))
       .catch(() => setCategoryHints([]))
   }, [])
+
+  async function handleExport() {
+    setExportLoading(true)
+    try {
+      const resp = await fetch('/api/rules/export', { credentials: 'include' })
+      if (!resp.ok) throw new Error(`Export failed: ${resp.status}`)
+      const blob = await resp.blob()
+      const today = new Date().toISOString().slice(0, 10)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `cashflow-rules-${today}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      showToast({ title: e instanceof Error ? e.message : 'Export failed', variant: 'destructive' })
+    } finally {
+      setExportLoading(false)
+    }
+  }
 
   async function onCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -239,6 +263,21 @@ export function RulesPage() {
       <PageHeader
         title="Rules"
         description="Match merchants on import so category, business, and split defaults land in the right place."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => void handleExport()}
+              disabled={exportLoading || rules.length === 0}
+              title={rules.length === 0 ? 'No rules to export.' : undefined}
+            >
+              {exportLoading ? 'Exporting…' : 'Export rules'}
+            </Button>
+            <Button variant="outline" onClick={() => setImportModalOpen(true)}>
+              Import rules
+            </Button>
+          </>
+        }
       />
       {err && <span className="error">{err}</span>}
       <RulesHealthSection onAfterCreate={() => void load()} />
@@ -480,6 +519,12 @@ export function RulesPage() {
       </section>
     </div>
     {confirm.dialog}
+    <ImportRulesModal
+      open={importModalOpen}
+      onOpenChange={setImportModalOpen}
+      currentRuleCount={rules.length}
+      onSuccess={() => void load()}
+    />
     </>
   )
 }
