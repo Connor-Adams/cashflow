@@ -19,6 +19,7 @@ import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { RulesHealthSection } from '../components/RulesHealthSection'
 import { deleteReq, getJson, postJson } from '../lib/api'
 import { ImportRulesModal } from '@/components/rules/ImportRulesModal'
+import { RulePatternPreview } from '@/components/rules/RulePatternPreview'
 import type { Rule } from '../types/api'
 
 type CategoryHint = {
@@ -73,6 +74,17 @@ export function RulesPage() {
   const [importModalOpen, setImportModalOpen] = useState(false)
   const confirm = useConfirm()
   const { showToast } = useToast()
+  // Controlled form state for validation
+  const [formPattern, setFormPattern] = useState('')
+  const [formMatchKind, setFormMatchKind] = useState('substring')
+  const [formSplitType, setFormSplitType] = useState('me')
+  const [formPctMe, setFormPctMe] = useState('')
+  const [formPctPartner, setFormPctPartner] = useState('')
+  const pctSum = (Number(formPctMe) || 0) + (Number(formPctPartner) || 0)
+  const shareError =
+    formSplitType === 'shared' && (formPctMe || formPctPartner) && pctSum !== 100
+      ? `Shares must add to 100% (current: ${pctSum}%)`
+      : null
   const categoryLabels = useMemo(
     () => categoryHints.map((hint) => hint.label),
     [categoryHints]
@@ -131,6 +143,8 @@ export function RulesPage() {
     const fd = new FormData(form)
     setErr(null)
     try {
+      const rawPctMe = fd.get('pctMe') ? Number(fd.get('pctMe')) : null
+      const rawPctPartner = fd.get('pctPartner') ? Number(fd.get('pctPartner')) : null
       await postJson('/api/rules', {
         merchantPattern: String(fd.get('merchantPattern') ?? ''),
         matchKind: String(fd.get('matchKind') ?? 'substring'),
@@ -138,11 +152,16 @@ export function RulesPage() {
         category: String(fd.get('category') ?? '') || null,
         isBusiness: fd.get('isBusiness') === 'on',
         splitType: String(fd.get('splitType') ?? 'me'),
-        pctMe: fd.get('pctMe') ? String(fd.get('pctMe')) : null,
-        pctPartner: fd.get('pctPartner') ? String(fd.get('pctPartner')) : null,
+        pctMe: rawPctMe != null && !Number.isNaN(rawPctMe) ? String(rawPctMe / 100) : null,
+        pctPartner: rawPctPartner != null && !Number.isNaN(rawPctPartner) ? String(rawPctPartner / 100) : null,
       })
       form.reset()
       setRuleCategory('')
+      setFormPattern('')
+      setFormMatchKind('substring')
+      setFormSplitType('me')
+      setFormPctMe('')
+      setFormPctPartner('')
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create rule')
@@ -296,14 +315,28 @@ export function RulesPage() {
         <div className="formGrid rulesFormGrid">
           <label>
             Pattern
-            <input name="merchantPattern" required placeholder="merchant text" />
+            <input
+              name="merchantPattern"
+              required
+              placeholder="merchant text"
+              value={formPattern}
+              onChange={(e) => setFormPattern(e.target.value)}
+            />
+            <RulePatternPreview pattern={formPattern} matchType={formMatchKind} />
           </label>
           <label>
-            Match
-            <select name="matchKind" defaultValue="substring">
+            Match type
+            <select
+              name="matchKind"
+              value={formMatchKind}
+              onChange={(e) => setFormMatchKind(e.target.value)}
+            >
               <option value="substring">substring</option>
               <option value="regex">regex</option>
             </select>
+            <span className="muted" style={{ fontSize: '0.75rem' }}>
+              substring matches any part of the description; regex is for patterns (advanced).
+            </span>
           </label>
           <label>
             Priority
@@ -327,22 +360,56 @@ export function RulesPage() {
           </label>
           <label>
             Split
-            <select name="splitType" defaultValue="me">
+            <select
+              name="splitType"
+              value={formSplitType}
+              onChange={(e) => setFormSplitType(e.target.value)}
+            >
               <option value="me">me</option>
               <option value="partner">partner</option>
               <option value="shared">shared</option>
             </select>
           </label>
-          <label>
-            pct_me (0–1)
-            <input name="pctMe" placeholder="0.5" />
-          </label>
-          <label>
-            pct_partner (0–1)
-            <input name="pctPartner" placeholder="0.5" />
-          </label>
+          {formSplitType === 'shared' && (
+            <>
+              <label>
+                Your share (%)
+                <input
+                  name="pctMe"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="50"
+                  value={formPctMe}
+                  onChange={(e) => setFormPctMe(e.target.value)}
+                />
+              </label>
+              <label>
+                Partner's share (%)
+                <input
+                  name="pctPartner"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="50"
+                  value={formPctPartner}
+                  onChange={(e) => setFormPctPartner(e.target.value)}
+                />
+              </label>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <span className="muted" style={{ fontSize: '0.75rem' }}>Must sum to 100%</span>
+                {shareError && (
+                  <p className="text-sm" style={{ color: 'var(--color-red-600, #dc2626)', marginTop: '0.25rem' }}>
+                    {shareError}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </div>
-        <button type="submit">Add rule</button>
+        <button type="submit" disabled={!!shareError}>Add rule</button>
       </form>
 
       {suggestionsUnavailable && (

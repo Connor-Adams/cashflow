@@ -243,6 +243,61 @@ function captureRuleAuditFields(
   return out;
 }
 
+router.post('/preview-pattern', async (req, res, next) => {
+  try {
+    const body = req.body as { pattern?: unknown; matchType?: unknown };
+    const pattern = typeof body.pattern === 'string' ? body.pattern : '';
+    const matchType = body.matchType === 'regex' ? 'regex' : 'substring';
+
+    if (!pattern.trim()) {
+      res.json({ matches: 0, sample: [] });
+      return;
+    }
+
+    if (matchType === 'regex') {
+      try {
+        new RegExp(pattern, 'i');
+      } catch (e) {
+        res.status(400).json({ error: 'INVALID_PATTERN', message: (e as Error).message });
+        return;
+      }
+    }
+
+    const CAP = 500;
+    const where = visibleTransactionWhere(req);
+    const rows = await Transaction.findAll({
+      where,
+      attributes: ['id', 'merchantClean', 'merchantRaw', 'date', 'amount', 'currency'],
+      raw: true,
+    });
+
+    type TRow = { id: number; merchantClean: string | null; merchantRaw: string | null; date: string; amount: unknown; currency: string };
+    let matchCount = 0;
+    const sample: object[] = [];
+
+    for (const r of rows as unknown as TRow[]) {
+      const merchant = ((r.merchantClean ?? '') || (r.merchantRaw ?? '')).trim();
+      if (!merchant) continue;
+      let ok = false;
+      if (matchType === 'regex') {
+        try { ok = new RegExp(pattern, 'i').test(merchant); } catch { ok = false; }
+      } else {
+        ok = merchant.toLowerCase().includes(pattern.toLowerCase());
+      }
+      if (!ok) continue;
+      matchCount++;
+      if (sample.length < 5) {
+        sample.push({ id: r.id, merchant, date: r.date, currency: r.currency });
+      }
+      if (matchCount >= CAP) break;
+    }
+
+    res.json({ matches: matchCount, sample });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
