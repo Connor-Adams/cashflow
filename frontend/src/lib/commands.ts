@@ -215,10 +215,16 @@ export const COMMANDS: Command[] = [
     destination: '/money-leaks',
   },
   {
-    id: 'nav-amazon',
-    label: 'Go to Amazon',
+    id: 'nav-receipts',
+    label: 'Go to Receipts',
     category: 'Navigate',
-    destination: '/amazon',
+    destination: '/receipts',
+  },
+  {
+    id: 'nav-amazon',
+    label: 'Go to Amazon orders',
+    category: 'Navigate',
+    destination: '/receipts?vendor=amazon',
   },
   {
     id: 'nav-items',
