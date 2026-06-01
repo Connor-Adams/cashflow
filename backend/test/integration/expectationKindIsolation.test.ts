@@ -79,6 +79,7 @@ before(async () => {
     source: 'recurring_detection',
     name: 'Netflix',
     normalizedName: 'netflix',
+    amount: '15.9900',
     cadence: 'monthly',
     expectedDate: '2026-06-15',
     lastChargeDate: '2026-05-15',
