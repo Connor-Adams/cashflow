@@ -1993,7 +1993,7 @@ interface CounterpartyBackfillStatus {
   running: boolean;
   lastRunAt: string | null;
   nextAllowedAt: string | null;
-  lastSummary: { processed: number; extracted: number; elapsedMs: number } | null;
+  lastSummary: { processed: number; extracted: number; linked: number; elapsedMs: number } | null;
   rateLimitMs: number;
 }
 
