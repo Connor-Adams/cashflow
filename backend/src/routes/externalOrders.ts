@@ -22,6 +22,7 @@ import {
   registerBuiltInReceiptPdfParsers,
 } from '../import/pdf/receipts/registry';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { importUploadLimiter } from './importRateLimit';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -282,6 +283,10 @@ router.post('/import-text', aiSuggestLimiter, async (req, res, next) => {
       source: 'email-paste',
     });
 
+    if (created) {
+      await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+    }
+
     logger.info({
       source: 'email-paste',
       orderId: order.id,
@@ -324,6 +329,9 @@ router.post(
         householdId: auth.household.id,
         source: 'image-upload',
       });
+      if (created) {
+        await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+      }
       logger.info({
         source: 'image-upload',
         orderId: order.id,
@@ -372,6 +380,7 @@ router.post(
 
       let created = 0;
       let duplicates = 0;
+      const createdOrderIds: number[] = [];
       const errors: Array<{ rowIndex: number; message: string }> = [];
 
       for (let i = 0; i < parsed.orders.length; i++) {
@@ -382,14 +391,26 @@ router.post(
             householdId: auth.household.id,
             source: `${vendor}-csv`,
           });
-          if (result.created) created++;
-          else duplicates++;
+          if (result.created) {
+            created++;
+            createdOrderIds.push(result.order.id);
+          } else {
+            duplicates++;
+          }
         } catch (e) {
           errors.push({
             rowIndex: i,
             message: e instanceof Error ? e.message : 'persist failed',
           });
         }
+      }
+
+      if (createdOrderIds.length > 0) {
+        await categorizeAndApplyReceiptItems({
+          householdId: auth.household.id,
+          orderIds: createdOrderIds,
+          limit: 200,
+        });
       }
 
       logger.info({
@@ -467,6 +488,10 @@ router.post(
             householdId: auth.household.id,
           })
         : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
+
+      if (created) {
+        await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+      }
 
       logger.info({
         source: `${parser.id}-pdf`,

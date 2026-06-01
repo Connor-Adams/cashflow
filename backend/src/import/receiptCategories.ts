@@ -1,0 +1,21 @@
+/** Fallback spending categories for non-Amazon receipt line items. */
+export const RECEIPT_CATEGORIES: string[] = [
+  'Groceries',
+  'Produce',
+  'Dairy',
+  'Meat & Seafood',
+  'Bakery',
+  'Beverages',
+  'Alcohol',
+  'Snacks',
+  'Household',
+  'Personal Care',
+  'Health & Pharmacy',
+  'Baby & Kids',
+  'Pet',
+  'Toys',
+  'Electronics',
+  'Clothing',
+  'Home & Garden',
+  'Other',
+]
