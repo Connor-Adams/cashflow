@@ -55,6 +55,40 @@ test('attaches high-confidence link when all items share one inferredCategory', 
   assert.equal(signals[0].fields.merchantCanonical, 'Amazon');
 });
 
+test('emits orderLink (numeric confidence + matchReason) so the persist layer can create a suggested TransactionOrderLink', () => {
+  const signals = runLinkItemsStage({
+    merchantRaw: 'AMZN MKTP US*ABC',
+    merchantClean: 'AMZN MKTP US',
+    amount: -100,
+    date: '2026-05-10',
+    notes: null,
+    sourceReference: null,
+    threshold: 70,
+    candidateOrders: [
+      order({
+        id: 42,
+        total: 100,
+        orderDate: '2026-05-09',
+        items: [
+          { id: 1, title: 'USB Cable', totalPrice: '30', inferredCategory: 'Office', businessUsePercent: '0' },
+        ],
+      }),
+    ],
+  });
+  assert.equal(signals.length, 1);
+  const link = signals[0].orderLink;
+  assert.ok(link, 'item-link signal must carry orderLink for persistence');
+  assert.equal(link.externalOrderId, 42);
+  assert.ok(
+    typeof link.confidence === 'number' && link.confidence >= 70,
+    `orderLink.confidence must be the numeric score (>=threshold), got ${String(link.confidence)}`,
+  );
+  assert.ok(
+    typeof link.matchReason === 'string' && link.matchReason.length > 0,
+    'orderLink.matchReason must be a non-empty string',
+  );
+});
+
 test('uses medium confidence when items have mixed categories; picks highest-totalPrice winner', () => {
   const signals = runLinkItemsStage({
     merchantRaw: 'AMAZON.CA',

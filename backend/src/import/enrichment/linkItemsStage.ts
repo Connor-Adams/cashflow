@@ -111,7 +111,7 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
     sourceReference: input.sourceReference,
   } as Transaction;
 
-  let best: { order: LinkItemsCandidateOrder; confidence: number } | null = null;
+  let best: { order: LinkItemsCandidateOrder; confidence: number; matchReason: string } | null = null;
   for (const order of vendorOrders) {
     const externalOrder: ExternalOrder = {
       total: String(order.total),
@@ -124,7 +124,7 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
     // the threshold under equivalent conditions.
     const adjusted = matched.vendor === 'amazon' ? score.confidence : Math.min(100, score.confidence + 15);
     if (adjusted >= input.threshold && (!best || adjusted > best.confidence)) {
-      best = { order, confidence: adjusted };
+      best = { order, confidence: adjusted, matchReason: score.matchReason };
     }
   }
 
@@ -162,6 +162,11 @@ export function runLinkItemsStage(input: LinkItemsInput): Signal[] {
         autoBusiness,
         linkedExternalOrderId: best.order.id,
         notes: buildNotes(items),
+      },
+      orderLink: {
+        externalOrderId: best.order.id,
+        confidence: best.confidence,
+        matchReason: best.matchReason,
       },
       rationale: `linked to ${matched.canonical} order ${best.order.id} (match confidence ${best.confidence})`,
     },

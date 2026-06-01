@@ -18,6 +18,7 @@ import { loadAllRules } from './applyRules';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { caseInsensitiveLikeOp } from '../ai/chat/_common';
 import { enrichTransaction } from './enrich';
+import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
@@ -335,6 +336,20 @@ export async function runBackfill(
                   })),
                   { transaction: t },
                 );
+              }
+
+              // Persist the item-link match through the canonical
+              // TransactionOrderLink join table (status 'suggested'). Idempotent,
+              // and never resurrects a link the user has already rejected.
+              const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
+              if (orderLink) {
+                await upsertSuggestedOrderLink({
+                  transactionId: txn.id,
+                  externalOrderId: orderLink.externalOrderId,
+                  confidence: orderLink.confidence,
+                  matchReason: orderLink.matchReason,
+                  transaction: t,
+                });
               }
             });
 
