@@ -7,6 +7,8 @@ import {
   TransactionRevision,
   Label,
   TransactionLabel,
+  AiSuggestion,
+  ProviderJobLog,
   sequelize,
 } from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
@@ -51,6 +53,11 @@ import {
   isCounterpartyBackfillRunning,
   runCounterpartyBackfill,
 } from '../import/counterpartyBackfill';
+import {
+  isInteracSyncRunning,
+  runInteracCounterpartySync,
+  INTERAC_SYNC_PROVIDER,
+} from '../integrations/interacCounterparty';
 import {
   parseRevisionChanges,
   RESTORABLE_FIELDS,
@@ -2141,6 +2148,163 @@ router.post('/counterparty/backfill', async (req, res, next) => {
       }
       next(err);
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Interac e-Transfer counterparty sync (Task 5 of Interac feature).
+//
+// Three routes:
+//   POST /interac-counterparty/sync    — run (or dry-run) the sync job
+//   GET  /interac-counterparty/status  — last run + running flag
+//   POST /:id/interac-counterparty/accept — accept a review suggestion
+//
+// The two literal-path routes are registered BEFORE the /:id wildcard block
+// so Express matches them before capturing the path segment as an id.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/transactions/interac-counterparty/sync
+ *
+ * Runs `runInteracCounterpartySync` for the caller's household.
+ * Body: { dryRun?: boolean }
+ *
+ * Returns the InteracSyncResult on success (200).
+ * Returns 409 if a sync is already in flight for this household.
+ */
+router.post('/interac-counterparty/sync', async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    if (isInteracSyncRunning(household.id)) {
+      res.status(409).json({ error: 'Interac sync already running for this household' });
+      return;
+    }
+    const dryRun = Boolean((req.body ?? {}).dryRun);
+    try {
+      const result = await runInteracCounterpartySync({
+        householdId: household.id,
+        userId: user.id,
+        dryRun,
+      });
+      res.json(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.toLowerCase().includes('already running')) {
+        res.status(409).json({ error: msg });
+        return;
+      }
+      next(e);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/transactions/interac-counterparty/status
+ *
+ * Returns:
+ *   { running: boolean, lastRunAt: string|null, lastSummary: object|null }
+ *
+ * `lastSummary` is the JSON-encoded summary from the most recent
+ * ProviderJobLog row, or null when no run has completed yet.
+ */
+router.get('/interac-counterparty/status', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const row = await ProviderJobLog.findOne({
+      where: {
+        provider: INTERAC_SYNC_PROVIDER,
+        symbol: String(household.id),
+      },
+      order: [
+        ['fetchedAt', 'DESC'],
+        ['id', 'DESC'],
+      ],
+    });
+    let lastSummary: unknown = null;
+    if (row?.errorMessage) {
+      try {
+        lastSummary = JSON.parse(row.errorMessage) as unknown;
+      } catch {
+        // Malformed log row — surface null so the UI still renders.
+      }
+    }
+    res.json({
+      running: isInteracSyncRunning(household.id),
+      lastRunAt: row ? row.fetchedAt.toISOString() : null,
+      lastSummary,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/transactions/:id/interac-counterparty/accept
+ *
+ * Accepts a `counterparty_email_match` AiSuggestion for the given transaction.
+ * Body: { suggestionId: number }
+ *
+ * - Sets `counterpartyRaw` to the suggestion's output.name on the transaction.
+ * - If `!output.isSelf`, find-or-creates a Contact and links it.
+ * - Marks the suggestion as 'accepted'.
+ * - Returns { transaction: serialized, suggestionId }.
+ */
+router.post('/:id/interac-counterparty/accept', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const { household } = currentAuth(req);
+    const body = (req.body || {}) as { suggestionId?: unknown };
+    const suggestionId = Number(body.suggestionId);
+    if (!Number.isInteger(suggestionId) || suggestionId <= 0) {
+      res.status(400).json({ error: 'suggestionId must be a positive integer' });
+      return;
+    }
+    const suggestion = await AiSuggestion.findOne({
+      where: {
+        id: suggestionId,
+        householdId: household.id,
+        kind: 'counterparty_email_match',
+        status: 'suggested',
+      },
+    });
+    if (!suggestion) {
+      res.status(404).json({ error: 'Suggestion not found' });
+      return;
+    }
+    const txn = await Transaction.findOne({
+      where: { id, ...visibleTransactionWhere(req) },
+    });
+    if (!txn) {
+      res.status(404).json({ error: 'Transaction not found' });
+      return;
+    }
+    if (suggestion.transactionId !== id) {
+      res.status(400).json({ error: 'Suggestion does not belong to this transaction' });
+      return;
+    }
+    const output = suggestion.output as { name: string; isSelf: boolean };
+    const name = typeof output?.name === 'string' ? output.name.trim() : '';
+    if (!name) {
+      res.status(400).json({ error: 'Suggestion has no usable counterparty name' });
+      return;
+    }
+    txn.counterpartyRaw = name;
+    if (!output.isSelf) {
+      const contact = await findOrCreateContactByName(household.id, name);
+      txn.counterpartyContactId = contact.id;
+    }
+    await txn.save();
+    suggestion.status = 'accepted';
+    await suggestion.save();
+    res.json({ transaction: serializeTransaction(txn), suggestionId });
   } catch (e) {
     next(e);
   }
