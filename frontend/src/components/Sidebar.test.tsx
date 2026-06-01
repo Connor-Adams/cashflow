@@ -83,4 +83,12 @@ describe('Sidebar rail (PR 0)', () => {
       expect(screen.getByRole('link', { name })).toBeInTheDocument()
     }
   })
+
+  it('drops Cashflow/Currency/Partner folded into Reports tabs (PR 4)', () => {
+    renderSidebar()
+    for (const name of ['Cashflow', 'Currency', 'Partner']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+    expect(screen.getByRole('link', { name: 'Reports' })).toBeInTheDocument()
+  })
 })

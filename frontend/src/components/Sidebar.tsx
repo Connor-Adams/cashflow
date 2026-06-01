@@ -11,7 +11,6 @@ import {
   PackageSearch,
   CreditCard,
   ClipboardCheck,
-  Globe,
   Inbox,
   Lightbulb,
   LineChart,
@@ -31,8 +30,6 @@ import {
   Target,
   TrendingUp,
   Upload,
-  Users,
-  Waypoints,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -106,11 +103,8 @@ const navSections: NavSection[] = [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
       { to: '/insights', label: 'Insights', icon: Lightbulb },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
-      { to: '/sankey', label: 'Cashflow', icon: Waypoints },
       { to: '/vault', label: 'Vault', icon: Lock },
-      { to: '/currency', label: 'Currency', icon: Globe },
       { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
-      { to: '/partner', label: 'Partner', icon: Users },
     ],
   },
 ]
