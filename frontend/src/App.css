@@ -1255,29 +1255,6 @@
     background: color-mix(in srgb, var(--bg2) 72%, var(--accent-green) 8%);
   }
 
-  .businessSpotlightHeader {
-    @apply flex flex-wrap items-end justify-between gap-4;
-  }
-
-  .businessSpotlightHeader h2 {
-    @apply mb-1 mt-0;
-  }
-
-  .businessSpotlightTotals {
-    @apply text-right;
-    min-width: 0;
-  }
-
-  .businessSpotlightTotalLabel {
-    @apply m-0 text-[0.72rem] font-semibold uppercase tracking-normal;
-    color: var(--muted-foreground);
-  }
-
-  .businessSpotlightTotalValue {
-    @apply mt-0.5 text-lg font-semibold tracking-tight tabular-nums;
-    color: var(--foreground);
-  }
-
   .businessSpotlightGrid {
     @apply mt-4 grid gap-4;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1305,25 +1282,6 @@
 
   .businessFocusValue {
     @apply mb-1 mt-1 text-[1.7rem] font-semibold tracking-tight;
-  }
-
-  .businessFocusShare {
-    @apply m-0 text-sm;
-    color: var(--muted-foreground);
-  }
-
-  .businessFocusMetrics {
-    @apply mt-4 grid gap-3;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .businessFocusMetrics dt {
-    @apply mb-1 text-[0.68rem] font-semibold uppercase tracking-normal;
-    color: var(--muted-foreground);
-  }
-
-  .businessFocusMetrics dd {
-    @apply m-0 text-base font-semibold;
   }
 
   .businessSharePanel {
@@ -1915,14 +1873,6 @@
     grid-column: span 1;
   }
 
-  .businessSpotlightTotals {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .businessFocusMetrics {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* SettingsTabLayout — sidebar + outlet layout */
