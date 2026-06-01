@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   scoreReceiptMatch,
   txnMatchesVendor,
+  decideAutoAccept,
   type CandidatePayment,
 } from '../src/import/matchReceiptToTransactions';
 import type { ExternalOrder } from '../src/models/ExternalOrder';
@@ -145,4 +146,32 @@ test('scoreReceiptMatch: last4 with no match in notes does not boost', () => {
   // 50 + 25 + 15 + 0 (last4 9999 != 3114) = 90
   const { confidence } = scoreReceiptMatch(txn, order, pay(947.04, '3114'));
   assert.equal(confidence, 90);
+});
+
+test('decideAutoAccept: single candidate at/above threshold accepts', () => {
+  assert.equal(decideAutoAccept([85]), true);
+  assert.equal(decideAutoAccept([90]), true);
+  assert.equal(decideAutoAccept([100]), true);
+});
+
+test('decideAutoAccept: single candidate below threshold stays suggested', () => {
+  assert.equal(decideAutoAccept([84]), false);
+  assert.equal(decideAutoAccept([70]), false);
+});
+
+test('decideAutoAccept: two equal high candidates are ambiguous → false', () => {
+  assert.equal(decideAutoAccept([90, 90]), false);
+});
+
+test('decideAutoAccept: clear margin over runner-up accepts', () => {
+  assert.equal(decideAutoAccept([90, 75]), true); // margin 15 > 10
+});
+
+test('decideAutoAccept: thin margin over runner-up stays suggested', () => {
+  assert.equal(decideAutoAccept([90, 82]), false); // margin 8, not > 10
+  assert.equal(decideAutoAccept([90, 80]), false); // margin 10, not > 10 (strict)
+});
+
+test('decideAutoAccept: empty input → false', () => {
+  assert.equal(decideAutoAccept([]), false);
 });

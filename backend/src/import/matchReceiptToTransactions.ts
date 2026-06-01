@@ -21,6 +21,22 @@ import {
 
 const MATCH_CONFIDENCE_THRESHOLD = 70;
 const DATE_WINDOW_DAYS = 7;
+const AUTO_ACCEPT_THRESHOLD = 85; // exact-amount match baseline is 90 (50 amount + 25 date + 15 vendor)
+const AUTO_ACCEPT_MARGIN = 10;    // best must lead runner-up by MORE than this to be unambiguous
+
+/**
+ * Decide whether the top-scored candidate for a single payment is safe to
+ * auto-accept: high enough confidence AND unambiguous (sole qualifier, or a
+ * clear margin over the runner-up). `sortedConfidences` is the per-payment
+ * candidate confidences, already filtered to >= MATCH_CONFIDENCE_THRESHOLD and
+ * sorted descending. Pure — no DB, no model coupling.
+ */
+export function decideAutoAccept(sortedConfidences: number[]): boolean {
+  if (sortedConfidences.length === 0) return false;
+  if (sortedConfidences[0] < AUTO_ACCEPT_THRESHOLD) return false;
+  if (sortedConfidences.length === 1) return true;
+  return sortedConfidences[0] - sortedConfidences[1] > AUTO_ACCEPT_MARGIN;
+}
 
 export type CandidatePayment = {
   paymentLast4: string | null;
@@ -187,6 +203,7 @@ export async function matchReceiptOrderToTransactions(args: {
 
     if (scored.length === 0) continue;
     const best = scored[0];
+    const autoAccept = decideAutoAccept(scored.map((s) => s.confidence));
 
     const [link, isNew] = await TransactionOrderLink.findOrCreate({
       where: { transactionId: best.txn.id, externalOrderId: order.id },
@@ -195,7 +212,7 @@ export async function matchReceiptOrderToTransactions(args: {
         externalOrderId: order.id,
         confidence: String(best.confidence),
         matchReason: best.matchReason,
-        status: 'suggested',
+        status: autoAccept ? 'accepted' : 'suggested',
         linkedAmount: String(payment.amount),
       },
     });
@@ -207,6 +224,7 @@ export async function matchReceiptOrderToTransactions(args: {
         confidence: String(best.confidence),
         matchReason: best.matchReason,
         linkedAmount: String(payment.amount),
+        ...(autoAccept ? { status: 'accepted' as const } : {}),
       });
       updated += 1;
     }
