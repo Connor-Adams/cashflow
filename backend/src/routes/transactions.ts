@@ -59,6 +59,7 @@ import {
 } from '../util/transactionRevisions';
 import { isTransactionStatus } from '../transactions/types';
 import { streamCsvExport } from '../services/transactionsExport';
+import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 
 const router = Router();
 
@@ -2329,13 +2330,13 @@ router.post('/:id/revisions/:rid/restore', aiSuggestLimiter, async (req, res, ne
  *
  *  - `{ contactId: <existing> }` — link to an existing Contact owned by
  *    the user's household. 404 if the Contact does not belong here.
- *  - `{}` (no contactId) — auto-create a Contact from `counterparty_raw`
- *    if no Contact in this household already has that name; otherwise
- *    reuse the existing match. Requires `counterparty_raw` to be set.
+ *  - `{}` (no contactId) — find-or-create a Contact from `counterparty_raw`
+ *    by its normalized name (reusing an existing match if present).
+ *    Requires `counterparty_raw` to be set.
  *
- * Contact dedup key is `(householdId, name)`. The match is case-sensitive
- * and exact-string to keep promotion deterministic; a future "suggest
- * promote" job (#373) will handle fuzzy/normalized deduplication.
+ * Contact dedup key is `(householdId, normalized_name)` (lowercase +
+ * whitespace-collapsed) via `findOrCreateContactByName`, so `'Jane Doe'`
+ * and `'JANE DOE'` collapse to one Contact.
  */
 router.post('/:id/counterparty/promote', async (req, res, next) => {
   try {
@@ -2375,16 +2376,7 @@ router.post('/:id/counterparty/promote', async (req, res, next) => {
         });
         return;
       }
-      contact = await Contact.findOne({
-        where: { householdId: household.id, name: raw },
-      });
-      if (!contact) {
-        contact = await Contact.create({
-          householdId: household.id,
-          name: raw,
-          notes: null,
-        });
-      }
+      contact = await findOrCreateContactByName(household.id, raw);
     }
     txn.counterpartyContactId = contact.id;
     await txn.save();
@@ -2497,16 +2489,7 @@ router.post('/counterparty/promote-bulk', async (req, res, next) => {
           return null;
         }
         const rawName = (newest.counterpartyRaw ?? '').trim();
-        contact = await Contact.findOne({
-          where: { householdId: household.id, name: rawName },
-          transaction: t,
-        });
-        if (!contact) {
-          contact = await Contact.create(
-            { householdId: household.id, name: rawName, notes: null },
-            { transaction: t },
-          );
-        }
+        contact = await findOrCreateContactByName(household.id, rawName, { transaction: t });
       }
 
       // Link every matching txn. Iterate so per-row save triggers

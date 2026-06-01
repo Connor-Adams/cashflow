@@ -19,7 +19,7 @@ test('out-of-scope account types always return null', () => {
 test('in-scope: Interac e-transfer FROM with full INTERAC prefix', () => {
   for (const t of IN_SCOPE) {
     assert.equal(
-      extractCounterparty('INTERAC E-TRANSFER FROM JANE DOE', t),
+      extractCounterparty('INTERAC E-TRANSFER FROM JANE DOE', t)?.name,
       'JANE DOE',
     );
   }
@@ -27,110 +27,110 @@ test('in-scope: Interac e-transfer FROM with full INTERAC prefix', () => {
 
 test('in-scope: Interac e-transfer with E-TFR abbrev', () => {
   assert.equal(
-    extractCounterparty('INTERAC E-TFR FROM JANE DOE', 'checking'),
+    extractCounterparty('INTERAC E-TFR FROM JANE DOE', 'checking')?.name,
     'JANE DOE',
   );
   assert.equal(
-    extractCounterparty('INTERAC E-TFR TO MIKE SMITH', 'savings'),
+    extractCounterparty('INTERAC E-TFR TO MIKE SMITH', 'savings')?.name,
     'MIKE SMITH',
   );
 });
 
 test('in-scope: bare E-TRANSFER without INTERAC prefix', () => {
   assert.equal(
-    extractCounterparty('E-TRANSFER FROM JANE DOE', 'checking'),
+    extractCounterparty('E-TRANSFER FROM JANE DOE', 'checking')?.name,
     'JANE DOE',
   );
   assert.equal(
-    extractCounterparty('E-TRANSFER TO MIKE SMITH', 'checking'),
+    extractCounterparty('E-TRANSFER TO MIKE SMITH', 'checking')?.name,
     'MIKE SMITH',
   );
 });
 
 test('in-scope: SEND/RECV e-transfer variants', () => {
   assert.equal(
-    extractCounterparty('SEND E-TFR JOHN SMITH', 'checking'),
+    extractCounterparty('SEND E-TFR JOHN SMITH', 'checking')?.name,
     'JOHN SMITH',
   );
   assert.equal(
-    extractCounterparty('RECV E-TFR JANE DOE', 'checking'),
+    extractCounterparty('RECV E-TFR JANE DOE', 'checking')?.name,
     'JANE DOE',
   );
   assert.equal(
-    extractCounterparty('RECEIVED E-TFR JANE DOE', 'checking'),
+    extractCounterparty('RECEIVED E-TFR JANE DOE', 'checking')?.name,
     'JANE DOE',
   );
 });
 
 test('in-scope: Zelle FROM/TO', () => {
   assert.equal(
-    extractCounterparty('ZELLE FROM SARAH KIM', 'checking'),
+    extractCounterparty('ZELLE FROM SARAH KIM', 'checking')?.name,
     'SARAH KIM',
   );
   assert.equal(
-    extractCounterparty('ZELLE TO BOB JONES', 'checking'),
+    extractCounterparty('ZELLE TO BOB JONES', 'checking')?.name,
     'BOB JONES',
   );
 });
 
 test('in-scope: Venmo payment/cashout', () => {
   assert.equal(
-    extractCounterparty('VENMO PAYMENT FROM SARAH', 'checking'),
+    extractCounterparty('VENMO PAYMENT FROM SARAH', 'checking')?.name,
     'SARAH',
   );
   assert.equal(
-    extractCounterparty('VENMO CASHOUT TO BOB', 'checking'),
+    extractCounterparty('VENMO CASHOUT TO BOB', 'checking')?.name,
     'BOB',
   );
 });
 
 test('in-scope: Cash App asterisk form', () => {
   assert.equal(
-    extractCounterparty('CASH APP*JANE DOE', 'checking'),
+    extractCounterparty('CASH APP*JANE DOE', 'checking')?.name,
     'JANE DOE',
   );
   assert.equal(
-    extractCounterparty('CASHAPP*MIKE', 'checking'),
+    extractCounterparty('CASHAPP*MIKE', 'checking')?.name,
     'MIKE',
   );
 });
 
 test('in-scope: Cash App with FROM/TO', () => {
   assert.equal(
-    extractCounterparty('CASH APP FROM JANE DOE', 'checking'),
+    extractCounterparty('CASH APP FROM JANE DOE', 'checking')?.name,
     'JANE DOE',
   );
 });
 
 test('in-scope: payroll / direct deposit captures payer', () => {
   assert.equal(
-    extractCounterparty('PAYROLL DEPOSIT ACME CORP', 'checking'),
+    extractCounterparty('PAYROLL DEPOSIT ACME CORP', 'checking')?.name,
     'ACME CORP',
   );
   assert.equal(
-    extractCounterparty('DIRECT DEPOSIT ACME PAYROLL', 'checking'),
+    extractCounterparty('DIRECT DEPOSIT ACME PAYROLL', 'checking')?.name,
     'ACME PAYROLL',
   );
   assert.equal(
-    extractCounterparty('DIRECT DEP ACME INC', 'checking'),
+    extractCounterparty('DIRECT DEP ACME INC', 'checking')?.name,
     'ACME INC',
   );
 });
 
 test('in-scope: trailing REF#/numeric noise is stripped', () => {
   assert.equal(
-    extractCounterparty('INTERAC E-TFR FROM JANE DOE REF# ABC123', 'checking'),
+    extractCounterparty('INTERAC E-TFR FROM JANE DOE REF# ABC123', 'checking')?.name,
     'JANE DOE',
   );
   assert.equal(
-    extractCounterparty('INTERAC E-TFR FROM JANE DOE 12345', 'checking'),
+    extractCounterparty('INTERAC E-TFR FROM JANE DOE 12345', 'checking')?.name,
     'JANE DOE',
   );
 });
 
 test('in-scope: whitespace collapses and trims', () => {
   assert.equal(
-    extractCounterparty('INTERAC E-TFR FROM   JANE   DOE  ', 'checking'),
+    extractCounterparty('INTERAC E-TFR FROM   JANE   DOE  ', 'checking')?.name,
     'JANE DOE',
   );
 });
@@ -150,25 +150,25 @@ test('in-scope: empty / whitespace input returns null', () => {
 
 test('in-scope: mixed case input still matches', () => {
   assert.equal(
-    extractCounterparty('Interac e-Transfer from Jane Doe', 'checking'),
+    extractCounterparty('Interac e-Transfer from Jane Doe', 'checking')?.name,
     'Jane Doe',
   );
 });
 
 test('in-scope: very short single-word name still captured', () => {
   assert.equal(
-    extractCounterparty('INTERAC E-TFR FROM SU', 'checking'),
+    extractCounterparty('INTERAC E-TFR FROM SU', 'checking')?.name,
     'SU',
   );
 });
 
 test('in-scope: name with hyphen/apostrophe preserved', () => {
   assert.equal(
-    extractCounterparty("INTERAC E-TFR FROM SEAN O'BRIEN", 'checking'),
+    extractCounterparty("INTERAC E-TFR FROM SEAN O'BRIEN", 'checking')?.name,
     "SEAN O'BRIEN",
   );
   assert.equal(
-    extractCounterparty('INTERAC E-TFR FROM MARY-JANE WATSON', 'checking'),
+    extractCounterparty('INTERAC E-TFR FROM MARY-JANE WATSON', 'checking')?.name,
     'MARY-JANE WATSON',
   );
 });

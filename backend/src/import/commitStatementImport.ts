@@ -22,6 +22,7 @@ import {
   serializeFlags,
 } from './computeImportConfidence';
 import { extractCounterparty } from './extractCounterparty';
+import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import type { AccountType } from '@cashflow/shared';
 import {
   enrichmentRecurringMinSupport,
@@ -325,9 +326,14 @@ export async function commitStatementImport(
         amount: row.amount,
       });
 
-      const counterpartyRaw = extractCounterparty(
+      const _cp = extractCounterparty(
         row.merchantRaw,
         account.accountType as AccountType,
+      );
+      const counterpartyContactId = await resolveCounterpartyContact(
+        account.householdId ?? null,
+        _cp,
+        { transaction: t },
       );
       const txn = Transaction.build({
         accountId: account.id,
@@ -337,8 +343,8 @@ export async function commitStatementImport(
         ownershipType:
           f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
-        counterpartyRaw,
-        counterpartyContactId: null,
+        counterpartyRaw: _cp?.name ?? null,
+        counterpartyContactId,
         importBatch: preview.importBatch,
         date: row.date,
         merchantRaw: row.merchantRaw,
