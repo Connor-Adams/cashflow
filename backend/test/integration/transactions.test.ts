@@ -537,6 +537,37 @@ test('PATCH /:id: ownershipType=me clears ownershipContactId to null (even when 
   assert.equal(res.body.ownershipContactId, null, 'contactId must be auto-nulled');
 });
 
+test('PATCH /:id: counterpartyContactId links a household contact', async () => {
+  const id = await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-01-05', amount: -50,
+  });
+  const res = await agentA.patch(`/api/transactions/${id}`).send({
+    counterpartyContactId: contactAId,
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.counterpartyContactId, contactAId);
+});
+
+test('PATCH /:id: counterpartyContactId=null clears the link', async () => {
+  const id = await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-01-05', amount: -50,
+  });
+  await agentA.patch(`/api/transactions/${id}`).send({ counterpartyContactId: contactAId });
+  const res = await agentA.patch(`/api/transactions/${id}`).send({ counterpartyContactId: null });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.counterpartyContactId, null);
+});
+
+test('PATCH /:id: cross-household counterpartyContactId throws 400', async () => {
+  const id = await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-01-05', amount: -50,
+  });
+  const res = await agentA.patch(`/api/transactions/${id}`).send({
+    counterpartyContactId: contactBId,
+  });
+  assert.equal(res.status, 400);
+});
+
 test('PATCH /:id: reviewFlag=false sets reviewedAt to a non-null timestamp', async () => {
   const id = await createTxn({
     householdId: householdAId,
