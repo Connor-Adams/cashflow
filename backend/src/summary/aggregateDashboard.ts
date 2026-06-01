@@ -280,6 +280,8 @@ export function aggregateDashboard(
       metrics.totalPayments += amount;
       merchantSummary.totalPayments += amount;
       accountSummary.totalPayments += amount;
+    // NOTE: income folds into totalCredits here (headline/merchant/account).
+    // Only the per-business aggregate below splits income out — see that block.
     } else if (positiveBucket === 'credit') {
       metrics.totalCredits += amount;
       merchantSummary.totalCredits += amount;
@@ -424,6 +426,14 @@ export function aggregateDashboard(
           netSpend: 0,
           income: 0,
         };
+        // Income (txnType='income') is peeled into its own `income` bucket so
+        // the dashboard can show business/personal Income and Spend separately;
+        // netSpend (= totalSpend - totalCredits) is Spend and excludes income.
+        // This split is intentionally tile-scoped: the metrics / merchant /
+        // account / category aggregates above still fold income into credits.
+        // Negative-amount income (a reversal) is non-spend (income ∈
+        // NON_SPEND_TXN_TYPES) so it hits neither branch and contributes to
+        // nothing — correct: an income reversal is money-movement, not spend.
         if (part < 0 && !nonSpend) {
           business.totalSpend += -part;
         } else if (part > 0) {
