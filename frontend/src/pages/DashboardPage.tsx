@@ -37,6 +37,7 @@ import { useInsightsSeen } from '@/hooks/useInsightsSeen'
 import { useAuth } from '@/lib/useAuth'
 import { formatMoney } from '../lib/formatMoney'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
+import { businessIncomeSpend } from '../lib/businessIncomeSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import {
@@ -89,6 +90,7 @@ type BusinessReportRow = {
   totalSpend: number
   totalCredits: number
   netSpend: number
+  income: number
 }
 
 type CategoryReportRow = {
@@ -539,70 +541,10 @@ export function DashboardPage() {
     return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
   }, [data?.monthlyByCurrency, currency])
 
-  const businessReportData = useMemo(() => {
-    const rows = data?.netSpendByBusiness ?? []
-    const byFlag = new Map<
-      string,
-      {
-        label: string
-        tone: 'business' | 'personal'
-        totalSpend: number
-        totalCredits: number
-        netSpend: number
-      }
-    >()
-    for (const row of rows) {
-      if (currency && row.currency !== currency) continue
-      const key = row.business ? 'Business' : 'Personal'
-      const existing = byFlag.get(key) ?? {
-        label: key,
-        tone: row.business ? 'business' : 'personal',
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-      existing.totalSpend += row.totalSpend
-      existing.totalCredits += row.totalCredits
-      existing.netSpend += row.netSpend
-      byFlag.set(key, existing)
-    }
-    return Array.from(byFlag.values()).sort((a, b) => b.netSpend - a.netSpend)
-  }, [data?.netSpendByBusiness, currency])
-
-  const businessSpotlight = useMemo(() => {
-    const business =
-      businessReportData.find((row) => row.tone === 'business') ?? {
-        label: 'Business',
-        tone: 'business' as const,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-    const personal =
-      businessReportData.find((row) => row.tone === 'personal') ?? {
-        label: 'Personal',
-        tone: 'personal' as const,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-    const totalNetSpend = business.netSpend + personal.netSpend
-    const totalGrossSpend = business.totalSpend + personal.totalSpend
-    const totalCredits = business.totalCredits + personal.totalCredits
-    const safeTotal = totalNetSpend > 0 ? totalNetSpend : 0
-    const businessShare = safeTotal === 0 ? 0 : (business.netSpend / safeTotal) * 100
-    const personalShare = safeTotal === 0 ? 0 : (personal.netSpend / safeTotal) * 100
-
-    return {
-      business,
-      personal,
-      totalNetSpend,
-      totalGrossSpend,
-      totalCredits,
-      businessShare,
-      personalShare,
-    }
-  }, [businessReportData])
+  const bizSplit = useMemo(
+    () => businessIncomeSpend(data?.netSpendByBusiness ?? [], currency),
+    [data?.netSpendByBusiness, currency]
+  )
 
   const merchantReportData = useMemo(
     () => rankByNetSpend(data?.merchantSummaries ?? [], currency),
@@ -1206,96 +1148,93 @@ export function DashboardPage() {
         <CfoBriefingTile />
 
         <BentoTile
-          span={8}
+          span={4}
           rows={2}
           aria-busy={loading}
-          label="Business vs personal"
-          description="A direct split of current net spend so business charges do not get lost in the overall totals."
-          actions={
-            <div className="businessSpotlightTotals">
-              <p className="businessSpotlightTotalLabel">Combined net spend</p>
-              <p className="businessSpotlightTotalValue">
-                {formatDashboardAmount(businessSpotlight.totalNetSpend)}
-              </p>
-            </div>
-          }
+          label="Income · business vs personal"
+          description="Earned income split by business vs personal."
         >
           <div className="businessSpotlightGrid">
-            {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
-              const share =
-                businessSpotlight.totalNetSpend > 0
-                  ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
-                  : 0
-              return (
-                <article
-                  key={row.label}
-                  className={`businessFocusCard businessFocusCard--${row.tone}`}
-                >
-                  <p className="businessFocusLabel">{row.label}</p>
-                  <p className="businessFocusValue">
-                    {formatDashboardAmount(row.netSpend)}
-                  </p>
-                  <p className="businessFocusShare">
-                    {businessSpotlight.totalNetSpend > 0
-                      ? `${share.toFixed(0)}% of current net spend`
-                      : 'No net spend in current filters'}
-                  </p>
-                  <dl className="businessFocusMetrics">
-                    <div>
-                      <dt>Gross spend</dt>
-                      <dd>{formatDashboardAmount(row.totalSpend)}</dd>
-                    </div>
-                    <div>
-                      <dt>Credits</dt>
-                      <dd>{formatDashboardAmount(row.totalCredits)}</dd>
-                    </div>
-                  </dl>
-                </article>
-              )
-            })}
+            {([
+              ['Business', bizSplit.income.business, 'business'] as const,
+              ['Personal', bizSplit.income.personal, 'personal'] as const,
+            ]).map(([label, value, tone]) => (
+              <article key={label} className={`businessFocusCard businessFocusCard--${tone}`}>
+                <p className="businessFocusLabel">{label}</p>
+                <p className="businessFocusValue">{formatDashboardAmount(value)}</p>
+              </article>
+            ))}
           </div>
-
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              {/* Override the .businessShareLabels muted color: these split
-                  percentages are load-bearing context for the bar below and
-                  read as ghosted at --muted-foreground. Bumping to --foreground
-                  + semibold restores them as primary labels. */}
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--foreground)' }}
-              >
-                Business {businessSpotlight.businessShare.toFixed(0)}%
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Business {bizSplit.incomeShare.toFixed(0)}%
               </span>
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--foreground)' }}
-              >
-                Personal {businessSpotlight.personalShare.toFixed(0)}%
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Personal {(100 - bizSplit.incomeShare).toFixed(0)}%
               </span>
             </div>
             <div
               className="businessShareBar"
               role="img"
-              aria-label={`Business ${businessSpotlight.businessShare.toFixed(
-                0
-              )} percent, personal ${businessSpotlight.personalShare.toFixed(
-                0
-              )} percent of net spend`}
+              aria-label={`Business ${bizSplit.incomeShare.toFixed(0)} percent of income`}
             >
               <span
                 className="businessShareFill businessShareFill--business"
-                style={{ width: `${businessSpotlight.businessShare}%` }}
+                style={{ width: `${bizSplit.incomeShare}%` }}
               />
               <span
                 className="businessShareFill businessShareFill--personal"
-                style={{ width: `${businessSpotlight.personalShare}%` }}
+                style={{ width: `${100 - bizSplit.incomeShare}%` }}
               />
             </div>
-            <p className="muted businessShareCaption">
-              Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
-              Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
-            </p>
+            {bizSplit.income.business === 0 && bizSplit.income.personal === 0 && (
+              <p className="muted businessShareCaption">No income in current filters.</p>
+            )}
+          </div>
+        </BentoTile>
+
+        <BentoTile
+          span={4}
+          rows={2}
+          aria-busy={loading}
+          label="Spend · business vs personal"
+          description="Spend (gross outflows net of refunds) split by business vs personal."
+        >
+          <div className="businessSpotlightGrid">
+            {([
+              ['Business', bizSplit.spend.business, 'business'] as const,
+              ['Personal', bizSplit.spend.personal, 'personal'] as const,
+            ]).map(([label, value, tone]) => (
+              <article key={label} className={`businessFocusCard businessFocusCard--${tone}`}>
+                <p className="businessFocusLabel">{label}</p>
+                <p className="businessFocusValue">{formatDashboardAmount(value)}</p>
+              </article>
+            ))}
+          </div>
+          <div className="businessSharePanel">
+            <div className="businessShareLabels" aria-hidden="true">
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Business {bizSplit.spendShare.toFixed(0)}%
+              </span>
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Personal {(100 - bizSplit.spendShare).toFixed(0)}%
+              </span>
+            </div>
+            <div
+              className="businessShareBar"
+              role="img"
+              aria-label={`Business ${bizSplit.spendShare.toFixed(0)} percent of spend`}
+            >
+              <span
+                className="businessShareFill businessShareFill--business"
+                style={{ width: `${bizSplit.spendShare}%` }}
+              />
+              <span
+                className="businessShareFill businessShareFill--personal"
+                style={{ width: `${100 - bizSplit.spendShare}%` }}
+              />
+            </div>
           </div>
         </BentoTile>
 
