@@ -125,6 +125,8 @@ const ACTIONS_BY_SOURCE: Record<ReviewItemSource, SourceAction[]> = {
  *   chat-proposal:{id}            → /api/chat/proposals/{id}/{apply|reject}
  *   ai-review:{runId}:{itemId}    → /api/ai/reviews/{runId}/items/{itemId}/{accept|dismiss}
  *   cfo-briefing:{bId}:{itemId}   → /api/cfo/briefings/{bId}/items/{itemId}/{resolve|dismiss}
+ *
+ * counterparty_email_match items use a custom endpoint — see writeEmailMatchEndpoint.
  */
 function writeEndpoint(item: ReviewItem, kind: ActionKind): string | null {
   const parts = item.id.split(':')
@@ -202,9 +204,36 @@ function ActionItemCardBody({ item }: { item: ReviewItem }) {
   )
 }
 
+function CounterpartyEmailMatchCardBody({ item }: { item: ReviewItem }) {
+  const p = item.payload
+  const output = p.output as { name?: string; isSelf?: boolean } | null | undefined
+  const name = output?.name ?? ''
+  const isSelf = output?.isSelf ?? false
+  const summary =
+    isSelf
+      ? 'Interac transfer identified as sent to yourself'
+      : `Link ${name} to this transfer?`
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <strong>{summary}</strong>
+        <Badge variant="outline">counterparty email match</Badge>
+      </div>
+      {item.subject_type && item.subject_id ? (
+        <p className="muted mb-0 text-xs">
+          {item.subject_type} #{item.subject_id}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function AiSuggestionCardBody({ item }: { item: ReviewItem }) {
   const p = item.payload
   const kind = typeof p.kind === 'string' ? p.kind : 'suggestion'
+  if (kind === 'counterparty_email_match') {
+    return <CounterpartyEmailMatchCardBody item={item} />
+  }
   const output = p.output
   let headline = ''
   if (output && typeof output === 'object' && !Array.isArray(output)) {
@@ -389,10 +418,36 @@ export function UnifiedInboxPage() {
 
   const onAction = useCallback(
     async (item: ReviewItem, kind: ActionKind) => {
-      const path = writeEndpoint(item, kind)
-      if (!path) return
       setBusyId(item.id)
       try {
+        // counterparty_email_match uses bespoke endpoints:
+        //   accept → POST /api/transactions/:txnId/interac-counterparty/accept
+        //   reject → POST /api/ai/suggestions/:id/reject  (standard)
+        if (
+          item.source === 'ai-suggestion' &&
+          typeof item.payload.kind === 'string' &&
+          item.payload.kind === 'counterparty_email_match'
+        ) {
+          const nativeId = item.id.split(':')[1]
+          if (kind === 'apply') {
+            const txnId = item.subject_id
+            if (!txnId || !nativeId) return
+            await postJson(
+              `/api/transactions/${encodeURIComponent(txnId)}/interac-counterparty/accept`,
+              { suggestionId: Number(nativeId) },
+            )
+            await load()
+            return
+          }
+          if (kind === 'reject') {
+            if (!nativeId) return
+            await postJson(`/api/ai/suggestions/${encodeURIComponent(nativeId)}/reject`)
+            await load()
+            return
+          }
+        }
+        const path = writeEndpoint(item, kind)
+        if (!path) return
         await postJson(path)
         await load()
       } catch (e) {

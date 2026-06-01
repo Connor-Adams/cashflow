@@ -39,6 +39,7 @@ import {
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import { logger } from '../observability/logger';
+import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 
 /**
@@ -577,6 +578,16 @@ export async function scanInbox(
 
   integ.set({ lastScanAt: new Date() });
   await integ.save();
+
+  // Best-effort: after the receipt pass, refresh e-transfer counterparty names
+  // from Interac emails. Never let it fail the scan.
+  if (opts.householdId != null) {
+    try {
+      await runInteracCounterpartySync({ householdId: opts.householdId, userId: opts.userId });
+    } catch (e) {
+      logger.warn({ err: e, module: 'interac_sync' }, 'post_scan_interac_sync_failed');
+    }
+  }
 
   return {
     scannedMessages: summaries.length,

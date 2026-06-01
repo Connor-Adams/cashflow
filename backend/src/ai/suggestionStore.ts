@@ -31,7 +31,8 @@ export async function createTrackedSuggestion(params: {
     | 'receipt_extract'
     | 'financial_insight'
     | 'rule_proposal'
-    | 'counterparty_promotion';
+    | 'counterparty_promotion'
+    | 'counterparty_email_match';
   inputSnapshot: unknown;
   output: unknown;
   model?: string | null;
