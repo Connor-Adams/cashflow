@@ -118,12 +118,18 @@ test('returns projection for held CAD security with monthly dividends', async ()
     currency: 'CAD',
   });
 
-  // 12 monthly dividends of $0.10/share each — all within the last 12 months
-  const months = [
-    '2025-06-01', '2025-07-01', '2025-08-01', '2025-09-01',
-    '2025-10-01', '2025-11-01', '2025-12-01', '2026-01-01',
-    '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01',
-  ];
+  // 12 monthly dividends of $0.10/share each, anchored to the run date so they
+  // always fall inside the endpoint's trailing-365-day window (inferCadence:
+  // date >= asOf-365d && date <= asOf). Hardcoded dates rotted — the earliest
+  // aged out of the window once "now" crossed its first-of-month, dropping the
+  // sum to 11 × $0.10. Offsets 0..11 (this month back through 11 months ago)
+  // keep all 12 comfortably in-window for any run date.
+  const now = new Date();
+  const months = Array.from({ length: 12 }, (_, i) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
+      .toISOString()
+      .slice(0, 10),
+  );
   for (const date of months) {
     await seedDividend(models, { securityId: vcn.id, exDividendDate: date, amount: 0.10, currency: 'CAD' });
   }
