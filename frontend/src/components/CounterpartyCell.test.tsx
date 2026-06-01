@@ -42,7 +42,7 @@ describe('CounterpartyCell', () => {
       <CounterpartyCell value={null} contacts={contacts} onChange={onChange}
         onCreateContact={onCreateContact} onError={vi.fn()} txnId={1} />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /add counterparty for transaction 1/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add new counterparty contact for transaction 1/i }));
     fireEvent.change(screen.getByLabelText(/new contact name/i), { target: { value: 'Zoe' } });
     fireEvent.click(screen.getByRole('button', { name: /^create$/i }));
     await waitFor(() => expect(onCreateContact).toHaveBeenCalledWith('Zoe'));

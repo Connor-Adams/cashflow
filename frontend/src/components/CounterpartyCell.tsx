@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,6 @@ export type CounterpartyCellProps = {
 export function CounterpartyCell({
   value, contacts, onChange, onCreateContact, onError, txnId,
 }: CounterpartyCellProps) {
-  const selectId = useId();
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -29,8 +28,8 @@ export function CounterpartyCell({
     if (!name) return;
     setCreating(true);
     try {
-      const c = await onCreateContact(name);
-      onChange(c.id);
+      const contact = await onCreateContact(name);
+      onChange(contact.id);
       setCreateOpen(false);
       setNewName('');
     } catch (e) {
@@ -42,12 +41,8 @@ export function CounterpartyCell({
 
   return (
     <div className="flex items-center gap-1">
-      {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
-      <label htmlFor={selectId} className="sr-only">
-        {`Counterparty for transaction ${txnId}`}
-      </label>
       <NativeSelect
-        id={selectId}
+        aria-label={`Counterparty for transaction ${txnId}`}
         value={value != null ? String(value) : ''}
         onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
         className="text-xs"
@@ -59,10 +54,10 @@ export function CounterpartyCell({
       </NativeSelect>
       <Button
         type="button" size="sm" variant="outline"
+        aria-label={`Add new counterparty contact for transaction ${txnId}`}
         onClick={() => setCreateOpen(true)}
       >
-        <span className="sr-only">{`Add counterparty for transaction ${txnId}`}</span>
-        <span aria-hidden="true">+ New</span>
+        + New
       </Button>
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogHeader><DialogTitle>New counterparty contact</DialogTitle></DialogHeader>
