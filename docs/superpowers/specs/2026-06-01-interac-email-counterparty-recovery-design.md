@@ -51,7 +51,7 @@ Reuses `gmail.ts`: `listMessageIds({ query: 'from:payments.interac.ca after:<sin
 - **review:** insert an `ai_suggestions` row `kind='counterparty_email_match'` carrying `{ txnId, name, ref, emailMessageId, isSelf }`. Accepting it (existing inbox accept path) writes the same as the auto path.
 - Provenance/idempotency: store the matched `emailMessageId` (in the suggestion, and for auto matches in the txn's `notes` or a provenance field — exact column decided in planning); re-runs skip txns that already have `counterparty_contact_id`.
 
-### 5. `runInteracCounterpartySync({ householdId, userId, dryRun }) → { processed, autoApplied, suggested, selfSkipped, elapsedMs }`
+### 5. `runInteracCounterpartySync({ householdId, userId, dryRun }) → { processed, autoApplied, suggested, selfApplied, elapsedMs, dryRun }`
 Orchestrator. Loads the user's `UserEmailIntegration` (provider `google`), refreshes the token, fetches the account owner's name, calls fetch → match → apply. Reuses the per-household in-flight lock + `ProviderJobLog` summary pattern from `counterpartyBackfill.ts`. `dryRun` computes matches without writing. File: `backend/src/integrations/interacCounterparty.ts`.
 
 ### 6. Triggers
