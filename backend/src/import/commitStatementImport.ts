@@ -325,10 +325,11 @@ export async function commitStatementImport(
         amount: row.amount,
       });
 
-      const counterpartyRaw = extractCounterparty(
+      const _cp = extractCounterparty(
         row.merchantRaw,
         account.accountType as AccountType,
       );
+      const counterpartyRaw = _cp?.name ?? null;
       const txn = Transaction.build({
         accountId: account.id,
         householdId: account.householdId ?? null,

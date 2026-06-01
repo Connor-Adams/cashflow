@@ -59,7 +59,7 @@ async function seed(accountType: AccountType) {
 
 async function insert(merchantRaw: string, accountType: AccountType, fp: string) {
   const { hh, acct } = await seed(accountType);
-  const counterpartyRaw = extractCounterparty(merchantRaw, accountType);
+  const counterpartyRaw = extractCounterparty(merchantRaw, accountType)?.name ?? null;
   const txn = await Transaction.create({
     accountId: acct.id,
     householdId: hh.id,

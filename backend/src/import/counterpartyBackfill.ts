@@ -223,7 +223,8 @@ export async function runCounterpartyBackfill(
       const updates: Array<{ id: number; counterparty: string; merchantRaw: string }> = [];
       for (const r of rows) {
         try {
-          const value = extractCounterparty(r.merchantRaw, r.accountType);
+          const _cp = extractCounterparty(r.merchantRaw, r.accountType);
+          const value = _cp?.name ?? null;
           processed++;
           if (value != null) {
             extracted++;
