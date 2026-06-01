@@ -37,6 +37,7 @@ import {
 import { parseWsHoldingsCsv } from './wealthsimpleHoldingsParse';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
+import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
 import {
@@ -501,6 +502,19 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               })),
               { transaction: sp },
             );
+          }
+
+          // Persist the item-link match through the canonical TransactionOrderLink
+          // join table (status 'suggested') so imports auto-surface suggested links.
+          const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
+          if (orderLink) {
+            await upsertSuggestedOrderLink({
+              transactionId: txn.id,
+              externalOrderId: orderLink.externalOrderId,
+              confidence: orderLink.confidence,
+              matchReason: orderLink.matchReason,
+              transaction: sp,
+            });
           }
         });
         inserted += 1;

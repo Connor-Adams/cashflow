@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, type Transaction as DbTransaction } from 'sequelize';
 import { ExternalOrder, Transaction, TransactionOrderLink } from '../models';
 
 export function isAmazonLikeMerchant(merchant: string): boolean {
@@ -74,6 +74,39 @@ export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): M
   };
 }
 
+/**
+ * Create — or refresh — a *suggested* link between a transaction and an external
+ * order. Idempotent: an existing link for the same (transaction, order) pair is
+ * never duplicated, and a link the user has already accepted or rejected is left
+ * untouched — only a still-'suggested' row gets its score/reason refreshed.
+ * Pass `transaction` to enlist the write in a surrounding DB transaction.
+ * Returns whether a new row was created.
+ */
+export async function upsertSuggestedOrderLink(args: {
+  transactionId: number;
+  externalOrderId: number;
+  confidence: number;
+  matchReason: string;
+  transaction?: DbTransaction;
+}): Promise<boolean> {
+  const { transactionId, externalOrderId, confidence, matchReason, transaction } = args;
+  const [link, created] = await TransactionOrderLink.findOrCreate({
+    where: { transactionId, externalOrderId },
+    defaults: {
+      transactionId,
+      externalOrderId,
+      confidence: String(confidence),
+      matchReason,
+      status: 'suggested',
+    },
+    transaction,
+  });
+  if (!created && link.status === 'suggested') {
+    await link.update({ confidence: String(confidence), matchReason }, { transaction });
+  }
+  return created;
+}
+
 export async function runAmazonMatching(args: {
   householdId: number;
 }): Promise<{
@@ -116,22 +149,12 @@ export async function runAmazonMatching(args: {
       candidate.confidence >= 70 || (best < 70 && candidate.confidence === best && best > 0),
     );
     for (const candidate of candidates) {
-      const [link, created] = await TransactionOrderLink.findOrCreate({
-        where: { transactionId: txn.id, externalOrderId: candidate.order.id },
-        defaults: {
-          transactionId: txn.id,
-          externalOrderId: candidate.order.id,
-          confidence: String(candidate.confidence),
-          matchReason: candidate.matchReason,
-          status: 'suggested',
-        },
+      const created = await upsertSuggestedOrderLink({
+        transactionId: txn.id,
+        externalOrderId: candidate.order.id,
+        confidence: candidate.confidence,
+        matchReason: candidate.matchReason,
       });
-      if (!created && link.status === 'suggested') {
-        await link.update({
-          confidence: String(candidate.confidence),
-          matchReason: candidate.matchReason,
-        });
-      }
       if (created) {
         suggested += 1;
         if (matchedDateFrom == null || txn.date < matchedDateFrom) matchedDateFrom = txn.date;

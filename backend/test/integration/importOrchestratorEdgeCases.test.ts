@@ -196,6 +196,66 @@ test('Risk E: re-importing same CSV content under a different filename/buffer tr
   assert.equal(s.skippedDuplicates, 1);
 });
 
+// ─── Item-link persistence on import (feeds TransactionOrderLink) ──────────
+
+test('import auto-creates a suggested TransactionOrderLink when a row matches an ExternalOrder', async () => {
+  const acc = await models.Account.create({
+    name: 'Apple Link Import',
+    owner: 'me',
+    defaultCurrency: 'CAD',
+    accountType: 'checking',
+    visibility: 'private',
+    householdId: amazonHouseholdId,
+    ownerUserId: amazonUserId,
+  } as never);
+
+  const order = await models.ExternalOrder.create({
+    householdId: amazonHouseholdId,
+    createdByUserId: amazonUserId,
+    vendor: 'apple',
+    vendorOrderId: 'APPL-IMPORT-1',
+    dedupeKey: 'apple:APPL-IMPORT-1',
+    orderDate: '2026-04-25',
+    shipmentDate: null,
+    total: '4.99',
+    currency: 'CAD',
+    paymentLast4: null,
+    source: 'bookmarklet-apple-v1',
+    rawPayload: null,
+  } as never);
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'iCloud 50GB',
+    quantity: 1,
+    totalPrice: '4.99',
+    inferredCategory: 'Subscriptions',
+  } as never);
+
+  const csv = 'Date,Description,Amount\n2026-04-26,APPLE.COM/BILL,-4.99\n';
+  const res = await importCsvFile({
+    buffer: Buffer.from(csv, 'utf8'),
+    fileName: 'apple-link.csv',
+    accountId: acc.id,
+    profileId: 'generic_simple',
+  });
+  assert.equal((res as Record<string, unknown>).inserted, 1, JSON.stringify(res));
+
+  const txn = await models.Transaction.findOne({
+    where: { accountId: acc.id, merchantRaw: 'APPLE.COM/BILL' },
+  });
+  assert.ok(txn, 'imported transaction should exist');
+
+  const link = await models.TransactionOrderLink.findOne({
+    where: { transactionId: txn!.id, externalOrderId: order.id },
+  });
+  assert.ok(link, 'import should auto-create a suggested TransactionOrderLink for the matched order');
+  assert.equal(link!.status, 'suggested');
+  assert.ok(
+    Number(link!.confidence) >= 70,
+    `link confidence should be the numeric score, got ${link!.confidence}`,
+  );
+});
+
 // ─── SAVEPOINT around per-row insert ───────────────────────────────────────
 
 test('SAVEPOINT: per-row unique-violation rolls back only the row; outer transaction continues', async () => {

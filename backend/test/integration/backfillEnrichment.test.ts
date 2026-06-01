@@ -296,15 +296,75 @@ test('backfill links a transaction to an Apple ExternalOrder', async () => {
   assert.equal(txn.merchantCanonical, 'Apple');
   assert.match(String(txn.notes ?? ''), /iCloud 50GB/);
 
-  // linkedExternalOrderId lives in the item-link signal's fields JSON,
-  // not on the Transaction row directly (no schema column for it).
-  // Origin's matcher emits source='item-link' for ALL vendors, not vendor-specific names.
+  // The item-link match is persisted through the canonical TransactionOrderLink
+  // join table (status 'suggested'), not a forked column. The signal still records
+  // linkedExternalOrderId in its fields JSON for the audit trail.
   const signal = await models.TransactionSignal.findOne({
     where: { transactionId: txn.id, source: 'item-link' },
   });
   assert.ok(signal, 'expected an item-link signal');
   const fields = signal!.fields as { linkedExternalOrderId?: number };
   assert.equal(fields.linkedExternalOrderId, order.id);
+
+  const link = await models.TransactionOrderLink.findOne({
+    where: { transactionId: txn.id, externalOrderId: order.id },
+  });
+  assert.ok(link, 'backfill should create a suggested TransactionOrderLink for the matched order');
+  assert.equal(link!.status, 'suggested');
+  assert.ok(
+    Number(link!.confidence) >= 70,
+    `link confidence should be the numeric score, got ${link!.confidence}`,
+  );
+  assert.ok(String(link!.matchReason).length > 0, 'link should record a matchReason');
+});
+
+test('backfill order-linking is idempotent and never resurrects a rejected link', async () => {
+  const acc = await models.Account.findOne();
+  assert.ok(acc);
+  const order = await models.ExternalOrder.create({
+    householdId: acc.householdId,
+    createdByUserId: acc.ownerUserId,
+    vendor: 'apple',
+    vendorOrderId: 'APPL-OR-2',
+    dedupeKey: 'apple:APPL-OR-2',
+    orderDate: '2026-04-25',
+    shipmentDate: null,
+    total: '9.99',
+    currency: 'CAD',
+    paymentLast4: null,
+    source: 'bookmarklet-apple-v1',
+    rawPayload: null,
+  } as never);
+  await models.ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'iCloud 200GB',
+    quantity: 1,
+    totalPrice: '9.99',
+    inferredCategory: 'Subscriptions',
+  } as never);
+  const txn = await createTxn({
+    merchantRaw: 'APPLE.COM/BILL',
+    merchantClean: 'APPLE.COM/BILL',
+    amount: -9.99,
+    date: '2026-04-27',
+    reviewFlag: true,
+  });
+
+  await backfillModule.runBackfill(seedFlags({}));
+  await backfillModule.runBackfill(seedFlags({}));
+
+  const links = await models.TransactionOrderLink.findAll({
+    where: { transactionId: txn.id, externalOrderId: order.id },
+  });
+  assert.equal(links.length, 1, 'repeat backfill must not duplicate the link');
+
+  // User rejects the suggestion; a later backfill must leave it rejected.
+  await links[0].update({ status: 'rejected' });
+  await backfillModule.runBackfill(seedFlags({}));
+  const after = await models.TransactionOrderLink.findOne({
+    where: { transactionId: txn.id, externalOrderId: order.id },
+  });
+  assert.equal(after!.status, 'rejected', 'backfill must not resurrect a rejected link');
 });
 
 test('backfill respects merchantPattern filter (substring, case-insensitive)', async () => {
