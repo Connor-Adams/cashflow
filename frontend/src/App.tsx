@@ -2,7 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { Layout } from './components/Layout'
 import { AccountsPage } from './pages/AccountsPage'
-import { AccountsLayout, ScenariosLayout, PortfolioLayout } from './pages/RouteTabsLayout'
+import { AccountsLayout, InboxLayout, ScenariosLayout, PortfolioLayout } from './pages/RouteTabsLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
@@ -95,7 +95,7 @@ function AppRoutes() {
             <Route path="debt" element={<DebtPage />} />
             <Route path="statements" element={<StatementsPage />} />
           </Route>
-          <Route path="review" element={<ReviewInboxPage />} />
+          <Route path="review" element={<Navigate to="/inbox/review" replace />} />
           <Route path="refunds" element={<Navigate to="/transactions/refunds" replace />} />
           <Route path="transactions" element={<TransactionsLayout />}>
             <Route index element={<TransactionsPage />} />
@@ -179,7 +179,10 @@ function AppRoutes() {
           {/* Unified review-items inbox (issue #378) replaces the separate AI
               inbox / AI reviews / CFO briefings list surfaces. Old routes
               redirect, preselecting the matching saved view. */}
-          <Route path="inbox" element={<UnifiedInboxPage />} />
+          <Route path="inbox" element={<InboxLayout />}>
+            <Route index element={<UnifiedInboxPage />} />
+            <Route path="review" element={<ReviewInboxPage />} />
+          </Route>
           <Route
             path="ai/inbox"
             element={<Navigate to="/inbox?view=ai-suggestions-pending" replace />}
