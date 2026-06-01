@@ -39,7 +39,7 @@ import { TransfersPage } from './pages/TransfersPage'
 import { StatementsPage } from './pages/StatementsPage'
 import { ItemsPage } from './pages/ItemsPage'
 import { PurchasesPage } from './pages/PurchasesPage'
-import { AmazonPage } from './pages/AmazonPage'
+import { ReceiptsPage } from './pages/ReceiptsPage'
 import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
 import { SettingsTabLayout } from './pages/settings/SettingsTabLayout'
@@ -120,7 +120,8 @@ function AppRoutes() {
             <Route path="security/:id" element={<PortfolioSecurityPage />} />
           </Route>
           <Route path="net-worth" element={<Navigate to="/portfolio/net-worth" replace />} />
-          <Route path="amazon" element={<AmazonPage />} />
+          <Route path="receipts" element={<ReceiptsPage />} />
+          <Route path="amazon" element={<Navigate to="/receipts?vendor=amazon" replace />} />
           <Route path="planned" element={<PlannedLayout />}>
             <Route index element={<PlannedEventsPage />} />
             <Route path="calendar" element={<CalendarPage />} />

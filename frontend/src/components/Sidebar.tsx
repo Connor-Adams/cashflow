@@ -6,7 +6,7 @@ import {
   CalendarClock,
   CheckSquare,
   ChevronDown,
-  PackageSearch,
+  Receipt,
   CreditCard,
   Inbox,
   Lightbulb,
@@ -64,8 +64,8 @@ const navSections: NavSection[] = [
       { to: '/accounts', label: 'Accounts', icon: CreditCard },
       { to: '/income', label: 'Income', icon: DollarSign },
       { to: '/transactions', label: 'Transactions', icon: ReceiptText },
+      { to: '/receipts', label: 'Receipts', icon: Receipt },
       { to: '/import', label: 'Import', icon: Upload },
-      { to: '/amazon', label: 'Amazon', icon: PackageSearch },
     ],
   },
   {

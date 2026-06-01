@@ -43,13 +43,12 @@ describe('Sidebar rail (PR 0)', () => {
     }
   })
 
-  it('relocates Amazon into the Money section', () => {
-    // Credit cards was also relocated here in PR 0, then folded into the
-    // Accounts tabs in PR 3 (asserted absent below).
+  it('places Receipts in the Money section and drops the standalone Amazon entry', () => {
     renderSidebar()
     const moneyHeader = screen.getByRole('button', { name: /Money/ })
     const moneySection = moneyHeader.closest('.sidebar__section') as HTMLElement
-    expect(within(moneySection).getByRole('link', { name: 'Amazon' })).toBeInTheDocument()
+    expect(within(moneySection).getByRole('link', { name: 'Receipts' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Amazon' })).not.toBeInTheDocument()
   })
 
   it('keeps Chat reachable (Ask folds into it)', () => {

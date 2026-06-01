@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { sequelize, ExternalOrder, ExternalOrderItem, ExternalOrderTender } from '../models';
+import { Op } from 'sequelize';
+import {
+  sequelize,
+  ExternalOrder,
+  ExternalOrderItem,
+  ExternalOrderTender,
+  TransactionOrderLink,
+} from '../models';
 import { currentAuth } from '../auth/middleware';
 import { logger } from '../observability/logger';
 import {
@@ -20,6 +27,66 @@ import { importUploadLimiter } from './importRateLimit';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 
 const router = Router();
+
+type LinkStatus = 'linked' | 'needs_match' | 'orphan';
+
+function deriveLinkStatus(links: TransactionOrderLink[] | undefined): LinkStatus {
+  const list = links ?? [];
+  if (list.some((l) => l.status === 'accepted')) return 'linked';
+  if (list.some((l) => l.status === 'suggested')) return 'needs_match';
+  return 'orphan';
+}
+
+function serializeOrderWithLinkStatus(order: ExternalOrder) {
+  const json = order.toJSON() as Record<string, unknown>;
+  const linkStatus = deriveLinkStatus(
+    order.get('transactionLinks') as TransactionOrderLink[] | undefined,
+  );
+  delete json.transactionLinks;
+  return { ...json, linkStatus };
+}
+
+/**
+ * GET /api/external-orders?group=all|gmail|amazon|other&limit=50
+ *
+ * Vendor-agnostic list of captured receipts/orders for the caller's household,
+ * each annotated with its match status to card transactions. The canonical
+ * read surface behind the /receipts page.
+ */
+router.get('/', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const group = String(req.query.group ?? 'all').toLowerCase();
+
+    const where: Record<string, unknown> = { householdId: household.id };
+    if (group === 'gmail') {
+      where.source = { [Op.like]: 'gmail-scan:%' };
+    } else if (group === 'amazon') {
+      where.vendor = 'amazon';
+    } else if (group === 'other') {
+      where.source = { [Op.notLike]: 'gmail-scan:%' };
+      where.vendor = { [Op.ne]: 'amazon' };
+    }
+
+    const orders = await ExternalOrder.findAll({
+      where: where as never,
+      include: [
+        { model: ExternalOrderItem, as: 'items' },
+        { model: TransactionOrderLink, as: 'transactionLinks', required: false },
+      ],
+      order: [
+        ['orderDate', 'DESC'],
+        ['id', 'DESC'],
+      ],
+      limit,
+    });
+
+    res.json(orders.map(serializeOrderWithLinkStatus));
+  } catch (e) {
+    next(e);
+  }
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),

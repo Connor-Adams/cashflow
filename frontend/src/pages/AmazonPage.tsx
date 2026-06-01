@@ -125,7 +125,7 @@ function categoryPreview(order?: AmazonOrder): string {
     : '—'
 }
 
-export function AmazonPage() {
+export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const confirm = useConfirm()
   const [orders, setOrders] = useState<AmazonOrder[]>([])
@@ -331,13 +331,15 @@ export function AmazonPage() {
   }
 
   return (
-    <div className="page amazonPage">
+    <div className={embedded ? 'amazonPage' : 'page amazonPage'}>
       {confirm.dialog}
       <div className="amazonHeader">
-        <div>
-          <h1>Amazon Enrichment</h1>
-          <p className="muted">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
-        </div>
+        {!embedded && (
+          <div>
+            <h1>Amazon Enrichment</h1>
+            <p className="muted">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
+          </div>
+        )}
         <div className="amazonActionRow">
           <Button type="button" variant="secondary" onClick={runMatching} disabled={loading}>
             <RefreshCw aria-hidden="true" />
