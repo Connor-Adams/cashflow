@@ -1,47 +1,91 @@
-# Split business/personal net-spend into Income + Spend tiles
+# Fix business_amount sign bug + split business/personal net-spend into Income + Spend tiles
 
 Date: 2026-05-31
 
-## Problem
+## Background
 
-The dashboard "Business vs personal" tile shows **net spend** per side:
+User reported business spend rendering **negative** on the dashboard.
+Investigation on 2026-05-31 (prod query + a deterministic probe over the real
+`aggregateDashboard`) established the cause is a **sign double-flip bug**, not
+income netting as originally hypothesized.
 
+## Verified root cause (prod)
+
+- `business_amount` is persisted **signed** — same sign as `amount`
+  (`backend/src/import/calculateShares.ts:54-57`: `return a`, no `abs`). A
+  business expense of −$100 stores `business_amount = −100`.
+- `backend/src/import/splitTxnByItems.ts:91` (the no-linked-items branch)
+  computes `businessAmount: bizAmt * sign`, treating the already-signed value as
+  an unsigned magnitude and re-applying the sign.
+- For a no-item business expense (−100): `sign = −1`, `bizAmt = −100` →
+  allocation `businessAmount = +100`. In `aggregateDashboard`'s per-business
+  block, `businessPart = +100` routes into business **credits** (not spend),
+  and `personalPart = amount − businessAmount = −100 − 100 = −200` inflates
+  **personal** spend.
+- Prod (2026-05-31): all 48 `final_business=true` rows are expenses
+  (`amount < 0`), all have `business_amount` negative, and **none** have an
+  order link → every one hits the buggy path. The business tile reads
+  ≈ **−$10,288** (all credits, ~$0 spend) instead of **+$10,288** spend, and
+  personal spend is over-counted by ≈ $20,576.
+- **Blast radius is exactly `netSpendByBusiness`.** The only consumer of the
+  allocation's `businessAmount` is `aggregateDashboard.ts:410-411`.
+  `aggregateMonthly`, `ai/insights.ts`, and `routes/budgets.ts` all call
+  `splitTxnByItems` but read only `alloc.amount` / `alloc.category` — unaffected.
+  Headline metrics / merchant / account summaries use raw `amount` — unaffected.
+
+The income-netting path (positive `txnType='income'` rows routed to the credit
+bucket and subtracted from net spend) is real in code but **does not fire in
+prod** — there are zero business income rows. Part 2 handles it as
+future-proofing.
+
+## Part 1 — Fix the sign bug
+
+`backend/src/import/splitTxnByItems.ts`, the `usable.length === 0` branch
+(~line 85-95). Change line 91 from:
+
+```ts
+businessAmount: bizAmt === 0 ? 0 : bizAmt * sign,
 ```
-business.netSpend = business.totalSpend - business.totalCredits
+
+to:
+
+```ts
+businessAmount: bizAmt,
 ```
 
-`totalCredits` accumulates **every** positive (inflow) row routed to the
-`'credit'` bucket by `classifyPositiveAmount` — refunds, rewards/cashback,
-statement credits, reimbursements, **and `txnType='income'`**
-(`classifyTransactionFlow.ts:138-144` routes `income → 'credit'`).
+`bizAmt` (= `n(txn.businessAmount)`) is already signed to match `amount`, so no
+sign re-application is needed. This changes **only negative rows** — positive
+rows have `sign = +1`, so their result is unchanged, meaning income attribution
+is unaffected. The itemized path (lines 129, 141: `biz * sign` where `biz` is a
+positive magnitude derived from `businessUsePercent`) is correct and stays
+untouched.
 
-Consequence: any positive row with `finalBusiness=true` subtracts from the
-business spend figure. A business that books revenue/income tagged
-`finalBusiness=true` shows **negative** "business spend" — net cash-positive
-rendered as a negative spend number. Income and spend are two unrelated
-quantities mashed into one metric.
+After the fix, the 48 prod business expenses report `totalSpend = 10288`,
+`totalCredits = 0`, `netSpend = +10288`; personal spend de-inflates.
 
-This conflation also reaches the headline "net spend", merchant, and account
-summaries (income silently reduces them too) — but fixing those is explicitly
-**out of scope** here (see Scope).
+No data backfill is required — `business_amount` values are correct; only the
+aggregation misread them.
 
-## Locked decisions
+## Part 2 — Income vs Spend split
+
+Built on top of the Part 1 fix (correctly-signed `businessPart`).
+
+### Locked decisions
 
 - **Income** = positive rows with `txnType === 'income'` only.
 - **Refunds / reimbursements / rewards / cashback / statement credits** = offset
-  credits that **net against spend** (they reverse purchases; they are not
-  income).
+  credits that **net against spend** (they reverse purchases; not income).
 - **Two separate dashboard tiles** (not one tile with two metrics).
 - **Tile-scoped**: only the `netSpendByBusiness` aggregate and its single
-  frontend consumer change. Headline net-spend, merchant summaries, and account
-  summaries stay exactly as they are today (income still nets into them). No
-  existing displayed numbers outside the business/personal tile move.
+  frontend consumer change. Headline net-spend, merchant, and account summaries
+  are untouched (income still nets into those — deliberately out of scope).
+- With zero business income in prod today, the Income tile renders **$0** per
+  side until business income is tagged. The Spend tile shows correct
+  business-vs-personal spend immediately (post Part 1).
 
-## Backend
+### Backend — `backend/src/summary/aggregateDashboard.ts`
 
-### `backend/src/summary/aggregateDashboard.ts`
-
-The per-business allocation loop (~lines 409–433) currently does:
+The per-business allocation loop (~lines 409–433) currently:
 
 ```ts
 if (part < 0 && !nonSpend) {
@@ -67,21 +111,11 @@ if (part < 0 && !nonSpend) {
 business.netSpend = business.totalSpend - business.totalCredits; // income no longer subtracts
 ```
 
-Net effect:
-
-- `netSpend` now means **Spend** = gross outflows − offset credits (income
-  excluded). This is the value the Spend tile renders.
-- `income` (new field) is the value the Income tile renders.
-- `totalCredits` for this bucket now holds **offset credits only**.
-
-Income's attribution to the business vs personal side reuses the **existing**
-split path (`businessPart`/`personalPart` from the allocation loop) — the same
-path already routing income into the business bucket today, which is why the
-negative was observed. No new attribution logic; income is simply peeled into a
-separate accumulator at the same point.
+Net effect: `netSpend` becomes the **Spend** value (gross − offset credits);
+new `income` field is the **Income** value; `totalCredits` for this bucket holds
+offset credits only.
 
 Type changes:
-
 - Add `income: number` to the `netSpendByBusiness` map value type (~line 108).
 - Add `income: 0` to the bucket initializer (~line 418).
 
@@ -90,60 +124,55 @@ changing the global classifier would ripple into headline/merchant/account
 aggregates, which is out of scope. The income split is a local `txnType` check
 inside the per-business block.
 
-### `backend/src/routes/summary.ts`
+### API — `backend/src/routes/summary.ts`
 
-`netSpendByBusiness` rows (line ~92) now carry `income`. No new endpoint, no
-new query. Existing sort is unchanged.
+`netSpendByBusiness` rows (~line 92) now carry `income` automatically
+(`Array.from(map.values())`). No new endpoint, no new query.
 
-## Frontend
+### Frontend — `frontend/src/pages/DashboardPage.tsx` + new lib
 
-### `frontend/src/pages/DashboardPage.tsx`
-
+- New pure helper `frontend/src/lib/businessIncomeSpend.ts`: given
+  `BusinessReportRow[]` (with `income`) and a currency filter, returns
+  `{ income: { business, personal }, spend: { business, personal },
+  incomeShare, spendShare }`. Shares clamp to `[0, 100]` and guard
+  divide-by-zero. Unit-tested in `businessIncomeSpend.test.ts`.
 - `BusinessReportRow` type: add `income: number`.
-- `businessReportData` memo (~542): accumulate `income` alongside
-  `totalSpend` / `totalCredits` / `netSpend`.
-- `businessSpotlight` memo (~572): expose per-side `income` and `netSpend`, plus
-  income-share and spend-share (computed independently).
 - Replace the single "Business vs personal" `<BentoTile>` (~1212–1300) with
-  **two** tiles:
-  - **Income · business vs personal** — Business `income`, Personal `income`;
-    share bar = `businessIncome / (businessIncome + personalIncome)`.
-  - **Spend · business vs personal** — Business `netSpend`, Personal `netSpend`;
-    share bar = `businessSpend / (businessSpend + personalSpend)`.
-- Each tile: per-side value + share % + share bar. Share/bar math clamps to
-  `[0, 100]` and guards divide-by-zero.
+  **two** tiles, consuming the helper:
+  - **Income · business vs personal** — Business `income`, Personal `income`,
+    share bar from `incomeShare`.
+  - **Spend · business vs personal** — Business `spend` (= row `netSpend`),
+    Personal `spend`, share bar from `spendShare`.
+- Each tile: per-side value + share % + share bar.
 
-## Edge cases
+### Edge cases
 
-- **Spend still negative**: if refunds/offset credits exceed gross spend in a
-  filter window (no income involved), the Spend value is legitimately negative.
-  Render it honestly; treat the share as 0 with a caption.
-- **No business income**: Income tile shows `$0` per side → "No income in
-  current filters."
-- **Currency**: existing per-row currency filtering + summation preserved
-  unchanged in `businessReportData`.
+- **Spend still negative**: if offset credits exceed gross spend in a window
+  (no income involved), Spend is legitimately negative. Render honestly; share
+  → 0.
+- **No business income** (the current prod state): Income tile shows `$0` per
+  side → "No income in current filters."
+- **Currency**: existing per-row currency filtering + summation preserved.
 
-## Tests
+### Tests
 
-Backend (`backend/test`, aggregateDashboard):
-
-- A `finalBusiness=true` income row lands in `income`, **not** in `netSpend`.
-- A `finalBusiness=true` refund row nets against `netSpend` (spend goes down),
-  does **not** appear in `income`.
-- Mixed row set: income, refund, and purchase all on the business side →
-  `income`, `netSpend`, and `totalSpend` each correct.
+Backend (`backend/test/aggregateDashboard.test.ts`, new — none exists today):
+- Regression for Part 1: a `finalBusiness=true` expense with **no** item
+  context-link and signed `business_amount` lands in business `totalSpend`
+  (not `totalCredits`), and personal spend is **not** inflated.
+- Income row (`txnType='income'`, positive) → `income` bucket, not `netSpend`.
+- Refund row (positive, non-income) → nets `netSpend` down, not in `income`.
 - Refund > gross spend (no income) → `netSpend` negative, `income` = 0.
 - Personal side unaffected by business income.
 
-Frontend (`DashboardPage` render test):
-
-- Two tiles render with correct income vs spend values per side.
-- Share math correct; clamps on negative spend.
-- Empty states ("No income in current filters").
+Frontend (`frontend/src/lib/businessIncomeSpend.test.ts`, new):
+- Income/spend split per side correct; share math; clamps on negative spend;
+  empty (all-zero) input.
 
 ## Primitives spine check
 
-This is a new **view/derivation** over the **Transaction** primitive — an
-income-vs-spend slice of the existing `finalBusiness` flag. No new table, no new
-status machine; it adds a computed field (`income`) to an existing aggregate and
-splits one rendered tile into two. Compliant — **not** a spine change.
+Part 1 is a bug fix, no shape change. Part 2 is a new **view/derivation** over
+the **Transaction** primitive — an income-vs-spend slice of the existing
+`finalBusiness` flag. No new table, no new status machine; it adds a computed
+field (`income`) to an existing aggregate and splits one rendered tile into two.
+Compliant — **not** a spine change.
