@@ -202,8 +202,25 @@ test('GET /api/insights?status=garbage rejects unknown status', async () => {
 // ---- GET /api/insights ?type= ------------------------------------------
 
 test('GET /api/insights?type= filters by insight type', async () => {
-  // The primary household has at least one duplicate_transactions insight
-  // seeded by the earlier run tests.
+  // The primary household has a duplicate_transactions insight from the earlier
+  // run tests. The seeded fixtures only produce that one type, so seed a second,
+  // distinct type directly — otherwise the filter has nothing to isolate against.
+  const models = await import('../../src/models');
+  await models.Insight.create({
+    householdId: primaryHouseholdId,
+    userId: primaryUserId,
+    type: 'merchant_spend_spike',
+    severity: 'info',
+    title: 'seed spike for type-filter test',
+    description: null,
+    entityType: null,
+    entityId: null,
+    status: 'open',
+    fingerprint: 'seed:type-filter:merchant_spend_spike',
+    metadata: {},
+    detectedAt: new Date(),
+  });
+
   const all = await primaryAgent.get('/api/insights');
   const allTypes = new Set(
     (all.body.data as Array<{ type: string }>).map((i) => i.type),
