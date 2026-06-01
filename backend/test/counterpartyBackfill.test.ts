@@ -167,17 +167,25 @@ test('idempotent: re-running does not overwrite non-NULL values', async () => {
   });
 
   const first = await runCounterpartyBackfill({ householdId: hh.id, batchSize: 50 });
-  assert.equal(first.processed, 1, 'pre-filled row excluded by NULL filter');
-  assert.equal(first.extracted, 1);
+  // PR C: the sweep now keys on counterparty_contact_id IS NULL, so the
+  // pre-filled-raw row is ALSO processed — to link a Contact — but its
+  // existing counterparty_raw is never overwritten (only raw-null rows get
+  // raw set, so `extracted` stays 1).
+  assert.equal(first.processed, 2, 'both rows swept (pre-filled row processed to link a contact)');
+  assert.equal(first.extracted, 1, 'only the raw-null row had its raw backfilled');
+  assert.equal(first.linked, 2, 'both person rows got a Contact link');
 
-  // Re-run: no NULL rows remain — nothing should change.
+  // Re-run: every row now has a contact link — nothing should change.
   const second = await runCounterpartyBackfill({ householdId: hh.id, batchSize: 50 });
   assert.equal(second.processed, 0);
   assert.equal(second.extracted, 0);
+  assert.equal(second.linked, 0);
 
   const rows = await Transaction.findAll({ order: [['id', 'ASC']] });
-  assert.equal(rows[0].counterpartyRaw, 'JANE D. PREV', 'manual edit preserved');
+  assert.equal(rows[0].counterpartyRaw, 'JANE D. PREV', 'manual edit preserved (raw never overwritten)');
   assert.equal(rows[1].counterpartyRaw, 'MIKE SMITH');
+  assert.ok(rows[0].counterpartyContactId, 'pre-filled-raw row now gets a Contact link');
+  assert.ok(rows[1].counterpartyContactId, 'raw-null row got raw + a Contact link');
 });
 
 test('writes a ProviderJobLog summary row at completion', async () => {
