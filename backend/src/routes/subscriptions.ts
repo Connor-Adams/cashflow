@@ -4,7 +4,7 @@ import {
   SUBSCRIPTION_CADENCES,
   type SubscriptionCadence,
 } from '../models/PlannedEvent';
-import { PlannedEvent, HouseholdMember, Transaction, SubscriptionPriceChange } from '../models';
+import { PlannedEvent, HouseholdMember, Transaction, Insight } from '../models';
 import {
   fromSubscriptionStatus,
   serializeSubscription,
@@ -347,45 +347,59 @@ router.get('/', async (req, res, next) => {
 
     const rows = await PlannedEvent.findAll({ where });
 
-    // Unacknowledged price changes for this household, keyed by the
-    // subscription's PlannedEvent id (detection stamps planned_events.id).
-    const priceChangeRows = await SubscriptionPriceChange.findAll({
-      where: { householdId: auth.household.id, acknowledgedAt: null },
-      attributes: ['id', 'subscriptionId', 'previousAmountCents', 'newAmountCents', 'pctChange', 'detectedOn'],
+    // Pending price changes now derive from OPEN `subscription_price_increase`
+    // Insights (the Observation primitive), keyed by the subscription's
+    // PlannedEvent id (the Insight's entityId), NOT the retired
+    // subscription_price_changes table. Dismissing/resolving the Insight
+    // clears the chip on the next read because we only read status='open'.
+    const priceInsights = await Insight.findAll({
+      where: {
+        householdId: auth.household.id,
+        type: 'subscription_price_increase',
+        status: 'open',
+      },
+      attributes: ['id', 'entityId', 'metadata', 'detectedAt'],
       raw: true,
     });
-    type PriceChangeRaw = {
-      id: number;
-      subscriptionId: number;
-      previousAmountCents: number;
-      newAmountCents: number;
-      pctChange: string;
-      detectedOn: string;
-    };
     const pendingMap = new Map<number, PendingPriceChange>();
-    for (const pc of priceChangeRows as unknown as PriceChangeRaw[]) {
-      // If multiple unacknowledged rows exist for a subscription, keep the first (highest id).
-      if (!pendingMap.has(pc.subscriptionId)) {
-        pendingMap.set(pc.subscriptionId, {
-          id: pc.id,
-          prevCents: pc.previousAmountCents,
-          newCents: pc.newAmountCents,
-          pctChange: pc.pctChange,
-          detectedOn: pc.detectedOn,
-        });
-      }
+    for (const ins of priceInsights) {
+      // If multiple open Insights exist for one subscription, keep the first.
+      if (ins.entityId == null || pendingMap.has(ins.entityId)) continue;
+      const md = (ins.metadata ?? {}) as {
+        previousAmountCents?: number;
+        newAmountCents?: number;
+        pctChange?: number;
+      };
+      pendingMap.set(ins.entityId, {
+        id: ins.id,
+        prevCents: md.previousAmountCents ?? 0,
+        newCents: md.newAmountCents ?? 0,
+        pctChange: String(md.pctChange ?? 0),
+        detectedOn: (ins.detectedAt instanceof Date
+          ? ins.detectedAt
+          : new Date(ins.detectedAt as string)
+        )
+          .toISOString()
+          .slice(0, 10),
+      });
     }
 
     // Order in JS by the *legacy* serialized shape: the merged `status` column
     // holds a different value set than the legacy enum, and the merchant name
     // lives in `name`, so a DB-level ORDER BY would not match the historical
     // [status ASC, annualizedCost DESC, merchantName ASC] order. Attach any
-    // pending price change while mapping.
+    // pending price change while mapping. `serializeSubscription` no longer
+    // sources `priceChangeDetected` from the (retired) column, so set it here
+    // from the chip: true exactly when an open price-increase Insight exists.
     const items = rows
-      .map((row) => ({
-        ...serializeSubscription(row),
-        pendingPriceChange: pendingMap.get(row.id) ?? null,
-      }))
+      .map((row) => {
+        const pendingPriceChange = pendingMap.get(row.id) ?? null;
+        return {
+          ...serializeSubscription(row),
+          priceChangeDetected: pendingPriceChange != null,
+          pendingPriceChange,
+        };
+      })
       .sort(
         (a, b) =>
           a.status.localeCompare(b.status) ||
@@ -415,6 +429,26 @@ router.get('/summary', async (req, res, next) => {
     // Count by the legacy status the DTO exposes, not the merged column.
     const subs = rows.map(serializeSubscription);
 
+    // Price-increase count derives from OPEN `subscription_price_increase`
+    // Insights (entityId = subscription's PlannedEvent id), matching the chip
+    // — `serializeSubscription` no longer sources it from the retired column.
+    const subIds = new Set<number>(rows.map((r) => r.id));
+    const priceInsights = await Insight.findAll({
+      where: {
+        householdId: auth.household.id,
+        type: 'subscription_price_increase',
+        status: 'open',
+      },
+      attributes: ['entityId'],
+      raw: true,
+    });
+    const priceChangeSubIds = new Set<number>(
+      priceInsights
+        .map((i) => i.entityId)
+        .filter((x): x is number => x != null && subIds.has(x)),
+    );
+    const priceChangeCount = priceChangeSubIds.size;
+
     type CurrencyBucket = {
       currency: string;
       activeCount: number;
@@ -426,10 +460,8 @@ router.get('/summary', async (req, res, next) => {
     let ignored = 0;
     let cancelled = 0;
     let unknown = 0;
-    let priceChangeCount = 0;
 
     for (const row of subs) {
-      if (row.priceChangeDetected) priceChangeCount += 1;
       if (row.status === 'active') {
         totalActive += 1;
         const annual = Number(row.annualizedCost);
