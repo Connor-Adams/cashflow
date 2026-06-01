@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { Account, Transaction, TaxReserveSetting, Label, Subscription, PlannedEvent, FinanceEvent } from '../models';
+import { Account, Transaction, TaxReserveSetting, Label, PlannedEvent, FinanceEvent } from '../models';
 import { DEFAULT_TAX_RESERVE_PERCENT } from '../models/TaxReserveSetting';
+import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import { buildSeries, monthEndDatesInRange, daysInRange } from '../networth/aggregate';
 import { detectRecurring, type RecurringInputTxn } from './recurring';
@@ -632,16 +633,19 @@ router.get('/recurring', async (req, res, next) => {
       ? String(req.query.currency).toUpperCase().slice(0, 3)
       : null;
 
-    // 1. Explicit Subscriptions.
+    // 1. Explicit Subscriptions (folded into PlannedEvent kind='subscription';
+    //    legacy 'active' = {status:'planned', statusUncertain:false}). Serialize
+    //    back to the legacy Subscription DTO so the consumers below read
+    //    merchantName / cadence / nextExpectedDate / category unchanged.
     const subWhere: Record<string, unknown> = {
       householdId: household.id,
-      status: 'active',
+      kind: 'subscription',
+      status: 'planned',
+      statusUncertain: false,
     };
     if (currency) subWhere.currency = currency;
-    const subscriptions = await Subscription.findAll({
-      where: subWhere,
-      attributes: ['id', 'merchantName', 'amount', 'currency', 'cadence', 'nextExpectedDate', 'category'],
-    });
+    const subscriptionRows = await PlannedEvent.findAll({ where: subWhere });
+    const subscriptions = subscriptionRows.map((row) => serializeSubscription(row));
 
     // 2. Recurring PlannedEvents (have a recurrenceRule and are not skipped/ignored).
     const peWhere: Record<string, unknown> = {

@@ -67,6 +67,27 @@ async function seed(emailPrefix: string): Promise<Seeded> {
   return { token, householdId: household.id, userId: user.id, accountId: account.id };
 }
 
+// Map a legacy Subscription status to the merged PlannedEvent (kind='subscription')
+// status + statusUncertain pair. Mirrors fromSubscriptionStatus in
+// src/expectations/subscriptionMapper.ts; the money-leaks route reads these
+// rows back through serializeSubscription, which reconstructs the legacy
+// `status` the detector filters on (e.g. only 'active' subs cluster).
+function subscriptionStatusFields(
+  status: 'active' | 'cancelled' | 'ignored' | 'unknown',
+): { status: 'planned' | 'cancelled' | 'ignored'; statusUncertain: boolean } {
+  switch (status) {
+    case 'cancelled':
+      return { status: 'cancelled', statusUncertain: false };
+    case 'ignored':
+      return { status: 'ignored', statusUncertain: false };
+    case 'unknown':
+      return { status: 'planned', statusUncertain: true };
+    case 'active':
+    default:
+      return { status: 'planned', statusUncertain: false };
+  }
+}
+
 async function seedSubscription(args: {
   householdId: number;
   merchant: string;
@@ -81,21 +102,35 @@ async function seedSubscription(args: {
   const cadence = args.cadence ?? 'monthly';
   const annualized =
     cadence === 'monthly' ? args.amount * 12 : args.amount * 52;
-  await models.Subscription.create({
+  const lastChargeDate = new Date().toISOString().slice(0, 10);
+  const owner = (
+    await models.HouseholdMember.findOne({
+      where: { householdId: args.householdId, role: 'owner' },
+      attributes: ['userId'],
+      raw: true,
+    })
+  )!.userId;
+  await models.PlannedEvent.create({
+    kind: 'subscription',
+    type: 'expense',
+    source: 'recurring_detection',
+    userId: owner,
     householdId: args.householdId,
-    merchantName: args.merchant,
+    name: args.merchant,
     normalizedName: args.merchant.toLowerCase(),
     amount: args.amount.toFixed(4),
     currency: args.currency ?? 'CAD',
     cadence,
-    lastChargeDate: new Date().toISOString().slice(0, 10),
+    lastChargeDate,
     nextExpectedDate: null,
-    status: args.status ?? 'active',
+    // expectedDate (NOT NULL) = nextExpectedDate ?? lastChargeDate.
+    expectedDate: lastChargeDate,
     category: args.category ?? null,
     annualizedCost: annualized.toFixed(4),
     priceChangeDetected: args.priceChangeDetected ?? false,
     cancellationUrl: null,
     notes: null,
+    ...subscriptionStatusFields(args.status ?? 'active'),
   });
 }
 

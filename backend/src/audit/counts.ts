@@ -10,8 +10,8 @@ import {
   FinancialGoal,
   HoldingSnapshot,
   HouseholdMember,
+  PlannedEvent,
   Rule,
-  Subscription,
   Transaction,
 } from '../models';
 
@@ -45,7 +45,8 @@ export async function runCounts(householdId: number): Promise<CountsResult> {
     Rule.count({ where: { householdId } }),
     Contact.count({ where: { householdId } }),
     ExternalOrder.count({ where: { householdId } }),
-    Subscription.count({ where: { householdId } }),
+    // Subscriptions folded into PlannedEvent (kind='subscription').
+    PlannedEvent.count({ where: { householdId, kind: 'subscription' } }),
     FinancialGoal.count({ where: { householdId } }),
     BudgetTarget.count({ where: { householdId } }),
     AuditLog.count({ where: { householdId } }),

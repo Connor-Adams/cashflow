@@ -314,6 +314,7 @@ async function buildBaselineInput(
   // PlannedEvent occurrences in the window.
   const eventWhere: WhereOptions = {
     householdId,
+    kind: 'planned',
     currency,
     status: 'planned',
     expectedDate: { [Op.lte]: dateTo },

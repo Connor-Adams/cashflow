@@ -1,5 +1,6 @@
 import { Op } from 'sequelize';
-import { Subscription, Transaction, SubscriptionPriceChange } from '../models';
+import { PlannedEvent, Transaction, SubscriptionPriceChange } from '../models';
+import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { logger } from '../observability/logger';
 
 /**
@@ -20,6 +21,14 @@ function median(values: number[]): number {
  * recent charge amount against the median of prior charges in the last 90 days.
  * Inserts a SubscriptionPriceChange row (idempotent via unique partial index)
  * when the deviation exceeds 5%.
+ *
+ * Post-Expectation-fold: subscriptions are PlannedEvent rows with
+ * kind='subscription'. Legacy status 'active' maps to {status:'planned',
+ * statusUncertain:false}. Rows are serialized to the legacy Subscription DTO
+ * (via serializeSubscription) so the detection math below reads merchantName,
+ * householdId, currency, etc. unchanged. `sub.id` is now the planned_events.id,
+ * which becomes the SubscriptionPriceChange.subscriptionId (the new canonical
+ * identity — see routes/subscriptions.ts pendingMap join on row.id).
  */
 export async function detectSubscriptionPriceChanges(): Promise<{
   detected: number;
@@ -28,9 +37,10 @@ export async function detectSubscriptionPriceChanges(): Promise<{
   let detected = 0;
   let skipped = 0;
 
-  const activeSubscriptions = await Subscription.findAll({
-    where: { status: 'active' },
+  const activeRows = await PlannedEvent.findAll({
+    where: { kind: 'subscription', status: 'planned', statusUncertain: false },
   });
+  const activeSubscriptions = activeRows.map((row) => serializeSubscription(row));
 
   const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
     .toISOString()

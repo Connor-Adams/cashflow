@@ -23,7 +23,7 @@
  */
 
 import { num } from '../util/numbers';
-import type { SubscriptionCadence } from '../models/Subscription';
+import type { SubscriptionCadence } from '../models/PlannedEvent';
 
 /** Transaction row consumed by the aggregator. Mirrors the attribute list
  *  the route requests from Sequelize — kept here so editors get type

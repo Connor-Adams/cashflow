@@ -209,6 +209,7 @@ export async function getUpcomingRequiredExpenses(
 ): Promise<number> {
   const where: WhereOptions = {
     householdId,
+    kind: 'planned',
     currency,
     status: 'planned',
     expectedDate: { [Op.lte]: windowEndDate },

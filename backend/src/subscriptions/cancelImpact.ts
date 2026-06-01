@@ -12,7 +12,7 @@
  * To project a horizon we multiply that per-period charge by the number of
  * occurrences that fall inside the horizon.
  */
-import type { SubscriptionCadence } from '../models/Subscription';
+import type { SubscriptionCadence } from '../models/PlannedEvent';
 
 const MONTHS_PER_YEAR = 12;
 

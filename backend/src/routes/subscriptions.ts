@@ -1,13 +1,16 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import {
-  Subscription,
-  SUBSCRIPTION_STATUSES,
   SUBSCRIPTION_CADENCES,
-  type SubscriptionStatus,
   type SubscriptionCadence,
-} from '../models/Subscription';
-import { Transaction, SubscriptionPriceChange } from '../models';
+} from '../models/PlannedEvent';
+import { PlannedEvent, HouseholdMember, Transaction, SubscriptionPriceChange } from '../models';
+import {
+  fromSubscriptionStatus,
+  serializeSubscription,
+  toSubscriptionStatus,
+  type SubscriptionStatus,
+} from '../expectations/subscriptionMapper';
 import { num } from '../util/numbers';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
@@ -30,6 +33,45 @@ import {
 
 const router = Router();
 
+/**
+ * The legacy Subscription status set, kept here so PATCH/GET validation and the
+ * `/summary` rollup stay byte-identical after the Expectation merge. The merged
+ * `PlannedEvent` model stores a different status machine (planned/cancelled/…);
+ * the subscriptionMapper translates between the two.
+ */
+const SUBSCRIPTION_STATUSES: readonly SubscriptionStatus[] = [
+  'active',
+  'cancelled',
+  'ignored',
+  'unknown',
+] as const;
+
+/**
+ * Translate a legacy Subscription status filter into a `where` fragment against
+ * the merged PlannedEvent columns. This is the exact inverse of
+ * `toSubscriptionStatus`: `unknown` is any row flagged uncertain; `cancelled`
+ * and `ignored` map to their own (non-uncertain) statuses; `active` is the
+ * catch-all — not uncertain and not cancelled/ignored.
+ */
+function legacyStatusWhere(
+  status: SubscriptionStatus,
+): Record<string, unknown> {
+  switch (status) {
+    case 'unknown':
+      return { statusUncertain: true };
+    case 'cancelled':
+      return { status: 'cancelled', statusUncertain: false };
+    case 'ignored':
+      return { status: 'ignored', statusUncertain: false };
+    case 'active':
+    default:
+      return {
+        statusUncertain: false,
+        status: { [Op.notIn]: ['cancelled', 'ignored'] },
+      };
+  }
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_WINDOW_DAYS = 180;
 const DEFAULT_MIN_OCCURRENCES = 3;
@@ -40,53 +82,6 @@ interface PendingPriceChange {
   newCents: number;
   pctChange: string;
   detectedOn: string;
-}
-
-interface SubscriptionResponse {
-  id: number;
-  householdId: number;
-  merchantName: string;
-  normalizedName: string;
-  amount: string;
-  currency: string;
-  cadence: string;
-  lastChargeDate: string;
-  nextExpectedDate: string | null;
-  status: SubscriptionStatus;
-  category: string | null;
-  annualizedCost: string;
-  priceChangeDetected: boolean;
-  cancellationUrl: string | null;
-  notes: string | null;
-  createdAt: string;
-  updatedAt: string;
-  pendingPriceChange: PendingPriceChange | null;
-}
-
-function serialize(
-  row: InstanceType<typeof Subscription>,
-  pendingPriceChange: PendingPriceChange | null = null,
-): SubscriptionResponse {
-  return {
-    id: row.id,
-    householdId: row.householdId,
-    merchantName: row.merchantName,
-    normalizedName: row.normalizedName,
-    amount: String(row.amount),
-    currency: row.currency,
-    cadence: row.cadence,
-    lastChargeDate: row.lastChargeDate,
-    nextExpectedDate: row.nextExpectedDate,
-    status: row.status,
-    category: row.category,
-    annualizedCost: String(row.annualizedCost),
-    priceChangeDetected: Boolean(row.priceChangeDetected),
-    cancellationUrl: row.cancellationUrl,
-    notes: row.notes,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    pendingPriceChange,
-  };
 }
 
 interface SubscriptionPatch {
@@ -247,15 +242,24 @@ export async function refreshDetectedSubscriptions(args: {
 
   const detected = detectRecurring(candidates, { minOccurrences });
 
-  const existingRows = await Subscription.findAll({
-    where: { householdId: args.householdId },
+  // Merged Expectation rows require a non-null user_id; subscriptions are a
+  // household-level concept, so attribute new rows to the household owner.
+  const owner = await HouseholdMember.findOne({
+    where: { householdId: args.householdId, role: 'owner' },
+    attributes: ['userId'],
+    raw: true,
+  });
+  if (!owner) throw new Error(`household ${args.householdId} has no owner member`);
+
+  const existingRows = await PlannedEvent.findAll({
+    where: { householdId: args.householdId, kind: 'subscription' },
   });
   const existing: ExistingSubscriptionRow[] = existingRows.map((row) => ({
     id: row.id,
-    normalizedName: row.normalizedName,
+    normalizedName: row.normalizedName ?? '',
     currency: row.currency,
     amount: String(row.amount),
-    status: row.status,
+    status: toSubscriptionStatus(row.status, row.statusUncertain),
     cancellationUrl: row.cancellationUrl,
     notes: row.notes,
   }));
@@ -263,16 +267,23 @@ export async function refreshDetectedSubscriptions(args: {
   const ops = mergeDetectionWithExisting(detected, existing);
   for (const op of ops) {
     if (op.kind === 'insert') {
-      await Subscription.create({
+      const mapped = fromSubscriptionStatus(op.status);
+      await PlannedEvent.create({
         householdId: args.householdId,
-        merchantName: op.merchantName,
+        userId: owner.userId,
+        kind: 'subscription',
+        type: 'expense',
+        source: 'recurring_detection',
+        name: op.merchantName,
         normalizedName: op.normalizedName,
         currency: op.currency,
         amount: op.amount,
         cadence: op.cadence,
         lastChargeDate: op.lastChargeDate,
         nextExpectedDate: op.nextExpectedDate,
-        status: op.status,
+        expectedDate: op.nextExpectedDate ?? op.lastChargeDate,
+        status: mapped.status,
+        statusUncertain: mapped.statusUncertain,
         category: op.category,
         annualizedCost: op.annualizedCost,
         priceChangeDetected: op.priceChangeDetected,
@@ -280,7 +291,23 @@ export async function refreshDetectedSubscriptions(args: {
         notes: null,
       });
     } else {
-      await Subscription.update(op.patch, { where: { id: op.id } });
+      // op.patch is keyed by legacy Subscription field names. The detection
+      // merge never touches `status` (user-curated state is preserved across
+      // refreshes), but translate it defensively if a future change adds it.
+      // `merchantName` maps onto the merged model's `name` column.
+      const patch: Record<string, unknown> = { ...op.patch };
+      if (typeof patch.status === 'string') {
+        const mapped = fromSubscriptionStatus(patch.status as SubscriptionStatus);
+        patch.status = mapped.status;
+        patch.statusUncertain = mapped.statusUncertain;
+      }
+      if ('merchantName' in patch) {
+        patch.name = patch.merchantName;
+        delete patch.merchantName;
+      }
+      await PlannedEvent.update(patch, {
+        where: { id: op.id, kind: 'subscription' },
+      });
     }
   }
 }
@@ -296,7 +323,10 @@ router.get('/', async (req, res, next) => {
       });
     }
 
-    const where: Record<string, unknown> = { ...householdWhere(req) };
+    const where: Record<string, unknown> = {
+      ...householdWhere(req),
+      kind: 'subscription',
+    };
     if (req.query.status) {
       const statusCandidate = String(req.query.status);
       if (
@@ -307,23 +337,18 @@ router.get('/', async (req, res, next) => {
         });
         return;
       }
-      where.status = statusCandidate;
+      // The column stores the merged status machine, so translate the legacy
+      // filter into the exact inverse of `toSubscriptionStatus`.
+      Object.assign(where, legacyStatusWhere(statusCandidate as SubscriptionStatus));
     }
     if (req.query.currency) {
       where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
     }
 
-    const rows = await Subscription.findAll({
-      where,
-      order: [
-        ['status', 'ASC'],
-        ['annualizedCost', 'DESC'],
-        ['merchantName', 'ASC'],
-      ],
-    });
+    const rows = await PlannedEvent.findAll({ where });
 
-    // Fetch all unacknowledged price-change rows for this household in one
-    // query, then build a map from subscriptionId to the pending change.
+    // Unacknowledged price changes for this household, keyed by the
+    // subscription's PlannedEvent id (detection stamps planned_events.id).
     const priceChangeRows = await SubscriptionPriceChange.findAll({
       where: { householdId: auth.household.id, acknowledgedAt: null },
       attributes: ['id', 'subscriptionId', 'previousAmountCents', 'newAmountCents', 'pctChange', 'detectedOn'],
@@ -339,7 +364,7 @@ router.get('/', async (req, res, next) => {
     };
     const pendingMap = new Map<number, PendingPriceChange>();
     for (const pc of priceChangeRows as unknown as PriceChangeRaw[]) {
-      // If multiple unacknowledged rows exist for a subscription, keep latest (first inserted with highest id).
+      // If multiple unacknowledged rows exist for a subscription, keep the first (highest id).
       if (!pendingMap.has(pc.subscriptionId)) {
         pendingMap.set(pc.subscriptionId, {
           id: pc.id,
@@ -351,7 +376,23 @@ router.get('/', async (req, res, next) => {
       }
     }
 
-    res.json({ items: rows.map((row) => serialize(row, pendingMap.get(row.id) ?? null)) });
+    // Order in JS by the *legacy* serialized shape: the merged `status` column
+    // holds a different value set than the legacy enum, and the merchant name
+    // lives in `name`, so a DB-level ORDER BY would not match the historical
+    // [status ASC, annualizedCost DESC, merchantName ASC] order. Attach any
+    // pending price change while mapping.
+    const items = rows
+      .map((row) => ({
+        ...serializeSubscription(row),
+        pendingPriceChange: pendingMap.get(row.id) ?? null,
+      }))
+      .sort(
+        (a, b) =>
+          a.status.localeCompare(b.status) ||
+          Number(b.annualizedCost) - Number(a.annualizedCost) ||
+          a.merchantName.localeCompare(b.merchantName),
+      );
+    res.json({ items });
   } catch (e) {
     next(e);
   }
@@ -368,9 +409,11 @@ router.get('/summary', async (req, res, next) => {
       });
     }
 
-    const rows = await Subscription.findAll({
-      where: { ...householdWhere(req) },
+    const rows = await PlannedEvent.findAll({
+      where: { ...householdWhere(req), kind: 'subscription' },
     });
+    // Count by the legacy status the DTO exposes, not the merged column.
+    const subs = rows.map(serializeSubscription);
 
     type CurrencyBucket = {
       currency: string;
@@ -385,7 +428,7 @@ router.get('/summary', async (req, res, next) => {
     let unknown = 0;
     let priceChangeCount = 0;
 
-    for (const row of rows) {
+    for (const row of subs) {
       if (row.priceChangeDetected) priceChangeCount += 1;
       if (row.status === 'active') {
         totalActive += 1;
@@ -432,8 +475,8 @@ router.patch('/:id', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    const row = await Subscription.findOne({
-      where: { id, ...householdWhere(req) },
+    const row = await PlannedEvent.findOne({
+      where: { id, ...householdWhere(req), kind: 'subscription' },
     });
     if (!row) {
       res.status(404).json({ error: 'Not found' });
@@ -446,7 +489,12 @@ router.patch('/:id', async (req, res, next) => {
       return;
     }
     const patch = result.value;
-    if (patch.status !== undefined) row.set('status', patch.status);
+    if (patch.status !== undefined) {
+      // Inbound is the legacy status; persist as the merged status + flag.
+      const mapped = fromSubscriptionStatus(patch.status);
+      row.set('status', mapped.status);
+      row.set('statusUncertain', mapped.statusUncertain);
+    }
     if (patch.cadence !== undefined) {
       row.set('cadence', patch.cadence);
       // Keep the derived annual cost consistent with the corrected cadence so
@@ -462,7 +510,7 @@ router.patch('/:id', async (req, res, next) => {
     }
     if (patch.notes !== undefined) row.set('notes', patch.notes);
     await row.save();
-    res.json(serialize(row));
+    res.json(serializeSubscription(row));
   } catch (e) {
     next(e);
   }
@@ -491,10 +539,10 @@ router.get('/:id/cancel-impact', async (req, res, next) => {
       return;
     }
 
-    const row = await Subscription.findOne({
-      where: { id, ...householdWhere(req) },
+    const row = await PlannedEvent.findOne({
+      where: { id, ...householdWhere(req), kind: 'subscription' },
     });
-    if (!row) {
+    if (!row || row.cadence == null) {
       res.status(404).json({ error: 'Not found' });
       return;
     }

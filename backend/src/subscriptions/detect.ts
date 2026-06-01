@@ -13,10 +13,8 @@
  * heuristic and merge logic trivially unit-testable.
  */
 import type { RecurringItem } from '../routes/recurring';
-import type {
-  SubscriptionCadence,
-  SubscriptionStatus,
-} from '../models/Subscription';
+import type { SubscriptionCadence } from '../models/PlannedEvent';
+import type { SubscriptionStatus } from '../expectations/subscriptionMapper';
 import { periodsPerYear } from './cancelImpact';
 
 /**

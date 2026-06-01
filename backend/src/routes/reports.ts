@@ -19,7 +19,8 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import type { WhereOptions } from 'sequelize';
-import { Account, Receipt, Subscription, Transaction } from '../models';
+import { Account, PlannedEvent, Receipt, Transaction } from '../models';
+import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 import { aiSuggestLimiter } from './aiRateLimit';
@@ -223,10 +224,13 @@ async function fetchSubscriptions(
   req: Parameters<typeof currentAuth>[0],
   currency: string | null,
 ): Promise<ExplainMonthSubRow[]> {
-  const where: Record<string, unknown> = { ...householdWhere(req) };
+  // Subscriptions are folded into planned_events as kind='subscription'
+  // (Expectation merge). serializeSubscription maps a merged row back to the
+  // legacy Subscription DTO this report expects.
+  const where: Record<string, unknown> = { ...householdWhere(req), kind: 'subscription' };
   if (currency) where.currency = currency;
-  const rows = await Subscription.findAll({ where });
-  return rows.map((row) => ({
+  const rows = await PlannedEvent.findAll({ where });
+  return rows.map(serializeSubscription).map((row) => ({
     id: row.id,
     merchantName: row.merchantName,
     currency: row.currency,

@@ -73,7 +73,6 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
-import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
@@ -185,7 +184,6 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
-initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
 initMoneyLeakDismissal(sequelize);
@@ -543,6 +541,10 @@ Household.hasMany(PlannedEvent, {
   onDelete: 'CASCADE',
   hooks: true,
 });
+Household.hasMany(PlannedEvent, {
+  foreignKey: 'household_id',
+  as: 'expectations',
+});
 PlannedEvent.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
@@ -598,14 +600,6 @@ FinancialGoal.belongsTo(Account, {
   foreignKey: 'linked_account_id',
   as: 'linkedAccount',
 });
-
-Household.hasMany(Subscription, {
-  foreignKey: 'household_id',
-  as: 'subscriptions',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 
 Household.hasMany(MoneyLeakDismissal, {
   foreignKey: 'household_id',
@@ -1106,7 +1100,6 @@ export {
   Insight,
   PlannedEvent,
   FinancialGoal,
-  Subscription,
   AiReviewRun,
   CfoBriefing,
   MoneyLeakDismissal,
