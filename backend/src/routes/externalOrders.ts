@@ -61,11 +61,11 @@ router.get('/', async (req, res, next) => {
 
     const where: Record<string, unknown> = { householdId: household.id };
     if (group === 'gmail') {
-      where.source = { [Op.like]: 'email_gmail%' };
+      where.source = { [Op.like]: 'gmail-scan:%' };
     } else if (group === 'amazon') {
       where.vendor = 'amazon';
     } else if (group === 'other') {
-      where.source = { [Op.notLike]: 'email_gmail%' };
+      where.source = { [Op.notLike]: 'gmail-scan:%' };
       where.vendor = { [Op.ne]: 'amazon' };
     }
 

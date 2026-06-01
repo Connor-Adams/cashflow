@@ -40,7 +40,7 @@ before(async () => {
     orderDate: '2026-05-20',
     total: '9.99',
     currency: 'CAD',
-    source: 'email_gmail_apple',
+    source: 'gmail-scan:apple',
   } as never);
   const txn = await models.Transaction.create({
     accountId,
@@ -83,6 +83,58 @@ before(async () => {
     currency: 'CAD',
     source: 'amazon-csv',
   } as never);
+
+  // A Gmail-sourced order with a suggested link (needs_match).
+  const gmailOrder2 = await models.ExternalOrder.create({
+    householdId,
+    vendor: 'apple',
+    dedupeKey: 'gmail-2',
+    orderDate: '2026-05-23',
+    total: '14.99',
+    currency: 'CAD',
+    source: 'gmail-scan:google',
+  } as never);
+  const txn2 = await models.Transaction.create({
+    accountId,
+    householdId,
+    importBatch: 'orders-list-test',
+    date: '2026-05-23',
+    merchantRaw: 'GOOGLE *SERVICES',
+    merchantClean: 'Google',
+    amount: '-14.99',
+    currency: 'CAD',
+    status: 'posted',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    visibility: 'shared',
+    ownershipType: 'me',
+    finalBusiness: false,
+    finalSplitType: 'me',
+    myShareAmount: '-14.99',
+    partnerShareAmount: '0',
+    businessAmount: '0',
+    txnType: 'purchase',
+    isRecurring: false,
+    reviewFlag: false,
+  } as never);
+  await models.TransactionOrderLink.create({
+    transactionId: txn2.id,
+    externalOrderId: gmailOrder2.id,
+    confidence: '60',
+    matchReason: 'test-suggested',
+    status: 'suggested',
+  } as never);
+
+  // An order from a non-gmail, non-amazon source (image-upload).
+  await models.ExternalOrder.create({
+    householdId,
+    vendor: 'other',
+    dedupeKey: 'other-1',
+    orderDate: '2026-05-24',
+    total: '25.00',
+    currency: 'CAD',
+    source: 'image-upload',
+  } as never);
 });
 
 after(async () => {
@@ -92,19 +144,21 @@ after(async () => {
 test('GET /api/external-orders returns all household orders with derived linkStatus', async () => {
   const res = await authed.get('/api/external-orders');
   assert.equal(res.status, 200);
-  assert.equal(res.body.length, 2);
-  const apple = res.body.find((o: { vendor: string }) => o.vendor === 'apple');
+  assert.equal(res.body.length, 4);
+  const apple = res.body.find((o: { vendor: string; dedupeKey: string }) => o.dedupeKey === 'gmail-1');
   const amazon = res.body.find((o: { vendor: string }) => o.vendor === 'amazon');
   assert.equal(apple.linkStatus, 'linked');
   assert.equal(amazon.linkStatus, 'orphan');
   assert.ok(Array.isArray(apple.items));
 });
 
-test('group=gmail filters to email_gmail* sources', async () => {
+test('group=gmail filters to gmail-scan:* sources', async () => {
   const res = await authed.get('/api/external-orders?group=gmail');
   assert.equal(res.status, 200);
-  assert.equal(res.body.length, 1);
-  assert.equal(res.body[0].vendor, 'apple');
+  assert.equal(res.body.length, 2);
+  const dedupKeys: string[] = res.body.map((o: { dedupeKey: string }) => o.dedupeKey);
+  assert.ok(dedupKeys.includes('gmail-1'));
+  assert.ok(dedupKeys.includes('gmail-2'));
 });
 
 test('group=amazon filters to vendor=amazon', async () => {
@@ -112,6 +166,26 @@ test('group=amazon filters to vendor=amazon', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.length, 1);
   assert.equal(res.body[0].vendor, 'amazon');
+});
+
+test('needs_match linkStatus derived from suggested TransactionOrderLink', async () => {
+  const res = await authed.get('/api/external-orders?group=gmail');
+  assert.equal(res.status, 200);
+  const needsMatch = res.body.find((o: { dedupeKey: string }) => o.dedupeKey === 'gmail-2');
+  assert.ok(needsMatch, 'gmail-2 order should be in gmail group');
+  assert.equal(needsMatch.linkStatus, 'needs_match');
+});
+
+test('group=other returns non-gmail non-amazon orders only', async () => {
+  const res = await authed.get('/api/external-orders?group=other');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.length, 1);
+  assert.equal(res.body[0].dedupeKey, 'other-1');
+  assert.equal(res.body[0].vendor, 'other');
+  const dedupKeys: string[] = res.body.map((o: { dedupeKey: string }) => o.dedupeKey);
+  assert.ok(!dedupKeys.includes('gmail-1'), 'gmail order must not appear in other');
+  assert.ok(!dedupKeys.includes('gmail-2'), 'gmail order must not appear in other');
+  assert.ok(!dedupKeys.includes('amz-1'), 'amazon order must not appear in other');
 });
 
 test('rejects unauthenticated requests', async () => {
