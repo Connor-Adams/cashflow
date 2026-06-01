@@ -435,8 +435,12 @@ export function DashboardPage() {
   }, [currency])
 
   useEffect(() => {
-    void getJson<unknown[]>('/api/subscription-price-changes?status=unack')
-      .then((rows) => setPriceChangeCount(rows.length))
+    // Price increases are now subscription_price_increase Insights; count the
+    // open ones. GET /api/insights returns { data: [...] }.
+    void getJson<{ data: unknown[] }>(
+      '/api/insights?type=subscription_price_increase&status=open',
+    )
+      .then((res) => setPriceChangeCount(res.data.length))
       .catch(() => setPriceChangeCount(0))
   }, [])
 

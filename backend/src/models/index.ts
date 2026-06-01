@@ -116,10 +116,6 @@ import { Feedback, initFeedback } from './Feedback';
 import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
 import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
 import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
-import {
-  SubscriptionPriceChange,
-  initSubscriptionPriceChange,
-} from './SubscriptionPriceChange';
 import { SavedFilter, initSavedFilter } from './SavedFilter';
 
 initUser(sequelize);
@@ -212,7 +208,6 @@ initFeedback(sequelize);
 initClientErrorEvent(sequelize);
 initServerErrorEvent(sequelize);
 initIncomeEntry(sequelize);
-initSubscriptionPriceChange(sequelize);
 initSavedFilter(sequelize);
 
 // Transaction labels (issue #270). belongsToMany both directions so a
@@ -1129,6 +1124,5 @@ export {
   ClientErrorEvent,
   ServerErrorEvent,
   IncomeEntry,
-  SubscriptionPriceChange,
   SavedFilter,
 };

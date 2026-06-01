@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { CancelImpactCard } from '@/components/subscriptions/CancelImpactCard'
-import { getJson, patchJson, postJson } from '../lib/api'
+import { getJson, patchJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   CancelImpact,
@@ -418,7 +418,10 @@ function SubscriptionRow({
   async function acknowledgePriceChange() {
     if (!pendingChange) return
     try {
-      await postJson(`/api/subscription-price-changes/${pendingChange.id}/acknowledge`, {})
+      // pendingChange.id is the Insight id (the price-increase signal is now a
+      // subscription_price_increase Insight). Acknowledging dismisses it; the
+      // chip + money-leak both read status:'open', so they clear immediately.
+      await patchJson(`/api/insights/${pendingChange.id}`, { status: 'dismissed' })
       setPendingChange(null)
       setPriceDrawerOpen(false)
       showToast({ title: 'Acknowledged.' })
