@@ -68,7 +68,8 @@ async function main() {
   for (const householdId of householdIds) {
     let pass = 0;
     for (;;) {
-      const updated = await categorizeAndApplyReceiptItems({ householdId, limit: 500 });
+      // 200 = the categorizer's internal per-call cap; the loop drains the rest.
+      const updated = await categorizeAndApplyReceiptItems({ householdId, limit: 200 });
       totalUpdated += updated;
       pass += 1;
       console.log(`  household ${householdId}: pass ${pass} categorized ${updated} item(s)`);
