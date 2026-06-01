@@ -4,7 +4,7 @@ import {
   SUBSCRIPTION_CADENCES,
   type SubscriptionCadence,
 } from '../models/PlannedEvent';
-import { PlannedEvent, HouseholdMember, Transaction } from '../models';
+import { PlannedEvent, HouseholdMember, Transaction, SubscriptionPriceChange } from '../models';
 import {
   fromSubscriptionStatus,
   serializeSubscription,
@@ -75,6 +75,14 @@ function legacyStatusWhere(
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_WINDOW_DAYS = 180;
 const DEFAULT_MIN_OCCURRENCES = 3;
+
+interface PendingPriceChange {
+  id: number;
+  prevCents: number;
+  newCents: number;
+  pctChange: string;
+  detectedOn: string;
+}
 
 interface SubscriptionPatch {
   status?: SubscriptionStatus;
@@ -337,18 +345,53 @@ router.get('/', async (req, res, next) => {
       where.currency = String(req.query.currency).toUpperCase().slice(0, 3);
     }
 
+    const rows = await PlannedEvent.findAll({ where });
+
+    // Unacknowledged price changes for this household, keyed by the
+    // subscription's PlannedEvent id (detection stamps planned_events.id).
+    const priceChangeRows = await SubscriptionPriceChange.findAll({
+      where: { householdId: auth.household.id, acknowledgedAt: null },
+      attributes: ['id', 'subscriptionId', 'previousAmountCents', 'newAmountCents', 'pctChange', 'detectedOn'],
+      raw: true,
+    });
+    type PriceChangeRaw = {
+      id: number;
+      subscriptionId: number;
+      previousAmountCents: number;
+      newAmountCents: number;
+      pctChange: string;
+      detectedOn: string;
+    };
+    const pendingMap = new Map<number, PendingPriceChange>();
+    for (const pc of priceChangeRows as unknown as PriceChangeRaw[]) {
+      // If multiple unacknowledged rows exist for a subscription, keep the first (highest id).
+      if (!pendingMap.has(pc.subscriptionId)) {
+        pendingMap.set(pc.subscriptionId, {
+          id: pc.id,
+          prevCents: pc.previousAmountCents,
+          newCents: pc.newAmountCents,
+          pctChange: pc.pctChange,
+          detectedOn: pc.detectedOn,
+        });
+      }
+    }
+
     // Order in JS by the *legacy* serialized shape: the merged `status` column
     // holds a different value set than the legacy enum, and the merchant name
-    // lives in `name`, so a DB-level ORDER BY on those columns would not match
-    // the historical [status ASC, annualizedCost DESC, merchantName ASC] order.
-    const rows = await PlannedEvent.findAll({ where });
-    const items = rows.map(serializeSubscription);
-    items.sort(
-      (a, b) =>
-        a.status.localeCompare(b.status) ||
-        Number(b.annualizedCost) - Number(a.annualizedCost) ||
-        a.merchantName.localeCompare(b.merchantName),
-    );
+    // lives in `name`, so a DB-level ORDER BY would not match the historical
+    // [status ASC, annualizedCost DESC, merchantName ASC] order. Attach any
+    // pending price change while mapping.
+    const items = rows
+      .map((row) => ({
+        ...serializeSubscription(row),
+        pendingPriceChange: pendingMap.get(row.id) ?? null,
+      }))
+      .sort(
+        (a, b) =>
+          a.status.localeCompare(b.status) ||
+          Number(b.annualizedCost) - Number(a.annualizedCost) ||
+          a.merchantName.localeCompare(b.merchantName),
+      );
     res.json({ items });
   } catch (e) {
     next(e);

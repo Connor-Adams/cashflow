@@ -31,6 +31,10 @@ export type EnvConfig = {
   weeklyDigestCron: string;
   budgetBreachCheckEnabled: boolean;
   budgetBreachCheckCron: string;
+  dividendMatchEnabled: boolean;
+  dividendMatchCron: string;
+  subscriptionPriceDetectEnabled: boolean;
+  subscriptionPriceDetectCron: string;
 };
 
 export function parsePort(raw: string | undefined): number {
@@ -147,6 +151,16 @@ export function loadEnvConfig(
     nodeEnv,
   );
   const budgetBreachCheckCron = e.BUDGET_BREACH_CHECK_CRON?.trim() || '0 8 * * *';
+  const dividendMatchEnabled = parseDividendMatchEnabled(
+    e.DIVIDEND_MATCH_ENABLED,
+    nodeEnv,
+  );
+  const dividendMatchCron = e.DIVIDEND_MATCH_CRON?.trim() || '30 3 * * *';
+  const subscriptionPriceDetectEnabled = parseSubscriptionPriceDetectEnabled(
+    e.SUBSCRIPTION_PRICE_DETECT_ENABLED,
+    nodeEnv,
+  );
+  const subscriptionPriceDetectCron = e.SUBSCRIPTION_PRICE_DETECT_CRON?.trim() || '0 2 * * *';
 
   return {
     csvUploadDir,
@@ -174,6 +188,10 @@ export function loadEnvConfig(
     weeklyDigestCron,
     budgetBreachCheckEnabled,
     budgetBreachCheckCron,
+    dividendMatchEnabled,
+    dividendMatchCron,
+    subscriptionPriceDetectEnabled,
+    subscriptionPriceDetectCron,
   };
 }
 
@@ -272,6 +290,37 @@ export function parseBudgetBreachCheckEnabled(
   return true;
 }
 
+/**
+ * Daily dividend-reconciliation matcher (#305). Defaults on outside tests so
+ * the matcher runs in dev/prod; tests invoke the handler directly.
+ */
+export function parseDividendMatchEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
+/**
+ * Default-off in test so the subscription price-detect cron doesn't
+ * auto-schedule during the integration-test suite. Production / dev
+ * defaults on.
+ */
+export function parseSubscriptionPriceDetectEnabled(
+  raw: string | undefined,
+  nodeEnv: string,
+): boolean {
+  const trimmed = raw?.trim().toLowerCase();
+  if (trimmed && QUOTE_TRUTHY.has(trimmed)) return true;
+  if (trimmed && QUOTE_FALSY.has(trimmed)) return false;
+  if (nodeEnv === 'test') return false;
+  return true;
+}
+
 export function parseDividendDedupDays(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return 5;
   const n = Number(raw);
@@ -310,6 +359,10 @@ export const weeklyDigestEnabled = resolved.weeklyDigestEnabled;
 export const weeklyDigestCron = resolved.weeklyDigestCron;
 export const budgetBreachCheckEnabled = resolved.budgetBreachCheckEnabled;
 export const budgetBreachCheckCron = resolved.budgetBreachCheckCron;
+export const dividendMatchEnabled = resolved.dividendMatchEnabled;
+export const dividendMatchCron = resolved.dividendMatchCron;
+export const subscriptionPriceDetectEnabled = resolved.subscriptionPriceDetectEnabled;
+export const subscriptionPriceDetectCron = resolved.subscriptionPriceDetectCron;
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];

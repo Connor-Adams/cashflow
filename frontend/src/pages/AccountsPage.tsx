@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -62,6 +62,7 @@ export function AccountsPage() {
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editCreditLimit, setEditCreditLimit] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -216,6 +217,7 @@ export function AccountsPage() {
         closedAt: editClosedAt.trim() || null,
       }
       if (creditLimitPayload !== undefined) payload.creditLimit = creditLimitPayload
+      payload.notes = editNotes.trim() || null
       await patchJson<Account>(`/api/accounts/${id}`, payload)
       setEditingId(null)
       setEditName('')
@@ -226,7 +228,8 @@ export function AccountsPage() {
       setEditVisibility('private')
       setEditClosedAt('')
       setEditCreditLimit('')
-      showToast({ title: 'Limit saved.', variant: 'success', durationMs: 2000 })
+      setEditNotes('')
+      showToast({ title: 'Account saved.', variant: 'success', durationMs: 2000 })
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -243,6 +246,7 @@ export function AccountsPage() {
     setEditVisibility('private')
     setEditClosedAt('')
     setEditCreditLimit('')
+    setEditNotes('')
   }
 
   function startEdit(account: Account) {
@@ -255,6 +259,7 @@ export function AccountsPage() {
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
     setEditCreditLimit(account.creditLimit != null ? String(account.creditLimit) : '')
+    setEditNotes(account.notes ?? '')
   }
 
   const accountCount = accounts.length
@@ -423,7 +428,8 @@ export function AccountsPage() {
                 ))
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
+                  <Fragment key={a.id}>
+                  <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -448,7 +454,14 @@ export function AccountsPage() {
                           placeholder="Account name"
                         />
                       ) : (
-                        a.name
+                        <div>
+                          {a.name}
+                          {a.notes && (
+                            <p className="text-xs muted" style={{ marginTop: '0.125rem' }}>
+                              {a.notes.length > 100 ? `${a.notes.slice(0, 100)}…` : a.notes}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>
@@ -594,6 +607,33 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId === a.id && (
+                    <TableRow>
+                      <TableCell colSpan={9}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          <label className="text-sm font-medium" htmlFor={`notes-${a.id}`}>
+                            Notes
+                          </label>
+                          <textarea
+                            id={`notes-${a.id}`}
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            rows={3}
+                            maxLength={4000}
+                            placeholder="Routing number, custodian, tax ID, or any per-account reminder…"
+                            style={{ width: '100%', resize: 'vertical' }}
+                          />
+                          <span
+                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'muted'}`}
+                            aria-live="polite"
+                          >
+                            {editNotes.length}/4000
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 ))
               )}
             </TableBody>

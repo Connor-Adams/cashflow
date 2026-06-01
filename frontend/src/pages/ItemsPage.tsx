@@ -5,6 +5,7 @@ import { ItemsBrowse } from '@/components/items/ItemsBrowse'
 import { ItemsSearch } from '@/components/items/ItemsSearch'
 import { ItemsFilterStrip } from '@/components/items/ItemsFilterStrip'
 import { ItemDetailDrawer } from '@/components/items/ItemDetailDrawer'
+import { AnalyzeTab } from '@/components/items/AnalyzeTab'
 import type { ItemsFilters } from '@/hooks/useItems'
 import type { ItemRow } from '@cashflow/shared'
 
@@ -112,10 +113,7 @@ export function ItemsPage() {
         <ItemsBrowse filters={filters} onOpenItem={openItem} />
       </TabPanel>
       <TabPanel value="analyze" active={tab}>
-        <div className="rounded-lg border p-6 text-center space-y-2">
-          <p className="font-semibold">Analyze items — coming soon</p>
-          <p className="text-sm text-muted-foreground">This view will summarize spending and trends by item.</p>
-        </div>
+        <AnalyzeTab />
       </TabPanel>
       <TabPanel value="search" active={tab}>
         <ItemsSearch filters={filters} onChangeFilters={setFilters} onOpenItem={openItem} />
