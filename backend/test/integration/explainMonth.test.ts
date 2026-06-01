@@ -180,11 +180,32 @@ async function seedSubscription(args: {
     expectedDate: lastChargeDate,
     category: args.category ?? null,
     annualizedCost: (args.amount * 12).toFixed(4),
-    priceChangeDetected: args.priceChangeDetected ?? false,
     cancellationUrl: null,
     notes: null,
     ...subscriptionStatusFields(args.status ?? 'active'),
   });
+  // The price-increase signal now lives in an open Insight
+  // (type='subscription_price_increase', entityId=PlannedEvent.id), NOT the
+  // retired planned_events.price_change_detected column. Seed it that way so
+  // the explain-month route — which derives the per-subscription
+  // priceChangeDetected flag from open Insights — surfaces the "price changed"
+  // finding. Mirrors moneyLeaks.test.ts.
+  if (args.priceChangeDetected) {
+    await models.Insight.create({
+      householdId: args.householdId,
+      userId: null,
+      type: 'subscription_price_increase',
+      severity: 'warning',
+      title: `${args.merchant} price increased`,
+      description: '',
+      entityType: 'expectation',
+      entityId: sub.id,
+      status: 'open',
+      fingerprint: `subscription_price_increase:${sub.id}:1899`,
+      metadata: { newAmountCents: 1899 },
+      detectedAt: new Date(),
+    });
+  }
   // Override createdAt / updatedAt timestamps if requested — Sequelize sets
   // them automatically on create() and the route's "new this month"
   // detector relies on them. We must use Model.update with silent:true to
@@ -316,6 +337,37 @@ test('GET /api/reports/explain-month surfaces subscription_change for new subscr
   );
   assert.ok(subs.length >= 1);
   assert.ok(subs.some((s) => /NewSaaS/.test(s.title)));
+});
+
+test('GET /api/reports/explain-month surfaces subscription_change price-changed from an open Insight', async () => {
+  // An open subscription_price_increase Insight (entityId = the subscription's
+  // PlannedEvent id) drives the "price changed" finding — the route derives the
+  // per-subscription flag from open Insights, NOT the retired column. The sub
+  // is NOT new this month (created long ago) and its lastChargeDate falls in the
+  // report month, so the only reason the finding fires is the price-increase.
+  await seedSubscription({
+    householdId: primaryHouseholdId,
+    merchant: 'PriceyStream',
+    amount: 18.99,
+    category: 'Streaming',
+    priceChangeDetected: true,
+    lastChargeDate: '2024-09-08',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  });
+  const res = await primaryAgent.get('/api/reports/explain-month?month=2024-09');
+  assert.equal(res.status, 200);
+  const subs = (
+    res.body.findings as Array<{
+      kind: string;
+      title: string;
+      summary: string;
+      meta?: { priceChangeDetected?: boolean };
+    }>
+  ).filter((f) => f.kind === 'subscription_change' && /PriceyStream/.test(f.title));
+  assert.equal(subs.length, 1, 'expected one PriceyStream subscription_change finding');
+  assert.match(subs[0].summary, /price changed/);
+  assert.equal(subs[0].meta?.priceChangeDetected, true);
 });
 
 test('GET /api/reports/explain-month respects currency filter', async () => {
