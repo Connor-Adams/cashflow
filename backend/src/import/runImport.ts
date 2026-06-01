@@ -853,6 +853,7 @@ type PdfAccountTemplate = {
  * eSavings) are ignored at this step.
  */
 const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
+  'RBC Digital Choice Business': { name: 'RBC Digital Choice Business', accountType: 'checking' },
   'RBC Day to Day Banking': { name: 'RBC Day to Day Banking', accountType: 'checking' },
   'RBC Day to Day Savings': { name: 'RBC Day to Day Savings', accountType: 'savings' },
   'RBC High Interest eSavings': { name: 'RBC High Interest eSavings', accountType: 'savings' },
