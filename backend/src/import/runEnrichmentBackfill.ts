@@ -21,6 +21,7 @@ import { enrichTransaction } from './enrich';
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -110,6 +111,15 @@ export async function runBackfill(
     return householdAccountIdsByAccount.get(accountId)!;
   }
 
+  const ownerNamesByHousehold = new Map<string, string[]>();
+  async function getOwnerNames(hh: number | null) {
+    const k = householdKey(hh);
+    if (!ownerNamesByHousehold.has(k)) {
+      ownerNamesByHousehold.set(k, await loadHouseholdOwnerNames(hh));
+    }
+    return ownerNamesByHousehold.get(k)!;
+  }
+
   const where: Record<string, unknown> = {};
   if (flags.transactionId != null) where.id = flags.transactionId;
   if (flags.accountId != null) where.accountId = flags.accountId;
@@ -188,6 +198,7 @@ export async function runBackfill(
               txn.accountId,
               txn.householdId,
             );
+            const ownerNames = await getOwnerNames(txn.householdId);
             const memory = await findMerchantMemory(
               txn.householdId,
               txn.merchantClean,
@@ -221,6 +232,7 @@ export async function runBackfill(
               accountId: txn.accountId,
               householdId: txn.householdId,
               householdAccountIds,
+              ownerNames,
               rules,
               amazonOrders,
               memory,

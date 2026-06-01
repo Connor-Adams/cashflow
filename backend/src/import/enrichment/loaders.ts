@@ -1,5 +1,5 @@
 import { QueryTypes } from 'sequelize';
-import { sequelize, Account, ExternalOrder, ExternalOrderItem } from '../../models';
+import { sequelize, Account, ExternalOrder, ExternalOrderItem, HouseholdMember, User } from '../../models';
 import type { ExternalOrderItem as ExternalOrderItemType } from '../../models/ExternalOrderItem';
 import type { LinkItemsCandidateOrder } from './linkItemsStage';
 import type { RecurringHistoryRow } from './detectRecurringStage';
@@ -43,6 +43,24 @@ export async function loadHouseholdAccountIds(accountId: number, householdId: nu
   const ids = rows.map((r) => r.id);
   if (!ids.includes(accountId)) ids.push(accountId);
   return ids;
+}
+
+/**
+ * Household member display names (e.g. ['Connor Adams', 'LingLing']). Fed to the
+ * detect-type stage so an external payroll direct deposit (income) is told apart
+ * from a self-deposit made under the owner's own name (transfer). Returns [] when
+ * the household is unknown or has no members.
+ */
+export async function loadHouseholdOwnerNames(householdId: number | null): Promise<string[]> {
+  if (householdId == null) return [];
+  const members = await HouseholdMember.findAll({
+    where: { householdId },
+    attributes: ['userId'],
+  });
+  const userIds = members.map((m) => m.userId);
+  if (userIds.length === 0) return [];
+  const users = await User.findAll({ where: { id: userIds }, attributes: ['displayName'] });
+  return users.map((u) => u.displayName).filter((n): n is string => Boolean(n));
 }
 
 export async function loadRecurringHistory(

@@ -32,6 +32,7 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -233,6 +234,7 @@ export async function commitStatementImport(
   const rules = await loadAllRules(account.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
   const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
+  const ownerNames = await loadHouseholdOwnerNames(account.householdId ?? null);
   const overrideBusiness = preview.overrideBusiness === true;
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
@@ -288,6 +290,7 @@ export async function commitStatementImport(
         accountId: account.id,
         householdId: account.householdId ?? null,
         householdAccountIds,
+        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,

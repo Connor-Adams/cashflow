@@ -138,6 +138,22 @@ test('enrichTransaction labels WS investment txn via ws-investment stage', async
   assert.equal(result.fields.merchantCanonical, 'XEQT — Buy');
 });
 
+test('pipeline classifies an external direct deposit as income', async () => {
+  const result = await enrichTransaction(baseInputs({
+    raw: { merchantRaw: 'Direct deposit from CDG LABS INC', date: '2026-05-15', amount: 5000, sourceReference: null, notes: null },
+    ownerNames: ['Connor Adams', 'LingLing'],
+  }));
+  assert.equal(result.fields.txnType, 'income');
+});
+
+test('pipeline excludes an own-name direct deposit from income (threads ownerNames)', async () => {
+  const result = await enrichTransaction(baseInputs({
+    raw: { merchantRaw: 'Direct deposit from ADAMS CONNOR DO', date: '2026-05-15', amount: 5000, sourceReference: null, notes: null },
+    ownerNames: ['Connor Adams'],
+  }));
+  assert.equal(result.fields.txnType, 'transfer');
+});
+
 test('enrichTransaction labels regular merchant via normalize-seed (not WS stage)', async () => {
   const result = await enrichTransaction({
     raw: {

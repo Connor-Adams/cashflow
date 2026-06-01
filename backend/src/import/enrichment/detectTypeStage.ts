@@ -60,10 +60,69 @@ const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType }> = [
   { value: 'deposit', type: 'transfer' },
 ];
 
+// Income: external payroll / direct-deposit inflows. Distinguished from the
+// `transfer` pattern below (which also matches "direct deposit") by requiring a
+// positive amount and excluding self-deposits. A "direct deposit from <X>"
+// where <X> is the account owner's own name or an own-account word is internal
+// money movement, not earned income. Bank descriptions are truncated (35-char
+// cap in the reference data) so a corporate-entity suffix is not reliably
+// present — own-name exclusion against the household members is the precision
+// signal that separates "Direct deposit from CDG LABS INC" / "...ADAMS GREENE"
+// (income) from "...ADAMS CONNOR" (the owner paying themselves → transfer).
+const INCOME_WORD_RE = /\b(payroll|salary|paycheque|paycheck)\b/i;
+const DIRECT_DEPOSIT_FROM_RE = /\bdirect deposit from\b/i;
+const OWN_ACCOUNT_RE =
+  /\b(chequing|checking|savings|tfsa|fhsa|rrsp|rrif|rdsp|margin|crypto)\b/i;
+
+function tokenizeName(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+}
+
+/**
+ * True when the payee text names a household member — every token of some
+ * member's name is present in the payee. A token-SUPERSET test (not substring)
+ * so a shared surname alone ("ADAMS" in both "Connor Adams" and an external
+ * "ADAMS GREENE") does not misclassify external income as a self transfer.
+ */
+function isOwnNameDeposit(
+  payeeTokens: Set<string>,
+  ownerNames: string[],
+): boolean {
+  return ownerNames.some((name) => {
+    const memberTokens = tokenizeName(name);
+    return memberTokens.length > 0 && memberTokens.every((t) => payeeTokens.has(t));
+  });
+}
+
+function detectsIncome(
+  haystack: string,
+  amount: number,
+  ownerNames: string[],
+): boolean {
+  if (amount <= 0) return false;
+  if (INCOME_WORD_RE.test(haystack)) return true;
+  if (!DIRECT_DEPOSIT_FROM_RE.test(haystack)) return false;
+  if (OWN_ACCOUNT_RE.test(haystack)) return false;
+  return !isOwnNameDeposit(new Set(tokenizeName(haystack)), ownerNames);
+}
+
 export interface DetectTypeInput {
   merchantRaw: string;
   merchantClean: string;
   amount: number;
+  /**
+   * Household member display names (e.g. ['Connor Adams', 'LingLing']). Used to
+   * tell an external payroll direct deposit (income) apart from a self-deposit
+   * the owner made under their own name (transfer). Optional: when omitted, any
+   * "direct deposit from <X>" that isn't an own-account movement is treated as
+   * external income.
+   */
+  ownerNames?: string[];
 }
 
 export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
@@ -81,6 +140,17 @@ export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
         },
       ];
     }
+  }
+
+  if (detectsIncome(haystack, input.amount, input.ownerNames ?? [])) {
+    return [
+      {
+        source: 'type-detect',
+        confidence: 'high',
+        fields: { txnType: 'income' },
+        rationale: 'narrative matched income (payroll / external direct deposit)',
+      },
+    ];
   }
 
   for (const p of PATTERNS) {

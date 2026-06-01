@@ -29,6 +29,7 @@ export type TxnType =
   | 'reward'
   | 'investment'
   | 'dividend'
+  | 'income'
   | 'unknown';
 
 export type SignalFields = Partial<{
