@@ -39,9 +39,11 @@ export function registerBuiltInPdfParsers(): void {
   const { rbcInvestmentParser } = require('./rbcInvestment');
   const { questradeParser } = require('./questrade');
   const { wiseStatementParser } = require('./wiseStatement');
+  const { rbcBusinessBankingParser } = require('./rbcBusinessBanking');
   /* eslint-enable @typescript-eslint/no-require-imports */
   registerPdfParser(cibcCostcoMastercardParser);
   registerPdfParser(rbcPersonalBankingParser);
+  registerPdfParser(rbcBusinessBankingParser);
   registerPdfParser(rbcVisaParser);
   registerPdfParser(rbcCreditLineParser);
   registerPdfParser(rbcInvestmentParser);
