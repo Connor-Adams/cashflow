@@ -137,17 +137,20 @@ function AppRoutes() {
           <Route path="subscriptions" element={<SubscriptionsPage />} />
           <Route path="money-leaks" element={<Navigate to="/transactions/leaks" replace />} />
           <Route path="rules" element={<RulesPage />} />
-          <Route path="partner" element={<PartnerFairnessPage />} />
+          <Route path="partner" element={<Navigate to="/reports/partner" replace />} />
           <Route path="reports" element={<ReportsLayout />}>
             <Route index element={<ReportsPage />} />
             <Route path="explain-month" element={<ExplainMonthPage />} />
             <Route path="lifestyle-inflation" element={<LifestyleInflationPage />} />
             <Route path="savings-rate" element={<SavingsRatePage />} />
+            <Route path="partner" element={<PartnerFairnessPage />} />
+            <Route path="currency" element={<CurrencyPage />} />
+            <Route path="cashflow" element={<SankeyPage />} />
           </Route>
           <Route path="audit-log" element={<Navigate to="/settings/audit-log" replace />} />
           <Route path="sync" element={<Navigate to="/settings/backup" replace />} />
-          <Route path="sankey" element={<SankeyPage />} />
-          <Route path="currency" element={<CurrencyPage />} />
+          <Route path="sankey" element={<Navigate to="/reports/cashflow" replace />} />
+          <Route path="currency" element={<Navigate to="/reports/currency" replace />} />
           <Route path="monthly-close" element={<MonthlyClosePage />} />
           <Route path="income" element={<IncomePage />} />
           <Route path="tax" element={<Navigate to="/scenarios/tax" replace />} />
