@@ -92,7 +92,9 @@ function eventKey(e: ForecastEvent): string {
 }
 
 function buildEventDescription(e: ForecastEvent): string {
-  if (e.sourceType === 'recurring_detection') return 'Recurring (detected)'
+  if (e.sourceType === 'recurring_detection') {
+    return e.direction === 'in' ? 'Recurring income (detected)' : 'Recurring (detected)'
+  }
   return 'Planned event'
 }
 

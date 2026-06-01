@@ -1,13 +1,17 @@
 /**
  * Integration coverage for the Expectation merge (Task 5): after the fold,
  * planned_events holds BOTH one-shot planned events (kind='planned') and
- * subscriptions (kind='subscription'). Every reader that historically saw only
- * planned events MUST filter kind='planned', or subscriptions leak into the
- * forecast / calendar / planned-events list / etc.
+ * subscriptions (kind='subscription').
  *
- * This test seeds one row of each kind and asserts the planned reader surfaces
- * (the /api/planned-events list and /api/forecast) show the planned row and do
- * NOT show the subscription row.
+ * The planned-events LIST view (/api/planned-events) is a distinct surface from
+ * subscriptions and MUST filter kind='planned' — subscriptions have their own
+ * view, so they must not leak into the planned-events list.
+ *
+ * The FORECAST is different: it is a projection of all future cash movement, so
+ * recurring subscription expenses legitimately belong there as projected
+ * outflows. (Excluding them was a bug — the forecast was blind to tracked
+ * subscriptions.) This test pins both rules: subscriptions stay OUT of the
+ * planned-events list but DO appear in the forecast.
  *
  * Postgres-only (exercises the merged model against the real DB), so it runs
  * under `yarn test:integration` in CI.
@@ -104,9 +108,21 @@ test('subscription rows do NOT appear in /api/planned-events', async () => {
   );
 });
 
-test('subscription rows do NOT appear in /api/forecast', async () => {
-  const res = await agent.get('/api/forecast');
+test('subscription rows DO appear in /api/forecast as projected outflows', async () => {
+  // Window covering the subscription's seed date (2026-06-15, monthly cadence).
+  const res = await agent
+    .get('/api/forecast')
+    .query({ dateFrom: '2026-06-01', dateTo: '2026-06-30', currency: 'CAD' });
   assert.equal(res.status, 200);
-  const body = JSON.stringify(res.body);
-  assert.ok(!body.includes('Netflix'), 'subscription leaked into /api/forecast');
+  const events = res.body.events as Array<{
+    sourceName: string;
+    direction: string;
+    date: string;
+    amount: number;
+  }>;
+  const netflix = events.filter((e) => e.sourceName === 'Netflix');
+  assert.equal(netflix.length, 1, 'subscription should be projected into the forecast');
+  assert.equal(netflix[0].direction, 'out');
+  assert.equal(netflix[0].date, '2026-06-15');
+  assert.equal(netflix[0].amount, 15.99);
 });
