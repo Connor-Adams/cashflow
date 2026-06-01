@@ -70,3 +70,19 @@ export const InboxLayout = () => (
     ]}
   />
 )
+
+// Expectation family (planned events + calendar/forecast views + recurring/
+// subscriptions/reimbursements) grouped under /planned — PR 2. Unblocked once
+// the backend Expectation merge landed (pages unchanged, endpoints preserved).
+export const PlannedLayout = () => (
+  <RouteTabsLayout
+    tabs={[
+      { value: 'upcoming', label: 'Upcoming', path: '/planned' },
+      { value: 'calendar', label: 'Calendar', path: '/planned/calendar' },
+      { value: 'forecast', label: 'Forecast', path: '/planned/forecast' },
+      { value: 'recurring', label: 'Recurring', path: '/planned/recurring' },
+      { value: 'subscriptions', label: 'Subscriptions', path: '/planned/subscriptions' },
+      { value: 'reimbursements', label: 'Reimbursements', path: '/planned/reimbursements' },
+    ]}
+  />
+)
