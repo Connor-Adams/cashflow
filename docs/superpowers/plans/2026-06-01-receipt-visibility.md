@@ -91,7 +91,7 @@ before(async () => {
     orderDate: '2026-05-20',
     total: '9.99',
     currency: 'CAD',
-    source: 'email_gmail_apple',
+    source: 'gmail-scan:apple',
   } as never);
   const txn = await models.Transaction.create({
     accountId,
@@ -138,7 +138,7 @@ test('GET /api/external-orders returns all household orders with derived linkSta
   assert.ok(Array.isArray(apple.items));
 });
 
-test('group=gmail filters to email_gmail* sources', async () => {
+test('group=gmail filters to gmail-scan:* sources', async () => {
   const res = await authed.get('/api/external-orders?group=gmail');
   assert.equal(res.status, 200);
   assert.equal(res.body.length, 1);
@@ -218,11 +218,11 @@ router.get('/', async (req, res, next) => {
 
     const where: Record<string, unknown> = { householdId: household.id };
     if (group === 'gmail') {
-      where.source = { [Op.like]: 'email_gmail%' };
+      where.source = { [Op.like]: 'gmail-scan:%' };
     } else if (group === 'amazon') {
       where.vendor = 'amazon';
     } else if (group === 'other') {
-      where.source = { [Op.notLike]: 'email_gmail%' };
+      where.source = { [Op.notLike]: 'gmail-scan:%' };
       where.vendor = { [Op.ne]: 'amazon' };
     }
 
