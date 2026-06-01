@@ -49,6 +49,7 @@ import {
   rankRepaymentCandidates,
   type CandidateTransaction,
 } from '../reimbursements/matching';
+import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   REIMBURSEMENT_STATUSES,
   type ReimbursementStatus,
@@ -235,16 +236,7 @@ router.post(
         // the standalone /counterparty/promote endpoint on the transactions
         // route, so a user who promotes via either path lands on the same
         // Contact row.
-        let contact = await Contact.findOne({
-          where: { householdId: txn.householdId!, name: rawName },
-          transaction: t,
-        });
-        if (!contact) {
-          contact = await Contact.create(
-            { householdId: txn.householdId!, name: rawName, notes: null },
-            { transaction: t },
-          );
-        }
+        const contact = await findOrCreateContactByName(txn.householdId!, rawName, { transaction: t });
         txn.counterpartyContactId = contact.id;
         await txn.save({ transaction: t });
         const claim = await Reimbursement.create(

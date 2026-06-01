@@ -59,6 +59,7 @@ import {
 } from '../util/transactionRevisions';
 import { isTransactionStatus } from '../transactions/types';
 import { streamCsvExport } from '../services/transactionsExport';
+import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 
 const router = Router();
 
@@ -2375,16 +2376,7 @@ router.post('/:id/counterparty/promote', async (req, res, next) => {
         });
         return;
       }
-      contact = await Contact.findOne({
-        where: { householdId: household.id, name: raw },
-      });
-      if (!contact) {
-        contact = await Contact.create({
-          householdId: household.id,
-          name: raw,
-          notes: null,
-        });
-      }
+      contact = await findOrCreateContactByName(household.id, raw);
     }
     txn.counterpartyContactId = contact.id;
     await txn.save();
@@ -2497,16 +2489,7 @@ router.post('/counterparty/promote-bulk', async (req, res, next) => {
           return null;
         }
         const rawName = (newest.counterpartyRaw ?? '').trim();
-        contact = await Contact.findOne({
-          where: { householdId: household.id, name: rawName },
-          transaction: t,
-        });
-        if (!contact) {
-          contact = await Contact.create(
-            { householdId: household.id, name: rawName, notes: null },
-            { transaction: t },
-          );
-        }
+        contact = await findOrCreateContactByName(household.id, rawName, { transaction: t });
       }
 
       // Link every matching txn. Iterate so per-row save triggers
