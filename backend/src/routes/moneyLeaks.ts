@@ -26,7 +26,7 @@ import {
   MONEY_LEAK_TYPES,
   type MoneyLeakType,
 } from '../models/MoneyLeakDismissal';
-import { PlannedEvent, Transaction } from '../models';
+import { Insight, PlannedEvent, Transaction } from '../models';
 import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope';
@@ -142,6 +142,23 @@ router.get('/', async (req, res, next) => {
     const subRows = await PlannedEvent.findAll({
       where: { ...householdWhere(req), kind: 'subscription' },
     });
+    // The price-increase signal now lives in an open Insight
+    // (type='subscription_price_increase', entityId=PlannedEvent.id), not the
+    // retired planned_events.price_change_detected column. Build the set of
+    // subscriptions with an OPEN price-increase Insight; dismissing/resolving
+    // the Insight clears the leak on the next read.
+    const priceInsights = await Insight.findAll({
+      where: {
+        ...householdWhere(req),
+        type: 'subscription_price_increase',
+        status: 'open',
+      },
+      attributes: ['entityId'],
+      raw: true,
+    });
+    const priceUp = new Set<number>(
+      priceInsights.map((i) => i.entityId).filter((x): x is number => x != null),
+    );
     const subscriptions: LeakSubscription[] = subRows
       .map(serializeSubscription)
       .map((row) => ({
@@ -153,7 +170,7 @@ router.get('/', async (req, res, next) => {
         cadence: row.cadence,
         annualizedCost: Number(row.annualizedCost),
         status: row.status,
-        priceChangeDetected: Boolean(row.priceChangeDetected),
+        priceChangeDetected: priceUp.has(row.id),
         category: row.category,
         lastChargeDate: row.lastChargeDate,
         nextExpectedDate: row.nextExpectedDate,

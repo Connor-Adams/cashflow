@@ -110,7 +110,7 @@ async function seedSubscription(args: {
       raw: true,
     })
   )!.userId;
-  await models.PlannedEvent.create({
+  const pe = await models.PlannedEvent.create({
     kind: 'subscription',
     type: 'expense',
     source: 'recurring_detection',
@@ -127,11 +127,30 @@ async function seedSubscription(args: {
     expectedDate: lastChargeDate,
     category: args.category ?? null,
     annualizedCost: annualized.toFixed(4),
-    priceChangeDetected: args.priceChangeDetected ?? false,
     cancellationUrl: null,
     notes: null,
     ...subscriptionStatusFields(args.status ?? 'active'),
   });
+  // The price-increase signal now lives in an open Insight
+  // (type='subscription_price_increase', entityId=PlannedEvent.id), NOT the
+  // retired planned_events.price_change_detected column. Seed it that way so
+  // the route — which reads open Insights — surfaces the leak.
+  if (args.priceChangeDetected) {
+    await models.Insight.create({
+      householdId: args.householdId,
+      userId: null,
+      type: 'subscription_price_increase',
+      severity: 'warning',
+      title: `${args.merchant} price increased`,
+      description: '',
+      entityType: 'expectation',
+      entityId: pe.id,
+      status: 'open',
+      fingerprint: `subscription_price_increase:${pe.id}:1899`,
+      metadata: { newAmountCents: 1899 },
+      detectedAt: new Date(),
+    });
+  }
 }
 
 async function seedDeliveryCharges(
@@ -221,7 +240,7 @@ test('GET /api/money-leaks returns empty when no leaks present', async () => {
   assert.deepEqual(res.body.totals.byCurrency, []);
 });
 
-test('GET /api/money-leaks surfaces subscription_price_increase from priceChangeDetected', async () => {
+test('GET /api/money-leaks surfaces subscription_price_increase from an open Insight', async () => {
   await seedSubscription({
     householdId: primaryHouseholdId,
     merchant: 'Netflix',
