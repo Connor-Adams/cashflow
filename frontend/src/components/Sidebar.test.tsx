@@ -83,4 +83,10 @@ describe('Sidebar rail (PR 0)', () => {
       expect(screen.getByRole('link', { name })).toBeInTheDocument()
     }
   })
+
+  it('folds Review into the Inbox tabs (PR 5)', () => {
+    renderSidebar()
+    expect(screen.queryByRole('link', { name: 'Review' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Inbox' })).toBeInTheDocument()
+  })
 })

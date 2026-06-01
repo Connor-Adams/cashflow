@@ -10,7 +10,6 @@ import {
   HandCoins,
   PackageSearch,
   CreditCard,
-  ClipboardCheck,
   Globe,
   Inbox,
   Lightbulb,
@@ -62,7 +61,6 @@ const navSections: NavSection[] = [
     label: 'Today',
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-      { to: '/review', label: 'Review', icon: ClipboardCheck },
       { to: '/inbox', label: 'Inbox', icon: Inbox },
       { to: '/chat', label: 'Chat', icon: MessageSquare },
     ],
