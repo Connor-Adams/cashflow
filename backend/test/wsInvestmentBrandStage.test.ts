@@ -9,6 +9,12 @@ function canonicalOf(raw: string): string | null {
   return c ?? null;
 }
 
+function categoryOf(raw: string): string | null | undefined {
+  const signals = runWsInvestmentBrandStage({ merchantRaw: raw });
+  if (signals.length === 0) return null;
+  return signals[0].fields.autoCategory;
+}
+
 test('ws-investment: ticker buy', () => {
   assert.equal(
     canonicalOf('XEQT - iShares Core Equity ETF Portfolio: Bought 0.3921 shares at $40.78 per share (executed at 2026-01-06)'),
@@ -134,4 +140,42 @@ test('ws-investment: signal source and confidence', () => {
   assert.equal(signals.length, 1);
   assert.equal(signals[0].source, 'ws-investment');
   assert.equal(signals[0].confidence, 'high');
+});
+
+// Category assignment (#stock-activity-review): every matched WS investment row
+// carries an autoCategory so it never lands in the categorization review inbox.
+// Money the investment PAYS you is income; everything else (asset/cash movement,
+// fees) is the generic 'Investments' bucket.
+test('ws-investment: dividend / interest / stake-reward -> Investment income', () => {
+  assert.equal(
+    categoryOf('VFV - Vanguard S&P 500 Index ETF: Cash dividend distribution, received on 2025-10-07, record date of'),
+    'Investment income',
+  );
+  assert.equal(categoryOf('Stock lending monthly interest payment'), 'Investment income');
+  assert.equal(categoryOf('Interest received (executed at 2025-09-01)'), 'Investment income');
+  assert.equal(categoryOf('0.0020786267 of DOT rewards earned'), 'Investment income');
+});
+
+test('ws-investment: buys / sells / transfers / contributions / fees -> Investments', () => {
+  assert.equal(
+    categoryOf('XEQT - iShares Core Equity ETF Portfolio: Bought 0.3921 shares at $40.78 per share (executed at 2026-01-06)'),
+    'Investments',
+  );
+  assert.equal(categoryOf('NFLD - Exploits Discovery Corp: Sold 1500.0000 shares (executed at 2025-08-19)'), 'Investments');
+  assert.equal(
+    categoryOf('Purchase of 500000.0000000000 PEPE (executed at 2025-01-07), FX Rate: 1.4401, Fee charged $0.27'),
+    'Investments',
+  );
+  assert.equal(
+    categoryOf('Trading fee for sale of 4.0000000000 XRP (executed at 2026-01-28), FX Rate: 1.3552'),
+    'Investments',
+  );
+  assert.equal(categoryOf('Staked 0.0208474700 of ETH-Ethereum'), 'Investments');
+  assert.equal(categoryOf('Contribution (executed at 2025-11-02)'), 'Investments');
+  assert.equal(categoryOf('Money transfer into the account (executed at 2024-12-13)'), 'Investments');
+  assert.equal(categoryOf('Subscription fee paid for period 2025-10-07 to'), 'Investments');
+});
+
+test('ws-investment: no category for ordinary merchant strings', () => {
+  assert.equal(categoryOf('STARBUCKS'), null);
 });

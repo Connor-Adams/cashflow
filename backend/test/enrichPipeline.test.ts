@@ -174,3 +174,48 @@ test('enrichTransaction labels regular merchant via normalize-seed (not WS stage
 
   assert.equal(result.fields.merchantCanonical, 'Starbucks');
 });
+
+test('enrichTransaction: WS buy gets Investments category and clears review flag', async () => {
+  const result = await enrichTransaction({
+    raw: {
+      merchantRaw: 'XEQT - iShares Core Equity ETF Portfolio: Bought 0.3921 shares at $40.78 per share (executed at 2026-01-06)',
+      amount: -16,
+      date: '2026-01-06',
+      notes: null,
+      sourceReference: null,
+    },
+    rules: [],
+    memory: null,
+    recurringHistory: [],
+    amazonOrders: [],
+    relationshipCandidates: [],
+    accountId: 1,
+    householdAccountIds: [1],
+  } as any);
+
+  assert.equal(result.fields.autoCategory, 'Investments');
+  assert.equal(result.fields.autoSource, 'ws-investment');
+  assert.equal(result.fields.reviewFlag, false);
+});
+
+test('enrichTransaction: WS dividend gets Investment income category and clears review flag', async () => {
+  const result = await enrichTransaction({
+    raw: {
+      merchantRaw: 'VFV - Vanguard S&P 500 Index ETF: Cash dividend distribution, received on 2025-10-07, record date of',
+      amount: 12.5,
+      date: '2025-10-07',
+      notes: null,
+      sourceReference: null,
+    },
+    rules: [],
+    memory: null,
+    recurringHistory: [],
+    amazonOrders: [],
+    relationshipCandidates: [],
+    accountId: 1,
+    householdAccountIds: [1],
+  } as any);
+
+  assert.equal(result.fields.autoCategory, 'Investment income');
+  assert.equal(result.fields.reviewFlag, false);
+});
