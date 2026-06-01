@@ -120,6 +120,27 @@ async function seedTxn(args: SeedTxnArgs): Promise<number> {
   return txn.id;
 }
 
+// Map a legacy Subscription status to the merged PlannedEvent (kind='subscription')
+// status + statusUncertain pair. Mirrors fromSubscriptionStatus in
+// src/expectations/subscriptionMapper.ts; the explain-month route reads these
+// rows back through serializeSubscription, which reconstructs the legacy
+// `status` (e.g. 'cancelled' drives the cancelled-this-month finding).
+function subscriptionStatusFields(
+  status: 'active' | 'cancelled' | 'ignored' | 'unknown',
+): { status: 'planned' | 'cancelled' | 'ignored'; statusUncertain: boolean } {
+  switch (status) {
+    case 'cancelled':
+      return { status: 'cancelled', statusUncertain: false };
+    case 'ignored':
+      return { status: 'ignored', statusUncertain: false };
+    case 'unknown':
+      return { status: 'planned', statusUncertain: true };
+    case 'active':
+    default:
+      return { status: 'planned', statusUncertain: false };
+  }
+}
+
 async function seedSubscription(args: {
   householdId: number;
   merchant: string;
@@ -133,21 +154,36 @@ async function seedSubscription(args: {
   updatedAt?: string;
 }): Promise<void> {
   const models = await import('../../src/models');
-  const sub = await models.Subscription.create({
+  const lastChargeDate =
+    args.lastChargeDate ?? new Date().toISOString().slice(0, 10);
+  const owner = (
+    await models.HouseholdMember.findOne({
+      where: { householdId: args.householdId, role: 'owner' },
+      attributes: ['userId'],
+      raw: true,
+    })
+  )!.userId;
+  const sub = await models.PlannedEvent.create({
+    kind: 'subscription',
+    type: 'expense',
+    source: 'recurring_detection',
+    userId: owner,
     householdId: args.householdId,
-    merchantName: args.merchant,
+    name: args.merchant,
     normalizedName: args.merchant.toLowerCase(),
     amount: args.amount.toFixed(4),
     currency: args.currency ?? 'CAD',
     cadence: 'monthly',
-    lastChargeDate: args.lastChargeDate ?? new Date().toISOString().slice(0, 10),
+    lastChargeDate,
     nextExpectedDate: null,
-    status: args.status ?? 'active',
+    // expectedDate (NOT NULL) = nextExpectedDate ?? lastChargeDate.
+    expectedDate: lastChargeDate,
     category: args.category ?? null,
     annualizedCost: (args.amount * 12).toFixed(4),
     priceChangeDetected: args.priceChangeDetected ?? false,
     cancellationUrl: null,
     notes: null,
+    ...subscriptionStatusFields(args.status ?? 'active'),
   });
   // Override createdAt / updatedAt timestamps if requested — Sequelize sets
   // them automatically on create() and the route's "new this month"
@@ -158,8 +194,8 @@ async function seedSubscription(args: {
     const patch: Record<string, Date> = {};
     if (args.createdAt) patch.createdAt = new Date(args.createdAt);
     if (args.updatedAt) patch.updatedAt = new Date(args.updatedAt);
-    await models.Subscription.update(patch, {
-      where: { id: sub.id },
+    await models.PlannedEvent.update(patch, {
+      where: { id: sub.id, kind: 'subscription' },
       silent: true,
     });
   }

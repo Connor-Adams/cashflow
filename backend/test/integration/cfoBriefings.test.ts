@@ -210,17 +210,27 @@ before(async () => {
     source: 'manual',
   } as never);
 
-  // New subscription created in the window → new_subscription.
-  await models.Subscription.create({
+  // New subscription created in the window → new_subscription. Subscriptions
+  // are folded into planned_events as kind='subscription' (Expectation merge);
+  // legacy status 'active' maps to status='planned' + statusUncertain=false,
+  // which is exactly what the briefing builder's new-subscription query filters
+  // on. createdAt defaults to now() — inside the default 7-day window.
+  await models.PlannedEvent.create({
+    kind: 'subscription',
+    type: 'expense',
+    source: 'recurring_detection',
+    userId: primaryUserId,
     householdId: primaryHouseholdId,
-    merchantName: 'Netflix',
+    name: 'Netflix',
     normalizedName: 'netflix',
     amount: '15.9900',
     currency: 'CAD',
     cadence: 'monthly',
     lastChargeDate: fiveDaysAgo,
     nextExpectedDate: today,
-    status: 'active',
+    expectedDate: today,
+    status: 'planned',
+    statusUncertain: false,
     annualizedCost: '191.8800',
     category: 'Entertainment',
   } as never);
