@@ -28,7 +28,7 @@ const CAT_COLORS = [
   'var(--primary)',
   'var(--positive)',
   'var(--warning)',
-  '#7E9CD8',
+  'var(--chart-3)',
   'var(--muted-foreground)',
   'var(--border)',
 ]
@@ -78,6 +78,8 @@ export function ReceiptsList({ group }: { group: ReceiptGroup }) {
 
   const summary = summarizeOrders(orders)
   const currency = orders[0].currency
+  // Total/tax sums only make sense in a single currency; the list can mix them.
+  const singleCurrency = orders.every((o) => o.currency === currency)
 
   return (
     <div className="flex flex-col gap-3">
@@ -89,15 +91,20 @@ export function ReceiptsList({ group }: { group: ReceiptGroup }) {
           <>
             <span aria-hidden>·</span>
             <span>
-              <strong style={{ color: 'var(--warning)' }}>{summary.orphanCount}</strong> orphan
+              <strong style={{ color: 'var(--warning)' }}>{summary.orphanCount}</strong>{' '}
+              {summary.orphanCount === 1 ? 'orphan' : 'orphans'}
             </span>
           </>
         ) : null}
-        <span aria-hidden>·</span>
-        <span className="tabular-nums">
-          <strong className="text-[var(--foreground)]">{formatMoney(summary.totalSum, currency)}</strong> total
-        </span>
-        {summary.taxSum > 0 ? (
+        {singleCurrency ? (
+          <>
+            <span aria-hidden>·</span>
+            <span className="tabular-nums">
+              <strong className="text-[var(--foreground)]">{formatMoney(summary.totalSum, currency)}</strong> total
+            </span>
+          </>
+        ) : null}
+        {singleCurrency && summary.taxSum > 0 ? (
           <>
             <span aria-hidden>·</span>
             <span className="tabular-nums">
@@ -141,7 +148,7 @@ export function ReceiptsList({ group }: { group: ReceiptGroup }) {
                     />
                     <span className="sr-only">{LINK_LABEL[o.linkStatus]}</span>
                   </span>
-                  <span className="text-[var(--muted-foreground)] transition-transform group-open:rotate-90">›</span>
+                  <span aria-hidden className="text-[var(--muted-foreground)] transition-transform group-open:rotate-90">›</span>
                 </summary>
 
                 <div className="flex flex-col gap-3 border-t border-border bg-[var(--card)] p-3 sm:flex-row sm:gap-6">
