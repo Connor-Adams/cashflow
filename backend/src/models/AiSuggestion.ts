@@ -15,7 +15,8 @@ export type AiSuggestionKind =
   | 'receipt_extract'
   | 'financial_insight'
   | 'rule_proposal'
-  | 'counterparty_promotion';
+  | 'counterparty_promotion'
+  | 'counterparty_email_match';
 
 export type AiSuggestionStatus =
   | 'suggested'
