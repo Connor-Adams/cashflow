@@ -45,4 +45,11 @@ describe('ReportsLayout (PR 0)', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Savings rate' }))
     expect(screen.getByText('savings-body')).toBeInTheDocument()
   })
+
+  it('exposes the folded Partner, Currency, and Cashflow tabs (PR 4)', () => {
+    renderAt('/reports')
+    for (const name of ['Partner', 'Currency', 'Cashflow']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument()
+    }
+  })
 })
