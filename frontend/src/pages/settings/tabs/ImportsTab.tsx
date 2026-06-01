@@ -13,6 +13,7 @@ import {
   type CaptureTokenRow,
 } from '../../../lib/captureTokens'
 import { CounterpartyBackfillCard } from './imports/CounterpartyBackfillCard'
+import { InteracSyncCard } from './imports/InteracSyncCard'
 
 // ---------------------------------------------------------------------------
 // Types (inlined from SettingsPage.tsx — no shared type file yet)
@@ -672,6 +673,8 @@ export function ImportsTab() {
       </Card>
       {/* ── Counterparty backfill (issue #376) ──────────────────────────── */}
       <CounterpartyBackfillCard />
+      {/* ── Interac email counterparty sync ─────────────────────────────── */}
+      <InteracSyncCard />
     </>
   )
 }

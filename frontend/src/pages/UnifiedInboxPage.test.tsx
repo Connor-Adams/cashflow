@@ -226,6 +226,102 @@ describe('UnifiedInboxPage', () => {
     )
   })
 
+  it('counterparty_email_match: renders candidate name and Accept POSTs to interac accept endpoint', async () => {
+    const emailMatchItem: ReviewItem = {
+      id: 'ai-suggestion:42',
+      source: 'ai-suggestion',
+      subject_type: 'transaction',
+      subject_id: '999',
+      payload: {
+        kind: 'counterparty_email_match',
+        output: { name: 'Jane Doe', isSelf: false },
+        transactionId: 999,
+      },
+      status_common: 'pending',
+      native_status: 'suggested',
+      created_at: '2026-06-01T00:00:00Z',
+      resolved_at: null,
+    }
+    const postSpy = vi.fn()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = init?.method ?? 'GET'
+        if (method === 'GET' && url.includes('/api/review-items')) {
+          return new Response(
+            JSON.stringify({ data: [emailMatchItem], nextCursor: null }),
+            { status: 200 },
+          )
+        }
+        if (method === 'POST') {
+          postSpy(url, init?.body)
+          return new Response(JSON.stringify({ ok: true }), { status: 200 })
+        }
+        return new Response('not found', { status: 404 })
+      },
+    )
+    render(
+      <MemoryRouter>
+        <UnifiedInboxPage />
+      </MemoryRouter>,
+    )
+    // Candidate name renders.
+    await waitFor(() => screen.getByText(/Link Jane Doe to this transfer/i))
+    const applyBtn = screen.getByRole('button', { name: /^Apply$/i })
+    fireEvent.click(applyBtn)
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
+    const calledUrl = String(postSpy.mock.calls[0][0])
+    expect(calledUrl).toContain('/api/transactions/999/interac-counterparty/accept')
+    const calledBody = JSON.parse(String(postSpy.mock.calls[0][1])) as { suggestionId: unknown }
+    expect(calledBody.suggestionId).toBe(42)
+  })
+
+  it('counterparty_email_match: Reject POSTs to standard ai/suggestions reject endpoint', async () => {
+    const emailMatchItem: ReviewItem = {
+      id: 'ai-suggestion:42',
+      source: 'ai-suggestion',
+      subject_type: 'transaction',
+      subject_id: '999',
+      payload: {
+        kind: 'counterparty_email_match',
+        output: { name: 'Jane Doe', isSelf: false },
+        transactionId: 999,
+      },
+      status_common: 'pending',
+      native_status: 'suggested',
+      created_at: '2026-06-01T00:00:00Z',
+      resolved_at: null,
+    }
+    const postSpy = vi.fn()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = init?.method ?? 'GET'
+        if (method === 'GET' && url.includes('/api/review-items')) {
+          return new Response(
+            JSON.stringify({ data: [emailMatchItem], nextCursor: null }),
+            { status: 200 },
+          )
+        }
+        if (method === 'POST') {
+          postSpy(url)
+          return new Response(JSON.stringify({ ok: true }), { status: 200 })
+        }
+        return new Response('not found', { status: 404 })
+      },
+    )
+    render(
+      <MemoryRouter>
+        <UnifiedInboxPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() => screen.getByText(/Link Jane Doe to this transfer/i))
+    const rejectBtn = screen.getByRole('button', { name: /^Reject$/i })
+    fireEvent.click(rejectBtn)
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
+    expect(String(postSpy.mock.calls[0][0])).toContain('/api/ai/suggestions/42/reject')
+  })
+
   it('clicking apply on a chat-proposal card POSTs to the chat apply endpoint', async () => {
     const postSpy = vi.fn()
     vi.spyOn(globalThis, 'fetch').mockImplementation(
