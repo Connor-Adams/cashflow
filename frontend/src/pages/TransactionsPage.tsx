@@ -37,6 +37,7 @@ import type { SavedFilter } from '../components/transactions/SavedFiltersDropdow
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
+import { CounterpartyCell } from '../components/CounterpartyCell'
 import { RefundBadge } from '../components/RefundBadge'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import {
@@ -366,6 +367,12 @@ export function TransactionsPage() {
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
     await load()
+  }
+
+  async function createContact(name: string): Promise<Contact> {
+    const c = await postJson<Contact>('/api/contacts', { name })
+    setContacts((prev) => [...prev, c].sort((a, b) => a.name.localeCompare(b.name)))
+    return c
   }
 
   function toggleSelected(id: number) {
@@ -1813,6 +1820,7 @@ export function TransactionsPage() {
                   selected={selectedIds.has(t.id)}
                   onToggleSelected={() => toggleSelected(t.id)}
                   onSave={saveRow}
+                  onCreateContact={createContact}
                     aiEnabled={aiEnabled}
                     onAttachReceipt={(id) => {
                       setAttachForTxnId(id)
@@ -1921,6 +1929,7 @@ function TransactionRow({
   selected,
   onToggleSelected,
   onSave,
+  onCreateContact,
   aiEnabled,
   onAttachReceipt,
   onViewItems,
@@ -1936,6 +1945,7 @@ function TransactionRow({
   selected: boolean
   onToggleSelected: () => void
   onSave: (id: number, patch: Record<string, unknown>) => Promise<void>
+  onCreateContact: (name: string) => Promise<Contact>
   aiEnabled: boolean
   onAttachReceipt: (transactionId: number) => void
   onViewItems: (transactionId: number) => void
@@ -1973,6 +1983,9 @@ function TransactionRow({
   const [ownershipContactId, setOwnershipContactId] = useState(
     t.ownershipContactId != null ? String(t.ownershipContactId) : ''
   )
+  const [counterpartyContactId, setCounterpartyContactId] = useState<number | null>(
+    t.counterpartyContactId ?? null,
+  )
   const [status, setStatus] = useState<TransactionStatus>(t.status)
   const [reimburseOpen, setReimburseOpen] = useState(false)
   const rowConfirmAction = useConfirm()
@@ -1997,6 +2010,7 @@ function TransactionRow({
     visibility !== (t.visibility ?? 'private') ||
     ownershipType !== (t.ownershipType ?? 'me') ||
     ownershipContactId !== (t.ownershipContactId != null ? String(t.ownershipContactId) : '')
+    || (t.counterpartyContactId ?? null) !== counterpartyContactId
 
   const resetDraft = useCallback(() => {
     setCat(t.categoryOverride ?? '')
@@ -2013,6 +2027,7 @@ function TransactionRow({
     setVisibility(t.visibility ?? 'private')
     setOwnershipType(t.ownershipType ?? 'me')
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
+    setCounterpartyContactId(t.counterpartyContactId ?? null)
     setStatus(t.status)
     setRowLabels(t.labels ?? [])
     setAiSuggestion(null)
@@ -2081,6 +2096,14 @@ function TransactionRow({
               })()}
             </span>
           )}
+          <CounterpartyCell
+            value={counterpartyContactId}
+            contacts={contacts}
+            onChange={setCounterpartyContactId}
+            onCreateContact={onCreateContact}
+            onError={onError}
+            txnId={t.id}
+          />
           {t.txnType === 'refund' && (
             <RefundBadge
               transactionId={t.id}
@@ -2372,6 +2395,7 @@ function TransactionRow({
                 ownershipType,
                 ownershipContactId:
                   ownershipType === 'contact' ? Number(ownershipContactId) : null,
+                counterpartyContactId,
                 reviewFlag: false,
                 aiSuggestionId,
               })

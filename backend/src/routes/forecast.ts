@@ -7,12 +7,17 @@ import { householdWhere } from '../auth/scope';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
   expandRecurrence,
+  cadenceToRecurrenceRule,
   type PlannedEventLike,
 } from '../forecast/expandRecurrence';
 import {
   buildForecast,
   type ForecastOccurrence,
 } from '../forecast/buildForecast';
+import {
+  detectRecurringIncome,
+  type IncomeInputTxn,
+} from '../forecast/detectIncome';
 import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
 import { classifyPositiveFlow } from '../summary/classifyTransactionFlow';
@@ -244,9 +249,13 @@ router.get('/', async (req, res, next) => {
     // window. Pull all currency-matched planned-events with expectedDate
     // <= dateTo (so the seed for recurring events qualifies even if it
     // started long before the window).
+    // Include both ordinary planned events and subscription-kind expectations.
+    // Subscriptions carry a `cadence` instead of a recurrenceRule (synthesized
+    // below); excluding them here was why tracked subscriptions never showed
+    // up in the forecast.
     const eventWhere: WhereOptions = {
       ...householdWhere(req),
-      kind: 'planned',
+      kind: { [Op.in]: ['planned', 'subscription'] },
       currency: forecastCurrency,
       status: 'planned',
       expectedDate: { [Op.lte]: dateTo },
@@ -261,10 +270,24 @@ router.get('/', async (req, res, next) => {
 
     const allOccurrences: ForecastOccurrence[] = [];
     for (const row of plannedRows) {
+      // Subscriptions encode recurrence as a `cadence` and anchor on
+      // nextExpectedDate; synthesize an RRULE so they expand like any other
+      // recurring event. Ordinary planned events keep their stored rule.
+      const hasExplicitRule =
+        row.recurrenceRule != null && row.recurrenceRule.trim() !== '';
+      const recurrenceRule = hasExplicitRule
+        ? row.recurrenceRule
+        : row.kind === 'subscription'
+          ? cadenceToRecurrenceRule(row.cadence)
+          : null;
+      const seedDate =
+        row.kind === 'subscription' && row.nextExpectedDate
+          ? row.nextExpectedDate
+          : row.expectedDate;
       const eventLike: PlannedEventLike = {
         id: row.id,
-        expectedDate: row.expectedDate,
-        recurrenceRule: row.recurrenceRule,
+        expectedDate: seedDate,
+        recurrenceRule,
         status: row.status,
       };
       const occs = expandRecurrence(eventLike, dateFrom, dateTo);
@@ -309,6 +332,7 @@ router.get('/', async (req, res, next) => {
           'merchantRaw',
           'merchantClean',
           'finalCategory',
+          'txnType',
         ],
         raw: true,
       });
@@ -320,6 +344,7 @@ router.get('/', async (req, res, next) => {
         merchantRaw: string | null;
         merchantClean: string | null;
         finalCategory: string | null;
+        txnType: string | null;
       };
 
       const candidates: RecurringInputTxn[] = [];
@@ -381,6 +406,67 @@ router.get('/', async (req, res, next) => {
             accountId: null,
           });
           cursor = addDaysIso(cursor, stepDays);
+        }
+      }
+
+      // ----- 5b. Detect & project recurring INCOME ----------------------
+      // The detector above only projects charges (money out). Income is
+      // identified by an explicit txn_type='income' or a direct-deposit /
+      // payroll description — NOT by merchant-blind recurrence, because real
+      // payroll is often tagged like an internal transfer and we must not
+      // count self-transfers as new money. Detected streams are projected
+      // forward at their cadence and deduped against any income planned event
+      // the user has already created.
+      const incomeCandidates: IncomeInputTxn[] = [];
+      for (const row of txnRows as unknown as RawTxnRow[]) {
+        const inflow = num(row.amount);
+        if (inflow == null || inflow <= 0) continue;
+        const merchant =
+          (row.merchantClean ?? '').trim() || (row.merchantRaw ?? '').trim();
+        incomeCandidates.push({
+          merchant: merchant || null,
+          txnType: row.txnType ?? null,
+          amount: inflow,
+          currency: row.currency,
+          date: row.date,
+        });
+      }
+
+      const incomePlannedKeys = new Set(
+        plannedRows
+          .filter((r) => r.type === 'income')
+          .map((r) => r.name.trim().toLowerCase()),
+      );
+
+      for (const item of detectRecurringIncome(incomeCandidates)) {
+        if (incomePlannedKeys.has(item.source.trim().toLowerCase())) continue;
+        const rule =
+          item.cadence === 'weekly'
+            ? 'FREQ=WEEKLY'
+            : item.cadence === 'biweekly'
+              ? 'FREQ=WEEKLY;INTERVAL=2'
+              : 'FREQ=MONTHLY';
+        const id = recurringIdCounter++;
+        const occs = expandRecurrence(
+          {
+            id,
+            expectedDate: item.nextExpected,
+            recurrenceRule: rule,
+            status: 'planned',
+          },
+          dateFrom,
+          dateTo,
+        );
+        for (const occ of occs) {
+          allOccurrences.push({
+            date: occ.date,
+            amount: item.avgAmount,
+            direction: 'in',
+            sourceType: 'recurring_detection',
+            sourceId: id,
+            sourceName: item.source,
+            accountId: null,
+          });
         }
       }
     }

@@ -352,6 +352,7 @@ const PATCHABLE_KEYS = [
   'visibility',
   'ownershipType',
   'ownershipContactId',
+  'counterpartyContactId',
   'status',
 ] as const;
 
@@ -410,6 +411,23 @@ export async function applyPatchBody(
             throw err;
           }
           txn.set('ownershipContactId', contact.id);
+        }
+      } else if (k === 'counterpartyContactId') {
+        if (b[k] == null || b[k] === '') {
+          txn.set('counterpartyContactId', null);
+        } else {
+          const contactId = Number(b[k]);
+          const contact = await Contact.findOne({
+            where: { id: contactId, householdId: household.id },
+          });
+          if (!contact) {
+            const err = new Error(
+              'counterpartyContactId must reference a household contact',
+            ) as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          txn.set('counterpartyContactId', contact.id);
         }
       } else if (k === 'status') {
         if (!isTransactionStatus(b[k])) {

@@ -51,6 +51,30 @@ type ParsedRRule = {
 
 const MAX_OCCURRENCES = 2000; // hard ceiling so a malformed rule cannot blow up the server
 
+/**
+ * Subscription-kind expectations carry a `cadence` string instead of a
+ * recurrenceRule. Translate it into a rule the expander understands so a
+ * subscription projects forward over the window like any other recurring
+ * planned event. Returns null for an unknown/empty cadence (caller falls
+ * back to one-off seed behaviour).
+ */
+export function cadenceToRecurrenceRule(cadence: string | null): string | null {
+  switch (cadence) {
+    case 'weekly':
+      return 'FREQ=WEEKLY';
+    case 'monthly':
+      return 'FREQ=MONTHLY';
+    case 'quarterly':
+      return 'FREQ=MONTHLY;INTERVAL=3';
+    case 'semiannual':
+      return 'FREQ=MONTHLY;INTERVAL=6';
+    case 'annual':
+      return 'FREQ=YEARLY';
+    default:
+      return null;
+  }
+}
+
 function parseRRule(rule: string): ParsedRRule | null {
   // Accept either a bare rule body or one prefixed with `RRULE:` (iCal style).
   let body = rule.trim();

@@ -3,11 +3,17 @@
   "private": true,
   "license": "UNLICENSED",
   "packageManager": "yarn@1.22.22",
-  "workspaces": [
-    "backend",
-    "frontend",
-    "shared"
-  ],
+  "workspaces": {
+    "packages": [
+      "backend",
+      "frontend",
+      "shared"
+    ],
+    "nohoist": [
+      "**/@vitest/coverage-v8",
+      "**/@vitest/coverage-v8/**"
+    ]
+  },
   "scripts": {
     "prepare": "husky || true",
     "lint-staged": "lint-staged",
@@ -26,6 +32,7 @@
     "railway:frontend:build": "RAILWAY_DEPLOY_TARGET=frontend node scripts/railway-run.cjs build",
     "railway:frontend:start": "RAILWAY_DEPLOY_TARGET=frontend node scripts/railway-run.cjs start",
     "test": "yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace frontend run test",
+    "coverage": "yarn workspace cashflow-backend run test:coverage && yarn workspace frontend run test:coverage",
     "ci": "yarn test:workflows && yarn workspace cashflow-backend run typecheck && yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace cashflow-backend run build && yarn workspace frontend run test && yarn workspace frontend run build",
     "test:workflows": "node --test test/*.test.cjs",
     "deadcode": "fallow dead-code",
