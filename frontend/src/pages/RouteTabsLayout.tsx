@@ -58,3 +58,15 @@ export const PortfolioLayout = () => (
     ]}
   />
 )
+
+// Groups the two inbox-y surfaces under /inbox WITHOUT merging their data
+// (different machines: proposals on /api/review-items vs transaction review on
+// /api/transactions). Nav-only fold — PR 5.
+export const InboxLayout = () => (
+  <RouteTabsLayout
+    tabs={[
+      { value: 'proposals', label: 'Proposals', path: '/inbox' },
+      { value: 'review', label: 'Transaction review', path: '/inbox/review' },
+    ]}
+  />
+)
