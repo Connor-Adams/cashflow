@@ -44,6 +44,7 @@ export async function runEnrichmentBackfillTick(
       reviewFlagCleared: 0,
       signalsWritten: 0,
       skipped: 0,
+      aiEnhanced: 0,
     };
     let householdsProcessed = 0;
     let householdsSkipped = 0;
@@ -67,12 +68,15 @@ export async function runEnrichmentBackfillTick(
           batchSize: 100,
           dateFrom: null,
           dateTo: null,
+          // ai intentionally omitted: nightly cron stays deterministic (no
+          // recurring OpenAI cost); AI runs only on manual backfill.
         });
         totals.processed += result.processed;
         totals.updated += result.updated;
         totals.reviewFlagCleared += result.reviewFlagCleared;
         totals.signalsWritten += result.signalsWritten;
         totals.skipped += result.skipped;
+        totals.aiEnhanced += result.aiEnhanced;
         householdsProcessed += 1;
       } catch (err) {
         logger.error(

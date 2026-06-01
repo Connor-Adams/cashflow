@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { logger } from '../observability/logger';
 import { Op } from 'sequelize';
 import type { Account as AccountModel } from '../models/Account';
 import {
@@ -49,9 +48,6 @@ import {
   enrichmentAmazonLinkThreshold,
   enrichmentRefundWindowDays,
   enrichmentTransferWindowDays,
-  enrichmentAiEnabled,
-  enrichmentAiMaxMerchants,
-  enrichmentAiPerRowConcurrency,
 } from '../config/env';
 import {
   loadAmazonOrdersCache,
@@ -60,13 +56,15 @@ import {
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
-import { runAiBatchStage, type AiBatchCandidate, type AiBatchSuggestion } from './enrichment/aiBatchStage';
-import { mergeSignals } from './enrichment/computeReviewFlag';
-import { openaiJson } from '../ai/openaiJson';
-import { getOpenAiConfig } from '../config/openai';
-import { loadCategoryHints } from '../ai/suggestTransaction';
-import type { MerchantMemoryMatch } from '../ai/merchantMemory';
-import type { Signal } from './enrichment/types';
+// Stage 8 ai-batch over cold rows lives in a shared module so the import path
+// and the enrichment backfill path use one implementation. aiSuggestionToSignal
+// and dedupeColdRowsByMerchantKey are re-exported below because existing unit
+// tests import them from this module.
+import {
+  maybeRunAiBatchOverColdRows,
+  type ColdRow,
+} from './enrichment/aiBatchOverColdRows';
+export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
 
 /** Max row-level parse diagnostics returned on a single import response */
 export const PARSE_ERRORS_MAX = 50;
@@ -618,196 +616,6 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     };
   }
   return out;
-}
-
-type AiBatchSummary = {
-  attempted: boolean;
-  coldRowCount: number;
-  merchantsConsidered: number;
-  enhanced: number;
-  capped: boolean;
-  usedBatch: boolean;
-  fellBackToPerRow: boolean;
-};
-
-type ColdRow = {
-  txnId: number;
-  signals: Signal[];
-  merchantKey: string;
-  merchantRaw: string;
-  merchantClean: string;
-  merchantCanonical: string | null;
-  amount: number;
-  date: string;
-  currency: string;
-  memory: MerchantMemoryMatch | null;
-  /** Captured at insert-time so post-AI confidence reclassification doesn't
-   *  need to round-trip through the DB. */
-  accountVisibility: 'private' | 'shared';
-  txnType: string;
-};
-
-export function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
-  const groups = new Map<string, ColdRow>();
-  for (const c of coldRows) {
-    const existing = groups.get(c.merchantKey);
-    if (existing == null || c.date > existing.date) groups.set(c.merchantKey, c);
-  }
-  return [...groups.values()];
-}
-
-function coldRowToCandidate(c: ColdRow): AiBatchCandidate {
-  return {
-    merchantKey: c.merchantKey,
-    sampleMerchantRaw: c.merchantRaw,
-    sampleMerchantClean: c.merchantClean,
-    sampleMerchantCanonical: c.merchantCanonical,
-    sampleAmount: c.amount,
-    sampleDate: c.date,
-    sampleCurrency: c.currency,
-    similarPriors: [],
-    memoryMatch: c.memory ? { category: c.memory.category, supportCount: c.memory.supportCount } : null,
-  };
-}
-
-export function aiSuggestionToSignal(sug: {
-  category: string | null;
-  business: boolean | null;
-  splitType: 'me' | 'partner' | 'shared' | null;
-  pctMe: number | null;
-  pctPartner: number | null;
-  confidence: 'high' | 'medium' | 'low';
-  rationale: string | null;
-}): Signal {
-  return {
-    source: 'ai',
-    confidence: sug.confidence,
-    fields: {
-      autoCategory: sug.category,
-      autoBusiness: sug.business,
-      autoSplitType: sug.splitType,
-      autoPctMe: sug.pctMe != null ? String(sug.pctMe) : null,
-      autoPctPartner: sug.pctPartner != null ? String(sug.pctPartner) : null,
-    },
-    ...(sug.rationale ? { rationale: sug.rationale } : {}),
-  };
-}
-
-async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
-  const merged = mergeSignals([...c.signals, aiSignal]);
-  // Re-classify import confidence with the merged enrichment fields. An AI
-  // suggestion that fills a category and turns reviewFlag off should move
-  // the row from 'needs_review' back to 'clean' on the dashboard.
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory: merged.fields.autoCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' ||
-      merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
-  });
-  try {
-    await Transaction.update(
-      {
-        autoCategory: merged.fields.autoCategory,
-        autoBusiness: merged.fields.autoBusiness,
-        autoSplitType: merged.fields.autoSplitType,
-        autoPctMe: merged.fields.autoPctMe,
-        autoPctPartner: merged.fields.autoPctPartner,
-        autoSource: merged.fields.autoSource,
-        autoConfidence: merged.fields.autoConfidence,
-        reviewFlag: merged.fields.reviewFlag,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-      },
-      { where: { id: c.txnId } },
-    );
-    await TransactionSignal.create({
-      transactionId: c.txnId,
-      source: 'ai',
-      confidence: aiSignal.confidence,
-      fields: aiSignal.fields,
-      rationale: aiSignal.rationale ?? null,
-    });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
-    return true;
-  } catch (err) {
-    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');
-    return false;
-  }
-}
-
-function emptyAiSummary(coldRowCount: number): AiBatchSummary {
-  return {
-    attempted: false,
-    coldRowCount,
-    merchantsConsidered: 0,
-    enhanced: 0,
-    capped: false,
-    usedBatch: false,
-    fellBackToPerRow: false,
-  };
-}
-
-function aiBatchPossible(coldRows: ColdRow[]): boolean {
-  if (!enrichmentAiEnabled) return false;
-  if (coldRows.length === 0) return false;
-  return getOpenAiConfig() != null;
-}
-
-async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined, householdId: number | null): Promise<boolean> {
-  if (sug == null || sug.category == null) return false;
-  return persistAiEnhancement(c, aiSuggestionToSignal(sug), householdId);
-}
-
-async function applyAiSuggestionsToColdRows(
-  coldRows: ColdRow[],
-  suggestions: Map<string, AiBatchSuggestion>,
-  householdId: number | null,
-): Promise<number> {
-  let enhanced = 0;
-  for (const c of coldRows) {
-    if (await tryEnhanceColdRow(c, suggestions.get(c.merchantKey), householdId)) enhanced += 1;
-  }
-  return enhanced;
-}
-
-async function maybeRunAiBatchOverColdRows(
-  coldRows: ColdRow[],
-  householdId: number | null,
-): Promise<AiBatchSummary> {
-  if (!aiBatchPossible(coldRows)) return emptyAiSummary(coldRows.length);
-
-  const candidates = dedupeColdRowsByMerchantKey(coldRows).map(coldRowToCandidate);
-  const categoryHints = await loadCategoryHints(householdId);
-  const result = await runAiBatchStage({
-    candidates,
-    categoryHints,
-    maxMerchants: enrichmentAiMaxMerchants,
-    perRowConcurrency: enrichmentAiPerRowConcurrency,
-    openaiCaller: (msgs) => openaiJson(msgs),
-  });
-  const enhanced = await applyAiSuggestionsToColdRows(coldRows, result.suggestions, householdId);
-
-  return {
-    attempted: true,
-    coldRowCount: coldRows.length,
-    merchantsConsidered: candidates.length,
-    enhanced,
-    capped: result.capped,
-    usedBatch: result.usedBatch,
-    fellBackToPerRow: result.fellBackToPerRow,
-  };
 }
 
 export async function runImport(options: {
