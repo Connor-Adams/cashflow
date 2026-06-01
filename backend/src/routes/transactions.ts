@@ -1899,6 +1899,10 @@ router.post('/enrichment/backfill', async (req, res, next) => {
       batchSize: 100,
       dateFrom,
       dateTo,
+      // The manual "Run backfill" button should apply AI to rows the
+      // deterministic pipeline leaves cold. runBackfill still gates this off on
+      // dry-run, so a dry-run preview never calls OpenAI.
+      ai: true,
     };
 
     // Content negotiation: NDJSON streaming only when the client explicitly

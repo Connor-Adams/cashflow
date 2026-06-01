@@ -34,6 +34,11 @@ import {
 } from '../config/env';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { runBackfillBatchTrace } from './backfillTrace';
+import {
+  maybeRunAiBatchOverColdRows,
+  type ColdRow,
+} from './enrichment/aiBatchOverColdRows';
+import type { ChatMessage } from './enrichment/aiBatchStage';
 
 export interface BackfillFlags {
   dryRun: boolean;
@@ -57,6 +62,13 @@ export interface BackfillFlags {
    * every loaded row, so over-selection is safe — under-selection is not.
    */
   merchantPattern?: string | null;
+  /**
+   * Run Stage 8 (ai-batch) over rows the deterministic pipeline leaves cold
+   * (reviewFlag still true). Off by default so the nightly cron / CLI stay
+   * deterministic with no recurring OpenAI cost; the manual backfill route sets
+   * it true. Ignored on dry-run (AI never runs without persistence).
+   */
+  ai?: boolean;
 }
 
 export interface BackfillResult {
@@ -65,6 +77,11 @@ export interface BackfillResult {
   reviewFlagCleared: number;
   signalsWritten: number;
   skipped: number;
+  /**
+   * Count of cold rows the ai-batch stage successfully enhanced. 0 when the
+   * `ai` flag is off or on a dry-run.
+   */
+  aiEnhanced: number;
 }
 
 export interface BackfillProgressEvent {
@@ -89,6 +106,7 @@ export interface BackfillCallbacks {
 export async function runBackfill(
   flags: BackfillFlags,
   callbacks: BackfillCallbacks = {},
+  deps: { aiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>> } = {},
 ): Promise<BackfillResult> {
   const rulesByHousehold = new Map<string, Awaited<ReturnType<typeof loadAllRules>>>();
   const amazonByHousehold = new Map<string, Awaited<ReturnType<typeof loadAmazonOrdersCache>>>();
@@ -152,8 +170,23 @@ export async function runBackfill(
   let reviewFlagCleared = 0;
   let signalsWritten = 0;
   let skipped = 0;
+  let aiEnhanced = 0;
   let offset = 0;
   let batchIndex = 0;
+
+  // Stage 8 runs AFTER all per-row DB transactions (exactly like import), so
+  // OpenAI latency never holds row locks. Accumulate cold rows grouped by
+  // household — an admin/CLI sweep with no householdId filter can span
+  // households, and the ai-batch stage (category hints, ensureCategory) is
+  // per-household. The manual route is single-household so this is usually one
+  // group.
+  const runAi = flags.ai === true && !flags.dryRun;
+  const coldRowsByHousehold = new Map<number | null, ColdRow[]>();
+  const pushColdRow = (householdId: number | null, row: ColdRow) => {
+    const existing = coldRowsByHousehold.get(householdId);
+    if (existing) existing.push(row);
+    else coldRowsByHousehold.set(householdId, [row]);
+  };
 
   while (true) {
     if (flags.limit != null && processed >= flags.limit) break;
@@ -357,6 +390,29 @@ export async function runBackfill(
             if (willClearReview) reviewFlagCleared++;
             signalsWritten += enriched.signals.length;
 
+            // Accumulate cold rows for the post-loop ai-batch stage. Built the
+            // same way the import path builds them (runImport.ts), so the shared
+            // module sees an identical ColdRow shape.
+            if (runAi && f.reviewFlag === true) {
+              const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
+              if (key.length > 0) {
+                pushColdRow(txn.householdId, {
+                  txnId: txn.id,
+                  signals: enriched.signals,
+                  merchantKey: key,
+                  merchantRaw: txn.merchantRaw,
+                  merchantClean: f.merchantClean,
+                  merchantCanonical: f.merchantCanonical,
+                  amount: Number(txn.amount),
+                  date: txn.date,
+                  currency: txn.currency,
+                  memory,
+                  accountVisibility: txn.visibility === 'shared' ? 'shared' : 'private',
+                  txnType: f.txnType,
+                });
+              }
+            }
+
             callbacks.onProgress?.({
               txnId: txn.id,
               merchantRaw: txn.merchantRaw,
@@ -408,5 +464,19 @@ export async function runBackfill(
     }
   }
 
-  return { processed, updated, reviewFlagCleared, signalsWritten, skipped };
+  // === Stage 8: ai-batch over cold rows ===
+  // Runs outside every per-row DB transaction (same as the import path) so AI
+  // latency never holds locks. Gated on flags.ai && !dryRun via `runAi`; the
+  // shared module also self-gates on enrichmentAiEnabled + OpenAI config, so
+  // this is a no-op when AI is disabled or no rows stayed cold.
+  if (runAi) {
+    for (const [householdId, rows] of coldRowsByHousehold) {
+      const summary = await maybeRunAiBatchOverColdRows(rows, householdId, {
+        openaiCaller: deps.aiCaller,
+      });
+      aiEnhanced += summary.enhanced;
+    }
+  }
+
+  return { processed, updated, reviewFlagCleared, signalsWritten, skipped, aiEnhanced };
 }
