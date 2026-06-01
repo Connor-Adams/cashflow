@@ -57,3 +57,49 @@ test('no-item business expense (signed business_amount) counts as business SPEND
   // personal must NOT be inflated by the flipped half
   assert.equal(biz(out, false), null);
 });
+
+test('business income (txnType=income) lands in income bucket, not netSpend', () => {
+  const out = aggregateDashboard(
+    [row({ amount: '500.00', txnType: 'income', businessAmount: '500.00' })],
+    accounts,
+    emptyCtx,
+  );
+  const b = biz(out, true);
+  assert.ok(b);
+  assert.equal(b.income, 500);
+  assert.equal(b.totalCredits, 0);
+  assert.equal(b.totalSpend, 0);
+  assert.equal(b.netSpend, 0);
+});
+
+test('refund (positive, non-income) nets against spend, not income', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-100.00', businessAmount: '-100.00', txnType: 'purchase' }),
+      row({ id: 2, amount: '30.00', businessAmount: '30.00', txnType: 'refund' }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  const b = biz(out, true);
+  assert.ok(b);
+  assert.equal(b.totalSpend, 100);
+  assert.equal(b.totalCredits, 30);
+  assert.equal(b.netSpend, 70);
+  assert.equal(b.income, 0);
+});
+
+test('refund exceeding spend yields negative netSpend with zero income', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-50.00', businessAmount: '-50.00', txnType: 'purchase' }),
+      row({ id: 2, amount: '80.00', businessAmount: '80.00', txnType: 'refund' }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  const b = biz(out, true);
+  assert.ok(b);
+  assert.equal(b.netSpend, -30);
+  assert.equal(b.income, 0);
+});

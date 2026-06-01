@@ -113,6 +113,7 @@ export type DashboardAggregates = {
       totalSpend: number;
       totalCredits: number;
       netSpend: number;
+      income: number;
     }
   >;
   categoryReports: Map<
@@ -421,11 +422,16 @@ export function aggregateDashboard(
           totalSpend: 0,
           totalCredits: 0,
           netSpend: 0,
+          income: 0,
         };
         if (part < 0 && !nonSpend) {
           business.totalSpend += -part;
         } else if (part > 0) {
-          business.totalCredits += part;
+          if (row.txnType === 'income') {
+            business.income += part;
+          } else {
+            business.totalCredits += part;
+          }
         }
         business.netSpend = business.totalSpend - business.totalCredits;
         netSpendByBusiness.set(businessKey, business);
