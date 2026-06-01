@@ -201,6 +201,65 @@ export async function persistExtractedOrder(
 }
 
 /**
+ * POST /api/external-orders/match-unlinked
+ *
+ * Runs the receipt→transaction matcher against every ExternalOrder in this
+ * household that has no TransactionOrderLink rows (orphans). Useful for
+ * back-filling orders that were created before the auto-link was wired in.
+ *
+ * Capped at 1000 orders per call to bound runtime.
+ *
+ * Returns: { processed, linksCreated }
+ */
+router.post('/match-unlinked', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const householdId = household.id;
+
+    // Orphan = no TransactionOrderLink rows for this order.
+    // Use NOT EXISTS subquery to avoid GROUP BY / HAVING complexity with Sequelize includes.
+    const orphans = await ExternalOrder.findAll({
+      where: {
+        householdId,
+        [Op.and]: [
+          sequelize.literal(
+            `NOT EXISTS (SELECT 1 FROM "transaction_order_links" tol WHERE tol.external_order_id = "ExternalOrder"."id")`,
+          ),
+        ],
+      },
+      limit: 1000,
+    } as never);
+
+    let processed = 0;
+    let linksCreated = 0;
+
+    for (const order of orphans) {
+      try {
+        const result = await matchReceiptOrderToTransactions({
+          externalOrderId: order.id,
+          householdId,
+        });
+        linksCreated += result.created;
+        processed += 1;
+      } catch (err) {
+        logger.warn({ err, orderId: order.id }, 'match_unlinked_order_failed');
+        processed += 1;
+      }
+    }
+
+    logger.info({
+      householdId,
+      processed,
+      linksCreated,
+    }, 'match_unlinked_complete');
+
+    res.json({ processed, linksCreated });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/external-orders/import-text
  * Body: { text: string }
  * Returns: { order, created, extracted }
