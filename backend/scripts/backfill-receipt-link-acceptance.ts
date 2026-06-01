@@ -16,6 +16,7 @@
 import { Op } from 'sequelize';
 import { ExternalOrder, TransactionOrderLink, sequelize } from '../src/models';
 import { matchReceiptOrderToTransactions } from '../src/import/matchReceiptToTransactions';
+import { databaseUrl } from '../src/config/env';
 
 const COMMIT = process.argv.includes('--commit');
 
@@ -24,6 +25,15 @@ async function acceptedCount(orderId: number): Promise<number> {
 }
 
 async function main() {
+  if (databaseUrl) {
+    console.log(`Target DB: postgres (${new URL(databaseUrl).host})`);
+  } else {
+    console.log('Target DB: LOCAL SQLITE');
+    if (COMMIT) {
+      console.error('Refusing to --commit against local sqlite. Set DATABASE_URL to the prod Postgres URL.');
+      process.exit(1);
+    }
+  }
   const suggested = await TransactionOrderLink.findAll({
     where: { status: 'suggested' },
     attributes: ['externalOrderId'],
