@@ -3,6 +3,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { GmailSection } from '@/pages/settings/sections/GmailSection'
 import { GmailScanHistory } from '@/components/receipts/GmailScanHistory'
 import { MatchUnlinkedButton } from '@/components/receipts/MatchUnlinkedButton'
+import { CategorizeItemsButton } from '@/components/receipts/CategorizeItemsButton'
 import { ReceiptsList, type ReceiptGroup } from '@/components/receipts/ReceiptsList'
 import { AmazonPage } from '@/pages/AmazonPage'
 
@@ -40,8 +41,9 @@ export function ReceiptsPage() {
       <GmailSection />
       <GmailScanHistory />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center gap-3">
         <MatchUnlinkedButton />
+        <CategorizeItemsButton />
       </div>
 
       <nav className="flex gap-2 border-b border-[var(--border)]" aria-label="Filter receipts by source">

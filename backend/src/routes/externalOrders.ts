@@ -261,6 +261,34 @@ router.post('/match-unlinked', async (req, res, next) => {
 });
 
 /**
+ * POST /api/external-orders/categorize-items
+ *
+ * AI-categorizes this household's non-Amazon receipt line items that still have
+ * no inferredCategory (e.g. Costco till-receipt PDFs imported before AI
+ * categorization existed). Drains in passes of 200 up to a safety cap so one
+ * click clears the backlog without an unbounded request; click again if a very
+ * large backlog remains.
+ *
+ * Returns: { categorized }
+ */
+router.post('/categorize-items', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    if (rejectDemoAiRequest(req, res)) return;
+    const { household } = currentAuth(req);
+    let categorized = 0;
+    for (let pass = 0; pass < 10; pass++) {
+      const n = await categorizeAndApplyReceiptItems({ householdId: household.id, limit: 200 });
+      categorized += n;
+      if (n === 0) break;
+    }
+    logger.info({ householdId: household.id, categorized }, 'receipt_items_categorized');
+    res.json({ categorized });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/external-orders/import-text
  * Body: { text: string }
  * Returns: { order, created, extracted }
