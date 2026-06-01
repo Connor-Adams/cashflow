@@ -13,7 +13,7 @@
  * review pass on top — it reads the same `insights` table.
  */
 import { Op } from 'sequelize';
-import { Insight, Transaction, PartnerSettlement, Contact, Receipt, sequelize } from '../models';
+import { Insight, Transaction, PartnerSettlement, Contact, Receipt, PlannedEvent, sequelize } from '../models';
 import {
   detectDuplicateTransactions,
   detectMerchantSpendSpike,
@@ -150,10 +150,32 @@ export async function runDetectorsForHousehold(
   const transactions = await loadTransactions(householdId, now);
   const settlements = await loadSettlements(householdId);
 
+  // Merchants we already track as subscriptions — `recurring_increase` skips
+  // these so `subscription_price_increase` (the dedicated subscription-price
+  // detector) owns their price hikes instead of double-surfacing them. We seed
+  // the guard set with BOTH `normalizedName` and the display `name`, each
+  // lowercased: `recurring_increase` buckets by `merchantClean.trim().toLowerCase()`,
+  // and while a detection-sourced sub's `normalizedName` equals exactly that, a
+  // manually-created or renamed sub may store a `normalizedName` that no longer
+  // matches the live `merchantClean` — including the display `name` lowercased
+  // catches that case.
+  const subRows = await PlannedEvent.findAll({
+    where: { householdId, kind: 'subscription' },
+    attributes: ['name', 'normalizedName'],
+    raw: true,
+  });
+  const subscriptionMerchants = new Set<string>();
+  for (const r of subRows) {
+    const normalized = String(r.normalizedName ?? '').trim().toLowerCase();
+    if (normalized) subscriptionMerchants.add(normalized);
+    const display = String(r.name ?? '').trim().toLowerCase();
+    if (display) subscriptionMerchants.add(display);
+  }
+
   const findings: DetectedInsight[] = [
     ...detectDuplicateTransactions(transactions, { now }),
     ...detectMerchantSpendSpike(transactions, { now }),
-    ...detectRecurringIncrease(transactions, { now }),
+    ...detectRecurringIncrease(transactions, { now, subscriptionMerchants }),
     ...detectMissingReceipt(transactions, { now }),
     ...detectUnusualCategorySpend(transactions, { now }),
     ...detectSettlementImbalance(settlements),

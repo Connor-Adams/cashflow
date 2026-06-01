@@ -209,6 +209,20 @@ test('detectRecurringIncrease: requires at least 3 prior monthly occurrences (on
   assert.equal(insights.length, 0);
 });
 
+test('detectRecurringIncrease: skips merchants that are tracked subscriptions', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const rows = [
+    txn({ id: 1, date: '2026-02-01', merchantClean: 'Netflix', amount: -15 }),
+    txn({ id: 2, date: '2026-03-01', merchantClean: 'Netflix', amount: -15 }),
+    txn({ id: 3, date: '2026-04-01', merchantClean: 'Netflix', amount: -15 }),
+    txn({ id: 4, date: '2026-05-01', merchantClean: 'Netflix', amount: -22 }),
+  ];
+  const withGuard = detectRecurringIncrease(rows, { now, subscriptionMerchants: new Set(['netflix']) });
+  assert.equal(withGuard.length, 0);
+  const without = detectRecurringIncrease(rows, { now, subscriptionMerchants: new Set() });
+  assert.equal(without.length, 1);
+});
+
 // ---- detectMissingReceipt ----------------------------------------------
 
 test('detectMissingReceipt: flags large transactions older than 7 days with no receipts', () => {
