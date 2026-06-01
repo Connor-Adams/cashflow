@@ -27,6 +27,7 @@ import { SafeToSpendTile } from '@/components/dashboard/SafeToSpendTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
+import { EmailedReceiptsTile } from '@/components/dashboard/EmailedReceiptsTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
@@ -1609,6 +1610,8 @@ export function DashboardPage() {
         />
 
         <ReceiptCoverageTile currency={currency || null} />
+
+        <EmailedReceiptsTile />
 
         <ImportHealthTile currency={currency || null} />
 
