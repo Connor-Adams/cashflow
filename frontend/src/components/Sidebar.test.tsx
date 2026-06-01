@@ -97,4 +97,12 @@ describe('Sidebar rail (PR 0)', () => {
     expect(screen.queryByRole('link', { name: 'Review' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Inbox' })).toBeInTheDocument()
   })
+
+  it('folds the Expectation family into the Planned tabs (PR 2)', () => {
+    renderSidebar()
+    for (const name of ['Calendar', 'Forecast', 'Recurring', 'Subscriptions', 'Reimbursements']) {
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
+    expect(screen.getByRole('link', { name: 'Planned' })).toBeInTheDocument()
+  })
 })

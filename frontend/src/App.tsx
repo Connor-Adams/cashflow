@@ -2,7 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { Layout } from './components/Layout'
 import { AccountsPage } from './pages/AccountsPage'
-import { AccountsLayout, InboxLayout, ScenariosLayout, PortfolioLayout } from './pages/RouteTabsLayout'
+import { AccountsLayout, InboxLayout, PlannedLayout, ScenariosLayout, PortfolioLayout } from './pages/RouteTabsLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
@@ -121,10 +121,17 @@ function AppRoutes() {
           </Route>
           <Route path="net-worth" element={<Navigate to="/portfolio/net-worth" replace />} />
           <Route path="amazon" element={<AmazonPage />} />
-          <Route path="planned" element={<PlannedEventsPage />} />
-          <Route path="calendar" element={<CalendarPage />} />
+          <Route path="planned" element={<PlannedLayout />}>
+            <Route index element={<PlannedEventsPage />} />
+            <Route path="calendar" element={<CalendarPage />} />
+            <Route path="forecast" element={<ForecastPage />} />
+            <Route path="recurring" element={<RecurringPage />} />
+            <Route path="subscriptions" element={<SubscriptionsPage />} />
+            <Route path="reimbursements" element={<ReimbursementsPage />} />
+          </Route>
+          <Route path="calendar" element={<Navigate to="/planned/calendar" replace />} />
           <Route path="goals" element={<GoalsPage />} />
-          <Route path="forecast" element={<ForecastPage />} />
+          <Route path="forecast" element={<Navigate to="/planned/forecast" replace />} />
           <Route path="debt" element={<Navigate to="/accounts/debt" replace />} />
           <Route path="credit-cards" element={<Navigate to="/accounts/credit-cards" replace />} />
           <Route path="opportunity-cost" element={<Navigate to="/scenarios/opportunity-cost" replace />} />
@@ -133,8 +140,8 @@ function AppRoutes() {
             <Route path="tax" element={<TaxPage />} />
             <Route path="opportunity-cost" element={<OpportunityCostPage />} />
           </Route>
-          <Route path="recurring" element={<RecurringPage />} />
-          <Route path="subscriptions" element={<SubscriptionsPage />} />
+          <Route path="recurring" element={<Navigate to="/planned/recurring" replace />} />
+          <Route path="subscriptions" element={<Navigate to="/planned/subscriptions" replace />} />
           <Route path="money-leaks" element={<Navigate to="/transactions/leaks" replace />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="partner" element={<Navigate to="/reports/partner" replace />} />
@@ -155,7 +162,7 @@ function AppRoutes() {
           <Route path="income" element={<IncomePage />} />
           <Route path="tax" element={<Navigate to="/scenarios/tax" replace />} />
           <Route path="return-warranty" element={<Navigate to="/transactions/returns" replace />} />
-          <Route path="reimbursements" element={<ReimbursementsPage />} />
+          <Route path="reimbursements" element={<Navigate to="/planned/reimbursements" replace />} />
           <Route path="large-purchases" element={<Navigate to="/transactions/large" replace />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />

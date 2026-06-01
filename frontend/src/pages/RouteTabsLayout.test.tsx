@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { AccountsLayout, InboxLayout, PortfolioLayout, ScenariosLayout } from './RouteTabsLayout'
+import { AccountsLayout, InboxLayout, PlannedLayout, PortfolioLayout, ScenariosLayout } from './RouteTabsLayout'
 
 void React
 
@@ -91,5 +91,23 @@ describe('Scenario + Portfolio configs', () => {
     }
     expect(screen.getByRole('tab', { name: 'Transaction review' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('review-body')).toBeInTheDocument()
+  })
+
+  it('PlannedLayout exposes the Expectation-family tabs and activates from URL (PR 2)', () => {
+    render(
+      <MemoryRouter initialEntries={['/planned/subscriptions']}>
+        <Routes>
+          <Route path="/planned" element={<PlannedLayout />}>
+            <Route index element={<div>upcoming-body</div>} />
+            <Route path="subscriptions" element={<div>subs-body</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    for (const name of ['Upcoming', 'Calendar', 'Forecast', 'Recurring', 'Subscriptions', 'Reimbursements']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument()
+    }
+    expect(screen.getByRole('tab', { name: 'Subscriptions' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('subs-body')).toBeInTheDocument()
   })
 })
