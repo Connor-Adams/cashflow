@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { AccountsLayout, PortfolioLayout, ScenariosLayout } from './RouteTabsLayout'
+import { AccountsLayout, InboxLayout, PortfolioLayout, ScenariosLayout } from './RouteTabsLayout'
 
 void React
 
@@ -73,5 +73,23 @@ describe('Scenario + Portfolio configs', () => {
     )
     expect(screen.getByRole('tab', { name: 'Positions' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('sec')).toBeInTheDocument()
+  })
+
+  it('InboxLayout exposes Proposals + Transaction review and activates from URL (PR 5)', () => {
+    render(
+      <MemoryRouter initialEntries={['/inbox/review']}>
+        <Routes>
+          <Route path="/inbox" element={<InboxLayout />}>
+            <Route index element={<div>proposals-body</div>} />
+            <Route path="review" element={<div>review-body</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    for (const name of ['Proposals', 'Transaction review']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument()
+    }
+    expect(screen.getByRole('tab', { name: 'Transaction review' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('review-body')).toBeInTheDocument()
   })
 })
