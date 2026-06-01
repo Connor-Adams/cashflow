@@ -8,6 +8,7 @@ dist/
 *.sqlite-journal
 .DS_Store
 .serena/
+.superpowers/
 .claude/worktrees/
 coverage/
 uploads/
