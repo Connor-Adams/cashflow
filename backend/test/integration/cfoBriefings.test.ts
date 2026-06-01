@@ -26,8 +26,8 @@ let otherAgent: ReturnType<typeof request.agent>;
 let primaryHouseholdId: number;
 let primaryUserId: number;
 let primaryAccountId: number;
-let otherHouseholdId: number;
-let otherAccountId: number;
+let otherHouseholdId!: number;
+let otherAccountId!: number;
 let testDb: PgTestDb;
 
 type Seeded = {
