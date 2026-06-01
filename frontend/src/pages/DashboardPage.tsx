@@ -1177,7 +1177,7 @@ export function DashboardPage() {
             <div
               className="businessShareBar"
               role="img"
-              aria-label={`Business ${bizSplit.incomeShare.toFixed(0)} percent of income`}
+              aria-label={`Business ${bizSplit.incomeShare.toFixed(0)} percent, personal ${(100 - bizSplit.incomeShare).toFixed(0)} percent of income`}
             >
               <span
                 className="businessShareFill businessShareFill--business"
@@ -1188,7 +1188,7 @@ export function DashboardPage() {
                 style={{ width: `${100 - bizSplit.incomeShare}%` }}
               />
             </div>
-            {bizSplit.income.business === 0 && bizSplit.income.personal === 0 && (
+            {bizSplit.income.business + bizSplit.income.personal <= 0 && (
               <p className="muted businessShareCaption">No income in current filters.</p>
             )}
           </div>
@@ -1224,7 +1224,7 @@ export function DashboardPage() {
             <div
               className="businessShareBar"
               role="img"
-              aria-label={`Business ${bizSplit.spendShare.toFixed(0)} percent of spend`}
+              aria-label={`Business ${bizSplit.spendShare.toFixed(0)} percent, personal ${(100 - bizSplit.spendShare).toFixed(0)} percent of spend`}
             >
               <span
                 className="businessShareFill businessShareFill--business"
@@ -1235,6 +1235,9 @@ export function DashboardPage() {
                 style={{ width: `${100 - bizSplit.spendShare}%` }}
               />
             </div>
+            {bizSplit.spend.business + bizSplit.spend.personal <= 0 && (
+              <p className="muted businessShareCaption">No net spend in current filters.</p>
+            )}
           </div>
         </BentoTile>
 
