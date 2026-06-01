@@ -7,6 +7,7 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
+import { normalizeContactName } from '../contacts/normalizeContactName';
 
 export class Contact extends Model<
   InferAttributes<Contact>,
@@ -24,6 +25,8 @@ export class Contact extends Model<
    * Default false so legacy rows behave as before.
    */
   declare isPartner: CreationOptional<boolean>;
+  /** Lowercase + whitespace-collapsed key for dedup; auto-set by a hook. */
+  declare normalizedName: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -45,6 +48,11 @@ export function initContact(sequelize: Sequelize): typeof Contact {
         allowNull: false,
         defaultValue: false,
       },
+      normalizedName: {
+        type: DataTypes.STRING(160),
+        field: 'normalized_name',
+        allowNull: true,
+      },
     } as ModelAttributes<Contact>,
     {
       sequelize,
@@ -54,5 +62,8 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       timestamps: true,
     }
   );
+  Contact.beforeValidate((contact) => {
+    contact.set('normalizedName', normalizeContactName(contact.get('name')));
+  });
   return Contact;
 }
