@@ -165,9 +165,9 @@ router.post('/transactions/:id/reimbursable', async (req, res, next) => {
 //
 // #374: one-click "Promote and use" — given a transaction whose statement-
 // import populated `counterparty_raw` but no Contact link (#372), atomically:
-//   1. promote the raw text into a Contact (creating one in this household
-//      if no exact-name match exists; reusing the match if it does — same
-//      dedup rule as the standalone /counterparty/promote endpoint),
+//   1. promote the raw text into a Contact (find-or-create in this household
+//      by normalized name — same dedup rule as the standalone
+//      /counterparty/promote endpoint),
 //   2. link `transaction.counterparty_contact_id` to that Contact,
 //   3. create the Reimbursement claim using the new contactId (plus any
 //      amount / dueDate / notes the user supplied in the body).
@@ -232,10 +232,10 @@ router.post(
       }
 
       const result = await sequelize.transaction(async (t) => {
-        // Reuse-or-create dedup, scoped to (householdId, name) — same rule as
-        // the standalone /counterparty/promote endpoint on the transactions
-        // route, so a user who promotes via either path lands on the same
-        // Contact row.
+        // Find-or-create dedup, scoped to (householdId, normalized_name) —
+        // same rule as the standalone /counterparty/promote endpoint on the
+        // transactions route, so a user who promotes via either path lands on
+        // the same Contact row.
         const contact = await findOrCreateContactByName(txn.householdId!, rawName, { transaction: t });
         txn.counterpartyContactId = contact.id;
         await txn.save({ transaction: t });

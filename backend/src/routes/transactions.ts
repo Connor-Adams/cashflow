@@ -2330,13 +2330,13 @@ router.post('/:id/revisions/:rid/restore', aiSuggestLimiter, async (req, res, ne
  *
  *  - `{ contactId: <existing> }` — link to an existing Contact owned by
  *    the user's household. 404 if the Contact does not belong here.
- *  - `{}` (no contactId) — auto-create a Contact from `counterparty_raw`
- *    if no Contact in this household already has that name; otherwise
- *    reuse the existing match. Requires `counterparty_raw` to be set.
+ *  - `{}` (no contactId) — find-or-create a Contact from `counterparty_raw`
+ *    by its normalized name (reusing an existing match if present).
+ *    Requires `counterparty_raw` to be set.
  *
- * Contact dedup key is `(householdId, name)`. The match is case-sensitive
- * and exact-string to keep promotion deterministic; a future "suggest
- * promote" job (#373) will handle fuzzy/normalized deduplication.
+ * Contact dedup key is `(householdId, normalized_name)` (lowercase +
+ * whitespace-collapsed) via `findOrCreateContactByName`, so `'Jane Doe'`
+ * and `'JANE DOE'` collapse to one Contact.
  */
 router.post('/:id/counterparty/promote', async (req, res, next) => {
   try {
