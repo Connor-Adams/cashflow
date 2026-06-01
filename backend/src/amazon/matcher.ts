@@ -26,6 +26,42 @@ export type MatchScore = {
   matchReason: string;
 };
 
+/** A candidate is auto-suggested only at or above this confidence. */
+export const MATCH_CONFIDENCE_THRESHOLD = 70;
+
+/**
+ * When nothing clears the threshold, a single best candidate may still be
+ * surfaced for review — but only if it reaches this floor. Below it (e.g. a
+ * merchant-only confidence of 15) the match is noise, not a suggestion.
+ */
+export const FALLBACK_MIN_CONFIDENCE = 50;
+
+/**
+ * Pick which scored orders become suggested links for one transaction.
+ *
+ * - Every candidate at/above {@link MATCH_CONFIDENCE_THRESHOLD} is returned
+ *   (a transaction can legitimately span multiple confident orders).
+ * - Otherwise fall back to AT MOST the single best candidate, and only when it
+ *   is unambiguous (no tie at the top score) and clears
+ *   {@link FALLBACK_MIN_CONFIDENCE}.
+ *
+ * The tie guard is the fix for the historical fan-out: the previous filter
+ * `confidence === best` linked the transaction to EVERY order tied at the best
+ * sub-threshold score, so one charge whose amount collided with many stale
+ * Amazon orders (each scoring 50) produced a link to all of them.
+ */
+export function selectMatchCandidates<T extends { confidence: number }>(scored: T[]): T[] {
+  const strong = scored.filter((candidate) => candidate.confidence >= MATCH_CONFIDENCE_THRESHOLD);
+  if (strong.length > 0) return strong;
+
+  const sorted = [...scored].sort((a, b) => b.confidence - a.confidence);
+  const best = sorted[0];
+  if (!best || best.confidence < FALLBACK_MIN_CONFIDENCE) return [];
+  const tiedAtBest = sorted.filter((candidate) => candidate.confidence === best.confidence);
+  if (tiedAtBest.length > 1) return []; // ambiguous fan-out — abstain rather than guess
+  return [best];
+}
+
 export function scoreAmazonOrderMatch(txn: Transaction, order: ExternalOrder): MatchScore {
   let score = 0;
   const reasons: string[] = [];
@@ -108,13 +144,8 @@ export async function runAmazonMatching(args: {
   let matchedDateTo: string | null = null;
 
   for (const txn of txns.filter((row) => isAmazonLikeMerchant(`${row.merchantRaw} ${row.merchantClean}`))) {
-    const scores = orders
-      .map((order) => ({ order, ...scoreAmazonOrderMatch(txn, order) }))
-      .sort((a, b) => b.confidence - a.confidence);
-    const best = scores[0]?.confidence ?? 0;
-    const candidates = scores.filter((candidate) =>
-      candidate.confidence >= 70 || (best < 70 && candidate.confidence === best && best > 0),
-    );
+    const scores = orders.map((order) => ({ order, ...scoreAmazonOrderMatch(txn, order) }));
+    const candidates = selectMatchCandidates(scores);
     for (const candidate of candidates) {
       const [link, created] = await TransactionOrderLink.findOrCreate({
         where: { transactionId: txn.id, externalOrderId: candidate.order.id },
