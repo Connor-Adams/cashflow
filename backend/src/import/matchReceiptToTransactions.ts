@@ -203,6 +203,7 @@ export async function matchReceiptOrderToTransactions(args: {
 
     if (scored.length === 0) continue;
     const best = scored[0];
+    const autoAccept = decideAutoAccept(scored.map((s) => s.confidence));
 
     const [link, isNew] = await TransactionOrderLink.findOrCreate({
       where: { transactionId: best.txn.id, externalOrderId: order.id },
@@ -211,7 +212,7 @@ export async function matchReceiptOrderToTransactions(args: {
         externalOrderId: order.id,
         confidence: String(best.confidence),
         matchReason: best.matchReason,
-        status: 'suggested',
+        status: autoAccept ? 'accepted' : 'suggested',
         linkedAmount: String(payment.amount),
       },
     });
@@ -223,6 +224,7 @@ export async function matchReceiptOrderToTransactions(args: {
         confidence: String(best.confidence),
         matchReason: best.matchReason,
         linkedAmount: String(payment.amount),
+        ...(autoAccept ? { status: 'accepted' as const } : {}),
       });
       updated += 1;
     }
