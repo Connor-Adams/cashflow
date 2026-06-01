@@ -2,41 +2,39 @@ import { useEffect, useState } from 'react'
 import { getJson } from '@/lib/api'
 import { EmptyState } from '@/components/ui/empty-state'
 import { formatMoney } from '@/lib/formatMoney'
+import {
+  summarizeOrders,
+  rollUpCategories,
+  type ReceiptOrder,
+  type ReceiptLinkStatus,
+} from './receiptDerivations'
 
 export type ReceiptGroup = 'all' | 'gmail' | 'amazon' | 'other'
 
-type ReceiptItem = {
-  id: number
-  title: string
-  quantity: number
-  unitPrice: string | null
-  totalPrice: string | null
-  inferredCategory: string | null
-}
-
-type ReceiptOrder = {
-  id: number
-  vendor: string
-  source: string | null
-  orderDate: string | null
-  total: string | null
-  currency: string
-  paymentLast4: string | null
-  linkStatus: 'linked' | 'needs_match' | 'orphan'
-  items?: ReceiptItem[]
-}
-
-const LINK_LABEL: Record<ReceiptOrder['linkStatus'], string> = {
+const LINK_LABEL: Record<ReceiptLinkStatus, string> = {
   linked: 'Linked',
   needs_match: 'Needs match',
   orphan: 'Orphan',
 }
 
-const LINK_COLOR: Record<ReceiptOrder['linkStatus'], string> = {
-  linked: 'var(--primary)',
-  needs_match: 'var(--accent-warm, var(--muted-foreground))',
-  orphan: 'var(--muted-foreground)',
+const LINK_COLOR: Record<ReceiptLinkStatus, string> = {
+  linked: 'var(--positive)',
+  needs_match: 'var(--primary)',
+  orphan: 'var(--warning)',
 }
+
+// Distinct swatches for the per-receipt category roll-up bar (cycled if needed).
+const CAT_COLORS = [
+  'var(--primary)',
+  'var(--positive)',
+  'var(--warning)',
+  '#7E9CD8',
+  'var(--muted-foreground)',
+  'var(--border)',
+]
+
+// Single source of truth for the column template so header + every row align.
+const ROW_GRID = 'grid grid-cols-[1.6fr_0.7fr_1fr_1fr_auto_1rem] items-center gap-3'
 
 export function ReceiptsList({ group }: { group: ReceiptGroup }) {
   const [orders, setOrders] = useState<ReceiptOrder[] | null>(null)
@@ -78,39 +76,169 @@ export function ReceiptsList({ group }: { group: ReceiptGroup }) {
     )
   }
 
+  const summary = summarizeOrders(orders)
+  const currency = orders[0].currency
+
   return (
-    <ul className="flex flex-col gap-2">
-      {orders.map((o) => (
-        <li key={o.id}>
-          <details className="rounded-md border border-border p-3">
-            <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-2">
-              <span className="font-medium">{o.vendor}</span>
-              <span className="muted text-sm">{o.orderDate ?? '—'}</span>
-              <span className="tabular-nums">
-                {o.total != null ? formatMoney(Number(o.total), o.currency) : '—'}
-              </span>
-              <span className="text-xs font-semibold" style={{ color: LINK_COLOR[o.linkStatus] }}>
-                {LINK_LABEL[o.linkStatus]}
-              </span>
-              {o.source ? <span className="muted text-xs">{o.source}</span> : null}
-            </summary>
-            <ul className="mt-2 flex flex-col gap-1 pl-4 text-sm">
-              {(o.items ?? []).map((it) => (
-                <li key={it.id} className="flex justify-between gap-2">
-                  <span className="truncate">
-                    {it.title}
-                    {it.quantity > 1 ? ` ×${it.quantity}` : ''}
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--muted-foreground)]">
+        <span>
+          <strong className="text-[var(--foreground)]">{summary.count}</strong> receipts
+        </span>
+        {summary.orphanCount > 0 ? (
+          <>
+            <span aria-hidden>·</span>
+            <span>
+              <strong style={{ color: 'var(--warning)' }}>{summary.orphanCount}</strong> orphan
+            </span>
+          </>
+        ) : null}
+        <span aria-hidden>·</span>
+        <span className="tabular-nums">
+          <strong className="text-[var(--foreground)]">{formatMoney(summary.totalSum, currency)}</strong> total
+        </span>
+        {summary.taxSum > 0 ? (
+          <>
+            <span aria-hidden>·</span>
+            <span className="tabular-nums">
+              <strong className="text-[var(--foreground)]">{formatMoney(summary.taxSum, currency)}</strong> tax
+            </span>
+          </>
+        ) : null}
+      </div>
+
+      <div className={`${ROW_GRID} px-3 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]`}>
+        <span>Vendor</span>
+        <span>Date</span>
+        <span className="text-right">Tax</span>
+        <span className="text-right">Total</span>
+        <span className="sr-only">Status</span>
+        <span aria-hidden />
+      </div>
+
+      <ul className="flex flex-col gap-1">
+        {orders.map((o) => {
+          const cats = rollUpCategories(o.items ?? [])
+          const catTotal = cats.reduce((sum, c) => sum + c.total, 0)
+          const items = o.items ?? []
+          return (
+            <li key={o.id}>
+              <details className="group rounded-md border border-border">
+                <summary className={`${ROW_GRID} cursor-pointer list-none px-3 py-2 [&::-webkit-details-marker]:hidden`}>
+                  <span className="truncate font-medium">{o.vendor}</span>
+                  <span className="muted text-sm tabular-nums">{o.orderDate ?? '—'}</span>
+                  <span className="muted text-right text-sm tabular-nums">
+                    {o.tax != null ? formatMoney(Number(o.tax), o.currency) : ''}
                   </span>
-                  <span className="muted tabular-nums">
-                    {it.totalPrice != null ? formatMoney(Number(it.totalPrice), o.currency) : '—'}
+                  <span className="text-right tabular-nums">
+                    {o.total != null ? formatMoney(Number(o.total), o.currency) : '—'}
                   </span>
-                </li>
-              ))}
-              {(o.items ?? []).length === 0 ? <li className="muted">No line items</li> : null}
-            </ul>
-          </details>
-        </li>
-      ))}
-    </ul>
+                  <span className="flex justify-center">
+                    <span
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ background: LINK_COLOR[o.linkStatus] }}
+                      title={LINK_LABEL[o.linkStatus]}
+                    />
+                    <span className="sr-only">{LINK_LABEL[o.linkStatus]}</span>
+                  </span>
+                  <span className="text-[var(--muted-foreground)] transition-transform group-open:rotate-90">›</span>
+                </summary>
+
+                <div className="flex flex-col gap-3 border-t border-border bg-[var(--card)] p-3 sm:flex-row sm:gap-6">
+                  <div className="min-w-0 flex-1">
+                    <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+                      {items.length} items
+                    </p>
+                    <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto pr-1 text-sm">
+                      {items.map((it) => (
+                        <li key={it.id} className="flex justify-between gap-2">
+                          <span className="truncate">
+                            {it.title}
+                            {it.quantity > 1 ? ` ×${it.quantity}` : ''}
+                          </span>
+                          <span
+                            className="muted tabular-nums"
+                            style={
+                              it.totalPrice != null && Number(it.totalPrice) < 0
+                                ? { color: 'var(--warning)' }
+                                : undefined
+                            }
+                          >
+                            {it.totalPrice != null ? formatMoney(Number(it.totalPrice), o.currency) : '—'}
+                          </span>
+                        </li>
+                      ))}
+                      {items.length === 0 ? <li className="muted">No line items</li> : null}
+                    </ul>
+                  </div>
+
+                  <div className="sm:w-56">
+                    <p className="mb-1 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Breakdown</p>
+                    <dl className="text-sm">
+                      {o.subtotal != null ? (
+                        <div className="flex justify-between gap-2 py-0.5 text-[var(--muted-foreground)]">
+                          <dt>Subtotal</dt>
+                          <dd className="tabular-nums text-[var(--foreground)]">{formatMoney(Number(o.subtotal), o.currency)}</dd>
+                        </div>
+                      ) : null}
+                      {o.tax != null ? (
+                        <div className="flex justify-between gap-2 py-0.5 text-[var(--muted-foreground)]">
+                          <dt>Tax</dt>
+                          <dd className="tabular-nums text-[var(--foreground)]">{formatMoney(Number(o.tax), o.currency)}</dd>
+                        </div>
+                      ) : null}
+                      {o.shipping != null ? (
+                        <div className="flex justify-between gap-2 py-0.5 text-[var(--muted-foreground)]">
+                          <dt>Shipping</dt>
+                          <dd className="tabular-nums text-[var(--foreground)]">{formatMoney(Number(o.shipping), o.currency)}</dd>
+                        </div>
+                      ) : null}
+                      <div className="mt-1 flex justify-between gap-2 border-t border-border pt-2 font-semibold">
+                        <dt>Total</dt>
+                        <dd className="tabular-nums">
+                          {o.total != null ? formatMoney(Number(o.total), o.currency) : '—'}
+                        </dd>
+                      </div>
+                    </dl>
+                    {o.paymentLast4 ? (
+                      <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                        Paid with{' '}
+                        <span className="rounded border border-border px-1.5 py-0.5 text-[var(--foreground)]">•••• {o.paymentLast4}</span>
+                      </p>
+                    ) : null}
+
+                    {cats.length > 0 ? (
+                      <div className="mt-3 border-t border-border pt-2">
+                        <p className="mb-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Where it went</p>
+                        <div className="mb-2 flex h-2 overflow-hidden rounded">
+                          {cats.map((c, i) => (
+                            <span
+                              key={c.category}
+                              style={{ width: `${(c.total / catTotal) * 100}%`, background: CAT_COLORS[i % CAT_COLORS.length] }}
+                            />
+                          ))}
+                        </div>
+                        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--muted-foreground)]">
+                          {cats.map((c, i) => (
+                            <li key={c.category} className="flex items-center gap-1.5">
+                              <span
+                                className="inline-block h-2 w-2 rounded-sm"
+                                style={{ background: CAT_COLORS[i % CAT_COLORS.length] }}
+                              />
+                              {c.category}{' '}
+                              <span className="tabular-nums text-[var(--foreground)]">{formatMoney(c.total, o.currency)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </details>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
