@@ -55,6 +55,7 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -292,6 +293,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   }
 
   const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
+  const ownerNames = await loadHouseholdOwnerNames(opts.householdId ?? account.householdId ?? null);
 
   const text = buf.toString('utf8');
   const parsed = parseCsvRecords(text);
@@ -405,6 +407,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         householdAccountIds,
+        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,

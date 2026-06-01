@@ -34,6 +34,13 @@ export interface EnrichInputs {
   transferWindowDays: number;
   recurringMinSupport: number;
   amazonLinkThreshold: number;
+  /**
+   * Household member display names (e.g. ['Connor Adams', 'LingLing']). Passed
+   * to detect-type so an external payroll direct deposit (income) is told apart
+   * from a self-deposit the owner made under their own name (transfer).
+   * Optional; when omitted, any external "direct deposit from <X>" is income.
+   */
+  ownerNames?: string[];
   /** Optional learned-brand lookup for stage 1; orchestrator may pass a memo'd resolver. */
   learnedBrandLookup?: (merchantClean: string) => string | null;
 }
@@ -91,6 +98,7 @@ export async function enrichTransaction(input: EnrichInputs): Promise<Enrichment
     merchantRaw: input.raw.merchantRaw,
     merchantClean,
     amount: input.raw.amount,
+    ownerNames: input.ownerNames,
   }), []));
 
   const txnType = pickTxnType(signals);

@@ -118,13 +118,19 @@ test('transfer: cash received (P2P_RECEIVED narrative)', () => {
   assert.equal(out[0].fields.txnType, 'transfer');
 });
 
-test('transfer: direct deposit (AFT_IN narrative)', () => {
+test('income: direct deposit from a non-member payer (ADAMS GREENE, shares surname only)', () => {
+  // Was historically 'transfer' (AFT_IN); reclassified to 'income' 2026-06-01.
+  // "ADAMS GREENE" shares the "ADAMS" surname with member "Connor Adams" but is
+  // not a full member-name match, so it is external income — not a self
+  // transfer. Prod merchant_raw is truncated at 35 chars (no usable corp
+  // marker), so the discriminator is household-member own-name exclusion.
   const out = runDetectTypeStage({
     merchantRaw: 'Direct deposit from ADAMS GREENE HO',
     merchantClean: 'Direct deposit from ADAMS GREENE HO',
     amount: 207.4,
+    ownerNames: ['Connor Adams', 'LingLing'],
   });
-  assert.equal(out[0].fields.txnType, 'transfer');
+  assert.equal(out[0].fields.txnType, 'income');
 });
 
 test('fee: subscription fee paid for period', () => {
@@ -281,4 +287,107 @@ test('investment: WS "Staked X of TOKEN" crypto staking initiation', () => {
     amount: 0,
   });
   assert.equal(out[0].fields.txnType, 'investment');
+});
+
+// === Income detection (2026-06-01) ===
+// Employer payroll / external direct deposits must classify as 'income', not
+// 'transfer'. The hard part: prod merchant_raw is truncated at 35 chars, so
+// "Direct deposit from ADAMS GREENE HO" (income) and "Direct deposit from ADAMS
+// CONNOR DO" (a self-deposit from the account owner's own name) are both
+// marker-less name strings. The discriminator is own-name exclusion against the
+// household members' names — money via the direct-deposit/payroll rail from
+// someone who is NOT you is income; from your own name it is a self transfer.
+
+const HH_MEMBERS = ['Connor Adams', 'LingLing'];
+
+test('income: direct deposit from an external company (CDG LABS INC)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Direct deposit from CDG LABS INC',
+    merchantClean: 'Direct deposit from CDG LABS INC',
+    amount: 10726.4,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+  assert.equal(out[0].confidence, 'high');
+});
+
+test('transfer: direct deposit from the account owner\'s own name is a self-deposit, not income', () => {
+  // "ADAMS CONNOR" is member "Connor Adams" surname-first — a full member-name
+  // match — so it stays a transfer even though it rides the direct-deposit rail.
+  const out = runDetectTypeStage({
+    merchantRaw: 'Direct deposit from ADAMS CONNOR DO',
+    merchantClean: 'Direct deposit from ADAMS CONNOR DO',
+    amount: 3977.31,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('income: explicit payroll narrative', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'PAYROLL DEPOSIT',
+    merchantClean: 'PAYROLL DEPOSIT',
+    amount: 3200,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+});
+
+test('income: explicit salary narrative', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'ACME CORP SALARY',
+    merchantClean: 'ACME CORP SALARY',
+    amount: 4100,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+});
+
+test('income: direct deposit is income even without owner names (default external)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Direct deposit from CDG LABS INC',
+    merchantClean: 'Direct deposit from CDG LABS INC',
+    amount: 10726.4,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+});
+
+test('transfer: negative-amount direct deposit is not income (positive-only guard)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Direct deposit from CDG LABS INC',
+    merchantClean: 'Direct deposit from CDG LABS INC',
+    amount: -10726.4,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: direct deposit from an own-account word stays transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Direct deposit from chequing account',
+    merchantClean: 'Direct deposit from chequing account',
+    amount: 500,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: Interac e-Transfer Received is a transfer, not income', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Interac e-Transfer® Received',
+    merchantClean: 'Interac e-Transfer Received',
+    amount: 1500,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('unknown: positive investment "Contribution" is not income', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Contribution (executed at 2025-12-18)',
+    merchantClean: 'Contribution (executed at 2025-12-18)',
+    amount: 9000,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'unknown');
 });
