@@ -88,7 +88,7 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
       {
         category: txn.finalCategory,
         amount: txnAmount,
-        businessAmount: bizAmt === 0 ? 0 : bizAmt * sign,
+        businessAmount: bizAmt,
         currency: txn.currency,
       },
     ];
