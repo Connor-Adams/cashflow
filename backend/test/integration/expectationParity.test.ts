@@ -73,7 +73,6 @@ before(async () => {
     status: 'planned',
     statusUncertain: false,
     category: 'Streaming',
-    priceChangeDetected: false,
     currency: 'CAD',
   });
 });

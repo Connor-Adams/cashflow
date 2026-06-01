@@ -203,7 +203,6 @@ async function createSubscription(
     expectedDate: '2026-06-01',
     category: null,
     annualizedCost: '120.00',
-    priceChangeDetected: false,
     cancellationUrl: null,
     notes: null,
     ...subscriptionStatusFields(status),

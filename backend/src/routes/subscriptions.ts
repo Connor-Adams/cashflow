@@ -286,7 +286,6 @@ export async function refreshDetectedSubscriptions(args: {
         statusUncertain: mapped.statusUncertain,
         category: op.category,
         annualizedCost: op.annualizedCost,
-        priceChangeDetected: op.priceChangeDetected,
         cancellationUrl: null,
         notes: null,
       });

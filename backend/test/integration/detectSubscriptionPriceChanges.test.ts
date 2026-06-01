@@ -91,7 +91,6 @@ async function seedSub(householdId: number, userId: number, merchant: string): P
     status: 'planned',
     statusUncertain: false,
     category: null,
-    priceChangeDetected: false,
     cancellationUrl: null,
     notes: null,
   });
