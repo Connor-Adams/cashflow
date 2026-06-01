@@ -293,3 +293,64 @@ jobs:
 
       - name: Build frontend
         run: yarn workspace frontend run build
+
+  coverage:
+    needs: install
+    runs-on: ubuntu-latest
+    # Report-only: publishes line/branch/funcs coverage as a build artifact and
+    # prints the tables in the job log. continue-on-error on the run steps means
+    # coverage never blocks a merge. To enforce a floor later, drop those flags
+    # and add `--check-coverage` (c8) / `coverage.thresholds` (vitest).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      # Unit (sqlite, per-process) and integration (postgres) must run as
+      # separate processes — the models singleton binds one dialect per process.
+      # c8 accumulates V8 coverage across both runs into one merged report.
+      - name: Backend coverage (unit + integration)
+        continue-on-error: true
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: yarn workspace cashflow-backend run test:coverage
+
+      - name: Frontend coverage
+        continue-on-error: true
+        run: yarn workspace frontend run test:coverage
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            backend/coverage
+            frontend/coverage
+          retention-days: 7
+          if-no-files-found: ignore
