@@ -42,7 +42,11 @@ export function serializeSubscription(row: any) {
     status: toSubscriptionStatus(row.status, row.statusUncertain),
     category: row.category,
     annualizedCost: String(row.annualizedCost),
-    priceChangeDetected: row.priceChangeDetected,
+    // The price-increase signal now lives in an open `subscription_price_increase`
+    // Insight, not the (soon-to-be-dropped) planned_events.price_change_detected
+    // column. The /subscriptions route derives the accurate boolean (and the
+    // detail chip) from open Insights; this mapper field is a fixed `false`.
+    priceChangeDetected: false,
     cancellationUrl: row.cancellationUrl,
     notes: row.notes,
     createdAt: row.createdAt,

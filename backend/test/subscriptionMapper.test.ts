@@ -159,6 +159,16 @@ test('serializeSubscription maps name->merchantName and copies passthrough field
   assert.equal('kind' in dto, false);
 });
 
+test('serializeSubscription always emits priceChangeDetected:false (signal moved to Insights)', () => {
+  // The price-increase signal now lives in an open `subscription_price_increase`
+  // Insight, not the planned_events.price_change_detected column. The mapper
+  // emits a fixed `false`; the /subscriptions route derives the accurate value
+  // from open Insights. So even a row whose (legacy) column is `true` maps to
+  // `false` here.
+  const dto = serializeSubscription(row({ priceChangeDetected: true }));
+  assert.equal(dto.priceChangeDetected, false);
+});
+
 test('serializeSubscription derives legacy status from status+statusUncertain', () => {
   assert.equal(serializeSubscription(row({ status: 'planned' })).status, 'active');
   assert.equal(serializeSubscription(row({ status: 'cancelled' })).status, 'cancelled');

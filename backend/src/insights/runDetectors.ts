@@ -13,7 +13,7 @@
  * review pass on top — it reads the same `insights` table.
  */
 import { Op } from 'sequelize';
-import { Insight, Transaction, PartnerSettlement, Contact, Receipt, sequelize } from '../models';
+import { Insight, Transaction, PartnerSettlement, Contact, Receipt, PlannedEvent, sequelize } from '../models';
 import {
   detectDuplicateTransactions,
   detectMerchantSpendSpike,
@@ -93,6 +93,53 @@ async function loadSettlements(householdId: number): Promise<DetectorSettlement[
   }));
 }
 
+/**
+ * Upsert one detected insight, keyed by (householdId, type, fingerprint).
+ * Refreshes content fields but NEVER writes `status`, so a user's
+ * dismissed/resolved state is preserved across re-runs. Caller supplies the
+ * transaction. Returns 'created' | 'refreshed'.
+ */
+export async function upsertInsight(
+  householdId: number,
+  f: DetectedInsight,
+  opts: { now: Date; userId: number | null },
+  t: import('sequelize').Transaction,
+): Promise<'created' | 'refreshed'> {
+  const existing = await Insight.findOne({
+    where: { householdId, type: f.type, fingerprint: f.fingerprint },
+    transaction: t,
+  });
+  if (existing) {
+    existing.set('severity', f.severity);
+    existing.set('title', f.title);
+    existing.set('description', f.description);
+    existing.set('entityType', f.entityType);
+    existing.set('entityId', f.entityId);
+    existing.set('metadata', f.metadata);
+    existing.set('detectedAt', opts.now);
+    await existing.save({ transaction: t });
+    return 'refreshed';
+  }
+  await Insight.create(
+    {
+      householdId,
+      userId: opts.userId,
+      type: f.type,
+      severity: f.severity,
+      title: f.title,
+      description: f.description,
+      entityType: f.entityType,
+      entityId: f.entityId,
+      status: 'open',
+      fingerprint: f.fingerprint,
+      metadata: f.metadata,
+      detectedAt: opts.now,
+    },
+    { transaction: t },
+  );
+  return 'created';
+}
+
 export async function runDetectorsForHousehold(
   householdId: number,
   options?: { now?: Date; userId?: number | null },
@@ -103,10 +150,32 @@ export async function runDetectorsForHousehold(
   const transactions = await loadTransactions(householdId, now);
   const settlements = await loadSettlements(householdId);
 
+  // Merchants we already track as subscriptions — `recurring_increase` skips
+  // these so `subscription_price_increase` (the dedicated subscription-price
+  // detector) owns their price hikes instead of double-surfacing them. We seed
+  // the guard set with BOTH `normalizedName` and the display `name`, each
+  // lowercased: `recurring_increase` buckets by `merchantClean.trim().toLowerCase()`,
+  // and while a detection-sourced sub's `normalizedName` equals exactly that, a
+  // manually-created or renamed sub may store a `normalizedName` that no longer
+  // matches the live `merchantClean` — including the display `name` lowercased
+  // catches that case.
+  const subRows = await PlannedEvent.findAll({
+    where: { householdId, kind: 'subscription' },
+    attributes: ['name', 'normalizedName'],
+    raw: true,
+  });
+  const subscriptionMerchants = new Set<string>();
+  for (const r of subRows) {
+    const normalized = String(r.normalizedName ?? '').trim().toLowerCase();
+    if (normalized) subscriptionMerchants.add(normalized);
+    const display = String(r.name ?? '').trim().toLowerCase();
+    if (display) subscriptionMerchants.add(display);
+  }
+
   const findings: DetectedInsight[] = [
     ...detectDuplicateTransactions(transactions, { now }),
     ...detectMerchantSpendSpike(transactions, { now }),
-    ...detectRecurringIncrease(transactions, { now }),
+    ...detectRecurringIncrease(transactions, { now, subscriptionMerchants }),
     ...detectMissingReceipt(transactions, { now }),
     ...detectUnusualCategorySpend(transactions, { now }),
     ...detectSettlementImbalance(settlements),
@@ -124,45 +193,8 @@ export async function runDetectorsForHousehold(
   // state. Upsert by (household_id, type, fingerprint).
   await sequelize.transaction(async (t) => {
     for (const f of findings) {
-      const existing = await Insight.findOne({
-        where: {
-          householdId,
-          type: f.type,
-          fingerprint: f.fingerprint,
-        },
-        transaction: t,
-      });
-      if (existing) {
-        // Don't reopen a dismissed/resolved row — preserve the user's state.
-        existing.set('severity', f.severity);
-        existing.set('title', f.title);
-        existing.set('description', f.description);
-        existing.set('entityType', f.entityType);
-        existing.set('entityId', f.entityId);
-        existing.set('metadata', f.metadata);
-        existing.set('detectedAt', now);
-        await existing.save({ transaction: t });
-        refreshed++;
-      } else {
-        await Insight.create(
-          {
-            householdId,
-            userId,
-            type: f.type,
-            severity: f.severity,
-            title: f.title,
-            description: f.description,
-            entityType: f.entityType,
-            entityId: f.entityId,
-            status: 'open',
-            fingerprint: f.fingerprint,
-            metadata: f.metadata,
-            detectedAt: now,
-          },
-          { transaction: t },
-        );
-        created++;
-      }
+      const r = await upsertInsight(householdId, f, { now, userId }, t);
+      if (r === 'created') created++; else refreshed++;
     }
   });
 

@@ -440,33 +440,54 @@ test('PATCH /api/subscriptions/:id returns 404 across households', async () => {
   assert.equal(res.status, 404);
 });
 
-test('detected price increase flags a row when amount changes above threshold', async () => {
-  // Seed Hulu at 9.99 four times centred ~5 months ago, then refresh so the
-  // detector persists a $9.99 baseline.
+test('price increase flags a row when an open subscription_price_increase Insight targets it', async () => {
+  // The chip + the DTO's priceChangeDetected now derive from an open
+  // `subscription_price_increase` Insight (entityId = the subscription's
+  // PlannedEvent id), NOT the retired planned_events.price_change_detected
+  // column. Detect Hulu as a subscription first, then seed the Insight.
   await seedRecurringCharges(primaryHouseholdId, primaryAccountId, 'Hulu', 9.99, 4, 30);
-  await primaryAgent.get('/api/subscriptions'); // first refresh — establishes baseline
+  const detected = await primaryAgent.get('/api/subscriptions'); // persists the row
+  const huluRow = (
+    detected.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'hulu');
+  assert.ok(huluRow, 'expected Hulu to be detected as a subscription');
 
-  // Now wipe Hulu's charges and re-seed at a higher amount so the new
-  // detection-derived avgAmount is well above the persisted $9.99. We
-  // can't just append — that would mix old + new amounts into the same
-  // detector group, blunting the change. Detection persistence reads the
-  // PERSISTED amount and compares it to the freshly-computed avg, so a
-  // clean swap is the cleanest way to provoke a real "price up" signal.
   const models = await import('../../src/models');
-  await models.Transaction.destroy({
-    where: { householdId: primaryHouseholdId, merchantClean: 'Hulu' },
+  await models.Insight.create({
+    householdId: primaryHouseholdId,
+    userId: null,
+    type: 'subscription_price_increase',
+    severity: 'warning',
+    title: 'Hulu price increased',
+    description: '',
+    entityType: 'expectation',
+    entityId: huluRow!.id,
+    status: 'open',
+    fingerprint: `subscription_price_increase:${huluRow!.id}:1400`,
+    metadata: { previousAmountCents: 999, newAmountCents: 1400, pctChange: 40 },
+    detectedAt: new Date('2026-05-18T00:00:00Z'),
   });
-  await seedRecurringCharges(primaryHouseholdId, primaryAccountId, 'Hulu', 14, 4, 10);
 
-  const res = await primaryAgent.get('/api/subscriptions');
+  // refresh=0 so the seeded row + Insight are read back untouched.
+  const res = await primaryAgent.get('/api/subscriptions?refresh=0');
   const hulu = (
     res.body.items as Array<{
       normalizedName: string;
       amount: string;
       priceChangeDetected: boolean;
+      pendingPriceChange: {
+        prevCents: number;
+        newCents: number;
+        pctChange: string;
+        detectedOn: string;
+      } | null;
     }>
   ).find((i) => i.normalizedName === 'hulu');
   assert.ok(hulu);
-  // 14 / 9.99 ≈ 1.40 → 40% increase, well above the 10% threshold.
   assert.equal(hulu!.priceChangeDetected, true);
+  assert.ok(hulu!.pendingPriceChange);
+  assert.equal(hulu!.pendingPriceChange!.prevCents, 999);
+  assert.equal(hulu!.pendingPriceChange!.newCents, 1400);
+  assert.equal(hulu!.pendingPriceChange!.pctChange, '40');
+  assert.equal(hulu!.pendingPriceChange!.detectedOn, '2026-05-18');
 });

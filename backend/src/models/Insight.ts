@@ -39,6 +39,7 @@ export type InsightType =
   | 'duplicate_transactions'
   | 'merchant_spend_spike'
   | 'recurring_increase'
+  | 'subscription_price_increase'
   | 'missing_receipt'
   | 'unusual_category_spend'
   | 'settlement_imbalance';

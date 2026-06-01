@@ -19,7 +19,7 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import type { WhereOptions } from 'sequelize';
-import { Account, PlannedEvent, Receipt, Transaction } from '../models';
+import { Account, Insight, PlannedEvent, Receipt, Transaction } from '../models';
 import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
@@ -230,6 +230,25 @@ async function fetchSubscriptions(
   const where: Record<string, unknown> = { ...householdWhere(req), kind: 'subscription' };
   if (currency) where.currency = currency;
   const rows = await PlannedEvent.findAll({ where });
+  // The price-increase signal now lives in an open Insight
+  // (type='subscription_price_increase', entityId=PlannedEvent.id), not the
+  // retired planned_events.price_change_detected column (serializeSubscription
+  // hard-codes that field to false). Build the set of subscriptions with an
+  // OPEN price-increase Insight so explainMonth's "price changed" finding still
+  // fires; dismissing/resolving the Insight clears it on the next read. Mirrors
+  // routes/moneyLeaks.ts.
+  const priceInsights = await Insight.findAll({
+    where: {
+      ...householdWhere(req),
+      type: 'subscription_price_increase',
+      status: 'open',
+    },
+    attributes: ['entityId'],
+    raw: true,
+  });
+  const priceUp = new Set<number>(
+    priceInsights.map((i) => i.entityId).filter((x): x is number => x != null),
+  );
   return rows.map(serializeSubscription).map((row) => ({
     id: row.id,
     merchantName: row.merchantName,
@@ -238,7 +257,7 @@ async function fetchSubscriptions(
     cadence: row.cadence,
     annualizedCost: Number(row.annualizedCost),
     status: row.status,
-    priceChangeDetected: Boolean(row.priceChangeDetected),
+    priceChangeDetected: priceUp.has(row.id),
     category: row.category,
     lastChargeDate: row.lastChargeDate,
     createdAt: row.createdAt.toISOString(),

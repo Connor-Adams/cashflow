@@ -137,7 +137,6 @@ export class PlannedEvent extends Model<
   declare lastChargeDate: string | null;
   declare nextExpectedDate: string | null;
   declare annualizedCost: string | null;
-  declare priceChangeDetected: CreationOptional<boolean>;
   declare cancellationUrl: string | null;
   declare category: string | null;
   declare statusUncertain: CreationOptional<boolean>;
@@ -219,12 +218,6 @@ export function initPlannedEvent(sequelize: Sequelize): typeof PlannedEvent {
         type: DataTypes.DECIMAL(14, 4),
         field: 'annualized_cost',
         allowNull: true,
-      },
-      priceChangeDetected: {
-        type: DataTypes.BOOLEAN,
-        field: 'price_change_detected',
-        allowNull: false,
-        defaultValue: false,
       },
       cancellationUrl: {
         type: DataTypes.TEXT,
