@@ -39,6 +39,7 @@ import {
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import { logger } from '../observability/logger';
+import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 
 /**
  * Default sender allowlist baked into the app. Every household gets these
@@ -529,6 +530,20 @@ export async function scanInbox(
       result.status = result.orderCreated ? 'extracted' : 'duplicate';
       if (result.orderCreated) created++;
       else dupes++;
+
+      // Auto-link new orders to card transactions. Runs AFTER the DB transaction
+      // commits so the order row is visible. A match failure must never fail the scan.
+      if (result.orderCreated === true && result.orderId != null && opts.householdId != null) {
+        try {
+          await matchReceiptOrderToTransactions({
+            externalOrderId: result.orderId,
+            householdId: opts.householdId,
+          });
+        } catch (err) {
+          logger.warn({ err, orderId: result.orderId }, 'gmail_scan_match_failed');
+        }
+      }
+
       await recordProcessed({
         messageId: summary.id,
         status: result.status,
