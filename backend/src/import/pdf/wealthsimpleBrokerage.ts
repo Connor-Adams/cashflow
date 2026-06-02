@@ -1,5 +1,9 @@
 import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
-import type { NormalizedHoldingSnapshot } from '../statementTypes';
+import type {
+  NormalizedHoldingSnapshot,
+  NormalizedInvestmentActivity,
+} from '../statementTypes';
+import { wsPdfCodeToActivity, WS_PDF_SKIP_CODES } from './wealthsimpleActivityCodes';
 
 /**
  * Wealthsimple brokerage Account Statement parser — handles all Wealthsimple
@@ -38,15 +42,46 @@ import type { NormalizedHoldingSnapshot } from '../statementTypes';
 const ACCOUNT_LINE_RE =
   /\b([A-Z]{2}[A-Z0-9]{4,12}(?:CAD|USD))\b\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})/;
 
+/**
+ * Find the account-type label line, e.g. "Tax-Free Savings SDI Cash Account"
+ * or "Self-directed Non-Registered Cash Account". It reliably sits on page 1
+ * as the line ending in "Account" immediately after the "Phone:" line (the
+ * address block). We MUST scope to this line: a full-document scan picks up
+ * the page-5 "Information about Statement Codes" legend (which contains code
+ * descriptions like "WDQ - FHSA Qualifying withdrawal" and "Tax-free transfer
+ * into the…"), mislabeling Non-Registered accounts as FHSA/TFSA.
+ */
+function findAccountTypeLabel(lines: PdfLine[]): string {
+  const page1 = lines.filter((l) => l.page === 1);
+  const phoneIdx = page1.findIndex((l) => /Phone:/i.test(l.text));
+  const ACCOUNT_LABEL_RE = /Account$/;
+  if (phoneIdx >= 0) {
+    const after = page1
+      .slice(phoneIdx + 1)
+      .find((l) => ACCOUNT_LABEL_RE.test(l.text.trim()));
+    if (after) return after.text.trim();
+  }
+  // Fallback: first page-1 line that both ends in "Account" and carries an
+  // account-type keyword (avoids matching e.g. a stray "Account" heading).
+  const fallback = page1.find(
+    (l) =>
+      ACCOUNT_LABEL_RE.test(l.text.trim()) &&
+      /(Tax-Free|First Home|Retirement|Registered Education|Non-Registered|Margin|TFSA|FHSA|RRSP|RESP|Crypto|Chequing|Savings|Cash)/i.test(
+        l.text,
+      ),
+  );
+  return fallback ? fallback.text.trim() : '';
+}
+
 function detectProductLabel(lines: PdfLine[]): string {
-  const all = lines.map((l) => l.text).join(' ');
+  // Classify ONLY the account-type label line, not the whole document.
+  const label = findAccountTypeLabel(lines);
   // Order matters: registered-account markers win over the generic
   // Margin/Non-Registered fallback.
-  if (/Tax-Free Savings|\bTFSA\b/i.test(all)) return 'Wealthsimple TFSA';
-  if (/First Home Savings|\bFHSA\b/i.test(all)) return 'Wealthsimple FHSA';
-  if (/Retirement Savings|\bRRSP\b/i.test(all)) return 'Wealthsimple RRSP';
-  if (/Registered Education|\bRESP\b/i.test(all)) return 'Wealthsimple RESP';
-  if (/Margin|Non-Registered/i.test(all)) return 'Wealthsimple Investing';
+  if (/Tax-Free Savings|\bTFSA\b/i.test(label)) return 'Wealthsimple TFSA';
+  if (/First Home Savings|\bFHSA\b/i.test(label)) return 'Wealthsimple FHSA';
+  if (/Retirement Savings|\bRRSP\b/i.test(label)) return 'Wealthsimple RRSP';
+  if (/Registered Education|\bRESP\b/i.test(label)) return 'Wealthsimple RESP';
   return 'Wealthsimple Investing';
 }
 
@@ -181,6 +216,181 @@ function parseHoldings(
   return out;
 }
 
+type Activity = Omit<NormalizedInvestmentActivity, 'sourceRowFingerprint'>;
+
+const DATE_CELL_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CODE_CELL_RE = /^[A-Z]+$/;
+const TRADE_DATE_RE = /(?:executed at|received on)\s+(\d{4}-\d{2}-\d{2})/i;
+const QTY_RE = /\b(?:Bought|Sold)\s+([\d.]+)\s+shares?/i;
+// "SYM - Some Security Name: ..." → symbol + name. Name is non-greedy up to
+// the first colon (the colon separates the security from the action clause).
+const SECURITY_RE = /^([A-Z0-9.]+)\s*-\s*(.+?):/;
+const ACTIVITY_STOP_RE =
+  /LEVERAGE DISCLOSURE|STATEMENT NOTES|Information about Statement Codes/i;
+
+type PendingRow = {
+  date: string;
+  code: string;
+  debit: number;
+  credit: number;
+  descParts: string[];
+};
+
+/** True when a tokenized line opens a new activity row. */
+function isActivityRow(cols: string[]): boolean {
+  if (cols.length < 4) return false;
+  if (!DATE_CELL_RE.test(cols[0])) return false;
+  if (!CODE_CELL_RE.test(cols[1])) return false;
+  const last = cols.length - 1;
+  return (
+    MONEY_CELL_RE.test(cols[last - 2]) &&
+    MONEY_CELL_RE.test(cols[last - 1]) &&
+    MONEY_CELL_RE.test(cols[last])
+  );
+}
+
+function buySell(code: string): boolean {
+  const a = wsPdfCodeToActivity(code);
+  return a === 'buy' || a === 'sell';
+}
+
+/**
+ * Parse the activity table(s). Single ("Activity - Current period") or split
+ * ("CAD Activity"/"USD Activity") tables. Walks lines IN ORDER, starting a
+ * pending row on each row line and accumulating every following non-row line
+ * onto its description until the next row (or section/table boundary), so
+ * date-prefixed wrap tails ("2025-05-01)") are captured rather than dropped.
+ */
+function parseActivities(
+  lines: PdfLine[],
+  accountCurrency: string,
+): { activities: Activity[]; warnings: string[] } {
+  const activities: Activity[] = [];
+  const skipCounts: Record<string, number> = {};
+  const unmappedCounts: Record<string, number> = {};
+
+  let inSection = false;
+  let currency = accountCurrency;
+  let pending: PendingRow | null = null;
+
+  const finalize = () => {
+    if (!pending) return;
+    const row = pending;
+    pending = null;
+
+    const code = row.code;
+    const activityType = wsPdfCodeToActivity(code);
+    if (activityType === null) {
+      if (WS_PDF_SKIP_CODES.has(code)) {
+        skipCounts[code] = (skipCounts[code] ?? 0) + 1;
+      } else {
+        unmappedCounts[code] = (unmappedCounts[code] ?? 0) + 1;
+      }
+      return;
+    }
+
+    const description = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
+    const tradeMatch = TRADE_DATE_RE.exec(description);
+    const tradeDate = tradeMatch ? tradeMatch[1] : row.date;
+    const qtyMatch = buySell(code) ? QTY_RE.exec(description) : null;
+    const quantity = qtyMatch ? Number(qtyMatch[1]) : null;
+    const secMatch = SECURITY_RE.exec(description);
+    const security = secMatch
+      ? {
+          symbol: secMatch[1].toUpperCase(),
+          name: secMatch[2].trim(),
+          assetType: null,
+          currency,
+        }
+      : null;
+    const amount = Number((row.credit - row.debit).toFixed(4));
+
+    activities.push({
+      activityType,
+      tradeDate,
+      settlementDate: null,
+      description,
+      security,
+      quantity,
+      price: null,
+      amount,
+      fees: null,
+      currency,
+      sourceReference: null,
+    });
+  };
+
+  for (const l of lines) {
+    const t = l.text.trim();
+
+    // Currency-tagged table headers (margin accounts split into two tables).
+    if (/CAD Activity/i.test(t)) {
+      finalize();
+      inSection = true;
+      currency = 'CAD';
+      continue;
+    }
+    if (/USD Activity/i.test(t)) {
+      finalize();
+      inSection = true;
+      currency = 'USD';
+      continue;
+    }
+    // Merged single table — denominated in the account currency.
+    if (/Activity\s*-\s*Current period/i.test(t)) {
+      finalize();
+      inSection = true;
+      currency = accountCurrency;
+      continue;
+    }
+    if (!inSection) continue;
+    if (ACTIVITY_STOP_RE.test(t)) {
+      finalize();
+      break;
+    }
+    // Column header line — not data.
+    if (/^Date\s/i.test(t) && /Transaction/i.test(t) && /Description/i.test(t)) {
+      continue;
+    }
+
+    const cols = tokenize(t);
+    if (isActivityRow(cols)) {
+      finalize();
+      const last = cols.length - 1;
+      pending = {
+        date: cols[0],
+        code: cols[1],
+        debit: num(cols[last - 2]),
+        credit: num(cols[last - 1]),
+        descParts: cols.slice(2, last - 2),
+      };
+      continue;
+    }
+    // Continuation / wrap line — accumulate onto the pending row.
+    if (pending && t) pending.descParts.push(t);
+  }
+  finalize();
+
+  const warnings: string[] = [];
+  const skipTotal = Object.values(skipCounts).reduce((a, b) => a + b, 0);
+  const unmappedTotal = Object.values(unmappedCounts).reduce((a, b) => a + b, 0);
+  if (skipTotal > 0 || unmappedTotal > 0) {
+    const fmt = (m: Record<string, number>) =>
+      Object.entries(m)
+        .sort()
+        .map(([c, n]) => `${c}×${n}`)
+        .join(', ');
+    const parts: string[] = [];
+    if (skipTotal > 0) parts.push(`skipped ${skipTotal} zero-cash row(s) (${fmt(skipCounts)})`);
+    if (unmappedTotal > 0) {
+      parts.push(`skipped ${unmappedTotal} unmapped-code row(s) (${fmt(unmappedCounts)})`);
+    }
+    warnings.push(`WS brokerage activity: ${parts.join('; ')}`);
+  }
+
+  return { activities, warnings };
+}
+
 export const wealthsimpleBrokerageParser: PdfParser = {
   id: 'wealthsimple_brokerage',
   label: 'Wealthsimple Brokerage Statement',
@@ -197,20 +407,17 @@ export const wealthsimpleBrokerageParser: PdfParser = {
     }
     return orderExec && ws && !questrade;
   },
-  // activities implemented in Task 8
   parse: (lines): PdfParseResult => {
     const header = parseWsBrokerageHeader(lines);
-    const holdings = parseHoldings(
-      lines,
-      header.periodEnd,
-      header.currency ?? 'CAD',
-    );
+    const accountCurrency = header.currency ?? 'CAD';
+    const holdings = parseHoldings(lines, header.periodEnd, accountCurrency);
+    const { activities, warnings } = parseActivities(lines, accountCurrency);
     return {
       transactions: [],
-      investmentActivities: [],
+      investmentActivities: activities,
       holdings,
       header,
-      warnings: [],
+      warnings,
       parseErrors: [],
     };
   },
