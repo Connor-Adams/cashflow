@@ -48,6 +48,7 @@ export class Transaction extends Model<
   declare autoCategory: string | null;
   declare categoryOverride: string | null;
   declare finalCategory: string | null;
+  declare taxTreatmentOverride: string | null;
 
   declare counterpartyRaw: string | null;
   declare counterpartyContactId: number | null;
@@ -198,6 +199,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       finalCategory: {
         type: DataTypes.STRING(128),
         field: 'final_category',
+        allowNull: true,
+      },
+      taxTreatmentOverride: {
+        type: DataTypes.STRING(32),
+        field: 'tax_treatment_override',
         allowNull: true,
       },
 
