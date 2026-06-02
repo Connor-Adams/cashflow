@@ -3,6 +3,7 @@ import { patchJson } from '@/lib/api';
 import { TaxTreatmentSelect } from '../../components/TaxTreatmentSelect';
 import type { TaxTreatment } from '../../lib/taxTreatment';
 import type { QueueLeg } from '../../hooks/useClassificationQueue';
+import { fmtCurrency } from './util/format';
 
 const CORP_OPTIONS: TaxTreatment[] = [
   'eligible_dividend',
@@ -48,7 +49,7 @@ export function ClassifyRow({ targetId, kind, primary, counter, onClassified }: 
   return (
     <li className="flex items-center gap-3 py-2">
       <span className="w-20 text-sm">{primary.date}</span>
-      <span className="w-24 text-sm font-semibold">${primary.amount}</span>
+      <span className="w-24 text-right tabular-nums text-sm font-semibold">{fmtCurrency(primary.amount)}</span>
       <span className="flex-1 text-sm">
         <span>{flow}</span>
         {primary.merchantClean && <span> · {primary.merchantClean}</span>}

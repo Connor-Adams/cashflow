@@ -33,7 +33,7 @@ export function T5008Form({ issuer, onChange, values }: SlipFormProps) {
     <fieldset>
       <legend>T5008 boxes</legend>
       {FIELDS.map((f) => (
-        <label key={f.key} style={{ display: 'block' }}>
+        <label key={f.key} className="block">
           {f.label}
           <input
             type={f.type}

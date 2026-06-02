@@ -27,7 +27,7 @@ export function T3Form({ issuer, onChange, values }: SlipFormProps) {
     <fieldset>
       <legend>T3 boxes</legend>
       {FIELDS.map(({ key, label }) => (
-        <label key={key} style={{ display: 'block' }}>
+        <label key={key} className="block">
           {label}
           <input
             type="number"
