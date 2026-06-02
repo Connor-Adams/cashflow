@@ -3,7 +3,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../../src/db';
 import {
-  Account, Entity, Household, HouseholdPlan, Scenario, Transaction,
+  Account, Entity, Household, HouseholdPlan, Scenario, ShareholderLoan, Transaction,
 } from '../../../src/models';
 import { computeHouseholdPlan } from '../../../src/tax/scenarios/computeHouseholdPlan';
 import { ensureCorpBaselineScenario } from '../../../src/tax/scenarios/resolveCorpScenario';
@@ -385,4 +385,110 @@ test('computeHouseholdPlan applies pension split between two linked spouses', as
   assert.ok(bEmp, 'expected L10100 on B');
   assert.equal(aEmp.amount, '90000');
   assert.equal(bEmp.amount, '30000');
+});
+
+test('corp dividend ledger auto-flows to the owner T1 (non-eligible)', async () => {
+  // Seed: household, personal entity P, corp entity C with C.ownerEntityId = P.id
+  const household = await Household.create({ name: 'DivFlow' });
+  const personalEntity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const corpEntity = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'C',
+    jurisdiction: 'CA-ON', fiscalYearEnd: '12-31',
+  });
+  await corpEntity.update({ ownerEntityId: personalEntity.id });
+
+  // Two dividend_credit ShareholderLoan rows totalling $23,000 in the corp FY 2025
+  await ShareholderLoan.create({
+    entityId: corpEntity.id,
+    kind: 'dividend_credit',
+    amount: '20000.0000',
+    date: '2025-06-01',
+    description: null,
+  });
+  await ShareholderLoan.create({
+    entityId: corpEntity.id,
+    kind: 'dividend_credit',
+    amount: '3000.0000',
+    date: '2025-09-01',
+    description: null,
+  });
+
+  const plan = await HouseholdPlan.create({
+    householdId: household.id, name: 'DivFlow Plan', notes: null,
+  });
+
+  // Corp scenario: plain baseline linked to plan — NO ownerComp.* override
+  const corpBaseline = await ensureCorpBaselineScenario(corpEntity.id, 2025);
+  await corpBaseline.update({ householdPlanId: plan.id });
+
+  // Personal scenario: plain baseline linked to plan
+  const personalBaseline = await ensureBaselineScenario(personalEntity.id, 2025);
+  await personalBaseline.update({ householdPlanId: plan.id });
+
+  const result = await computeHouseholdPlan(plan.id);
+
+  const personal = result.personal.find((p) => p.scenario.entityId === personalEntity.id)!;
+  assert.ok(personal, 'expected a personal result');
+
+  // L12010 (taxable non-eligible dividends, grossed up 15%) should be > 0
+  const l12010 = (personal.computed.lines as Array<{ code: string; amount: string }>)
+    .find((l) => l.code === 'L12010');
+  assert.ok(l12010 && Number(l12010.amount) > 0, 'non-eligible dividends present on owner T1');
+});
+
+test('manual ownerComp override wins over the dividend ledger', async () => {
+  // Same setup as above but corp scenario has ownerComp.<P.id>.nonEligibleDividend = 5000
+  const household = await Household.create({ name: 'DivOverride' });
+  const personalEntity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P',
+    jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const corpEntity = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'C',
+    jurisdiction: 'CA-ON', fiscalYearEnd: '12-31',
+  });
+  await corpEntity.update({ ownerEntityId: personalEntity.id });
+
+  // Two dividend_credit rows totalling $23,000 — should NOT flow through (override wins)
+  await ShareholderLoan.create({
+    entityId: corpEntity.id,
+    kind: 'dividend_credit',
+    amount: '20000.0000',
+    date: '2025-06-01',
+    description: null,
+  });
+  await ShareholderLoan.create({
+    entityId: corpEntity.id,
+    kind: 'dividend_credit',
+    amount: '3000.0000',
+    date: '2025-09-01',
+    description: null,
+  });
+
+  const plan = await HouseholdPlan.create({
+    householdId: household.id, name: 'DivOverride Plan', notes: null,
+  });
+
+  // Corp scenario: fork with ownerComp override of 5000 non-eligible dividend
+  const corpBaseline = await ensureCorpBaselineScenario(corpEntity.id, 2025);
+  await Scenario.create({
+    parentId: corpBaseline.id, householdPlanId: plan.id,
+    entityId: corpEntity.id, year: 2025, name: 'Corp override fork', kind: 'fork',
+    overrides: { [`ownerComp.${personalEntity.id}.nonEligibleDividend`]: 5000 },
+    assumptions: {}, nextYearId: null, notes: null,
+  });
+
+  // Personal scenario: plain baseline linked to plan
+  const personalBaseline = await ensureBaselineScenario(personalEntity.id, 2025);
+  await personalBaseline.update({ householdPlanId: plan.id });
+
+  const result = await computeHouseholdPlan(plan.id);
+
+  // The manual override of 5000 should win — not the 23000 from the ledger
+  const nonEligDiv = result.integration.byShareholder[personalEntity.id]?.nonEligibleDividends;
+  assert.ok(nonEligDiv, 'expected nonEligibleDividends routed to personal entity');
+  assert.equal(nonEligDiv.toString(), '5000');
 });

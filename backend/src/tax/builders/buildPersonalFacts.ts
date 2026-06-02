@@ -13,6 +13,7 @@ import {
   User,
 } from '../../models';
 import { D, sumD } from '../util/decimal';
+import { isTaxTreatment } from '@cashflow/shared';
 import type {
   CapGainEvent,
   IncomeItem,
@@ -59,7 +60,14 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
-    const treatment = t.taxTreatmentOverride ?? catTreatment.get(t.finalCategory ?? '') ?? 'none';
+    // Resolve via the transaction's category treatment; fall back to the
+    // finalCategory string itself when it is a tax-treatment keyword. This keeps
+    // the pre-category snake_case categories (e.g. 'employment_income') working
+    // when no Category.taxTreatment / per-txn override is set.
+    let treatment = t.taxTreatmentOverride ?? catTreatment.get(t.finalCategory ?? '') ?? 'none';
+    if (treatment === 'none' && t.finalCategory && isTaxTreatment(t.finalCategory)) {
+      treatment = t.finalCategory;
+    }
     if (treatment === 'employment_income') employmentIncome.push(item);
     else if (treatment === 'donations') donations.push(item);
     else if (treatment === 'rrsp_contribution') {
