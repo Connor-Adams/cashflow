@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { useShareholderLoans, type ShareholderLoanKind, type ShareholderLoanDto } from '../../hooks/useShareholderLoans';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
-import { formatMoney } from '../../lib/formatMoney';
+import { fmtCurrency } from './util/format';
+import { StatCard } from '@/components/ui/stat-card';
+import { EmptyState } from '@/components/ui/empty-state';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 
 const KIND_LABELS: Record<ShareholderLoanKind, string> = {
   advance: 'Advance (corp to owner)',
@@ -54,23 +64,33 @@ export function ShareholderLoanTab() {
     }
   }
 
+  if (!corpEntity && !entitiesError) {
+    return (
+      <div>
+        <h2>Shareholder Loans</h2>
+        <EmptyState
+          title="No corporation found"
+          description="Add a corporate entity to track shareholder loans."
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2>Shareholder Loans</h2>
 
-      <p className="muted">Shareholder-loan balance: <strong>{formatMoney(Number(balance), corpEntity?.currency ?? 'CAD')}</strong></p>
+      <div className="mb-4 max-w-xs">
+        <StatCard label="Loan balance" value={fmtCurrency(balance)} />
+      </div>
 
       {(error ?? entitiesError) && (
         <p className="error">Error: {error ?? entitiesError}</p>
       )}
 
-      {!corpEntity && !entitiesError && (
-        <p className="muted">No corp entity found. Create one via POST /api/tax/entities.</p>
-      )}
-
-      <section style={{ marginBottom: '1.5rem' }}>
+      <section className="mb-6">
         <h3>Add Entry</h3>
-        <form onSubmit={(e) => { void handleSubmit(e); }} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '32rem' }}>
+        <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-2 max-w-lg">
           <label>
             Date{' '}
             <input
@@ -109,7 +129,7 @@ export function ShareholderLoanTab() {
             />
           </label>
           {formError && <p className="error">{formError}</p>}
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div className="flex gap-2">
             <button type="submit" disabled={submitting || !corpEntity}>
               {submitting ? 'Saving…' : 'Add'}
             </button>
@@ -122,34 +142,34 @@ export function ShareholderLoanTab() {
         {loans.length === 0 ? (
           <p className="muted">No shareholder loan entries yet.</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Kind</th>
-                <th>Amount</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Description</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {loans.map((loan) => (
-                <LoanRow key={loan.id} loan={loan} currency={corpEntity?.currency ?? 'CAD'} />
+                <LoanRow key={loan.id} loan={loan} />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </section>
     </div>
   );
 }
 
-function LoanRow({ loan, currency }: { loan: ShareholderLoanDto; currency: string }) {
+function LoanRow({ loan }: { loan: ShareholderLoanDto }) {
   return (
-    <tr>
-      <td>{loan.date}</td>
-      <td>{KIND_LABELS[loan.kind] ?? loan.kind}</td>
-      <td>{formatMoney(Number(loan.amount), currency)}</td>
-      <td>{loan.description ?? '—'}</td>
-    </tr>
+    <TableRow>
+      <TableCell>{loan.date}</TableCell>
+      <TableCell>{KIND_LABELS[loan.kind] ?? loan.kind}</TableCell>
+      <TableCell className="text-right tabular-nums">{fmtCurrency(loan.amount)}</TableCell>
+      <TableCell>{loan.description ?? '—'}</TableCell>
+    </TableRow>
   );
 }
