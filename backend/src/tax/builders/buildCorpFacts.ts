@@ -164,6 +164,37 @@ export async function buildCorpFacts(
     }
   }
 
+  // Classified corp→personal distributions (income-queue actuals). The corp
+  // leg is an outflow (negative); distributions/remuneration are positive.
+  for (const t of txns) {
+    const tt = t.taxTreatment;
+    if (tt == null) continue;
+    const { cad } = await toCad(
+      D(t.amount as unknown as string),
+      t.currency ?? 'CAD',
+      t.date as unknown as string,
+    );
+    const amt = cad.abs();
+    if (tt === 'eligible_dividend') {
+      dividendsPaid.push({
+        source: `Txn #${t.id} eligible dividend`,
+        date: t.date as unknown as string,
+        amount: amt,
+        kind: 'eligible',
+      });
+    } else if (tt === 'non_eligible_dividend') {
+      dividendsPaid.push({
+        source: `Txn #${t.id} non-eligible dividend`,
+        date: t.date as unknown as string,
+        amount: amt,
+        kind: 'non_eligible',
+      });
+    } else if (tt === 'salary') {
+      salaryPaid = salaryPaid.plus(amt);
+    }
+    // loan_advance | loan_repayment | employment_income | not_income → no T2 effect
+  }
+
   return {
     fiscalYear,
     jurisdiction: 'CA-ON',
