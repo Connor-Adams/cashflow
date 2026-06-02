@@ -58,7 +58,12 @@ function ItemRow({ item, categoryHints }: ItemRowProps) {
 
   return (
     <tr>
-      <td>{item.title}</td>
+      <td>
+        {item.displayName ?? item.title}
+        {item.displayName && (
+          <div style={{ fontSize: '0.8em', color: '#888' }}>{item.title}</div>
+        )}
+      </td>
       <td>{item.quantity}</td>
       <td>{item.totalPrice ?? '—'}</td>
       <td>
