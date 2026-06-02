@@ -112,7 +112,7 @@ test('GET /api/tax/classification-queue returns corpDistributions and payroll', 
   const ts = Date.now();
 
   // Seed a corp→personal transfer PAIR:
-  // personal leg: entityId=personal, amount 5000, txnType=transfer, taxTreatment=null
+  // personal leg: entityId=personal, amount 5000, txnType=transfer, taxTreatmentOverride=null
   const personalLeg = await models.Transaction.create({
     accountId: personalAccountId,
     householdId,
@@ -129,7 +129,7 @@ test('GET /api/tax/classification-queue returns corpDistributions and payroll', 
     sourceIdentityFingerprint: `sif-personal-${ts}`,
   } as never);
 
-  // corp leg: entityId=corp, amount -5000, txnType=transfer, taxTreatment=null
+  // corp leg: entityId=corp, amount -5000, txnType=transfer, taxTreatmentOverride=null
   const corpLeg = await models.Transaction.create({
     accountId: corpAccountId,
     householdId,
@@ -151,7 +151,7 @@ test('GET /api/tax/classification-queue returns corpDistributions and payroll', 
   await corpLeg.update({ linkedTransactionId: personalLeg.id });
 
   // Seed a payroll deposit on the personal account:
-  // txnType='income', amount 3000, taxTreatment=null
+  // txnType='income', amount 3000, taxTreatmentOverride=null
   const payrollTxn = await models.Transaction.create({
     accountId: personalAccountId,
     householdId,

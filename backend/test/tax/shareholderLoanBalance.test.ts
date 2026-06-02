@@ -23,12 +23,12 @@ test('balance = manual ledger + classified loan transfers', async () => {
   await Transaction.create({
     accountId: acct.id, householdId: household.id, entityId: corp.id,
     date: '2025-03-01', amount: '-3000.0000', currency: 'CAD', merchantRaw: 'O', merchantClean: 'O',
-    taxTreatment: 'loan_advance', importBatch: 's', sourceRowFingerprint: 'fp-l1', sourceIdentityFingerprint: 'sif-l1',
+    taxTreatmentOverride: 'loan_advance', importBatch: 's', sourceRowFingerprint: 'fp-l1', sourceIdentityFingerprint: 'sif-l1',
   } as never);
   await Transaction.create({
     accountId: acct.id, householdId: household.id, entityId: corp.id,
     date: '2025-04-01', amount: '1000.0000', currency: 'CAD', merchantRaw: 'O', merchantClean: 'O',
-    taxTreatment: 'loan_repayment', importBatch: 's', sourceRowFingerprint: 'fp-l2', sourceIdentityFingerprint: 'sif-l2',
+    taxTreatmentOverride: 'loan_repayment', importBatch: 's', sourceRowFingerprint: 'fp-l2', sourceIdentityFingerprint: 'sif-l2',
   } as never);
 
   const balance = await computeShareholderLoanBalance(corp.id);

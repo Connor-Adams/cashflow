@@ -19,11 +19,11 @@ export async function computeShareholderLoanBalance(corpEntityId: number): Promi
   }
 
   const txns = await Transaction.findAll({
-    where: { entityId: corpEntityId, taxTreatment: { [Op.in]: ['loan_advance', 'loan_repayment'] } },
+    where: { entityId: corpEntityId, taxTreatmentOverride: { [Op.in]: ['loan_advance', 'loan_repayment'] } },
   });
   for (const t of txns) {
     const amt = D(t.amount as unknown as string).abs();
-    balance = t.taxTreatment === 'loan_repayment' ? balance.minus(amt) : balance.plus(amt);
+    balance = t.taxTreatmentOverride === 'loan_repayment' ? balance.minus(amt) : balance.plus(amt);
   }
 
   return balance;

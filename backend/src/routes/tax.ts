@@ -48,7 +48,7 @@ router.get('/classification-queue', async (req, res, next) => {
         date: { [Op.between]: [start, end] },
         txnType: 'transfer',
         linkedTransactionId: { [Op.ne]: null },
-        taxTreatment: null,
+        taxTreatmentOverride: null,
       },
     });
     const corpDistributions: Array<{ personal: unknown; corp: unknown }> = [];
@@ -60,7 +60,7 @@ router.get('/classification-queue', async (req, res, next) => {
     }
 
     const payroll = await Transaction.findAll({
-      where: { entityId, date: { [Op.between]: [start, end] }, txnType: 'income', taxTreatment: null },
+      where: { entityId, date: { [Op.between]: [start, end] }, txnType: 'income', taxTreatmentOverride: null },
     });
 
     res.json({ corpDistributions, payroll });
@@ -95,29 +95,13 @@ router.patch('/entities/:id', async (req, res, next) => {
       return;
     }
 
-    const body = (req.body ?? {}) as { associatedGroupId?: unknown };
-    // Field must be present in the body — distinguishes "set to null" (clear)
-    // from "not specified" (no-op would be ambiguous so reject as 400).
-    if (!Object.prototype.hasOwnProperty.call(body, 'associatedGroupId')) {
+    const body = (req.body ?? {}) as { associatedGroupId?: unknown; ownerEntityId?: unknown };
+    const hasGroup = Object.prototype.hasOwnProperty.call(body, 'associatedGroupId');
+    const hasOwner = Object.prototype.hasOwnProperty.call(body, 'ownerEntityId');
+    if (!hasGroup && !hasOwner) {
       res.status(400).json({
         error: 'invalid_body',
-        message: 'associatedGroupId (string | null) required',
-      });
-      return;
-    }
-    const raw = body.associatedGroupId;
-    let associatedGroupId: string | null;
-    if (raw === null) {
-      associatedGroupId = null;
-    } else if (typeof raw === 'string') {
-      const trimmed = raw.trim();
-      // Empty string treated as null (clear) — UX: blanking the text input
-      // shouldn't require a separate "delete" gesture.
-      associatedGroupId = trimmed === '' ? null : trimmed;
-    } else {
-      res.status(400).json({
-        error: 'invalid_body',
-        message: 'associatedGroupId must be a string or null',
+        message: 'associatedGroupId or ownerEntityId required',
       });
       return;
     }
@@ -134,12 +118,48 @@ router.patch('/entities/:id', async (req, res, next) => {
     if (entity.kind !== 'corp') {
       res.status(400).json({
         error: 'invalid_kind',
-        message: 'associatedGroupId can only be set on kind=corp entities',
+        message: 'associatedGroupId / ownerEntityId can only be set on kind=corp entities',
       });
       return;
     }
 
-    await entity.update({ associatedGroupId });
+    const patch: { associatedGroupId?: string | null; ownerEntityId?: number | null } = {};
+
+    if (hasGroup) {
+      const raw = body.associatedGroupId;
+      if (raw === null) {
+        patch.associatedGroupId = null;
+      } else if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        patch.associatedGroupId = trimmed === '' ? null : trimmed;
+      } else {
+        res.status(400).json({ error: 'invalid_body', message: 'associatedGroupId must be a string or null' });
+        return;
+      }
+    }
+
+    if (hasOwner) {
+      const raw = body.ownerEntityId;
+      if (raw === null) {
+        patch.ownerEntityId = null;
+      } else if (Number.isInteger(raw)) {
+        const target = await Entity.findByPk(raw as number);
+        if (!target || target.householdId !== household.id) {
+          res.status(400).json({ error: 'invalid_owner', message: 'ownerEntityId must be an entity in this household' });
+          return;
+        }
+        if (target.kind !== 'personal') {
+          res.status(400).json({ error: 'invalid_owner', message: 'ownerEntityId must be a personal entity' });
+          return;
+        }
+        patch.ownerEntityId = raw as number;
+      } else {
+        res.status(400).json({ error: 'invalid_body', message: 'ownerEntityId must be an integer or null' });
+        return;
+      }
+    }
+
+    await entity.update(patch);
     res.status(200).json({ entity });
   } catch (err) {
     next(err);

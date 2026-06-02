@@ -1088,3 +1088,30 @@ test('GET /refund-suggestions: surfaces unreviewed auto-linked refunds', async (
   assert.ok(ours, 'refund should appear in the suggestions queue');
   assert.equal(ours!.linkedOriginal?.id, originalId);
 });
+
+test('PATCH /api/transactions/:id sets and clears taxTreatmentOverride', async () => {
+  const txnId = await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2026-03-01',
+    amount: -100,
+    merchantRaw: 'TaxTreatmentTest',
+  });
+
+  const set = await agentA
+    .patch(`/api/transactions/${txnId}`)
+    .send({ taxTreatmentOverride: 'rrsp_contribution' })
+    .expect(200);
+  assert.equal(set.body.taxTreatmentOverride, 'rrsp_contribution');
+
+  await agentA
+    .patch(`/api/transactions/${txnId}`)
+    .send({ taxTreatmentOverride: 'bogus' })
+    .expect(400);
+
+  const clear = await agentA
+    .patch(`/api/transactions/${txnId}`)
+    .send({ taxTreatmentOverride: null })
+    .expect(200);
+  assert.equal(clear.body.taxTreatmentOverride, null);
+});

@@ -65,6 +65,8 @@ import type {
 import { useLabels } from '../lib/useLabels'
 import { useSessionState } from '../lib/useSessionState'
 import { notifyReceiptsChanged } from '@/hooks/useReceiptCompleteness'
+import { TAX_TREATMENTS, TREATMENT_LABELS } from '../lib/taxTreatment'
+import type { TaxTreatment } from '../lib/taxTreatment'
 
 type CategoryHint = {
   label: string
@@ -1967,6 +1969,9 @@ function TransactionRow({
         ? 'true'
         : 'false'
   )
+  const [taxOverride, setTaxOverride] = useState<TaxTreatment | ''>(
+    t.taxTreatmentOverride ?? ''
+  )
   const [split, setSplit] = useState(t.splitOverride ?? '')
   const [pctMe, setPctMe] = useState(
     t.pctMeOverride != null ? String(t.pctMeOverride) : ''
@@ -2004,6 +2009,7 @@ function TransactionRow({
         : t.businessOverride
           ? 'true'
           : 'false') ||
+    taxOverride !== (t.taxTreatmentOverride ?? '') ||
     split !== (t.splitOverride ?? '') ||
     pctMe !== (t.pctMeOverride != null ? String(t.pctMeOverride) : '') ||
     pctPartner !== (t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '') ||
@@ -2021,6 +2027,7 @@ function TransactionRow({
           ? 'true'
           : 'false'
     )
+    setTaxOverride(t.taxTreatmentOverride ?? '')
     setSplit(t.splitOverride ?? '')
     setPctMe(t.pctMeOverride != null ? String(t.pctMeOverride) : '')
     setPctPartner(t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '')
@@ -2157,6 +2164,16 @@ function TransactionRow({
           <NativeSelectOption value="">(auto)</NativeSelectOption>
           <NativeSelectOption value="true">Yes</NativeSelectOption>
           <NativeSelectOption value="false">No</NativeSelectOption>
+        </NativeSelect>
+        <NativeSelect
+          aria-label={`Tax treatment override for transaction ${t.id}`}
+          value={taxOverride}
+          onChange={(e) => setTaxOverride(e.target.value as TaxTreatment | '')}
+        >
+          <NativeSelectOption value="">Use category default</NativeSelectOption>
+          {TAX_TREATMENTS.filter((tt) => tt !== 'none').map((tt) => (
+            <NativeSelectOption key={tt} value={tt}>{TREATMENT_LABELS[tt]}</NativeSelectOption>
+          ))}
         </NativeSelect>
       </TableCell>
       <TableCell>
@@ -2388,6 +2405,7 @@ function TransactionRow({
               void onSave(t.id, {
                 categoryOverride: cat || null,
                 businessOverride: biz === '' ? null : biz === 'true',
+                taxTreatmentOverride: taxOverride === '' ? null : taxOverride,
                 splitOverride: split || null,
                 pctMeOverride: parsedPctMe,
                 pctPartnerOverride: parsedPctPartner,

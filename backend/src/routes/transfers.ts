@@ -30,7 +30,7 @@ import { Account, Transaction, sequelize } from '../models';
 import { serializeTransaction } from '../util/serializeTransaction';
 import { visibleTransactionWhere } from '../auth/scope';
 import { logger } from '../observability/logger';
-import { isTaxTreatment, type TaxTreatment } from '../transactions/types';
+import { isTaxTreatment, type TaxTreatment } from '@cashflow/shared';
 
 /**
  * Valid `transfer_purpose` values. Mirrors {@link TransferPurpose} in
@@ -597,7 +597,7 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
       return;
     }
     const body = (req.body || {}) as Record<string, unknown>;
-    const raw = body.taxTreatment;
+    const raw = body.taxTreatmentOverride;
     let treatment: TaxTreatment | null;
     if (raw === null || raw === undefined || raw === '') {
       treatment = null;
@@ -619,7 +619,7 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
         throw err;
       }
       const reviewedAt = new Date();
-      a.set('taxTreatment', treatment);
+      a.set('taxTreatmentOverride', treatment);
       a.set('reviewedAt', reviewedAt);
       await a.save({ transaction: t });
       let b = null;
@@ -629,7 +629,7 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
           transaction: t,
         });
         if (b) {
-          b.set('taxTreatment', treatment);
+          b.set('taxTreatmentOverride', treatment);
           b.set('reviewedAt', reviewedAt);
           await b.save({ transaction: t });
         }

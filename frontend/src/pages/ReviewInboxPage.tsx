@@ -43,6 +43,8 @@ import {
   getReviewInboxSummary,
   getSelectedReviewSummary,
 } from '../lib/reviewInbox'
+import { TAX_TREATMENTS, TREATMENT_LABELS } from '../lib/taxTreatment'
+import type { TaxTreatment } from '../lib/taxTreatment'
 import type { Paginated, Transaction } from '../types/api'
 
 type CategoryHint = {
@@ -95,6 +97,9 @@ function buildRevertPatch(
       case 'businessOverride':
         revert.businessOverride = row.businessOverride
         break
+      case 'taxTreatmentOverride':
+        revert.taxTreatmentOverride = row.taxTreatmentOverride
+        break
       case 'splitOverride':
         revert.splitOverride = row.splitOverride
         break
@@ -140,6 +145,7 @@ export function ReviewInboxPage() {
   const [category, setCategory] = useState('')
   const [business, setBusiness] = useState('')
   const [splitType, setSplitType] = useState('')
+  const [taxTreatment, setTaxTreatment] = useState<TaxTreatment | ''>('')
   const [merchantFilter, setMerchantFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
   const confidenceFlag =
@@ -239,9 +245,10 @@ export function ReviewInboxPage() {
         category,
         business,
         splitType,
+        taxTreatment,
         markReviewed: true,
       }),
-    [business, category, splitType]
+    [business, category, splitType, taxTreatment]
   )
 
   const canApply = selectedIds.size > 0 && Object.keys(patch).length > 0
@@ -458,6 +465,7 @@ export function ReviewInboxPage() {
       setCategory('')
       setBusiness('')
       setSplitType('')
+      setTaxTreatment('')
       await load()
 
       // Per-row PATCH reverts are required: bulk-patch applies one patch to
@@ -517,6 +525,7 @@ export function ReviewInboxPage() {
       setCategory('')
       setBusiness('')
       setSplitType('')
+      setTaxTreatment('')
       await load()
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not create rule')
@@ -800,6 +809,20 @@ export function ReviewInboxPage() {
                 <NativeSelectOption value="">Keep current</NativeSelectOption>
                 <NativeSelectOption value="false">Personal</NativeSelectOption>
                 <NativeSelectOption value="true">Business</NativeSelectOption>
+              </NativeSelect>
+            </Label>
+            <Label>
+              Tax treatment
+              <NativeSelect
+                value={taxTreatment}
+                onChange={(e) => setTaxTreatment(e.target.value as TaxTreatment | '')}
+              >
+                <NativeSelectOption value="">Keep current</NativeSelectOption>
+                {TAX_TREATMENTS.filter((tt) => tt !== 'none').map((tt) => (
+                  <NativeSelectOption key={tt} value={tt}>
+                    {TREATMENT_LABELS[tt]}
+                  </NativeSelectOption>
+                ))}
               </NativeSelect>
             </Label>
           </div>

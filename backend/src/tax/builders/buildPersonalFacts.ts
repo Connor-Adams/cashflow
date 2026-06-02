@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import {
   Account,
   Carryforward,
+  Category,
   Entity,
   HouseholdMember,
   InvestmentActivity,
@@ -12,6 +13,7 @@ import {
   User,
 } from '../../models';
 import { D, sumD } from '../util/decimal';
+import { isTaxTreatment } from '@cashflow/shared';
 import type {
   CapGainEvent,
   IncomeItem,
@@ -34,6 +36,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const accounts = await Account.findAll({ where: { entityId } });
   const accountIds = accounts.map((a) => a.id);
 
+  const householdCategories = await Category.findAll({ where: { householdId: entity.householdId } });
+  const catTreatment = new Map(householdCategories.map((c) => [c.name, c.taxTreatment]));
+
   const txns = await Transaction.findAll({
     where: {
       entityId,
@@ -53,30 +58,33 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
     const item: IncomeItem = {
-      source: `Txn #${t.id} ${t.finalCategory ?? t.taxTreatment ?? ''}`,
+      source: `Txn #${t.id} ${t.finalCategory ?? t.taxTreatmentOverride ?? ''}`,
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
-
-    // Tax-treatment classification (corp→personal distributions + confirmed
-    // payroll) takes precedence and short-circuits the category routing below.
-    // This is the no-double-count guard: a classified row is handled here only.
-    const tt = t.taxTreatment;
-    if (tt != null) {
-      if (tt === 'salary' || tt === 'employment_income') employmentIncome.push(item);
-      else if (tt === 'eligible_dividend') eligibleDividends.push(item);
-      else if (tt === 'non_eligible_dividend') nonEligibleDividends.push(item);
-      // loan_advance | loan_repayment | not_income → no income effect
-      continue;
+    // Resolve via the transaction's category treatment; fall back to the
+    // finalCategory string itself when it is a tax-treatment keyword. This keeps
+    // the pre-category snake_case categories (e.g. 'employment_income') working
+    // when no Category.taxTreatment / per-txn override is set.
+    let treatment = t.taxTreatmentOverride ?? catTreatment.get(t.finalCategory ?? '') ?? 'none';
+    if (treatment === 'none' && t.finalCategory && isTaxTreatment(t.finalCategory)) {
+      treatment = t.finalCategory;
     }
-
-    const cat = t.finalCategory ?? '';
-    if (cat === 'employment_income') employmentIncome.push(item);
-    else if (cat === 'donations') donations.push(item);
-    else if (cat === 'rrsp_contribution') {
+    // Corp→personal distributions + payroll (income-queue) fold into the same
+    // treatment routing. loan_advance/loan_repayment/not_income are explicitly
+    // non-income — skipped before the self-employment fallback so a business-
+    // flagged loan leg is never miscounted as SE income.
+    if (treatment === 'salary' || treatment === 'employment_income') employmentIncome.push(item);
+    else if (treatment === 'eligible_dividend') eligibleDividends.push(item);
+    else if (treatment === 'non_eligible_dividend') nonEligibleDividends.push(item);
+    else if (treatment === 'donations') donations.push(item);
+    else if (treatment === 'loan_advance' || treatment === 'loan_repayment' || treatment === 'not_income') {
+      // classified as non-income for the personal T1 — intentionally skipped
+    }
+    else if (treatment === 'rrsp_contribution') {
       rrspContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
     }
-    else if (cat === 'fhsa_contribution') {
+    else if (treatment === 'fhsa_contribution') {
       fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
     }
     else if (t.finalBusiness && cad.greaterThan(0)) selfEmploymentIncome.push(item);

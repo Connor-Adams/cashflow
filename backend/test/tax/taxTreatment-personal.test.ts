@@ -19,16 +19,16 @@ async function seedPersonal() {
 
 beforeEach(async () => { await sequelize.sync({ force: true }); });
 
-test('taxTreatment persists on a Transaction', async () => {
+test('taxTreatmentOverride persists on a Transaction', async () => {
   const { household, entity, account } = await seedPersonal();
   const txn = await Transaction.create({
     accountId: account.id, householdId: household.id, entityId: entity.id,
     date: '2025-06-15', amount: '1000.0000', currency: 'CAD',
-    merchantRaw: 'CORP', merchantClean: 'CORP', taxTreatment: 'salary',
+    merchantRaw: 'CORP', merchantClean: 'CORP', taxTreatmentOverride: 'salary',
     importBatch: 'seed', sourceRowFingerprint: 'fp-tt-1', sourceIdentityFingerprint: 'sif-tt-1',
   } as never);
   const reloaded = await Transaction.findByPk(txn.id);
-  assert.equal(reloaded?.taxTreatment, 'salary');
+  assert.equal(reloaded?.taxTreatmentOverride, 'salary');
 });
 
 async function addTxn(account: any, entity: any, household: any, fields: Record<string, unknown>, n: number) {
@@ -43,7 +43,7 @@ async function addTxn(account: any, entity: any, household: any, fields: Record<
 
 test('salary treatment routes to employment income', async () => {
   const s = await seedPersonal();
-  await addTxn(s.account, s.entity, s.household, { amount: '6000.0000', taxTreatment: 'salary' }, 1);
+  await addTxn(s.account, s.entity, s.household, { amount: '6000.0000', taxTreatmentOverride: 'salary' }, 1);
   const facts = await buildPersonalFacts(s.entity.id, 2025);
   assert.equal(facts.employmentIncome.length, 1);
   assert.equal(facts.employmentIncome[0].cadAmount.toFixed(2), '6000.00');
@@ -52,8 +52,8 @@ test('salary treatment routes to employment income', async () => {
 
 test('dividend treatments route to eligible/non-eligible buckets', async () => {
   const s = await seedPersonal();
-  await addTxn(s.account, s.entity, s.household, { amount: '500.0000', taxTreatment: 'eligible_dividend' }, 2);
-  await addTxn(s.account, s.entity, s.household, { amount: '300.0000', taxTreatment: 'non_eligible_dividend' }, 3);
+  await addTxn(s.account, s.entity, s.household, { amount: '500.0000', taxTreatmentOverride: 'eligible_dividend' }, 2);
+  await addTxn(s.account, s.entity, s.household, { amount: '300.0000', taxTreatmentOverride: 'non_eligible_dividend' }, 3);
   const facts = await buildPersonalFacts(s.entity.id, 2025);
   assert.equal(facts.eligibleDividends.length, 1);
   assert.equal(facts.eligibleDividends[0].cadAmount.toFixed(2), '500.00');
@@ -63,7 +63,7 @@ test('dividend treatments route to eligible/non-eligible buckets', async () => {
 
 test('loan_advance is not income', async () => {
   const s = await seedPersonal();
-  await addTxn(s.account, s.entity, s.household, { amount: '9000.0000', taxTreatment: 'loan_advance' }, 4);
+  await addTxn(s.account, s.entity, s.household, { amount: '9000.0000', taxTreatmentOverride: 'loan_advance' }, 4);
   const facts = await buildPersonalFacts(s.entity.id, 2025);
   assert.equal(facts.employmentIncome.length, 0);
   assert.equal(facts.eligibleDividends.length, 0);
@@ -73,7 +73,7 @@ test('loan_advance is not income', async () => {
 test('treatment beats finalCategory — counts once (guard)', async () => {
   const s = await seedPersonal();
   await addTxn(s.account, s.entity, s.household,
-    { amount: '4000.0000', finalCategory: 'employment_income', taxTreatment: 'salary' }, 5);
+    { amount: '4000.0000', finalCategory: 'employment_income', taxTreatmentOverride: 'salary' }, 5);
   const facts = await buildPersonalFacts(s.entity.id, 2025);
   assert.equal(facts.employmentIncome.length, 1, 'must not double-count');
   assert.equal(facts.employmentIncome[0].cadAmount.toFixed(2), '4000.00');

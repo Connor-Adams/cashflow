@@ -8,7 +8,7 @@ import {
   CreationOptional,
 } from 'sequelize';
 import { logger } from '../observability/logger';
-import { TRANSACTION_STATUSES, type TransactionStatus, type TaxTreatment } from '../transactions/types';
+import { TRANSACTION_STATUSES, type TransactionStatus } from '../transactions/types';
 
 export class Transaction extends Model<
   InferAttributes<Transaction>,
@@ -43,13 +43,12 @@ export class Transaction extends Model<
   declare linkedTransactionId: number | null;
   declare transferPurpose: string | null;
   declare transferLinkedAt: Date | null;
-  /** Per-transfer tax treatment (#income-queue). One of TAX_TREATMENTS or null. */
-  declare taxTreatment: TaxTreatment | null;
   declare isRecurring: CreationOptional<boolean>;
 
   declare autoCategory: string | null;
   declare categoryOverride: string | null;
   declare finalCategory: string | null;
+  declare taxTreatmentOverride: string | null;
 
   declare counterpartyRaw: string | null;
   declare counterpartyContactId: number | null;
@@ -202,6 +201,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         field: 'final_category',
         allowNull: true,
       },
+      taxTreatmentOverride: {
+        type: DataTypes.STRING(32),
+        field: 'tax_treatment_override',
+        allowNull: true,
+      },
 
       autoBusiness: {
         type: DataTypes.BOOLEAN,
@@ -322,11 +326,6 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       transferLinkedAt: {
         type: DataTypes.DATE,
         field: 'transfer_linked_at',
-        allowNull: true,
-      },
-      taxTreatment: {
-        type: DataTypes.STRING(32),
-        field: 'tax_treatment',
         allowNull: true,
       },
       isRecurring: {

@@ -72,7 +72,7 @@ after(async () => {
   await sequelize.close();
 });
 
-test('PATCH /api/transfers/:id/tax-treatment sets taxTreatment on both legs of a linked pair', async () => {
+test('PATCH /api/transfers/:id/tax-treatment sets taxTreatmentOverride on both legs of a linked pair', async () => {
   const models = await import('../../src/models/index.js');
 
   // Create transaction a (inbound, positive amount)
@@ -113,22 +113,22 @@ test('PATCH /api/transfers/:id/tax-treatment sets taxTreatment on both legs of a
 
   const res = await authed
     .patch(`/api/transfers/${a.id}/tax-treatment`)
-    .send({ taxTreatment: 'non_eligible_dividend' });
+    .send({ taxTreatmentOverride: 'non_eligible_dividend' });
 
   assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
 
-  // Reload both from DB and verify taxTreatment was set on each
+  // Reload both from DB and verify taxTreatmentOverride was set on each
   await a.reload();
   await b.reload();
   assert.equal(
-    (a as any).taxTreatment,
+    (a as any).taxTreatmentOverride,
     'non_eligible_dividend',
-    `expected a.taxTreatment 'non_eligible_dividend', got '${(a as any).taxTreatment}'`,
+    `expected a.taxTreatmentOverride 'non_eligible_dividend', got '${(a as any).taxTreatmentOverride}'`,
   );
   assert.equal(
-    (b as any).taxTreatment,
+    (b as any).taxTreatmentOverride,
     'non_eligible_dividend',
-    `expected b.taxTreatment 'non_eligible_dividend', got '${(b as any).taxTreatment}'`,
+    `expected b.taxTreatmentOverride 'non_eligible_dividend', got '${(b as any).taxTreatmentOverride}'`,
   );
 });
 
@@ -152,12 +152,12 @@ test('PATCH /api/transfers/:id/tax-treatment rejects an invalid treatment', asyn
 
   const res = await authed
     .patch(`/api/transfers/${txn.id}/tax-treatment`)
-    .send({ taxTreatment: 'bogus' });
+    .send({ taxTreatmentOverride: 'bogus' });
 
   assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
 });
 
-test('PATCH /api/transfers/:id/tax-treatment sets taxTreatment on an unlinked row', async () => {
+test('PATCH /api/transfers/:id/tax-treatment sets taxTreatmentOverride on an unlinked row', async () => {
   const models = await import('../../src/models/index.js');
 
   const txn = await models.Transaction.create({
@@ -177,15 +177,15 @@ test('PATCH /api/transfers/:id/tax-treatment sets taxTreatment on an unlinked ro
 
   const res = await authed
     .patch(`/api/transfers/${txn.id}/tax-treatment`)
-    .send({ taxTreatment: 'salary' });
+    .send({ taxTreatmentOverride: 'salary' });
 
   assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
 
   await txn.reload();
   assert.equal(
-    (txn as any).taxTreatment,
+    (txn as any).taxTreatmentOverride,
     'salary',
-    `expected txn.taxTreatment 'salary', got '${(txn as any).taxTreatment}'`,
+    `expected txn.taxTreatmentOverride 'salary', got '${(txn as any).taxTreatmentOverride}'`,
   );
 });
 
@@ -229,25 +229,25 @@ test('PATCH /api/transfers/:id/tax-treatment set then clear leaves both legs nul
   // Set treatment
   const setRes = await authed
     .patch(`/api/transfers/${a.id}/tax-treatment`)
-    .send({ taxTreatment: 'salary' });
+    .send({ taxTreatmentOverride: 'salary' });
   assert.equal(setRes.status, 200, `set: expected 200, got ${setRes.status}: ${JSON.stringify(setRes.body)}`);
 
   // Clear treatment
   const clearRes = await authed
     .patch(`/api/transfers/${a.id}/tax-treatment`)
-    .send({ taxTreatment: null });
+    .send({ taxTreatmentOverride: null });
   assert.equal(clearRes.status, 200, `clear: expected 200, got ${clearRes.status}: ${JSON.stringify(clearRes.body)}`);
 
   await a.reload();
   await b.reload();
   assert.equal(
-    (a as any).taxTreatment,
+    (a as any).taxTreatmentOverride,
     null,
-    `expected a.taxTreatment null, got '${(a as any).taxTreatment}'`,
+    `expected a.taxTreatmentOverride null, got '${(a as any).taxTreatmentOverride}'`,
   );
   assert.equal(
-    (b as any).taxTreatment,
+    (b as any).taxTreatmentOverride,
     null,
-    `expected b.taxTreatment null, got '${(b as any).taxTreatment}'`,
+    `expected b.taxTreatmentOverride null, got '${(b as any).taxTreatmentOverride}'`,
   );
 });

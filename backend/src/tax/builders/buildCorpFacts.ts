@@ -167,7 +167,7 @@ export async function buildCorpFacts(
   // Classified corp→personal distributions (income-queue actuals). The corp
   // leg is an outflow (negative); distributions/remuneration are positive.
   for (const t of txns) {
-    const tt = t.taxTreatment;
+    const tt = t.taxTreatmentOverride;
     if (tt !== 'eligible_dividend' && tt !== 'non_eligible_dividend' && tt !== 'salary') continue;
     const { cad } = await toCad(
       D(t.amount as unknown as string),

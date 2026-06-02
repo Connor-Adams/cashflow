@@ -67,6 +67,7 @@ import {
 import { isTransactionStatus } from '../transactions/types';
 import { streamCsvExport } from '../services/transactionsExport';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
+import { isTaxTreatment } from '@cashflow/shared';
 
 const router = Router();
 
@@ -353,6 +354,7 @@ function scheduleMemoryFanoutIfNeeded(
 const PATCHABLE_KEYS = [
   'categoryOverride',
   'businessOverride',
+  'taxTreatmentOverride',
   'splitOverride',
   'pctMeOverride',
   'pctPartnerOverride',
@@ -1099,6 +1101,15 @@ router.patch('/:id', async (req, res, next) => {
     const txn = await Transaction.findOne({ where: { id, ...visibleTransactionWhere(req) } });
     if (!txn) {
       res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
+    if (
+      'taxTreatmentOverride' in b &&
+      b.taxTreatmentOverride !== null &&
+      !isTaxTreatment(b.taxTreatmentOverride)
+    ) {
+      res.status(400).json({ error: 'unknown tax treatment' });
       return;
     }
 

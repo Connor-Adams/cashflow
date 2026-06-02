@@ -24,7 +24,7 @@ test('classified corp dividend legs feed dividendsPaid with correct kind', async
   await Transaction.create({
     accountId: s.account.id, householdId: s.household.id, entityId: s.entity.id,
     date: '2025-04-01', amount: '-20000.0000', currency: 'CAD',
-    merchantRaw: 'OWNER', merchantClean: 'OWNER', taxTreatment: 'eligible_dividend',
+    merchantRaw: 'OWNER', merchantClean: 'OWNER', taxTreatmentOverride: 'eligible_dividend',
     importBatch: 'seed', sourceRowFingerprint: 'fp-c1', sourceIdentityFingerprint: 'sif-c1',
   } as never);
   const facts = await buildCorpFacts(s.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
@@ -38,7 +38,7 @@ test('classified corp salary leg feeds salaryPaid', async () => {
   await Transaction.create({
     accountId: s.account.id, householdId: s.household.id, entityId: s.entity.id,
     date: '2025-04-01', amount: '-5000.0000', currency: 'CAD',
-    merchantRaw: 'OWNER', merchantClean: 'OWNER', taxTreatment: 'salary',
+    merchantRaw: 'OWNER', merchantClean: 'OWNER', taxTreatmentOverride: 'salary',
     importBatch: 'seed', sourceRowFingerprint: 'fp-c2', sourceIdentityFingerprint: 'sif-c2',
   } as never);
   const facts = await buildCorpFacts(s.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
@@ -50,7 +50,7 @@ test('classified non-eligible dividend leg feeds dividendsPaid kind non_eligible
   await Transaction.create({
     accountId: s.account.id, householdId: s.household.id, entityId: s.entity.id,
     date: '2025-04-01', amount: '-8000.0000', currency: 'CAD',
-    merchantRaw: 'OWNER', merchantClean: 'OWNER', taxTreatment: 'non_eligible_dividend',
+    merchantRaw: 'OWNER', merchantClean: 'OWNER', taxTreatmentOverride: 'non_eligible_dividend',
     importBatch: 'seed', sourceRowFingerprint: 'fp-c3', sourceIdentityFingerprint: 'sif-c3',
   } as never);
   const facts = await buildCorpFacts(s.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });

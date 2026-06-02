@@ -1,6 +1,6 @@
 // backend/src/tax/scenarios/computeHouseholdPlan.ts
 import { Entity, HouseholdPlan, Scenario } from '../../models';
-import { D, type Decimal } from '../util/decimal';
+import { D, sumD, type Decimal } from '../util/decimal';
 import { computeCorpScenario, type ComputeCorpScenarioResult } from './computeCorpScenario';
 import { computeGroupAaii } from './computeGroupAaii';
 import { computeScenario, type ComputeScenarioResult } from './computeScenario';
@@ -121,10 +121,13 @@ function ownerCompPlansForCorp(
 
 // Build the router inputs by walking computed corp results: one
 // CorpReturnSummary per corp (for GRIP / CDA caps) and N OwnerCompPlan rows.
-function buildRouterInputs(corp: CorpResult[]): {
-  ownerCompPlans: OwnerCompPlan[];
-  corpReturns: CorpReturnSummary[];
-} {
+// Also derives a plan from the corp's actual dividend ledger when an owner is
+// linked and no manual ownerComp plan already covers that shareholder.
+function buildRouterInputs(
+  corp: CorpResult[],
+  corpBaseFactsByScenarioId: Map<number, CorpTaxYearFacts>,
+  entityById: Map<number, Entity>,
+): { ownerCompPlans: OwnerCompPlan[]; corpReturns: CorpReturnSummary[] } {
   const ownerCompPlans: OwnerCompPlan[] = [];
   const corpReturns: CorpReturnSummary[] = [];
   for (const { scenario, computed } of corp) {
@@ -138,9 +141,34 @@ function buildRouterInputs(corp: CorpResult[]): {
       // the plan's "risks / out of scope" section.
       retainedEarningsAfter: D('0'),
     });
-    ownerCompPlans.push(
-      ...ownerCompPlansForCorp(scenario, scenario.overrides as Record<string, unknown>),
-    );
+    const manualPlans = ownerCompPlansForCorp(scenario, scenario.overrides as Record<string, unknown>);
+    ownerCompPlans.push(...manualPlans);
+
+    // Derive a plan from the corp's actual dividend ledger when an owner is
+    // linked and no manual ownerComp plan already covers that shareholder.
+    const ownerId = entityById.get(scenario.entityId)?.ownerEntityId ?? null;
+    if (ownerId != null && !manualPlans.some((p) => p.shareholderEntityId === ownerId)) {
+      const facts = corpBaseFactsByScenarioId.get(scenario.id);
+      if (facts) {
+        const eligibleDividend = sumD(
+          facts.dividendsPaid.filter((d) => d.kind === 'eligible').map((d) => d.amount),
+        );
+        const nonEligibleDividend = sumD(
+          facts.dividendsPaid.filter((d) => d.kind === 'non_eligible').map((d) => d.amount),
+        );
+        if (eligibleDividend.greaterThan(0) || nonEligibleDividend.greaterThan(0)) {
+          ownerCompPlans.push({
+            corpScenarioId: scenario.id,
+            shareholderEntityId: ownerId,
+            salary: D(0),
+            bonus: D(0),
+            eligibleDividend,
+            nonEligibleDividend,
+            capitalDividend: D(0),
+          });
+        }
+      }
+    }
   }
   return { ownerCompPlans, corpReturns };
 }
@@ -455,7 +483,9 @@ export async function computeHouseholdPlan(
 
   // 4. Run the integration router over the corp outputs to derive per-
   //    shareholder additions + GRIP / CDA cap warnings.
-  const integration = integrationRouter(buildRouterInputs(corp));
+  const integration = integrationRouter(
+    buildRouterInputs(corp, corpBaseFactsByScenarioId, entityById),
+  );
 
   // 5. Pre-resolve facts for every personal scenario (one resolve per scenario;
   //    reused by both the spouseRouter input + the T1 build below).
