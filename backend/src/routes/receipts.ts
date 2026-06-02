@@ -32,6 +32,12 @@ import {
   parseFilter,
   RECEIPT_COMPLETENESS_FILTERS,
 } from '../summary/receiptCompleteness';
+import type { TripDetailView } from '@cashflow/shared';
+
+export function orderTrip(order: Pick<ExternalOrder, 'rawPayload'>): TripDetailView | null {
+  const raw = order.rawPayload as { trip?: TripDetailView | null } | null;
+  return raw?.trip ?? null;
+}
 
 const router = Router();
 
@@ -253,6 +259,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
                 shipping: order.shipping,
                 total: order.total,
                 currency: order.currency,
+                trip: orderTrip(order),
               }
             : null,
           items: (r.externalOrderId != null ? (itemsByOrder.get(r.externalOrderId) ?? []) : []).map(

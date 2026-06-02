@@ -38,6 +38,8 @@ import {
   type OauthTokenResponse,
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
+import { uberVendorOverride } from './parsers/uber';
+import { categorizeUberTrip } from '../ai/aiCategorizeUberTrip';
 import { logger } from '../observability/logger';
 import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
@@ -69,9 +71,9 @@ export const DEFAULT_RECEIPT_SENDERS: Array<{ address: string; vendorHint: strin
   { address: 'no-reply@primevideo.com', vendorHint: 'amazon', label: 'Prime Video' },
   { address: 'noreply@audible.com', vendorHint: 'amazon', label: 'Audible' },
   // Rides / food
-  { address: 'receipts@uber.com', vendorHint: 'other', label: 'Uber receipts' },
-  { address: 'noreply@uber.com', vendorHint: 'other', label: 'Uber' },
-  { address: 'no-reply@uber.com', vendorHint: 'other', label: 'Uber' },
+  { address: 'receipts@uber.com', vendorHint: 'uber', label: 'Uber receipts' },
+  { address: 'noreply@uber.com', vendorHint: 'uber', label: 'Uber' },
+  { address: 'no-reply@uber.com', vendorHint: 'uber', label: 'Uber' },
   { address: 'no-reply@lyftmail.com', vendorHint: 'other', label: 'Lyft' },
   { address: 'no-reply@doordash.com', vendorHint: 'other', label: 'DoorDash' },
   { address: 'no-reply@grubhub.com', vendorHint: 'other', label: 'Grubhub' },
@@ -451,6 +453,14 @@ export async function scanInbox(
         aiExtractions++;
       }
 
+      // Uber rides and Uber Eats both arrive from uber.com but the AI returns
+      // vendor 'other'. The sender is authoritative for the vendor family;
+      // subject/body picks ride vs eats.
+      const uberVendor = uberVendorOverride(result.from, result.subject, body);
+      if (uberVendor) {
+        extracted.vendor = uberVendor;
+      }
+
       result.parser = parser;
       byParser[parser] = (byParser[parser] ?? 0) + 1;
       result.vendor = extracted.vendor;
@@ -470,6 +480,21 @@ export async function scanInbox(
           fromAddr: result.from,
         });
         return result;
+      }
+
+      // For Uber rides, infer business-use from trip context and stamp it on
+      // the single synthetic trip item so it propagates via linkItemsStage.
+      if (extracted.vendor === 'uber' && extracted.trip && extracted.items[0]) {
+        try {
+          const cat = await categorizeUberTrip(extracted.trip);
+          extracted.items[0].inferredCategory = cat.category;
+          extracted.items[0].businessUsePercent = cat.businessUsePercent;
+        } catch (err) {
+          logger.warn(
+            { messageId: summary.id, error: err instanceof Error ? err.message : String(err) },
+            'uber_trip_categorize_failed',
+          );
+        }
       }
 
       const dedupeKey = [
@@ -504,7 +529,7 @@ export async function scanInbox(
             currency: extracted!.currency ?? 'USD',
             paymentLast4: extracted!.paymentLast4,
             source: `gmail-scan:${parser}`,
-            rawPayload: { extracted, gmailMessageId: summary.id, parser } as unknown,
+            rawPayload: { extracted, gmailMessageId: summary.id, parser, trip: extracted!.trip ?? null } as unknown,
           } as never,
           transaction: t,
         });
@@ -519,7 +544,7 @@ export async function scanInbox(
               unitPrice: it.unitPrice != null ? String(it.unitPrice) : null,
               totalPrice: it.totalPrice != null ? String(it.totalPrice) : null,
               inferredCategory: it.inferredCategory,
-              businessUsePercent: null,
+              businessUsePercent: it.businessUsePercent != null ? String(it.businessUsePercent) : null,
               confidence: null,
               itemNumber: it.vendorItemId ?? null,
               rawPayload: it as unknown,

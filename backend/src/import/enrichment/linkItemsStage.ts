@@ -35,9 +35,19 @@ const VENDOR_MATCHERS: Array<{
     canonical: 'Costco',
     pattern: /\bcostco\b/i,
   },
+  {
+    vendor: 'uber_eats',
+    canonical: 'Uber Eats',
+    pattern: /\buber\s*\*?\s*eats\b/i,
+  },
+  {
+    vendor: 'uber',
+    canonical: 'Uber',
+    pattern: /\buber\b/i,
+  },
 ];
 
-function matchVendor(merchantText: string): { vendor: string; canonical: string } | null {
+export function matchVendor(merchantText: string): { vendor: string; canonical: string } | null {
   for (const entry of VENDOR_MATCHERS) {
     if (entry.pattern.test(merchantText)) {
       return { vendor: entry.vendor, canonical: entry.canonical };

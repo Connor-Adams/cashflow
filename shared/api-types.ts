@@ -953,6 +953,17 @@ export type ExternalOrderItemView = {
   businessUseOverride: string | null;
 };
 
+export type TripDetailView = {
+  pickupAddress: string | null;
+  dropoffAddress: string | null;
+  distance: number | null;
+  distanceUnit: 'km' | 'mi' | null;
+  durationMinutes: number | null;
+  requestedAt: string | null;
+  driver: string | null;
+  surgeMultiplier: number | null;
+};
+
 export type ExternalOrderView = {
   id: number;
   vendor: string;
@@ -961,6 +972,7 @@ export type ExternalOrderView = {
   shipping: string | null;
   total: string | null;
   currency: string;
+  trip?: TripDetailView | null;
 };
 
 export type ReceiptWithItems = {
