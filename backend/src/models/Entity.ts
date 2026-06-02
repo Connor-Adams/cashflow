@@ -21,6 +21,7 @@ export class Entity extends Model<
   declare jurisdiction: CreationOptional<string>;
   declare fiscalYearEnd: string | null;
   declare spouseEntityId: number | null;
+  declare ownerEntityId: number | null;
   declare associatedGroupId: string | null;
   declare currency: CreationOptional<string>;
   declare readonly createdAt: CreationOptional<Date>;
@@ -48,6 +49,12 @@ export function initEntity(sequelize: Sequelize): typeof Entity {
         type: DataTypes.INTEGER,
         field: 'spouse_entity_id',
         allowNull: true,
+      },
+      ownerEntityId: {
+        type: DataTypes.INTEGER,
+        field: 'owner_entity_id',
+        allowNull: true,
+        defaultValue: null,
       },
       associatedGroupId: {
         type: DataTypes.STRING(64),

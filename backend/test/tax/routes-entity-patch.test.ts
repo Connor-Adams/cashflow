@@ -184,3 +184,28 @@ test('PATCH returns 400 when associatedGroupId is not a string or null', async (
     .send({ associatedGroupId: 42 });
   assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
 });
+
+test('PATCH /entities/:id sets ownerEntityId to a personal entity; rejects non-personal target', async () => {
+  const corp = await createCorp('Opco');
+  const personal = await createPersonal('Owner');
+  const corp2 = await createCorp('Opco2');
+
+  const ok = await authed
+    .patch(`/api/tax/entities/${corp.id}`)
+    .send({ ownerEntityId: personal.id })
+    .expect(200);
+  assert.equal(ok.body.entity.ownerEntityId, personal.id);
+
+  // target must be kind=personal
+  await authed
+    .patch(`/api/tax/entities/${corp.id}`)
+    .send({ ownerEntityId: corp2.id })
+    .expect(400);
+
+  // clear
+  const cleared = await authed
+    .patch(`/api/tax/entities/${corp.id}`)
+    .send({ ownerEntityId: null })
+    .expect(200);
+  assert.equal(cleared.body.entity.ownerEntityId, null);
+});
