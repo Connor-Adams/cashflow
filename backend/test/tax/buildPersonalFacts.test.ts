@@ -147,3 +147,33 @@ test.skip('per-security dividend eligibility routes to eligible or nonEligible',
   assert.equal(eligSum.toFixed(2), '1200.00', 'eligible + unknown both go to eligibleDividends');
   assert.equal(nonElSum.toFixed(2), '500.00', 'non_eligible dividend routes to nonEligibleDividends');
 });
+
+test('tolerates an investment activity with a null amount (e.g. activityType "other")', async () => {
+  // Regression: InvestmentActivity.amount is nullable. The income loop builds
+  // D(a.amount) for EVERY activity row before branching on activityType, so a
+  // non-income row (activityType "other") with a null amount used to crash with
+  // "[DecimalError] Invalid argument: null" — which broke every personal Tax tab
+  // (Overview / Personal T1 / Reconciliation all funnel through buildPersonalFacts).
+  const household = await Household.create({ name: 'Null Amount Activity' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'Null Amt', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Invest', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+
+  // Mirrors prod rows (account 10, 2025-01-22): activity_type 'other', amount NULL.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: null, activityType: 'other',
+    tradeDate: '2025-01-22', quantity: null, amount: null, currency: 'CAD', fees: null,
+    description: 'corporate action', sourceRowFingerprint: 'fp-other-null-001', importBatch: 'seed-null-amt',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  // A null-amount "other" activity is not income; it must be ignored, not crash.
+  assert.equal(facts.interestIncome.length, 0, 'no interest income');
+  assert.equal(facts.eligibleDividends.length, 0, 'no eligible dividends');
+  assert.equal(facts.nonEligibleDividends.length, 0, 'no non-eligible dividends');
+});
