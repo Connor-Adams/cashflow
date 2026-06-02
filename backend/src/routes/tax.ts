@@ -33,6 +33,13 @@ router.get('/classification-queue', async (req, res, next) => {
       res.status(400).json({ error: 'entityId and year query params required' });
       return;
     }
+    const statusRaw = req.query.status;
+    const status = statusRaw === undefined ? 'unclassified' : String(statusRaw);
+    if (status !== 'unclassified' && status !== 'classified') {
+      res.status(400).json({ error: 'invalid status' });
+      return;
+    }
+    const overrideWhere = status === 'classified' ? { [Op.ne]: null } : null;
     const personal = await Entity.findByPk(entityId);
     if (!personal || personal.kind !== 'personal' || personal.householdId !== household.id) {
       res.status(404).json({ error: 'personal entity not found' });
@@ -51,7 +58,7 @@ router.get('/classification-queue', async (req, res, next) => {
         date: { [Op.between]: [start, end] },
         txnType: 'transfer',
         linkedTransactionId: { [Op.ne]: null },
-        taxTreatmentOverride: null,
+        taxTreatmentOverride: overrideWhere,
       },
     });
 
@@ -76,7 +83,7 @@ router.get('/classification-queue', async (req, res, next) => {
         entityId,
         date: { [Op.between]: [start, end] },
         txnType: 'income',
-        taxTreatmentOverride: null,
+        taxTreatmentOverride: overrideWhere,
       },
     });
 
@@ -98,6 +105,7 @@ router.get('/classification-queue', async (req, res, next) => {
       accountId: t.accountId,
       accountName: acctName.get(t.accountId) ?? null,
       txnType: t.txnType,
+      taxTreatmentOverride: t.taxTreatmentOverride,
     });
     res.json({
       corpDistributions: corpDistributions.map((d) => ({
