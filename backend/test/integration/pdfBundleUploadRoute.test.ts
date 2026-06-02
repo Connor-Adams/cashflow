@@ -125,3 +125,145 @@ test('POST /api/import/upload-pdf-bundle: 400 when non-pdf file attached', async
     });
   assert.equal(res.status, 400);
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/import/pdf-batch/:id — progress endpoint tests
+// ---------------------------------------------------------------------------
+
+test('GET /api/import/pdf-batch/:id: 200 with batch + items', async () => {
+  const crypto = await import('node:crypto');
+  const { PdfImportBatch, PdfImportItem } = models;
+
+  // Retrieve the household id from the session (POST a no-op and read the
+  // batch we just created to find householdId).
+  const uploadRes = await authed
+    .post('/api/import/upload-pdf-bundle')
+    .attach('files', fakePdf1, { filename: 'progress-a.pdf', contentType: 'application/pdf' });
+  assert.equal(uploadRes.status, 201);
+  const { batchId: seedBatchId } = uploadRes.body as { batchId: string };
+  const seedBatch = await PdfImportBatch.findOne({ where: { id: seedBatchId } });
+  assert.ok(seedBatch);
+  const householdId = seedBatch!.householdId;
+
+  // Create a batch with controlled data
+  const batchId = crypto.randomUUID();
+  await PdfImportBatch.create({
+    id: batchId,
+    householdId,
+    userId: seedBatch!.userId,
+    status: 'processing',
+    total: 2,
+    processed: 2,
+    succeeded: 1,
+    failed: 1,
+  });
+  const doneItemId = crypto.randomUUID();
+  await PdfImportItem.create({
+    id: doneItemId,
+    batchId,
+    fileName: 'done.pdf',
+    storedFilename: 'dummy-done.pdf',
+    storageKind: 'local',
+    encryptionAlgorithm: 'none',
+    status: 'done',
+    resultJson: {
+      accountName: 'WS Credit Card',
+      insertedTransactions: 5,
+      insertedInvestmentActivities: 2,
+      insertedHoldings: 1,
+      skippedDuplicates: 3,
+    },
+    error: null,
+  });
+  const failedItemId = crypto.randomUUID();
+  await PdfImportItem.create({
+    id: failedItemId,
+    batchId,
+    fileName: 'failed.pdf',
+    storedFilename: 'dummy-failed.pdf',
+    storageKind: 'local',
+    encryptionAlgorithm: 'none',
+    status: 'failed',
+    resultJson: null,
+    error: 'No PDF parser matched this statement layout',
+  });
+
+  const res = await authed.get(`/api/import/pdf-batch/${batchId}`);
+  assert.equal(res.status, 200, `expected 200 got ${res.status}: ${JSON.stringify(res.body)}`);
+
+  const body = res.body as {
+    id: string; status: string; total: number; processed: number;
+    succeeded: number; failed: number;
+    items: Array<{
+      fileName: string; status: string; accountName: string | null;
+      insertedTransactions: number; insertedInvestmentActivities: number;
+      insertedHoldings: number; skippedDuplicates: number; error: string | null;
+    }>;
+  };
+
+  assert.equal(body.id, batchId);
+  assert.equal(body.status, 'processing');
+  assert.equal(body.total, 2);
+  assert.equal(body.processed, 2);
+  assert.equal(body.succeeded, 1);
+  assert.equal(body.failed, 1);
+  assert.equal(body.items.length, 2);
+
+  const doneItem = body.items.find((i) => i.fileName === 'done.pdf');
+  assert.ok(doneItem, 'done item should be present');
+  assert.equal(doneItem!.status, 'done');
+  assert.equal(doneItem!.accountName, 'WS Credit Card');
+  assert.equal(doneItem!.insertedTransactions, 5);
+  assert.equal(doneItem!.insertedInvestmentActivities, 2);
+  assert.equal(doneItem!.insertedHoldings, 1);
+  assert.equal(doneItem!.skippedDuplicates, 3);
+  assert.equal(doneItem!.error, null);
+
+  const failedItem = body.items.find((i) => i.fileName === 'failed.pdf');
+  assert.ok(failedItem, 'failed item should be present');
+  assert.equal(failedItem!.status, 'failed');
+  assert.equal(failedItem!.accountName, null);
+  assert.equal(failedItem!.insertedTransactions, 0);
+  assert.ok(
+    typeof failedItem!.error === 'string' && failedItem!.error.length > 0,
+    `expected non-empty error, got ${JSON.stringify(failedItem!.error)}`,
+  );
+});
+
+test('GET /api/import/pdf-batch/:id: 404 for random unknown uuid', async () => {
+  const { randomUUID } = await import('node:crypto');
+  const res = await authed.get(`/api/import/pdf-batch/${randomUUID()}`);
+  assert.equal(res.status, 404, `expected 404 got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('GET /api/import/pdf-batch/:id: 404 for a batch belonging to another household', async () => {
+  const crypto = await import('node:crypto');
+  const { PdfImportBatch } = models;
+
+  // Create a second user + household to own the foreign batch
+  const authed2 = request.agent(app);
+  const reg2 = await authed2.post('/api/auth/register').send({
+    email: 'pdfbundle2@example.com',
+    displayName: 'PDF Bundle User 2',
+    password: 'password123',
+  });
+  assert.equal(reg2.status, 201);
+
+  // The second user uploads a batch (so we have a real householdId)
+  const upload2 = await authed2
+    .post('/api/import/upload-pdf-bundle')
+    .attach('files', fakePdf1, { filename: 'other-user.pdf', contentType: 'application/pdf' });
+  assert.equal(upload2.status, 201);
+  const { batchId: otherBatchId } = upload2.body as { batchId: string };
+
+  // Verify the other batch exists
+  const otherBatch = await PdfImportBatch.findOne({ where: { id: otherBatchId } });
+  assert.ok(otherBatch, 'other batch should exist in DB');
+
+  // authed (first household) must NOT see the other household's batch
+  const res = await authed.get(`/api/import/pdf-batch/${otherBatchId}`);
+  assert.equal(
+    res.status, 404,
+    `cross-household batch should return 404, got ${res.status}: ${JSON.stringify(res.body)}`,
+  );
+});

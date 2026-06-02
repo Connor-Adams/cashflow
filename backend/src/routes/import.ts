@@ -605,6 +605,47 @@ const pdfBundleMulter = (req: Request, res: Response, next: NextFunction) => {
 
 router.post('/upload-pdf-bundle', importUploadLimiter, pdfBundleMulter, pdfBundleHandler);
 
+/**
+ * GET /api/import/pdf-batch/:id
+ *
+ * Progress endpoint for an async PDF-bundle import batch. Returns the batch
+ * status + per-item counts so the frontend can poll progress without polling
+ * the DB directly. Scoped to the authenticated household — a batch belonging
+ * to another household returns 404, not 200, to prevent cross-household leaks.
+ */
+router.get('/pdf-batch/:id', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const batch = await PdfImportBatch.findOne({
+      where: { id: req.params.id, householdId: household.id },
+    });
+    if (!batch) {
+      res.status(404).json({ error: 'Batch not found' });
+      return;
+    }
+    const items = await PdfImportItem.findAll({
+      where: { batchId: batch.id }, order: [['created_at', 'ASC']],
+    });
+    res.json({
+      id: batch.id, status: batch.status, total: batch.total,
+      processed: batch.processed, succeeded: batch.succeeded, failed: batch.failed,
+      items: items.map((i) => {
+        const r = (i.resultJson ?? {}) as Record<string, number | string | undefined>;
+        return {
+          fileName: i.fileName, status: i.status, accountName: r.accountName ?? null,
+          insertedTransactions: r.insertedTransactions ?? 0,
+          insertedInvestmentActivities: r.insertedInvestmentActivities ?? 0,
+          insertedHoldings: r.insertedHoldings ?? 0,
+          skippedDuplicates: r.skippedDuplicates ?? 0,
+          error: i.error ?? null,
+        };
+      }),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post(
   '/upload-holdings',
   importUploadLimiter,
