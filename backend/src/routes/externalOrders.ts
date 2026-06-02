@@ -23,6 +23,10 @@ import {
 } from '../import/pdf/receipts/registry';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
 import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
+import {
+  EXPANSION_VENDORS,
+  maybeExpandItemNamesForOrder,
+} from '../import/enrichment/expandItemNames';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { importUploadLimiter } from './importRateLimit';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -180,6 +184,7 @@ export async function persistExtractedOrder(
           inferredCategory: it.inferredCategory,
           businessUsePercent: null,
           confidence: null,
+          itemNumber: it.vendorItemId ?? null,
           rawPayload: it as unknown,
         })) as never[],
         { transaction: t },
@@ -199,6 +204,19 @@ export async function persistExtractedOrder(
     }
     return { order, created };
   });
+}
+
+/**
+ * Best-effort: kick off AI item-name expansion for a freshly-ingested order
+ * when its vendor is in the expansion allowlist (Costco). Never throws — the
+ * underlying gate no-ops when AI is disabled/unconfigured and swallows errors,
+ * so this can never block or fail receipt ingest. Mirrors how the routes
+ * already fire-and-forget matchReceiptOrderToTransactions().
+ */
+async function maybeExpandIngestedOrderItemNames(order: ExternalOrder): Promise<void> {
+  if (order.householdId == null) return;
+  if (!(EXPANSION_VENDORS as readonly string[]).includes(order.vendor)) return;
+  await maybeExpandItemNamesForOrder({ householdId: order.householdId, orderId: order.id });
 }
 
 /**
@@ -519,6 +537,7 @@ router.post(
 
       if (created) {
         await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+        await maybeExpandIngestedOrderItemNames(order);
       }
 
       logger.info({

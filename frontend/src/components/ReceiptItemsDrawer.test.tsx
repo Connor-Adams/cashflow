@@ -95,6 +95,42 @@ describe('ReceiptItemsDrawer', () => {
     expect(screen.getAllByText('Total').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('shows the AI-expanded displayName with the raw receipt title as secondary text', () => {
+    const receipt: ReceiptWithItems = {
+      ...RECEIPT_WITH_ORDER,
+      order: { ...RECEIPT_WITH_ORDER.order!, vendor: 'costco' },
+      items: [
+        {
+          id: 201,
+          externalOrderId: 99,
+          title: 'KS ORG PNT BTR',
+          displayName: 'Kirkland Signature Organic Peanut Butter',
+          quantity: 1,
+          unitPrice: '9.99',
+          totalPrice: '9.99',
+          inferredCategory: null,
+          categoryOverride: null,
+          businessUsePercent: null,
+          businessUseOverride: null,
+        },
+      ],
+    }
+
+    render(
+      <ReceiptItemsDrawer
+        open={true}
+        onClose={vi.fn()}
+        receipts={[receipt]}
+        categoryHints={CATEGORY_HINTS}
+        onExtract={vi.fn()}
+      />,
+    )
+
+    // Readable name is shown, and the raw receipt text remains visible as secondary.
+    expect(screen.getByText('Kirkland Signature Organic Peanut Butter')).toBeInTheDocument()
+    expect(screen.getByText('KS ORG PNT BTR')).toBeInTheDocument()
+  })
+
   it('shows Extract items button and fires onExtract when no externalOrderId', async () => {
     const onExtract = vi.fn().mockResolvedValue(undefined)
 

@@ -521,6 +521,7 @@ export async function scanInbox(
               inferredCategory: it.inferredCategory,
               businessUsePercent: null,
               confidence: null,
+              itemNumber: it.vendorItemId ?? null,
               rawPayload: it as unknown,
             })) as never[],
             { transaction: t },

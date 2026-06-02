@@ -940,6 +940,10 @@ export type ExternalOrderItemView = {
   id: number;
   externalOrderId: number;
   title: string;
+  /** AI-expanded human-readable product name; null = show `title`. */
+  displayName?: string | null;
+  /** Vendor item/article number (e.g. Costco), when captured. */
+  itemNumber?: string | null;
   quantity: number;
   unitPrice: string | null;
   totalPrice: string | null;

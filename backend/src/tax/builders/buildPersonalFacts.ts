@@ -24,6 +24,14 @@ import type {
 } from '../engine/types';
 import { computeAcb } from '../../portfolio/acb';
 import { toCad } from '../../fx/toCad';
+import { dividendDedupDays } from '../../config/env';
+
+/** Whole-day difference (a − b) between two 'YYYY-MM-DD' dates at UTC midnight. */
+function daysBetween(a: string, b: string): number {
+  const da = new Date(`${a}T00:00:00.000Z`).getTime();
+  const db = new Date(`${b}T00:00:00.000Z`).getTime();
+  return Math.round((da - db) / 86_400_000);
+}
 
 export async function buildPersonalFacts(entityId: number, year: number): Promise<TaxYearFacts> {
   const entity = await Entity.findByPk(entityId);
@@ -92,7 +100,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       selfEmploymentExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
   }
 
-  // Investment activity → interest, dividends, capital gain events
+  // Investment activity for INCOME (interest, dividends, DRIP, staking) — this
+  // is correctly year-scoped: income is reported in the year received. Capital
+  // gains use a separate, full-history feed below (ACB needs prior years).
   const activity = accountIds.length
     ? await InvestmentActivity.findAll({
         where: {
@@ -105,6 +115,24 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
 
   const interestIncome: IncomeItem[] = [];
 
+  // Route a dividend-type item by Security.dividendEligibility; unknown/missing
+  // defaults to eligible.
+  const pushDividend = (a: InvestmentActivity, item: IncomeItem) => {
+    const eligibility = (a as any).security?.dividendEligibility ?? 'eligible';
+    if (eligibility === 'non_eligible') nonEligibleDividends.push(item);
+    else eligibleDividends.push(item);
+  };
+
+  // Dividend rows (broker AND synthetic AV-reconciled) keyed for the DRIP
+  // dedup below. Keyed by account too: the reconciler inserts its synthetic
+  // dividend into the SAME account as the holding, so a DRIP and a dividend in
+  // different accounts are distinct payouts. `consumed` enforces a greedy 1:1
+  // match.
+  const dividendKeys: { accountId: number; securityId: number | null; tradeDate: string; consumed: boolean }[] = [];
+  // Reinvestment (DRIP) rows are resolved AFTER the loop, once every dividend
+  // row for the year is known.
+  const reinvestments: { activity: InvestmentActivity; item: IncomeItem }[] = [];
+
   for (const a of activity) {
     const { cad } = await toCad(D(a.amount ?? 0), (a as any).currency ?? 'CAD', a.tradeDate as unknown as string);
     const item: IncomeItem = {
@@ -112,24 +140,65 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       amount: D(a.amount ?? 0),
       cadAmount: cad,
     };
-    if (a.activityType === 'interest') interestIncome.push(item);
-    else if (a.activityType === 'dividend') {
-      // Route based on Security.dividendEligibility; unknown defaults to eligible.
-      const eligibility = (a as any).security?.dividendEligibility ?? 'eligible';
-      if (eligibility === 'non_eligible') {
-        nonEligibleDividends.push(item);
-      } else {
-        // 'eligible' or 'unknown' → eligible
-        eligibleDividends.push(item);
-      }
+    if (a.activityType === 'interest' || a.activityType === 'staking_reward') {
+      // staking_reward (e.g. Wealthsimple CRYPTORWD) is fully taxable ordinary
+      // income. The T1 engine has no dedicated "other income" (L13000) line, so
+      // it rides L12100 ("Interest and other investment income") with interest —
+      // same ordinary rate, no gross-up, no inclusion factor.
+      interestIncome.push(item);
+    } else if (a.activityType === 'dividend') {
+      dividendKeys.push({ accountId: a.accountId, securityId: a.securityId ?? null, tradeDate: a.tradeDate as unknown as string, consumed: false });
+      pushDividend(a, item);
+    } else if (a.activityType === 'reinvestment') {
+      // A reinvested dividend (DRIP) is taxable exactly like a cash dividend, but
+      // the AV reconciler may have inserted a synthetic 'dividend' for the same
+      // payout (it dedups only against activityType='dividend'). Defer routing so
+      // we don't double-count.
+      reinvestments.push({ activity: a, item });
     }
   }
 
-  // Capital gain events from sells, using ACB helper
+  // Resolve DRIP income: count a reinvestment ONLY when no dividend row (broker
+  // or synthetic) already covers the same security within the dedup window —
+  // otherwise that dividend row is the same payout. Greedy 1:1 so one dividend
+  // can't mask multiple DRIPs.
+  for (const { activity: a, item } of reinvestments) {
+    const sid = a.securityId ?? null;
+    const when = a.tradeDate as unknown as string;
+    const match = sid == null
+      ? undefined
+      : dividendKeys.find(
+          (k) => !k.consumed && k.accountId === a.accountId && k.securityId === sid
+            && Math.abs(daysBetween(k.tradeDate, when)) <= dividendDedupDays,
+        );
+    if (match) {
+      match.consumed = true;
+      continue;
+    }
+    pushDividend(a, item);
+  }
+
+  // Capital gain events from sells, using the ACB helper.
+  //
+  // ACB is a weighted-average running balance, so computeAcb needs the FULL
+  // per-security history up to year-end — NOT just this tax year's rows. A
+  // year-windowed feed makes prior-year buys (and return_of_capital) invisible,
+  // collapsing ACB to ~0 and grossly overstating realized gains as near-$0-cost
+  // dispositions. We walk all activity at-or-before year-end, then keep only the
+  // dispositions that actually settled DURING the tax year.
+  const acbActivity = accountIds.length
+    ? await InvestmentActivity.findAll({
+        where: {
+          accountId: accountIds,
+          tradeDate: { [Op.lte]: yearEnd },
+        },
+      })
+    : [];
+
   const capitalGainEvents: CapGainEvent[] = [];
-  const securityIds = Array.from(new Set(activity.map((a) => a.securityId).filter((x): x is number => x != null)));
+  const securityIds = Array.from(new Set(acbActivity.map((a) => a.securityId).filter((x): x is number => x != null)));
   for (const sid of securityIds) {
-    const acts = activity.filter((a) => a.securityId === sid);
+    const acts = acbActivity.filter((a) => a.securityId === sid);
     const acb = computeAcb(acts.map((a) => ({
       id: a.id as number,
       activityType: a.activityType as string,
@@ -140,6 +209,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       fees: a.fees != null ? Number(a.fees) : null,
     })));
     for (const realized of acb.realizedEvents) {
+      // Prior-year dispositions are already reported on their own year's return;
+      // here they only serve to advance the ACB state. Keep just this year's.
+      if (realized.tradeDate < yearStart || realized.tradeDate > yearEnd) continue;
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,
         securityId: sid,
