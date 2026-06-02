@@ -180,6 +180,49 @@ describe('TransactionsPage transaction status controls', () => {
   })
 })
 
+describe('TransactionsPage tax treatment override control', () => {
+  it('changing tax treatment override includes it in the PATCH call', async () => {
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({
+              id: 42,
+              merchantClean: 'Tax Test Merchant',
+              status: 'posted',
+              taxTreatmentOverride: null,
+            }),
+          ],
+          page: 1,
+          pageSize: 25,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/ai/status') return { openai: false }
+      if (path === '/api/contacts') return []
+      return null
+    })
+    vi.mocked(api.patchJson).mockResolvedValue({})
+    renderPage()
+
+    const select = await screen.findByRole('combobox', {
+      name: /tax treatment override for transaction 42/i,
+    })
+    await userEvent.selectOptions(select, 'rrsp_contribution')
+
+    const saveButton = screen.getByRole('button', { name: /^save$/i })
+    await userEvent.click(saveButton)
+
+    await waitFor(() => {
+      expect(api.patchJson).toHaveBeenCalledWith(
+        '/api/transactions/42',
+        expect.objectContaining({ taxTreatmentOverride: 'rrsp_contribution' }),
+      )
+    })
+  })
+})
+
 function makeTransaction(
   overrides: Partial<Transaction> & Pick<Transaction, 'id' | 'merchantClean' | 'status'>,
 ): Transaction {
@@ -207,6 +250,7 @@ function makeTransaction(
     autoBusiness: null,
     businessOverride: null,
     finalBusiness: false,
+    taxTreatmentOverride: null,
     autoSplitType: null,
     splitOverride: null,
     finalSplitType: 'me',

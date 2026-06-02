@@ -160,6 +160,7 @@ export type Transaction = {
   autoBusiness: boolean | null
   businessOverride: boolean | null
   finalBusiness: boolean
+  taxTreatmentOverride: TaxTreatment | null
   autoSplitType: string | null
   splitOverride: string | null
   finalSplitType: string
