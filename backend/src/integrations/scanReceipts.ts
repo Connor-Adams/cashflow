@@ -39,6 +39,7 @@ import {
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import { uberVendorOverride } from './parsers/uber';
+import { categorizeUberTrip } from '../ai/aiCategorizeUberTrip';
 import { logger } from '../observability/logger';
 import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
@@ -481,6 +482,21 @@ export async function scanInbox(
         return result;
       }
 
+      // For Uber rides, infer business-use from trip context and stamp it on
+      // the single synthetic trip item so it propagates via linkItemsStage.
+      if (extracted.vendor === 'uber' && extracted.trip && extracted.items[0]) {
+        try {
+          const cat = await categorizeUberTrip(extracted.trip);
+          extracted.items[0].inferredCategory = cat.category;
+          extracted.items[0].businessUsePercent = cat.businessUsePercent;
+        } catch (err) {
+          logger.warn(
+            { messageId: summary.id, error: err instanceof Error ? err.message : String(err) },
+            'uber_trip_categorize_failed',
+          );
+        }
+      }
+
       const dedupeKey = [
         extracted.vendor,
         extracted.orderId || '',
@@ -513,7 +529,7 @@ export async function scanInbox(
             currency: extracted!.currency ?? 'USD',
             paymentLast4: extracted!.paymentLast4,
             source: `gmail-scan:${parser}`,
-            rawPayload: { extracted, gmailMessageId: summary.id, parser } as unknown,
+            rawPayload: { extracted, gmailMessageId: summary.id, parser, trip: extracted!.trip ?? null } as unknown,
           } as never,
           transaction: t,
         });
@@ -528,7 +544,7 @@ export async function scanInbox(
               unitPrice: it.unitPrice != null ? String(it.unitPrice) : null,
               totalPrice: it.totalPrice != null ? String(it.totalPrice) : null,
               inferredCategory: it.inferredCategory,
-              businessUsePercent: null,
+              businessUsePercent: it.businessUsePercent != null ? String(it.businessUsePercent) : null,
               confidence: null,
               itemNumber: it.vendorItemId ?? null,
               rawPayload: it as unknown,
