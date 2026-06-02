@@ -188,3 +188,66 @@ test('PATCH /api/transfers/:id/tax-treatment sets taxTreatment on an unlinked ro
     `expected txn.taxTreatment 'salary', got '${(txn as any).taxTreatment}'`,
   );
 });
+
+test('PATCH /api/transfers/:id/tax-treatment set then clear leaves both legs null', async () => {
+  const models = await import('../../src/models/index.js');
+  const ts = Date.now();
+
+  const a = await models.Transaction.create({
+    accountId,
+    householdId,
+    date: '2025-04-01',
+    amount: '6000',
+    currency: 'CAD',
+    txnType: 'transfer',
+    visibility: 'shared',
+    merchantRaw: 'CLEAR TEST IN',
+    merchantClean: 'CLEAR TEST IN',
+    importBatch: 'b',
+    sourceRowFingerprint: `fp-e1-${ts}`,
+    sourceIdentityFingerprint: `sif-e1-${ts}`,
+  } as never);
+
+  const b = await models.Transaction.create({
+    accountId,
+    householdId,
+    date: '2025-04-01',
+    amount: '-6000',
+    currency: 'CAD',
+    txnType: 'transfer',
+    visibility: 'shared',
+    linkedTransactionId: a.id,
+    merchantRaw: 'CLEAR TEST OUT',
+    merchantClean: 'CLEAR TEST OUT',
+    importBatch: 'b',
+    sourceRowFingerprint: `fp-e2-${ts}`,
+    sourceIdentityFingerprint: `sif-e2-${ts}`,
+  } as never);
+
+  await a.update({ linkedTransactionId: b.id });
+
+  // Set treatment
+  const setRes = await authed
+    .patch(`/api/transfers/${a.id}/tax-treatment`)
+    .send({ taxTreatment: 'salary' });
+  assert.equal(setRes.status, 200, `set: expected 200, got ${setRes.status}: ${JSON.stringify(setRes.body)}`);
+
+  // Clear treatment
+  const clearRes = await authed
+    .patch(`/api/transfers/${a.id}/tax-treatment`)
+    .send({ taxTreatment: null });
+  assert.equal(clearRes.status, 200, `clear: expected 200, got ${clearRes.status}: ${JSON.stringify(clearRes.body)}`);
+
+  await a.reload();
+  await b.reload();
+  assert.equal(
+    (a as any).taxTreatment,
+    null,
+    `expected a.taxTreatment null, got '${(a as any).taxTreatment}'`,
+  );
+  assert.equal(
+    (b as any).taxTreatment,
+    null,
+    `expected b.taxTreatment null, got '${(b as any).taxTreatment}'`,
+  );
+});

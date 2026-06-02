@@ -46,6 +46,7 @@ router.get('/classification-queue', async (req, res, next) => {
       where: {
         entityId,
         date: { [Op.between]: [start, end] },
+        txnType: 'transfer',
         linkedTransactionId: { [Op.ne]: null },
         taxTreatment: null,
       },

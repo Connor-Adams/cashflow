@@ -53,7 +53,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
     const item: IncomeItem = {
-      source: `Txn #${t.id} ${t.finalCategory ?? ''}`,
+      source: `Txn #${t.id} ${t.finalCategory ?? t.taxTreatment ?? ''}`,
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };

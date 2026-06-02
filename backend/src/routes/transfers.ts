@@ -596,7 +596,8 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
       res.status(400).json({ error: 'Invalid id' });
       return;
     }
-    const raw = (req.body || {}).taxTreatment;
+    const body = (req.body || {}) as Record<string, unknown>;
+    const raw = body.taxTreatment;
     let treatment: TaxTreatment | null;
     if (raw === null || raw === undefined || raw === '') {
       treatment = null;
@@ -617,8 +618,9 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
         err.status = 404;
         throw err;
       }
+      const reviewedAt = new Date();
       a.set('taxTreatment', treatment);
-      a.set('reviewedAt', new Date());
+      a.set('reviewedAt', reviewedAt);
       await a.save({ transaction: t });
       let b = null;
       if (a.linkedTransactionId != null) {
@@ -628,7 +630,7 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
         });
         if (b) {
           b.set('taxTreatment', treatment);
-          b.set('reviewedAt', new Date());
+          b.set('reviewedAt', reviewedAt);
           await b.save({ transaction: t });
         }
       }

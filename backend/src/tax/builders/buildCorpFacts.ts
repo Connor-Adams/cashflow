@@ -168,7 +168,7 @@ export async function buildCorpFacts(
   // leg is an outflow (negative); distributions/remuneration are positive.
   for (const t of txns) {
     const tt = t.taxTreatment;
-    if (tt == null) continue;
+    if (tt !== 'eligible_dividend' && tt !== 'non_eligible_dividend' && tt !== 'salary') continue;
     const { cad } = await toCad(
       D(t.amount as unknown as string),
       t.currency ?? 'CAD',
@@ -184,15 +184,15 @@ export async function buildCorpFacts(
       });
     } else if (tt === 'non_eligible_dividend') {
       dividendsPaid.push({
-        source: `Txn #${t.id} non-eligible dividend`,
+        source: `Txn #${t.id} non_eligible dividend`,
         date: t.date as unknown as string,
         amount: amt,
         kind: 'non_eligible',
       });
-    } else if (tt === 'salary') {
+    } else {
+      // salary
       salaryPaid = salaryPaid.plus(amt);
     }
-    // loan_advance | loan_repayment | employment_income | not_income → no T2 effect
   }
 
   return {

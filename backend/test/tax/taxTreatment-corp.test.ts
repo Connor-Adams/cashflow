@@ -44,3 +44,17 @@ test('classified corp salary leg feeds salaryPaid', async () => {
   const facts = await buildCorpFacts(s.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
   assert.equal(facts.salaryPaid.toFixed(2), '5000.00');
 });
+
+test('classified non-eligible dividend leg feeds dividendsPaid kind non_eligible', async () => {
+  const s = await seedCorp();
+  await Transaction.create({
+    accountId: s.account.id, householdId: s.household.id, entityId: s.entity.id,
+    date: '2025-04-01', amount: '-8000.0000', currency: 'CAD',
+    merchantRaw: 'OWNER', merchantClean: 'OWNER', taxTreatment: 'non_eligible_dividend',
+    importBatch: 'seed', sourceRowFingerprint: 'fp-c3', sourceIdentityFingerprint: 'sif-c3',
+  } as never);
+  const facts = await buildCorpFacts(s.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+  assert.equal(facts.dividendsPaid.length, 1);
+  assert.equal(facts.dividendsPaid[0].kind, 'non_eligible');
+  assert.equal(facts.dividendsPaid[0].amount.toFixed(2), '8000.00');
+});

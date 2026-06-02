@@ -219,3 +219,39 @@ test('GET /api/tax/classification-queue returns 404 for unknown entity', async (
   const res = await authed.get('/api/tax/classification-queue?entityId=999999&year=2025');
   assert.equal(res.status, 404, `expected 404, got ${res.status}: ${JSON.stringify(res.body)}`);
 });
+
+test('GET /api/tax/classification-queue returns 404 when querying another household entity', async () => {
+  const models = await import('../../src/models/index.js');
+  const { hashPassword, hashToken } = await import('../../src/auth/password.js');
+  const ts = Date.now();
+
+  // Seed a second household with its own personal entity
+  const password2 = await hashPassword('password456');
+  const user2 = await models.User.create({
+    email: `cq-hh2-${ts}@example.com`,
+    displayName: 'CQ HH2 User',
+    globalRole: 'user',
+    passwordHash: password2.hash,
+    passwordSalt: password2.salt,
+    passwordParams: password2.params,
+  });
+  const household2 = await models.Household.create({ name: 'CQ HH2' });
+  await models.HouseholdMember.create({
+    householdId: household2.id,
+    userId: user2.id,
+    role: 'owner',
+  });
+  const personalEntity2 = await models.Entity.create({
+    householdId: household2.id,
+    kind: 'personal',
+    legalName: 'Other Person',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  // Use the FIRST household's session to query the second household's entity
+  const res = await authed.get(
+    `/api/tax/classification-queue?entityId=${personalEntity2.id}&year=2025`,
+  );
+  assert.equal(res.status, 404, `expected 404, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
