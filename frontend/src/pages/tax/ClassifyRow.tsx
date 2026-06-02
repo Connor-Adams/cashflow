@@ -1,19 +1,9 @@
 import { useState } from 'react';
 import { patchJson } from '@/lib/api';
 import { TaxTreatmentSelect } from '../../components/TaxTreatmentSelect';
-import type { TaxTreatment } from '../../lib/taxTreatment';
+import { CORP_OPTIONS, PAYROLL_OPTIONS, type TaxTreatment } from '../../lib/taxTreatment';
 import type { QueueLeg } from '../../hooks/useClassificationQueue';
 import { fmtCurrency } from './util/format';
-
-const CORP_OPTIONS: TaxTreatment[] = [
-  'eligible_dividend',
-  'non_eligible_dividend',
-  'salary',
-  'loan_advance',
-  'loan_repayment',
-  'not_income',
-];
-const PAYROLL_OPTIONS: TaxTreatment[] = ['employment_income', 'not_income'];
 
 interface ClassifyRowProps {
   targetId: number;
