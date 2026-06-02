@@ -27,7 +27,8 @@ export function ClassifyRow({ targetId, kind, primary, counter, onClassified }: 
   const [busy, setBusy] = useState(false);
   const options = kind === 'corp' ? CORP_OPTIONS : PAYROLL_OPTIONS;
 
-  async function choose(next: TaxTreatment) {
+  async function choose(next: TaxTreatment | null) {
+    if (!next) return;
     setError(null);
     setBusy(true);
     try {
