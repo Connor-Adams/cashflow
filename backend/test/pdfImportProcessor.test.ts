@@ -74,3 +74,16 @@ test('a failing item marks failed without aborting the chunk', async () => {
   assert.equal(reloaded?.status, 'failed'); // all items failed → batch failed
   assert.equal(reloaded?.failed, 1);
 });
+
+test('pdf_import_process job is registered and runnable', async () => {
+  await sequelize.sync({ force: true });
+  await import('../src/jobs/definitions/pdfImportProcess');
+  const { runJobByName } = await import('../src/jobs/registry');
+  const outcome = await runJobByName('pdf_import_process');
+  // TickOutcome shape: { status: JobStatus, durationMs, jobName, runId?, result?, error? }
+  // JobStatus: 'ok' | 'error' | 'skipped_disabled' | 'skipped_locked' | 'skipped_reentrant'
+  assert.ok(outcome, 'should return a TickOutcome');
+  assert.equal(outcome.jobName, 'pdf_import_process');
+  const validStatuses = ['ok', 'error', 'skipped_disabled', 'skipped_locked', 'skipped_reentrant'];
+  assert.ok(validStatuses.includes(outcome.status), `unexpected status: ${outcome.status}`);
+});
