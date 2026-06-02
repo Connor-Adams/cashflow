@@ -38,6 +38,7 @@ import {
   type OauthTokenResponse,
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
+import { uberVendorOverride } from './parsers/uber';
 import { logger } from '../observability/logger';
 import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
@@ -69,9 +70,9 @@ export const DEFAULT_RECEIPT_SENDERS: Array<{ address: string; vendorHint: strin
   { address: 'no-reply@primevideo.com', vendorHint: 'amazon', label: 'Prime Video' },
   { address: 'noreply@audible.com', vendorHint: 'amazon', label: 'Audible' },
   // Rides / food
-  { address: 'receipts@uber.com', vendorHint: 'other', label: 'Uber receipts' },
-  { address: 'noreply@uber.com', vendorHint: 'other', label: 'Uber' },
-  { address: 'no-reply@uber.com', vendorHint: 'other', label: 'Uber' },
+  { address: 'receipts@uber.com', vendorHint: 'uber', label: 'Uber receipts' },
+  { address: 'noreply@uber.com', vendorHint: 'uber', label: 'Uber' },
+  { address: 'no-reply@uber.com', vendorHint: 'uber', label: 'Uber' },
   { address: 'no-reply@lyftmail.com', vendorHint: 'other', label: 'Lyft' },
   { address: 'no-reply@doordash.com', vendorHint: 'other', label: 'DoorDash' },
   { address: 'no-reply@grubhub.com', vendorHint: 'other', label: 'Grubhub' },
@@ -449,6 +450,14 @@ export async function scanInbox(
         extracted = await extractReceiptFromText(body);
         parser = 'ai';
         aiExtractions++;
+      }
+
+      // Uber rides and Uber Eats both arrive from uber.com but the AI returns
+      // vendor 'other'. The sender is authoritative for the vendor family;
+      // subject/body picks ride vs eats.
+      const uberVendor = uberVendorOverride(result.from, result.subject, body);
+      if (uberVendor) {
+        extracted.vendor = uberVendor;
       }
 
       result.parser = parser;

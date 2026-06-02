@@ -28,7 +28,7 @@ export type ExtractedReceiptTender = {
 };
 
 export type ExtractedReceiptOrder = {
-  vendor: 'amazon' | 'apple' | 'google' | 'costco' | 'other';
+  vendor: 'amazon' | 'apple' | 'google' | 'costco' | 'uber' | 'uber_eats' | 'other';
   vendorName: string | null;
   orderDate: string | null;
   orderId: string | null;
