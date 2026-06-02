@@ -57,6 +57,8 @@ import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
 import { Job, initJob } from './Job';
 import { JobRun, initJobRun } from './JobRun';
+import { PdfImportBatch, initPdfImportBatch } from './PdfImportBatch';
+import { PdfImportItem, initPdfImportItem } from './PdfImportItem';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -170,6 +172,8 @@ initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
 initJob(sequelize);
 initJobRun(sequelize);
+initPdfImportBatch(sequelize);
+initPdfImportItem(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -634,6 +638,9 @@ AiReviewRun.belongsTo(User, {
   as: 'user',
 });
 
+PdfImportBatch.hasMany(PdfImportItem, { foreignKey: 'batch_id', as: 'items', onDelete: 'CASCADE', hooks: true });
+PdfImportItem.belongsTo(PdfImportBatch, { foreignKey: 'batch_id', as: 'batch' });
+
 // CFO briefings (issue #236). Cascades with household; user FK for the
 // actor that requested the briefing.
 Household.hasMany(CfoBriefing, {
@@ -1087,6 +1094,8 @@ export {
   ProviderJobLog,
   Job,
   JobRun,
+  PdfImportBatch,
+  PdfImportItem,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
   Scenario,
