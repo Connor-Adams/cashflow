@@ -41,7 +41,26 @@ async function main() {
     throw new Error('--household and --user are required');
   }
 
-  const files = fs.readdirSync(dir).filter((f) => FILENAME_RE.test(f)).sort();
+  const allPdfs = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.pdf'));
+  const files = allPdfs.filter((f) => FILENAME_RE.test(f)).sort();
+  const skippedByRegex = allPdfs
+    .filter((f) => !FILENAME_RE.test(f))
+    .reduce<Record<string, number>>((acc, f) => {
+      // Derive suffix: token after last '_', before '.pdf'
+      const base = path.basename(f, '.pdf');
+      const parts = base.split('_');
+      const suffix = parts[parts.length - 1] ?? 'UNKNOWN';
+      acc[suffix] = (acc[suffix] ?? 0) + 1;
+      return acc;
+    }, {});
+  const skippedCount = allPdfs.length - files.length;
+  const skippedSummary = Object.entries(skippedByRegex)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(', ');
+  process.stdout.write(
+    `Found ${allPdfs.length} pdfs; ${files.length} match BROKERAGE/CREDIT_CARD; skipping ${skippedCount}${skippedCount > 0 ? ` (${skippedSummary})` : ''} — not in scope.\n`,
+  );
+
   const report: Array<Record<string, unknown>> = [];
   let processed = 0;
 
@@ -139,9 +158,17 @@ async function main() {
 
   const mode = commit ? 'commit' : 'dryrun';
   const outPath = `/tmp/ws_pdf_backfill_${mode}.json`;
-  fs.writeFileSync(outPath, JSON.stringify({ mode, totals, files: report }, null, 2));
+  fs.writeFileSync(
+    outPath,
+    JSON.stringify(
+      { mode, totalPdfsInDir: allPdfs.length, matched: files.length, skippedByRegex, totals, files: report },
+      null,
+      2,
+    ),
+  );
+  const modePrefix = commit ? 'COMMITTED — ' : 'DRY RUN — ';
   process.stdout.write(
-    `\nFiles: ${report.length}  txns:${totals.txns} activities:${totals.activities} holdings:${totals.holdings} parseErrors:${totals.errors} noAccount:${totals.noAccount}\n`,
+    `\n${modePrefix}Files: ${report.length}  txns:${totals.txns} activities:${totals.activities} holdings:${totals.holdings} parseErrors:${totals.errors} noAccount:${totals.noAccount}\n`,
   );
   process.stdout.write(`Report: ${outPath}\n`);
   process.exit(0);
