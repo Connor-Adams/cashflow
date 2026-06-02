@@ -43,9 +43,12 @@ test('Scenario A: $80k employment, no other income, single, age 40', () => {
   // First sanity: total income = 80000, no deductions => taxable = 80000
   assert.equal(ret.totals.totalIncome.toFixed(2), '80000.00');
   assert.equal(ret.totals.taxableIncome.toFixed(2), '80000.00');
-  // Federal+ON+surtax+OHP+CPP+EI total within published range (~$18k-$20k).
-  assert.ok(ret.totals.totalPayable.greaterThan(D('17000')));
-  assert.ok(ret.totals.totalPayable.lessThan(D('22000')));
+  // Federal+ON+surtax+OHP total (CPP/EI excluded from L43500 per CRA T1 — they are
+  // payroll-remitted, not owing at filing). Correct range ~$14k-$17k.
+  // Old range (17k-22k) was based on the buggy computation that added cpp($4055.50)+ei($1049.12)=~$5104.62.
+  // Correct totalPayable = 15067.70 (federal 9990.92 + provincial 5076.78).
+  assert.ok(ret.totals.totalPayable.greaterThan(D('14000')));
+  assert.ok(ret.totals.totalPayable.lessThan(D('17000')));
 });
 
 test('Scenario B: $80k employment + $10k eligible dividends', () => {
