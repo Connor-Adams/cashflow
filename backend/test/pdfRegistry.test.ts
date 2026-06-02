@@ -51,3 +51,19 @@ test('built-in parsers include CIBC Costco Mastercard', async () => {
   const found = mod.findPdfParser(lines);
   assert.equal(found?.id, 'cibc_costco_mastercard');
 });
+
+test('built-in registry includes the Wealthsimple PDF parsers', async () => {
+  const mod = await import('../src/import/pdf/registry');
+  mod.clearPdfParsersForTest();
+  mod.registerBuiltInPdfParsers();
+  const cc = mod.findPdfParser([
+    { page: 1, y: 0, text: 'Credit card statement' },
+    { page: 1, y: 1, text: 'Wealthsimple Payments Inc.' },
+  ]);
+  assert.equal(cc?.id, 'wealthsimple_credit_card');
+  const brk = mod.findPdfParser([
+    { page: 1, y: 0, text: 'ORDER EXECUTION ONLY ACCOUNT' },
+    { page: 1, y: 1, text: 'Wealthsimple Investments Inc.' },
+  ]);
+  assert.equal(brk?.id, 'wealthsimple_brokerage');
+});
