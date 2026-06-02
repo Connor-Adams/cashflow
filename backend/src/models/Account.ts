@@ -127,5 +127,39 @@ export function initAccount(sequelize: Sequelize): typeof Account {
       timestamps: true,
     }
   );
+
+  /**
+   * Default entity_id to the household's `personal` tax entity when not
+   * explicitly set. Accounts created with NULL entity_id are silently excluded
+   * from the T1/T2 tax engine (buildPersonalFacts / buildCorpFacts both query
+   * `where entityId=...`), so every account must carry one. Explicit tagging
+   * (e.g. a corp account from the PDF importer) wins because we only fill when
+   * null. Accounts without a household have no entity to default to and are
+   * left unset. Lazy import dodges the model<->service circular dependency at
+   * init time.
+   */
+  const fillPersonalEntity = async (
+    instance: Account,
+    options: { transaction?: import('sequelize').Transaction },
+  ): Promise<void> => {
+    if (instance.entityId != null || instance.householdId == null) return;
+    const { getOrCreatePersonalEntity } = await import(
+      '../tax/services/getOrCreatePersonalEntity'
+    );
+    const personal = await getOrCreatePersonalEntity(instance.householdId, {
+      transaction: options.transaction,
+    });
+    instance.entityId = personal.id;
+  };
+  Account.addHook('beforeCreate', fillPersonalEntity);
+  Account.addHook('beforeBulkCreate', async (instances, options) => {
+    for (const instance of instances) {
+      await fillPersonalEntity(
+        instance,
+        options as { transaction?: import('sequelize').Transaction },
+      );
+    }
+  });
+
   return Account;
 }
