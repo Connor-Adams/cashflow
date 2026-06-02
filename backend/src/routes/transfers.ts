@@ -30,6 +30,7 @@ import { Account, Transaction, sequelize } from '../models';
 import { serializeTransaction } from '../util/serializeTransaction';
 import { visibleTransactionWhere } from '../auth/scope';
 import { logger } from '../observability/logger';
+import { isTaxTreatment } from '../transactions/types';
 
 /**
  * Valid `transfer_purpose` values. Mirrors {@link TransferPurpose} in
@@ -568,6 +569,68 @@ router.patch('/:id/purpose', async (req, res, next) => {
       if (b) {
         b.set('transferPurpose', purpose);
         await b.save({ transaction: t });
+      }
+      return { a, b };
+    });
+
+    res.json({
+      a: serializeTransaction(result.a),
+      b: result.b ? serializeTransaction(result.b) : null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * PATCH /api/transfers/:id/tax-treatment
+ *
+ * Sets `tax_treatment` on a transaction. If the row is linked (a transfer
+ * pair), both legs get the same value. Unlinked rows (e.g. a payroll deposit)
+ * are allowed — only that row is updated. null/'' clears the treatment.
+ */
+router.patch('/:id/tax-treatment', async (req, res, next) => {
+  try {
+    const id = asNumberId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const raw = (req.body || {}).taxTreatment;
+    let treatment: string | null;
+    if (raw === null || raw === undefined || raw === '') {
+      treatment = null;
+    } else if (isTaxTreatment(raw)) {
+      treatment = raw;
+    } else {
+      res.status(400).json({ error: 'invalid taxTreatment' });
+      return;
+    }
+
+    const result = await sequelize.transaction(async (t) => {
+      const a = await Transaction.findOne({
+        where: { id, ...visibleTransactionWhere(req) },
+        transaction: t,
+      });
+      if (!a) {
+        const err = new Error('Not found') as Error & { status?: number };
+        err.status = 404;
+        throw err;
+      }
+      a.set('taxTreatment', treatment);
+      a.set('reviewedAt', new Date());
+      await a.save({ transaction: t });
+      let b = null;
+      if (a.linkedTransactionId != null) {
+        b = await Transaction.findOne({
+          where: { id: a.linkedTransactionId, ...visibleTransactionWhere(req) },
+          transaction: t,
+        });
+        if (b) {
+          b.set('taxTreatment', treatment);
+          b.set('reviewedAt', new Date());
+          await b.save({ transaction: t });
+        }
       }
       return { a, b };
     });
