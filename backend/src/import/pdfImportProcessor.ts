@@ -43,15 +43,16 @@ export async function processItem(item: PdfImportItem): Promise<void> {
   const statementPreview = preview as Exclude<typeof preview, { ok: false }>;
   const commit = await commitStatementImport(statementPreview, batch.userId, batch.householdId);
   item.accountId = account.id;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (item as any).resultJson = {
+  // resultJson is typed CreationOptional<unknown | null>; cast through unknown to satisfy the brand.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  item.resultJson = {
     accountName: account.name,
     insertedTransactions: commit.insertedTransactions,
     insertedInvestmentActivities: commit.insertedInvestmentActivities,
     insertedHoldings: commit.insertedHoldings,
     skippedDuplicates: commit.skippedDuplicates,
     warnings: commit.warnings,
-  };
+  } as unknown as typeof item.resultJson;
   item.status = 'done';
   await item.save();
 }
@@ -67,7 +68,7 @@ async function recomputeBatch(batchId: string): Promise<void> {
   batch.processed = processed;
   batch.succeeded = succeeded;
   batch.failed = failed;
-  batch.status = anyPending ? 'processing' : 'done';
+  batch.status = anyPending ? 'processing' : (succeeded === 0 && failed > 0 ? 'failed' : 'done');
   await batch.save();
 }
 

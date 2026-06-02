@@ -71,6 +71,6 @@ test('a failing item marks failed without aborting the chunk', async () => {
   assert.equal(item?.status, 'failed');
   assert.ok(item?.error);
   const reloaded = await PdfImportBatch.findByPk(batch.id);
-  assert.equal(reloaded?.status, 'done'); // done, with failed=1
+  assert.equal(reloaded?.status, 'failed'); // all items failed → batch failed
   assert.equal(reloaded?.failed, 1);
 });
