@@ -1,10 +1,14 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
+import { describeCron } from '@/lib/cron'
 import { getJson, patchJson, postJson } from '../../../lib/api'
 import type { JobRunOutcome, JobRunView, JobView } from '../../../types/jobs'
+
+const TH = 'px-3 py-2 text-left text-xs font-medium uppercase tracking-wide'
+const TD = 'px-3 py-2 align-middle'
 
 function formatRelative(iso: string | null): string {
   if (!iso) return 'Never run'
@@ -15,18 +19,27 @@ function formatRelative(iso: string | null): string {
   if (mins < 60) return `${mins}m ago`
   const hrs = Math.round(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
-  return d.toLocaleString()
+  const days = Math.round(hrs / 24)
+  return `${days}d ago`
+}
+
+function formatRelativeFuture(iso: string | null): string {
+  if (!iso) return '-'
+  const diffMs = new Date(iso).getTime() - Date.now()
+  if (diffMs <= 0) return 'due'
+  const mins = Math.round(diffMs / 60_000)
+  if (mins < 1) return 'in <1m'
+  if (mins < 60) return `in ${mins}m`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `in ${hrs}h`
+  const days = Math.round(hrs / 24)
+  return `in ${days}d`
 }
 
 function formatDuration(ms: number | null): string {
   if (ms == null) return '-'
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s`
-}
-
-function scheduleLabel(cron: string | null): string {
-  if (!cron || cron === 'manual') return 'Manual'
-  return cron
 }
 
 function truncatedError(message: string): string {
@@ -197,7 +210,7 @@ export function JobsTab() {
           aria-checked={autoRefresh}
           aria-label="Auto-refresh"
           onClick={() => setAutoRefresh((v) => !v)}
-          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm"
+          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-muted/50"
         >
           <span className={cn('h-2 w-2 rounded-full', autoRefresh ? 'bg-emerald-500' : 'bg-slate-400')} />
           Auto-refresh
@@ -218,117 +231,145 @@ export function JobsTab() {
       ) : jobs.length === 0 ? (
         <div className="rounded-md border border-border p-4 text-sm text-muted-foreground">No scheduled jobs found.</div>
       ) : (
-        <table className="dataTable">
-          <thead>
-            <tr>
-              <th>Job</th>
-              <th>Schedule</th>
-              <th>Enabled</th>
-              <th>Last run</th>
-              <th>Status</th>
-              <th>Duration</th>
-              <th>Next run</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((j) => {
-              const isExpanded = Boolean(expanded[j.name])
-              const isRunning = Boolean(busy[j.name])
-              const status = jobStatus(j, isRunning)
-              return (
-                <Fragment key={j.name}>
-                  <tr key={j.name}>
-                    <td>
-                      <button
-                        type="button"
-                        aria-label={`${isExpanded ? 'Hide' : 'Show'} runs for ${j.name}`}
-                        onClick={() => void toggleExpanded(j)}
-                        className="inline-flex items-center gap-1 font-medium"
-                      >
-                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        {j.name}
-                      </button>
-                    </td>
-                    <td>{scheduleLabel(j.cron)}</td>
-                    <td>
-                      <button
-                        role="switch"
-                        aria-checked={j.enabled}
-                        aria-label={`${j.name} enabled`}
-                        disabled={isRunning}
-                        onClick={() => void toggleEnabled(j)}
-                      >
-                        {j.enabled ? 'on' : 'off'}
-                      </button>
-                    </td>
-                    <td>{formatRelative(j.lastRunAt)}</td>
-                    <td><StatusPill {...status} /></td>
-                    <td>{formatDuration(j.lastDurationMs)}</td>
-                    <td>{j.nextRunAt ? new Date(j.nextRunAt).toLocaleString() : '-'}</td>
-                    <td>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        aria-label={`Run now: ${j.name}`}
-                        title={isRunning ? 'Run already in progress.' : undefined}
-                        disabled={isRunning}
-                        onClick={() => void runNow(j)}
-                      >
-                        Run now
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={isRunning || (j.source.enabled === 'env' && j.source.cron === 'env')}
-                        onClick={() => void resetOverrides(j)}
-                      >
-                        Reset to env
-                      </Button>
-                    </td>
-                  </tr>
-                  {isExpanded ? (
-                    <tr key={`${j.name}-runs`}>
-                      <td colSpan={8}>
-                        {(runs[j.name] ?? []).length === 0 ? (
-                          <div className="py-3 text-sm text-muted-foreground">No runs recorded yet.</div>
+        <div className="overflow-hidden rounded-lg border border-border">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-muted/50 text-muted-foreground">
+              <tr>
+                <th className={TH}>Job</th>
+                <th className={TH}>Schedule</th>
+                <th className={TH}>Enabled</th>
+                <th className={TH}>Last run</th>
+                <th className={TH}>Next run</th>
+                <th className={cn(TH, 'text-right')}>Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {jobs.map((j) => {
+                const isExpanded = Boolean(expanded[j.name])
+                const isRunning = Boolean(busy[j.name])
+                const status = jobStatus(j, isRunning)
+                const hasCron = Boolean(j.cron) && j.cron !== 'manual'
+                const noOverrides = j.source.enabled === 'env' && j.source.cron === 'env'
+                return (
+                  <Fragment key={j.name}>
+                    <tr className="hover:bg-muted/30">
+                      <td className={TD}>
+                        <button
+                          type="button"
+                          aria-label={`${isExpanded ? 'Hide' : 'Show'} runs for ${j.name}`}
+                          onClick={() => void toggleExpanded(j)}
+                          className="inline-flex items-center gap-1 font-medium"
+                        >
+                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          {j.name}
+                        </button>
+                      </td>
+                      <td className={TD}>
+                        <span
+                          title={hasCron ? j.cron : undefined}
+                          className={cn(hasCron && 'cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-4')}
+                        >
+                          {describeCron(j.cron)}
+                        </span>
+                      </td>
+                      <td className={TD}>
+                        <button
+                          role="switch"
+                          aria-checked={j.enabled}
+                          aria-label={`${j.name} enabled`}
+                          disabled={isRunning}
+                          onClick={() => void toggleEnabled(j)}
+                          className={cn(
+                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50',
+                            j.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                          )}
+                        >
+                          {j.enabled ? 'on' : 'off'}
+                        </button>
+                      </td>
+                      <td className={TD}>
+                        <span className="inline-flex items-center gap-2">
+                          <StatusPill {...status} />
+                          <span className="text-muted-foreground">{formatRelative(j.lastRunAt)}</span>
+                        </span>
+                      </td>
+                      <td className={TD}>
+                        {j.nextRunAt ? (
+                          <span className="cursor-help text-muted-foreground" title={new Date(j.nextRunAt).toLocaleString()}>
+                            {formatRelativeFuture(j.nextRunAt)}
+                          </span>
                         ) : (
-                          <div className="py-2">
-                            <table className="dataTable">
-                              <thead>
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </td>
+                      <td className={cn(TD, 'text-right')}>
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            aria-label={`Run now: ${j.name}`}
+                            title={isRunning ? 'Run already in progress.' : undefined}
+                            disabled={isRunning}
+                            onClick={() => void runNow(j)}
+                          >
+                            Run now
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Reset ${j.name} to env`}
+                            title={noOverrides ? 'No overrides to reset.' : 'Reset to env default'}
+                            disabled={isRunning || noOverrides}
+                            onClick={() => void resetOverrides(j)}
+                          >
+                            <RotateCcw size={14} />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded ? (
+                      <tr>
+                        <td colSpan={6} className="bg-muted/20 px-3 py-2">
+                          {(runs[j.name] ?? []).length === 0 ? (
+                            <div className="py-1 text-sm text-muted-foreground">No runs recorded yet.</div>
+                          ) : (
+                            <table className="w-full text-xs">
+                              <thead className="text-muted-foreground">
                                 <tr>
-                                  <th>Started</th>
-                                  <th>Status</th>
-                                  <th>Duration</th>
-                                  <th>Error</th>
+                                  <th className="px-2 py-1 text-left font-medium">Started</th>
+                                  <th className="px-2 py-1 text-left font-medium">Status</th>
+                                  <th className="px-2 py-1 text-left font-medium">Duration</th>
+                                  <th className="px-2 py-1 text-left font-medium">Error</th>
                                 </tr>
                               </thead>
-                              <tbody>
+                              <tbody className="divide-y divide-border/60">
                                 {(runs[j.name] ?? []).map((run) => {
                                   const runPill = runStatus(run)
                                   return (
                                     <tr key={run.id}>
-                                      <td>{new Date(run.startedAt).toLocaleString()}</td>
-                                      <td><StatusPill {...runPill} /></td>
-                                      <td>{formatDuration(run.durationMs)}</td>
-                                      <td>{run.errorMessage ?? '-'}</td>
+                                      <td className="px-2 py-1" title={new Date(run.startedAt).toLocaleString()}>
+                                        {formatRelative(run.startedAt)}
+                                      </td>
+                                      <td className="px-2 py-1"><StatusPill {...runPill} /></td>
+                                      <td className="px-2 py-1">{formatDuration(run.durationMs)}</td>
+                                      <td className="px-2 py-1 text-muted-foreground">{run.errorMessage ?? '-'}</td>
                                     </tr>
                                   )
                                 })}
                               </tbody>
                             </table>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              )
-            })}
-          </tbody>
-        </table>
+                          )}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
