@@ -35,7 +35,18 @@ No new primitive. All four are fixes/refactors over existing code.
 
 **Problem:** three hand-rolled treatment `<select>`s exist: `frontend/src/pages/ReviewInboxPage.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/settings/tabs/CategoriesTab.tsx`.
 
-**Fix:** Replace each with `TaxTreatmentSelect` (built in P2), passing each call site's existing option set + value/onChange so behavior is unchanged (e.g. a site that currently excludes `none` passes `options` without it; CategoriesTab passes the full set). Update each site's tests if they assert on the select markup.
+**Snag (discovered during planning):** the P2 `TaxTreatmentSelect` has a *disabled* placeholder and fires `onChange` only for non-empty values (correct for the Classify queue). But the 3 existing selects need a *selectable* empty option that fires onChange: ReviewInbox "Keep current", TransactionsPage "Use category default", CategoriesTab a full list (incl `none`). So a clean swap isn't possible.
+
+**Fix (generalize, per Connor):** Extend `TaxTreatmentSelect`:
+- `onChange: (next: TaxTreatment | null) => void` (now allows `null`).
+- new optional `emptyLabel?: string`: when provided, the empty `<option value="">` is **selectable** (not disabled) with that label, and selecting it fires `onChange(null)`. When absent, keep today's disabled `placeholder` behavior. Unified handler: `onChange(value === '' ? null : value as TaxTreatment)`.
+
+Update the one existing consumer `ClassifyRow` so its handler accepts `TaxTreatment | null` (ignores `null`; it runs in placeholder mode so `null` never fires). Then refactor the 3 sites:
+- **CategoriesTab:** `options={[...TAX_TREATMENTS]}`, `value={cat.taxTreatment}`, no `emptyLabel`; onChange guards non-null → `setTreatment`.
+- **ReviewInboxPage:** `options={TAX_TREATMENTS.filter(t=>t!=='none')}`, `value={taxTreatment || null}`, `emptyLabel="Keep current"`, `onChange={(t)=>setTaxTreatment(t ?? '')}`.
+- **TransactionsPage:** same as ReviewInbox but `emptyLabel="Use category default"`, writing `taxOverride`.
+
+Update `TaxTreatmentSelect.test.tsx` (add an `emptyLabel`-selectable → `onChange(null)` case) and any site tests that assert on the old `NativeSelect` markup.
 
 ### 4. Queue N+1 → batched lookup
 
