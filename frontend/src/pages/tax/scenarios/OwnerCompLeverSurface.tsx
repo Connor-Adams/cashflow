@@ -36,6 +36,7 @@ import {
   type PersonalScenarioComputeEntry,
 } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from '../util/format';
+import { StatCard } from '@/components/ui/stat-card';
 
 const FIELDS = [
   { key: 'salary', label: 'Salary' },
@@ -382,15 +383,13 @@ function IntegratedSummaryReady({
       <h4 className="mb-3 font-medium">Integrated summary</h4>
 
       <div className="mb-4">
-        <h5 className="text-sm font-semibold">Corp side</h5>
-        <table className="w-full text-sm">
-          <tbody>
-            <SummaryRow label="T2 federal tax" value={fmtCurrency(corpFederal)} />
-            <SummaryRow label="T2 provincial tax" value={fmtCurrency(corpProvincial)} />
-            <SummaryRow label="Dividend refund" value={fmtCurrency(corpDividendRefund)} />
-            <SummaryRow label="Net corp tax payable" value={fmtCurrency(corpNetTax)} strong />
-          </tbody>
-        </table>
+        <h5 className="mb-2 text-sm font-semibold">Corp side</h5>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="T2 federal tax" value={fmtCurrency(corpFederal)} />
+          <StatCard label="T2 provincial tax" value={fmtCurrency(corpProvincial)} />
+          <StatCard label="Dividend refund" value={fmtCurrency(corpDividendRefund)} />
+          <StatCard label="Net corp tax payable" value={fmtCurrency(corpNetTax)} />
+        </div>
       </div>
 
       <div className="mb-4">
@@ -407,15 +406,13 @@ function IntegratedSummaryReady({
       </div>
 
       <div>
-        <h5 className="text-sm font-semibold">Integration</h5>
-        <table className="w-full text-sm">
-          <tbody>
-            <SummaryRow label="Total routed to shareholders" value={fmtCurrency(totalRouted)} />
-            <SummaryRow label="Total tax (corp + personal)" value={fmtCurrency(totalTax)} />
-            <SummaryRow label="Total take-home" value={fmtCurrency(takeHome)} strong />
-            <SummaryRow label="Integrated tax rate" value={fmtPct(integratedRate)} strong />
-          </tbody>
-        </table>
+        <h5 className="mb-2 text-sm font-semibold">Integration</h5>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="Total routed to shareholders" value={fmtCurrency(totalRouted)} />
+          <StatCard label="Total tax (corp + personal)" value={fmtCurrency(totalTax)} />
+          <StatCard label="Total take-home" value={fmtCurrency(takeHome)} />
+          <StatCard label="Integrated tax rate" value={fmtPct(integratedRate)} />
+        </div>
       </div>
     </section>
   );
@@ -497,21 +494,6 @@ function PersonalSideRow({ id, additions, personal }: PersonalSideRowProps) {
       <td className="py-1 pr-2">{fmtCurrency(provTax)}</td>
       <td className="py-1 pr-2">{fmtCurrency(cpp)}</td>
       <td className="py-1 pr-2 font-medium">{fmtCurrency(netToShareholder)}</td>
-    </tr>
-  );
-}
-
-interface SummaryRowProps {
-  label: string;
-  value: string;
-  strong?: boolean;
-}
-
-function SummaryRow({ label, value, strong }: SummaryRowProps) {
-  return (
-    <tr>
-      <td className="py-1 pr-4 text-gray-600">{label}</td>
-      <td className={`py-1 ${strong ? 'font-semibold' : ''}`}>{value}</td>
     </tr>
   );
 }
