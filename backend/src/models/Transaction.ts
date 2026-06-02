@@ -435,5 +435,39 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       delete opts._pendingRevisionDiff;
     }
   });
+
+  /**
+   * Inherit entity_id from the owning account when not explicitly set. The tax
+   * engine keys income off transactions.entity_id (buildPersonalFacts /
+   * buildCorpFacts use `where entityId=...`), so a NULL-entity transaction is
+   * silently dropped from T1/T2 even when its account is correctly tagged.
+   * Mirroring the account's entity at insert time keeps the invariant
+   * (a txn's entity == its account's entity) without a DB trigger. Lazy import
+   * of Account dodges init-order coupling.
+   */
+  const inheritEntityFromAccount = async (
+    instance: Transaction,
+    options: { transaction?: import('sequelize').Transaction },
+  ): Promise<void> => {
+    if (instance.entityId != null || instance.accountId == null) return;
+    const { Account } = await import('./Account');
+    const account = await Account.findByPk(instance.accountId, {
+      attributes: ['id', 'entityId'],
+      transaction: options.transaction,
+    });
+    if (account?.entityId != null) {
+      instance.entityId = account.entityId;
+    }
+  };
+  Transaction.addHook('beforeCreate', inheritEntityFromAccount);
+  Transaction.addHook('beforeBulkCreate', async (instances, options) => {
+    for (const instance of instances) {
+      await inheritEntityFromAccount(
+        instance,
+        options as { transaction?: import('sequelize').Transaction },
+      );
+    }
+  });
+
   return Transaction;
 }
