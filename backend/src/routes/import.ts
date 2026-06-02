@@ -80,11 +80,12 @@ const bundleUpload = multer({
   },
 });
 
-// PDF bundle drop (RBC, CIBC, Questrade). PDF-only, mirrors Wealthsimple
-// bundle limits (20 files, 15 MB each — matches statementUpload).
+// PDF bundle drop (RBC, CIBC, Questrade, Wealthsimple). PDF-only; 120-file
+// limit matches the Wealthsimple CSV bundle so a multi-year, multi-account
+// statement archive imports in one (or few) batches.
 const pdfBundleUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 20 },
+  limits: { fileSize: 15 * 1024 * 1024, files: 120 },
   fileFilter: (_req, file, cb) => {
     if (!file.originalname.toLowerCase().endsWith('.pdf')) {
       const e = new Error('Only .pdf files are allowed') as Error & { status?: number };
@@ -586,7 +587,7 @@ const pdfBundleHandler = async (req: Request, res: Response, next: NextFunction)
 };
 
 const pdfBundleMulter = (req: Request, res: Response, next: NextFunction) => {
-  pdfBundleUpload.array('files', 20)(req as never, res as never, (err: unknown) => {
+  pdfBundleUpload.array('files', 120)(req as never, res as never, (err: unknown) => {
     if (err) {
       next(err);
       return;

@@ -39,7 +39,7 @@ export function ImportPage() {
     <div className="page">
       <PageHeader
         title="Import"
-        description="Drop CSVs, OFX exports, Wealthsimple bundles, or PDF bundles (RBC, CIBC, Questrade)."
+        description="Drop CSVs, OFX exports, Wealthsimple bundles, or PDF bundles (RBC, CIBC, Questrade, Wealthsimple)."
         actions={<Button onClick={() => setModalOpen(true)}>Import statements</Button>}
       />
       {accountsError && (
