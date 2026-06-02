@@ -263,3 +263,106 @@ test('transaction taxTreatmentOverride wins over the category default', async ()
   assert.equal(facts.donations.length, 1, 'override beats category default');
   assert.equal(facts.donations[0].cadAmount.toFixed(2), '500.00');
 });
+
+test('investment income earned inside a registered account is excluded from personal T1 facts', async () => {
+  // Registered accounts (TFSA tax-free; RRSP/RRIF/FHSA taxed on withdrawal, not
+  // on in-account earnings) must NOT contribute interest/dividend income to the
+  // taxable T1. Only taxable accounts (non_registered / n_a) feed investment income.
+  const household = await Household.create({ name: 'Registered Exclusion' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const tfsa = await Account.create({
+    name: 'TFSA', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'registered_tfsa', defaultCurrency: 'CAD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'VFV', name: 'Vanguard SP500', currency: 'CAD', householdId: household.id,
+    dividendEligibility: 'eligible',
+  } as never);
+
+  await InvestmentActivity.create({
+    accountId: tfsa.id, securityId: null, activityType: 'interest',
+    tradeDate: '2025-03-01', quantity: null, amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'TFSA interest', sourceRowFingerprint: 'fp-reg-int-001', importBatch: 'seed-reg',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: tfsa.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2025-04-01', quantity: null, amount: '500.0000', currency: 'CAD', fees: null,
+    description: 'TFSA dividend', sourceRowFingerprint: 'fp-reg-div-001', importBatch: 'seed-reg',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.interestIncome.length, 0, 'registered (TFSA) interest is not taxable T1 income');
+  assert.equal(facts.eligibleDividends.length, 0, 'registered (TFSA) dividends are not taxable T1 income');
+  assert.equal(facts.nonEligibleDividends.length, 0, 'registered (TFSA) dividends are not taxable T1 income');
+});
+
+test('investment income earned inside a non-registered account is included', async () => {
+  // Mirror of the registered-exclusion test: a taxable account must still feed
+  // interest and dividend income — the fix restricts to taxable accounts, it
+  // must not drop them.
+  const household = await Household.create({ name: 'Non-Registered Inclusion' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const taxable = await Account.create({
+    name: 'Margin', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'VFV', name: 'Vanguard SP500', currency: 'CAD', householdId: household.id,
+    dividendEligibility: 'eligible',
+  } as never);
+
+  await InvestmentActivity.create({
+    accountId: taxable.id, securityId: null, activityType: 'interest',
+    tradeDate: '2025-03-01', quantity: null, amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'taxable interest', sourceRowFingerprint: 'fp-non-int-001', importBatch: 'seed-non',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: taxable.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2025-04-01', quantity: null, amount: '500.0000', currency: 'CAD', fees: null,
+    description: 'taxable dividend', sourceRowFingerprint: 'fp-non-div-001', importBatch: 'seed-non',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.interestIncome.length, 1, 'non-registered interest is taxable T1 income');
+  assert.equal(facts.interestIncome[0].cadAmount.toFixed(2), '1000.00');
+  assert.equal(facts.eligibleDividends.length, 1, 'non-registered dividend is taxable T1 income');
+  assert.equal(facts.eligibleDividends[0].cadAmount.toFixed(2), '500.00');
+});
+
+test('a sell inside a registered account produces no capital gain events', async () => {
+  // Dispositions inside registered accounts (RRSP/TFSA/etc.) are not taxable
+  // capital gains, so the ACB/cap-gains feed must exclude them.
+  const household = await Household.create({ name: 'Registered Cap Gain' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const rrsp = await Account.create({
+    name: 'RRSP', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'registered_rrsp', defaultCurrency: 'CAD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'XEQT', name: 'iShares All-Equity', currency: 'CAD', householdId: household.id,
+    dividendEligibility: 'eligible',
+  } as never);
+
+  await InvestmentActivity.create({
+    accountId: rrsp.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-01-10', quantity: '100', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'RRSP buy', sourceRowFingerprint: 'fp-reg-buy-001', importBatch: 'seed-reg-cg',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: rrsp.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-06-10', quantity: '100', amount: '1500.0000', currency: 'CAD', fees: null,
+    description: 'RRSP sell', sourceRowFingerprint: 'fp-reg-sell-001', importBatch: 'seed-reg-cg',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.capitalGainEvents.length, 0, 'registered-account disposition is not a taxable capital gain');
+});

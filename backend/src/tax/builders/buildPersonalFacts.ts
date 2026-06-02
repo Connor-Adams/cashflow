@@ -33,8 +33,17 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
 
-  const accounts = await Account.findAll({ where: { entityId } });
-  const accountIds = accounts.map((a) => a.id);
+  // Only taxable accounts feed the personal T1. Investment income and capital
+  // gains earned INSIDE registered accounts (TFSA is tax-free; RRSP/RRIF/FHSA are
+  // taxed on withdrawal, not on in-account earnings) must never land on the
+  // taxable return. Allowlist the taxable statuses so any future registered type
+  // stays excluded by default. Transaction-based income (employment, self-
+  // employment, donations, RRSP/FHSA contributions) is keyed off entityId below
+  // and is intentionally unaffected.
+  const taxableAccounts = await Account.findAll({
+    where: { entityId, taxStatus: { [Op.in]: ['non_registered', 'n_a'] } },
+  });
+  const accountIds = taxableAccounts.map((a) => a.id);
 
   const householdCategories = await Category.findAll({ where: { householdId: entity.householdId } });
   const catTreatment = new Map(householdCategories.map((c) => [c.name, c.taxTreatment]));
