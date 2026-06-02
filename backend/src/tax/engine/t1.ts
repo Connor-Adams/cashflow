@@ -214,7 +214,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   push('L42802', 'Ontario Health Premium', ohp);
 
   // Totals
-  const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, cppEmployee, eiEmployee, oasRepayment]);
+  const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, oasRepayment]);
   push('L43500', 'Total payable', totalPayable);
 
   // Tax deducted at source: sum T4 box 22 across all T4 slips.
