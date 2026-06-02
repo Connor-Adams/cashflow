@@ -780,19 +780,29 @@ export async function parseStatementFile(opts: {
     }));
     const holdings: NormalizedHoldingSnapshot[] = (out.holdings ?? []).map((h) => ({
       ...h,
-      sourceRowFingerprint: stableFingerprint({
-        kind: 'holding',
-        accountId: account.id,
-        statementDate: h.statementDate,
-        symbol: h.security.symbol,
-        quantity: h.quantity,
-        marketValue: h.marketValue,
-      }),
+      sourceRowFingerprint:
+        parser.holdingFingerprint === 'ws_holding'
+          ? stableFingerprint({
+              kind: 'ws_holding',
+              accountId: account.id,
+              statementDate: h.statementDate,
+              symbol: h.security.symbol.toUpperCase(),
+              currency: h.currency,
+            })
+          : stableFingerprint({
+              kind: 'holding',
+              accountId: account.id,
+              statementDate: h.statementDate,
+              symbol: h.security.symbol,
+              quantity: h.quantity,
+              marketValue: h.marketValue,
+            }),
     }));
     const preview = {
       ...base,
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
+      ...(parser.crossSourceDedup ? { crossSourceDedup: parser.crossSourceDedup } : {}),
       transactions,
       investmentActivities,
       holdings,
