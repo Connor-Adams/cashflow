@@ -8,7 +8,7 @@ import {
   CreationOptional,
 } from 'sequelize';
 import { logger } from '../observability/logger';
-import { TRANSACTION_STATUSES, type TransactionStatus } from '../transactions/types';
+import { TRANSACTION_STATUSES, type TransactionStatus, type TaxTreatment } from '../transactions/types';
 
 export class Transaction extends Model<
   InferAttributes<Transaction>,
@@ -44,7 +44,7 @@ export class Transaction extends Model<
   declare transferPurpose: string | null;
   declare transferLinkedAt: Date | null;
   /** Per-transfer tax treatment (#income-queue). One of TAX_TREATMENTS or null. */
-  declare taxTreatment: string | null;
+  declare taxTreatment: TaxTreatment | null;
   declare isRecurring: CreationOptional<boolean>;
 
   declare autoCategory: string | null;
@@ -325,7 +325,7 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
         allowNull: true,
       },
       taxTreatment: {
-        type: DataTypes.STRING(24),
+        type: DataTypes.STRING(32),
         field: 'tax_treatment',
         allowNull: true,
       },
