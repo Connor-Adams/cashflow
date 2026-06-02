@@ -43,6 +43,8 @@ export class Transaction extends Model<
   declare linkedTransactionId: number | null;
   declare transferPurpose: string | null;
   declare transferLinkedAt: Date | null;
+  /** Per-transfer tax treatment (#income-queue). One of TAX_TREATMENTS or null. */
+  declare taxTreatment: string | null;
   declare isRecurring: CreationOptional<boolean>;
 
   declare autoCategory: string | null;
@@ -320,6 +322,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       transferLinkedAt: {
         type: DataTypes.DATE,
         field: 'transfer_linked_at',
+        allowNull: true,
+      },
+      taxTreatment: {
+        type: DataTypes.STRING(24),
+        field: 'tax_treatment',
         allowNull: true,
       },
       isRecurring: {
