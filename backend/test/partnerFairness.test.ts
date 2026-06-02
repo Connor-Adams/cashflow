@@ -114,24 +114,15 @@ test('topLargestShared: rows with partnerShare=0 excluded', () => {
 
 test('buildFairnessByCurrency: single shared purchase produces partner_owes_me balance', () => {
   const rows = [makeRow({ amount: -100, myShare: -50, partnerShare: -50 })];
-  // partnerShare sum = -50 → balance = -50 → I owe partner refund-style
-  // (negative because amount is negative). The headline direction depends
-  // on sign of partnerShareTotal aggregate.
   const result = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01');
   assert.equal(result.length, 1);
   const cad = result[0];
   assert.equal(cad.currency, 'CAD');
   assert.equal(cad.sharedTransactionCount, 1);
+  // partnerShare sum = -50 (a purchase I paid). balance = -partnerShareTotal = 50 → partner owes me.
   assert.equal(cad.partnerShareTotal, -50);
-  assert.equal(cad.balance, -50);
-  // Negative partnerShare means partner owes me (single-payer: I paid).
-  // Hmm — single-payer convention: positive partnerShare = partner owes me, negative = refund-on-shared = I owe partner.
-  // The partner's share of a $100 purchase paid by me is what partner owes me. In the schema, partnerShareAmount
-  // is signed the same as amount. So purchase amount=-100, partnerShareAmount=-50 means partner owes me 50 (the
-  // signed -50 reads as "partner is on the hook for 50 of my -100 spend"). The fairness `balance` is
-  // partnerShareTotal + settlementDelta; we use sign(rounded balance) to decide direction. partnerShareTotal=-50
-  // → balance=-50 → rounded < 0 → direction='i_owe_partner'. That's what the existing rawNetForRow does.
-  assert.equal(cad.direction, 'i_owe_partner');
+  assert.equal(cad.balance, 50);
+  assert.equal(cad.direction, 'partner_owes_me');
 });
 
 test('buildFairnessByCurrency: settlement i_paid_partner raises balance', () => {
@@ -141,8 +132,8 @@ test('buildFairnessByCurrency: settlement i_paid_partner raises balance', () => 
   ];
   const result = buildFairnessByCurrency(rows, settlements, '2026-05-01', '2026-06-01');
   const cad = result[0];
-  // balance = partnerShareTotal(-50) + (iPaid 80 - partnerPaid 0) = 30
-  assert.equal(cad.balance, 30);
+  // balance = -partnerShareTotal(-50) + (iPaid 80 - partnerPaid 0) = 50 + 80 = 130
+  assert.equal(cad.balance, 130);
   assert.equal(cad.direction, 'partner_owes_me');
 });
 
@@ -244,8 +235,8 @@ test('buildFairnessMonthly: cumulativeBalance accumulates per currency in chrono
   const result = buildFairnessMonthly(rows, []);
   const apr = result.find((p) => p.month === '2026-04')!;
   const may = result.find((p) => p.month === '2026-05')!;
-  assert.equal(apr.cumulativeBalance, -50);
-  assert.equal(may.cumulativeBalance, -150);
+  assert.equal(apr.cumulativeBalance, 50);
+  assert.equal(may.cumulativeBalance, 150);
 });
 
 test('buildFairnessMonthly: settlements modify cumulativeBalance', () => {
@@ -255,11 +246,11 @@ test('buildFairnessMonthly: settlements modify cumulativeBalance', () => {
   ];
   const result = buildFairnessMonthly(rows, settlements);
   const apr = result.find((p) => p.month === '2026-04')!;
-  assert.equal(apr.cumulativeBalance, -50);
+  assert.equal(apr.cumulativeBalance, 50);
   const may = result.find((p) => p.month === '2026-05')!;
   assert.equal(may.settlementDelta, 70);
   assert.equal(may.netDelta, 70);
-  assert.equal(may.cumulativeBalance, 20);
+  assert.equal(may.cumulativeBalance, 120);
 });
 
 test('buildFairnessMonthly: multi-currency cumulatives independent per currency', () => {
@@ -272,9 +263,9 @@ test('buildFairnessMonthly: multi-currency cumulatives independent per currency'
   const cadApr = result.find((p) => p.currency === 'CAD' && p.month === '2026-04')!;
   const cadMay = result.find((p) => p.currency === 'CAD' && p.month === '2026-05')!;
   const usdApr = result.find((p) => p.currency === 'USD' && p.month === '2026-04')!;
-  assert.equal(cadApr.cumulativeBalance, -50);
-  assert.equal(cadMay.cumulativeBalance, -150);
-  assert.equal(usdApr.cumulativeBalance, -40);
+  assert.equal(cadApr.cumulativeBalance, 50);
+  assert.equal(cadMay.cumulativeBalance, 150);
+  assert.equal(usdApr.cumulativeBalance, 40);
 });
 
 test('buildFairnessMonthly: rows with partnerShare=0 ignored', () => {
@@ -460,8 +451,8 @@ test('buildFairnessByCurrency: excludeNonPartnerInflows drops non-partner inflow
   // Inflow split is reported on the unfiltered input regardless of the toggle.
   assert.equal(cad.partnerInflows, 500);
   assert.equal(cad.nonPartnerInflows, 30);
-  // Balance reflects the cleaned set: 150 + 0 settlements = 150.
-  assert.equal(cad.balance, 150);
+  // Balance reflects the cleaned set: -partnerShareTotal(150) + 0 settlements = -150.
+  assert.equal(cad.balance, -150);
 });
 
 test('buildFairnessByCurrency: excludeNonPartnerInflows=false preserves legacy behavior', () => {
@@ -544,11 +535,11 @@ test('buildFairnessMonthly: excludeNonPartnerInflows drops non-partner rows from
   assert.ok(apr);
   // April partnerShare = 250 only (15 dropped).
   assert.equal(apr.partnerShare, 250);
-  assert.equal(apr.cumulativeBalance, 250);
+  assert.equal(apr.cumulativeBalance, -250);
   const may = result.find((p) => p.month === '2026-05')!;
   assert.ok(may);
   assert.equal(may.partnerShare, -50);
-  assert.equal(may.cumulativeBalance, 200);
+  assert.equal(may.cumulativeBalance, -200);
 });
 
 test('buildFairnessByCurrency: refunds (negative-amount rows) are unaffected by the toggle', () => {
