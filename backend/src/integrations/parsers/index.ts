@@ -10,6 +10,7 @@ import type { ExtractedReceiptOrder } from '../../ai/extractReceiptItems';
 import { parseAppleReceipt } from './apple';
 import { parseGoogleReceipt } from './google';
 import { parseAmazonReceiptEmail } from './amazon';
+import { parseUberRide } from './uber';
 
 export interface ParserContext {
   fromAddress: string | null;
@@ -45,6 +46,13 @@ export function tryDeterministicParse(ctx: ParserContext): DeterministicParseRes
     const order = parseAmazonReceiptEmail(ctx.body);
     if (order) return { ok: true, parser: 'amazon', order };
     return { ok: false, reason: 'amazon_parser_no_match' };
+  }
+
+  // Uber (rides only; Eats falls through to AI item extraction)
+  if (/@?uber\.com/.test(from)) {
+    const order = parseUberRide(ctx.body);
+    if (order) return { ok: true, parser: 'uber', order };
+    return { ok: false, reason: 'uber_parser_no_match' };
   }
 
   return { ok: false, reason: 'no_vendor_parser' };
