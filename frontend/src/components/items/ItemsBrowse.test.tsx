@@ -63,7 +63,7 @@ beforeEach(() => {
 })
 
 describe('ItemsBrowse', () => {
-  it('renders grouped by receipt with group headers', async () => {
+  it('renders grouped by purchase with group headers', async () => {
     render(<ItemsBrowse filters={{}} onOpenItem={() => {}} />)
     await waitFor(() => expect(screen.getByText(/amazon/i)).toBeInTheDocument())
     expect(screen.getByText(/^3 items$/)).toBeInTheDocument()
