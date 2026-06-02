@@ -91,6 +91,7 @@ describe('reviewInbox helpers', () => {
         category: 'Transport',
         business: 'false',
         splitType: 'shared',
+        taxTreatment: '',
         markReviewed: true,
       })
     ).toEqual({
@@ -99,5 +100,29 @@ describe('reviewInbox helpers', () => {
       splitOverride: 'shared',
       reviewFlag: false,
     })
+  })
+
+  it('includes taxTreatmentOverride when a tax treatment is selected', () => {
+    expect(
+      buildReviewBulkPatch({
+        category: '',
+        business: '',
+        splitType: '',
+        taxTreatment: 'donations',
+        markReviewed: false,
+      })
+    ).toEqual({ taxTreatmentOverride: 'donations' })
+  })
+
+  it('omits taxTreatmentOverride when tax treatment is empty (keep current)', () => {
+    expect(
+      buildReviewBulkPatch({
+        category: 'Transport',
+        business: '',
+        splitType: '',
+        taxTreatment: '',
+        markReviewed: false,
+      })
+    ).toEqual({ categoryOverride: 'Transport' })
   })
 })
