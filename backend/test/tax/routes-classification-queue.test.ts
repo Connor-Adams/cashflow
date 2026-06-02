@@ -222,7 +222,7 @@ test('GET /api/tax/classification-queue returns 404 for unknown entity', async (
 
 test('GET /api/tax/classification-queue returns 404 when querying another household entity', async () => {
   const models = await import('../../src/models/index.js');
-  const { hashPassword, hashToken } = await import('../../src/auth/password.js');
+  const { hashPassword } = await import('../../src/auth/password.js');
   const ts = Date.now();
 
   // Seed a second household with its own personal entity
