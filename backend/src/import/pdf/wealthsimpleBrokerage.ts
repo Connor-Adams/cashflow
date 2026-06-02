@@ -1,4 +1,5 @@
 import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
+import type { NormalizedHoldingSnapshot } from '../statementTypes';
 
 /**
  * Wealthsimple brokerage Account Statement parser — handles all Wealthsimple
@@ -81,6 +82,105 @@ export function parseWsBrokerageHeader(lines: PdfLine[]): PdfStatementHeader {
   };
 }
 
+type Holding = Omit<NormalizedHoldingSnapshot, 'sourceRowFingerprint'>;
+
+const TICKER_RE = /^[A-Z][A-Z0-9.]{0,9}$/;
+// A money cell: optional $, optional leading -, digits w/ commas, optional
+// decimals, optional trailing " CAD"/" USD".
+const MONEY_CELL_RE = /^\$?-?[\d,]+(?:\.\d+)?(?:\s*(?:CAD|USD))?$/;
+
+/** Strip $, commas, currency suffix, spaces → Number. */
+function num(s: string): number {
+  return Number(s.replace(/[$,]/g, '').replace(/\s*(?:CAD|USD)\s*$/i, '').trim());
+}
+
+/** Currency suffix on a money cell, e.g. "$27.08 USD" → "USD"; else null. */
+function cellCurrency(cell: string): string | null {
+  const m = /\b(CAD|USD)\b/.exec(cell);
+  return m ? m[1] : null;
+}
+
+function tokenize(text: string): string[] {
+  return text
+    .trim()
+    .split(/\s{2,}/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Parse the "Portfolio Equities" table. RIGHT-anchored: the table's
+ * quantity-column count varies (3 for self-directed, 2 for managed), so the
+ * last three cells (price, market value, book cost) are read from the end and
+ * the first numeric column is the total quantity.
+ */
+function parseHoldings(
+  lines: PdfLine[],
+  statementDate: string,
+  accountCurrency: string,
+): Holding[] {
+  const out: Holding[] = [];
+  const STOP_RE = /^Activity\b|Current period|Stock Lending|STATEMENT NOTES/i;
+  let currency = accountCurrency;
+  let inHoldings = false;
+
+  for (const l of lines) {
+    const t = l.text.trim();
+    if (/^Portfolio Equities/i.test(t)) {
+      inHoldings = true;
+      continue;
+    }
+    if (!inHoldings) continue;
+    if (STOP_RE.test(t)) break;
+
+    // Section-currency tracking.
+    if (/^(US|United States)\s+Equities/i.test(t)) {
+      currency = 'USD';
+      continue;
+    }
+    if (/^Canadian\s+Equities/i.test(t)) {
+      currency = 'CAD';
+      continue;
+    }
+    // Header / footer / section-name noise — skip explicitly (they also fail
+    // the ticker+3-money test below, but skipping early is cheaper + clearer).
+    if (/^Total\b/i.test(t) || /^Symbol\b/i.test(t)) continue;
+
+    const cols = tokenize(t);
+    if (cols.length < 6) continue;
+    if (!TICKER_RE.test(cols[1])) continue;
+    const last = cols.length - 1;
+    const priceCell = cols[last - 2];
+    if (
+      !MONEY_CELL_RE.test(priceCell) ||
+      !MONEY_CELL_RE.test(cols[last - 1]) ||
+      !MONEY_CELL_RE.test(cols[last])
+    ) {
+      continue;
+    }
+
+    const rowCurrency = cellCurrency(priceCell) ?? currency;
+    out.push({
+      statementDate,
+      security: {
+        symbol: cols[1],
+        name: cols[0],
+        assetType: null,
+        currency: rowCurrency,
+      },
+      quantity: num(cols[2]),
+      price: num(priceCell),
+      marketValue: num(cols[last - 1]),
+      costBasis: num(cols[last]),
+      unrealizedGainLoss: null,
+      currency: rowCurrency,
+      sourceReference: null,
+    });
+  }
+
+  return out;
+}
+
 export const wealthsimpleBrokerageParser: PdfParser = {
   id: 'wealthsimple_brokerage',
   label: 'Wealthsimple Brokerage Statement',
@@ -97,13 +197,18 @@ export const wealthsimpleBrokerageParser: PdfParser = {
     }
     return orderExec && ws && !questrade;
   },
-  // parse implemented in Tasks 7-8
+  // activities implemented in Task 8
   parse: (lines): PdfParseResult => {
     const header = parseWsBrokerageHeader(lines);
+    const holdings = parseHoldings(
+      lines,
+      header.periodEnd,
+      header.currency ?? 'CAD',
+    );
     return {
       transactions: [],
       investmentActivities: [],
-      holdings: [],
+      holdings,
       header,
       warnings: [],
       parseErrors: [],
