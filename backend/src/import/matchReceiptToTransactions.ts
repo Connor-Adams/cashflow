@@ -72,6 +72,8 @@ const VENDOR_MERCHANT_PATTERNS: Record<string, RegExp> = {
   apple: /\b(apple(?:\.com)?|itunes|app\s*store|apple\s*music|apple\s*tv|icloud)\b/i,
   google: /\b(google(?:\s*play)?|googlepay|youtube\s*premium)\b/i,
   costco: /\bcostco\b/i,
+  uber_eats: /\buber\s*\*?\s*eats\b/i,
+  uber: /\buber\b(?!\s*\*?\s*eats\b)/i,
 };
 
 export function txnMatchesVendor(vendor: string, txn: Transaction): boolean {
