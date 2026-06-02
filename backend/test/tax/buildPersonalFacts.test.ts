@@ -148,6 +148,44 @@ test.skip('per-security dividend eligibility routes to eligible or nonEligible',
   assert.equal(nonElSum.toFixed(2), '500.00', 'non_eligible dividend routes to nonEligibleDividends');
 });
 
+test('captures self-employment income/expenses from business-flagged transactions', async () => {
+  // Regression: buildPersonalFacts read (t as any).business, but the Transaction
+  // attribute is finalBusiness (column final_business). The wrong field name —
+  // hidden by an `as any` cast — meant business-flagged transactions never reached
+  // selfEmploymentIncome/selfEmploymentExpenses, silently dropping that income.
+  const household = await Household.create({ name: 'Self-Employment' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'Sole Prop', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Business', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+
+  // Business revenue (positive) and a business expense (negative), both flagged.
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-04-10', amount: '50000.0000', currency: 'CAD',
+    finalCategory: 'consulting', finalBusiness: true,
+    merchantRaw: 'CLIENT', merchantClean: 'CLIENT',
+    importBatch: 'seed-se', sourceRowFingerprint: 'fp-se-inc-001', sourceIdentityFingerprint: 'sif-se-inc-001',
+  } as never);
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-05-02', amount: '-8000.0000', currency: 'CAD',
+    finalCategory: 'supplies', finalBusiness: true,
+    merchantRaw: 'SUPPLIER', merchantClean: 'SUPPLIER',
+    importBatch: 'seed-se', sourceRowFingerprint: 'fp-se-exp-001', sourceIdentityFingerprint: 'sif-se-exp-001',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.selfEmploymentIncome.length, 1, 'business revenue captured');
+  assert.equal(facts.selfEmploymentIncome[0].cadAmount.toFixed(2), '50000.00');
+  assert.equal(facts.selfEmploymentExpenses.length, 1, 'business expense captured');
+  assert.equal(facts.selfEmploymentExpenses[0].cadAmount.toFixed(2), '8000.00');
+});
+
 test('tolerates an investment activity with a null amount (e.g. activityType "other")', async () => {
   // Regression: InvestmentActivity.amount is nullable. The income loop builds
   // D(a.amount) for EVERY activity row before branching on activityType, so a
