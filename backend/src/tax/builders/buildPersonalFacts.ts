@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import {
   Account,
   Carryforward,
+  Category,
   Entity,
   HouseholdMember,
   InvestmentActivity,
@@ -34,6 +35,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const accounts = await Account.findAll({ where: { entityId } });
   const accountIds = accounts.map((a) => a.id);
 
+  const householdCategories = await Category.findAll({ where: { householdId: entity.householdId } });
+  const catTreatment = new Map(householdCategories.map((c) => [c.name, c.taxTreatment]));
+
   const txns = await Transaction.findAll({
     where: {
       entityId,
@@ -55,13 +59,13 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
-    const cat = t.finalCategory ?? '';
-    if (cat === 'employment_income') employmentIncome.push(item);
-    else if (cat === 'donations') donations.push(item);
-    else if (cat === 'rrsp_contribution') {
+    const treatment = t.taxTreatmentOverride ?? catTreatment.get(t.finalCategory ?? '') ?? 'none';
+    if (treatment === 'employment_income') employmentIncome.push(item);
+    else if (treatment === 'donations') donations.push(item);
+    else if (treatment === 'rrsp_contribution') {
       rrspContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
     }
-    else if (cat === 'fhsa_contribution') {
+    else if (treatment === 'fhsa_contribution') {
       fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
     }
     else if (t.finalBusiness && cad.greaterThan(0)) selfEmploymentIncome.push(item);

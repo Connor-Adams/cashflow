@@ -160,6 +160,7 @@ export type Transaction = {
   autoBusiness: boolean | null
   businessOverride: boolean | null
   finalBusiness: boolean
+  taxTreatmentOverride: TaxTreatment | null
   autoSplitType: string | null
   splitOverride: string | null
   finalSplitType: string
@@ -452,11 +453,29 @@ export type Contact = {
   isPartner: boolean
 }
 
+export const TAX_TREATMENTS = [
+  'none',
+  'employment_income',
+  'donations',
+  'rrsp_contribution',
+  'fhsa_contribution',
+] as const
+
+export type TaxTreatment = (typeof TAX_TREATMENTS)[number]
+
+export function isTaxTreatment(value: unknown): value is TaxTreatment {
+  return (
+    typeof value === 'string' &&
+    (TAX_TREATMENTS as readonly string[]).includes(value)
+  )
+}
+
 export type Category = {
   id: number
   householdId: number
   name: string
   icon: string | null
+  taxTreatment: TaxTreatment
   createdAt: string
   updatedAt: string
 }
