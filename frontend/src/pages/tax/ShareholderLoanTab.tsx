@@ -3,6 +3,7 @@ import { useShareholderLoans, type ShareholderLoanKind, type ShareholderLoanDto 
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { fmtCurrency } from './util/format';
 import { StatCard } from '@/components/ui/stat-card';
+import { EmptyState } from '@/components/ui/empty-state';
 import {
   Table,
   TableHeader,
@@ -63,20 +64,28 @@ export function ShareholderLoanTab() {
     }
   }
 
+  if (!corpEntity && !entitiesError) {
+    return (
+      <div>
+        <h2>Shareholder Loans</h2>
+        <EmptyState
+          title="No corporation found"
+          description="Add a corporate entity to track shareholder loans."
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2>Shareholder Loans</h2>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+      <div className="mb-4 max-w-xs">
         <StatCard label="Loan balance" value={fmtCurrency(balance)} />
       </div>
 
       {(error ?? entitiesError) && (
         <p className="error">Error: {error ?? entitiesError}</p>
-      )}
-
-      {!corpEntity && !entitiesError && (
-        <p className="muted">No corp entity found. Create one via POST /api/tax/entities.</p>
       )}
 
       <section className="mb-6">

@@ -23,7 +23,7 @@ export function ReconciliationTab({ year }: { year: number }) {
     <div>
       <h2>Reconciliation — {year}</h2>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 max-w-md">
         <StatCard
           label="Engine warnings"
           value={String(engineWarnings.length)}

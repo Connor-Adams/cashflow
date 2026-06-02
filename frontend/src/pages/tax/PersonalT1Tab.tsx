@@ -20,6 +20,7 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
 import {
   Table,
   TableHeader,
@@ -38,9 +39,10 @@ export function PersonalT1Tab({ year }: { year: number }) {
   const personalEntity = entities.find((e) => e.kind === 'personal');
   if (!personalEntity) {
     return (
-      <p className="muted">
-        No personal entity for this household. Create one first (POST /api/tax/entities).
-      </p>
+      <EmptyState
+        title="No personal entity yet"
+        description="Add a personal entity for this household to start modelling your T1 return."
+      />
     );
   }
 

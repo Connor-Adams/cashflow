@@ -21,6 +21,7 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
 import {
   Table,
   TableHeader,
@@ -107,9 +108,10 @@ export function CorpT2Tab() {
         </p>
       </header>
       {!corpEntity ? (
-        <p className="muted">
-          No corp entity for this household. Create one first (POST /api/tax/entities with kind=corp).
-        </p>
+        <EmptyState
+          title="No corporation yet"
+          description="Add a corporate entity to model its T2 return."
+        />
       ) : yearInt === null ? (
         <p className="error">Fiscal year must start with a 4-digit year (e.g. 2024 or 2024-01-01/2024-12-31).</p>
       ) : (

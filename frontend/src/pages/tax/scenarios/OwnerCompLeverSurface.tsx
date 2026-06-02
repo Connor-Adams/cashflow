@@ -451,14 +451,14 @@ function PersonalSideTable({
   return (
     <Table className="w-full text-sm">
       <TableHeader>
-        <TableRow className="text-left text-xs text-gray-500">
+        <TableRow className="text-xs text-gray-500">
           <TableHead className="py-1 pr-2">Shareholder</TableHead>
-          <TableHead className="py-1 pr-2">Employment</TableHead>
-          <TableHead className="py-1 pr-2">Dividends</TableHead>
-          <TableHead className="py-1 pr-2">Fed tax</TableHead>
-          <TableHead className="py-1 pr-2">Prov tax</TableHead>
-          <TableHead className="py-1 pr-2">CPP</TableHead>
-          <TableHead className="py-1 pr-2">Net to shareholder</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Employment</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Dividends</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Fed tax</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Prov tax</TableHead>
+          <TableHead className="py-1 pr-2 text-right">CPP</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Net to shareholder</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
