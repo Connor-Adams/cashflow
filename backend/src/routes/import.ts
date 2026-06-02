@@ -19,8 +19,8 @@ import {
   previewRollback,
   RollbackBlockedError,
 } from '../import/rollbackImportBatch';
-import { Account, ImportHistory, PdfImportBatch, PdfImportItem } from '../models';
-import { saveVaultObject } from '../storage/vaultStorage';
+import { sequelize, Account, ImportHistory, PdfImportBatch, PdfImportItem } from '../models';
+import { saveVaultObject, deleteVaultObject } from '../storage/vaultStorage';
 import { runJobByName } from '../jobs/registry';
 import { importUploadLimiter } from './importRateLimit';
 import { aiSuggestLimiter } from './aiRateLimit';
@@ -538,29 +538,55 @@ const pdfBundleHandler = async (req: Request, res: Response, next: NextFunction)
       totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
     });
 
-    const batch = await PdfImportBatch.create({
-      id: randomUUID(), householdId: household.id, userId: user.id,
-      status: 'pending', total: files.length, processed: 0, succeeded: 0, failed: 0,
-    });
-    for (const file of files) {
-      const ext = path.extname(file.originalname || '') || '';
-      const safeExt = /^\.[a-zA-Z0-9]{1,8}$/.test(ext) ? ext : '.pdf';
-      const stored = `${randomUUID()}${safeExt}`;
-      const put = await saveVaultObject(stored, {
-        buffer: file.buffer, contentType: file.mimetype || 'application/pdf',
-        originalName: file.originalname || stored,
-      });
-      await PdfImportItem.create({
-        id: randomUUID(), batchId: batch.id,
-        fileName: path.basename(file.originalname || stored).replace(/[\\/]/g, ''),
-        storedFilename: put.storedFilename, storageKind: put.storageKind,
-        encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending',
-      });
+    // Phase 1: save all bytes to vault storage BEFORE touching the DB.
+    // If any save fails, clean up the already-saved ones and rethrow so
+    // next(e) handles it — no batch or item rows are created.
+    type SavedFile = { put: Awaited<ReturnType<typeof saveVaultObject>>; fileName: string };
+    const saved: SavedFile[] = [];
+    try {
+      for (const file of files) {
+        const ext = path.extname(file.originalname || '') || '';
+        const safeExt = /^\.[a-zA-Z0-9]{1,8}$/.test(ext) ? ext : '.pdf';
+        const stored = `${randomUUID()}${safeExt}`;
+        const put = await saveVaultObject(stored, {
+          buffer: file.buffer, contentType: file.mimetype || 'application/pdf',
+          originalName: file.originalname || stored,
+        });
+        saved.push({
+          put,
+          fileName: path.basename(file.originalname || stored).replace(/[\\/]/g, ''),
+        });
+      }
+    } catch (saveErr) {
+      // Best-effort cleanup of already-saved bytes, then rethrow.
+      await Promise.all(
+        saved.map(({ put }) => deleteVaultObject(put.storedFilename).catch(() => {}))
+      );
+      throw saveErr;
     }
 
-    // Kick the first chunk now (best-effort); the cron is the safety net.
-    void runJobByName('pdf_import_process').catch(() => {});
+    // Phase 2: create the batch + all items in a single DB transaction so
+    // either all rows land or none do. total is set from files.length which
+    // is known before the transaction, so it will always equal the item count.
+    const batch = await sequelize.transaction(async (t) => {
+      const b = await PdfImportBatch.create({
+        id: randomUUID(), householdId: household.id, userId: user.id,
+        status: 'pending', total: files.length, processed: 0, succeeded: 0, failed: 0,
+      }, { transaction: t });
+      for (const { put, fileName } of saved) {
+        await PdfImportItem.create({
+          id: randomUUID(), batchId: b.id,
+          fileName,
+          storedFilename: put.storedFilename, storageKind: put.storageKind,
+          encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending',
+        }, { transaction: t });
+      }
+      return b;
+    });
 
+    // Phase 3: kick the processor and respond.
+    void runJobByName('pdf_import_process').catch(() => {});
+    logImportEvent('pdf_bundle_queued', { batchId: batch.id, total: files.length });
     res.status(201).json({ batchId: batch.id, total: files.length });
   } catch (e) {
     next(e);
