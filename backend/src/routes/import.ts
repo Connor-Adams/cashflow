@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
@@ -7,9 +9,7 @@ import {
   importCsvFile,
   importWsBundleFile,
   importWsHoldingsFile,
-  importPdfBundleFile,
   type BundleFileResult,
-  type PdfBundleFileResult,
 } from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
@@ -19,7 +19,9 @@ import {
   previewRollback,
   RollbackBlockedError,
 } from '../import/rollbackImportBatch';
-import { Account, ImportHistory } from '../models';
+import { Account, ImportHistory, PdfImportBatch, PdfImportItem } from '../models';
+import { saveVaultObject } from '../storage/vaultStorage';
+import { runJobByName } from '../jobs/registry';
 import { importUploadLimiter } from './importRateLimit';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { currentAuth } from '../auth/middleware';
@@ -80,12 +82,12 @@ const bundleUpload = multer({
   },
 });
 
-// PDF bundle drop (RBC, CIBC, Questrade, Wealthsimple). PDF-only; 120-file
-// limit matches the Wealthsimple CSV bundle so a multi-year, multi-account
-// statement archive imports in one (or few) batches.
+// PDF bundle drop (RBC, CIBC, Questrade, Wealthsimple). PDF-only; 200-file
+// limit supports multi-year, multi-account statement archives; bytes are
+// saved to vault storage (S3/disk) before responding — no parse-in-request.
 const pdfBundleUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 120 },
+  limits: { fileSize: 15 * 1024 * 1024, files: 200 },
   fileFilter: (_req, file, cb) => {
     if (!file.originalname.toLowerCase().endsWith('.pdf')) {
       const e = new Error('Only .pdf files are allowed') as Error & { status?: number };
@@ -536,58 +538,37 @@ const pdfBundleHandler = async (req: Request, res: Response, next: NextFunction)
       totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
     });
 
-    const results: PdfBundleFileResult[] = [];
+    const batch = await PdfImportBatch.create({
+      id: randomUUID(), householdId: household.id, userId: user.id,
+      status: 'pending', total: files.length, processed: 0, succeeded: 0, failed: 0,
+    });
     for (const file of files) {
-      try {
-        const result = await importPdfBundleFile({
-          buffer: file.buffer,
-          fileName: file.originalname,
-          householdId: household.id,
-          userId: user.id,
-        });
-        results.push(result);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logImportEvent('pdf_bundle_file_failed', {
-          file: file.originalname,
-          error: message,
-        });
-        results.push({
-          file: file.originalname,
-          accountSuffix: null,
-          productLabel: null,
-          accountId: null,
-          accountName: null,
-          accountCreated: false,
-          inserted: 0,
-          insertedTransactions: 0,
-          insertedInvestmentActivities: 0,
-          insertedHoldings: 0,
-          skippedDuplicates: 0,
-          rowErrors: 0,
-          parseErrors: [],
-          warnings: [],
-          error: message,
-        });
-      }
+      const ext = path.extname(file.originalname || '') || '';
+      const safeExt = /^\.[a-zA-Z0-9]{1,8}$/.test(ext) ? ext : '.pdf';
+      const stored = `${randomUUID()}${safeExt}`;
+      const put = await saveVaultObject(stored, {
+        buffer: file.buffer, contentType: file.mimetype || 'application/pdf',
+        originalName: file.originalname || stored,
+      });
+      await PdfImportItem.create({
+        id: randomUUID(), batchId: batch.id,
+        fileName: path.basename(file.originalname || stored).replace(/[\\/]/g, ''),
+        storedFilename: put.storedFilename, storageKind: put.storageKind,
+        encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending',
+      });
     }
 
-    const accountsCreated = results.filter((r) => r.accountCreated).length;
-    const filesImported = results.filter((r) => !r.error).length;
-    logImportEvent('pdf_bundle_completed', {
-      fileCount: files.length,
-      filesImported,
-      accountsCreated,
-    });
+    // Kick the first chunk now (best-effort); the cron is the safety net.
+    void runJobByName('pdf_import_process').catch(() => {});
 
-    res.json({ results });
+    res.status(201).json({ batchId: batch.id, total: files.length });
   } catch (e) {
     next(e);
   }
 };
 
 const pdfBundleMulter = (req: Request, res: Response, next: NextFunction) => {
-  pdfBundleUpload.array('files', 120)(req as never, res as never, (err: unknown) => {
+  pdfBundleUpload.array('files', 200)(req as never, res as never, (err: unknown) => {
     if (err) {
       next(err);
       return;
