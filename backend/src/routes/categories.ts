@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Category } from '../models';
 import { householdWhere } from '../auth/scope';
-import { isCategoryIconName } from '@cashflow/shared';
+import { isCategoryIconName, isTaxTreatment } from '@cashflow/shared';
 
 const router = Router();
 
@@ -26,17 +26,28 @@ router.patch('/:id', async (req, res, next) => {
       return;
     }
     const b = (req.body || {}) as Record<string, unknown>;
-    if (!('icon' in b)) {
-      res.status(400).json({ error: 'icon field required' });
+    const hasIcon = 'icon' in b;
+    const hasTreatment = 'taxTreatment' in b;
+    if (!hasIcon && !hasTreatment) {
+      res.status(400).json({ error: 'icon or taxTreatment required' });
       return;
     }
-    if (b.icon === null) {
-      row.set('icon', null);
-    } else if (typeof b.icon === 'string' && isCategoryIconName(b.icon)) {
-      row.set('icon', b.icon);
-    } else {
-      res.status(400).json({ error: 'unknown icon name' });
-      return;
+    if (hasIcon) {
+      if (b.icon === null) {
+        row.set('icon', null);
+      } else if (typeof b.icon === 'string' && isCategoryIconName(b.icon)) {
+        row.set('icon', b.icon);
+      } else {
+        res.status(400).json({ error: 'unknown icon name' });
+        return;
+      }
+    }
+    if (hasTreatment) {
+      if (!isTaxTreatment(b.taxTreatment)) {
+        res.status(400).json({ error: 'unknown tax treatment' });
+        return;
+      }
+      row.set('taxTreatment', b.taxTreatment);
     }
     await row.save();
     res.json(row);
