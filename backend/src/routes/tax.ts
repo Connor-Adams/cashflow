@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import { currentAuth } from '../auth/middleware';
-import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, Transaction, sequelize } from '../models';
+import { Account, Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, Transaction, sequelize } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
@@ -51,7 +51,7 @@ router.get('/classification-queue', async (req, res, next) => {
         taxTreatmentOverride: null,
       },
     });
-    const corpDistributions: Array<{ personal: unknown; corp: unknown }> = [];
+    const corpDistributions: Array<{ personal: Transaction; corp: Transaction }> = [];
     for (const leg of personalLegs) {
       const other = await Transaction.findByPk(leg.linkedTransactionId as number);
       if (other && other.entityId != null && corpEntityIds.has(other.entityId)) {
@@ -63,7 +63,32 @@ router.get('/classification-queue', async (req, res, next) => {
       where: { entityId, date: { [Op.between]: [start, end] }, txnType: 'income', taxTreatmentOverride: null },
     });
 
-    res.json({ corpDistributions, payroll });
+    const allTxns = [
+      ...corpDistributions.flatMap((d) => [d.personal, d.corp]),
+      ...payroll,
+    ] as Transaction[];
+    const acctIds = Array.from(new Set(allTxns.map((t) => t.accountId)));
+    const accts = acctIds.length
+      ? await Account.findAll({ where: { id: acctIds } })
+      : [];
+    const acctName = new Map(accts.map((a) => [a.id, a.name]));
+    const slim = (t: Transaction) => ({
+      id: t.id,
+      date: t.date,
+      amount: t.amount,
+      currency: t.currency,
+      merchantClean: t.merchantClean,
+      accountId: t.accountId,
+      accountName: acctName.get(t.accountId) ?? null,
+      txnType: t.txnType,
+    });
+    res.json({
+      corpDistributions: corpDistributions.map((d) => ({
+        personal: slim(d.personal as Transaction),
+        corp: slim(d.corp as Transaction),
+      })),
+      payroll: payroll.map(slim),
+    });
   } catch (e) {
     next(e);
   }
