@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../src/db';
-import { Account, Entity, Household, Transaction } from '../../src/models';
+import { Account, Entity, Household, ShareholderLoan, Transaction } from '../../src/models';
 import { buildCorpFacts } from '../../src/tax/builders/buildCorpFacts';
 
 beforeEach(async () => { await sequelize.sync({ force: true }); });
@@ -57,4 +57,12 @@ test('classified non-eligible dividend leg feeds dividendsPaid kind non_eligible
   assert.equal(facts.dividendsPaid.length, 1);
   assert.equal(facts.dividendsPaid[0].kind, 'non_eligible');
   assert.equal(facts.dividendsPaid[0].amount.toFixed(2), '8000.00');
+});
+
+test('manual ShareholderLoan dividend_credit no longer feeds corp dividendsPaid', async () => {
+  const s = await seedCorp();
+  await ShareholderLoan.create({ entityId: s.entity.id, date: '2025-03-01', kind: 'dividend_credit', amount: '9999.0000' } as never);
+  const facts = await buildCorpFacts(s.entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+  assert.equal(facts.dividendsPaid.length, 0, 'manual dividend_credit must not contribute');
+  assert.equal(facts.salaryPaid.toFixed(2), '0.00');
 });

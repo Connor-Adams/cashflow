@@ -5,7 +5,6 @@ import {
   Entity,
   InvestmentActivity,
   Security,
-  ShareholderLoan,
   Transaction,
 } from '../../models';
 import { D } from '../util/decimal';
@@ -139,30 +138,9 @@ export async function buildCorpFacts(
     netCapitalLoss: D(cf.find((c) => c.kind === 'cap_loss')?.amount ?? 0),
   };
 
-  // ShareholderLoan entries in fiscal year
-  const loanRows = await ShareholderLoan.findAll({
-    where: {
-      entityId,
-      date: { [Op.between]: [startDate, endDate] },
-    },
-    order: [['date', 'ASC']],
-  });
-
+  // Classified txns are the sole source of corp→personal distributions (no manual ledger reads).
   const dividendsPaid: CorpDividendPaid[] = [];
   let salaryPaid = D(0);
-
-  for (const loan of loanRows) {
-    if (loan.kind === 'dividend_credit') {
-      dividendsPaid.push({
-        source: loan.description ?? `Dividend credit ${loan.date}`,
-        date: loan.date as unknown as string,
-        amount: D(loan.amount),
-        kind: 'non_eligible', // Phase 3 PR 2: default; UI can specify eligible in future
-      });
-    } else if (loan.kind === 'salary_credit') {
-      salaryPaid = salaryPaid.plus(D(loan.amount));
-    }
-  }
 
   // Classified corp→personal distributions (income-queue actuals). The corp
   // leg is an outflow (negative); distributions/remuneration are positive.
