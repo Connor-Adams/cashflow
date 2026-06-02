@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { Op } from 'sequelize';
+import { Op, fn, col, where as sqlWhere } from 'sequelize';
 import type { Account as AccountModel } from '../models/Account';
 import {
   sequelize,
@@ -772,6 +772,11 @@ export async function importWsBundleFile(opts: {
     },
   });
 
+  // WS corp accounts (Corporate Investing / Chequing / Save for Business) have
+  // no statement accountHolder to resolve, so link them to the household corp
+  // Entity (created by the Wise/RBC importer) when one exists. No-op otherwise.
+  await linkWsAccountToCorpEntity(account, parsed.productHint, opts.householdId);
+
   const profileId = parsed.isCreditCard ? 'generic_simple' : 'generic_passthrough';
 
   // Force business flag on every row imported into a corp-typed WS account.
@@ -895,8 +900,15 @@ export async function resolveEntityForHolder(
   if (!holder) return null;
   const trimmed = holder.trim();
   if (!trimmed) return null;
+  // Case-insensitive match within the household so statements that spell the
+  // corp differently ("CDG Labs Inc." vs "CDG LABS INC.") reuse one Entity
+  // instead of forking a duplicate. A same-named entity in another household
+  // must NOT be reused — scope the match by household_id.
   const existing = await Entity.findOne({
-    where: { householdId, legalName: trimmed },
+    where: {
+      householdId,
+      [Op.and]: [sqlWhere(fn('lower', col('legal_name')), trimmed.toLowerCase())],
+    },
   });
   if (existing) return existing;
   if (!CORP_HOLDER_RE.test(trimmed)) return null;
@@ -905,6 +917,37 @@ export async function resolveEntityForHolder(
     kind: 'corp',
     legalName: trimmed,
   });
+}
+
+/** Wealthsimple productHints that denote a corporate account. */
+const WS_CORP_PRODUCT_HINTS = new Set([
+  'corporate_investing',
+  'save_for_business',
+  'corporate_chequing',
+]);
+
+/**
+ * Link a Wealthsimple corp account to the household's corp Entity. The WS
+ * bundle importer (unlike the PDF importer) has no statement "accountHolder"
+ * to resolve, so corp WS accounts historically ended up with no corp entity
+ * (NULL or the personal default), silently excluding them from the T2 engine.
+ * When a corp Entity already exists in the household (the Wise/RBC importer
+ * auto-creates "CDG LABS INC." on first upload), point the WS corp account at
+ * it. No-op for non-corp products or when no corp entity exists yet.
+ * Case-insensitive matching lives in resolveEntityForHolder; here the corp
+ * entity is looked up by kind. Idempotent.
+ */
+export async function linkWsAccountToCorpEntity(
+  account: InstanceType<typeof Account>,
+  productHint: string,
+  householdId: number,
+): Promise<void> {
+  if (!WS_CORP_PRODUCT_HINTS.has(productHint)) return;
+  const corp = await Entity.findOne({ where: { householdId, kind: 'corp' } });
+  if (!corp) return;
+  if (account.entityId !== corp.id) {
+    await account.update({ entityId: corp.id });
+  }
 }
 
 function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult {

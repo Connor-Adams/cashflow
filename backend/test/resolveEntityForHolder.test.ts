@@ -111,3 +111,35 @@ test('resolveEntityForHolder: trims whitespace before matching', async () => {
   assert.ok(got);
   assert.equal(got!.legalName, 'CDG Labs Inc.');
 });
+
+test('resolveEntityForHolder: matches existing corp entity case-insensitively', async () => {
+  const existing = await Entity.create({
+    householdId,
+    kind: 'corp',
+    legalName: 'CDG LABS INC.',
+  });
+  // A later statement spells it differently; must reuse, not duplicate.
+  const got = await resolveEntityForHolder('CDG Labs Inc.', householdId);
+  assert.ok(got);
+  assert.equal(got!.id, existing.id);
+  const all = await Entity.findAll();
+  assert.equal(all.length, 1);
+});
+
+test('resolveEntityForHolder: does not duplicate across casings on repeated calls', async () => {
+  const a = await resolveEntityForHolder('CDG Labs Inc.', householdId);
+  const b = await resolveEntityForHolder('cdg labs inc.', householdId);
+  const c = await resolveEntityForHolder('CDG LABS INC.', householdId);
+  assert.equal(a!.id, b!.id);
+  assert.equal(b!.id, c!.id);
+  assert.equal((await Entity.findAll()).length, 1);
+});
+
+test('resolveEntityForHolder: does not reuse a same-named entity from another household', async () => {
+  const otherHh = (await Household.create({ name: 'Other' })).id;
+  await Entity.create({ householdId: otherHh, kind: 'corp', legalName: 'Shared Name Inc.' });
+  const got = await resolveEntityForHolder('Shared Name Inc.', householdId);
+  assert.ok(got);
+  assert.equal(got!.householdId, householdId, 'must create in the asking household');
+  assert.equal((await Entity.findAll()).length, 2);
+});
