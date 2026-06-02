@@ -6,7 +6,7 @@ const patchJson = vi.fn().mockResolvedValue({});
 vi.mock('@/lib/api', () => ({ patchJson: (...a: unknown[]) => patchJson(...a), getJson: vi.fn() }));
 
 const reload = vi.fn();
-let queueData: unknown = {
+const DEFAULT_QUEUE = {
   corpDistributions: [
     {
       personal: { id: 11, date: '2025-04-01', amount: '20000', currency: 'CAD', merchantClean: 'Owner transfer', accountId: 1, accountName: 'Personal Chk', txnType: 'transfer' },
@@ -17,6 +17,7 @@ let queueData: unknown = {
     { id: 21, date: '2025-07-01', amount: '3000', currency: 'CAD', merchantClean: 'Employer', accountId: 1, accountName: 'Personal Chk', txnType: 'income' },
   ],
 };
+let queueData: unknown = DEFAULT_QUEUE;
 vi.mock('../../hooks/useClassificationQueue', () => ({
   useClassificationQueue: () => ({ data: queueData, error: null, loading: false, reload }),
 }));
@@ -27,7 +28,7 @@ vi.mock('../../hooks/useTaxEntities', () => ({
 import { ClassifyTab } from './ClassifyTab';
 
 describe('ClassifyTab', () => {
-  beforeEach(() => { patchJson.mockClear(); reload.mockClear(); });
+  beforeEach(() => { patchJson.mockClear(); reload.mockClear(); queueData = DEFAULT_QUEUE; });
 
   it('renders corp + payroll sections and classifies a row (instant save + move)', async () => {
     render(<ClassifyTab year={2025} />);

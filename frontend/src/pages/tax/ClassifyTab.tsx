@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { patchJson } from '@/lib/api';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { useClassificationQueue } from '../../hooks/useClassificationQueue';
@@ -16,6 +16,8 @@ export function ClassifyTab({ year }: { year: number }) {
   const personalEntity = entities?.find((e) => e.kind === 'personal') ?? null;
   const { data, error, loading, reload } = useClassificationQueue(personalEntity?.id ?? null, year);
   const [classified, setClassified] = useState<ClassifiedEntry[]>([]);
+  const [undoInFlight, setUndoInFlight] = useState<Set<number>>(() => new Set());
+  useEffect(() => { setClassified([]); }, [year]);
 
   if (entitiesError) return <p className="error">Failed to load entities: {entitiesError}</p>;
   if (!personalEntity && entities !== null) return <p className="muted">No personal entity for this household.</p>;
@@ -26,9 +28,19 @@ export function ClassifyTab({ year }: { year: number }) {
     setClassified((prev) => [{ targetId, treatment, label }, ...prev]);
   }
   async function undo(entry: ClassifiedEntry) {
-    await patchJson(`/api/transfers/${entry.targetId}/tax-treatment`, { taxTreatmentOverride: null });
-    setClassified((prev) => prev.filter((c) => c.targetId !== entry.targetId));
-    reload();
+    if (undoInFlight.has(entry.targetId)) return;
+    setUndoInFlight((prev) => new Set(prev).add(entry.targetId));
+    try {
+      await patchJson(`/api/transfers/${entry.targetId}/tax-treatment`, { taxTreatmentOverride: null });
+      setClassified((prev) => prev.filter((c) => c.targetId !== entry.targetId));
+      reload();
+    } finally {
+      setUndoInFlight((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.targetId);
+        return next;
+      });
+    }
   }
 
   const doneIds = new Set(classified.map((c) => c.targetId));
@@ -38,12 +50,12 @@ export function ClassifyTab({ year }: { year: number }) {
 
   return (
     <div>
-      <h3>Classify income — {year}</h3>
+      <h2>Classify income — {year}</h2>
       {nothing && <p className="muted">No unclassified income for {year}.</p>}
 
       {corp.length > 0 && (
         <section>
-          <h4>Corp → personal · {corp.length}</h4>
+          <h3>Corp → personal · {corp.length}</h3>
           <ul className="flex flex-col divide-y divide-[var(--border)]">
             {corp.map((d) => (
               <ClassifyRow
@@ -61,7 +73,7 @@ export function ClassifyTab({ year }: { year: number }) {
 
       {payroll.length > 0 && (
         <section>
-          <h4>Payroll · {payroll.length}</h4>
+          <h3>Payroll · {payroll.length}</h3>
           <ul className="flex flex-col divide-y divide-[var(--border)]">
             {payroll.map((p) => (
               <ClassifyRow
@@ -78,13 +90,13 @@ export function ClassifyTab({ year }: { year: number }) {
 
       {classified.length > 0 && (
         <section>
-          <h4>Classified · {classified.length}</h4>
+          <h3>Classified · {classified.length}</h3>
           <ul className="flex flex-col divide-y divide-[var(--border)]">
             {classified.map((c) => (
               <li key={c.targetId} className="flex items-center gap-3 py-2">
                 <span aria-hidden>✓</span>
                 <span className="flex-1 text-sm">{c.label}</span>
-                <button type="button" className="text-sm underline" onClick={() => void undo(c)}>
+                <button type="button" className="text-sm underline" onClick={() => void undo(c)} disabled={undoInFlight.has(c.targetId)}>
                   Undo
                 </button>
               </li>
