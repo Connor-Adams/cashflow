@@ -13,7 +13,7 @@ const KIND_LABELS: Record<ShareholderLoanKind, string> = {
 const KIND_OPTIONS: ShareholderLoanKind[] = ['advance', 'repayment', 'dividend_credit', 'salary_credit'];
 
 export function ShareholderLoanTab() {
-  const { loans, error, add, refresh } = useShareholderLoans();
+  const { loans, balance, error, add, refresh } = useShareholderLoans();
   const { entities, error: entitiesError } = useTaxEntities();
   const corpEntity = entities?.find((e) => e.kind === 'corp') ?? null;
 
@@ -57,6 +57,8 @@ export function ShareholderLoanTab() {
   return (
     <div>
       <h2>Shareholder Loans</h2>
+
+      <p className="muted">Shareholder-loan balance: <strong>{formatMoney(Number(balance), corpEntity?.currency ?? 'CAD')}</strong></p>
 
       {(error ?? entitiesError) && (
         <p className="error">Error: {error ?? entitiesError}</p>

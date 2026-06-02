@@ -193,6 +193,9 @@ test('GET /api/tax/classification-queue returns corpDistributions and payroll', 
     corpLeg.id,
     `expected corp leg id ${corpLeg.id}, got ${res.body.corpDistributions[0].corp.id}`,
   );
+  assert.equal(res.body.corpDistributions[0].personal.accountName, 'Personal Chk');
+  assert.equal(res.body.corpDistributions[0].corp.accountName, 'Corp Chk');
+  assert.equal(res.body.payroll[0].accountName, 'Personal Chk');
 
   assert.ok(
     Array.isArray(res.body.payroll),
