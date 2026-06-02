@@ -352,11 +352,11 @@ test('brokerage parses DIV wrapping 2 continuation lines (received-on date)', ()
   assert.equal(fee.tradeDate, '2025-02-28');
 });
 
-test('brokerage skips unmapped cash-account codes (e.g. SPEND) with a distinct warning', () => {
+test('brokerage emits cash-account SPEND as a cash transaction (not an unmapped warn-skip)', () => {
   // Cash/Chequing accounts flow through this parser and carry cash-movement
-  // codes (EFT/SPEND/CASHBACK/OBP) the equity taxonomy does not map. They are
-  // dropped (cash-side; out of scope for InvestmentActivity) but surfaced in a
-  // warning under an "unmapped" tally so nothing is silently lost.
+  // codes the equity taxonomy does not map. These are now emitted as cash
+  // Transaction rows (no longer dropped as "unmapped"). The mapped INT row
+  // still becomes an InvestmentActivity, unchanged.
   const lines: PdfLine[] = [
     mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
     mk(' Account No.   Owner   Statement Period', 1, 762.2),
@@ -369,10 +369,116 @@ test('brokerage skips unmapped cash-account codes (e.g. SPEND) with a distinct w
     mk('2026-02-15   INT   Interest received   $0.00   $1.20   $1,068.00', 2, 747.0),
   ];
   const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
-  // Only the mapped INT row survives; SPEND is dropped.
+  // INT still becomes the only InvestmentActivity (unchanged).
   assert.equal(result.investmentActivities!.length, 1);
   assert.equal(result.investmentActivities![0].activityType, 'interest');
-  assert.ok(result.warnings.some((w) => /unmapped-code/.test(w) && /SPEND/.test(w)));
+  // SPEND now becomes a cash Transaction (Charged 14.11 → outflow).
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, -14.11);
+  assert.equal(result.transactions[0].currency, 'CAD');
+  // It is NOT counted as an unmapped/skipped code anymore.
+  assert.ok(!result.warnings.some((w) => /SPEND/.test(w)));
+});
+
+// ---------------------------------------------------------------------------
+// Cash-account spend codes → cash Transactions (additive; equity behavior
+// preserved). Real-shaped rows from WS Cash-account statements.
+// ---------------------------------------------------------------------------
+
+test('brokerage emits SPEND debit-card purchase as a negative cash transaction', () => {
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Charged ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk('2026-04-17   SPEND   Pizza Nova   $11.35   $0.00   $125.04', 2, 375.2),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  // One cash transaction, no investment activity for it.
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].merchantRaw, 'Pizza Nova');
+  assert.equal(result.transactions[0].amount, -11.35); // Charged → outflow
+  assert.equal(result.transactions[0].currency, 'CAD');
+  assert.equal(result.transactions[0].sourceReference, null);
+  assert.equal(result.investmentActivities!.length, 0);
+  // SPEND is handled, not warned about.
+  assert.ok(!result.warnings.some((w) => /SPEND/.test(w)));
+});
+
+test('brokerage emits E_TRFIN incoming e-transfer as a positive cash transaction', () => {
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Charged ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk('2026-04-13   E_TRFIN   Interac e-Transfer® Received   $0.00   $1,000.00   $7,248.76', 2, 375.2),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, 1000); // Credit → inflow
+  assert.match(result.transactions[0].merchantRaw, /Interac e-Transfer/);
+  assert.equal(result.investmentActivities!.length, 0);
+});
+
+test('brokerage emits AFT_OUT bill payment as a negative cash transaction', () => {
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Charged ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk('2026-04-13   AFT_OUT   Pre-authorized Debit to AMEX BILL PYMT   $1,001.72   $0.00   $6,248.76', 2, 375.2),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, -1001.72); // Charged → outflow
+  assert.match(result.transactions[0].merchantRaw, /AMEX/);
+  assert.equal(result.investmentActivities!.length, 0);
+});
+
+test('brokerage REGRESSION: BUY equity + SPEND cash do not cross-contaminate', () => {
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Charged ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk(' 2025-05-02   BUY   TD - The Toronto-Dominion Bank: Bought 0.0243 shares (executed at                            $2.14   $0.00   $50.84', 2, 375.2),
+    mk('2025-05-01)', 2, 365.4),
+    mk('2026-04-22   SPEND   Harvey\'s   $17.61   $0.00   $107.43', 2, 355.6),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  // BUY still produces exactly one investmentActivity, unchanged.
+  const buys = result.investmentActivities!.filter((a) => a.activityType === 'buy');
+  assert.equal(buys.length, 1);
+  assert.equal(buys[0].security?.symbol, 'TD');
+  assert.equal(buys[0].quantity, 0.0243);
+  assert.equal(buys[0].amount, -2.14);
+  // SPEND produces exactly one cash transaction, unchanged by the BUY.
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].merchantRaw, "Harvey's");
+  assert.equal(result.transactions[0].amount, -17.61);
+  // No cross-contamination: BUY did not become a transaction, SPEND did not
+  // become an investmentActivity.
+  assert.equal(result.investmentActivities!.length, 1);
+});
+
+test('brokerage REGRESSION: pure TFSA (CONT + holding, no cash codes) → transactions stays empty', () => {
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk('Portfolio Equities', 2, 786.3),
+    mk(' Symbol   Total Quantity   Segregated   Quantity on      Market       Market        Book', 2, 769.6),
+    mk('Quantity         Loan    Price* ($)       Value ($)      Cost* ($)', 2, 759.9),
+    mk('Canadian Equities and Alternatives', 2, 743.7),
+    mk('The Toronto-Dominion Bank   TD   2.0766   2.0766   0.0000   $94.77 CAD   $196.79   $163.43', 2, 732.5),
+    mk(' Total   $196.79   $163.43', 2, 615.1),
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk(' 2025-05-01   CONT   Contribution (executed at 2025-05-01)   $0.00   $50.00   $50.00', 2, 375.2),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  // No cash-spend codes → no cash transactions.
+  assert.deepEqual(result.transactions, []);
+  // The CONT still becomes a transfer investmentActivity (unchanged), and the
+  // holding is still parsed.
+  const cont = result.investmentActivities!.find((a) => a.activityType === 'transfer')!;
+  assert.equal(cont.amount, 50);
+  assert.equal(result.holdings!.length, 1);
+  assert.equal(result.holdings![0].security.symbol, 'TD');
 });
 
 test('brokerage tracks per-table currency in split CAD/USD margin activity', () => {
@@ -406,8 +512,9 @@ test('brokerage tracks per-table currency in split CAD/USD margin activity', () 
 test('brokerage handles a leading underscore-code row (AFT_IN) without corrupting the next BUY', () => {
   // Real-world: an AFT_IN deposit is the FIRST activity row. WS codes with
   // underscores must be RECOGNIZED as rows (so they finalize before the BUY)
-  // and, being cash-side + unmapped, SKIPPED-AND-COUNTED — never silently
-  // dropped and never bleeding into the following activity's description.
+  // and never bleed into the following activity's description. AFT_IN is a
+  // cash-funding code → it now becomes a cash Transaction (it is no longer
+  // dropped/warned), while the BUY is parsed independently and cleanly.
   const lines: PdfLine[] = [
     ...CAD_HEADER,
     mk(' Activity - Current period', 2, 403.1),
@@ -419,7 +526,8 @@ test('brokerage handles a leading underscore-code row (AFT_IN) without corruptin
   const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
   const acts = result.investmentActivities!;
 
-  // AFT_IN is unmapped + cash-side → dropped. Only the BUY survives.
+  // AFT_IN → cash transaction (positive: Credit $7,229.27). Only the BUY is an
+  // investmentActivity.
   assert.equal(acts.length, 1);
   const buy = acts[0];
   assert.equal(buy.activityType, 'buy');
@@ -428,9 +536,11 @@ test('brokerage handles a leading underscore-code row (AFT_IN) without corruptin
   // The AFT_IN row must NOT have leaked into the BUY's description.
   assert.doesNotMatch(buy.description, /AFT_IN/);
   assert.doesNotMatch(buy.description, /Direct deposit/);
-  // It is surfaced (not silently lost) in the warnings.
-  assert.ok(result.warnings.length > 0);
-  assert.ok(result.warnings.some((w) => /AFT_IN/.test(w)));
+  // AFT_IN is handled as a cash transaction (not lost, not warned as unmapped).
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].merchantRaw, 'Direct deposit');
+  assert.equal(result.transactions[0].amount, 7229.27);
+  assert.ok(!result.warnings.some((w) => /AFT_IN/.test(w)));
 });
 
 test('brokerage skips an "Amended - Version" footer so it does not join a buy description', () => {

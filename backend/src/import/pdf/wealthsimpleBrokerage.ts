@@ -3,6 +3,7 @@ import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
 } from '../statementTypes';
+import { normalizeMerchant } from '../normalizeMerchant';
 import { wsPdfCodeToActivity, WS_PDF_SKIP_CODES } from './wealthsimpleActivityCodes';
 
 /**
@@ -217,13 +218,29 @@ function parseHoldings(
 }
 
 type Activity = Omit<NormalizedInvestmentActivity, 'sourceRowFingerprint'>;
+type CashTxn = PdfParseResult['transactions'][number];
+
+/**
+ * Cash-account "Transaction" codes. WS Cash / Chequing / Savings accounts flow
+ * through THIS brokerage parser (same sniff), and list debit-card spend, bill
+ * payments, e-transfers and account funding in the same order-execution
+ * activity table. These codes are NOT in the InvestmentActivity taxonomy
+ * (wsPdfCodeToActivity returns null for them), so instead of warn-skipping them
+ * as "unmapped", we emit them as cash Transaction rows. The activityType
+ * taxonomy in wealthsimpleActivityCodes.ts is left untouched — this set is the
+ * brokerage parser's local concern.
+ */
+const CASH_TXN_CODES = new Set<string>([
+  'SPEND', 'DCTFEE', 'OBP', 'CASHBACK', 'GIVEAWAY',
+  'AFT_IN', 'AFT_OUT', 'P2P_IN', 'P2P_OUT', 'E_TRFIN', 'E_TRFOUT', 'EFT',
+]);
 
 const DATE_CELL_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Activity code cell. WS codes are all-caps but some carry underscores
 // (AFT_IN, AFT_OUT, P2P_IN, P2P_OUT, E_TRFIN, E_TRFOUT) — these must be
-// recognized as code cells so their rows are detected (and then skipped-and-
-// counted as unmapped cash-side codes), not silently dropped / merged into a
-// neighbor's description.
+// recognized as code cells so their rows are detected and routed (the cash
+// ones to Transactions via CASH_TXN_CODES, the rest to InvestmentActivity /
+// skip), not silently dropped / merged into a neighbor's description.
 const CODE_CELL_RE = /^[A-Z][A-Z0-9_]*$/;
 const TRADE_DATE_RE = /(?:executed at|received on)\s+(\d{4}-\d{2}-\d{2})/i;
 const QTY_RE = /\b(?:Bought|Sold)\s+([\d.]+)\s+shares?/i;
@@ -284,8 +301,9 @@ function buySell(code: string): boolean {
 function parseActivities(
   lines: PdfLine[],
   accountCurrency: string,
-): { activities: Activity[]; warnings: string[] } {
+): { activities: Activity[]; transactions: CashTxn[]; warnings: string[] } {
   const activities: Activity[] = [];
+  const transactions: CashTxn[] = [];
   const skipCounts: Record<string, number> = {};
   const unmappedCounts: Record<string, number> = {};
 
@@ -301,6 +319,25 @@ function parseActivities(
     const code = row.code;
     const activityType = wsPdfCodeToActivity(code);
     if (activityType === null) {
+      // Cash-account spend codes (SPEND / AFT_OUT / E_TRFIN / …) are not in the
+      // InvestmentActivity taxonomy. Emit them as cash Transaction rows BEFORE
+      // the skip/unmapped tally so they are handled, not warn-skipped. The two
+      // money columns are Charged ($) and Credit ($); amount = credit − charged
+      // (SPEND/AFT_OUT/P2P_OUT are outflows → negative; E_TRFIN/CASHBACK are
+      // inflows → positive). The wrap-aware description doubles as the merchant.
+      if (CASH_TXN_CODES.has(code)) {
+        const desc = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
+        const tradeMatch = TRADE_DATE_RE.exec(desc);
+        transactions.push({
+          date: tradeMatch ? tradeMatch[1] : row.date,
+          merchantRaw: desc,
+          merchantClean: normalizeMerchant(desc),
+          amount: Number((row.credit - row.debit).toFixed(4)),
+          currency,
+          sourceReference: null,
+        });
+        return;
+      }
       if (WS_PDF_SKIP_CODES.has(code)) {
         skipCounts[code] = (skipCounts[code] ?? 0) + 1;
       } else {
@@ -432,7 +469,7 @@ function parseActivities(
     warnings.push(`WS brokerage activity: ${parts.join('; ')}`);
   }
 
-  return { activities, warnings };
+  return { activities, transactions, warnings };
 }
 
 export const wealthsimpleBrokerageParser: PdfParser = {
@@ -455,9 +492,12 @@ export const wealthsimpleBrokerageParser: PdfParser = {
     const header = parseWsBrokerageHeader(lines);
     const accountCurrency = header.currency ?? 'CAD';
     const holdings = parseHoldings(lines, header.periodEnd, accountCurrency);
-    const { activities, warnings } = parseActivities(lines, accountCurrency);
+    const { activities, transactions, warnings } = parseActivities(
+      lines,
+      accountCurrency,
+    );
     return {
-      transactions: [],
+      transactions,
       investmentActivities: activities,
       holdings,
       header,
