@@ -42,6 +42,8 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   });
 
   const employmentIncome: IncomeItem[] = [];
+  const eligibleDividends: IncomeItem[] = [];
+  const nonEligibleDividends: IncomeItem[] = [];
   const selfEmploymentIncome: IncomeItem[] = [];
   const selfEmploymentExpenses: IncomeItem[] = [];
   const donations: IncomeItem[] = [];
@@ -55,6 +57,19 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
+
+    // Tax-treatment classification (corp→personal distributions + confirmed
+    // payroll) takes precedence and short-circuits the category routing below.
+    // This is the no-double-count guard: a classified row is handled here only.
+    const tt = t.taxTreatment;
+    if (tt != null) {
+      if (tt === 'salary' || tt === 'employment_income') employmentIncome.push(item);
+      else if (tt === 'eligible_dividend') eligibleDividends.push(item);
+      else if (tt === 'non_eligible_dividend') nonEligibleDividends.push(item);
+      // loan_advance | loan_repayment | not_income → no income effect
+      continue;
+    }
+
     const cat = t.finalCategory ?? '';
     if (cat === 'employment_income') employmentIncome.push(item);
     else if (cat === 'donations') donations.push(item);
@@ -81,8 +96,6 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     : [];
 
   const interestIncome: IncomeItem[] = [];
-  const eligibleDividends: IncomeItem[] = [];
-  const nonEligibleDividends: IncomeItem[] = [];
 
   for (const a of activity) {
     const { cad } = await toCad(D(a.amount ?? 0), (a as any).currency ?? 'CAD', a.tradeDate as unknown as string);
