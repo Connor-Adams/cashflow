@@ -14,6 +14,8 @@ export type AccountTaxStatus =
   | 'registered_tfsa'
   | 'registered_fhsa'
   | 'registered_rrif'
+  | 'registered_rdsp'
+  | 'registered_resp'
   | 'non_registered'
   | 'n_a';
 
@@ -167,6 +169,32 @@ export function initAccount(sequelize: Sequelize): typeof Account {
         instance,
         options as { transaction?: import('sequelize').Transaction },
       );
+    }
+  });
+
+  /**
+   * Default an investment account's tax_status from its name when left at the
+   * 'n_a' default. Registered accounts (TFSA/FHSA/RRSP/RRIF/RDSP) MUST carry a
+   * registered_* status or buildPersonalFacts' taxable allowlist
+   * ('non_registered','n_a') lets their sheltered in-account income/gains leak
+   * onto the personal T1. Only fills the default — an explicit tax_status wins.
+   * Non-investment accounts keep 'n_a'. Lazy import keeps the model free of a
+   * service-layer dependency at init time.
+   */
+  const fillInvestmentTaxStatus = async (instance: Account): Promise<void> => {
+    if (instance.accountType !== 'investment') return;
+    if (instance.taxStatus != null && instance.taxStatus !== 'n_a') return;
+    try {
+      const { inferTaxStatus } = await import('../tax/services/inferTaxStatus');
+      instance.taxStatus = inferTaxStatus(instance.name);
+    } catch (e) {
+      logger.warn({ err: e, model: 'Account' }, 'fill_investment_tax_status_failed');
+    }
+  };
+  Account.addHook('beforeCreate', fillInvestmentTaxStatus);
+  Account.addHook('beforeBulkCreate', async (instances) => {
+    for (const instance of instances as Account[]) {
+      await fillInvestmentTaxStatus(instance);
     }
   });
 

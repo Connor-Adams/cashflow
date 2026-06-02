@@ -12,6 +12,8 @@ export const TAX_STATUS_LABELS: Record<AccountTaxStatus, string> = {
   registered_rrsp: 'RRSP',
   registered_fhsa: 'FHSA',
   registered_rrif: 'RRIF',
+  registered_rdsp: 'RDSP',
+  registered_resp: 'RESP',
   non_registered: 'Non-registered',
   n_a: 'Other',
 };
@@ -22,6 +24,8 @@ export const TAX_STATUS_ORDER: AccountTaxStatus[] = [
   'registered_rrsp',
   'registered_fhsa',
   'registered_rrif',
+  'registered_rdsp',
+  'registered_resp',
   'non_registered',
   'n_a',
 ];
