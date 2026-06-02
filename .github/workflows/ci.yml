@@ -83,21 +83,7 @@ jobs:
         run: tar -xf node_modules.tar
 
       - name: Run backend unit tests
-        env:
-          # Dump raw V8 coverage as a side effect of this gating run (no effect
-          # on pass/fail). The `coverage` job merges it with integration
-          # coverage via `c8 report`, so the suite is no longer run twice.
-          NODE_V8_COVERAGE: ${{ github.workspace }}/backend/.v8cov
         run: yarn workspace cashflow-backend run test
-
-      - name: Upload backend unit coverage data
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cov-backend-unit
-          path: backend/.v8cov
-          retention-days: 1
-          if-no-files-found: ignore
 
   backend-test-integration:
     needs: install
@@ -135,17 +121,7 @@ jobs:
       - name: Run backend integration tests
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-          NODE_V8_COVERAGE: ${{ github.workspace }}/backend/.v8cov
         run: yarn workspace cashflow-backend run test:integration
-
-      - name: Upload backend integration coverage data
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cov-backend-integration
-          path: backend/.v8cov
-          retention-days: 1
-          if-no-files-found: ignore
 
   backend-build:
     needs: install
@@ -284,18 +260,7 @@ jobs:
         run: tar -xf node_modules.tar
 
       - name: Run frontend tests
-        # vitest run --coverage still fails on test failure, so this stays a
-        # valid gate while also emitting the frontend coverage report.
-        run: yarn workspace frontend run test:coverage
-
-      - name: Upload frontend coverage
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cov-frontend
-          path: frontend/coverage
-          retention-days: 1
-          if-no-files-found: ignore
+        run: yarn workspace frontend run test
 
   frontend-build:
     needs: install
@@ -328,72 +293,3 @@ jobs:
 
       - name: Build frontend
         run: yarn workspace frontend run build
-
-  coverage:
-    # Merge-only, report-only, NOT a required check. The gating jobs
-    # (backend-test, backend-test-integration, frontend-test) now emit coverage
-    # as a side effect, so this job runs no tests — it just stitches the raw V8
-    # data into one report. The suite is no longer executed twice per CI.
-    # To enforce a floor later, add `--check-coverage` to the c8 report step and
-    # `coverage.thresholds` to vitest, then make this job a required check.
-    needs: [backend-test, backend-test-integration, frontend-test]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-
-      - name: Download node_modules artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: node_modules
-
-      - name: Extract node_modules
-        run: tar -xf node_modules.tar
-
-      # Unit (sqlite) and integration (postgres) ran in separate jobs/processes
-      # — the models singleton binds one dialect per process — each dumping raw
-      # V8 coverage (NODE_V8_COVERAGE) to backend/.v8cov. Pull both into one temp
-      # dir; V8 filenames are unique per process so they don't collide, and
-      # `c8 report` merges them exactly like the old single-job --clean=false
-      # accumulation. Node embeds source-map-cache in the dumps, so c8 remaps to
-      # .ts even though tsx didn't run in this job.
-      - name: Download backend unit coverage data
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: cov-backend-unit
-          path: backend/.v8cov
-
-      - name: Download backend integration coverage data
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: cov-backend-integration
-          path: backend/.v8cov
-
-      - name: Build merged backend coverage report
-        continue-on-error: true
-        run: yarn workspace cashflow-backend run coverage:report
-
-      - name: Download frontend coverage
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: cov-frontend
-          path: frontend/coverage
-
-      - name: Upload coverage reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: |
-            backend/coverage
-            frontend/coverage
-          retention-days: 7
-          if-no-files-found: ignore
