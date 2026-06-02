@@ -11,6 +11,7 @@ import { factsHash } from '../tax/util/factsHash';
 import type { CorpFiscalYear } from '../tax/engine/types';
 import { rollPersonalCarryforwards } from '../tax/services/rollPersonalCarryforwards';
 import { buildReconciliationReport } from '../tax/reconciliation/buildReport';
+import { computeShareholderLoanBalance } from '../tax/services/shareholderLoanBalance';
 
 const router = Router();
 
@@ -698,14 +699,15 @@ router.get('/corp/shareholder-loans', async (req, res, next) => {
     const { household } = currentAuth(req);
     const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
     if (!entity) {
-      res.json({ shareholderLoans: [] });
+      res.json({ shareholderLoans: [], balance: '0' });
       return;
     }
     const rows = await ShareholderLoan.findAll({
       where: { entityId: entity.id },
       order: [['date', 'DESC']],
     });
-    res.json({ shareholderLoans: rows });
+    const balance = await computeShareholderLoanBalance(entity.id);
+    res.json({ shareholderLoans: rows, balance: balance.toString() });
   } catch (err) {
     next(err);
   }
