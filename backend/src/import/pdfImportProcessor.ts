@@ -5,6 +5,7 @@ import { parseStatementFile } from './parseStatementFile';
 import { commitStatementImport } from './commitStatementImport';
 import { resolvePdfAccountFromHeader } from './runImport';
 import { logger } from '../observability/logger';
+import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 
 export type DrainSummary = { processed: number; succeeded: number; failed: number };
 
@@ -103,5 +104,18 @@ export async function drainPendingChunk(opts: { chunk?: number } = {}): Promise<
     touchedBatches.add(item.batchId);
   }
   for (const batchId of touchedBatches) await recomputeBatch(batchId);
+  // Heal step: re-assert transaction.entity_id parity after any account→entity
+  // changes that the import may have triggered. Best-effort: a failure must not
+  // fail the drain (mirrors the post-bundle heal in restoreBundle / routes/import).
+  if (touchedBatches.size > 0) {
+    const batches = await PdfImportBatch.findAll({ where: { id: [...touchedBatches] } });
+    for (const hid of new Set(batches.map((b) => b.householdId))) {
+      try {
+        await syncTransactionEntityIds(hid);
+      } catch (err) {
+        logger.error({ err, hid }, 'pdf_import_entity_sync_failed');
+      }
+    }
+  }
   return summary;
 }
