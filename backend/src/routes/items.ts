@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import { Op, type WhereOptions } from 'sequelize';
 import type { Request } from 'express';
-import { ExternalOrder, ExternalOrderItem, Receipt, Transaction, sequelize } from '../models';
+import {
+  ExternalOrder,
+  ExternalOrderItem,
+  Receipt,
+  Transaction,
+  TransactionOrderLink,
+  sequelize,
+} from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
 import type { ItemRow, ItemsListResponse } from '@cashflow/shared';
@@ -53,11 +60,77 @@ function decodeCursor(raw: string | undefined): Cursor | null {
   return null;
 }
 
-function mapItemToRow(it: ExternalOrderItem): ItemRow {
+/**
+ * How an order reaches a visible transaction. An order is shown in the Items
+ * view only if it has an attribution: either an uploaded receipt (which carries
+ * a transactionId) or a non-rejected transaction_order_link from the matcher.
+ * `receiptId` is null for link-only attributions (the common case in prod, where
+ * bulk imports never create receipts).
+ */
+type Attribution = { txnId: number; txnDate: string | null; receiptId: number | null };
+
+/**
+ * Build a map of externalOrderId -> the best visible transaction attribution.
+ * Receipts win over links (explicit upload); among links, accepted beats
+ * suggested, then higher confidence. `txnWhere` already encodes household
+ * visibility plus any date filter, so only this household's transactions match.
+ */
+async function loadOrderAttribution(txnWhere: WhereOptions): Promise<Map<number, Attribution>> {
+  const map = new Map<number, Attribution>();
+
+  const receipts = await Receipt.findAll({
+    attributes: ['id', 'externalOrderId'],
+    where: { externalOrderId: { [Op.ne]: null } },
+    include: [
+      {
+        model: Transaction,
+        as: 'transaction',
+        required: true,
+        attributes: ['id', 'date'],
+        where: txnWhere,
+      },
+    ],
+  });
+  for (const r of receipts) {
+    const orderId = (r as Receipt & { externalOrderId: number | null }).externalOrderId;
+    if (orderId == null || map.has(orderId)) continue;
+    const txn = (r as Receipt & { transaction?: Transaction }).transaction;
+    if (!txn) continue;
+    map.set(orderId, { txnId: txn.id, txnDate: txn.date ?? null, receiptId: r.id });
+  }
+
+  const links = await TransactionOrderLink.findAll({
+    attributes: ['externalOrderId', 'transactionId', 'status', 'confidence'],
+    where: { status: { [Op.ne]: 'rejected' } },
+    include: [
+      {
+        model: Transaction,
+        as: 'transaction',
+        required: true,
+        attributes: ['id', 'date'],
+        where: txnWhere,
+      },
+    ],
+    // accepted < suggested alphabetically, so ASC puts accepted first.
+    order: [
+      ['externalOrderId', 'ASC'],
+      ['status', 'ASC'],
+      ['confidence', 'DESC'],
+    ],
+  });
+  for (const l of links) {
+    if (map.has(l.externalOrderId)) continue;
+    const txn = (l as TransactionOrderLink & { transaction?: Transaction }).transaction;
+    if (!txn) continue;
+    map.set(l.externalOrderId, { txnId: txn.id, txnDate: txn.date ?? null, receiptId: null });
+  }
+
+  return map;
+}
+
+function mapItemToRow(it: ExternalOrderItem, attribution: Map<number, Attribution>): ItemRow {
   const order = (it as ExternalOrderItem & { order?: ExternalOrder }).order!;
-  const receipts = (order as ExternalOrder & { receipts?: Receipt[] }).receipts ?? [];
-  const receipt = receipts[0];
-  const txn = (receipt as Receipt & { transaction?: Transaction })?.transaction;
+  const attr = attribution.get(order.id);
   return {
     id: it.id,
     title: it.title,
@@ -73,9 +146,10 @@ function mapItemToRow(it: ExternalOrderItem): ItemRow {
       it.businessUseOverride == null ? null : Number(it.businessUseOverride) > 0,
     order: { id: order.id, vendor: order.vendor },
     receipt: {
-      id: receipt?.id ?? 0,
-      date: txn?.date ?? null,
-      sourceTxnId: txn?.id ?? null,
+      // Grouping key: the receipt when present, else the transaction (one purchase).
+      id: attr?.receiptId ?? attr?.txnId ?? 0,
+      date: attr?.txnDate ?? null,
+      sourceTxnId: attr?.txnId ?? null,
     },
   };
 }
@@ -381,34 +455,45 @@ router.get('/items', async (req, res, next) => {
       (txnWhereWithDate as Record<string, unknown>).date = dateCond;
     }
 
+    // An item is visible only if its order is attributed to a visible transaction,
+    // via either a receipt (explicit upload) or a non-rejected order link (matcher).
+    // Gating on a precomputed order-id set keeps pagination on the item id and
+    // avoids the row duplication a hasMany join through links would cause.
+    const attribution = await loadOrderAttribution(txnWhereWithDate);
+    const orderIds = [...attribution.keys()];
+
     const format = typeof req.query.format === 'string' ? req.query.format : 'json';
+
+    if (orderIds.length === 0) {
+      if (format === 'csv') {
+        const filename = `items-${new Date().toISOString().slice(0, 10)}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(rowsToCsv([]));
+        return;
+      }
+      const empty: ItemsListResponse = { items: [], nextCursor: null };
+      res.json(empty);
+      return;
+    }
+
+    (itemWhere as Record<string, unknown>).externalOrderId = { [Op.in]: orderIds };
+
+    const itemInclude = [
+      {
+        model: ExternalOrder,
+        as: 'order',
+        required: true,
+        where: orderWhere,
+        attributes: ['id', 'vendor', 'currency'],
+      },
+    ];
+
     if (format === 'csv') {
       const maxRows = Number(process.env.ITEMS_CSV_MAX_ROWS ?? '50000');
       const allItems = await ExternalOrderItem.findAll({
         where: itemWhere,
-        include: [
-          {
-            model: ExternalOrder,
-            as: 'order',
-            required: true,
-            where: orderWhere,
-            include: [
-              {
-                model: Receipt,
-                as: 'receipts',
-                required: true,
-                include: [
-                  {
-                    model: Transaction,
-                    as: 'transaction',
-                    required: true,
-                    where: txnWhereWithDate,
-                  },
-                ],
-              },
-            ],
-          },
-        ],
+        include: itemInclude,
         order: [['id', 'ASC']],
         limit: maxRows + 1,
         subQuery: false,
@@ -419,7 +504,7 @@ router.get('/items', async (req, res, next) => {
           .json({ error: `Result set too large (>${maxRows} items). Narrow your filters.` });
         return;
       }
-      const csv = rowsToCsv(allItems.map(mapItemToRow));
+      const csv = rowsToCsv(allItems.map((it) => mapItemToRow(it, attribution)));
       const filename = `items-${new Date().toISOString().slice(0, 10)}.csv`;
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -429,29 +514,7 @@ router.get('/items', async (req, res, next) => {
 
     const items = await ExternalOrderItem.findAll({
       where: itemWhere,
-      include: [
-        {
-          model: ExternalOrder,
-          as: 'order',
-          required: true,
-          where: orderWhere,
-          include: [
-            {
-              model: Receipt,
-              as: 'receipts',
-              required: true,
-              include: [
-                {
-                  model: Transaction,
-                  as: 'transaction',
-                  required: true,
-                  where: txnWhereWithDate,
-                },
-              ],
-            },
-          ],
-        },
-      ],
+      include: itemInclude,
       order: [['id', 'ASC']],
       limit: limit + 1,
       subQuery: false,
@@ -460,7 +523,7 @@ router.get('/items', async (req, res, next) => {
     const hasMore = items.length > limit;
     const sliced = hasMore ? items.slice(0, limit) : items;
 
-    const rows: ItemRow[] = sliced.map(mapItemToRow);
+    const rows: ItemRow[] = sliced.map((it) => mapItemToRow(it, attribution));
 
     const last = rows[rows.length - 1];
     const nextCursor = hasMore && last ? encodeCursor({ itemId: last.id }) : null;
