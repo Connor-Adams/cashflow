@@ -7,6 +7,7 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
+import { logger } from '../observability/logger';
 
 export type AccountTaxStatus =
   | 'registered_rrsp'
@@ -143,13 +144,21 @@ export function initAccount(sequelize: Sequelize): typeof Account {
     options: { transaction?: import('sequelize').Transaction },
   ): Promise<void> => {
     if (instance.entityId != null || instance.householdId == null) return;
-    const { getOrCreatePersonalEntity } = await import(
-      '../tax/services/getOrCreatePersonalEntity'
-    );
-    const personal = await getOrCreatePersonalEntity(instance.householdId, {
-      transaction: options.transaction,
-    });
-    instance.entityId = personal.id;
+    try {
+      const { getOrCreatePersonalEntity } = await import(
+        '../tax/services/getOrCreatePersonalEntity'
+      );
+      const personal = await getOrCreatePersonalEntity(instance.householdId, {
+        transaction: options.transaction,
+      });
+      instance.entityId = personal.id;
+    } catch (e) {
+      // Best-effort: a missing household row (orphaned/legacy data) makes the
+      // personal-entity FK insert fail. Never break account creation over it —
+      // leave entity_id null; syncTransactionEntityIds / a later create can
+      // backfill once the household exists.
+      logger.warn({ err: e, householdId: instance.householdId, model: 'Account' }, 'fill_personal_entity_failed');
+    }
   };
   Account.addHook('beforeCreate', fillPersonalEntity);
   Account.addHook('beforeBulkCreate', async (instances, options) => {

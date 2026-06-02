@@ -50,3 +50,16 @@ test('findOrCreate path also fills entityId (bulk-safe)', async () => {
   const personal = await Entity.findOne({ where: { householdId, kind: 'personal' } });
   assert.equal(a.entityId, personal!.id);
 });
+
+test('account creation never fails when the household row is missing (orphan FK)', async () => {
+  // householdId 99999 does not exist → getOrCreatePersonalEntity would hit a
+  // FK violation. The hook must swallow it and still create the account with a
+  // null entity (the repair service can backfill later); it must never break
+  // account creation.
+  let a: InstanceType<typeof Account>;
+  await assert.doesNotReject(async () => {
+    a = await Account.create({ name: 'Orphan HH', owner: 'me', householdId: 99999 });
+  });
+  assert.ok(a! && a!.id, 'account should have been created');
+  assert.ok(a!.entityId == null, `expected no entity, got ${a!.entityId}`);
+});

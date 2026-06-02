@@ -450,13 +450,19 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
     options: { transaction?: import('sequelize').Transaction },
   ): Promise<void> => {
     if (instance.entityId != null || instance.accountId == null) return;
-    const { Account } = await import('./Account');
-    const account = await Account.findByPk(instance.accountId, {
-      attributes: ['id', 'entityId'],
-      transaction: options.transaction,
-    });
-    if (account?.entityId != null) {
-      instance.entityId = account.entityId;
+    try {
+      const { Account } = await import('./Account');
+      const account = await Account.findByPk(instance.accountId, {
+        attributes: ['id', 'entityId'],
+        transaction: options.transaction,
+      });
+      if (account?.entityId != null) {
+        instance.entityId = account.entityId;
+      }
+    } catch (e) {
+      // Best-effort: never break transaction creation if the account lookup
+      // fails. Leave entity_id null; syncTransactionEntityIds backfills later.
+      logger.warn({ err: e, accountId: instance.accountId, model: 'Transaction' }, 'inherit_entity_from_account_failed');
     }
   };
   Transaction.addHook('beforeCreate', inheritEntityFromAccount);
