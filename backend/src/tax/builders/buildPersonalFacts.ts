@@ -51,11 +51,11 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
     const item: IncomeItem = {
-      source: `Txn #${t.id} ${(t as any).finalCategory ?? ''}`,
+      source: `Txn #${t.id} ${t.finalCategory ?? ''}`,
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
-    const cat = (t as any).finalCategory ?? '';
+    const cat = t.finalCategory ?? '';
     if (cat === 'employment_income') employmentIncome.push(item);
     else if (cat === 'donations') donations.push(item);
     else if (cat === 'rrsp_contribution') {
@@ -64,8 +64,8 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     else if (cat === 'fhsa_contribution') {
       fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
     }
-    else if ((t as any).business && cad.greaterThan(0)) selfEmploymentIncome.push(item);
-    else if ((t as any).business && cad.lessThan(0))
+    else if (t.finalBusiness && cad.greaterThan(0)) selfEmploymentIncome.push(item);
+    else if (t.finalBusiness && cad.lessThan(0))
       selfEmploymentExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
   }
 
