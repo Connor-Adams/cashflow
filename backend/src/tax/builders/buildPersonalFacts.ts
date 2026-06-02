@@ -85,10 +85,10 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const nonEligibleDividends: IncomeItem[] = [];
 
   for (const a of activity) {
-    const { cad } = await toCad(D(a.amount as unknown as string), (a as any).currency ?? 'CAD', a.tradeDate as unknown as string);
+    const { cad } = await toCad(D(a.amount ?? 0), (a as any).currency ?? 'CAD', a.tradeDate as unknown as string);
     const item: IncomeItem = {
       source: `${(a as any).security?.symbol ?? '?'} ${a.activityType} ${a.tradeDate}`,
-      amount: D(a.amount as unknown as string),
+      amount: D(a.amount ?? 0),
       cadAmount: cad,
     };
     if (a.activityType === 'interest') interestIncome.push(item);

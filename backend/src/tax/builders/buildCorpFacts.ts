@@ -70,7 +70,7 @@ export async function buildCorpFacts(
 
   for (const a of activity) {
     const { cad } = await toCad(
-      D(a.amount as unknown as string),
+      D(a.amount ?? 0),
       (a as unknown as { currency?: string }).currency ?? 'CAD',
       a.tradeDate as unknown as string,
     );
@@ -78,7 +78,7 @@ export async function buildCorpFacts(
       .security;
     const item: IncomeItem = {
       source: `${sec?.symbol ?? '?'} ${a.activityType} ${a.tradeDate}`,
-      amount: D(a.amount as unknown as string),
+      amount: D(a.amount ?? 0),
       cadAmount: cad,
     };
     if (a.activityType === 'interest') {
