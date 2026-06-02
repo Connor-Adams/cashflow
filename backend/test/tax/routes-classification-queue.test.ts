@@ -223,6 +223,34 @@ test('GET /api/tax/classification-queue returns 404 for unknown entity', async (
   assert.equal(res.status, 404, `expected 404, got ${res.status}: ${JSON.stringify(res.body)}`);
 });
 
+test('queue excludes another member private corp→personal pair', async () => {
+  const models = await import('../../src/models/index.js');
+  const ts = Date.now();
+  const otherUser = await models.User.create({
+    email: `cq-other-${ts}@example.com`, displayName: 'Other', globalRole: 'user',
+    passwordHash: 'x', passwordSalt: 'x', passwordParams: '{}',
+  } as never);
+  const pPriv = await models.Transaction.create({
+    accountId: personalAccountId, householdId, entityId: personalEntityId,
+    date: '2025-09-01', amount: '4000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'private', createdByUserId: otherUser.id,
+    merchantRaw: 'PRIV', merchantClean: 'PRIV', importBatch: 'b',
+    sourceRowFingerprint: `fp-priv-${ts}`, sourceIdentityFingerprint: `sif-priv-${ts}`,
+  } as never);
+  const cPriv = await models.Transaction.create({
+    accountId: corpAccountId, householdId, entityId: corpEntityId,
+    date: '2025-09-01', amount: '-4000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'private', createdByUserId: otherUser.id, linkedTransactionId: pPriv.id,
+    merchantRaw: 'PRIV', merchantClean: 'PRIV', importBatch: 'b',
+    sourceRowFingerprint: `fp-privc-${ts}`, sourceIdentityFingerprint: `sif-privc-${ts}`,
+  } as never);
+  await pPriv.update({ linkedTransactionId: cPriv.id });
+  const res = await authed.get(`/api/tax/classification-queue?entityId=${personalEntityId}&year=2025`);
+  assert.equal(res.status, 200);
+  const ids = res.body.corpDistributions.map((d: { personal: { id: number } }) => d.personal.id);
+  assert.ok(!ids.includes(pPriv.id), 'another member private pair must be excluded');
+});
+
 test('GET /api/tax/classification-queue returns 404 when querying another household entity', async () => {
   const models = await import('../../src/models/index.js');
   const { hashPassword } = await import('../../src/auth/password.js');

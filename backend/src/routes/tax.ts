@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
 import { currentAuth } from '../auth/middleware';
+import { visibleTransactionWhere } from '../auth/scope';
 import { Account, Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, Transaction, sequelize } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
@@ -45,6 +46,7 @@ router.get('/classification-queue', async (req, res, next) => {
 
     const personalLegs = await Transaction.findAll({
       where: {
+        ...visibleTransactionWhere(req),
         entityId,
         date: { [Op.between]: [start, end] },
         txnType: 'transfer',
@@ -52,16 +54,30 @@ router.get('/classification-queue', async (req, res, next) => {
         taxTreatmentOverride: null,
       },
     });
+
+    const linkedIds = personalLegs
+      .map((l) => l.linkedTransactionId)
+      .filter((x): x is number => x != null);
+    const linkedTxns = linkedIds.length
+      ? await Transaction.findAll({ where: { id: { [Op.in]: linkedIds } } })
+      : [];
+    const linkedById = new Map(linkedTxns.map((t) => [t.id, t]));
     const corpDistributions: Array<{ personal: Transaction; corp: Transaction }> = [];
     for (const leg of personalLegs) {
-      const other = await Transaction.findByPk(leg.linkedTransactionId as number);
+      const other = linkedById.get(leg.linkedTransactionId as number);
       if (other && other.entityId != null && corpEntityIds.has(other.entityId)) {
         corpDistributions.push({ personal: leg, corp: other });
       }
     }
 
     const payroll = await Transaction.findAll({
-      where: { entityId, date: { [Op.between]: [start, end] }, txnType: 'income', taxTreatmentOverride: null },
+      where: {
+        ...visibleTransactionWhere(req),
+        entityId,
+        date: { [Op.between]: [start, end] },
+        txnType: 'income',
+        taxTreatmentOverride: null,
+      },
     });
 
     const allTxns = [

@@ -11,7 +11,8 @@ import { CategoryIcon } from '../../../components/CategoryIcon'
 import { CategoryIconPicker } from '../../../components/CategoryIconPicker'
 import { useCategories } from '../../../lib/useCategories'
 import { patchJson } from '../../../lib/api'
-import { TAX_TREATMENTS, TREATMENT_LABELS } from '../../../lib/taxTreatment'
+import { TAX_TREATMENTS } from '../../../lib/taxTreatment'
+import { TaxTreatmentSelect } from '../../../components/TaxTreatmentSelect'
 import type { CategoryIconName } from '@cashflow/shared'
 import type { TaxTreatment } from '../../../lib/taxTreatment'
 import type { Category } from '../../../types/api'
@@ -59,16 +60,12 @@ export function CategoriesTab() {
           <li key={cat.id} className="flex items-center gap-3 py-2">
             <CategoryIcon name={cat.name} size={20} />
             <span className="flex-1">{cat.name}</span>
-            <select
+            <TaxTreatmentSelect
               aria-label={`Tax treatment for ${cat.name}`}
               value={cat.taxTreatment}
-              onChange={(e) => void setTreatment(cat, e.target.value as TaxTreatment)}
-              className="text-sm"
-            >
-              {TAX_TREATMENTS.map((t) => (
-                <option key={t} value={t}>{TREATMENT_LABELS[t]}</option>
-              ))}
-            </select>
+              options={[...TAX_TREATMENTS]}
+              onChange={(t) => { if (t) void setTreatment(cat, t); }}
+            />
             <Button
               type="button"
               variant="secondary"

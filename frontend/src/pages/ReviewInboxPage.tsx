@@ -43,7 +43,8 @@ import {
   getReviewInboxSummary,
   getSelectedReviewSummary,
 } from '../lib/reviewInbox'
-import { TAX_TREATMENTS, TREATMENT_LABELS } from '../lib/taxTreatment'
+import { TAX_TREATMENTS } from '../lib/taxTreatment'
+import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
 import type { Paginated, Transaction } from '../types/api'
 
@@ -813,17 +814,12 @@ export function ReviewInboxPage() {
             </Label>
             <Label>
               Tax treatment
-              <NativeSelect
-                value={taxTreatment}
-                onChange={(e) => setTaxTreatment(e.target.value as TaxTreatment | '')}
-              >
-                <NativeSelectOption value="">Keep current</NativeSelectOption>
-                {TAX_TREATMENTS.filter((tt) => tt !== 'none').map((tt) => (
-                  <NativeSelectOption key={tt} value={tt}>
-                    {TREATMENT_LABELS[tt]}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+              <TaxTreatmentSelect
+                value={taxTreatment || null}
+                options={TAX_TREATMENTS.filter((tt) => tt !== 'none')}
+                emptyLabel="Keep current"
+                onChange={(t) => setTaxTreatment(t ?? '')}
+              />
             </Label>
           </div>
 
