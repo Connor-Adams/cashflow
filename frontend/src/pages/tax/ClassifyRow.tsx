@@ -1,18 +1,9 @@
 import { useState } from 'react';
 import { patchJson } from '@/lib/api';
 import { TaxTreatmentSelect } from '../../components/TaxTreatmentSelect';
-import type { TaxTreatment } from '../../lib/taxTreatment';
+import { CORP_OPTIONS, PAYROLL_OPTIONS, type TaxTreatment } from '../../lib/taxTreatment';
 import type { QueueLeg } from '../../hooks/useClassificationQueue';
-
-const CORP_OPTIONS: TaxTreatment[] = [
-  'eligible_dividend',
-  'non_eligible_dividend',
-  'salary',
-  'loan_advance',
-  'loan_repayment',
-  'not_income',
-];
-const PAYROLL_OPTIONS: TaxTreatment[] = ['employment_income', 'not_income'];
+import { fmtCurrency } from './util/format';
 
 interface ClassifyRowProps {
   targetId: number;
@@ -27,7 +18,8 @@ export function ClassifyRow({ targetId, kind, primary, counter, onClassified }: 
   const [busy, setBusy] = useState(false);
   const options = kind === 'corp' ? CORP_OPTIONS : PAYROLL_OPTIONS;
 
-  async function choose(next: TaxTreatment) {
+  async function choose(next: TaxTreatment | null) {
+    if (!next) return;
     setError(null);
     setBusy(true);
     try {
@@ -48,7 +40,7 @@ export function ClassifyRow({ targetId, kind, primary, counter, onClassified }: 
   return (
     <li className="flex items-center gap-3 py-2">
       <span className="w-20 text-sm">{primary.date}</span>
-      <span className="w-24 text-sm font-semibold">${primary.amount}</span>
+      <span className="w-24 text-right tabular-nums text-sm font-semibold">{fmtCurrency(primary.amount)}</span>
       <span className="flex-1 text-sm">
         <span>{flow}</span>
         {primary.merchantClean && <span> · {primary.merchantClean}</span>}

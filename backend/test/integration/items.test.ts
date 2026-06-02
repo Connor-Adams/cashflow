@@ -183,6 +183,191 @@ test('GET /api/items filters by q (case-insensitive title substring)', async () 
   assert.ok(res.body.items.every((r: { title: string }) => r.title.toLowerCase().includes('usb')));
 });
 
+test('GET /api/items shows items linked to a transaction via order link (no receipt)', async () => {
+  const { Account, ExternalOrder, ExternalOrderItem, Transaction, TransactionOrderLink } =
+    await import('../../src/models/index.js');
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const account = await Account.create({
+    householdId: householdAId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'A Link Account',
+    accountType: 'checking',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    householdId: householdAId,
+    importBatch: 'b-link',
+    date: '2026-04-01',
+    merchantRaw: 'Costco',
+    merchantClean: 'Costco',
+    amount: '-50',
+    currency: 'USD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    visibility: 'shared',
+    ownershipType: 'shared',
+    finalCategory: null,
+    finalBusiness: false,
+    finalSplitType: 'none',
+    businessAmount: '0',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'linkonly',
+    dedupeKey: 'linkonly-1',
+    total: '50',
+    currency: 'USD',
+    source: 'amazon_report',
+  } as never);
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Paper towels',
+    quantity: 1,
+    totalPrice: '50',
+    inferredCategory: 'Household',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90.00',
+    matchReason: 'test',
+    status: 'accepted',
+  } as never);
+
+  const res = await agentA.get('/api/items?vendor=linkonly');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.items.length, 1, 'item linked via order link should appear without a receipt');
+  const row = res.body.items[0];
+  assert.equal(row.id, item.id);
+  assert.equal(row.order.vendor, 'linkonly');
+  assert.equal(row.receipt.sourceTxnId, txn.id);
+  assert.equal(row.receipt.date, '2026-04-01');
+});
+
+test('GET /api/items excludes items whose only order link is rejected', async () => {
+  const { Account, ExternalOrder, ExternalOrderItem, Transaction, TransactionOrderLink } =
+    await import('../../src/models/index.js');
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const account = await Account.create({
+    householdId: householdAId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'A Rejected Account',
+    accountType: 'checking',
+  } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    householdId: householdAId,
+    importBatch: 'b-rej',
+    date: '2026-04-02',
+    merchantRaw: 'Costco',
+    merchantClean: 'Costco',
+    amount: '-9',
+    currency: 'USD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+    visibility: 'shared',
+    ownershipType: 'shared',
+    finalCategory: null,
+    finalBusiness: false,
+    finalSplitType: 'none',
+    businessAmount: '0',
+  } as never);
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'rejectedonly',
+    dedupeKey: 'rejectedonly-1',
+    total: '9',
+    currency: 'USD',
+    source: 'amazon_report',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'wrong-match thing',
+    quantity: 1,
+    totalPrice: '9',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '40.00',
+    matchReason: 'test',
+    status: 'rejected',
+  } as never);
+
+  const res = await agentA.get('/api/items?vendor=rejectedonly');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.items.length, 0, 'rejected-only links must not surface items');
+});
+
+test('GET /api/items does not duplicate an item with multiple non-rejected links', async () => {
+  const { Account, ExternalOrder, ExternalOrderItem, Transaction, TransactionOrderLink } =
+    await import('../../src/models/index.js');
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const account = await Account.create({
+    householdId: householdAId,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'A Multi Account',
+    accountType: 'checking',
+  } as never);
+  const mkTxn = (batch: string, date: string) =>
+    Transaction.create({
+      accountId: account.id,
+      householdId: householdAId,
+      importBatch: batch,
+      date,
+      merchantRaw: 'Costco',
+      merchantClean: 'Costco',
+      amount: '-20',
+      currency: 'USD',
+      sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+      sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
+      visibility: 'shared',
+      ownershipType: 'shared',
+      finalCategory: null,
+      finalBusiness: false,
+      finalSplitType: 'none',
+      businessAmount: '0',
+    } as never);
+  const txn1 = await mkTxn('b-multi-1', '2026-04-03');
+  const txn2 = await mkTxn('b-multi-2', '2026-04-04');
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'multilink',
+    dedupeKey: 'multilink-1',
+    total: '20',
+    currency: 'USD',
+    source: 'amazon_report',
+  } as never);
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'split item',
+    quantity: 1,
+    totalPrice: '20',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn1.id,
+    externalOrderId: order.id,
+    confidence: '80.00',
+    matchReason: 'test',
+    status: 'accepted',
+  } as never);
+  await TransactionOrderLink.create({
+    transactionId: txn2.id,
+    externalOrderId: order.id,
+    confidence: '70.00',
+    matchReason: 'test',
+    status: 'suggested',
+  } as never);
+
+  const res = await agentA.get('/api/items?vendor=multilink');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.items.length, 1, 'item with two links must appear exactly once');
+  assert.equal(res.body.items[0].id, item.id);
+});
+
 test('GET /api/items paginates with cursor', async () => {
   const { Account, ExternalOrder, ExternalOrderItem, Receipt, Transaction } = await import(
     '../../src/models/index.js'

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getJson } from '@/lib/api';
+import type { TaxTreatment } from '../lib/taxTreatment';
 
 export interface QueueLeg {
   id: number;
@@ -10,6 +11,7 @@ export interface QueueLeg {
   accountId: number;
   accountName: string | null;
   txnType: string;
+  taxTreatmentOverride: TaxTreatment | null;
 }
 
 export interface ClassificationQueue {
@@ -27,6 +29,7 @@ interface UseClassificationQueueResult {
 export function useClassificationQueue(
   entityId: number | null,
   year: number,
+  status: 'unclassified' | 'classified' = 'unclassified',
 ): UseClassificationQueueResult {
   const [data, setData] = useState<ClassificationQueue | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +46,7 @@ export function useClassificationQueue(
     setLoading(true);
     setError(null);
     getJson<ClassificationQueue>(
-      `/api/tax/classification-queue?entityId=${entityId}&year=${year}`,
+      `/api/tax/classification-queue?entityId=${entityId}&year=${year}&status=${status}`,
     )
       .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
       .catch((e: unknown) => {
@@ -53,7 +56,7 @@ export function useClassificationQueue(
         }
       });
     return () => { cancelled = true; };
-  }, [entityId, year, nonce]);
+  }, [entityId, year, status, nonce]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 

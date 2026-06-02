@@ -223,6 +223,34 @@ test('GET /api/tax/classification-queue returns 404 for unknown entity', async (
   assert.equal(res.status, 404, `expected 404, got ${res.status}: ${JSON.stringify(res.body)}`);
 });
 
+test('queue excludes another member private corp→personal pair', async () => {
+  const models = await import('../../src/models/index.js');
+  const ts = Date.now();
+  const otherUser = await models.User.create({
+    email: `cq-other-${ts}@example.com`, displayName: 'Other', globalRole: 'user',
+    passwordHash: 'x', passwordSalt: 'x', passwordParams: '{}',
+  } as never);
+  const pPriv = await models.Transaction.create({
+    accountId: personalAccountId, householdId, entityId: personalEntityId,
+    date: '2025-09-01', amount: '4000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'private', createdByUserId: otherUser.id,
+    merchantRaw: 'PRIV', merchantClean: 'PRIV', importBatch: 'b',
+    sourceRowFingerprint: `fp-priv-${ts}`, sourceIdentityFingerprint: `sif-priv-${ts}`,
+  } as never);
+  const cPriv = await models.Transaction.create({
+    accountId: corpAccountId, householdId, entityId: corpEntityId,
+    date: '2025-09-01', amount: '-4000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'private', createdByUserId: otherUser.id, linkedTransactionId: pPriv.id,
+    merchantRaw: 'PRIV', merchantClean: 'PRIV', importBatch: 'b',
+    sourceRowFingerprint: `fp-privc-${ts}`, sourceIdentityFingerprint: `sif-privc-${ts}`,
+  } as never);
+  await pPriv.update({ linkedTransactionId: cPriv.id });
+  const res = await authed.get(`/api/tax/classification-queue?entityId=${personalEntityId}&year=2025`);
+  assert.equal(res.status, 200);
+  const ids = res.body.corpDistributions.map((d: { personal: { id: number } }) => d.personal.id);
+  assert.ok(!ids.includes(pPriv.id), 'another member private pair must be excluded');
+});
+
 test('GET /api/tax/classification-queue returns 404 when querying another household entity', async () => {
   const models = await import('../../src/models/index.js');
   const { hashPassword } = await import('../../src/auth/password.js');
@@ -257,4 +285,112 @@ test('GET /api/tax/classification-queue returns 404 when querying another househ
     `/api/tax/classification-queue?entityId=${personalEntity2.id}&year=2025`,
   );
   assert.equal(res.status, 404, `expected 404, got ${res.status}: ${JSON.stringify(res.body)}`);
+});
+
+test('GET /api/tax/classification-queue?status=classified returns only classified items with treatment populated', async () => {
+  const models = await import('../../src/models/index.js');
+  const ts = Date.now();
+
+  // Classified corp→personal PAIR: both legs override = non_eligible_dividend.
+  const pLeg = await models.Transaction.create({
+    accountId: personalAccountId, householdId, entityId: personalEntityId,
+    date: '2025-03-10', amount: '8000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'shared', taxTreatmentOverride: 'non_eligible_dividend',
+    merchantRaw: 'DIV', merchantClean: 'DIV', importBatch: 'b',
+    sourceRowFingerprint: `fp-cp-${ts}`, sourceIdentityFingerprint: `sif-cp-${ts}`,
+  } as never);
+  const cLeg = await models.Transaction.create({
+    accountId: corpAccountId, householdId, entityId: corpEntityId,
+    date: '2025-03-10', amount: '-8000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'shared', taxTreatmentOverride: 'non_eligible_dividend',
+    merchantRaw: 'DIV', merchantClean: 'DIV', importBatch: 'b',
+    sourceRowFingerprint: `fp-cc-${ts}`, sourceIdentityFingerprint: `sif-cc-${ts}`,
+  } as never);
+  await pLeg.update({ linkedTransactionId: cLeg.id });
+  await cLeg.update({ linkedTransactionId: pLeg.id });
+
+  // Classified payroll deposit.
+  const payClassified = await models.Transaction.create({
+    accountId: personalAccountId, householdId, entityId: personalEntityId,
+    date: '2025-08-01', amount: '3500', currency: 'CAD', txnType: 'income',
+    visibility: 'shared', taxTreatmentOverride: 'employment_income',
+    merchantRaw: 'PAY2', merchantClean: 'PAY2', importBatch: 'b',
+    sourceRowFingerprint: `fp-pay2-${ts}`, sourceIdentityFingerprint: `sif-pay2-${ts}`,
+  } as never);
+
+  const res = await authed.get(
+    `/api/tax/classification-queue?entityId=${personalEntityId}&year=2025&status=classified`,
+  );
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+
+  const cpIds = res.body.corpDistributions.map((d: { personal: { id: number } }) => d.personal.id);
+  assert.ok(cpIds.includes(pLeg.id), 'classified pair must appear in classified mode');
+  const cp = res.body.corpDistributions.find(
+    (d: { personal: { id: number } }) => d.personal.id === pLeg.id,
+  );
+  assert.equal(cp.personal.taxTreatmentOverride, 'non_eligible_dividend');
+  assert.equal(cp.corp.taxTreatmentOverride, 'non_eligible_dividend');
+
+  const payIds = res.body.payroll.map((p: { id: number }) => p.id);
+  assert.ok(payIds.includes(payClassified.id), 'classified payroll must appear');
+
+  // No null-override (unclassified) item may leak into classified mode.
+  for (const d of res.body.corpDistributions) {
+    assert.ok(d.personal.taxTreatmentOverride != null, 'classified mode: personal leg must have a treatment');
+    assert.ok(d.corp.taxTreatmentOverride != null, 'classified mode: corp leg must have a treatment');
+  }
+  for (const p of res.body.payroll) {
+    assert.ok(p.taxTreatmentOverride != null, 'classified payroll must have a treatment');
+  }
+});
+
+test('default/unclassified mode returns only null-override items', async () => {
+  const res = await authed.get(
+    `/api/tax/classification-queue?entityId=${personalEntityId}&year=2025`,
+  );
+  assert.equal(res.status, 200);
+  for (const d of res.body.corpDistributions) {
+    assert.equal(d.personal.taxTreatmentOverride, null, 'unclassified mode: only null-override legs');
+  }
+  for (const p of res.body.payroll) {
+    assert.equal(p.taxTreatmentOverride, null, 'unclassified mode: only null-override payroll');
+  }
+});
+
+test('GET /api/tax/classification-queue rejects an unknown status with 400', async () => {
+  const res = await authed.get(
+    `/api/tax/classification-queue?entityId=${personalEntityId}&year=2025&status=bogus`,
+  );
+  assert.equal(res.status, 400, JSON.stringify(res.body));
+});
+
+test('classified mode excludes another member private classified pair', async () => {
+  const models = await import('../../src/models/index.js');
+  const ts = Date.now();
+  const otherUser = await models.User.create({
+    email: `cq-cls-other-${ts}@example.com`, displayName: 'Other Cls', globalRole: 'user',
+    passwordHash: 'x', passwordSalt: 'x', passwordParams: '{}',
+  } as never);
+  const pPriv = await models.Transaction.create({
+    accountId: personalAccountId, householdId, entityId: personalEntityId,
+    date: '2025-10-01', amount: '6000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'private', createdByUserId: otherUser.id, taxTreatmentOverride: 'eligible_dividend',
+    merchantRaw: 'PRIVCLS', merchantClean: 'PRIVCLS', importBatch: 'b',
+    sourceRowFingerprint: `fp-privcls-${ts}`, sourceIdentityFingerprint: `sif-privcls-${ts}`,
+  } as never);
+  const cPriv = await models.Transaction.create({
+    accountId: corpAccountId, householdId, entityId: corpEntityId,
+    date: '2025-10-01', amount: '-6000', currency: 'CAD', txnType: 'transfer',
+    visibility: 'private', createdByUserId: otherUser.id, taxTreatmentOverride: 'eligible_dividend',
+    linkedTransactionId: pPriv.id,
+    merchantRaw: 'PRIVCLS', merchantClean: 'PRIVCLS', importBatch: 'b',
+    sourceRowFingerprint: `fp-privclsc-${ts}`, sourceIdentityFingerprint: `sif-privclsc-${ts}`,
+  } as never);
+  await pPriv.update({ linkedTransactionId: cPriv.id });
+  const res = await authed.get(
+    `/api/tax/classification-queue?entityId=${personalEntityId}&year=2025&status=classified`,
+  );
+  assert.equal(res.status, 200);
+  const ids = res.body.corpDistributions.map((d: { personal: { id: number } }) => d.personal.id);
+  assert.ok(!ids.includes(pPriv.id), 'another member private classified pair must be excluded');
 });

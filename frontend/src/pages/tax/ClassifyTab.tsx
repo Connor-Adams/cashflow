@@ -4,6 +4,7 @@ import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { useClassificationQueue } from '../../hooks/useClassificationQueue';
 import { TREATMENT_LABELS, type TaxTreatment } from '../../lib/taxTreatment';
 import { ClassifyRow } from './ClassifyRow';
+import { fmtCurrency } from './util/format';
 
 interface ClassifiedEntry {
   targetId: number;
@@ -64,7 +65,7 @@ export function ClassifyTab({ year }: { year: number }) {
                 kind="corp"
                 primary={d.personal}
                 counter={d.corp}
-                onClassified={(id, t) => onClassified(id, t, `$${d.personal.amount} → ${TREATMENT_LABELS[t]}`)}
+                onClassified={(id, t) => onClassified(id, t, `${fmtCurrency(d.personal.amount)} → ${TREATMENT_LABELS[t]}`)}
               />
             ))}
           </ul>
@@ -81,7 +82,7 @@ export function ClassifyTab({ year }: { year: number }) {
                 targetId={p.id}
                 kind="payroll"
                 primary={p}
-                onClassified={(id, t) => onClassified(id, t, `$${p.amount} → ${TREATMENT_LABELS[t]}`)}
+                onClassified={(id, t) => onClassified(id, t, `${fmtCurrency(p.amount)} → ${TREATMENT_LABELS[t]}`)}
               />
             ))}
           </ul>

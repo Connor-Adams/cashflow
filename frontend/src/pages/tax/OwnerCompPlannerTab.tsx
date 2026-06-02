@@ -22,24 +22,11 @@
 //     model where personal scenarios are the routing target.
 import { useHouseholdPlanCompute } from '../../hooks/useHouseholdPlanCompute';
 import { OwnerCompLeverSurface } from './scenarios/OwnerCompLeverSurface';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/components/ui/page-header';
 
 interface Props {
   activePlanId: number | null;
-}
-
-function EmptyState({
-  tone = 'muted',
-  children,
-}: {
-  tone?: 'muted' | 'error';
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <h2>Owner Comp</h2>
-      <p className={tone}>{children}</p>
-    </div>
-  );
 }
 
 export function OwnerCompPlannerTab({ activePlanId }: Props) {
@@ -47,30 +34,32 @@ export function OwnerCompPlannerTab({ activePlanId }: Props) {
 
   if (activePlanId === null) {
     return (
-      <EmptyState>
-        Select a household plan in the Overview tab to start tuning owner
-        compensation. Each plan groups one corp + at least one personal
-        scenario so the salary-vs-dividend mix can be evaluated as a single
-        integrated number.
-      </EmptyState>
+      <EmptyState
+        title="No household plan selected"
+        description="Select a household plan in the Overview tab to start tuning owner compensation. Each plan groups one corp + at least one personal scenario so the salary-vs-dividend mix can be evaluated as a single integrated number."
+      />
     );
   }
   if (planCompute.error) {
-    return <EmptyState tone="error">Failed to load household plan: {planCompute.error}</EmptyState>;
+    return (
+      <EmptyState
+        title="Failed to load household plan"
+        description={planCompute.error}
+      />
+    );
   }
   if (!planCompute.data) {
-    return <EmptyState>Loading household plan…</EmptyState>;
+    return <EmptyState title="Loading household plan…" />;
   }
 
   const { corp, personal } = planCompute.data;
 
   if (corp.length === 0) {
     return (
-      <EmptyState>
-        This household plan has no corp scenarios linked. Add a corp scenario
-        to the plan (Corp T2 tab → set its household plan) so distributions
-        can be routed.
-      </EmptyState>
+      <EmptyState
+        title="No corporation set up"
+        description="This household plan has no corp scenarios linked. Add a corp scenario to the plan (Corp T2 tab → set its household plan) so distributions can be routed and owner-comp planning becomes available."
+      />
     );
   }
 
@@ -88,22 +77,13 @@ export function OwnerCompPlannerTab({ activePlanId }: Props) {
   const corpEntityId = primaryCorp.scenario.entityId;
   const fiscalYear = primaryCorp.scenario.year;
 
+  const description = corp.length > 1
+    ? `Active corp scenario: ${primaryCorp.scenario.name} (FY ${fiscalYear}). Plan links ${corp.length} corp scenarios — showing the first. Multi-corp planning lands in P10/P11.`
+    : `Active corp scenario: ${primaryCorp.scenario.name} (FY ${fiscalYear}).`;
+
   return (
     <div>
-      <header style={{ marginBottom: '0.75rem' }}>
-        <h2>Owner Comp</h2>
-        <p className="muted">
-          Active corp scenario:{' '}
-          <strong>{primaryCorp.scenario.name}</strong> (FY {fiscalYear}).
-          {corp.length > 1 && (
-            <>
-              {' '}
-              Plan links {corp.length} corp scenarios — showing the first.
-              Multi-corp planning lands in P10/P11.
-            </>
-          )}
-        </p>
-      </header>
+      <PageHeader title="Owner Comp" description={description} />
       <OwnerCompLeverSurface
         key={`${corpScenarioId}:${activePlanId}`}
         corpScenarioId={corpScenarioId}

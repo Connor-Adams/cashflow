@@ -65,7 +65,8 @@ import type {
 import { useLabels } from '../lib/useLabels'
 import { useSessionState } from '../lib/useSessionState'
 import { notifyReceiptsChanged } from '@/hooks/useReceiptCompleteness'
-import { TAX_TREATMENTS, TREATMENT_LABELS } from '../lib/taxTreatment'
+import { TAX_TREATMENTS } from '../lib/taxTreatment'
+import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
 
 type CategoryHint = {
@@ -2165,16 +2166,13 @@ function TransactionRow({
           <NativeSelectOption value="true">Yes</NativeSelectOption>
           <NativeSelectOption value="false">No</NativeSelectOption>
         </NativeSelect>
-        <NativeSelect
+        <TaxTreatmentSelect
           aria-label={`Tax treatment override for transaction ${t.id}`}
-          value={taxOverride}
-          onChange={(e) => setTaxOverride(e.target.value as TaxTreatment | '')}
-        >
-          <NativeSelectOption value="">Use category default</NativeSelectOption>
-          {TAX_TREATMENTS.filter((tt) => tt !== 'none').map((tt) => (
-            <NativeSelectOption key={tt} value={tt}>{TREATMENT_LABELS[tt]}</NativeSelectOption>
-          ))}
-        </NativeSelect>
+          value={taxOverride || null}
+          options={TAX_TREATMENTS.filter((tt) => tt !== 'none')}
+          emptyLabel="Use category default"
+          onChange={(t) => setTaxOverride(t ?? '')}
+        />
       </TableCell>
       <TableCell>
         <div className="txnSplitCell">

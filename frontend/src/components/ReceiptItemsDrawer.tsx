@@ -145,9 +145,22 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
   return (
     <div style={{ marginBottom: '1.5rem' }}>
       <div style={{ marginBottom: '0.5rem' }}>
-        <strong>{order.vendor}</strong>{' '}
+        <strong>{order.vendor === 'uber' ? 'Uber' : order.vendor === 'uber_eats' ? 'Uber Eats' : order.vendor}</strong>{' '}
         <span style={{ color: '#666' }}>{receipt.originalName}</span>
       </div>
+
+      {order.trip && (
+        <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: '#444' }}>
+          <div>
+            {order.trip.pickupAddress ?? '—'} → {order.trip.dropoffAddress ?? '—'}
+          </div>
+          <div style={{ color: '#666' }}>
+            {order.trip.distance != null && `${order.trip.distance} ${order.trip.distanceUnit ?? ''}`}
+            {order.trip.distance != null && order.trip.durationMinutes != null && ' · '}
+            {order.trip.durationMinutes != null && `${order.trip.durationMinutes} min`}
+          </div>
+        </div>
+      )}
 
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>

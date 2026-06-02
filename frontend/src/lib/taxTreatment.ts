@@ -16,3 +16,14 @@ export const TREATMENT_LABELS: Record<TaxTreatment, string> = {
   loan_repayment: 'Shareholder loan repayment',
   not_income: 'Not income',
 }
+
+export const CORP_OPTIONS: TaxTreatment[] = [
+  'eligible_dividend',
+  'non_eligible_dividend',
+  'salary',
+  'loan_advance',
+  'loan_repayment',
+  'not_income',
+]
+
+export const PAYROLL_OPTIONS: TaxTreatment[] = ['employment_income', 'not_income']

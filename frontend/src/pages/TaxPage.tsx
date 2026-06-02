@@ -11,6 +11,7 @@ import { OwnerCompPlannerTab } from './tax/OwnerCompPlannerTab'
 import { TaxHygieneTab } from './tax/TaxHygieneTab'
 import { TaxReserveTab } from './tax/TaxReserveTab'
 import { ClassifyTab } from './tax/ClassifyTab'
+import { ClassifiedTab } from './tax/ClassifiedTab'
 import { useTaxYears } from '../hooks/useTaxYears'
 
 const TABS = [
@@ -19,6 +20,7 @@ const TABS = [
   { value: 'slips', label: 'Slips' },
   { value: 'reconciliation', label: 'Reconciliation' },
   { value: 'classify', label: 'Classify' },
+  { value: 'classified', label: 'Classified' },
   { value: 'corp', label: 'Corp T2' },
   { value: 'shareholder-loans', label: 'Shareholder Loans' },
   { value: 'planner', label: 'Owner Comp' },
@@ -68,7 +70,7 @@ export function TaxPage() {
 
   return (
     <section>
-      <header style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
+      <header className="flex items-baseline gap-4">
         <h1>Tax</h1>
         {years && year !== null && (
           <YearJump
@@ -96,6 +98,7 @@ export function TaxPage() {
           {tab === 'slips' && <SlipsTab year={year} />}
           {tab === 'reconciliation' && <ReconciliationTab year={year} />}
           {tab === 'classify' && <ClassifyTab year={year} />}
+          {tab === 'classified' && <ClassifiedTab year={year} />}
           {tab === 'corp' && <CorpT2Tab />}
           {tab === 'shareholder-loans' && <ShareholderLoanTab />}
           {tab === 'planner' && <OwnerCompPlannerTab activePlanId={activePlanId} />}

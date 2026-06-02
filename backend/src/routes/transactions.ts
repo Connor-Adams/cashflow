@@ -465,6 +465,44 @@ export async function applyPatchBody(
   }
 }
 
+/**
+ * Keep a linked transfer pair's tax treatment in sync.
+ *
+ * The per-leg tax fact builders (buildPersonalFacts / buildCorpFacts /
+ * shareholderLoanBalance) read `taxTreatmentOverride` from each leg
+ * independently and never follow `linkedTransactionId`. Setting a treatment on
+ * only ONE leg of a corp↔personal transfer pair therefore desyncs the pair and
+ * yields inconsistent T1/T2. Whenever a patch touches `taxTreatmentOverride` on
+ * a row that is one leg of a linked pair, mirror the (already-applied) value —
+ * including `null` = cleared — onto the sibling leg, so every transactions
+ * write path stays consistent with PATCH /api/transfers/:id/tax-treatment.
+ *
+ * Mirrors ONLY the tax treatment; review state and every other field are left
+ * alone (syncing those is the dedicated transfers endpoint's job). Idempotent:
+ * no-ops when the patch doesn't touch the treatment, when the row is unlinked,
+ * when the sibling is not visible, or when it already matches. Must run inside
+ * the same transaction as the primary save so the pair can never half-commit.
+ */
+async function syncLinkedLegTaxTreatment(
+  req: import('express').Request,
+  txn: InstanceType<typeof Transaction>,
+  patch: Record<string, unknown>,
+  t: import('sequelize').Transaction,
+): Promise<void> {
+  if (!Object.prototype.hasOwnProperty.call(patch, 'taxTreatmentOverride')) return;
+  const siblingId = txn.linkedTransactionId;
+  if (siblingId == null) return;
+  const sibling = await Transaction.findOne({
+    where: { id: siblingId, ...visibleTransactionWhere(req) },
+    transaction: t,
+  });
+  if (!sibling) return;
+  const value = txn.get('taxTreatmentOverride');
+  if (sibling.get('taxTreatmentOverride') === value) return;
+  sibling.set('taxTreatmentOverride', value);
+  await sibling.save({ transaction: t });
+}
+
 router.post('/bulk-ai-suggest', aiSuggestLimiter, async (req, res, next) => {
   try {
     if (rejectDemoAiRequest(req, res)) return;
@@ -581,6 +619,7 @@ router.post('/bulk-patch', async (req, res, next) => {
             await applyPatchBody(req, txn, patch);
             recomputeTransactionAmounts(txn);
             await txn.save({ transaction: t });
+            await syncLinkedLegTaxTreatment(req, txn, patch, t);
             fanoutTargets.push({ snap, txn });
           }
         }),
@@ -673,6 +712,7 @@ router.post('/bulk-patch-filter', async (req, res, next) => {
             await applyPatchBody(req, txn, patch);
             recomputeTransactionAmounts(txn);
             await txn.save({ transaction: t });
+            await syncLinkedLegTaxTreatment(req, txn, patch, t);
             updatedIds.push(txn.id);
             fanoutTargets.push({ snap, txn });
           }
@@ -1130,7 +1170,11 @@ router.patch('/:id', async (req, res, next) => {
         source: hasAiSuggestion ? 'ai_suggestion' : 'user_edit',
         aiSuggestionId: hasAiSuggestion ? aiSuggestionId : null,
       },
-      () => txn.save(),
+      () =>
+        sequelize.transaction(async (t) => {
+          await txn.save({ transaction: t });
+          await syncLinkedLegTaxTreatment(req, txn, b, t);
+        }),
     );
     scheduleMemoryFanoutIfNeeded(memSnap, txn);
     if (hasAiSuggestion) {

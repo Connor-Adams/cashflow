@@ -39,7 +39,7 @@ export function OverviewTab({ year, activePlanId, onPlanChange }: Props) {
 
   return (
     <div>
-      <section style={{ marginBottom: '1rem' }}>
+      <section className="mb-4">
         <SpouseLinkSection
           personalEntities={personalEntities}
           allEntities={entities}
@@ -48,12 +48,12 @@ export function OverviewTab({ year, activePlanId, onPlanChange }: Props) {
         />
       </section>
 
-      <section style={{ marginBottom: '1rem' }}>
+      <section className="mb-4">
         <HouseholdPlanPicker activePlanId={activePlanId} onChange={onPlanChange} />
       </section>
 
       {activePlanId !== null && (
-        <section style={{ marginBottom: '1rem' }}>
+        <section className="mb-4">
           <IntegratedRateCard
             loading={planCompute.loading}
             error={planCompute.error}
@@ -63,7 +63,7 @@ export function OverviewTab({ year, activePlanId, onPlanChange }: Props) {
       )}
 
       {activePlanId !== null && (
-        <section style={{ marginBottom: '1rem' }}>
+        <section className="mb-4">
           <HouseholdRollupCard planCompute={planCompute.data} />
         </section>
       )}

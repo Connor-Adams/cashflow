@@ -14,6 +14,7 @@ import {
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
 import { commitStatementImport } from '../import/commitStatementImport';
+import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 import {
   executeRollback,
   previewRollback,
@@ -508,6 +509,19 @@ router.post(
             error: message,
           });
         }
+      }
+
+      // Re-assert txn.entity_id == account.entity_id across the whole bundle.
+      // The per-row inheritance hook handles new rows, but a corp account that
+      // only gets linked mid-bundle (linkWsAccountToCorpEntity) leaves earlier
+      // rows on the personal default — this heals them. Best-effort: a repair
+      // failure must not fail the user's import.
+      try {
+        await syncTransactionEntityIds(household.id);
+      } catch (e) {
+        logImportEvent('bundle_entity_sync_failed', {
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
 
       const accountsCreated = results.filter((r) => r.accountCreated).length;
