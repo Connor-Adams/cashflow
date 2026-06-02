@@ -71,6 +71,37 @@ const RECEIPT_NO_ORDER: ReceiptWithItems = {
   items: [],
 }
 
+const RECEIPT_UBER_TRIP: ReceiptWithItems = {
+  id: 3,
+  transactionId: 12,
+  originalName: 'uber_trip_abc.pdf',
+  mimeType: 'application/pdf',
+  sizeBytes: 800,
+  extractedNote: null,
+  createdAt: '2024-01-03T00:00:00Z',
+  externalOrderId: 100,
+  order: {
+    id: 100,
+    vendor: 'uber',
+    subtotal: null,
+    tax: null,
+    shipping: null,
+    total: '23.45',
+    currency: 'CAD',
+    trip: {
+      pickupAddress: '123 Main St',
+      dropoffAddress: '456 King St W',
+      distance: 12.3,
+      distanceUnit: 'km',
+      durationMinutes: 27,
+      requestedAt: null,
+      driver: null,
+      surgeMultiplier: null,
+    },
+  },
+  items: [],
+}
+
 describe('ReceiptItemsDrawer', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', makeFetchOk())
@@ -232,6 +263,31 @@ describe('ReceiptItemsDrawer', () => {
       const body = JSON.parse((patchCall![1] as RequestInit).body as string)
       expect(body).toHaveProperty('businessUseOverride', 50)
     })
+  })
+
+  it('renders Uber trip detail (route and distance) when order.trip is set', () => {
+    render(
+      <ReceiptItemsDrawer
+        open={true}
+        onClose={vi.fn()}
+        receipts={[RECEIPT_UBER_TRIP]}
+        categoryHints={CATEGORY_HINTS}
+        onExtract={vi.fn()}
+      />,
+    )
+
+    // Vendor label should be human-friendly
+    expect(screen.getByText('Uber')).toBeInTheDocument()
+
+    // Route addresses
+    expect(screen.getByText(/123 Main St/)).toBeInTheDocument()
+    expect(screen.getByText(/456 King St W/)).toBeInTheDocument()
+
+    // Distance
+    expect(screen.getByText(/12\.3\s*km/)).toBeInTheDocument()
+
+    // Duration
+    expect(screen.getByText(/27\s*min/)).toBeInTheDocument()
   })
 
   it('does not render anything when open is false', () => {
