@@ -30,7 +30,7 @@ import { Account, Transaction, sequelize } from '../models';
 import { serializeTransaction } from '../util/serializeTransaction';
 import { visibleTransactionWhere } from '../auth/scope';
 import { logger } from '../observability/logger';
-import { isTaxTreatment } from '../transactions/types';
+import { isTaxTreatment, type TaxTreatment } from '../transactions/types';
 
 /**
  * Valid `transfer_purpose` values. Mirrors {@link TransferPurpose} in
@@ -597,7 +597,7 @@ router.patch('/:id/tax-treatment', async (req, res, next) => {
       return;
     }
     const raw = (req.body || {}).taxTreatment;
-    let treatment: string | null;
+    let treatment: TaxTreatment | null;
     if (raw === null || raw === undefined || raw === '') {
       treatment = null;
     } else if (isTaxTreatment(raw)) {
