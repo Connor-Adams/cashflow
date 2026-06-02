@@ -13,7 +13,6 @@
     "test:integration": "tsx --import ./test/setup.ts --test test/integration/*.test.ts",
     "test:coverage:unit": "c8 --clean=true tsx --import ./test/setup.ts --test test/*.test.ts test/portfolio/*.test.ts test/fx/*.test.ts test/chat/*.test.ts test/tax/*.test.ts test/tax/scenarios/*.test.ts test/tax/reconciliation/*.test.ts test/config/*.test.ts test/integrations/alphaVantage/*.test.ts test/migrations/*.test.ts test/notifications/*.test.ts test/services/*.test.ts",
     "test:coverage": "c8 --clean=true --reporter=none tsx --import ./test/setup.ts --test test/*.test.ts test/portfolio/*.test.ts test/fx/*.test.ts test/chat/*.test.ts test/tax/*.test.ts test/tax/scenarios/*.test.ts test/tax/reconciliation/*.test.ts test/config/*.test.ts test/integrations/alphaVantage/*.test.ts test/migrations/*.test.ts test/notifications/*.test.ts test/services/*.test.ts && c8 --clean=false tsx --import ./test/setup.ts --test test/integration/*.test.ts",
-    "coverage:report": "c8 report --temp-directory=.v8cov",
     "ai:eval": "tsx scripts/ai-eval.ts",
     "lint": "eslint src --ext .ts"
   },
