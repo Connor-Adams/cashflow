@@ -874,6 +874,12 @@ const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
   'Wise USD': { name: 'Wise USD', accountType: 'checking' },
   'Wise GBP': { name: 'Wise GBP', accountType: 'checking' },
   'Wise EUR': { name: 'Wise EUR', accountType: 'checking' },
+  'Wealthsimple TFSA': { name: 'Wealthsimple TFSA', accountType: 'investment' },
+  'Wealthsimple FHSA': { name: 'Wealthsimple FHSA', accountType: 'investment' },
+  'Wealthsimple RRSP': { name: 'Wealthsimple RRSP', accountType: 'investment' },
+  'Wealthsimple RESP': { name: 'Wealthsimple RESP', accountType: 'investment' },
+  'Wealthsimple Investing': { name: 'Wealthsimple Investing', accountType: 'investment' },
+  'Wealthsimple Credit Card': { name: 'Wealthsimple Credit Card', accountType: 'credit_card' },
 };
 
 // Corp entity suffix patterns (Inc., Corp., Ltd., LLC, GmbH, Pty, S.A.). When a

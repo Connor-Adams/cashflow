@@ -103,4 +103,18 @@ export type PdfParser = {
   sniff: (lines: PdfLine[]) => boolean;
   /** Parse all transactions out of the PDF. */
   parse: (lines: PdfLine[], ctx: PdfParseContext) => PdfParseResult;
+  /**
+   * When set, `parseStatementFile` stamps `preview.crossSourceDedup` with this
+   * value so the commit pipeline runs the fuzzy investment-activity matcher
+   * against existing DB rows before inserting. Use for parsers whose source
+   * overlaps another importer (Wealthsimple PDF vs Wealthsimple CSV).
+   */
+  crossSourceDedup?: 'fuzzy-window-5d';
+  /**
+   * Holding fingerprint scheme. Default (omitted) = the generic
+   * kind:'holding' scheme. 'ws_holding' makes emitted holdings hash
+   * identically to the Wealthsimple holdings CSV importer so the same
+   * month-end snapshot does not duplicate across the two sources.
+   */
+  holdingFingerprint?: 'ws_holding';
 };
