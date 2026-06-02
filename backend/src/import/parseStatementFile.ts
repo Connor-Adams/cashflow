@@ -754,6 +754,10 @@ export async function parseStatementFile(opts: {
       amount: v.amount,
       currency: v.currency,
       sourceReference: v.sourceReference,
+      // Authoritative txnType from the parser (WS code / CC TYPE column) — wins
+      // over enrichment's narrative guess in the commit pipeline. undefined for
+      // parsers/rows that carry no such signal.
+      overrideTxnType: v.overrideTxnType,
       sourceRowFingerprint: rowFingerprint({
         accountId: account.id,
         date: v.date,

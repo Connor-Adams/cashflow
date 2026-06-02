@@ -48,10 +48,13 @@ test('parse extracts purchases (negative) and payments (positive)', () => {
   assert.equal(aw.amount, -10.49);          // purchase → charge → negative
   assert.equal(aw.date, '2026-04-16');       // TRANS. DATE, year inferred
   assert.equal(aw.currency, 'CAD');
+  // The statement TYPE column authoritatively types this row.
+  assert.equal(aw.overrideTxnType, 'purchase');
 
   const pay = result.transactions.find((t) => t.merchantRaw.includes('chequing'))!;
   assert.equal(pay.amount, 4404.43);         // payment → credit → positive
   assert.equal(pay.date, '2026-05-06');
+  assert.equal(pay.overrideTxnType, 'payment');
 });
 
 test('parse infers prior year across the Jan boundary', () => {
@@ -101,6 +104,9 @@ test('reconciliation excludes Monthly fee from the Purchases total', () => {
   assert.equal(r.warnings.filter((w) => /Purchases.*mismatch/i.test(w)).length, 0);
   // Fee is still captured as a negative transaction.
   assert.ok(r.transactions.some((t) => /Monthly fee/i.test(t.merchantRaw) && t.amount === -10));
+  // The Fee TYPE column types it as a fee, not a purchase.
+  const fee = r.transactions.find((t) => /Monthly fee/i.test(t.merchantRaw))!;
+  assert.equal(fee.overrideTxnType, 'fee');
 });
 
 test('reconciliation tolerates a space artifact in the Purchases total', () => {

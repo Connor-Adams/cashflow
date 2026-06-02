@@ -1,4 +1,5 @@
 import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
+import type { TxnType } from '../enrichment/types';
 import { normalizeMerchant } from '../normalizeMerchant';
 
 const MONTHS: Record<string, number> = {
@@ -82,6 +83,23 @@ function parseAmount(raw: string): { magnitude: number; isCredit: boolean } {
 
 const TYPE_RE = /\b(Purchase|Payment|Refund|Reversal|Interest|Fee|Cash advance)\b/i;
 
+/**
+ * Map the credit-card statement TYPE column to the authoritative `TxnType`.
+ * Stamped onto overrideTxnType so the commit pipeline types the row by the
+ * printed type instead of guessing from the narrative. Unknown types (e.g.
+ * "Cash advance", "Reversal") return undefined → let enrichment decide.
+ */
+function ccTypeToTxnType(type: string): TxnType | undefined {
+  switch (type.trim().toLowerCase()) {
+    case 'purchase': return 'purchase';
+    case 'payment': return 'payment';
+    case 'refund': return 'refund';
+    case 'interest': return 'interest';
+    case 'fee': return 'fee';
+    default: return undefined; // e.g. cash advance → let enrichment decide
+  }
+}
+
 export const wealthsimpleCreditCardParser: PdfParser = {
   id: 'wealthsimple_credit_card',
   label: 'Wealthsimple Credit Card',
@@ -129,6 +147,8 @@ export const wealthsimpleCreditCardParser: PdfParser = {
           amount,
           currency: ctx.defaultCurrency,
           sourceReference: null,
+          // TYPE column (cols[2]) authoritatively types the row.
+          overrideTxnType: ccTypeToTxnType(cols[2]),
         });
         // Bug 1 fix: only count rows whose Activity TYPE is "Purchase" toward the
         // Purchases reconciliation total (fees have their own "+ Fees" line).
