@@ -39,6 +39,19 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
     type: 'transfer',
     re: /\b(transfer (?:to|from|in|out)|wire transfer|interac e?-?transfer|pre-?authorized (?:debit|credit)|cash (?:sent|received)|direct deposit|from chequing account|eft (?:in|out)|aft)\b/i,
   },
+  // RBC internal-transfer narratives: "Online transfer sent - 6113 Connor Adams"
+  // and "Online transfer received". The existing pattern above only matches
+  // "transfer to/from/in/out", so "Online transfer sent" fell through to
+  // 'purchase'. "Online transfer sent|received" is unambiguous — RBC uses it
+  // exclusively for account-to-account funds movement.
+  { type: 'transfer', re: /\bonline transfer (?:sent|received)\b/i },
+  // RBC → Wealthsimple investment funding: "Investment WS Investments".
+  // This phrase is not a securities BUY (no "bought N shares"), so it is safe
+  // to match before the negative fallback. The existing `investment` patterns
+  // only match "bought/sold N shares" and "loan of N shares", not this phrase.
+  // We match the full phrase (not bare "investment") to avoid false-positives
+  // on other "investment" narratives like "Investment advisor fee".
+  { type: 'transfer', re: /\binvestment\s+ws\s+investments\b/i },
   // Wise FX conversion: "Converted 5,207.60 USD to 7,084.89 CAD". Both legs of
   // a Wise FX appear on the matching CAD + USD statements with a shared
   // sourceReference; classifying them as transfer lets detectRelationshipsStage

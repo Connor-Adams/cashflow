@@ -391,3 +391,52 @@ test('unknown: positive investment "Contribution" is not income', () => {
   });
   assert.equal(out[0].fields.txnType, 'unknown');
 });
+
+// === RBC internal-transfer patterns (2026-06-01) ===
+// RBC business statements describe internal transfers with narratives that do
+// NOT match the existing "transfer to/from/in/out" regex, so they fell through
+// to 'purchase'. These tests pin the targeted patterns added for Fix 1.
+
+test('transfer: RBC "Online transfer sent" is a transfer (not a purchase)', () => {
+  // RBC chequing → WS: "Online transfer sent - 6113 Connor Adams"
+  const out = runDetectTypeStage({
+    merchantRaw: 'Online transfer sent - 6113 Connor Adams',
+    merchantClean: 'Online transfer sent - 6113 Connor Adams',
+    amount: -7000,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+  assert.equal(out[0].confidence, 'high');
+});
+
+test('transfer: RBC "Investment WS Investments" (Wealthsimple funding) is a transfer', () => {
+  // RBC → Wealthsimple investment funding: unambiguously internal money movement.
+  const out = runDetectTypeStage({
+    merchantRaw: 'Investment WS Investments',
+    merchantClean: 'Investment WS Investments',
+    amount: -7000,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+  assert.equal(out[0].confidence, 'high');
+});
+
+test('NOT transfer: "Misc Payment CDG LABS INC" stays non-transfer (income-eligible)', () => {
+  // Corporate revenue inflow must NOT be classified as transfer.
+  // Mis-tagging it would exclude it from income reporting.
+  const out = runDetectTypeStage({
+    merchantRaw: 'Misc Payment CDG LABS INC',
+    merchantClean: 'Misc Payment CDG LABS INC',
+    amount: 5000,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.notEqual(out[0].fields.txnType, 'transfer');
+});
+
+test('purchase: a normal coffee purchase still classifies as purchase', () => {
+  // Regression guard: adding RBC patterns must not affect the purchase fallback.
+  const out = runDetectTypeStage({
+    merchantRaw: 'TIM HORTONS #1234',
+    merchantClean: 'Tim Hortons',
+    amount: -3.75,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
