@@ -219,14 +219,34 @@ function parseHoldings(
 type Activity = Omit<NormalizedInvestmentActivity, 'sourceRowFingerprint'>;
 
 const DATE_CELL_RE = /^\d{4}-\d{2}-\d{2}$/;
-const CODE_CELL_RE = /^[A-Z]+$/;
+// Activity code cell. WS codes are all-caps but some carry underscores
+// (AFT_IN, AFT_OUT, P2P_IN, P2P_OUT, E_TRFIN, E_TRFOUT) — these must be
+// recognized as code cells so their rows are detected (and then skipped-and-
+// counted as unmapped cash-side codes), not silently dropped / merged into a
+// neighbor's description.
+const CODE_CELL_RE = /^[A-Z][A-Z0-9_]*$/;
 const TRADE_DATE_RE = /(?:executed at|received on)\s+(\d{4}-\d{2}-\d{2})/i;
 const QTY_RE = /\b(?:Bought|Sold)\s+([\d.]+)\s+shares?/i;
+// Commodity trades quote a unit rather than "shares" ("Bought 0.02 ounces …").
+const QTY_UNIT_RE = /\b(?:Bought|Sold)\s+([\d.]+)\s+(?:ounces?|units?)\b/i;
+// Crypto trades have no "<TICKER> - <Name>:" prefix and no "shares" keyword
+// ("Purchase of 0.029 ETH (executed at …)" / "Sale of 4.0 XRP …"). Mirrors
+// CRYPTO_BUYSELL_RE in wealthsimpleInvestParse.ts.
+const QTY_CRYPTO_RE = /\b(?:Purchase|Sale)\s+of\s+([\d.]+)\s+[A-Z0-9]+\b/i;
 // "SYM - Some Security Name: ..." → symbol + name. Name is non-greedy up to
 // the first colon (the colon separates the security from the action clause).
 const SECURITY_RE = /^([A-Z0-9.]+)\s*-\s*(.+?):/;
+// Crypto security form (no ticker/name prefix). Symbol doubles as the name,
+// assetType is cryptocurrency — matches how wealthsimpleInvestParse.ts builds
+// the crypto security from CRYPTO_BUYSELL_RE.
+const SECURITY_CRYPTO_RE =
+  /^(?:Purchase|Sale)\s+of\s+[\d.]+\s+([A-Z0-9]+)\s*\(executed at/i;
 const ACTIVITY_STOP_RE =
   /LEVERAGE DISCLOSURE|STATEMENT NOTES|Information about Statement Codes/i;
+// Per-page footer noise on amended statements ("Amended - Version: 2   3/6")
+// and bare page-number lines ("3/6") that must NOT accumulate onto the pending
+// activity's description (which would clobber its symbol/qty wrap tail).
+const ACTIVITY_NOISE_RE = /Amended\s*-\s*Version|^\d+\/\d+$/i;
 
 type PendingRow = {
   date: string;
@@ -292,17 +312,39 @@ function parseActivities(
     const description = row.descParts.join(' ').replace(/\s+/g, ' ').trim();
     const tradeMatch = TRADE_DATE_RE.exec(description);
     const tradeDate = tradeMatch ? tradeMatch[1] : row.date;
-    const qtyMatch = buySell(code) ? QTY_RE.exec(description) : null;
-    const quantity = qtyMatch ? Number(qtyMatch[1]) : null;
-    const secMatch = SECURITY_RE.exec(description);
-    const security = secMatch
-      ? {
-          symbol: secMatch[1].toUpperCase(),
-          name: secMatch[2].trim(),
-          assetType: null,
-          currency,
-        }
+    // Quantity is a position change only for trades. Equities quote "shares",
+    // commodities quote "ounces/units", crypto uses "Purchase/Sale of N SYM".
+    // Non-trade activity (dividend/interest/fee/etc.) keeps quantity null.
+    const qtyMatch = buySell(code)
+      ? QTY_RE.exec(description) ??
+        QTY_UNIT_RE.exec(description) ??
+        QTY_CRYPTO_RE.exec(description)
       : null;
+    const quantity = qtyMatch ? Number(qtyMatch[1]) : null;
+    // Security: the "SYM - Name:" form covers equities + commodities (e.g.
+    // "GOLD - Physically backed gold: …"); the crypto form has no such prefix,
+    // so the symbol doubles as the name and is tagged cryptocurrency.
+    const secMatch = SECURITY_RE.exec(description);
+    let security: Activity['security'] = null;
+    if (secMatch) {
+      security = {
+        symbol: secMatch[1].toUpperCase(),
+        name: secMatch[2].trim(),
+        assetType: null,
+        currency,
+      };
+    } else {
+      const cryptoMatch = SECURITY_CRYPTO_RE.exec(description);
+      if (cryptoMatch) {
+        const sym = cryptoMatch[1].toUpperCase();
+        security = {
+          symbol: sym,
+          name: sym,
+          assetType: 'cryptocurrency',
+          currency,
+        };
+      }
+    }
     const amount = Number((row.credit - row.debit).toFixed(4));
 
     activities.push({
@@ -366,8 +408,10 @@ function parseActivities(
       };
       continue;
     }
-    // Continuation / wrap line — accumulate onto the pending row.
-    if (pending && t) pending.descParts.push(t);
+    // Continuation / wrap line — accumulate onto the pending row, but skip
+    // per-page amended/page-number footer noise so it never clobbers the
+    // description's symbol/qty wrap tail.
+    if (pending && t && !ACTIVITY_NOISE_RE.test(t)) pending.descParts.push(t);
   }
   finalize();
 

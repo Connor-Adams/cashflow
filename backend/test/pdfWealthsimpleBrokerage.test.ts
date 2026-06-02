@@ -398,3 +398,83 @@ test('brokerage tracks per-table currency in split CAD/USD margin activity', () 
   assert.equal(div.currency, 'USD'); // under the "USD Activity" table
   assert.equal(div.security?.currency, 'USD');
 });
+
+// ---------------------------------------------------------------------------
+// Review fixes (2026-06): underscore codes, amended-footer noise, crypto qty.
+// ---------------------------------------------------------------------------
+
+test('brokerage handles a leading underscore-code row (AFT_IN) without corrupting the next BUY', () => {
+  // Real-world: an AFT_IN deposit is the FIRST activity row. WS codes with
+  // underscores must be RECOGNIZED as rows (so they finalize before the BUY)
+  // and, being cash-side + unmapped, SKIPPED-AND-COUNTED — never silently
+  // dropped and never bleeding into the following activity's description.
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk('2026-04-30   AFT_IN   Direct deposit   $0.00   $7,229.27   $7,229.27', 2, 375.2),
+    mk(' 2026-04-30   BUY   TD - The Toronto-Dominion Bank: Bought 0.0243 shares (executed at                            $2.14   $0.00   $7,227.13', 2, 365.4),
+    mk('2026-04-29)', 2, 355.6),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  const acts = result.investmentActivities!;
+
+  // AFT_IN is unmapped + cash-side → dropped. Only the BUY survives.
+  assert.equal(acts.length, 1);
+  const buy = acts[0];
+  assert.equal(buy.activityType, 'buy');
+  assert.equal(buy.security?.symbol, 'TD');
+  assert.equal(buy.quantity, 0.0243);
+  // The AFT_IN row must NOT have leaked into the BUY's description.
+  assert.doesNotMatch(buy.description, /AFT_IN/);
+  assert.doesNotMatch(buy.description, /Direct deposit/);
+  // It is surfaced (not silently lost) in the warnings.
+  assert.ok(result.warnings.length > 0);
+  assert.ok(result.warnings.some((w) => /AFT_IN/.test(w)));
+});
+
+test('brokerage skips an "Amended - Version" footer so it does not join a buy description', () => {
+  // Amended statements carry a per-page footer like "Amended - Version: 2  3/6"
+  // that must NOT accumulate onto the pending activity's description (which
+  // would lose the symbol/qty wrap tail).
+  const lines: PdfLine[] = [
+    ...CAD_HEADER,
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk(' 2025-05-02   BUY   TD - The Toronto-Dominion Bank: Bought 0.0243 shares (executed at                            $2.14   $0.00   $50.84', 2, 375.2),
+    mk(' Amended - Version: 2   3/6', 2, 90.0),
+    mk('2025-05-01)', 2, 365.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  const buy = result.investmentActivities!.find((a) => a.activityType === 'buy')!;
+  assert.doesNotMatch(buy.description, /Amended/);
+  assert.equal(buy.security?.symbol, 'TD');
+  assert.equal(buy.quantity, 0.0243);
+  assert.equal(buy.tradeDate, '2025-05-01'); // executed-at tail still captured
+});
+
+test('brokerage extracts crypto BUY symbol + quantity (cryptocurrency assetType)', () => {
+  // Crypto rows have no "<TICKER> - <Name>:" prefix and no "shares" keyword —
+  // "Purchase of 0.0544286100 ETH (executed at ...)". Quantity + symbol must
+  // still be extracted (the fuzzy matcher keys on quantity to dedup against
+  // CSV-imported crypto), and the security is tagged cryptocurrency.
+  const lines: PdfLine[] = [
+    mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
+    mk(' Account No.   Owner   Statement Period', 1, 762.2),
+    mk(' HQ6R28910CAD   Connor Adams   2024-10-01 - 2024-10-31', 1, 749.6),
+    mk(' Self-directed Non-Registered Crypto Account', 1, 699.9),
+    mk(' Activity - Current period', 2, 403.1),
+    mk(' Date   Transaction   Description   Debit ($)   Credit ($)   Balance ($)', 2, 386.4),
+    mk('2024-10-22   BUY   Purchase of 0.0544286100 ETH (executed at 2024-10-23), FX Rate: 1.3877,                 $200.00   $0.00   $0.00', 2, 375.2),
+    mk('Fee charged $3.94', 2, 365.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  const buy = result.investmentActivities!.find((a) => a.activityType === 'buy')!;
+  assert.equal(buy.activityType, 'buy');
+  assert.equal(buy.security?.symbol, 'ETH');
+  assert.equal(buy.security?.name, 'ETH'); // crypto: symbol == name
+  assert.equal(buy.security?.assetType, 'cryptocurrency');
+  assert.equal(buy.quantity, 0.0544286100);
+  assert.equal(buy.tradeDate, '2024-10-23'); // executed-at, not the 10-22 row date
+  assert.equal(buy.amount, -200); // credit 0 − debit 200
+});
