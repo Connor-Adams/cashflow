@@ -103,6 +103,7 @@ export const wealthsimpleCreditCardParser: PdfParser = {
     const parseErrors: PdfParseResult['parseErrors'] = [];
 
     let idx = 0;
+    let parsedPurchases = 0;
     for (const l of lines) {
       const cols = l.text.trim().split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
       // A data row starts with two "Mon DD" date columns.
@@ -129,6 +130,11 @@ export const wealthsimpleCreditCardParser: PdfParser = {
           currency: ctx.defaultCurrency,
           sourceReference: null,
         });
+        // Bug 1 fix: only count rows whose Activity TYPE is "Purchase" toward the
+        // Purchases reconciliation total (fees have their own "+ Fees" line).
+        if (/^Purchase$/i.test(cols[2])) {
+          parsedPurchases += abs;
+        }
       } catch (err) {
         parseErrors.push({ rowIndex: idx, message: (err as Error).message });
       }
@@ -136,15 +142,13 @@ export const wealthsimpleCreditCardParser: PdfParser = {
 
     const purchasesTotal = (() => {
       for (const l of lines) {
-        const m = /Purchases\s+\$([\d,]+\.\d{2})/.exec(l.text);
-        if (m) return Number(m[1].replace(/,/g, ''));
+        // Bug 2 fix: allow spaces inside the dollar figure (pdfjs space artifacts).
+        const m = /Purchases\s+\$([\d,\s]+\.\d{2})/.exec(l.text);
+        if (m) return Number(m[1].replace(/[,\s]/g, ''));
       }
       return null;
     })();
     if (purchasesTotal != null) {
-      const parsedPurchases = transactions
-        .filter((t) => t.amount < 0)
-        .reduce((s, t) => s + Math.abs(t.amount), 0);
       if (Math.abs(parsedPurchases - purchasesTotal) > 0.01) {
         warnings.push(
           `Purchases total mismatch: parsed ${parsedPurchases.toFixed(2)} vs statement ${purchasesTotal.toFixed(2)}`,

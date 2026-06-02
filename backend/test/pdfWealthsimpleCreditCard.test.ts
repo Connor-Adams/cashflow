@@ -84,3 +84,36 @@ test('parse warns when purchases sum disagrees with Account summary Purchases to
   const result = wealthsimpleCreditCardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.ok(result.warnings.some((w) => /Purchases.*mismatch/i.test(w)));
 });
+
+test('reconciliation excludes Monthly fee from the Purchases total', () => {
+  const lines: PdfLine[] = [
+    mk('Credit card statement'),
+    mk('Wealthsimple Apr 15 — May 14, 2026'),
+    mk('4126 50** **** 3338'),
+    mk('Statement date May 15, 2026'),
+    mk('+ Purchases $100.00'),
+    mk('TRANS. DATE   POSTED DATE   TYPE   DETAILS   AMOUNT ($CAD)', 2),
+    mk('Apr 16   Apr 17   Purchase   A&W #4655   $100.00', 2),
+    mk('Apr 30   Apr 30   Fee   Monthly fee   $10.00', 2),
+  ];
+  const r = wealthsimpleCreditCardParser.parse(lines, { defaultCurrency: 'CAD' });
+  // The $10 fee must NOT count toward the Purchases reconciliation.
+  assert.equal(r.warnings.filter((w) => /Purchases.*mismatch/i.test(w)).length, 0);
+  // Fee is still captured as a negative transaction.
+  assert.ok(r.transactions.some((t) => /Monthly fee/i.test(t.merchantRaw) && t.amount === -10));
+});
+
+test('reconciliation tolerates a space artifact in the Purchases total', () => {
+  const lines: PdfLine[] = [
+    mk('Credit card statement'),
+    mk('Wealthsimple Apr 15 — May 14, 2026'),
+    mk('4126 50** **** 3338'),
+    mk('Statement date May 15, 2026'),
+    mk('+ Purchases $5,1 13.78'),
+    mk('TRANS. DATE   POSTED DATE   TYPE   DETAILS   AMOUNT ($CAD)', 2),
+    mk('Apr 16   Apr 17   Purchase   IKEA   $5,113.78', 2),
+  ];
+  const r = wealthsimpleCreditCardParser.parse(lines, { defaultCurrency: 'CAD' });
+  // Total parses despite the embedded space; sums match → no warning.
+  assert.equal(r.warnings.filter((w) => /Purchases.*mismatch/i.test(w)).length, 0);
+});
