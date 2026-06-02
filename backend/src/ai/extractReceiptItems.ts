@@ -19,6 +19,19 @@ export type ExtractedReceiptItem = {
   vendorItemId?: string | null;
   /** Whether sales tax (HST/GST/etc.) applies. */
   taxable?: boolean | null;
+  /** Percentage of this item attributed to business use (0–100). */
+  businessUsePercent?: number | null;
+};
+
+export type TripDetail = {
+  pickupAddress: string | null;
+  dropoffAddress: string | null;
+  distance: number | null;
+  distanceUnit: 'km' | 'mi' | null;
+  durationMinutes: number | null;
+  requestedAt: string | null;
+  driver: string | null;
+  surgeMultiplier: number | null;
 };
 
 export type ExtractedReceiptTender = {
@@ -44,6 +57,7 @@ export type ExtractedReceiptOrder = {
   tenders: ExtractedReceiptTender[];
   items: ExtractedReceiptItem[];
   notes: string | null;
+  trip?: TripDetail | null;
 };
 
 const SYSTEM_PROMPT = `You extract structured order data from receipt emails and images.
@@ -66,11 +80,13 @@ Reply with JSON only. Schema:
       "inferredCategory": string | null
     }
   ],
-  "notes": string | null
+  "notes": string | null,
+  "trip": { "pickupAddress": string|null, "dropoffAddress": string|null, "distance": number|null, "distanceUnit": "km"|"mi"|null, "durationMinutes": number|null, "requestedAt": string|null, "driver": string|null, "surgeMultiplier": number|null } | null
 }
 
 Rules:
 - Use "amazon" / "apple" / "google" for those three exact merchants; otherwise "other".
+- Only populate "trip" for rideshare/taxi receipts (e.g. Uber/Lyft trips). For all other receipts set "trip": null.
 - inferredCategory: short labels matching common personal-finance categories ("Subscriptions", "Apps", "Music", "Streaming", "Office", "Groceries", "Dining", "Hardware", "Books"). Null if uncertain.
 - Quantities default to 1 if not stated.
 - All numbers as plain numbers (no currency symbols, no commas).
@@ -119,6 +135,22 @@ function parseItems(v: unknown): ExtractedReceiptItem[] {
     .slice(0, 50);
 }
 
+function parseTrip(v: unknown): TripDetail | null {
+  if (v == null || typeof v !== 'object') return null;
+  const r = v as Record<string, unknown>;
+  const unit = parseString(r.distanceUnit);
+  return {
+    pickupAddress: parseString(r.pickupAddress),
+    dropoffAddress: parseString(r.dropoffAddress),
+    distance: parseNumber(r.distance),
+    distanceUnit: unit === 'km' || unit === 'mi' ? unit : null,
+    durationMinutes: parseNumber(r.durationMinutes),
+    requestedAt: parseString(r.requestedAt),
+    driver: parseString(r.driver),
+    surgeMultiplier: parseNumber(r.surgeMultiplier),
+  };
+}
+
 export function parseExtractedReceipt(j: Record<string, unknown>): ExtractedReceiptOrder {
   return {
     vendor: parseVendor(j.vendor),
@@ -133,6 +165,7 @@ export function parseExtractedReceipt(j: Record<string, unknown>): ExtractedRece
     tenders: [],
     items: parseItems(j.items),
     notes: parseString(j.notes),
+    trip: parseTrip(j.trip),
   };
 }
 
