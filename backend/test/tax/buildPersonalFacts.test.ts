@@ -2,7 +2,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../src/db';
 import {
-  Account, Entity, FxRate, HouseholdMember, InvestmentActivity, Security, TaxSlip, Transaction,
+  Account, Category, Entity, FxRate, HouseholdMember, InvestmentActivity, Security, TaxSlip, Transaction,
   Carryforward, Household, User,
 } from '../../src/models';
 import { D } from '../../src/tax/util/decimal';
@@ -214,4 +214,52 @@ test('tolerates an investment activity with a null amount (e.g. activityType "ot
   assert.equal(facts.interestIncome.length, 0, 'no interest income');
   assert.equal(facts.eligibleDividends.length, 0, 'no eligible dividends');
   assert.equal(facts.nonEligibleDividends.length, 0, 'no non-eligible dividends');
+});
+
+test('category taxTreatment routes a transaction into employment income', async () => {
+  const household = await Household.create({ name: 'TT employment' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Chk', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  await Category.create({
+    householdId: household.id, name: 'Salary', taxTreatment: 'employment_income',
+  } as never);
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-02-01', amount: '60000.0000', currency: 'CAD', finalCategory: 'Salary',
+    merchantRaw: 'EMP', merchantClean: 'EMP', importBatch: 's',
+    sourceRowFingerprint: 'fp-tt-emp-1', sourceIdentityFingerprint: 'sif-tt-emp-1',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.employmentIncome.length, 1, 'category treatment feeds employment income');
+  assert.equal(facts.employmentIncome[0].cadAmount.toFixed(2), '60000.00');
+});
+
+test('transaction taxTreatmentOverride wins over the category default', async () => {
+  const household = await Household.create({ name: 'TT override' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Chk', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  // Category default is 'none'; the override forces a donation.
+  await Category.create({ householdId: household.id, name: 'Misc' } as never);
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-03-01', amount: '500.0000', currency: 'CAD', finalCategory: 'Misc',
+    taxTreatmentOverride: 'donations',
+    merchantRaw: 'CH', merchantClean: 'CH', importBatch: 's',
+    sourceRowFingerprint: 'fp-tt-ovr-1', sourceIdentityFingerprint: 'sif-tt-ovr-1',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.donations.length, 1, 'override beats category default');
+  assert.equal(facts.donations[0].cadAmount.toFixed(2), '500.00');
 });
