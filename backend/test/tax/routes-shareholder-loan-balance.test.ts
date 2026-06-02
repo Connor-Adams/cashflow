@@ -40,5 +40,5 @@ test('GET /corp/shareholder-loans includes computed balance', async () => {
   await models.ShareholderLoan.create({ entityId: corpEntityId, date: '2025-02-01', kind: 'repayment', amount: '2000.0000' } as never);
   const res = await authed.get('/api/tax/corp/shareholder-loans');
   assert.equal(res.status, 200);
-  assert.equal(res.body.balance, '8000');
+  assert.equal(res.body.balance, '8000.00');
 });

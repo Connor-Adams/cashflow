@@ -699,7 +699,7 @@ router.get('/corp/shareholder-loans', async (req, res, next) => {
     const { household } = currentAuth(req);
     const entity = await Entity.findOne({ where: { householdId: household.id, kind: 'corp' } });
     if (!entity) {
-      res.json({ shareholderLoans: [], balance: '0' });
+      res.json({ shareholderLoans: [], balance: '0.00' });
       return;
     }
     const rows = await ShareholderLoan.findAll({
@@ -707,7 +707,7 @@ router.get('/corp/shareholder-loans', async (req, res, next) => {
       order: [['date', 'DESC']],
     });
     const balance = await computeShareholderLoanBalance(entity.id);
-    res.json({ shareholderLoans: rows, balance: balance.toString() });
+    res.json({ shareholderLoans: rows, balance: balance.toFixed(2) });
   } catch (err) {
     next(err);
   }
