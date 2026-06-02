@@ -64,6 +64,8 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   });
 
   const employmentIncome: IncomeItem[] = [];
+  const eligibleDividends: IncomeItem[] = [];
+  const nonEligibleDividends: IncomeItem[] = [];
   const selfEmploymentIncome: IncomeItem[] = [];
   const selfEmploymentExpenses: IncomeItem[] = [];
   const donations: IncomeItem[] = [];
@@ -73,7 +75,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
     const item: IncomeItem = {
-      source: `Txn #${t.id} ${t.finalCategory ?? ''}`,
+      source: `Txn #${t.id} ${t.finalCategory ?? t.taxTreatmentOverride ?? ''}`,
       amount: D(t.amount as unknown as string),
       cadAmount: cad,
     };
@@ -85,8 +87,17 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     if (treatment === 'none' && t.finalCategory && isTaxTreatment(t.finalCategory)) {
       treatment = t.finalCategory;
     }
-    if (treatment === 'employment_income') employmentIncome.push(item);
+    // Corp→personal distributions + payroll (income-queue) fold into the same
+    // treatment routing. loan_advance/loan_repayment/not_income are explicitly
+    // non-income — skipped before the self-employment fallback so a business-
+    // flagged loan leg is never miscounted as SE income.
+    if (treatment === 'salary' || treatment === 'employment_income') employmentIncome.push(item);
+    else if (treatment === 'eligible_dividend') eligibleDividends.push(item);
+    else if (treatment === 'non_eligible_dividend') nonEligibleDividends.push(item);
     else if (treatment === 'donations') donations.push(item);
+    else if (treatment === 'loan_advance' || treatment === 'loan_repayment' || treatment === 'not_income') {
+      // classified as non-income for the personal T1 — intentionally skipped
+    }
     else if (treatment === 'rrsp_contribution') {
       rrspContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
     }
@@ -112,8 +123,6 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     : [];
 
   const interestIncome: IncomeItem[] = [];
-  const eligibleDividends: IncomeItem[] = [];
-  const nonEligibleDividends: IncomeItem[] = [];
 
   // Route a dividend-type item by Security.dividendEligibility; unknown/missing
   // defaults to eligible.

@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import { Op } from 'sequelize';
 import { currentAuth } from '../auth/middleware';
-import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, sequelize } from '../models';
+import { Entity, TaxReturn, TaxSlip, Carryforward, ShareholderLoan, InstalmentPayment, Transaction, sequelize } from '../models';
 import { buildPersonalFacts } from '../tax/builders/buildPersonalFacts';
 import { buildCorpFacts } from '../tax/builders/buildCorpFacts';
 import { buildT1 } from '../tax/engine/t1';
@@ -16,6 +17,56 @@ const router = Router();
 // GET /api/tax/years — list years the engine has rate tables for.
 router.get('/years', (_req, res) => {
   res.json({ years: supportedYears() });
+});
+
+// GET /api/tax/classification-queue?entityId=&year=
+// Unclassified corp→personal transfer pairs + detected payroll deposits for a
+// personal entity in a calendar year. Read-only derivation (no table).
+router.get('/classification-queue', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const entityId = Number(req.query.entityId);
+    const year = Number(req.query.year);
+    if (!Number.isInteger(entityId) || !Number.isInteger(year) || isNaN(entityId) || isNaN(year)) {
+      res.status(400).json({ error: 'entityId and year query params required' });
+      return;
+    }
+    const personal = await Entity.findByPk(entityId);
+    if (!personal || personal.kind !== 'personal' || personal.householdId !== household.id) {
+      res.status(404).json({ error: 'personal entity not found' });
+      return;
+    }
+    const start = `${year}-01-01`;
+    const end = `${year}-12-31`;
+
+    const corpEntities = await Entity.findAll({ where: { householdId: personal.householdId, kind: 'corp' } });
+    const corpEntityIds = new Set(corpEntities.map((e) => e.id));
+
+    const personalLegs = await Transaction.findAll({
+      where: {
+        entityId,
+        date: { [Op.between]: [start, end] },
+        txnType: 'transfer',
+        linkedTransactionId: { [Op.ne]: null },
+        taxTreatmentOverride: null,
+      },
+    });
+    const corpDistributions: Array<{ personal: unknown; corp: unknown }> = [];
+    for (const leg of personalLegs) {
+      const other = await Transaction.findByPk(leg.linkedTransactionId as number);
+      if (other && other.entityId != null && corpEntityIds.has(other.entityId)) {
+        corpDistributions.push({ personal: leg, corp: other });
+      }
+    }
+
+    const payroll = await Transaction.findAll({
+      where: { entityId, date: { [Op.between]: [start, end] }, txnType: 'income', taxTreatmentOverride: null },
+    });
+
+    res.json({ corpDistributions, payroll });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // GET /api/tax/entities — list all entities for the authenticated household.

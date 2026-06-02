@@ -459,6 +459,12 @@ export const TAX_TREATMENTS = [
   'donations',
   'rrsp_contribution',
   'fhsa_contribution',
+  'eligible_dividend',
+  'non_eligible_dividend',
+  'salary',
+  'loan_advance',
+  'loan_repayment',
+  'not_income',
 ] as const
 
 export type TaxTreatment = (typeof TAX_TREATMENTS)[number]

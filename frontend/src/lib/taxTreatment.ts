@@ -9,4 +9,10 @@ export const TREATMENT_LABELS: Record<TaxTreatment, string> = {
   donations: 'Donation',
   rrsp_contribution: 'RRSP contribution',
   fhsa_contribution: 'FHSA contribution',
+  eligible_dividend: 'Eligible dividend',
+  non_eligible_dividend: 'Non-eligible dividend',
+  salary: 'Salary',
+  loan_advance: 'Shareholder loan advance',
+  loan_repayment: 'Shareholder loan repayment',
+  not_income: 'Not income',
 }
