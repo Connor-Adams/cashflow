@@ -22,6 +22,8 @@
 import { QueryTypes, type Sequelize, type Transaction } from 'sequelize';
 import type { BundlePayload } from './bundleFormat';
 import { TABLES, TABLE_NAMES, type BundleTableSpec } from './tables';
+import { getOrCreatePersonalEntity } from '../tax/services/getOrCreatePersonalEntity';
+import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 
 export type RestoreMode = 'merge' | 'replace';
 
@@ -57,9 +59,13 @@ const FK_REMAP: Record<string, Array<{ column: string; refTable: string }>> = {
 };
 
 /** Columns that should be NULLed when their source value can't be
- *  remapped (e.g. linked_transaction_id self-ref). */
+ *  remapped (e.g. linked_transaction_id self-ref). entity_id is nulled
+ *  because the bundle carries no tax_entities and a source-household entity
+ *  id is meaningless in the target DB; it is re-derived against the target
+ *  household after insert (see restoreBundle). */
 const NULL_ON_RESTORE: Record<string, string[]> = {
-  transactions: ['linked_transaction_id'],
+  accounts: ['entity_id'],
+  transactions: ['linked_transaction_id', 'entity_id'],
 };
 
 function targetIsEmpty(
@@ -231,6 +237,25 @@ export async function restoreBundle(
       }
       inserted[spec.table] = count;
     }
+
+    // entity_id was nulled on insert (NULL_ON_RESTORE): the bundle carries no
+    // tax_entities, so a source-household entity id is meaningless here.
+    // Re-derive against the TARGET household so restored rows stay inside the
+    // T1/T2 tax engine and satisfy the accounts/transactions → tax_entities FK:
+    // every account → the household's personal entity; every transaction → its
+    // account's entity. Corp accounts collapse to personal in V1 (no
+    // tax_entities in the bundle) and are re-linked on the next import.
+    const personal = await getOrCreatePersonalEntity(householdId, { transaction: t });
+    await sequelize.query(
+      'UPDATE accounts SET entity_id = :pid WHERE household_id = :hid AND entity_id IS NULL',
+      {
+        replacements: { pid: personal.id, hid: householdId },
+        type: QueryTypes.UPDATE,
+        transaction: t,
+      },
+    );
+    await syncTransactionEntityIds(householdId, { transaction: t });
+
     await t.commit();
   } catch (e) {
     await t.rollback();

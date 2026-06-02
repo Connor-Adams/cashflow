@@ -252,6 +252,15 @@ Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Entity.belongsTo(Entity, { foreignKey: 'spouseEntityId', as: 'spouse' });
 
+// entity_id attribution for the T1/T2 tax engine. belongsTo gives
+// Account/Transaction → Entity navigation; the DB-level FK lives in migration
+// 20260618000001 (Postgres only). Reciprocal hasMany matches the repo
+// convention for owning associations.
+Entity.hasMany(Account, { foreignKey: 'entity_id', as: 'accounts' });
+Account.belongsTo(Entity, { foreignKey: 'entity_id', as: 'entity' });
+Entity.hasMany(Transaction, { foreignKey: 'entity_id', as: 'transactions' });
+Transaction.belongsTo(Entity, { foreignKey: 'entity_id', as: 'entity' });
+
 Household.hasMany(TaxTag, { foreignKey: 'household_id', as: 'taxTags' });
 TaxTag.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 

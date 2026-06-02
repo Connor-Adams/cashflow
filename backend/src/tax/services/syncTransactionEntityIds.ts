@@ -18,7 +18,10 @@ import { sequelize } from '../../models';
  * (`IS NOT` on SQLite, `IS DISTINCT FROM` on Postgres). Returns the number of
  * transaction rows updated.
  */
-export async function syncTransactionEntityIds(householdId?: number): Promise<number> {
+export async function syncTransactionEntityIds(
+  householdId?: number,
+  options?: { transaction?: import('sequelize').Transaction },
+): Promise<number> {
   const distinctOp = sequelize.getDialect() === 'sqlite' ? 'IS NOT' : 'IS DISTINCT FROM';
   const householdScope = householdId != null ? 'AND a.household_id = :householdId' : '';
   const sql = `
@@ -38,6 +41,7 @@ export async function syncTransactionEntityIds(householdId?: number): Promise<nu
   const [, affected] = await sequelize.query(sql, {
     type: QueryTypes.UPDATE,
     replacements: householdId != null ? { householdId } : {},
+    transaction: options?.transaction,
   });
   return typeof affected === 'number' ? affected : 0;
 }
