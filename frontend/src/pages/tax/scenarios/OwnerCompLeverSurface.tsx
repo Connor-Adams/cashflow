@@ -37,6 +37,14 @@ import {
 } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from '../util/format';
 import { StatCard } from '@/components/ui/stat-card';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 
 const FIELDS = [
   { key: 'salary', label: 'Salary' },
@@ -441,19 +449,19 @@ function PersonalSideTable({
   personalByEntity,
 }: PersonalSideTableProps) {
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs text-gray-500">
-          <th className="py-1 pr-2">Shareholder</th>
-          <th className="py-1 pr-2">Employment</th>
-          <th className="py-1 pr-2">Dividends</th>
-          <th className="py-1 pr-2">Fed tax</th>
-          <th className="py-1 pr-2">Prov tax</th>
-          <th className="py-1 pr-2">CPP</th>
-          <th className="py-1 pr-2">Net to shareholder</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table className="w-full text-sm">
+      <TableHeader>
+        <TableRow className="text-left text-xs text-gray-500">
+          <TableHead className="py-1 pr-2">Shareholder</TableHead>
+          <TableHead className="py-1 pr-2">Employment</TableHead>
+          <TableHead className="py-1 pr-2">Dividends</TableHead>
+          <TableHead className="py-1 pr-2">Fed tax</TableHead>
+          <TableHead className="py-1 pr-2">Prov tax</TableHead>
+          <TableHead className="py-1 pr-2">CPP</TableHead>
+          <TableHead className="py-1 pr-2">Net to shareholder</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {shareholderEntityIds.map((id) => (
           <PersonalSideRow
             key={id}
@@ -462,8 +470,8 @@ function PersonalSideTable({
             personal={personalByEntity.get(id)}
           />
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -486,15 +494,15 @@ function PersonalSideRow({ id, additions, personal }: PersonalSideRowProps) {
   const totalPayable = numericOrZero(t.totalPayable);
   const netToShareholder = emp + dividends - totalPayable;
   return (
-    <tr>
-      <td className="py-1 pr-2">#{id}</td>
-      <td className="py-1 pr-2">{fmtCurrency(emp)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(dividends)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(fedTax)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(provTax)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(cpp)}</td>
-      <td className="py-1 pr-2 font-medium">{fmtCurrency(netToShareholder)}</td>
-    </tr>
+    <TableRow>
+      <TableCell className="py-1 pr-2">#{id}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(emp)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(dividends)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(fedTax)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(provTax)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(cpp)}</TableCell>
+      <TableCell className="py-1 pr-2 font-medium text-right tabular-nums">{fmtCurrency(netToShareholder)}</TableCell>
+    </TableRow>
   );
 }
 

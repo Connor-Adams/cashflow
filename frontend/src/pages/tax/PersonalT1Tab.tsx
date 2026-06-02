@@ -225,7 +225,7 @@ function PersonalT1ScenarioWorkspace({ year: yearProp, entityId }: WorkspaceProp
           isProjecting={isProjecting}
         />
         {chain.error && (
-          <p className="error" style={{ marginTop: '0.25rem' }}>
+          <p className="error mt-1">
             Failed to load year chain: {chain.error}
           </p>
         )}
