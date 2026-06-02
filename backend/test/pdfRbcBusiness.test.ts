@@ -312,3 +312,108 @@ test('registry: existing personal banking parser still resolves correctly after 
   ]);
   assert.equal(hit?.id, 'rbc_personal_banking');
 });
+
+// ─── Fix 1: Statement-level reconciliation gate ───────────────────────────────
+
+// Fixture: a statement where a transaction amount is deliberately mismatched
+// vs the balance delta — simulating a parse corruption.
+// Opening: 1000.00, one txn that claims rawAmount=50.00 but balance jumps only
+// 10.00 → the balance delta signs it as -10.00, but closing says 990.00.
+// opening 1000 + (-50) = 950  ≠  closing 990 → reconciliation fails.
+//
+// To build this: opening=1000, txn1 debit 50.00 balance=950.00, then closing=990.00 (lie).
+// Sums: opening(1000) + (-50) = 950 ≠ 990 → gate must fire.
+const MAGNITUDE_MISMATCH_LINES: PdfLine[] = [
+  mkHeaderLine(' Business Account Statement', 1, 721),
+  mkHeaderLine(' March 1, 2026 to April 1, 2026', 1, 664),
+  mkHeaderLine('RBBDA30000_4689872 E D 03592   00380', 1, 660),
+  mkHeaderLine(' CDG LABS INC.', 1, 647),
+  mkHeaderLine(' Account number:   03592   105-488-1', 1, 632),
+  mkHeaderLine(' RBC Digital Choice Business            account package', 1, 492),
+  // Closing balance in Account Summary (wrong — doesn't match opening + txns)
+  mkHeaderLine(' Closing balance on April 1, 2026   $990.00', 1, 440),
+  mkHeaderLine(' Account Activity Details', 1, 342),
+  mkLine('Date   Description   Cheques & Debits ($)   Deposits & Credits ($)   Balance ($)', 1, 321, 45),
+  mkLine('Opening balance   1,000.00', 1, 307, 90),
+  mkLine('15 Mar   Monthly fee   50.00   950.00', 1, 293, 45),
+  mkLine('Closing balance   990.00', 1, 278, 90),
+];
+
+test('reconciliation gate fires when statement does not reconcile (magnitude mismatch)', () => {
+  const result = rbcBusinessBankingParser.parse(MAGNITUDE_MISMATCH_LINES, { defaultCurrency: 'CAD' });
+  const reconErrors = result.parseErrors.filter(e => e.message.includes('does not reconcile'));
+  assert.ok(
+    reconErrors.length > 0,
+    `Expected a reconciliation parseError, got: ${JSON.stringify(result.parseErrors)}`,
+  );
+});
+
+// ─── Fix 2: Ambiguity guard for net-zero offsetting pair ─────────────────────
+
+// Fixture: two consecutive no-balance rows where both are equal magnitude
+// (e.g. 100.00 each), so totalDelta=0. Both [+100,-100] and [-100,+100]
+// satisfy totalDelta=0 within tolerance — ambiguous. Parser must flag this.
+// Opening: 500.00, row1: +100 no-balance, row2: -100 no-balance, then row3
+// with balance=500.00 (net delta=0). Closing: 500.00.
+const NET_ZERO_AMBIGUOUS_LINES: PdfLine[] = [
+  mkHeaderLine(' Business Account Statement', 1, 721),
+  mkHeaderLine(' March 1, 2026 to April 1, 2026', 1, 664),
+  mkHeaderLine('RBBDA30000_4689872 E D 03592   00380', 1, 660),
+  mkHeaderLine(' CDG LABS INC.', 1, 647),
+  mkHeaderLine(' Account number:   03592   105-488-1', 1, 632),
+  mkHeaderLine(' RBC Digital Choice Business            account package', 1, 492),
+  mkHeaderLine(' Closing balance on April 1, 2026   $500.00', 1, 440),
+  mkHeaderLine(' Account Activity Details', 1, 342),
+  mkLine('Date   Description   Cheques & Debits ($)   Deposits & Credits ($)   Balance ($)', 1, 321, 45),
+  mkLine('Opening balance   500.00', 1, 307, 90),
+  // Two consecutive no-balance rows of the same magnitude; netDelta=0 → ambiguous sign
+  mkLine('10 Mar   Incoming payment   100.00', 1, 293, 45),
+  mkLine('Outgoing payment   100.00   500.00', 1, 279, 90),
+  mkLine('Closing balance   500.00', 1, 265, 90),
+];
+
+test('ambiguity guard fires for net-zero offsetting no-balance pair', () => {
+  const period = { start: '2026-03-01', end: '2026-04-01' };
+  const { parseErrors } = parseRbcBusinessBankingActivity(NET_ZERO_AMBIGUOUS_LINES, period, 500.00);
+  const ambigErrors = parseErrors.filter(e => e.message.includes('ambiguous'));
+  assert.ok(
+    ambigErrors.length > 0,
+    `Expected an ambiguity parseError, got: ${JSON.stringify(parseErrors)}`,
+  );
+});
+
+// ─── Fix 1: Happy reconcile (no parseError) ───────────────────────────────────
+
+// A well-formed multi-txn statement (debit + credit) where opening + signed = closing.
+// Uses the MULTI_TXN_LINES fixture which has verified balances.
+// We add a closing-balance summary line so the gate can extract the closing balance.
+const MULTI_TXN_WITH_SUMMARY: PdfLine[] = [
+  mkHeaderLine(' P.O. BOX 4047 TERMINAL A                                 Business Account Statement', 1, 721),
+  mkHeaderLine(' October 3, 2025 to November 5, 2025', 1, 664),
+  mkHeaderLine('RBBDA30000_4689872 E D 03592   00380', 1, 660),
+  mkHeaderLine(' CDG LABS INC.', 1, 647),
+  mkHeaderLine(' Account number:   03592   105-488-1', 1, 632),
+  mkHeaderLine(' RBC Digital Choice Business            account package', 1, 492),
+  // Correct closing balance: -6 + (-0.02) + 7294.46 + (-5000) + (-6) + 7326.92 = 9609.36
+  mkHeaderLine(' Closing balance on November 5, 2025   $9,609.36', 1, 448),
+  mkHeaderLine(' Account Activity Details', 1, 342),
+  mkLine('Date   Description   Cheques & Debits ($)   Deposits & Credits ($)   Balance ($)', 1, 321, 45),
+  mkLine('Opening balance   -6.00', 1, 307, 90),
+  mkLine('17 Oct   Overdraft interest   @ RBP+05.00%P.A   0.02   -6.02', 1, 293, 45),
+  mkLine('20 Oct   Misc Payment   CDG LABS INC   7,294.46', 1, 278, 45),
+  mkLine('Investment   WS Investments   5,000.00   2,288.44', 1, 264, 90),
+  mkLine('03 Nov   Monthly fee   6.00   2,282.44', 1, 249, 45),
+  mkLine('05 Nov   Misc Payment   CDG LABS INC   7,326.92   9,609.36', 1, 235, 45),
+  mkLine('Closing balance   9,609.36', 1, 220, 90),
+];
+
+test('reconciliation gate passes cleanly for a correct multi-txn statement', () => {
+  const result = rbcBusinessBankingParser.parse(MULTI_TXN_WITH_SUMMARY, { defaultCurrency: 'CAD' });
+  const reconErrors = result.parseErrors.filter(e => e.message.includes('does not reconcile'));
+  assert.equal(
+    reconErrors.length,
+    0,
+    `Expected no reconciliation errors, got: ${JSON.stringify(reconErrors)}`,
+  );
+  assert.equal(result.transactions.length, 5, `Expected 5 transactions, got ${result.transactions.length}`);
+});

@@ -38,8 +38,8 @@ const ACCOUNT_NUMBER_RE = /Account number:\s*([\d\s-]+)/;
 const PERIOD_RE = /([A-Z][a-z]+\s+\d{1,2},\s+\d{4}\s+to\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4})/;
 const ACCOUNT_HOLDER_RE = /^([A-Z][A-Z\s.&'-]+(?:INC\.?|CORP\.?|CORPORATION|LTD\.?|LLC|LLP|CO\.?))\s*$/;
 
-/** Matches a transaction date prefix: "01 May" (two-digit day + 3-letter month). */
-const DATE_PREFIX_RE = /^(\d{2}\s+[A-Z][a-z]{2})\b/;
+/** Matches a transaction date prefix: "01 May" or "1 May" (1–2 digit day + 3-letter month). */
+const DATE_PREFIX_RE = /^(\d{1,2}\s+[A-Z][a-z]{2})\b/;
 
 /** Matches a money token: digits with optional commas, a decimal point, two digits. May be negative. */
 const MONEY_RE = /^-?[\d,]+\.\d{2}$/;
@@ -354,21 +354,34 @@ export function parseRbcBusinessBankingActivity(
           [-r1, -r2], // both debits
         ];
 
-        let matched = false;
-        for (const [s1, s2] of candidates) {
-          if (Math.abs(s1 + s2 - totalDelta) < 0.015) {
-            rows[placeholderIdx] = { date: row.date, description: row.description, amount: s1 };
-            runningBalance += s1;
-            // Sign next row directly.
-            rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
-            runningBalance = nextNextBalance;
-            i++; // skip next row (already processed)
-            matched = true;
-            break;
-          }
-        }
-        if (!matched) {
-          // Fallback: assume credit.
+        const matchingCandidates = candidates.filter(
+          ([s1, s2]) => Math.abs(s1 + s2 - totalDelta) < 0.015,
+        );
+
+        if (matchingCandidates.length > 1) {
+          // Ambiguous: multiple sign combinations satisfy the balance delta.
+          // Emit the first match as a best-guess so the rows are visible,
+          // but flag the statement as partial.
+          const [s1, s2] = matchingCandidates[0];
+          rows[placeholderIdx] = { date: row.date, description: row.description, amount: s1 };
+          runningBalance += s1;
+          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
+          runningBalance = nextNextBalance;
+          i++;
+          parseErrors.push({
+            rowIndex: i,
+            message: `ambiguous sign for no-balance row pair: ${matchingCandidates.length} combinations match delta ${totalDelta.toFixed(2)} (${row.description} / ${nextRow.description}); best-guess used`,
+          });
+        } else if (matchingCandidates.length === 1) {
+          const [s1, s2] = matchingCandidates[0];
+          rows[placeholderIdx] = { date: row.date, description: row.description, amount: s1 };
+          runningBalance += s1;
+          // Sign next row directly.
+          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
+          runningBalance = nextNextBalance;
+          i++; // skip next row (already processed)
+        } else {
+          // No match at all — fallback.
           rows[placeholderIdx] = { date: row.date, description: row.description, amount: row.rawAmount };
           parseErrors.push({ rowIndex: i + 1, message: `Could not determine sign for no-balance row: ${row.description}` });
           runningBalance += row.rawAmount;
@@ -416,6 +429,54 @@ function extractOpeningBalance(lines: PdfLine[]): number {
   return 0; // fallback
 }
 
+/**
+ * Extract the closing balance.
+ * Preference order:
+ * 1. Account Summary line: "Closing balance on Month DD, YYYY   $X.XX"
+ * 2. Last "Closing balance" row in the activity section (the Balance column value).
+ *
+ * Returns null if neither can be found.
+ */
+function extractClosingBalance(lines: PdfLine[]): number | null {
+  // 1. Summary line: "Closing balance on <date>   $<amount>"
+  const SUMMARY_CLOSING_RE = /Closing balance on\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}/i;
+  for (const l of lines) {
+    if (SUMMARY_CLOSING_RE.test(l.text)) {
+      // Extract the dollar amount — last money-looking token.
+      const tokens = l.text.split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) return v;
+      }
+    }
+  }
+
+  // 2. Activity section: last "Closing balance" row.
+  let inSection = false;
+  let closingFromTable: number | null = null;
+  for (const l of lines) {
+    if (/Account Activity Details/i.test(l.text)) {
+      inSection = true;
+      continue;
+    }
+    if (!inSection) continue;
+    if (/^[\s]*Closing balance\b/i.test(l.text)) {
+      // Extract trailing money token (balance column).
+      const tokens = l.text.split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) {
+          closingFromTable = v;
+          break;
+        }
+      }
+      // Don't break — if there are multiple pages, take the last one.
+    }
+    if (/Important information about your account/i.test(l.text)) break;
+  }
+  return closingFromTable;
+}
+
 export const rbcBusinessBankingParser: PdfParser = {
   id: 'rbc_business_banking',
   label: 'RBC business banking (chequing)',
@@ -424,6 +485,7 @@ export const rbcBusinessBankingParser: PdfParser = {
     const header = parseRbcBusinessBankingHeader(lines);
     const period: Period = { start: header.periodStart, end: header.periodEnd };
     const openingBalance = extractOpeningBalance(lines);
+    const closingBalance = extractClosingBalance(lines);
     const { rows, parseErrors } = parseRbcBusinessBankingActivity(lines, period, openingBalance);
 
     const transactions: PdfParseResult['transactions'] = rows.map((row) => {
@@ -437,6 +499,27 @@ export const rbcBusinessBankingParser: PdfParser = {
         sourceReference: null,
       };
     });
+
+    // ── Reconciliation gate ─────────────────────────────────────────────────
+    // Verify: opening + Σsigned ≈ closing. Silent wrong signs/amounts are
+    // unacceptable for corporate financial data.
+    if (closingBalance === null) {
+      parseErrors.push({
+        rowIndex: -1,
+        message: 'reconciliation: could not extract closing balance from statement; gate skipped',
+      });
+    } else {
+      const sumSigned = transactions.reduce((acc, t) => acc + t.amount, 0);
+      const recomputed = openingBalance + sumSigned;
+      if (Math.abs(recomputed - closingBalance) > 0.015) {
+        parseErrors.push({
+          rowIndex: -1,
+          message:
+            `statement does not reconcile: opening ${openingBalance} + sum ${sumSigned.toFixed(2)} = ${recomputed.toFixed(2)}, expected closing ${closingBalance}`,
+        });
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────────
 
     return {
       transactions,
