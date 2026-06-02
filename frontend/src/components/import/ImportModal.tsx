@@ -179,11 +179,18 @@ export function ImportModal({
     return () => { active = false }
   }, [batch, onCommitted])
 
+  // Clear stale batch progress when the modal closes so a reopen is fresh.
+  useEffect(() => {
+    if (!open) { setBatch(null); setBatchStatus(null) }
+  }, [open])
+
   function reset() {
     setFiles([])
     setBatchLabel('')
     setOverrideMode(null)
     setFeedback(null)
+    setBatch(null)
+    setBatchStatus(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -489,7 +496,7 @@ export function ImportModal({
                 {batchStatus.items.map((it, i) => (
                   <li key={i} className="truncate" title={it.error ?? ''}>
                     {it.fileName} → {it.accountName ?? '—'} · {it.status}
-                    {it.status === 'done' ? ` (txn=${it.insertedTransactions} act=${it.insertedInvestmentActivities} hld=${it.insertedHoldings})` : ''}
+                    {it.status === 'done' ? ` (txn=${it.insertedTransactions} act=${it.insertedInvestmentActivities} hld=${it.insertedHoldings} skip=${it.skippedDuplicates})` : ''}
                     {it.error ? ` · ERR: ${it.error}` : ''}
                   </li>
                 ))}
