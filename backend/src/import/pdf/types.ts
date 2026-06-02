@@ -2,6 +2,7 @@ import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
 } from '../statementTypes';
+import type { TxnType } from '../enrichment/types';
 
 /** One positioned text fragment on a line. X-positions are in pdfjs user-space units. */
 export type PdfTextSpan = {
@@ -73,6 +74,14 @@ export type PdfParseResult = {
     amount: number;
     currency: string;
     sourceReference: string | null;
+    /**
+     * Authoritative txnType supplied by the parser when the source carries a
+     * stronger signal than the narrative detector (WS brokerage cash codes,
+     * WS credit-card TYPE column). Flows onto NormalizedCashTransaction.
+     * overrideTxnType in parseStatementFile so the commit pipeline types the
+     * row by the source code instead of guessing. Omit to let enrichment decide.
+     */
+    overrideTxnType?: TxnType;
   }>;
   /**
    * Investment activity rows (mutual fund buys/sells, distributions,

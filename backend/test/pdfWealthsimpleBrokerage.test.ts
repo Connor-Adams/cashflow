@@ -399,6 +399,8 @@ test('brokerage emits SPEND debit-card purchase as a negative cash transaction',
   assert.equal(result.transactions[0].amount, -11.35); // Charged → outflow
   assert.equal(result.transactions[0].currency, 'CAD');
   assert.equal(result.transactions[0].sourceReference, null);
+  // The WS SPEND code authoritatively types this as a purchase.
+  assert.equal(result.transactions[0].overrideTxnType, 'purchase');
   assert.equal(result.investmentActivities!.length, 0);
   // SPEND is handled, not warned about.
   assert.ok(!result.warnings.some((w) => /SPEND/.test(w)));
@@ -415,6 +417,8 @@ test('brokerage emits E_TRFIN incoming e-transfer as a positive cash transaction
   assert.equal(result.transactions.length, 1);
   assert.equal(result.transactions[0].amount, 1000); // Credit → inflow
   assert.match(result.transactions[0].merchantRaw, /Interac e-Transfer/);
+  // E_TRFIN is an inter-account transfer, not spend.
+  assert.equal(result.transactions[0].overrideTxnType, 'transfer');
   assert.equal(result.investmentActivities!.length, 0);
 });
 
@@ -429,6 +433,8 @@ test('brokerage emits AFT_OUT bill payment as a negative cash transaction', () =
   assert.equal(result.transactions.length, 1);
   assert.equal(result.transactions[0].amount, -1001.72); // Charged → outflow
   assert.match(result.transactions[0].merchantRaw, /AMEX/);
+  // AFT_OUT is a pre-authorized debit transfer, not spend.
+  assert.equal(result.transactions[0].overrideTxnType, 'transfer');
   assert.equal(result.investmentActivities!.length, 0);
 });
 

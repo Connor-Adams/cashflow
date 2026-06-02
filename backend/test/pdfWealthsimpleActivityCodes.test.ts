@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { wsPdfCodeToActivity, WS_PDF_SKIP_CODES } from '../src/import/pdf/wealthsimpleActivityCodes';
+import {
+  wsPdfCodeToActivity,
+  WS_PDF_SKIP_CODES,
+  wsPdfCashCodeToTxnType,
+} from '../src/import/pdf/wealthsimpleActivityCodes';
 
 test('aligns with TX_TO_ACTIVITY for shared codes', () => {
   assert.equal(wsPdfCodeToActivity('BUY'), 'buy');
@@ -34,4 +38,32 @@ test('zero-cash stock-lending codes are flagged skip, not misclassified', () => 
 
 test('unknown code returns null', () => {
   assert.equal(wsPdfCodeToActivity('ZZZ'), null);
+});
+
+// ---------------------------------------------------------------------------
+// Cash-code → TxnType (overrideTxnType source for the brokerage cash branch).
+// ---------------------------------------------------------------------------
+
+test('wsPdfCashCodeToTxnType maps the cash-account codes to TxnType', () => {
+  assert.equal(wsPdfCashCodeToTxnType('SPEND'), 'purchase');
+  assert.equal(wsPdfCashCodeToTxnType('OBP'), 'payment');
+  assert.equal(wsPdfCashCodeToTxnType('CASHBACK'), 'reward');
+  assert.equal(wsPdfCashCodeToTxnType('GIVEAWAY'), 'reward');
+  assert.equal(wsPdfCashCodeToTxnType('DCTFEE'), 'fee');
+  assert.equal(wsPdfCashCodeToTxnType('AFT_OUT'), 'transfer');
+  assert.equal(wsPdfCashCodeToTxnType('AFT_IN'), 'transfer');
+  assert.equal(wsPdfCashCodeToTxnType('E_TRFIN'), 'transfer');
+  assert.equal(wsPdfCashCodeToTxnType('EFT'), 'transfer');
+});
+
+test('wsPdfCashCodeToTxnType is case-insensitive and trims', () => {
+  assert.equal(wsPdfCashCodeToTxnType('  spend '), 'purchase');
+  assert.equal(wsPdfCashCodeToTxnType('aft_out'), 'transfer');
+});
+
+test('wsPdfCashCodeToTxnType returns null for unknown/empty', () => {
+  assert.equal(wsPdfCashCodeToTxnType('ZZZ'), null);
+  assert.equal(wsPdfCashCodeToTxnType(null), null);
+  assert.equal(wsPdfCashCodeToTxnType(undefined), null);
+  assert.equal(wsPdfCashCodeToTxnType(''), null);
 });

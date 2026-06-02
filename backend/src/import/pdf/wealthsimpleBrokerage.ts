@@ -4,7 +4,11 @@ import type {
   NormalizedInvestmentActivity,
 } from '../statementTypes';
 import { normalizeMerchant } from '../normalizeMerchant';
-import { wsPdfCodeToActivity, WS_PDF_SKIP_CODES } from './wealthsimpleActivityCodes';
+import {
+  wsPdfCodeToActivity,
+  WS_PDF_SKIP_CODES,
+  wsPdfCashCodeToTxnType,
+} from './wealthsimpleActivityCodes';
 
 /**
  * Wealthsimple brokerage Account Statement parser — handles all Wealthsimple
@@ -335,6 +339,9 @@ function parseActivities(
           amount: Number((row.credit - row.debit).toFixed(4)),
           currency,
           sourceReference: null,
+          // The WS code authoritatively types the row (SPEND → purchase,
+          // AFT_OUT/E_TRFIN → transfer, …). null → let enrichment decide.
+          overrideTxnType: wsPdfCashCodeToTxnType(code) ?? undefined,
         });
         return;
       }

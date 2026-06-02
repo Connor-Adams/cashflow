@@ -1,4 +1,5 @@
 import type { NormalizedInvestmentActivity } from '../statementTypes';
+import type { TxnType } from '../enrichment/types';
 
 type ActivityType = NormalizedInvestmentActivity['activityType'];
 
@@ -50,4 +51,36 @@ export const WS_PDF_SKIP_CODES = new Set<string>([
 export function wsPdfCodeToActivity(code: string | null | undefined): ActivityType | null {
   if (!code) return null;
   return MAP[String(code).trim().toUpperCase()] ?? null;
+}
+
+/**
+ * Cash-account "Transaction" code → authoritative `TxnType`. These are the
+ * codes the brokerage parser routes to `transactions` (CASH_TXN_CODES in
+ * wealthsimpleBrokerage.ts), which the InvestmentActivity taxonomy does not
+ * map. Stamped onto NormalizedCashTransaction.overrideTxnType so the commit
+ * pipeline types them by the WS code instead of letting the narrative
+ * detector guess (e.g. a negative AFT_OUT would otherwise default to
+ * 'purchase' and inflate dashboard spend).
+ *
+ * Mirrors the inter-account/inter-party → 'transfer' convention in
+ * wealthsimpleTxnType.ts (the CSV path's wsTxCodeToTxnType).
+ */
+const CASH_CODE_TXN_TYPE: Record<string, TxnType> = {
+  SPEND: 'purchase',
+  OBP: 'payment',
+  CASHBACK: 'reward',
+  GIVEAWAY: 'reward',
+  DCTFEE: 'fee',
+  AFT_IN: 'transfer',
+  AFT_OUT: 'transfer',
+  P2P_IN: 'transfer',
+  P2P_OUT: 'transfer',
+  E_TRFIN: 'transfer',
+  E_TRFOUT: 'transfer',
+  EFT: 'transfer',
+};
+
+export function wsPdfCashCodeToTxnType(code: string | null | undefined): TxnType | null {
+  if (!code) return null;
+  return CASH_CODE_TXN_TYPE[String(code).trim().toUpperCase()] ?? null;
 }
