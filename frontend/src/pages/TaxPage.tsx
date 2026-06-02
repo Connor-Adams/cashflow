@@ -68,7 +68,7 @@ export function TaxPage() {
 
   return (
     <section>
-      <header style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
+      <header className="flex items-baseline gap-4">
         <h1>Tax</h1>
         {years && year !== null && (
           <YearJump
