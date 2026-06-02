@@ -15,9 +15,9 @@ describe('CategoriesTab', () => {
   it('lists categories and opens picker to PATCH icon', async () => {
     const list = [
       { id: 1, householdId: 1, name: 'Coffee', icon: null,
-        createdAt: '', updatedAt: '' },
+        taxTreatment: 'none', createdAt: '', updatedAt: '' },
       { id: 2, householdId: 1, name: 'Rent', icon: 'Home',
-        createdAt: '', updatedAt: '' },
+        taxTreatment: 'none', createdAt: '', updatedAt: '' },
     ]
     vi.spyOn(api, 'getJson').mockResolvedValue(list)
     const patchSpy = vi
@@ -34,6 +34,26 @@ describe('CategoriesTab', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Coffee' }))
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith('/api/categories/1', { icon: 'Coffee' })
+    })
+  })
+
+  it('changing tax treatment patches the category', async () => {
+    const list = [
+      { id: 1, householdId: 1, name: 'Coffee', icon: null,
+        taxTreatment: 'none', createdAt: '', updatedAt: '' },
+    ]
+    vi.spyOn(api, 'getJson').mockResolvedValue(list)
+    const patchSpy = vi
+      .spyOn(api, 'patchJson')
+      .mockResolvedValue({ ...list[0], taxTreatment: 'donations' })
+    render(<CategoriesTab />)
+    await waitFor(() => screen.getByText('Coffee'))
+
+    const select = screen.getByRole('combobox', { name: /tax treatment for Coffee/i })
+    await userEvent.selectOptions(select, 'donations')
+
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith('/api/categories/1', { taxTreatment: 'donations' })
     })
   })
 })
