@@ -153,7 +153,7 @@ export function initAccount(sequelize: Sequelize): typeof Account {
   };
   Account.addHook('beforeCreate', fillPersonalEntity);
   Account.addHook('beforeBulkCreate', async (instances, options) => {
-    for (const instance of instances) {
+    for (const instance of instances as Account[]) {
       await fillPersonalEntity(
         instance,
         options as { transaction?: import('sequelize').Transaction },

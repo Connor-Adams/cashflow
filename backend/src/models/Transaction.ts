@@ -461,7 +461,7 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
   };
   Transaction.addHook('beforeCreate', inheritEntityFromAccount);
   Transaction.addHook('beforeBulkCreate', async (instances, options) => {
-    for (const instance of instances) {
+    for (const instance of instances as Transaction[]) {
       await inheritEntityFromAccount(
         instance,
         options as { transaction?: import('sequelize').Transaction },
