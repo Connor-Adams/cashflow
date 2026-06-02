@@ -1,4 +1,4 @@
-import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader, PdfTextSpan } from './types';
+import type { PdfLine, PdfParser, PdfParseResult, PdfStatementHeader } from './types';
 import { normalizeMerchant } from '../normalizeMerchant';
 import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHelpers';
 
@@ -21,6 +21,14 @@ import { dayMonthToIso, parseLongDate, parseMoney, type Period } from './dateHel
  *   Columns:      Date | Description | Withdrawals ($) | Deposits ($) | Balance ($)
  *   Date format:  "4 Nov" (day-month, no year — year inferred from period)
  *   Termination:  "Closing Balance" or end of section
+ *
+ * pdfjs note: pdfjs v5 glues all text items on a transaction row into a SINGLE
+ * positioned span. Column-midpoint detection (findColumnMidpoint) and per-item
+ * x-position classification are not applicable. Instead we:
+ *   1. Split each row on 2+ spaces to find field boundaries.
+ *   2. Identify trailing money tokens (last 2 = [amount, balance]; last 1 = [balance-only]).
+ *   3. Sign each transaction using the running-balance delta (mirror rbcBusinessBanking).
+ *   4. Gate with extractClosingBalance + reconciliation check (opening + Σsigned ≈ closing).
  */
 
 const PRODUCT_MAP: Record<string, { label: string; accountType: 'checking' | 'savings' }> = {
@@ -105,106 +113,115 @@ export function parseRbcPersonalBankingHeader(lines: PdfLine[]): PdfStatementHea
 
 const DATE_PREFIX_RE = /^(\d{1,2}\s+[A-Z][a-z]{2})\b/;
 
-type ActivityRow = {
-  date: string;        // ISO yyyy-mm-dd
-  description: string;
-  amount: number;      // signed: + deposit, - withdrawal
-};
-
-/**
- * Detect the X centroid of the Withdrawals vs Deposits columns by looking at
- * the header line "Date Description Withdrawals ($) Deposits ($) Balance ($)".
- * Returns the midpoint x between the two columns — amounts left of midpoint
- * are withdrawals, right of midpoint are deposits. Balance (rightmost) is
- * filtered separately.
- */
-function findColumnMidpoint(lines: PdfLine[]): { withdrawalMid: number; balanceMin: number } | null {
-  for (const l of lines) {
-    if (!/Withdrawals\s*\(\$\)/.test(l.text) || !/Deposits\s*\(\$\)/.test(l.text)) continue;
-    const items = l.items ?? [];
-    let withdrawalX: number | null = null;
-    let depositsX: number | null = null;
-    let balanceX: number | null = null;
-    for (let i = 0; i < items.length; i++) {
-      const text = items[i].str;
-      if (/^Withdrawals$/.test(text)) withdrawalX = items[i].x;
-      if (/^Deposits$/.test(text)) depositsX = items[i].x;
-      if (/^Balance$/.test(text)) balanceX = items[i].x;
-    }
-    if (withdrawalX != null && depositsX != null) {
-      const withdrawalMid = (withdrawalX + depositsX) / 2;
-      return { withdrawalMid, balanceMin: balanceX ?? Number.POSITIVE_INFINITY };
-    }
-  }
-  return null;
-}
-
-const MONEY_RE = /^-?\$?[\d,]+\.\d{2}(?:\s*CR)?$/i;
+/** Matches a money token: digits with optional commas, a decimal point, two digits. May be negative or have $ prefix. */
+const MONEY_RE = /^-?\$?[\d,]+\.\d{2}$/;
 
 function isMoneyToken(s: string): boolean {
   return MONEY_RE.test(s.trim());
 }
 
-function classifyAmount(
-  rightmostMoneySpans: PdfTextSpan[],
-  cols: { withdrawalMid: number; balanceMin: number } | null,
-): { withdrawal: number | null; deposit: number | null; balance: number | null } {
-  // Trim from the right: rightmost numeric span is balance if its X >= balanceMin.
-  // Otherwise its X compared to withdrawalMid decides withdrawal vs deposit.
-  if (rightmostMoneySpans.length === 0) {
-    return { withdrawal: null, deposit: null, balance: null };
-  }
-  let withdrawal: number | null = null;
-  let deposit: number | null = null;
-  let balance: number | null = null;
-  for (const span of rightmostMoneySpans) {
-    const val = parseMoney(span.str);
-    if (!Number.isFinite(val)) continue;
-    if (cols && span.x >= cols.balanceMin - 5) {
-      balance = val;
-    } else if (cols && span.x < cols.withdrawalMid) {
-      withdrawal = val;
-    } else if (cols && span.x >= cols.withdrawalMid && span.x < cols.balanceMin - 5) {
-      deposit = val;
-    } else {
-      // No column hints — fall back to span count: if 2 spans, [amount, balance].
-      if (balance == null && rightmostMoneySpans.indexOf(span) === rightmostMoneySpans.length - 1) {
-        balance = val;
-      } else if (deposit == null) {
-        deposit = val;
-      }
+/**
+ * Extract trailing money tokens from a row of text.
+ * Splits on 2+ spaces to find column boundaries (pdfjs uses multi-space as column separator).
+ * Strips the date prefix first to avoid "01" matching as a money token.
+ */
+function extractTrailingMoneyTokens(text: string): number[] {
+  const stripped = text.replace(DATE_PREFIX_RE, '').trim();
+  const parts = stripped.split(/\s{2,}/);
+  const values: number[] = [];
+  for (const part of parts) {
+    const t = part.trim();
+    if (isMoneyToken(t)) {
+      values.push(parseMoney(t));
     }
   }
-  return { withdrawal, deposit, balance };
+  return values;
 }
 
 /**
- * Find all money-token spans on a line, in left-to-right order.
+ * Extract the opening balance from the "Opening Balance" row in the activity section.
+ * Real format: "         Opening Balance   96.49" (lots of leading spaces at x≈90).
  */
-function collectMoneySpans(line: PdfLine): PdfTextSpan[] {
-  const items = line.items;
-  if (!items || items.length === 0) {
-    // Fallback to splitting line.text by 2+ spaces and inventing X positions
-    // proportional to character position. Used by synthetic test fixtures.
-    const tokens = line.text.split(/\s{2,}/);
-    const spans: PdfTextSpan[] = [];
-    let xOffset = 0;
-    for (const t of tokens) {
-      if (isMoneyToken(t)) spans.push({ x: xOffset, width: t.length * 5, str: t.trim() });
-      xOffset += (t.length + 2) * 5;
+function extractOpeningBalance(lines: PdfLine[]): number {
+  for (const l of lines) {
+    if (/^[\s]*Opening Balance\b/i.test(l.text)) {
+      // Last money-looking token on this line.
+      const tokens = l.text.trim().split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) return v;
+      }
     }
-    return spans;
   }
-  return items.filter((it) => isMoneyToken(it.str));
+
+  // Fallback: summary line " Your opening balance on <date>   $XX.XX"
+  for (const l of lines) {
+    if (/Your opening balance on\b/i.test(l.text)) {
+      const tokens = l.text.trim().split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) return v;
+      }
+    }
+  }
+
+  return 0;
 }
+
+/**
+ * Extract the closing balance.
+ * Preference order:
+ * 1. Summary line: " Your closing balance on <date>   = $X.XX"
+ * 2. Activity section: " Closing Balance   $X.XX"
+ */
+function extractClosingBalance(lines: PdfLine[]): number | null {
+  // 1. Summary line (preferred, most reliable)
+  for (const l of lines) {
+    if (/Your closing balance on\b/i.test(l.text)) {
+      const tokens = l.text.trim().split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) return v;
+      }
+    }
+  }
+
+  // 2. Activity section Closing Balance row
+  let inSection = false;
+  for (const l of lines) {
+    if (/Details of your account activity/i.test(l.text)) {
+      inSection = true;
+      continue;
+    }
+    if (!inSection) continue;
+    if (/^[\s]*Closing Balance\b/i.test(l.text)) {
+      const tokens = l.text.trim().split(/\s+/);
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const v = parseMoney(tokens[i]);
+        if (Number.isFinite(v)) return v;
+      }
+    }
+    if (/Important information about your account/i.test(l.text)) break;
+  }
+
+  return null;
+}
+
+type PendingRow = {
+  date: string;       // ISO yyyy-mm-dd
+  description: string;
+  rawAmount: number;  // absolute value from PDF
+  balance: number | null; // null if no balance column on this row
+};
 
 export function parseRbcPersonalBankingActivity(
   lines: PdfLine[],
   period: Period,
-): { rows: ActivityRow[]; parseErrors: { rowIndex: number; message: string }[] } {
-  const rows: ActivityRow[] = [];
+): { rows: Array<{ date: string; description: string; amount: number }>; parseErrors: { rowIndex: number; message: string }[] } {
   const parseErrors: { rowIndex: number; message: string }[] = [];
-  const cols = findColumnMidpoint(lines);
+
+  // Extract opening balance before slicing the activity section.
+  const openingBalance = extractOpeningBalance(lines);
 
   // Slice the activity section: between "Details of your account activity"
   // and the first "Closing Balance" or "Important information about your account".
@@ -216,71 +233,34 @@ export function parseRbcPersonalBankingActivity(
       continue;
     }
     if (!inSection) continue;
-    if (/Closing Balance/i.test(l.text)) {
-      // Capture the closing balance line itself? It's not a txn, just stop.
-      break;
-    }
+    if (/^[\s]*Closing Balance\b/i.test(l.text)) break;
     if (/Important information about your account/i.test(l.text)) break;
-    if (/Details of your account activity - continued/i.test(l.text)) continue;
+    if (/Details of your account activity\s*-\s*continued/i.test(l.text)) continue;
     activityLines.push(l);
   }
 
-  // Walk lines, tracking the current date and accumulating multi-line descriptions.
+  // Collect pending rows from the activity section.
+  const pending: PendingRow[] = [];
   let currentDate: string | null = null;
   let descBuffer: string[] = [];
 
-  const flushTxn = (line: PdfLine, idx: number): void => {
-    if (!currentDate) {
-      // Date not yet known — skip (probably header noise like column labels).
-      descBuffer = [];
-      return;
-    }
-    const moneySpans = collectMoneySpans(line);
-    if (moneySpans.length === 0) {
-      // Pure description line — accumulate, don't emit.
-      const desc = line.text.trim();
-      if (desc) descBuffer.push(desc);
-      return;
-    }
-    const { withdrawal, deposit, balance: _balance } = classifyAmount(moneySpans, cols);
-    void _balance;
-    const amount = deposit != null ? deposit : withdrawal != null ? -withdrawal : null;
-    if (amount == null) {
-      parseErrors.push({ rowIndex: idx + 1, message: `Could not classify amount in line: ${JSON.stringify(line.text)}` });
-      return;
-    }
-    // Extract description from line: strip the date prefix (if present) and money tokens.
-    let text = line.text.replace(DATE_PREFIX_RE, '').trim();
-    for (const span of moneySpans) {
-      text = text.replace(span.str, '').trim();
-    }
-    text = text.replace(/\s{2,}/g, ' ').trim();
-    const fullDesc = [...descBuffer, text].filter((s) => s.length > 0).join(' ').trim();
-    descBuffer = [];
-    if (!fullDesc) {
-      parseErrors.push({ rowIndex: idx + 1, message: `Empty description on txn row` });
-      return;
-    }
-    rows.push({ date: currentDate, description: fullDesc, amount });
-  };
-
   for (let i = 0; i < activityLines.length; i++) {
-    const line = activityLines[i];
-    const text = line.text.trim();
-
-    // Skip empties + the table header repeated on continuation pages.
+    const l = activityLines[i];
+    const text = l.text.trim();
     if (!text) continue;
-    if (/^Date\s+Description/i.test(text)) continue;
-    if (/^Opening Balance/i.test(text)) {
-      // Reset date — Opening Balance is the first row, balance is the last money token.
-      descBuffer = [];
-      continue;
-    }
-    if (/^- No activity for this period/i.test(text)) continue;
 
+    // Skip the column header row.
+    if (/^Date\s+Description/i.test(text)) continue;
+    // Skip the opening balance row.
+    if (/^Opening Balance\b/i.test(text)) continue;
+    // Skip "No activity" rows.
+    if (/^-?\s*No activity\b/i.test(text)) continue;
+
+    const moneyTokens = extractTrailingMoneyTokens(text);
     const dateMatch = DATE_PREFIX_RE.exec(text);
+
     if (dateMatch) {
-      // New row starts. If buffer has accumulated text without an amount, drop it.
+      // New dated row — flush desc buffer from any orphaned desc-only date row.
       descBuffer = [];
       try {
         currentDate = dayMonthToIso(dateMatch[1], period);
@@ -288,9 +268,136 @@ export function parseRbcPersonalBankingActivity(
         parseErrors.push({ rowIndex: i + 1, message: (err as Error).message });
         continue;
       }
-      flushTxn(line, i);
+
+      // Extract description: strip date prefix and all money tokens.
+      let desc = text.replace(DATE_PREFIX_RE, '').trim();
+      for (const part of desc.split(/\s{2,}/)) {
+        if (isMoneyToken(part.trim())) {
+          desc = desc.replace(part, '').trim();
+        }
+      }
+      desc = desc.replace(/\s{2,}/g, ' ').trim();
+
+      if (moneyTokens.length === 0) {
+        // Description-only dated row (multi-line txn, amounts on a subsequent dateless row).
+        descBuffer = desc ? [desc] : [];
+        continue;
+      }
+
+      pending.push({
+        date: currentDate,
+        description: desc || text.replace(DATE_PREFIX_RE, '').replace(/\s{2,}/g, ' ').trim(),
+        rawAmount: moneyTokens.length >= 2 ? moneyTokens[moneyTokens.length - 2] : moneyTokens[0],
+        balance: moneyTokens.length >= 2 ? moneyTokens[moneyTokens.length - 1] : null,
+      });
     } else {
-      flushTxn(line, i);
+      // Dateless row — either description continuation or a new amount-bearing row.
+      if (moneyTokens.length === 0) {
+        // Pure description continuation.
+        descBuffer.push(text);
+        continue;
+      }
+
+      // Has money tokens → it's an amount row (continuation of the last dated row's description).
+      if (!currentDate) {
+        parseErrors.push({ rowIndex: i + 1, message: `Dateless amount row with no current date: ${text}` });
+        continue;
+      }
+
+      // Extract description from this dateless row (strip money tokens).
+      let desc = text;
+      for (const part of desc.split(/\s{2,}/)) {
+        if (isMoneyToken(part.trim())) {
+          desc = desc.replace(part, '').trim();
+        }
+      }
+      desc = desc.replace(/\s{2,}/g, ' ').trim();
+
+      const fullDesc = [...descBuffer, desc].filter((s) => s.length > 0).join(' ').trim();
+      descBuffer = [];
+
+      pending.push({
+        date: currentDate,
+        description: fullDesc || desc,
+        rawAmount: moneyTokens.length >= 2 ? moneyTokens[moneyTokens.length - 2] : moneyTokens[0],
+        balance: moneyTokens.length >= 2 ? moneyTokens[moneyTokens.length - 1] : null,
+      });
+    }
+  }
+
+  // Sign transactions using running-balance delta (mirror rbcBusinessBanking).
+  const rows: Array<{ date: string; description: string; amount: number }> = [];
+  let runningBalance = openingBalance;
+
+  for (let i = 0; i < pending.length; i++) {
+    const row = pending[i];
+
+    if (row.balance !== null) {
+      // Balance column present: delta determines sign.
+      const delta = row.balance - runningBalance;
+      // delta ≈ +rawAmount → deposit (credit); delta ≈ -rawAmount → withdrawal (debit).
+      const signed = Math.abs(delta - row.rawAmount) < 0.015 ? row.rawAmount : -row.rawAmount;
+      rows.push({ date: row.date, description: row.description, amount: signed });
+      runningBalance = row.balance;
+    } else {
+      // No balance column: look ahead to the next known-balance row.
+      let nextBalance: number | null = null;
+      let unknownsBetween = 0;
+      for (let j = i + 1; j < pending.length; j++) {
+        if (pending[j].balance !== null) {
+          nextBalance = pending[j].balance;
+          break;
+        }
+        unknownsBetween++;
+      }
+
+      if (nextBalance !== null && unknownsBetween === 0) {
+        // One no-balance row before the next known-balance row.
+        const nextRow = pending.find((p, j) => j > i && p.balance !== null)!;
+        const nextNextBalance = nextRow.balance!;
+        const totalDelta = nextNextBalance - runningBalance;
+        const r1 = row.rawAmount;
+        const r2 = nextRow.rawAmount;
+
+        const candidates: [number, number][] = [
+          [r1, r2], [r1, -r2], [-r1, r2], [-r1, -r2],
+        ];
+        const matching = candidates.filter(([s1, s2]) => Math.abs(s1 + s2 - totalDelta) < 0.015);
+
+        if (matching.length > 1) {
+          const [s1, s2] = matching[0];
+          rows.push({ date: row.date, description: row.description, amount: s1 });
+          runningBalance += s1;
+          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
+          runningBalance = nextNextBalance;
+          i++;
+          parseErrors.push({
+            rowIndex: i,
+            message: `ambiguous sign for no-balance row pair: ${matching.length} combinations match delta ${totalDelta.toFixed(2)} (${row.description} / ${nextRow.description}); best-guess used`,
+          });
+        } else if (matching.length === 1) {
+          const [s1, s2] = matching[0];
+          rows.push({ date: row.date, description: row.description, amount: s1 });
+          runningBalance += s1;
+          rows.push({ date: nextRow.date, description: nextRow.description, amount: s2 });
+          runningBalance = nextNextBalance;
+          i++;
+        } else {
+          rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
+          parseErrors.push({ rowIndex: i + 1, message: `Could not determine sign for no-balance row: ${row.description}` });
+          runningBalance += row.rawAmount;
+        }
+      } else if (nextBalance === null) {
+        // Last transaction, no more balances — default to credit.
+        rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
+        parseErrors.push({ rowIndex: i + 1, message: `Last transaction has no balance column; defaulting to credit: ${row.description}` });
+        runningBalance += row.rawAmount;
+      } else {
+        // Multiple no-balance rows — rare; best guess.
+        rows.push({ date: row.date, description: row.description, amount: row.rawAmount });
+        parseErrors.push({ rowIndex: i + 1, message: `No-balance row with multiple unknowns ahead; defaulting to credit: ${row.description}` });
+        runningBalance += row.rawAmount;
+      }
     }
   }
 
@@ -307,6 +414,8 @@ export const rbcPersonalBankingParser: PdfParser = {
   parse: (lines, ctx): PdfParseResult => {
     const header = parseRbcPersonalBankingHeader(lines);
     const period: Period = { start: header.periodStart, end: header.periodEnd };
+    const openingBalance = extractOpeningBalance(lines);
+    const closingBalance = extractClosingBalance(lines);
     const { rows, parseErrors } = parseRbcPersonalBankingActivity(lines, period);
 
     const transactions: PdfParseResult['transactions'] = rows.map((row) => {
@@ -320,6 +429,26 @@ export const rbcPersonalBankingParser: PdfParser = {
         sourceReference: null,
       };
     });
+
+    // ── Reconciliation gate ─────────────────────────────────────────────────
+    // Verify: opening + Σsigned ≈ closing. Wrong signs/amounts must not be silent.
+    if (closingBalance === null) {
+      parseErrors.push({
+        rowIndex: -1,
+        message: 'reconciliation: could not extract closing balance from statement; gate skipped',
+      });
+    } else {
+      const sumSigned = transactions.reduce((acc, t) => acc + t.amount, 0);
+      const recomputed = openingBalance + sumSigned;
+      if (Math.abs(recomputed - closingBalance) > 0.015) {
+        parseErrors.push({
+          rowIndex: -1,
+          message:
+            `statement does not reconcile: opening ${openingBalance} + sum ${sumSigned.toFixed(2)} = ${recomputed.toFixed(2)}, expected closing ${closingBalance}`,
+        });
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────────
 
     return {
       transactions,
