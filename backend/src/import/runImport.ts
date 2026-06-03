@@ -52,7 +52,6 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
-  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -65,11 +64,7 @@ import {
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
-import { openaiJson } from '../ai/openaiJson';
-import { getOpenAiConfig } from '../config/openai';
-import { loadCategoryHints } from '../ai/suggestTransaction';
-import type { MerchantMemoryMatch } from '../ai/merchantMemory';
-import type { Signal } from './enrichment/types';
+import { logger } from '../observability/logger';
 import { findOrCreateAccount } from './accountLookup';
 import { extractAccountNumber } from './csvProfiles';
 
@@ -455,7 +450,6 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         householdAccountIds,
-        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,
