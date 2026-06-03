@@ -102,6 +102,13 @@ export async function resolveOneItemNumber(
 
 export type ItemNumberToResolve = { itemNumber: string; name: string };
 
+export type PerItemResolver = (itemNumber: string, name: string) => Promise<ResolvedProduct>;
+
+/** Build a per-item resolver for the strict (item-number-verified) scraper path. */
+export function strictResolver(caller: CostcoScraperCaller): PerItemResolver {
+  return (itemNumber, name) => resolveOneItemNumber(itemNumber, name, caller);
+}
+
 /** Statuses that mean "don't query again" (error rows may be retried elsewhere). */
 const TERMINAL_CACHED = new Set<CostcoProductStatus>(['resolved', 'not_found']);
 
@@ -143,7 +150,7 @@ async function upsertResolved(r: ResolvedProduct): Promise<void> {
  */
 export async function resolveCostcoProductsForItemNumbers(
   items: ItemNumberToResolve[],
-  caller: CostcoScraperCaller,
+  resolveItem: PerItemResolver,
   opts?: { maxItems?: number },
 ): Promise<number> {
   const byNumber = new Map<string, string>();
@@ -170,7 +177,7 @@ export async function resolveCostcoProductsForItemNumbers(
     if (skip.has(num)) continue;
     if (attempted >= cap) break;
     attempted += 1;
-    const result = await resolveOneItemNumber(num, byNumber.get(num) ?? num, caller);
+    const result = await resolveItem(num, byNumber.get(num) ?? num);
     await upsertResolved(result);
     if (result.status === 'resolved') resolved += 1;
   }
@@ -198,7 +205,7 @@ export async function maybeResolveCostcoProductsForOrder(
     const toResolve: ItemNumberToResolve[] = items
       .filter((it) => it.itemNumber != null)
       .map((it) => ({ itemNumber: it.itemNumber as string, name: it.displayName ?? it.title }));
-    return await resolveCostcoProductsForItemNumbers(toResolve, caller);
+    return await resolveCostcoProductsForItemNumbers(toResolve, strictResolver(caller));
   } catch (err) {
     logger.warn({ err, orderId: args.orderId, module: 'resolveCostcoProducts' }, 'costco_resolve_order_failed');
     return 0;

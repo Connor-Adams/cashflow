@@ -15,6 +15,7 @@ import { sequelize, ExternalOrder, ExternalOrderItem } from '../src/models';
 import {
   RESOLVE_VENDORS,
   resolveCostcoProductsForItemNumbers,
+  strictResolver,
   type ItemNumberToResolve,
 } from '../src/import/enrichment/resolveCostcoProducts';
 import { costcoEnrichmentEnabled } from '../src/config/env';
@@ -86,7 +87,7 @@ async function main() {
 
   const resolved = await resolveCostcoProductsForItemNumbers(
     candidates,
-    caller,
+    strictResolver(caller),
     flags.limit != null ? { maxItems: flags.limit } : undefined,
   );
   console.log(`[backfill-costco-images] done: newly resolved=${resolved}`);
