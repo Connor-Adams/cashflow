@@ -463,6 +463,9 @@ export async function parseStatementFile(opts: {
    * (Save for business, Corporate investing).
    */
   overrideBusiness?: boolean;
+  /** Pre-extracted pdfjs lines. When set, the .pdf branch skips extractPdfLines
+   *  (avoids a second pdfjs pass when the caller already extracted). */
+  preExtractedLines?: import('./pdf/types').PdfLine[];
 }): Promise<StatementPreview | { ok: false; error: string }> {
   const account = await Account.findOne({
     where: {
@@ -734,10 +737,14 @@ export async function parseStatementFile(opts: {
     // Guard is idempotent — safe to call here so registration only runs for PDF uploads.
     registerBuiltInPdfParsers();
     let lines;
-    try {
-      lines = await extractPdfLines(opts.buffer);
-    } catch (err) {
-      return { ok: false, error: `Could not read PDF: ${(err as Error).message}` };
+    if (opts.preExtractedLines) {
+      lines = opts.preExtractedLines;
+    } else {
+      try {
+        lines = await extractPdfLines(opts.buffer);
+      } catch (err) {
+        return { ok: false, error: `Could not read PDF: ${(err as Error).message}` };
+      }
     }
     const parser = findPdfParser(lines);
     if (!parser) {

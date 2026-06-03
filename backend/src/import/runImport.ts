@@ -971,6 +971,35 @@ function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult 
 }
 
 /**
+ * Resolve (find-or-create) the Account for a PDF statement from its parsed
+ * header, applying the corp-entity + business-override logic. Shared by the
+ * synchronous bundle path and the async pdfImportProcess worker.
+ */
+export async function resolvePdfAccountFromHeader(
+  header: import('./pdf/types').PdfStatementHeader,
+  householdId: number,
+  userId: number,
+): Promise<{ account: InstanceType<typeof Account>; accountCreated: boolean; overrideBusiness: boolean }> {
+  const template =
+    PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? { name: header.productLabel, accountType: header.accountType };
+  const headerCurrency = header.currency ?? 'CAD';
+  const entity = await resolveEntityForHolder(header.accountHolder, householdId);
+  const overrideBusiness = entity?.kind === 'corp';
+  const [account, accountCreated] = await Account.findOrCreate({
+    where: { householdId, shortCode: header.accountSuffix },
+    defaults: {
+      householdId, name: template.name, accountType: template.accountType,
+      owner: 'me', visibility: 'private', defaultCurrency: headerCurrency,
+      ownerUserId: userId, shortCode: header.accountSuffix, entityId: entity?.id ?? null,
+    },
+  });
+  if (entity && account.entityId !== entity.id) {
+    await account.update({ entityId: entity.id });
+  }
+  return { account, accountCreated, overrideBusiness };
+}
+
+/**
  * Import a single PDF statement from a bundle upload. Works with any parser
  * registered via `registerBuiltInPdfParsers` (RBC, CIBC, Questrade today).
  *
@@ -1018,33 +1047,9 @@ export async function importPdfBundleFile(opts: {
     return emptyPdfBundleResult(file, `Parser ${parser.id} produced no header for account match`);
   }
   const header = parseOut.header;
-  const template =
-    PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? {
-      name: header.productLabel,
-      accountType: header.accountType,
-    };
-
-  const headerCurrency = header.currency ?? 'CAD';
-  const entity = await resolveEntityForHolder(header.accountHolder, opts.householdId);
-  const overrideBusiness = entity?.kind === 'corp';
-
-  const [account, accountCreated] = await Account.findOrCreate({
-    where: { householdId: opts.householdId, shortCode: header.accountSuffix },
-    defaults: {
-      householdId: opts.householdId,
-      name: template.name,
-      accountType: template.accountType,
-      owner: 'me',
-      visibility: 'private',
-      defaultCurrency: headerCurrency,
-      ownerUserId: opts.userId,
-      shortCode: header.accountSuffix,
-      entityId: entity?.id ?? null,
-    },
-  });
-  if (entity && account.entityId !== entity.id) {
-    await account.update({ entityId: entity.id });
-  }
+  const { account, accountCreated, overrideBusiness } = await resolvePdfAccountFromHeader(
+    header, opts.householdId, opts.userId,
+  );
 
   const preview = await parseStatementFile({
     buffer: opts.buffer,
@@ -1052,6 +1057,7 @@ export async function importPdfBundleFile(opts: {
     accountId: account.id,
     householdId: opts.householdId,
     overrideBusiness: overrideBusiness ? true : undefined,
+    preExtractedLines: lines,
   });
   if ('error' in preview) {
     return {

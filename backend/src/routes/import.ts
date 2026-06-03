@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { listImportProfiles } from '../import/csvProfiles';
@@ -7,9 +9,7 @@ import {
   importCsvFile,
   importWsBundleFile,
   importWsHoldingsFile,
-  importPdfBundleFile,
   type BundleFileResult,
-  type PdfBundleFileResult,
 } from '../import/runImport';
 import { parseStatementFile } from '../import/parseStatementFile';
 import { consumeStatementPreview } from '../import/statementPreviewStore';
@@ -20,7 +20,9 @@ import {
   previewRollback,
   RollbackBlockedError,
 } from '../import/rollbackImportBatch';
-import { Account, ImportHistory } from '../models';
+import { sequelize, Account, ImportHistory, PdfImportBatch, PdfImportItem } from '../models';
+import { saveVaultObject, deleteVaultObject } from '../storage/vaultStorage';
+import { runJobByName } from '../jobs/registry';
 import { importUploadLimiter } from './importRateLimit';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { currentAuth } from '../auth/middleware';
@@ -81,12 +83,12 @@ const bundleUpload = multer({
   },
 });
 
-// PDF bundle drop (RBC, CIBC, Questrade, Wealthsimple). PDF-only; 120-file
-// limit matches the Wealthsimple CSV bundle so a multi-year, multi-account
-// statement archive imports in one (or few) batches.
+// PDF bundle drop (RBC, CIBC, Questrade, Wealthsimple). PDF-only; 200-file
+// limit supports multi-year, multi-account statement archives; bytes are
+// saved to vault storage (S3/disk) before responding — no parse-in-request.
 const pdfBundleUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 120 },
+  limits: { fileSize: 15 * 1024 * 1024, files: 200 },
   fileFilter: (_req, file, cb) => {
     if (!file.originalname.toLowerCase().endsWith('.pdf')) {
       const e = new Error('Only .pdf files are allowed') as Error & { status?: number };
@@ -550,68 +552,63 @@ const pdfBundleHandler = async (req: Request, res: Response, next: NextFunction)
       totalSizeBytes: files.reduce((sum, file) => sum + file.size, 0),
     });
 
-    const results: PdfBundleFileResult[] = [];
-    for (const file of files) {
-      try {
-        const result = await importPdfBundleFile({
-          buffer: file.buffer,
-          fileName: file.originalname,
-          householdId: household.id,
-          userId: user.id,
+    // Phase 1: save all bytes to vault storage BEFORE touching the DB.
+    // If any save fails, clean up the already-saved ones and rethrow so
+    // next(e) handles it — no batch or item rows are created.
+    type SavedFile = { put: Awaited<ReturnType<typeof saveVaultObject>>; fileName: string };
+    const saved: SavedFile[] = [];
+    try {
+      for (const file of files) {
+        const ext = path.extname(file.originalname || '') || '';
+        const safeExt = /^\.[a-zA-Z0-9]{1,8}$/.test(ext) ? ext : '.pdf';
+        const stored = `${randomUUID()}${safeExt}`;
+        const put = await saveVaultObject(stored, {
+          buffer: file.buffer, contentType: file.mimetype || 'application/pdf',
+          originalName: file.originalname || stored,
         });
-        results.push(result);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logImportEvent('pdf_bundle_file_failed', {
-          file: file.originalname,
-          error: message,
-        });
-        results.push({
-          file: file.originalname,
-          accountSuffix: null,
-          productLabel: null,
-          accountId: null,
-          accountName: null,
-          accountCreated: false,
-          inserted: 0,
-          insertedTransactions: 0,
-          insertedInvestmentActivities: 0,
-          insertedHoldings: 0,
-          skippedDuplicates: 0,
-          rowErrors: 0,
-          parseErrors: [],
-          warnings: [],
-          error: message,
+        saved.push({
+          put,
+          fileName: path.basename(file.originalname || stored).replace(/[\\/]/g, ''),
         });
       }
+    } catch (saveErr) {
+      // Best-effort cleanup of already-saved bytes, then rethrow.
+      await Promise.all(
+        saved.map(({ put }) => deleteVaultObject(put.storedFilename).catch(() => {}))
+      );
+      throw saveErr;
     }
 
-    // Re-assert txn.entity_id == account.entity_id across the whole bundle.
-    // Best-effort: a repair failure must not fail the user's import.
-    try {
-      await syncTransactionEntityIds(household.id);
-    } catch (e) {
-      logImportEvent('pdf_bundle_entity_sync_failed', {
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
-
-    const accountsCreated = results.filter((r) => r.accountCreated).length;
-    const filesImported = results.filter((r) => !r.error).length;
-    logImportEvent('pdf_bundle_completed', {
-      fileCount: files.length,
-      filesImported,
-      accountsCreated,
+    // Phase 2: create the batch + all items in a single DB transaction so
+    // either all rows land or none do. total is set from files.length which
+    // is known before the transaction, so it will always equal the item count.
+    const batch = await sequelize.transaction(async (t) => {
+      const b = await PdfImportBatch.create({
+        id: randomUUID(), householdId: household.id, userId: user.id,
+        status: 'pending', total: files.length, processed: 0, succeeded: 0, failed: 0,
+      }, { transaction: t });
+      for (const { put, fileName } of saved) {
+        await PdfImportItem.create({
+          id: randomUUID(), batchId: b.id,
+          fileName,
+          storedFilename: put.storedFilename, storageKind: put.storageKind,
+          encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending',
+        }, { transaction: t });
+      }
+      return b;
     });
 
-    res.json({ results });
+    // Phase 3: kick the processor and respond.
+    void runJobByName('pdf_import_process').catch(() => {});
+    logImportEvent('pdf_bundle_queued', { batchId: batch.id, total: files.length });
+    res.status(201).json({ batchId: batch.id, total: files.length });
   } catch (e) {
     next(e);
   }
 };
 
 const pdfBundleMulter = (req: Request, res: Response, next: NextFunction) => {
-  pdfBundleUpload.array('files', 120)(req as never, res as never, (err: unknown) => {
+  pdfBundleUpload.array('files', 200)(req as never, res as never, (err: unknown) => {
     if (err) {
       next(err);
       return;
@@ -621,6 +618,47 @@ const pdfBundleMulter = (req: Request, res: Response, next: NextFunction) => {
 };
 
 router.post('/upload-pdf-bundle', importUploadLimiter, pdfBundleMulter, pdfBundleHandler);
+
+/**
+ * GET /api/import/pdf-batch/:id
+ *
+ * Progress endpoint for an async PDF-bundle import batch. Returns the batch
+ * status + per-item counts so the frontend can poll progress without polling
+ * the DB directly. Scoped to the authenticated household — a batch belonging
+ * to another household returns 404, not 200, to prevent cross-household leaks.
+ */
+router.get('/pdf-batch/:id', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const batch = await PdfImportBatch.findOne({
+      where: { id: req.params.id, householdId: household.id },
+    });
+    if (!batch) {
+      res.status(404).json({ error: 'Batch not found' });
+      return;
+    }
+    const items = await PdfImportItem.findAll({
+      where: { batchId: batch.id }, order: [['created_at', 'ASC']],
+    });
+    res.json({
+      id: batch.id, status: batch.status, total: batch.total,
+      processed: batch.processed, succeeded: batch.succeeded, failed: batch.failed,
+      items: items.map((i) => {
+        const r = (i.resultJson ?? {}) as Record<string, number | string | undefined>;
+        return {
+          fileName: i.fileName, status: i.status, accountName: r.accountName ?? null,
+          insertedTransactions: r.insertedTransactions ?? 0,
+          insertedInvestmentActivities: r.insertedInvestmentActivities ?? 0,
+          insertedHoldings: r.insertedHoldings ?? 0,
+          skippedDuplicates: r.skippedDuplicates ?? 0,
+          error: i.error ?? null,
+        };
+      }),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
 router.post(
   '/upload-holdings',
