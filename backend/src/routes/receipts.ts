@@ -288,6 +288,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               confidence: it.confidence,
               imageUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.imageUrl ?? null) : null,
               costcoUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.costcoUrl ?? null) : null,
+              imageVerified: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.verified ?? true) : true,
             }),
           ),
         };

@@ -955,6 +955,8 @@ export type ExternalOrderItemView = {
   imageUrl?: string | null;
   /** Verified Costco product page URL (thumbnail links here). */
   costcoUrl?: string | null;
+  /** false = best-effort guess (e.g. Google image), not item-number-verified. */
+  imageVerified?: boolean;
   quantity: number;
   unitPrice: string | null;
   totalPrice: string | null;

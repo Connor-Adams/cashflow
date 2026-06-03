@@ -61,9 +61,10 @@ export function ItemRow({ item, categoryHints, onSaved }: ItemRowProps) {
               <img
                 src={item.imageUrl}
                 alt={item.displayName ?? item.title}
+                title={item.imageVerified === false ? 'Best-effort match (unverified)' : undefined}
                 width={40}
                 height={40}
-                style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid #eee' }}
+                style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid #eee', opacity: item.imageVerified === false ? 0.6 : 1 }}
                 loading="lazy"
               />
             </a>
