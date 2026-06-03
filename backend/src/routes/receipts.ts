@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
 import { Op } from 'sequelize';
-import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink } from '../models';
+import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink, CostcoProduct } from '../models';
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
 import { anchorReceiptOrderToTransaction } from '../import/receiptOrderAnchor';
@@ -242,6 +242,11 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       list.push(it);
       itemsByOrder.set(it.externalOrderId, list);
     }
+    const itemNumbers = [...new Set(items.map((it) => it.itemNumber?.trim()).filter((x): x is string => x != null && x !== ''))];
+    const products = itemNumbers.length
+      ? await CostcoProduct.findAll({ where: { itemNumber: { [Op.in]: itemNumbers }, status: 'resolved' } })
+      : [];
+    const productByNumber = new Map(products.map((p) => [p.itemNumber, p]));
     res.json(
       receipts.map((r) => {
         const order = r.externalOrderId != null ? ordersById.get(r.externalOrderId) : null;
@@ -281,6 +286,8 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               businessUsePercent: it.businessUsePercent,
               businessUseOverride: it.businessUseOverride,
               confidence: it.confidence,
+              imageUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.imageUrl ?? null) : null,
+              costcoUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.costcoUrl ?? null) : null,
             }),
           ),
         };

@@ -18,6 +18,7 @@ import { AiSuggestion, initAiSuggestion } from './AiSuggestion';
 import { ChatThread, initChatThread } from './ChatThread';
 import { ChatMessage, initChatMessage } from './ChatMessage';
 import { ChatProposal, initChatProposal } from './ChatProposal';
+import { CostcoProduct, initCostcoProduct } from './CostcoProduct';
 import { ExternalOrder, initExternalOrder } from './ExternalOrder';
 import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
@@ -139,6 +140,7 @@ initAiSuggestion(sequelize);
 initChatThread(sequelize);
 initChatMessage(sequelize);
 initChatProposal(sequelize);
+initCostcoProduct(sequelize);
 initExternalOrder(sequelize);
 initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
@@ -1071,6 +1073,7 @@ export {
   ChatThread,
   ChatMessage,
   ChatProposal,
+  CostcoProduct,
   ExternalOrder,
   ExternalOrderItem,
   ExternalOrderTender,

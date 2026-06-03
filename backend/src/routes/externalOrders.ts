@@ -27,6 +27,7 @@ import {
   EXPANSION_VENDORS,
   maybeExpandItemNamesForOrder,
 } from '../import/enrichment/expandItemNames';
+import { maybeResolveCostcoProductsForOrder, RESOLVE_VENDORS } from '../import/enrichment/resolveCostcoProducts';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { importUploadLimiter } from './importRateLimit';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
@@ -220,6 +221,18 @@ async function maybeExpandIngestedOrderItemNames(order: ExternalOrder): Promise<
 }
 
 /**
+ * Fire-and-forget Costco product-image resolution for a freshly ingested order.
+ * Best-effort: errors are swallowed by the resolver; we don't await the result
+ * into the request path (image fills in shortly after upload).
+ */
+function kickCostcoProductResolution(order: ExternalOrder): void {
+  if (order.householdId == null) return;
+  if (!(RESOLVE_VENDORS as readonly string[]).includes(order.vendor)) return;
+  void maybeResolveCostcoProductsForOrder({ householdId: order.householdId, orderId: order.id })
+    .catch(() => { /* resolver already logs; never surfaces to ingest */ });
+}
+
+/**
  * POST /api/external-orders/match-unlinked
  *
  * Runs the receipt→transaction matcher against every ExternalOrder in this
@@ -338,6 +351,7 @@ router.post('/import-text', aiSuggestLimiter, async (req, res, next) => {
 
     if (created) {
       await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+      kickCostcoProductResolution(order);
     }
 
     logger.info({
@@ -393,6 +407,7 @@ router.post(
 
       if (created) {
         await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+        kickCostcoProductResolution(order);
       }
       logger.info({
         source: 'image-upload',
@@ -556,6 +571,7 @@ router.post(
       if (created) {
         await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
         await maybeExpandIngestedOrderItemNames(order);
+        kickCostcoProductResolution(order);
       }
 
       logger.info({

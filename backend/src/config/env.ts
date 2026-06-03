@@ -417,6 +417,10 @@ export const enrichmentItemClearConfidence = parseIntEnv(
   'ENRICHMENT_ITEM_CLEAR_CONFIDENCE',
   80,
 );
+/** Costco product-image enrichment: enabled only when true AND a scraper key is set. */
+export const costcoEnrichmentEnabled = parseBoolEnv('COSTCO_ENRICHMENT_ENABLED', false);
+/** Max distinct item numbers the resolver will attempt per invocation (budget guard). */
+export const costcoEnrichmentMaxItemsPerRun = parseIntEnv('COSTCO_ENRICHMENT_MAX_ITEMS_PER_RUN', 50);
 
 export const googleOauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
 export const googleOauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;
