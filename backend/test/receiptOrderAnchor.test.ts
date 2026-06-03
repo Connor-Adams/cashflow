@@ -153,3 +153,13 @@ test('anchor: low-confidence item keeps txn in review (straggler)', async () => 
   );
   assert.equal((await Transaction.findByPk(t))!.reviewFlag, true);
 });
+
+test('anchor: re-anchor same order is idempotent (no duplicate link, no double-count)', async () => {
+  const t = await reviewableTxn()
+  const o = await orderWithItems([{ inferredCategory: 'Groceries', confidence: 90 }])
+  await anchorReceiptOrderToTransaction({ orderId: o, transactionId: t, householdId: HH }, { openaiCaller: emptyCaller })
+  await anchorReceiptOrderToTransaction({ orderId: o, transactionId: t, householdId: HH }, { openaiCaller: emptyCaller })
+  const links = await TransactionOrderLink.findAll({ where: { transactionId: t, externalOrderId: o } })
+  assert.equal(links.length, 1)
+  assert.equal((links[0] as unknown as { status: string }).status, 'accepted')
+})

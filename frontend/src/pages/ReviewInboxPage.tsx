@@ -194,9 +194,6 @@ export function ReviewInboxPage() {
   const receiptInputRef = useRef<HTMLInputElement>(null)
   const [receiptTargetTxnId, setReceiptTargetTxnId] = useState<number | null>(null)
   const [lastAnalyzedTxnId, setLastAnalyzedTxnId] = useState<number | null>(null)
-  const { attachAndAnalyze, busyTxnId, lastItemCount, error: attachErr } =
-    useAttachAndAnalyzeReceipt(async () => { await load() })
-
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
@@ -218,6 +215,10 @@ export function ReviewInboxPage() {
       setLoading(false)
     }
   }, [confidenceFlag])
+
+  const onReceiptDone = useCallback(async () => { await load() }, [load])
+  const { attachAndAnalyze, busyTxnId, lastItemCount, error: attachErr } =
+    useAttachAndAnalyzeReceipt(onReceiptDone)
 
   const toggleExpanded = useCallback(
     async (id: number) => {
