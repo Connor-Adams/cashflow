@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 import {
   Dialog,
@@ -127,6 +128,7 @@ export function ImportModal({
   onCommitted,
   onAccountsChanged,
 }: ImportModalProps) {
+  const navigate = useNavigate()
   const [files, setFiles] = useState<File[]>([])
   const [autoMode, setAutoMode] = useState<DetectedMode>('standard')
   const [overrideMode, setOverrideMode] = useState<DetectedMode | null>(null)
@@ -139,6 +141,7 @@ export function ImportModal({
   const [feedback, setFeedback] = useState<{ variant: AlertVariant; title: string; lines?: string[] } | null>(null)
   const [batch, setBatch] = useState<{ id: string; total: number } | null>(null)
   const [batchStatus, setBatchStatus] = useState<PdfBatchStatus | null>(null)
+  const [showProgressLink, setShowProgressLink] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -191,6 +194,7 @@ export function ImportModal({
     setFeedback(null)
     setBatch(null)
     setBatchStatus(null)
+    setShowProgressLink(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -244,7 +248,11 @@ export function ImportModal({
         const { batchId, total } = await postFormData<{ batchId: string; total: number }>(PDF_BUNDLE_URL, fd)
         setBatch({ id: batchId, total })
         setFeedback({ variant: 'success', title: `Uploaded ${total} file(s); processing…` })
-        reset()
+        setShowProgressLink(true)
+        // Clear the file list so the drop-zone is ready, but keep the batch/feedback visible
+        setFiles([])
+        setOverrideMode(null)
+        if (fileInputRef.current) fileInputRef.current.value = ''
         return
       } else if (mode === 'ws-bundle') {
         const fd = new FormData()
@@ -481,6 +489,17 @@ export function ImportModal({
                   </li>
                 ))}
               </ul>
+            )}
+            {showProgressLink && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  className="text-xs underline underline-offset-2 text-blue-600 dark:text-blue-400 hover:opacity-80"
+                  onClick={() => { onOpenChange(false); navigate('/imports') }}
+                >
+                  View progress →
+                </button>
+              </div>
             )}
           </div>
         )}

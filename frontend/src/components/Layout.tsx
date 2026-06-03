@@ -9,6 +9,8 @@ import { NotificationBell } from './notifications/NotificationBell'
 import { WhatsNewBell } from './changelog/WhatsNewBell'
 import { FeedbackButton } from './feedback/FeedbackButton'
 import { ImportProgressBadge } from './import/ImportProgressBadge'
+import { useActiveImports } from './import/useActiveImports'
+import { useToast } from './ui/toast'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -20,6 +22,19 @@ export function Layout() {
   // the global keydown listener; the toolbar button opens it for mouse
   // users.
   const palette = useCommandPalette()
+
+  // Completion toast: fires when a batch transitions from active → terminal.
+  const { justFinished, clearFinished } = useActiveImports()
+  const { showToast } = useToast()
+  useEffect(() => {
+    if (!justFinished) return
+    showToast({
+      title: 'Import finished',
+      description: `${justFinished.succeeded} imported, ${justFinished.skipped} skipped, ${justFinished.failed} failed`,
+      variant: justFinished.failed > 0 ? 'warning' : 'success',
+    })
+    clearFinished()
+  }, [justFinished, clearFinished, showToast])
 
   // Auto-close on route change so the mobile drawer doesn't linger after
   // the user picks a destination. Desktop ignores `open` so this is a

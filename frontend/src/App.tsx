@@ -6,6 +6,7 @@ import { AccountsLayout, InboxLayout, PlannedLayout, ScenariosLayout, PortfolioL
 import { DashboardPage } from './pages/DashboardPage'
 import { ImportBatchPage } from './pages/ImportBatchPage'
 import { ImportPage } from './pages/ImportPage'
+import { ImportsPage } from './pages/ImportsPage'
 import { PartnerFairnessPage } from './pages/PartnerFairnessPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { ReportsLayout } from './pages/ReportsLayout'
@@ -114,6 +115,7 @@ function AppRoutes() {
           <Route path="purchases" element={<Navigate to="/transactions/purchases" replace />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="import/:batchId" element={<ImportBatchPage />} />
+          <Route path="imports" element={<ImportsPage />} />
           <Route path="portfolio" element={<PortfolioLayout />}>
             <Route index element={<PortfolioPage />} />
             <Route path="net-worth" element={<NetWorthPage />} />
