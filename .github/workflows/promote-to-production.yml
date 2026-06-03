@@ -48,7 +48,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Railway CLI
-        run: npm install -g @railway/cli
+        # Pinned: @railway/cli 4.66.1 (2026-06-03) sends a GraphQL query with a
+        # `deletedAt` field on VolumeInstance that Railway's API rejects, crashing
+        # `railway redeploy` ("Cannot query field deletedAt on type VolumeInstance").
+        # 4.66.0 is the last version that promotes cleanly. Bump deliberately after
+        # verifying redeploy works against the live API.
+        run: npm install -g @railway/cli@4.66.0
 
       # Resolve each service by its content hash (:tree-<hash>), stamp every
       # service with the release version tag, and re-tag :production + redeploy
