@@ -129,9 +129,10 @@ export interface DetectTypeInput {
   merchantClean: string;
   amount: number;
   /**
-   * Household member display names (e.g. ['Connor Adams', 'LingLing']). Used to
-   * tell an external payroll direct deposit (income) apart from a self-deposit
-   * the owner made under their own name (transfer). Optional: when omitted, any
+   * Owner-side names for the household — member User display names plus any
+   * partner Contact names (see loadHouseholdOwnerNames). Used to tell an external
+   * payroll direct deposit (income) apart from a self-deposit made under an
+   * owner's or partner's own name (transfer). Optional: when omitted, any
    * "direct deposit from <X>" that isn't an own-account movement is treated as
    * external income.
    */
