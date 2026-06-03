@@ -270,6 +270,38 @@ test('route: PATCH /api/external-order-items/:id triggers review recompute', asy
   );
 });
 
+test('categorization completing high-confidence clears an already-linked txn', async () => {
+  // Create a txn with an accepted order link and one straggler item (no category),
+  // plus an item-link signal at medium confidence (which sets reviewFlag=true).
+  const id = await makeItemizedTxn({
+    reviewFlag: true,
+    signals: [{ source: 'item-link', confidence: 'medium', fields: { autoCategory: 'Mixed' } }],
+    items: [
+      { inferredCategory: null, categoryOverride: null, confidence: null }, // straggler
+    ],
+  });
+
+  // Confirm the txn starts in review.
+  const before = await Transaction.findByPk(id);
+  assert.equal(before!.reviewFlag, true);
+
+  // Simulate categorization completing: update the straggler to high-confidence Groceries.
+  await ExternalOrderItem.update(
+    { inferredCategory: 'Groceries', confidence: '90' },
+    { where: { inferredCategory: null } },
+  );
+
+  // Recompute: the function should see all items resolved and clear the flag.
+  await recomputeTransactionReviewFromItems(id);
+
+  const after = await Transaction.findByPk(id);
+  assert.equal(
+    after!.reviewFlag,
+    false,
+    'reviewFlag should be cleared once all items are high-confidence',
+  );
+});
+
 test('route: POST /api/external-order-items/bulk-patch triggers review recompute', async () => {
   const { default: app } = await import('../src/app.js');
 

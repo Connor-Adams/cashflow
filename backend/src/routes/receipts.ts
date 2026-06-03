@@ -427,6 +427,7 @@ router.post(
           externalOrderId: order.id,
           householdId: auth.household.id,
         });
+        await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(order.id));
         // Best-effort: expand abbreviated item titles into readable names for
         // allowlisted vendors (Costco). No-ops/silently fails so a flaky
         // OpenAI call can't break receipt analysis.

@@ -18,6 +18,10 @@ import {
   Transaction,
   TransactionOrderLink,
 } from '../models';
+import {
+  recomputeTransactionsReviewFromItems,
+  transactionIdsForOrder,
+} from './enrichment/recomputeTransactionReviewFromItems';
 
 const MATCH_CONFIDENCE_THRESHOLD = 70;
 const DATE_WINDOW_DAYS = 7;
@@ -231,6 +235,11 @@ export async function matchReceiptOrderToTransactions(args: {
       updated += 1;
     }
     claimed.add(best.txn.id);
+  }
+
+  // Recompute review flags for newly accepted-linked transactions.
+  if (created > 0 || updated > 0) {
+    await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(args.externalOrderId));
   }
 
   return {

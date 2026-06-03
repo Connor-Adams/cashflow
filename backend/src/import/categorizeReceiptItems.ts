@@ -4,6 +4,10 @@ import { loadCategoryHints } from '../ai/suggestTransaction'
 import { openaiJsonWithMeta, type OpenAiJsonResult } from '../ai/openaiJson'
 import { logger } from '../observability/logger'
 import { RECEIPT_CATEGORIES } from './receiptCategories'
+import {
+  recomputeTransactionsReviewFromItems,
+  transactionIdsForOrder,
+} from './enrichment/recomputeTransactionReviewFromItems'
 
 export const RECEIPT_ITEM_CATEGORIZATION_PROMPT_VERSION = 'receipt-item-categorization-v1'
 
@@ -229,7 +233,14 @@ export async function categorizeAndApplyReceiptItems(
       { householdId: args.householdId, orderId: args.orderId, orderIds: args.orderIds, limit: args.limit },
       opts,
     )
-    return await applyReceiptItemCategorySuggestions(result.suggestions)
+    const updated = await applyReceiptItemCategorySuggestions(result.suggestions)
+    // Recompute review flags for any transactions linked to the categorized orders.
+    const orderIdList = args.orderId != null
+      ? [args.orderId]
+      : (args.orderIds ?? [])
+    const txnIds = (await Promise.all(orderIdList.map(transactionIdsForOrder))).flat()
+    await recomputeTransactionsReviewFromItems(txnIds)
+    return updated
   } catch (err) {
     logger.warn({ err, orderId: args.orderId, orderIds: args.orderIds }, 'receipt_item_categorization_failed')
     return 0
