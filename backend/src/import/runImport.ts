@@ -52,7 +52,6 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
-  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -65,6 +64,9 @@ import {
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
 export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
+import { logger } from '../observability/logger';
+import { findOrCreateAccount } from './accountLookup';
+import { extractAccountNumber } from './csvProfiles';
 
 /** Max row-level parse diagnostics returned on a single import response */
 export const PARSE_ERRORS_MAX = 50;
@@ -101,6 +103,30 @@ export async function resolveAccount(cardToken: string, householdId?: number | n
       ],
     },
   });
+}
+
+/** Try to resolve account via auto-match on CSV Account Number. Returns [account, 'matched' | 'created'] or null. */
+async function tryAutoMatchAccount(
+  records: Record<string, string>[],
+  headers: string[],
+  profileId: string,
+  householdId: number | null
+): Promise<{ account: AccountModel; matchedBy: string } | null> {
+  try {
+    const { profiles } = await import('./csvProfiles');
+    const profile = profiles[profileId] || profiles.generic_simple;
+    const csvAccountNumber = extractAccountNumber(records, headers, profile);
+
+    if (!csvAccountNumber) {
+      return null; // No account number in CSV
+    }
+
+    const result = await findOrCreateAccount(csvAccountNumber, profileId, householdId);
+    return { account: result.account, matchedBy: result.matchedBy };
+  } catch (err) {
+    logger.debug(`Auto-match account failed: ${err}`);
+    return null;
+  }
 }
 
 export type ImportCsvFileOpts = {
@@ -201,10 +227,49 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   const rules = await loadAllRules(opts.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(opts.householdId ?? null);
   const startedAt = new Date();
+
+  // Parse CSV early so we can use it for auto-match
+  const text = buf.toString('utf8');
+  const parsed = parseCsvRecords(text);
+  if (!parsed.ok) {
+    const msg = parsed.error;
+    await ImportHistory.create({
+      fileName: name,
+      filePathSafe: name,
+      contentHash,
+      batchLabel: 'parse-error',
+      status: 'failed',
+      rowCount: 0,
+      errorMessage: msg,
+      startedAt,
+      finishedAt: new Date(),
+      householdId: opts.householdId ?? null,
+      createdByUserId: opts.userId ?? null,
+    });
+    return {
+      file: name,
+      skipped: true,
+      reason: 'parse_error',
+      message: msg || 'Could not parse CSV (wrong delimiter or invalid file?)',
+    };
+  }
+  const { records, headers } = parsed;
+
+  // Infer profile early for auto-match
+  const { profileId, inferred: profileInferred } = resolveProfileIdForImport(
+    opts.profileId ?? undefined,
+    process.env.CSV_PROFILE_ID,
+    headers,
+    records,
+    env.defaultCurrency || 'CAD',
+  );
+
+  // Resolve account with three fallback paths: accountId, filename, auto-match
   let account: AccountModel;
   let importBatch: string;
 
   if (opts.accountId != null && opts.accountId !== '') {
+    // Path 1: Explicit accountId
     const id = Number(opts.accountId);
     if (Number.isNaN(id)) {
       await ImportHistory.create({
@@ -252,84 +317,63 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
       (opts.batchLabel && String(opts.batchLabel).trim()) ||
       `${ym} ${token}`;
   } else {
+    // Path 2: Try filename match
     const meta = parseStatementFilename(name);
-    if (!meta) {
-      await ImportHistory.create({
-        fileName: name,
-        filePathSafe: name,
-        contentHash,
-        batchLabel: 'invalid-filename',
-        status: 'failed',
-        rowCount: 0,
-        errorMessage:
-          'Filename must match CardName_YYYY_MM.csv (e.g. Amex_2025_01.csv), or pass accountId when uploading from the web',
-        startedAt,
-        finishedAt: new Date(),
-        householdId: opts.householdId ?? null,
-        createdByUserId: opts.userId ?? null,
-      });
-      return { file: name, skipped: true, reason: 'bad_filename' };
-    }
-    const resolved = await resolveAccount(meta.cardToken, opts.householdId);
+    let resolved = meta ? await resolveAccount(meta.cardToken, opts.householdId) : null;
+
+    // Path 3: If filename match failed, try auto-match on CSV Account Number
+    let autoMatched: { account: AccountModel; matchedBy: string } | null = null;
     if (!resolved) {
+      autoMatched = await tryAutoMatchAccount(records, headers, profileId, opts.householdId ?? null);
+      resolved = autoMatched?.account ?? null;
+    }
+
+    // All paths failed
+    if (!resolved) {
+      const errorMsg = meta
+        ? `No account matches token "${meta.cardToken}" (short_code or name), and CSV has no Account Number for auto-match`
+        : 'Filename must match CardName_YYYY_MM.csv (e.g. Amex_2025_01.csv), pass accountId, or CSV must have Account Number column for auto-match';
+
       await ImportHistory.create({
         fileName: name,
         filePathSafe: name,
         contentHash,
-        batchLabel: meta.batchLabel,
+        batchLabel: meta?.batchLabel || 'no-account',
         status: 'failed',
         rowCount: 0,
-        errorMessage: `No account matches token "${meta.cardToken}" (short_code or name)`,
+        errorMessage: errorMsg,
         startedAt,
         finishedAt: new Date(),
         householdId: opts.householdId ?? null,
         createdByUserId: opts.userId ?? null,
       });
-      return { file: name, skipped: true, reason: 'unknown_account' };
+      return { file: name, skipped: true, reason: 'unknown_account', message: errorMsg };
     }
+
+    // Set importBatch based on which path succeeded
     account = resolved;
-    importBatch = meta.batchLabel;
-  }
+    const d = new Date();
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const token = account.shortCode || account.name || 'account';
 
-  const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
-  const ownerNames = await loadHouseholdOwnerNames(opts.householdId ?? account.householdId ?? null);
-
-  const text = buf.toString('utf8');
-  const parsed = parseCsvRecords(text);
-  if (!parsed.ok) {
-    const msg = parsed.error;
-    await ImportHistory.create({
-      fileName: name,
-      filePathSafe: name,
-      contentHash,
-      batchLabel: 'parse-error',
-      status: 'failed',
-      rowCount: 0,
-      errorMessage: msg,
-      startedAt,
-      finishedAt: new Date(),
-      householdId: opts.householdId ?? null,
-      createdByUserId: opts.userId ?? null,
-    });
-    return {
-      file: name,
-      skipped: true,
-      reason: 'parse_error',
-      message: msg || 'Could not parse CSV (wrong delimiter or invalid file?)',
-    };
+    if (meta && !autoMatched) {
+      // Filename match succeeded
+      importBatch = meta.batchLabel;
+    } else {
+      // Auto-match succeeded (or filename match was used as fallback)
+      importBatch =
+        (opts.batchLabel && String(opts.batchLabel).trim()) ||
+        `${ym} ${token}`;
+      if (autoMatched) {
+        logger.info(`Auto-matched account via bank account number: ${account.id}`);
+      }
+    }
   }
-  const { records, headers } = parsed;
 
   const defaultCurrency =
     account.defaultCurrency || env.defaultCurrency || 'CAD';
 
-  const { profileId, inferred: profileInferred } = resolveProfileIdForImport(
-    opts.profileId ?? undefined,
-    process.env.CSV_PROFILE_ID,
-    headers,
-    records,
-    defaultCurrency,
-  );
+  const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
 
   let inserted = 0;
   let skippedDup = 0;
@@ -406,7 +450,6 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         householdAccountIds,
-        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,

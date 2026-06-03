@@ -16,6 +16,7 @@ export interface CsvProfile {
   creditAmountHeaders?: string[];
   currencyHeaders?: string[];
   referenceHeaders?: string[];
+  accountNumberHeaders?: string[];
   dateFormat: string;
   amountConvention: AmountConvention;
 }
@@ -83,6 +84,7 @@ const rbc: CsvProfile = {
   merchantHeaders: ['Description 1', 'Description 2'],
   amountHeaders: ['CAD$', 'USD$'],
   referenceHeaders: ['Cheque Number'],
+  accountNumberHeaders: ['Account Number'],
   dateFormat: 'M/d/yyyy',
   amountConvention: 'invert_sign',
 };
@@ -453,4 +455,26 @@ export function pickColumn(
     }
   }
   return undefined;
+}
+
+export function extractAccountNumber(
+  records: Record<string, string>[],
+  headers: string[],
+  profile: CsvProfile
+): string | null {
+  if (!profile.accountNumberHeaders || profile.accountNumberHeaders.length === 0) {
+    return null;
+  }
+
+  const headerMap = normalizeHeaderMap(headers);
+
+  // Scan first 10 rows for first non-empty account number
+  for (let i = 0; i < Math.min(10, records.length); i++) {
+    const value = pickColumn(records[i], headerMap, profile.accountNumberHeaders);
+    if (value && value.trim() !== '') {
+      return value.trim();
+    }
+  }
+
+  return null;
 }

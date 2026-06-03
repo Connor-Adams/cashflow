@@ -31,6 +31,7 @@ export class Account extends Model<
   declare visibility: CreationOptional<string>;
   declare accountType: CreationOptional<string>;
   declare shortCode: string | null;
+  declare bankAccountNumber: string | null;
   declare defaultCurrency: string | null;
   declare entityId: number | null;
   declare taxStatus: CreationOptional<AccountTaxStatus>;
@@ -80,6 +81,11 @@ export function initAccount(sequelize: Sequelize): typeof Account {
       shortCode: {
         type: DataTypes.STRING(64),
         field: 'short_code',
+        allowNull: true,
+      },
+      bankAccountNumber: {
+        type: DataTypes.STRING(64),
+        field: 'bank_account_number',
         allowNull: true,
       },
       defaultCurrency: {
