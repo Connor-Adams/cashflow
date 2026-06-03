@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { getJson, postJson } from '../lib/api'
 import { useActiveImports, type BatchSummary } from '../components/import/useActiveImports'
 import { Button } from '@/components/ui/button'
@@ -57,10 +57,9 @@ export function ImportsPage() {
   }, [activeBatches.length])
 
   useEffect(() => {
+    setDetail(null)
     if (open) {
       void getJson<BatchDetail>(`/api/import/pdf-batch/${open}`).then(setDetail).catch(() => {})
-    } else {
-      setDetail(null)
     }
   }, [open])
 
@@ -109,9 +108,8 @@ export function ImportsPage() {
               </TableRow>
             )}
             {batches.map((b) => (
-              <>
+              <Fragment key={b.id}>
                 <TableRow
-                  key={b.id}
                   className="cursor-pointer"
                   onClick={() => setOpen(open === b.id ? null : b.id)}
                 >
@@ -188,7 +186,7 @@ export function ImportsPage() {
                     </TableCell>
                   </TableRow>
                 )}
-              </>
+              </Fragment>
             ))}
           </TableBody>
         </Table>
