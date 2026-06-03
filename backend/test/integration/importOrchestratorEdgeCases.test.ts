@@ -57,9 +57,15 @@ after(async () => {
 });
 
 async function makeAccount(name: string) {
+  // Account needs a household so the beforeCreate hook fills entity_id
+  // (NOT NULL since migration 20260619000001). The edge cases under test
+  // (savepoints, re-import dedup) are account-scoped, so the household is
+  // incidental.
+  const household = await models.Household.create({ name: `${name} HH` });
   return models.Account.create({
     name,
     owner: 'me',
+    householdId: household.id,
     defaultCurrency: 'CAD',
     accountType: 'checking',
     visibility: 'private',

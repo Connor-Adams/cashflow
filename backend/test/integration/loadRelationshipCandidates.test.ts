@@ -12,6 +12,7 @@ let loadRelationshipCandidates: typeof import('../../src/import/enrichment/loade
 let Transaction: typeof import('../../src/models').Transaction;
 let Account: typeof import('../../src/models').Account;
 let User: typeof import('../../src/models').User;
+let Household: typeof import('../../src/models').Household;
 
 before(async () => {
   testDb = await setupPgTestDb('load-rel-candidates');
@@ -20,6 +21,7 @@ before(async () => {
   Transaction = models.Transaction;
   Account = models.Account;
   User = models.User;
+  Household = models.Household;
   const loaders = await import('../../src/import/enrichment/loaders');
   loadRelationshipCandidates = loaders.loadRelationshipCandidates;
 });
@@ -29,7 +31,10 @@ after(async () => {
 });
 
 test('loadRelationshipCandidates(householdId=null) only returns matching-merchant rows within the window', async () => {
-  // Seed: one user, one account (no household), three transactions.
+  // Seed: one user, one account, three transactions. The account carries a
+  // household so entity_id is populated (NOT NULL since migration
+  // 20260619000001); the null passed to loadRelationshipCandidates below is the
+  // query-scope param ("don't scope by household"), independent of the rows.
   //   (a) matching merchant, inside window  → expected in results
   //   (b) non-matching merchant, inside window → NOT expected
   //   (c) matching merchant, OUTSIDE window  → NOT expected
@@ -40,11 +45,12 @@ test('loadRelationshipCandidates(householdId=null) only returns matching-merchan
     passwordSalt: 'x',
     passwordParams: '{}',
   });
+  const household = await Household.create({ name: 'Rel Test HH' });
   const account = await Account.create({
     ownerUserId: user.id,
     name: 'Test Acct',
     owner: 'me',
-    householdId: null,
+    householdId: household.id,
   });
   await Transaction.bulkCreate([
     {
@@ -110,11 +116,12 @@ test('loadRelationshipCandidates is case-insensitive on merchantClean (aligns wi
     passwordSalt: 'x',
     passwordParams: '{}',
   });
+  const household = await Household.create({ name: 'Rel Case HH' });
   const account = await Account.create({
     ownerUserId: user.id,
     name: 'Case Acct',
     owner: 'me',
-    householdId: null,
+    householdId: household.id,
   });
   await Transaction.bulkCreate([
     {
