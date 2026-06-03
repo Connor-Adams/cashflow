@@ -958,6 +958,8 @@ export type ExternalOrderItemView = {
   categoryOverride: string | null;
   businessUsePercent: string | null;
   businessUseOverride: string | null;
+  /** AI categorization confidence score (DECIMAL stored as string); null on legacy rows. */
+  confidence: string | null;
 };
 
 export type TripDetailView = {

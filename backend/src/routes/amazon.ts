@@ -342,6 +342,7 @@ router.post('/links/:id/accept', async (req, res, next) => {
       return;
     }
     await link.update({ status: 'accepted' });
+    await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(Number(link.externalOrderId)));
     res.json(link);
   } catch (e) {
     next(e);
@@ -394,6 +395,7 @@ router.post('/links/manual', async (req, res, next) => {
     if (link.status !== 'accepted') {
       await link.update({ status: 'accepted', confidence: '100', matchReason: 'manually linked by user' });
     }
+    await recomputeTransactionsReviewFromItems([transactionId]);
     res.status(201).json(link);
   } catch (e) {
     next(e);

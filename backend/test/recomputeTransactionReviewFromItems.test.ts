@@ -377,6 +377,119 @@ test('backfill clears pre-existing fully-categorized itemized txns and is idempo
   assert.ok(second.recomputed >= 0);
 });
 
+// ---------------------------------------------------------------------------
+// Route-level test: POST /api/amazon/links/:id/accept
+// Accepting a link to a fully-high-confidence itemized order must flip reviewFlag.
+// ---------------------------------------------------------------------------
+
+test('route: POST /api/amazon/links/:id/accept triggers review recompute', async () => {
+  const { default: app } = await import('../src/app.js');
+
+  const password = await hashPassword('password123');
+  const acceptUser = await User.create({
+    email: `route-accept-${Date.now()}@example.com`,
+    displayName: 'Accept Test',
+    globalRole: 'user',
+    passwordHash: password.hash,
+    passwordSalt: password.salt,
+    passwordParams: password.params,
+  } as never);
+  const acceptHousehold = await Household.create({ name: 'Accept HH' } as never);
+  await HouseholdMember.create({
+    householdId: acceptHousehold.id,
+    userId: acceptUser.id,
+    role: 'owner',
+  } as never);
+  const acceptToken = crypto.randomBytes(32).toString('hex');
+  await Session.create({
+    userId: acceptUser.id,
+    tokenHash: hashToken(acceptToken),
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60),
+  } as never);
+
+  const acceptAccount = await Account.create({
+    householdId: acceptHousehold.id,
+    name: 'Accept Card',
+    visibility: 'private',
+  } as never);
+
+  const fp = `route-accept-${Date.now()}`;
+  const txn = await Transaction.create({
+    accountId: acceptAccount.id,
+    householdId: acceptHousehold.id,
+    createdByUserId: acceptUser.id,
+    visibility: 'shared',
+    importBatch: 'test',
+    date: '2026-05-01',
+    amount: '-80.00',
+    currency: 'CAD',
+    merchantRaw: 'AMAZON',
+    merchantClean: 'Amazon',
+    sourceRowFingerprint: fp,
+    sourceIdentityFingerprint: fp,
+    txnType: 'purchase',
+    reviewFlag: true,
+    finalSplitType: 'me',
+  } as never);
+
+  await TransactionSignal.create({
+    transactionId: txn.id,
+    source: 'item-link',
+    confidence: 'medium',
+    fields: { autoCategory: 'Mixed' },
+  } as never);
+
+  const order = await ExternalOrder.create({
+    householdId: acceptHousehold.id,
+    vendor: 'amazon',
+    dedupeKey: `accept-${Date.now()}-${Math.random()}`,
+    total: '80.00',
+    currency: 'CAD',
+    orderDate: '2026-05-01',
+    source: 'amazon-csv',
+  } as never);
+
+  // Two high-confidence items — fully resolved.
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'USB Cable',
+    inferredCategory: 'Electronics',
+    categoryOverride: null,
+    confidence: '90',
+  } as never);
+  await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Book',
+    inferredCategory: 'Books',
+    categoryOverride: null,
+    confidence: '85',
+  } as never);
+
+  // Link starts as 'suggested' (not yet accepted).
+  const link = await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '92',
+    matchReason: 'amount+date',
+    status: 'suggested',
+  } as never);
+
+  assert.equal((await Transaction.findByPk(txn.id))!.reviewFlag, true);
+
+  const agent = request.agent(app);
+  agent.jar.setCookie(`cashflow_session=${acceptToken}; Path=/`);
+  const res = await agent.post(`/api/amazon/links/${link.id}/accept`);
+
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+
+  const after = await Transaction.findByPk(txn.id);
+  assert.equal(
+    after!.reviewFlag,
+    false,
+    'reviewFlag should be cleared after accepting a link to a fully-high-confidence order',
+  );
+});
+
 test('route: POST /api/external-order-items/bulk-patch triggers review recompute', async () => {
   const { default: app } = await import('../src/app.js');
 

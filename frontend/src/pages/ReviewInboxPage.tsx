@@ -139,9 +139,12 @@ const CONFIDENCE_FLAG_CHIPS: Array<{
   }),
 )
 
-/** An item is a straggler (needs review) when no category has been resolved. */
+/** An item is a straggler (needs review) when no category has been resolved at sufficient confidence.
+ * Mirrors the backend ENRICHMENT_ITEM_CLEAR_CONFIDENCE threshold (>=80). */
 function isItemStraggler(item: ExternalOrderItemView): boolean {
-  return item.categoryOverride == null && item.inferredCategory == null
+  if (item.categoryOverride != null && item.categoryOverride !== '') return false;
+  const conf = item.confidence != null ? Number(item.confidence) : NaN;
+  return !(item.inferredCategory != null && item.inferredCategory !== '' && Number.isFinite(conf) && conf >= 80);
 }
 
 export function ReviewInboxPage() {

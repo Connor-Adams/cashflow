@@ -280,6 +280,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               categoryOverride: it.categoryOverride,
               businessUsePercent: it.businessUsePercent,
               businessUseOverride: it.businessUseOverride,
+              confidence: it.confidence,
             }),
           ),
         };
