@@ -144,7 +144,7 @@ test(
     });
 
     // ---- Step 2: first drain ----
-    const first = await drainPendingChunk({ chunk: 12 });
+    const first = await drainPendingChunk({ maxItems: 12 });
 
     assert.equal(first.succeeded, 1, `expected 1 succeeded, got ${JSON.stringify(first)}`);
     assert.equal(first.failed, 0, `expected 0 failed, got ${JSON.stringify(first)}`);
@@ -206,7 +206,7 @@ test(
       status: 'pending',
     });
 
-    const second = await drainPendingChunk({ chunk: 12 });
+    const second = await drainPendingChunk({ maxItems: 12 });
     // Second run must also succeed (processor shouldn't hard-fail on duplicates)
     assert.equal(second.succeeded, 1, `expected second drain succeeded=1, got ${JSON.stringify(second)}`);
 
@@ -275,7 +275,7 @@ test(
 
     // The upload handler kicks one drain inline (best-effort via runJobByName).
     // We drain explicitly here to ensure the item is processed synchronously.
-    await drainPendingChunk({ chunk: 12 });
+    await drainPendingChunk({ maxItems: 12 });
 
     // GET progress endpoint
     const progressRes = await authed.get(`/api/import/pdf-batch/${batchId}`);

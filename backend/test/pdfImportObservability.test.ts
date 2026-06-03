@@ -24,6 +24,19 @@ test('batch has skipped + startedAt; item has reason; skipped status persists', 
   assert.equal(got?.reason, 'No parser matched this statement layout');
 });
 
+test('drain reports pendingRemaining and respects maxItems', async () => {
+  await sequelize.sync({ force: true });
+  const { hh, u } = await hhUser();
+  const b = await PdfImportBatch.create({ id: crypto.randomUUID(), householdId: hh.id, userId: u.id, status: 'pending', total: 3, processed: 0, succeeded: 0, failed: 0, skipped: 0, startedAt: null });
+  for (let k = 0; k < 3; k++) {
+    const put = await saveVaultObject(`${crypto.randomUUID()}.pdf`, { buffer: Buffer.from('not a pdf'), contentType: 'application/pdf', originalName: 'b.pdf' });
+    await PdfImportItem.create({ id: crypto.randomUUID(), batchId: b.id, fileName: 'b.pdf', storedFilename: put.storedFilename, storageKind: put.storageKind, encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending' });
+  }
+  const s = await drainPendingChunk({ maxItems: 2 });
+  assert.equal(s.processed, 2);
+  assert.equal(s.pendingRemaining, 1);
+});
+
 test('a no-parser file is skipped (not failed) with a reason', { skip: !fs.existsSync(PERFORMANCE_PDF) }, async () => {
   await sequelize.sync({ force: true });
   const { hh, u } = await hhUser();

@@ -86,21 +86,25 @@ async function recomputeBatch(batchId: string): Promise<void> {
   await batch.save();
 }
 
-/** Drain up to `chunk` (or `maxItems`) pending items. Resets stale `processing` rows first. */
-export async function drainPendingChunk(opts: { chunk?: number; maxItems?: number } = {}): Promise<DrainSummary> {
-  const limit = opts.maxItems ?? opts.chunk ?? 12;
+/** Drain pending items within a time budget. Resets stale `processing` rows first. */
+export async function drainPendingChunk(
+  opts: { budgetMs?: number; maxItems?: number } = {},
+): Promise<DrainSummary & { pendingRemaining: number }> {
+  const budgetMs = opts.budgetMs ?? 25_000;
+  const maxItems = opts.maxItems ?? Infinity;
   const staleCutoff = new Date(Date.now() - STALE_PROCESSING_MS);
   await PdfImportItem.update(
     { status: 'pending' },
     { where: { status: 'processing', updatedAt: { [Op.lt]: staleCutoff } } },
   );
 
-  const items = await PdfImportItem.findAll({
-    where: { status: 'pending' }, order: [['created_at', 'ASC']], limit,
-  });
   const summary: DrainSummary = { processed: 0, succeeded: 0, failed: 0, skipped: 0 };
   const touchedBatches = new Set<string>();
-  for (const item of items) {
+  const start = Date.now();
+  let count = 0;
+  while (Date.now() - start < budgetMs && count < maxItems) {
+    const item = await PdfImportItem.findOne({ where: { status: 'pending' }, order: [['created_at', 'ASC']] });
+    if (!item) break;
     item.status = 'processing';
     await item.save();
     const b = await PdfImportBatch.findByPk(item.batchId);
@@ -120,7 +124,9 @@ export async function drainPendingChunk(opts: { chunk?: number; maxItems?: numbe
       );
     }
     summary.processed += 1;
+    count += 1;
     touchedBatches.add(item.batchId);
+    await new Promise<void>((r) => setImmediate(r)); // yield — pdfjs is CPU-bound
   }
   for (const batchId of touchedBatches) await recomputeBatch(batchId);
   // Heal step: re-assert transaction.entity_id parity after any account→entity
@@ -128,7 +134,7 @@ export async function drainPendingChunk(opts: { chunk?: number; maxItems?: numbe
   // fail the drain (mirrors the post-bundle heal in restoreBundle / routes/import).
   if (touchedBatches.size > 0) {
     const batches = await PdfImportBatch.findAll({ where: { id: [...touchedBatches] } });
-    for (const hid of new Set(batches.map((b) => b.householdId))) {
+    for (const hid of new Set(batches.map((bb) => bb.householdId))) {
       try {
         await syncTransactionEntityIds(hid);
       } catch (err) {
@@ -136,5 +142,6 @@ export async function drainPendingChunk(opts: { chunk?: number; maxItems?: numbe
       }
     }
   }
-  return summary;
+  const pendingRemaining = await PdfImportItem.count({ where: { status: 'pending' } });
+  return { ...summary, pendingRemaining };
 }
