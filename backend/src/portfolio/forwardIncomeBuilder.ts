@@ -11,8 +11,13 @@ import { computeForwardProjection, type PaymentEvent } from './forwardIncome';
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 async function latestHoldingsByHousehold(householdId: number, asOf: Date): Promise<Map<number, { qty: number; currency: string }>> {
+  const asOfDate = asOf.toISOString().slice(0, 10);
   const invAccounts = await Account.findAll({
-    where: { householdId, accountType: 'investment' },
+    where: {
+      householdId,
+      accountType: 'investment',
+      [Op.or]: [{ closedAt: null }, { closedAt: { [Op.gt]: asOfDate } }],
+    },
     attributes: ['id'],
   });
   if (invAccounts.length === 0) return new Map();
@@ -68,7 +73,11 @@ export async function rebuildForwardProjectionsForHousehold(
       },
     });
     const invAccounts = await Account.findAll({
-      where: { householdId, accountType: 'investment' },
+      where: {
+        householdId,
+        accountType: 'investment',
+        [Op.or]: [{ closedAt: null }, { closedAt: { [Op.gt]: asOf.toISOString().slice(0, 10) } }],
+      },
       attributes: ['id'],
     });
     intEvents = await InvestmentActivity.findAll({
