@@ -951,6 +951,10 @@ export type ExternalOrderItemView = {
   displayName?: string | null;
   /** Vendor item/article number (e.g. Costco), when captured. */
   itemNumber?: string | null;
+  /** Verified Costco product image URL; null = no verified match (show text card). */
+  imageUrl?: string | null;
+  /** Verified Costco product page URL (thumbnail links here). */
+  costcoUrl?: string | null;
   quantity: number;
   unitPrice: string | null;
   totalPrice: string | null;

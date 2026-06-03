@@ -89,3 +89,11 @@ test('per-run item cap bounds how many new item numbers are attempted', async ()
   );
   assert.equal(searchCalls, 2);
 });
+
+test('resolved cache rows expose imageUrl + costcoUrl for the read path', async () => {
+  const { CostcoProduct } = models;
+  const rows = await CostcoProduct.findAll({ where: { itemNumber: '1011242', status: 'resolved' } });
+  const map = new Map(rows.map((p) => [p.itemNumber, p]));
+  assert.equal(map.get('1011242')?.imageUrl, 'img.jpg');
+  assert.equal(map.get('1011242')?.costcoUrl, 'u_match');
+});
