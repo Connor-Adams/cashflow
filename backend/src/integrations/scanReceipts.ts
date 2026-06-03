@@ -43,6 +43,7 @@ import { categorizeUberTrip } from '../ai/aiCategorizeUberTrip';
 import { logger } from '../observability/logger';
 import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 
 /**
  * Default sender allowlist baked into the app. Every household gets these
@@ -569,6 +570,7 @@ export async function scanInbox(
         } catch (err) {
           logger.warn({ err, orderId: result.orderId }, 'gmail_scan_match_failed');
         }
+        await categorizeAndApplyReceiptItems({ householdId: opts.householdId, orderId: result.orderId });
       }
 
       await recordProcessed({
