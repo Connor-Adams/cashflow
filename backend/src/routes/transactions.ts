@@ -248,8 +248,9 @@ type ItemizedSummary = { itemCount: number; stragglerCount: number };
  *   - inferredCategory is non-null/non-empty AND confidence >= threshold
  * Otherwise it is a straggler.
  *
- * The confidence column is DECIMAL but may be stored as a string by the
- * categorizer; CAST(... AS REAL) handles both SQLite and Postgres correctly.
+ * confidence is a DECIMAL(5,2) column, so it is compared numerically. We must
+ * NOT compare it to '' (Postgres coerces '' -> numeric and throws "invalid input
+ * syntax for type numeric"); the IS NOT NULL guard is sufficient.
  */
 export async function itemizedSummaries(
   txnIds: number[],
@@ -264,8 +265,8 @@ export async function itemizedSummaries(
             COUNT(i.id) AS "itemCount",
             SUM(CASE WHEN (i.category_override IS NOT NULL AND i.category_override <> '')
                        OR (i.inferred_category IS NOT NULL AND i.inferred_category <> ''
-                           AND i.confidence IS NOT NULL AND i.confidence <> ''
-                           AND CAST(i.confidence AS REAL) >= :threshold)
+                           AND i.confidence IS NOT NULL
+                           AND i.confidence >= :threshold)
                      THEN 0 ELSE 1 END) AS "stragglerCount"
        FROM transaction_order_links tol
        JOIN external_order_items i ON i.external_order_id = tol.external_order_id
