@@ -145,6 +145,7 @@ router.get('/', aiSuggestLimiter, async (req, res, next) => {
         currency: meta.currency,
         totalSpend: agg.totals.totalSpend,
         totalCredits: agg.totals.totalCredits,
+        totalIncome: agg.totals.totalIncome,
         netSpend: agg.totals.netSpend,
         transactionCount: agg.totals.transactionCount,
         averageTransaction: agg.totals.averageTransaction,

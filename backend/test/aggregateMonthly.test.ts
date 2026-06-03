@@ -125,3 +125,23 @@ test('aggregateMonthly: excludes positive payments and non-categorical flows', (
   assert.equal(dining.sumAmount, -10);
   assert.equal(out.categoryPoints.length, 1);
 });
+
+test('aggregateMonthly: income (txnType=income) is excluded from both points and categoryPoints', () => {
+  const out = aggregateMonthly(
+    [
+      row({ id: 1, date: '2026-05-02', amount: '-100', finalCategory: 'Dining' }),
+      row({ id: 2, date: '2026-05-03', amount: '3000', txnType: 'income', finalCategory: null }),
+    ],
+    new Map(),
+  );
+  const may = out.points.find((p) => p.month === '2026-05');
+  assert.ok(may);
+  assert.equal(may.sumAmount, -100, 'income excluded from the activity curve');
+  // No null/Uncategorized income bucket should appear in categoryPoints.
+  assert.equal(out.categoryPoints.length, 1);
+  assert.equal(out.categoryPoints[0].category, 'Dining');
+  assert.equal(out.categoryPoints[0].sumAmount, -100);
+  // Invariant: points[m,c] == sum of categoryPoints[m,c,*] must survive the peel.
+  const catSum = out.categoryPoints.reduce((s, p) => s + p.sumAmount, 0);
+  assert.equal(may.sumAmount, catSum);
+});

@@ -48,10 +48,14 @@ export type MonthlyResult = {
  *    via `classifyPositiveAmount` — not category data, would inflate)
  *  - non-categorical money movement (transfer / investment / dividend, plus
  *    anything on an investment account — see `classifyTransactionFlow`)
+ *  - income (txnType='income', either sign) — inflow is not category spend
+ *    or a category-offsetting credit; peeled from BOTH points and
+ *    categoryPoints so a paycheck doesn't inflate the null/Uncategorized
+ *    bucket or the activity curve (matches the dashboard income peel)
  *
  * Included:
- *  - refunds / rewards / income — they net against the same month's spend
- *    in the UI, which is what users expect
+ *  - refunds / rewards — they net against the same month's spend in the UI,
+ *    which is what users expect
  *  - rows whose `num()` parse fails are silently skipped (legacy data)
  *
  * Sorting is left to the route so this stays a pure data transform.
@@ -67,6 +71,12 @@ export function aggregateMonthly(
     const amount = num(row.amount);
     if (amount == null) continue;
     const accountType = accountTypeById.get(row.accountId);
+    // Income (txnType='income') is inflow, not category spend nor a
+    // category-offsetting credit. Peel it out entirely so it inflates
+    // neither the activity curve (points) nor any category bucket
+    // (categoryPoints) — both signs dropped (a negative income reversal is
+    // money-movement, not spend). Keeps points == Σ categoryPoints intact.
+    if (row.txnType === 'income') continue;
     if (
       amount > 0 &&
       classifyPositiveAmount({

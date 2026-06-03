@@ -149,6 +149,52 @@ test('positive non-payment-pattern rows credit totalCredits (refund/reward/etc)'
   assert.equal(out.totals.netSpend, 45);
 });
 
+test('income (txnType=income) lands in totalIncome, not totalCredits, excluded from netSpend', () => {
+  const rows: MerchantTimelineTxnRow[] = [
+    row({ id: 1, amount: '-100.00', txnType: 'purchase' }),
+    row({
+      id: 2,
+      amount: '2000.00',
+      txnType: 'income',
+      accountType: 'chequing',
+      finalCategory: null,
+      merchantRaw: 'EMPLOYER PAYROLL',
+      merchantClean: 'EMPLOYER PAYROLL',
+      merchantCanonical: null,
+    }),
+  ];
+  const out = aggregateMerchantTimeline(rows);
+  assert.equal(out.totals.totalSpend, 100);
+  assert.equal(out.totals.totalCredits, 0, 'income must not inflate the credits bucket');
+  assert.equal(out.totals.totalIncome, 2000);
+  assert.equal(out.totals.netSpend, 100, 'netSpend = spend - credits; income excluded');
+});
+
+test('monthly bucket peels income into totalIncome, not totalCredits', () => {
+  const rows: MerchantTimelineTxnRow[] = [
+    row({ id: 1, date: '2026-05-03', amount: '-40.00', txnType: 'purchase' }),
+    row({ id: 2, date: '2026-05-20', amount: '1500.00', txnType: 'income', accountType: 'chequing' }),
+  ];
+  const out = aggregateMerchantTimeline(rows);
+  const may = out.monthlyTrend.find((m) => m.month === '2026-05');
+  assert.ok(may);
+  assert.equal(may.totalSpend, 40);
+  assert.equal(may.totalCredits, 0);
+  assert.equal(may.totalIncome, 1500);
+  assert.equal(may.netSpend, 40, 'monthly netSpend excludes income');
+});
+
+test('refund (positive, non-income) still credits totalCredits, not totalIncome', () => {
+  const rows: MerchantTimelineTxnRow[] = [
+    row({ id: 1, amount: '-50.00', txnType: 'purchase' }),
+    row({ id: 2, amount: '5.00', txnType: 'refund', merchantRaw: 'Tim Hortons Refund' }),
+  ];
+  const out = aggregateMerchantTimeline(rows);
+  assert.equal(out.totals.totalCredits, 5);
+  assert.equal(out.totals.totalIncome, 0);
+  assert.equal(out.totals.netSpend, 45);
+});
+
 test('resolveMerchantKey: canonical || clean || raw fallback, trimmed', () => {
   assert.equal(
     resolveMerchantKey({
