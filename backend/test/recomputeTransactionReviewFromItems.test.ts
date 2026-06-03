@@ -1,6 +1,8 @@
 // backend/test/recomputeTransactionReviewFromItems.test.ts
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import request from 'supertest';
 import {
   sequelize,
   Account,
@@ -9,8 +11,13 @@ import {
   ExternalOrder,
   ExternalOrderItem,
   TransactionOrderLink,
+  User,
+  Household,
+  HouseholdMember,
+  Session,
 } from '../src/models';
 import { recomputeTransactionReviewFromItems } from '../src/import/enrichment/recomputeTransactionReviewFromItems';
+import { hashPassword, hashToken } from '../src/auth/password';
 
 const HH = 1;
 let accountId: number;
@@ -147,4 +154,223 @@ test('removing the override that cleared an item re-flags the transaction', asyn
 
 test('best-effort: unknown txn id does not throw', async () => {
   await recomputeTransactionReviewFromItems(999999);
+});
+
+// ---------------------------------------------------------------------------
+// Route-level tests: PATCH /api/external-order-items/:id
+//                    POST /api/external-order-items/bulk-patch
+// Verify that the handlers trigger review recompute after persisting overrides.
+// ---------------------------------------------------------------------------
+
+test('route: PATCH /api/external-order-items/:id triggers review recompute', async () => {
+  // Import app lazily so SQLite DB is already initialised by the outer before().
+  const { default: app } = await import('../src/app.js');
+
+  // Seed auth rows.
+  const password = await hashPassword('password123');
+  const routeUser = await User.create({
+    email: `route-patch-${Date.now()}@example.com`,
+    displayName: 'Route Test',
+    globalRole: 'user',
+    passwordHash: password.hash,
+    passwordSalt: password.salt,
+    passwordParams: password.params,
+  } as never);
+  const routeHousehold = await Household.create({ name: 'Route Patch HH' } as never);
+  await HouseholdMember.create({
+    householdId: routeHousehold.id,
+    userId: routeUser.id,
+    role: 'owner',
+  } as never);
+  const token = crypto.randomBytes(32).toString('hex');
+  await Session.create({
+    userId: routeUser.id,
+    tokenHash: hashToken(token),
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60),
+  } as never);
+
+  const routeAccount = await Account.create({
+    householdId: routeHousehold.id,
+    name: 'Route Card',
+    visibility: 'private',
+  } as never);
+
+  // Build a transaction with a straggler item (no category resolved yet).
+  const fp = `route-patch-${Date.now()}`;
+  const txn = await Transaction.create({
+    accountId: routeAccount.id,
+    householdId: routeHousehold.id,
+    createdByUserId: routeUser.id,
+    visibility: 'shared',
+    importBatch: 'test',
+    date: '2026-05-01',
+    amount: '-50.00',
+    currency: 'CAD',
+    merchantRaw: 'COSTCO',
+    merchantClean: 'Costco',
+    sourceRowFingerprint: fp,
+    sourceIdentityFingerprint: fp,
+    txnType: 'purchase',
+    reviewFlag: true,
+    finalSplitType: 'me',
+  } as never);
+
+  await TransactionSignal.create({
+    transactionId: txn.id,
+    source: 'item-link',
+    confidence: 'medium',
+    fields: { autoCategory: 'Mixed' },
+  } as never);
+
+  const order = await ExternalOrder.create({
+    householdId: routeHousehold.id,
+    vendor: 'costco',
+    dedupeKey: `route-patch-${Date.now()}-${Math.random()}`,
+    total: '50.00',
+    currency: 'CAD',
+    orderDate: '2026-05-01',
+    source: 'test',
+  } as never);
+
+  // The one straggler item — starts uncategorised, will be overridden via PATCH.
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Mystery Item',
+    inferredCategory: null,
+    categoryOverride: null,
+    confidence: null,
+  } as never);
+
+  await TransactionOrderLink.create({
+    transactionId: txn.id,
+    externalOrderId: order.id,
+    confidence: '90',
+    matchReason: 'test',
+    status: 'accepted',
+  } as never);
+
+  // Confirm the txn starts in review.
+  assert.equal((await Transaction.findByPk(txn.id))!.reviewFlag, true);
+
+  // PATCH the item with a category override via the HTTP route.
+  const agent = request.agent(app);
+  agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
+  const res = await agent
+    .patch(`/api/external-order-items/${item.id}`)
+    .send({ categoryOverride: 'Household' });
+
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+
+  // The route should have triggered recompute — reviewFlag must now be false.
+  const after = await Transaction.findByPk(txn.id);
+  assert.equal(
+    after!.reviewFlag,
+    false,
+    'reviewFlag should be cleared after PATCH sets a category override',
+  );
+});
+
+test('route: POST /api/external-order-items/bulk-patch triggers review recompute', async () => {
+  const { default: app } = await import('../src/app.js');
+
+  // Seed auth rows.
+  const password = await hashPassword('password123');
+  const bulkUser = await User.create({
+    email: `route-bulk-${Date.now()}@example.com`,
+    displayName: 'Bulk Test',
+    globalRole: 'user',
+    passwordHash: password.hash,
+    passwordSalt: password.salt,
+    passwordParams: password.params,
+  } as never);
+  const bulkHousehold = await Household.create({ name: 'Route Bulk HH' } as never);
+  await HouseholdMember.create({
+    householdId: bulkHousehold.id,
+    userId: bulkUser.id,
+    role: 'owner',
+  } as never);
+  const bulkToken = crypto.randomBytes(32).toString('hex');
+  await Session.create({
+    userId: bulkUser.id,
+    tokenHash: hashToken(bulkToken),
+    expiresAt: new Date(Date.now() + 1000 * 60 * 60),
+  } as never);
+
+  const bulkAccount = await Account.create({
+    householdId: bulkHousehold.id,
+    name: 'Bulk Card',
+    visibility: 'private',
+  } as never);
+
+  // Two transactions, each with an uncategorised straggler item.
+  async function makeBulkTxn(label: string): Promise<{ txnId: number; itemId: number }> {
+    const fp = `route-bulk-${label}-${Date.now()}`;
+    const txn = await Transaction.create({
+      accountId: bulkAccount.id,
+      householdId: bulkHousehold.id,
+      createdByUserId: bulkUser.id,
+      visibility: 'shared',
+      importBatch: 'test',
+      date: '2026-05-02',
+      amount: '-25.00',
+      currency: 'CAD',
+      merchantRaw: 'COSTCO',
+      merchantClean: 'Costco',
+      sourceRowFingerprint: fp,
+      sourceIdentityFingerprint: fp,
+      txnType: 'purchase',
+      reviewFlag: true,
+      finalSplitType: 'me',
+    } as never);
+    await TransactionSignal.create({
+      transactionId: txn.id,
+      source: 'item-link',
+      confidence: 'medium',
+      fields: { autoCategory: 'Mixed' },
+    } as never);
+    const order = await ExternalOrder.create({
+      householdId: bulkHousehold.id,
+      vendor: 'costco',
+      dedupeKey: `bulk-${label}-${Date.now()}-${Math.random()}`,
+      total: '25.00',
+      currency: 'CAD',
+      orderDate: '2026-05-02',
+      source: 'test',
+    } as never);
+    const item = await ExternalOrderItem.create({
+      externalOrderId: order.id,
+      title: `Bulk Item ${label}`,
+      inferredCategory: null,
+      categoryOverride: null,
+      confidence: null,
+    } as never);
+    await TransactionOrderLink.create({
+      transactionId: txn.id,
+      externalOrderId: order.id,
+      confidence: '90',
+      matchReason: 'test',
+      status: 'accepted',
+    } as never);
+    return { txnId: txn.id, itemId: item.id };
+  }
+
+  const a = await makeBulkTxn('a');
+  const b = await makeBulkTxn('b');
+
+  assert.equal((await Transaction.findByPk(a.txnId))!.reviewFlag, true);
+  assert.equal((await Transaction.findByPk(b.txnId))!.reviewFlag, true);
+
+  const agent = request.agent(app);
+  agent.jar.setCookie(`cashflow_session=${bulkToken}; Path=/`);
+  const res = await agent
+    .post('/api/external-order-items/bulk-patch')
+    .send({ itemIds: [a.itemId, b.itemId], categoryOverride: 'Groceries' });
+
+  assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.updated, 2);
+
+  const afterA = await Transaction.findByPk(a.txnId);
+  const afterB = await Transaction.findByPk(b.txnId);
+  assert.equal(afterA!.reviewFlag, false, 'txn A reviewFlag should be cleared');
+  assert.equal(afterB!.reviewFlag, false, 'txn B reviewFlag should be cleared');
 });

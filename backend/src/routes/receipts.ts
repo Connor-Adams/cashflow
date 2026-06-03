@@ -22,6 +22,10 @@ import {
   recordAudit,
 } from '../audit/log';
 import {
+  transactionIdsForOrder,
+  recomputeTransactionsReviewFromItems,
+} from '../import/enrichment/recomputeTransactionReviewFromItems';
+import {
   deleteReceiptObject,
   readReceiptObject,
   saveReceiptObject,
@@ -497,6 +501,8 @@ router.patch('/external-order-items/:id', async (req, res, next) => {
       }
     }
     await item.update(patch);
+    const affected = await transactionIdsForOrder(item.externalOrderId);
+    await recomputeTransactionsReviewFromItems(affected);
     res.json(item.toJSON());
   } catch (e) {
     next(e);
