@@ -38,6 +38,7 @@ import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { ItemRow } from '../components/items/ItemRow'
 import { getJson, patchJson, postJson } from '../lib/api'
+import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
 import { formatMoney } from '../lib/formatMoney'
 import {
   buildReviewBulkPatch,
@@ -190,7 +191,9 @@ export function ReviewInboxPage() {
   const { showToast } = useToast()
   const categoryPickerRef = useRef<HTMLDivElement>(null)
   const tableWrapRef = useRef<HTMLDivElement>(null)
-
+  const receiptInputRef = useRef<HTMLInputElement>(null)
+  const [receiptTargetTxnId, setReceiptTargetTxnId] = useState<number | null>(null)
+  const [lastAnalyzedTxnId, setLastAnalyzedTxnId] = useState<number | null>(null)
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
@@ -212,6 +215,10 @@ export function ReviewInboxPage() {
       setLoading(false)
     }
   }, [confidenceFlag])
+
+  const onReceiptDone = useCallback(async () => { await load() }, [load])
+  const { attachAndAnalyze, busyTxnId, lastItemCount, error: attachErr } =
+    useAttachAndAnalyzeReceipt(onReceiptDone)
 
   const toggleExpanded = useCallback(
     async (id: number) => {
@@ -577,8 +584,28 @@ export function ReviewInboxPage() {
     }
   }
 
+  async function handleReceiptFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || receiptTargetTxnId == null) return
+    // Reset the input so the same file can be re-picked if needed
+    e.target.value = ''
+    const txnId = receiptTargetTxnId
+    setLastAnalyzedTxnId(txnId)
+    await attachAndAnalyze(file, txnId)
+  }
+
   return (
     <div className="page reviewInboxPage">
+      {/* Hidden file input shared across all rows for camera/photo capture */}
+      <input
+        ref={receiptInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        capture="environment"
+        className="hidden"
+        data-testid="receipt-file-input"
+        onChange={(e) => void handleReceiptFileChange(e)}
+      />
       <PageHeader
         title="Review Inbox"
         description="Clear imported transactions by selecting similar rows and applying one decision."
@@ -785,7 +812,7 @@ export function ReviewInboxPage() {
                         >
                           Why?
                         </button>
-                        {row.itemized != null && (
+                        {row.itemized != null ? (
                           <button
                             type="button"
                             aria-label={`${row.itemized.itemCount} items${row.itemized.stragglerCount > 0 ? `, ${row.itemized.stragglerCount} need review` : ''}`}
@@ -801,6 +828,27 @@ export function ReviewInboxPage() {
                               </span>
                             )}
                           </button>
+                        ) : busyTxnId === row.id ? (
+                          <span className="text-xs text-muted-foreground italic">Analyzing…</span>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              aria-label="Add receipt"
+                              onClick={() => {
+                                setReceiptTargetTxnId(row.id)
+                                receiptInputRef.current?.click()
+                              }}
+                              className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                            >
+                              📷 Add receipt
+                            </button>
+                            {lastAnalyzedTxnId === row.id && lastItemCount === 0 && attachErr == null && (
+                              <span className="text-xs text-amber-600">
+                                {"Couldn't read items — try another photo."}
+                              </span>
+                            )}
+                          </>
                         )}
                       </span>
                     </TableCell>
