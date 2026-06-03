@@ -43,6 +43,13 @@ const emptyCtx: ItemAllocationContext = {
 const biz = (out: ReturnType<typeof aggregateDashboard>, b: boolean) =>
   out.netSpendByBusiness.get(`CAD\0${b ? '1' : '0'}`) ?? null;
 
+const metricsOf = (out: ReturnType<typeof aggregateDashboard>, cur = 'CAD') =>
+  out.metricsByCurrency.get(cur) ?? null;
+const acctOf = (out: ReturnType<typeof aggregateDashboard>, id = 1, cur = 'CAD') =>
+  out.accountSummaries.get([cur, String(id)].join('\0')) ?? null;
+const merchOf = (out: ReturnType<typeof aggregateDashboard>, m: string, cur = 'CAD') =>
+  out.merchantSummaries.get([cur, m].join('\0')) ?? null;
+
 test('no-item business expense (signed business_amount) counts as business SPEND, not a credit', () => {
   const out = aggregateDashboard(
     [row({ amount: '-100.00', businessAmount: '-100.00' })],
@@ -102,4 +109,101 @@ test('refund exceeding spend yields negative netSpend with zero income', () => {
   assert.ok(b);
   assert.equal(b.netSpend, -30);
   assert.equal(b.income, 0);
+});
+
+// --- Headline metrics: income must be peeled into its own totalIncome line,
+// not folded into totalCredits (refunds). This is the "paychecks show as
+// refunds" bug: a direct-deposit (txnType=income) was inflating the refunds
+// bucket and deflating netSpend (netSpend = totalSpend - totalCredits).
+test('headline income (txnType=income) lands in totalIncome, not totalCredits, excluded from netSpend', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-100.00', txnType: 'purchase' }),
+      row({ id: 2, amount: '500.00', txnType: 'income' }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  const m = metricsOf(out);
+  assert.ok(m);
+  assert.equal(m.totalSpend, 100);
+  assert.equal(m.totalIncome, 500);
+  assert.equal(m.totalCredits, 0, 'income must not inflate the refunds/credits bucket');
+  assert.equal(m.netSpend, 100, 'netSpend = spend - credits; income is excluded');
+});
+
+test('headline refund (positive, non-income) still nets against spend via totalCredits', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-100.00', txnType: 'purchase' }),
+      row({ id: 2, amount: '30.00', txnType: 'refund' }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  const m = metricsOf(out);
+  assert.ok(m);
+  assert.equal(m.totalCredits, 30);
+  assert.equal(m.totalIncome, 0);
+  assert.equal(m.netSpend, 70);
+});
+
+test('headline netSpend reconciles with per-business netSpend sum when income is present', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-100.00', businessAmount: '0', finalBusiness: false, txnType: 'purchase' }),
+      row({ id: 2, amount: '500.00', businessAmount: '0', finalBusiness: false, txnType: 'income' }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  const m = metricsOf(out);
+  assert.ok(m);
+  const bizSum = [biz(out, true), biz(out, false)]
+    .filter((b): b is NonNullable<typeof b> => b != null)
+    .reduce((s, b) => s + b.netSpend, 0);
+  assert.equal(bizSum, m.netSpend, 'headline netSpend must equal sum of per-business netSpend');
+  assert.equal(m.netSpend, 100);
+});
+
+test('income routes to the source account/merchant totalIncome, not totalCredits', () => {
+  const out = aggregateDashboard(
+    [
+      row({
+        id: 2,
+        amount: '500.00',
+        txnType: 'income',
+        merchantCanonical: 'CDG LABS',
+        merchantClean: 'CDG LABS',
+        merchantRaw: 'CDG LABS',
+      }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  const acct = acctOf(out);
+  assert.ok(acct);
+  assert.equal(acct.totalIncome, 500);
+  assert.equal(acct.totalCredits, 0);
+  assert.equal(acct.netSpend, 0);
+  const merch = merchOf(out, 'CDG LABS');
+  assert.ok(merch);
+  assert.equal(merch.totalIncome, 500);
+  assert.equal(merch.totalCredits, 0);
+});
+
+test('monthly bucket peels income out of totalCredits into totalIncome', () => {
+  const out = aggregateDashboard(
+    [
+      row({ id: 1, amount: '-40.00', txnType: 'purchase', date: '2026-05-03' }),
+      row({ id: 2, amount: '500.00', txnType: 'income', date: '2026-05-04' }),
+    ],
+    accounts,
+    emptyCtx,
+  );
+  const monthly = out.monthlyByCurrency.get('2026-05\0CAD');
+  assert.ok(monthly);
+  assert.equal(monthly.totalIncome, 500);
+  assert.equal(monthly.totalCredits, 0);
+  assert.equal(monthly.netSpend, 40, 'monthly netSpend excludes income');
 });
