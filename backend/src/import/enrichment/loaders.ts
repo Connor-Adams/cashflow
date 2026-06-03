@@ -1,5 +1,5 @@
 import { QueryTypes } from 'sequelize';
-import { sequelize, Account, ExternalOrder, ExternalOrderItem, HouseholdMember, User } from '../../models';
+import { sequelize, Account, ExternalOrder, ExternalOrderItem, HouseholdMember, User, Contact } from '../../models';
 import type { ExternalOrderItem as ExternalOrderItemType } from '../../models/ExternalOrderItem';
 import type { LinkItemsCandidateOrder } from './linkItemsStage';
 import type { RecurringHistoryRow } from './detectRecurringStage';
@@ -46,10 +46,11 @@ export async function loadHouseholdAccountIds(accountId: number, householdId: nu
 }
 
 /**
- * Household member display names (e.g. ['Connor Adams', 'LingLing']). Fed to the
- * detect-type stage so an external payroll direct deposit (income) is told apart
- * from a self-deposit made under the owner's own name (transfer). Returns [] when
- * the household is unknown or has no members.
+ * Owner-side names for a household: the display names of its member Users PLUS
+ * the names of any partner Contacts (contacts.is_partner). Fed to the detect-type
+ * stage so an external payroll direct deposit (income) is told apart from a
+ * self-deposit made under an owner's or partner's own name (transfer). Returns []
+ * when the household is unknown or has no members/partners.
  */
 export async function loadHouseholdOwnerNames(householdId: number | null): Promise<string[]> {
   if (householdId == null) return [];
@@ -58,9 +59,21 @@ export async function loadHouseholdOwnerNames(householdId: number | null): Promi
     attributes: ['userId'],
   });
   const userIds = members.map((m) => m.userId);
-  if (userIds.length === 0) return [];
-  const users = await User.findAll({ where: { id: userIds }, attributes: ['displayName'] });
-  return users.map((u) => u.displayName).filter((n): n is string => Boolean(n));
+  const users = userIds.length
+    ? await User.findAll({ where: { id: userIds }, attributes: ['displayName'] })
+    : [];
+  // Partners modelled as a Contact (contacts.is_partner) are household-internal:
+  // a "direct deposit from <partner>" is a self/internal transfer, not external
+  // income. Include their names so the own-name exclusion covers partners too.
+  const partnerContacts = await Contact.findAll({
+    where: { householdId, isPartner: true },
+    attributes: ['name'],
+  });
+  const names = [
+    ...users.map((u) => u.displayName),
+    ...partnerContacts.map((c) => c.name),
+  ].filter((n): n is string => Boolean(n));
+  return Array.from(new Set(names));
 }
 
 export async function loadRecurringHistory(
