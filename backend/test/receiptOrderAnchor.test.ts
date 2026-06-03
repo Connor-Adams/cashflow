@@ -1,7 +1,8 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { sequelize, Account, ExternalOrder, TransactionOrderLink, Transaction } from '../src/models';
-import { supersedeAcceptedOrderLinks, linkOrderToTransaction } from '../src/import/receiptOrderAnchor';
+import { sequelize, Account, ExternalOrder, ExternalOrderItem, TransactionOrderLink, Transaction, TransactionSignal } from '../src/models';
+import { supersedeAcceptedOrderLinks, linkOrderToTransaction, anchorReceiptOrderToTransaction } from '../src/import/receiptOrderAnchor';
+import type { ReceiptOpenAiCaller } from '../src/import/categorizeReceiptItems';
 
 const HH = 1;
 let accountId: number;
@@ -57,4 +58,98 @@ test('supersedeAcceptedOrderLinks rejects other accepted links but keeps the kep
   const keepLink = await TransactionOrderLink.findOne({ where: { transactionId: t, externalOrderId: keep } });
   assert.equal((oldLink as unknown as { status: string }).status, 'rejected');
   assert.equal((keepLink as unknown as { status: string }).status, 'accepted');
+});
+
+// ── anchorReceiptOrderToTransaction tests ──────────────────────────────────────
+
+/** Returns an OpenAiJsonResult with no items (bypasses AI network calls). */
+const emptyCaller: ReceiptOpenAiCaller = async (_messages, _options) => ({
+  json: { items: [] },
+  model: 'test',
+  temperature: 0,
+  latencyMs: 0,
+  providerRequestId: null,
+  rawTextPreview: '',
+});
+
+async function reviewableTxn(): Promise<number> {
+  const t = await txn(); // reviewFlag=true from helper
+  await TransactionSignal.create({
+    transactionId: t, source: 'item-link', confidence: 'medium',
+    fields: { autoCategory: 'Mixed' },
+  } as never);
+  return t;
+}
+
+async function orderWithItems(
+  items: Array<{ inferredCategory: string | null; confidence: number | null }>,
+): Promise<number> {
+  const o = await order();
+  for (const it of items) {
+    await ExternalOrderItem.create({
+      externalOrderId: o, title: 'x', quantity: 1,
+      inferredCategory: it.inferredCategory,
+      categoryOverride: null,
+      confidence: it.confidence != null ? String(it.confidence) : null,
+    } as never);
+  }
+  return o;
+}
+
+test('anchor: links order to txn, high-confidence items clear review, returns itemCount', async () => {
+  const t = await reviewableTxn();
+  const o = await orderWithItems([
+    { inferredCategory: 'Groceries', confidence: 90 },
+    { inferredCategory: 'Household', confidence: 85 },
+  ]);
+  const res = await anchorReceiptOrderToTransaction(
+    { orderId: o, transactionId: t, householdId: HH },
+    { openaiCaller: emptyCaller },
+  );
+  assert.equal(res.itemCount, 2);
+  const link = await TransactionOrderLink.findOne({ where: { transactionId: t, externalOrderId: o } });
+  assert.equal((link as unknown as { status: string }).status, 'accepted');
+  assert.equal((await Transaction.findByPk(t))!.reviewFlag, false);
+});
+
+test('anchor: supersedes a prior accepted (amazon) link on the txn', async () => {
+  const t = await reviewableTxn();
+  const amazon = await order();
+  await TransactionOrderLink.create({
+    transactionId: t, externalOrderId: amazon, status: 'accepted', confidence: '90', matchReason: 'amazon',
+  } as never);
+  const o = await orderWithItems([{ inferredCategory: 'Groceries', confidence: 90 }]);
+  await anchorReceiptOrderToTransaction(
+    { orderId: o, transactionId: t, householdId: HH },
+    { openaiCaller: emptyCaller },
+  );
+  assert.equal(
+    (await TransactionOrderLink.findOne({ where: { transactionId: t, externalOrderId: amazon } }) as unknown as { status: string }).status,
+    'rejected',
+  );
+  assert.equal(
+    (await TransactionOrderLink.findOne({ where: { transactionId: t, externalOrderId: o } }) as unknown as { status: string }).status,
+    'accepted',
+  );
+});
+
+test('anchor: zero-item order leaves txn in review and returns itemCount 0', async () => {
+  const t = await reviewableTxn();
+  const o = await order(); // no items
+  const res = await anchorReceiptOrderToTransaction(
+    { orderId: o, transactionId: t, householdId: HH },
+    { openaiCaller: emptyCaller },
+  );
+  assert.equal(res.itemCount, 0);
+  assert.equal((await Transaction.findByPk(t))!.reviewFlag, true);
+});
+
+test('anchor: low-confidence item keeps txn in review (straggler)', async () => {
+  const t = await reviewableTxn();
+  const o = await orderWithItems([{ inferredCategory: 'Groceries', confidence: 30 }]);
+  await anchorReceiptOrderToTransaction(
+    { orderId: o, transactionId: t, householdId: HH },
+    { openaiCaller: emptyCaller },
+  );
+  assert.equal((await Transaction.findByPk(t))!.reviewFlag, true);
 });
