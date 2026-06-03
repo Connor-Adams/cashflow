@@ -12,7 +12,12 @@
  * Runs OUTSIDE ingest: scrape latency / rate limits never block receipt upload.
  */
 import type { CostcoProductData, CostcoScraperCaller } from '../../integrations/costco/scraperClient';
+import { defaultCostcoScraperCaller } from '../../integrations/costco/scraperClient';
 import type { CostcoProductStatus } from '../../models/CostcoProduct';
+import { ExternalOrder, ExternalOrderItem, CostcoProduct } from '../../models';
+import { costcoEnrichmentEnabled, costcoEnrichmentMaxItemsPerRun } from '../../config/env';
+import { getCostcoScraperConfig } from '../../config/costco';
+import { Op } from 'sequelize';
 import { logger } from '../../observability/logger';
 
 /** Vendors eligible for product-image resolution (ExternalOrder.vendor). */
@@ -87,5 +92,101 @@ export async function resolveOneItemNumber(
   } catch (err) {
     logger.warn({ err, itemNumber, module: 'resolveCostcoProducts' }, 'costco_resolve_one_failed');
     return { itemNumber, status: 'error', imageUrl: null, costcoUrl: null, officialName: null, onlinePrice: null, source: caller.source };
+  }
+}
+
+export type ItemNumberToResolve = { itemNumber: string; name: string };
+
+/** Statuses that mean "don't query again" (error rows may be retried elsewhere). */
+const TERMINAL_CACHED = new Set<CostcoProductStatus>(['resolved', 'not_found']);
+
+async function upsertResolved(r: ResolvedProduct): Promise<void> {
+  const [row, created] = await CostcoProduct.findOrCreate({
+    where: { itemNumber: r.itemNumber },
+    defaults: {
+      itemNumber: r.itemNumber,
+      status: r.status,
+      imageUrl: r.imageUrl,
+      costcoUrl: r.costcoUrl,
+      officialName: r.officialName,
+      onlinePrice: r.onlinePrice,
+      source: r.source,
+      attempts: 1,
+      fetchedAt: new Date(),
+    },
+  });
+  if (!created) {
+    await row.update({
+      status: r.status,
+      imageUrl: r.imageUrl,
+      costcoUrl: r.costcoUrl,
+      officialName: r.officialName,
+      onlinePrice: r.onlinePrice,
+      source: r.source,
+      attempts: row.attempts + 1,
+      fetchedAt: new Date(),
+    });
+  }
+}
+
+/**
+ * Resolve a set of (itemNumber, name) pairs: skip any already cached as
+ * resolved/not_found, attempt up to `maxItems` of the rest, and upsert results.
+ * Sequential — no concurrent scraper calls. Returns count newly resolved.
+ */
+export async function resolveCostcoProductsForItemNumbers(
+  items: ItemNumberToResolve[],
+  caller: CostcoScraperCaller,
+  opts?: { maxItems?: number },
+): Promise<number> {
+  const byNumber = new Map<string, string>();
+  for (const it of items) {
+    const num = it.itemNumber?.trim();
+    if (num) byNumber.set(num, it.name);
+  }
+  const numbers = [...byNumber.keys()];
+
+  const existing = await CostcoProduct.findAll({ where: { itemNumber: { [Op.in]: numbers } } });
+  const skip = new Set(existing.filter((p) => TERMINAL_CACHED.has(p.status)).map((p) => p.itemNumber));
+
+  const cap = opts?.maxItems ?? costcoEnrichmentMaxItemsPerRun;
+  let attempted = 0;
+  let resolved = 0;
+  for (const num of numbers) {
+    if (skip.has(num)) continue;
+    if (attempted >= cap) break;
+    attempted += 1;
+    const result = await resolveOneItemNumber(num, byNumber.get(num) ?? num, caller);
+    await upsertResolved(result);
+    if (result.status === 'resolved') resolved += 1;
+  }
+  return resolved;
+}
+
+/**
+ * Best-effort gate for one order's Costco items. No-ops when disabled /
+ * unconfigured. NEVER throws — a flaky scraper can't fail receipt ingest.
+ */
+export async function maybeResolveCostcoProductsForOrder(
+  args: { householdId: number; orderId: number },
+  opts?: { caller?: CostcoScraperCaller },
+): Promise<number> {
+  const caller = opts?.caller ?? defaultCostcoScraperCaller();
+  if (!costcoEnrichmentEnabled || caller == null || getCostcoScraperConfig() == null) return 0;
+  try {
+    const items = await ExternalOrderItem.findAll({
+      where: { itemNumber: { [Op.ne]: null } },
+      include: [{
+        model: ExternalOrder, as: 'order', required: true,
+        where: { id: args.orderId, householdId: args.householdId, vendor: { [Op.in]: RESOLVE_VENDORS as unknown as string[] } },
+      }],
+    });
+    const toResolve: ItemNumberToResolve[] = items
+      .filter((it) => it.itemNumber != null)
+      .map((it) => ({ itemNumber: it.itemNumber as string, name: it.displayName ?? it.title }));
+    return await resolveCostcoProductsForItemNumbers(toResolve, caller);
+  } catch (err) {
+    logger.warn({ err, orderId: args.orderId, module: 'resolveCostcoProducts' }, 'costco_resolve_order_failed');
+    return 0;
   }
 }
