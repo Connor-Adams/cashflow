@@ -83,6 +83,43 @@ function rangeLabel(range: FinancialInsightRange): string {
   return 'all time';
 }
 
+/**
+ * True when a row should NOT count toward the "no_category_count" cleanup
+ * queue — it isn't a spend row a user would categorize. Covers negative
+ * money-movement legs (transfer/investment/dividend and invest-account rows),
+ * positive statement payments, and positive non-categorical flows ('skip').
+ *
+ * Income is peeled here by txnType — a paycheck is a positive inflow, not an
+ * uncategorized spend row. classifyPositiveAmount intentionally maps income to
+ * 'credit' (for the dashboard's credit bucket; other consumers rely on that),
+ * so the peel lives at this consumer rather than in the shared classifier.
+ */
+export function isNonCategorizableRow(input: {
+  amount: number;
+  txnType: string | null | undefined;
+  accountType: string | null | undefined;
+  merchantRaw?: string | null;
+  merchantClean?: string | null;
+  category?: string | null;
+}): boolean {
+  if (input.txnType === 'income') return true;
+  const positiveBucket =
+    input.amount >= 0
+      ? classifyPositiveAmount({
+          txnType: input.txnType,
+          accountType: input.accountType,
+          merchantRaw: input.merchantRaw,
+          merchantClean: input.merchantClean,
+          category: input.category,
+        })
+      : null;
+  return (
+    (input.amount < 0 && isNonSpend(input.txnType, input.accountType)) ||
+    positiveBucket === 'skip' ||
+    positiveBucket === 'payment'
+  );
+}
+
 export async function buildFinancialInsights(
   req: Request,
   period: string,
@@ -210,23 +247,19 @@ export async function buildFinancialInsights(
     const accountType = accountTypeById.get(row.accountId);
     // Track no-category count BEFORE filtering — but only for rows that
     // could meaningfully carry a category. Transfers, investment buys,
-    // dividends, and any invest-account row aren't expected to have a
-    // category and shouldn't pad the cleanup queue.
-    const positiveBucket =
-      amount >= 0
-        ? classifyPositiveAmount({
-            txnType: row.txnType,
-            accountType,
-            merchantRaw: row.merchantRaw,
-            merchantClean: row.merchantClean,
-            category: row.finalCategory,
-          })
-        : null;
-    const isNonCategorizable =
-      (amount < 0 && isNonSpend(row.txnType, accountType)) ||
-      positiveBucket === 'skip' ||
-      positiveBucket === 'payment';
-    if (!row.finalCategory && !isNonCategorizable) {
+    // dividends, statement payments, income, and any invest-account row
+    // aren't expected to have a category and shouldn't pad the cleanup queue.
+    if (
+      !row.finalCategory &&
+      !isNonCategorizableRow({
+        amount,
+        txnType: row.txnType,
+        accountType,
+        merchantRaw: row.merchantRaw,
+        merchantClean: row.merchantClean,
+        category: row.finalCategory,
+      })
+    ) {
       noCategoryIds.push(row.id);
     }
     // Spend aggregation: only negative amounts that pass the same
