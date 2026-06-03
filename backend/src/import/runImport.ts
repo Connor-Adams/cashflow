@@ -414,6 +414,16 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         sourceIdentityFingerprint: identityFp,
         sourceReference: v.sourceReference ?? null,
         t,
+        // CSV-imported rows default to status 'posted' (see Transaction model).
+        // Threading the posted-row context lets the cross-parser merchant-drift
+        // fallback in findExistingForDedup catch a statement re-imported in a
+        // different format (CSV then PDF) where the same charge's merchantRaw is
+        // reconstructed slightly differently and flips the identity fingerprint.
+        incomingStatus: 'posted',
+        incomingDate: v.date,
+        incomingAmount: v.amount,
+        incomingCurrency: v.currency,
+        incomingMerchantRaw: v.merchantRaw,
       });
       if (dedup.kind !== 'no-match') {
         skippedDup += 1;
