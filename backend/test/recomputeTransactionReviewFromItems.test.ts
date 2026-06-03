@@ -302,6 +302,64 @@ test('categorization completing high-confidence clears an already-linked txn', a
   );
 });
 
+// ---------------------------------------------------------------------------
+// categorizeAndApplyReceiptItems — household-wide path (no explicit orderId)
+// Regression: when called with { householdId, limit } and no orderId/orderIds,
+// the recompute used to skip entirely because orderIdList was [].
+// ---------------------------------------------------------------------------
+
+test('categorizeAndApply with no orderId derives touched orders and clears reviewFlag', async () => {
+  const { categorizeAndApplyReceiptItems } = await import('../src/import/categorizeReceiptItems.js');
+
+  // Build a txn with one straggler item (inferredCategory=null).
+  const id = await makeItemizedTxn({
+    reviewFlag: true,
+    signals: [{ source: 'item-link', confidence: 'medium', fields: { autoCategory: 'Mixed' } }],
+    items: [
+      { inferredCategory: null, categoryOverride: null, confidence: null }, // straggler
+    ],
+  });
+
+  // Confirm the txn starts in review.
+  assert.equal((await Transaction.findByPk(id))!.reviewFlag, true);
+
+  // Find the item we just created so we can target it with the fake AI caller.
+  const links = await TransactionOrderLink.findAll({ where: { transactionId: id } });
+  const orderId = links[0].externalOrderId;
+  const stragglerItems = await ExternalOrderItem.findAll({ where: { externalOrderId: orderId } });
+  const stragglerItemId = stragglerItems[0].id;
+
+  // Fake AI caller that returns a single high-confidence categorization for the straggler item.
+  const fakeOpenaiCaller = async () => ({
+    json: {
+      items: [
+        { itemId: stragglerItemId, category: 'Groceries', confidence: 95, rationale: 'test' },
+      ],
+    },
+    model: 'gpt-4o-mini',
+    temperature: 0.1,
+    latencyMs: 1,
+    providerRequestId: 'fake-req-id',
+    rawTextPreview: '{}',
+  });
+
+  // Call with NO orderId — the household-wide path.
+  const updated = await categorizeAndApplyReceiptItems(
+    { householdId: HH, limit: 200 },
+    { openaiCaller: fakeOpenaiCaller },
+  );
+
+  assert.ok(updated >= 1, `expected at least 1 update, got ${updated}`);
+
+  // The fix: review flag must now be cleared because the derive-from-items path ran.
+  const after = await Transaction.findByPk(id);
+  assert.equal(
+    after!.reviewFlag,
+    false,
+    'reviewFlag must be cleared when categorizeAndApplyReceiptItems runs without an explicit orderId',
+  );
+});
+
 test('route: POST /api/external-order-items/bulk-patch triggers review recompute', async () => {
   const { default: app } = await import('../src/app.js');
 

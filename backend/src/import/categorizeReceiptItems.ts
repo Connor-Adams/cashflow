@@ -235,9 +235,16 @@ export async function categorizeAndApplyReceiptItems(
     )
     const updated = await applyReceiptItemCategorySuggestions(result.suggestions)
     // Recompute review flags for any transactions linked to the categorized orders.
-    const orderIdList = args.orderId != null
-      ? [args.orderId]
-      : (args.orderIds ?? [])
+    // Start with any explicit order ids from the caller.
+    const explicit = args.orderId != null ? [args.orderId] : (args.orderIds ?? [])
+    // Derive touched order ids from the suggestions when no explicit ids were given
+    // (e.g. the household-wide "categorize all uncategorized items" path).
+    const itemIds = result.suggestions.map((s) => s.itemId)
+    const touchedRows = itemIds.length > 0
+      ? await ExternalOrderItem.findAll({ where: { id: itemIds }, attributes: ['externalOrderId'] })
+      : []
+    const derived = touchedRows.map((r) => (r as unknown as { externalOrderId: number }).externalOrderId)
+    const orderIdList = [...new Set([...explicit, ...derived])]
     const txnIds = (await Promise.all(orderIdList.map(transactionIdsForOrder))).flat()
     await recomputeTransactionsReviewFromItems(txnIds)
     return updated
