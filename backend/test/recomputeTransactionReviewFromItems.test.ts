@@ -360,6 +360,23 @@ test('categorizeAndApply with no orderId derives touched orders and clears revie
   );
 });
 
+test('backfill clears pre-existing fully-categorized itemized txns and is idempotent', async () => {
+  const { backfillItemReviewClears } = await import('../src/import/enrichmentBackfillScheduler.js');
+
+  const id = await makeItemizedTxn({
+    reviewFlag: true,
+    signals: [{ source: 'item-link', confidence: 'medium', fields: { autoCategory: 'Mixed' } }],
+    items: [{ inferredCategory: 'Groceries', categoryOverride: null, confidence: 90 }],
+  });
+  const first = await backfillItemReviewClears();
+  assert.ok(first.recomputed >= 1);
+  assert.equal((await Transaction.findByPk(id))!.reviewFlag, false);
+
+  const second = await backfillItemReviewClears(); // idempotent
+  assert.equal((await Transaction.findByPk(id))!.reviewFlag, false);
+  assert.ok(second.recomputed >= 0);
+});
+
 test('route: POST /api/external-order-items/bulk-patch triggers review recompute', async () => {
   const { default: app } = await import('../src/app.js');
 
