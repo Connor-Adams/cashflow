@@ -55,10 +55,26 @@ export function ItemRow({ item, categoryHints, onSaved }: ItemRowProps) {
   return (
     <tr>
       <td>
-        {item.displayName ?? item.title}
-        {item.displayName && (
-          <div style={{ fontSize: '0.8em', color: '#888' }}>{item.title}</div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {item.imageUrl && (
+            <a href={item.costcoUrl ?? undefined} target="_blank" rel="noopener noreferrer">
+              <img
+                src={item.imageUrl}
+                alt={item.displayName ?? item.title}
+                width={40}
+                height={40}
+                style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid #eee' }}
+                loading="lazy"
+              />
+            </a>
+          )}
+          <div>
+            {item.displayName ?? item.title}
+            {item.displayName && (
+              <div style={{ fontSize: '0.8em', color: '#888' }}>{item.title}</div>
+            )}
+          </div>
+        </div>
       </td>
       <td>{item.quantity}</td>
       <td>{item.totalPrice ?? '—'}</td>
