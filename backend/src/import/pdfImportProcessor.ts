@@ -69,7 +69,7 @@ export async function processItem(item: PdfImportItem): Promise<'done' | 'skippe
   return 'done';
 }
 
-async function recomputeBatch(batchId: string): Promise<void> {
+export async function recomputeBatch(batchId: string): Promise<void> {
   const items = await PdfImportItem.findAll({ where: { batchId } });
   const succeeded = items.filter((i) => i.status === 'done').length;
   const failed = items.filter((i) => i.status === 'failed').length;

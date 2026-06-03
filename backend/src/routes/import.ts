@@ -20,6 +20,7 @@ import {
   previewRollback,
   RollbackBlockedError,
 } from '../import/rollbackImportBatch';
+import { recomputeBatch } from '../import/pdfImportProcessor';
 import { sequelize, Account, ImportHistory, PdfImportBatch, PdfImportItem } from '../models';
 import { saveVaultObject, deleteVaultObject } from '../storage/vaultStorage';
 import { runJobByName } from '../jobs/registry';
@@ -701,9 +702,10 @@ router.post('/pdf-batch/:id/retry', async (req, res, next) => {
       { status: 'pending', error: null, reason: null },
       { where: { batchId: batch.id, status: 'failed' } },
     );
-    if (n > 0) { batch.status = 'processing'; await batch.save(); }
-    void runJobByName('pdf_import_process').catch(() => {});
-    res.json({ id: batch.id, retried: n, status: batch.status });
+    if (n > 0) { await recomputeBatch(batch.id); }
+    void runJobByName('pdf_import_process').catch((err) => { logger.warn({ err }, 'pdf_import_retry_refire_failed'); });
+    const updated = n > 0 ? await PdfImportBatch.findByPk(batch.id) : batch;
+    res.json({ id: batch.id, retried: n, status: updated?.status ?? batch.status });
   } catch (e) { next(e); }
 });
 

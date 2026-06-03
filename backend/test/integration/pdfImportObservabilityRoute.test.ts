@@ -369,6 +369,14 @@ test('POST /pdf-batch/:id/retry flips failed items to pending and returns retrie
   assert.equal(item!.status, 'pending', `failed item should be pending after retry, got ${item!.status}`);
   assert.equal(item!.error, null, 'error should be cleared after retry');
   assert.equal(item!.reason, null, 'reason should be cleared after retry');
+
+  // Verify batch counts were immediately recomputed (failed dropped, processed dropped)
+  const batchRes = await authed.get(`/api/import/pdf-batch/${batchId}`);
+  assert.equal(batchRes.status, 200, `expected 200 on batch GET after retry, got ${batchRes.status}`);
+  const batchBody = batchRes.body as { failed: number; processed: number; status: string };
+  assert.equal(batchBody.failed, 0, `expected failed=0 after retry (was 1), got ${batchBody.failed}`);
+  assert.equal(batchBody.processed, 1, `expected processed=1 after retry (pending item excluded), got ${batchBody.processed}`);
+  assert.equal(batchBody.status, 'processing', `expected batch status=processing after retry, got ${batchBody.status}`);
 });
 
 test('POST /pdf-batch/:id/retry returns retried=0 when no failed items', async () => {
