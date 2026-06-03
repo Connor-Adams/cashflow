@@ -16,7 +16,8 @@ import { defaultCostcoScraperCaller } from '../../integrations/costco/scraperCli
 import type { CostcoProductStatus } from '../../models/CostcoProduct';
 import { ExternalOrder, ExternalOrderItem, CostcoProduct } from '../../models';
 import { costcoEnrichmentEnabled, costcoEnrichmentMaxItemsPerRun } from '../../config/env';
-import { getCostcoScraperConfig } from '../../config/costco';
+import { getCostcoScraperConfig, getCostcoProvider, getGoogleCseConfig } from '../../config/costco';
+import { makeGoogleBestEffortResolver } from '../../integrations/costco/googleImageCaller';
 import { Op } from 'sequelize';
 import { logger } from '../../observability/logger';
 
@@ -109,6 +110,17 @@ export function strictResolver(caller: CostcoScraperCaller): PerItemResolver {
   return (itemNumber, name) => resolveOneItemNumber(itemNumber, name, caller);
 }
 
+/** Pick the configured provider's per-item resolver, or null if unconfigured. */
+export function selectResolver(opts?: { caller?: CostcoScraperCaller }): PerItemResolver | null {
+  if (getCostcoProvider() === 'google') {
+    const cfg = getGoogleCseConfig();
+    return cfg ? makeGoogleBestEffortResolver(cfg) : null;
+  }
+  const caller = opts?.caller ?? defaultCostcoScraperCaller();
+  if (!caller || getCostcoScraperConfig() == null) return null;
+  return strictResolver(caller);
+}
+
 /** Statuses that mean "don't query again" (error rows may be retried elsewhere). */
 const TERMINAL_CACHED = new Set<CostcoProductStatus>(['resolved', 'not_found']);
 
@@ -190,10 +202,11 @@ export async function resolveCostcoProductsForItemNumbers(
  */
 export async function maybeResolveCostcoProductsForOrder(
   args: { householdId: number; orderId: number },
-  opts?: { caller?: CostcoScraperCaller },
+  opts?: { caller?: CostcoScraperCaller; resolver?: PerItemResolver },
 ): Promise<number> {
-  const caller = opts?.caller ?? defaultCostcoScraperCaller();
-  if (!costcoEnrichmentEnabled || caller == null || getCostcoScraperConfig() == null) return 0;
+  if (!costcoEnrichmentEnabled) return 0;
+  const resolveItem = opts?.resolver ?? selectResolver({ caller: opts?.caller });
+  if (resolveItem == null) return 0;
   try {
     const items = await ExternalOrderItem.findAll({
       where: { itemNumber: { [Op.ne]: null } },
@@ -205,7 +218,7 @@ export async function maybeResolveCostcoProductsForOrder(
     const toResolve: ItemNumberToResolve[] = items
       .filter((it) => it.itemNumber != null)
       .map((it) => ({ itemNumber: it.itemNumber as string, name: it.displayName ?? it.title }));
-    return await resolveCostcoProductsForItemNumbers(toResolve, strictResolver(caller));
+    return await resolveCostcoProductsForItemNumbers(toResolve, resolveItem);
   } catch (err) {
     logger.warn({ err, orderId: args.orderId, module: 'resolveCostcoProducts' }, 'costco_resolve_order_failed');
     return 0;
