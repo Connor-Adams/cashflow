@@ -411,6 +411,12 @@ export const enrichmentAiPerRowConcurrency = parseIntEnv(
   'ENRICHMENT_AI_PER_ROW_CONCURRENCY',
   4,
 );
+/** Per-item confidence (0-100) at/above which an AI-inferred item category is
+ *  trusted enough to count toward auto-clearing a transaction's review flag. */
+export const enrichmentItemClearConfidence = parseIntEnv(
+  'ENRICHMENT_ITEM_CLEAR_CONFIDENCE',
+  80,
+);
 
 export const googleOauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
 export const googleOauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;
