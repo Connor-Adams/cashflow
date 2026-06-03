@@ -26,8 +26,9 @@ type HeroTileProps = {
   /** Optional delta string, parsed for sign coloring. Pass undefined when
    *  there's no comparison period available. */
   netSpendDelta?: string
-  /** Three sub-metrics rendered as text rows below the hero number. */
-  subMetrics: [SubMetric, SubMetric, SubMetric]
+  /** Sub-metrics rendered as text rows below the hero number (spend, refunds,
+   *  income, payments). Rendered in order; the layout flows to any count. */
+  subMetrics: SubMetric[]
   /** Period comparison hint (e.g. "vs previous period: 2026-04-22 to 2026-05-22"). */
   comparisonHint: string
   /** Currency context line (e.g. "In CAD"). */
@@ -41,7 +42,7 @@ const SPARKLINE_HEIGHT = 56
 
 /**
  * Big-number tile for the bento dashboard. Promotes net spend; renders spend,
- * credits, payments as sub-rows; shows a small SVG sparkline derived from the
+ * refunds/credits, income, payments as sub-rows; shows a small SVG sparkline derived from the
  * monthly breakdown so the headline number has trend context without pulling
  * in Recharts for what is essentially decoration.
  */

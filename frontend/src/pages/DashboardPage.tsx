@@ -72,6 +72,7 @@ type CurrencyMetrics = {
   totalSpend: number
   totalCredits: number
   totalPayments: number
+  totalIncome: number
   netSpend: number
   transactionCount: number
 }
@@ -82,6 +83,7 @@ type MonthlyCurrencyBreakdown = {
   totalSpend: number
   totalCredits: number
   totalPayments: number
+  totalIncome: number
   netSpend: number
 }
 
@@ -580,12 +582,17 @@ export function DashboardPage() {
     const spendTotal = selected.reduce((sum, row) => sum + row.totalSpend, 0)
     const creditTotal = selected.reduce((sum, row) => sum + row.totalCredits, 0)
     const paymentTotal = selected.reduce((sum, row) => sum + row.totalPayments, 0)
+    const incomeTotal = selected.reduce((sum, row) => sum + (row.totalIncome ?? 0), 0)
     const netSpendTotal = selected.reduce((sum, row) => sum + row.netSpend, 0)
     const txCount = selected.reduce((sum, row) => sum + row.transactionCount, 0)
     const prevSpendTotal = prevSelected.reduce((sum, row) => sum + row.totalSpend, 0)
     const prevCreditTotal = prevSelected.reduce((sum, row) => sum + row.totalCredits, 0)
     const prevPaymentTotal = prevSelected.reduce(
       (sum, row) => sum + row.totalPayments,
+      0
+    )
+    const prevIncomeTotal = prevSelected.reduce(
+      (sum, row) => sum + (row.totalIncome ?? 0),
       0
     )
     const prevNetSpendTotal = prevSelected.reduce((sum, row) => sum + row.netSpend, 0)
@@ -602,6 +609,7 @@ export function DashboardPage() {
     const spendDelta = spendTotal - prevSpendTotal
     const creditDelta = creditTotal - prevCreditTotal
     const paymentDelta = paymentTotal - prevPaymentTotal
+    const incomeDelta = incomeTotal - prevIncomeTotal
     const netSpendDelta = netSpendTotal - prevNetSpendTotal
     const txDelta = txCount - prevTxCount
     const formatDeltaMoney = (v: number): string => {
@@ -631,6 +639,10 @@ export function DashboardPage() {
         singleCurrency != null
           ? formatMoney(paymentTotal, singleCurrency)
           : `${selected.length} currencies`,
+      incomeLabel:
+        singleCurrency != null
+          ? formatMoney(incomeTotal, singleCurrency)
+          : `${selected.length} currencies`,
       netSpendLabel:
         singleCurrency != null
           ? formatMoney(netSpendTotal, singleCurrency)
@@ -641,6 +653,7 @@ export function DashboardPage() {
       spendDeltaLabel: withPrevPeriod(formatDeltaMoney(spendDelta)),
       creditsDeltaLabel: withPrevPeriod(formatDeltaMoney(creditDelta)),
       paymentsDeltaLabel: withPrevPeriod(formatDeltaMoney(paymentDelta)),
+      incomeDeltaLabel: withPrevPeriod(formatDeltaMoney(incomeDelta)),
       netSpendDeltaLabel: withPrevPeriod(formatDeltaMoney(netSpendDelta)),
       txDeltaLabel: withPrevPeriod(formatDeltaCount(txDelta)),
       comparisonHint,
@@ -1099,6 +1112,14 @@ export function DashboardPage() {
                 value: summaryStats.creditsLabel,
                 delta: hasComparisonPeriod
                   ? summaryStats.creditsDeltaLabel
+                  : undefined,
+                metricKind: 'gain',
+              },
+              {
+                label: 'Income',
+                value: summaryStats.incomeLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.incomeDeltaLabel
                   : undefined,
                 metricKind: 'gain',
               },
