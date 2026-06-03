@@ -73,7 +73,7 @@ type WsBundleFileResult = {
 type MultiUploadResponse = { results: UploadResult[] }
 
 const PDF_BUNDLE_URL = '/api/import/upload-pdf-bundle'
-const WS_BUNDLE_URL = '/api/import/upload-ws-bundle'
+const WS_BUNDLE_URL = '/api/import/upload-bundle'
 const HOLDINGS_URL = '/api/import/upload-holdings'
 const SINGLE_URL = '/api/import/upload'
 const MULTI_URL = '/api/import/upload-many'
