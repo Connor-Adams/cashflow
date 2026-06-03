@@ -6,7 +6,7 @@ import { Op } from 'sequelize';
 import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrderLink } from '../models';
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
-import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { anchorReceiptOrderToTransaction } from '../import/receiptOrderAnchor';
 import {
   EXPANSION_VENDORS,
   maybeExpandItemNamesForOrder,
@@ -423,12 +423,16 @@ router.post(
           where: { externalOrderId: previousExternalOrderId, status: 'suggested' },
         });
       }
+      let itemCount = 0;
       if (auth.household.id != null) {
-        await matchReceiptOrderToTransactions({
-          externalOrderId: order.id,
+        // The receipt is attached to row.transactionId; anchor the extracted
+        // order directly to it (photo is authoritative), categorize, recompute.
+        const anchored = await anchorReceiptOrderToTransaction({
+          orderId: order.id,
+          transactionId: row.transactionId,
           householdId: auth.household.id,
         });
-        await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(order.id));
+        itemCount = anchored.itemCount;
         // Best-effort: expand abbreviated item titles into readable names for
         // allowlisted vendors (Costco). No-ops/silently fails so a flaky
         // OpenAI call can't break receipt analysis.
@@ -439,7 +443,7 @@ router.post(
           });
         }
       }
-      res.json({ receipt: row.toJSON(), order: order.toJSON(), extracted });
+      res.json({ receipt: row.toJSON(), order: order.toJSON(), extracted, itemCount });
     } catch (e) {
       next(e);
     }
