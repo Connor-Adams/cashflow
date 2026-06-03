@@ -7,12 +7,12 @@ import { resolvePdfAccountFromHeader } from './runImport';
 import { logger } from '../observability/logger';
 import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 
-export type DrainSummary = { processed: number; succeeded: number; failed: number };
+export type DrainSummary = { processed: number; succeeded: number; failed: number; skipped: number };
 
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
 
 /** Process one item: read bytes → single extract → resolve account → parse → commit. */
-export async function processItem(item: PdfImportItem): Promise<void> {
+export async function processItem(item: PdfImportItem): Promise<'done' | 'skipped'> {
   // Lazy-require avoids circular module init with pdfjs/registry.
   /* eslint-disable @typescript-eslint/no-require-imports */
   const { extractPdfLines } = require('./pdf/extractLines');
@@ -26,7 +26,16 @@ export async function processItem(item: PdfImportItem): Promise<void> {
   const buffer = await readVaultObject(item.storedFilename, item.encryptionAlgorithm as VaultEncryptionAlgorithm);
   const lines = await extractPdfLines(buffer);
   const parser = findPdfParser(lines);
-  if (!parser) throw new Error('No PDF parser matched this statement layout');
+  if (!parser) {
+    item.status = 'skipped';
+    item.reason = 'No parser matched this statement layout';
+    await item.save();
+    logger.info(
+      { batchId: item.batchId, itemId: item.id, fileName: item.fileName, reason: item.reason },
+      'pdf_import_item_skipped',
+    );
+    return 'skipped';
+  }
   const parseOut = parser.parse(lines, { defaultCurrency: 'CAD' });
   if (!parseOut.header) throw new Error(`Parser ${parser.id} produced no header for account match`);
 
@@ -55,53 +64,69 @@ export async function processItem(item: PdfImportItem): Promise<void> {
     warnings: commit.warnings,
   } as unknown as typeof item.resultJson;
   item.status = 'done';
+  item.reason = null;
   await item.save();
+  return 'done';
 }
 
-async function recomputeBatch(batchId: string): Promise<void> {
+export async function recomputeBatch(batchId: string): Promise<void> {
   const items = await PdfImportItem.findAll({ where: { batchId } });
-  const processed = items.filter((i) => i.status === 'done' || i.status === 'failed').length;
   const succeeded = items.filter((i) => i.status === 'done').length;
   const failed = items.filter((i) => i.status === 'failed').length;
+  const skipped = items.filter((i) => i.status === 'skipped').length;
+  const processed = succeeded + failed + skipped;
   const anyPending = items.some((i) => i.status === 'pending' || i.status === 'processing');
   const batch = await PdfImportBatch.findByPk(batchId);
   if (!batch) return;
   batch.processed = processed;
   batch.succeeded = succeeded;
   batch.failed = failed;
+  batch.skipped = skipped;
   batch.status = anyPending ? 'processing' : (succeeded === 0 && failed > 0 ? 'failed' : 'done');
   await batch.save();
 }
 
-/** Drain up to `chunk` pending items. Resets stale `processing` rows first. */
-export async function drainPendingChunk(opts: { chunk?: number } = {}): Promise<DrainSummary> {
-  const chunk = opts.chunk ?? 12;
+/** Drain pending items within a time budget. Resets stale `processing` rows first. */
+export async function drainPendingChunk(
+  opts: { budgetMs?: number; maxItems?: number } = {},
+): Promise<DrainSummary & { pendingRemaining: number }> {
+  const budgetMs = opts.budgetMs ?? 25_000;
+  const maxItems = opts.maxItems ?? Infinity;
   const staleCutoff = new Date(Date.now() - STALE_PROCESSING_MS);
   await PdfImportItem.update(
     { status: 'pending' },
     { where: { status: 'processing', updatedAt: { [Op.lt]: staleCutoff } } },
   );
 
-  const items = await PdfImportItem.findAll({
-    where: { status: 'pending' }, order: [['created_at', 'ASC']], limit: chunk,
-  });
-  const summary: DrainSummary = { processed: 0, succeeded: 0, failed: 0 };
+  const summary: DrainSummary = { processed: 0, succeeded: 0, failed: 0, skipped: 0 };
   const touchedBatches = new Set<string>();
-  for (const item of items) {
+  const start = Date.now();
+  let count = 0;
+  while (Date.now() - start < budgetMs && count < maxItems) {
+    const item = await PdfImportItem.findOne({ where: { status: 'pending' }, order: [['created_at', 'ASC']] });
+    if (!item) break;
     item.status = 'processing';
     await item.save();
+    const b = await PdfImportBatch.findByPk(item.batchId);
+    if (b && !b.startedAt) { b.startedAt = new Date(); await b.save(); }
     try {
-      await processItem(item);
-      summary.succeeded += 1;
+      const outcome = await processItem(item);
+      if (outcome === 'skipped') summary.skipped += 1; else summary.succeeded += 1;
     } catch (err) {
       item.status = 'failed';
       item.error = (err as Error).message;
+      item.reason = (err as Error).message;
       await item.save();
       summary.failed += 1;
-      logger.error({ err, item: item.id }, 'pdf_import_item_failed');
+      logger.error(
+        { batchId: item.batchId, itemId: item.id, fileName: item.fileName, storageKey: item.storedFilename, storageKind: item.storageKind, err },
+        'pdf_import_item_failed',
+      );
     }
     summary.processed += 1;
+    count += 1;
     touchedBatches.add(item.batchId);
+    await new Promise<void>((r) => setImmediate(r)); // yield — pdfjs is CPU-bound
   }
   for (const batchId of touchedBatches) await recomputeBatch(batchId);
   // Heal step: re-assert transaction.entity_id parity after any account→entity
@@ -109,7 +134,7 @@ export async function drainPendingChunk(opts: { chunk?: number } = {}): Promise<
   // fail the drain (mirrors the post-bundle heal in restoreBundle / routes/import).
   if (touchedBatches.size > 0) {
     const batches = await PdfImportBatch.findAll({ where: { id: [...touchedBatches] } });
-    for (const hid of new Set(batches.map((b) => b.householdId))) {
+    for (const hid of new Set(batches.map((bb) => bb.householdId))) {
       try {
         await syncTransactionEntityIds(hid);
       } catch (err) {
@@ -117,5 +142,6 @@ export async function drainPendingChunk(opts: { chunk?: number } = {}): Promise<
       }
     }
   }
-  return summary;
+  const pendingRemaining = await PdfImportItem.count({ where: { status: 'pending' } });
+  return { ...summary, pendingRemaining };
 }

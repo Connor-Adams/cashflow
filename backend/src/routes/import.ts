@@ -20,6 +20,7 @@ import {
   previewRollback,
   RollbackBlockedError,
 } from '../import/rollbackImportBatch';
+import { recomputeBatch } from '../import/pdfImportProcessor';
 import { sequelize, Account, ImportHistory, PdfImportBatch, PdfImportItem } from '../models';
 import { saveVaultObject, deleteVaultObject } from '../storage/vaultStorage';
 import { runJobByName } from '../jobs/registry';
@@ -640,9 +641,15 @@ router.get('/pdf-batch/:id', async (req, res, next) => {
     const items = await PdfImportItem.findAll({
       where: { batchId: batch.id }, order: [['created_at', 'ASC']],
     });
+    const pending = batch.total - batch.processed;
+    const estimatedRemainingMs =
+      batch.startedAt && batch.processed > 0 && pending > 0
+        ? Math.round((Date.now() - new Date(batch.startedAt).getTime()) / batch.processed * pending)
+        : null;
     res.json({
       id: batch.id, status: batch.status, total: batch.total,
       processed: batch.processed, succeeded: batch.succeeded, failed: batch.failed,
+      skipped: batch.skipped, startedAt: batch.startedAt, estimatedRemainingMs,
       items: items.map((i) => {
         const r = (i.resultJson ?? {}) as Record<string, number | string | undefined>;
         return {
@@ -651,13 +658,55 @@ router.get('/pdf-batch/:id', async (req, res, next) => {
           insertedInvestmentActivities: r.insertedInvestmentActivities ?? 0,
           insertedHoldings: r.insertedHoldings ?? 0,
           skippedDuplicates: r.skippedDuplicates ?? 0,
-          error: i.error ?? null,
+          reason: i.reason ?? null, error: i.error ?? null,
         };
       }),
     });
   } catch (e) {
     next(e);
   }
+});
+
+/**
+ * GET /api/import/pdf-batches
+ *
+ * Lists the 20 most recent PDF import batches for the authenticated household,
+ * newest first. Used by the imports history page and the polling badge.
+ */
+router.get('/pdf-batches', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const batches = await PdfImportBatch.findAll({
+      where: { householdId: household.id }, order: [['created_at', 'DESC']], limit: 20,
+    });
+    res.json(batches.map((b) => ({
+      id: b.id, status: b.status, total: b.total, processed: b.processed,
+      succeeded: b.succeeded, failed: b.failed, skipped: b.skipped,
+      createdAt: b.createdAt, startedAt: b.startedAt,
+    })));
+  } catch (e) { next(e); }
+});
+
+/**
+ * POST /api/import/pdf-batch/:id/retry
+ *
+ * Re-queues all failed items in a batch back to pending and fires the
+ * processor. Household-scoped: cross-household access returns 404.
+ */
+router.post('/pdf-batch/:id/retry', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const batch = await PdfImportBatch.findOne({ where: { id: req.params.id, householdId: household.id } });
+    if (!batch) { res.status(404).json({ error: 'Batch not found' }); return; }
+    const [n] = await PdfImportItem.update(
+      { status: 'pending', error: null, reason: null },
+      { where: { batchId: batch.id, status: 'failed' } },
+    );
+    if (n > 0) { await recomputeBatch(batch.id); }
+    void runJobByName('pdf_import_process').catch((err) => { logger.warn({ err }, 'pdf_import_retry_refire_failed'); });
+    const updated = n > 0 ? await PdfImportBatch.findByPk(batch.id) : batch;
+    res.json({ id: batch.id, retried: n, status: updated?.status ?? batch.status });
+  } catch (e) { next(e); }
 });
 
 router.post(

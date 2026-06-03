@@ -8,7 +8,7 @@ import {
   CreationOptional,
 } from 'sequelize';
 
-export type PdfImportStatus = 'pending' | 'processing' | 'done' | 'failed';
+export type PdfImportStatus = 'pending' | 'processing' | 'done' | 'failed' | 'skipped';
 
 export class PdfImportBatch extends Model<
   InferAttributes<PdfImportBatch>, InferCreationAttributes<PdfImportBatch>
@@ -21,6 +21,8 @@ export class PdfImportBatch extends Model<
   declare processed: number;
   declare succeeded: number;
   declare failed: number;
+  declare skipped: CreationOptional<number>;
+  declare startedAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -36,6 +38,8 @@ export function initPdfImportBatch(sequelize: Sequelize): typeof PdfImportBatch 
       processed: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       succeeded: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       failed: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      skipped: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      startedAt: { type: DataTypes.DATE, field: 'started_at', allowNull: true },
     } as ModelAttributes<PdfImportBatch>,
     { sequelize, modelName: 'PdfImportBatch', tableName: 'pdf_import_batches', underscored: true, timestamps: true },
   );

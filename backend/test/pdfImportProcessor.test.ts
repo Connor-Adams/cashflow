@@ -31,7 +31,7 @@ test('drainPendingChunk parses a pending item and marks the batch done', { skip:
     encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending',
   });
 
-  const summary = await drainPendingChunk({ chunk: 12 });
+  const summary = await drainPendingChunk({ maxItems: 12 });
   assert.equal(summary.processed, 1);
   assert.equal(summary.succeeded, 1);
 
@@ -65,7 +65,7 @@ test('a failing item marks failed without aborting the chunk', async () => {
     storedFilename: put.storedFilename, storageKind: put.storageKind,
     encryptionAlgorithm: put.encryptionAlgorithm, status: 'pending',
   });
-  const summary = await drainPendingChunk({ chunk: 12 });
+  const summary = await drainPendingChunk({ maxItems: 12 });
   assert.equal(summary.failed, 1);
   const item = await PdfImportItem.findOne({ where: { batchId: batch.id } });
   assert.equal(item?.status, 'failed');
