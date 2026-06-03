@@ -470,3 +470,167 @@ test('POST /pdf-batch/:id/retry 404 for cross-household batch', async () => {
   const res = await authed.post(`/api/import/pdf-batch/${otherBatchId}/retry`);
   assert.equal(res.status, 404, `cross-household retry should return 404, got ${res.status}`);
 });
+
+// ---------------------------------------------------------------------------
+// E2E: real PDFs — skipped-vs-done + retry no-op (gated on PDF presence)
+// ---------------------------------------------------------------------------
+
+const BRK_PDF = '/Users/connoradams/Downloads/monthly_pdf_statements/HQ6LMLTK8CAD_2025-05_BROKERAGE.pdf';
+const PERF_PDF = '/Users/connoradams/Downloads/monthly_pdf_statements/HQ8H0GZ07CAD_2025-01_YEARLY_PERFORMANCE.pdf';
+
+// NOTE: vaultStorage and drainPendingChunk must be dynamically imported AFTER
+// setupPgTestDb sets DATABASE_URL (same pattern as pdfImportAsync.test.ts).
+let saveVaultObject: (typeof import('../../src/storage/vaultStorage.js'))['saveVaultObject'];
+let drainPendingChunk: (typeof import('../../src/import/pdfImportProcessor.js'))['drainPendingChunk'];
+
+// Resolved once the first e2e test runs (from /api/auth/me, same session as authed)
+let e2eHouseholdId: number;
+let e2eUserId: number;
+
+test(
+  'e2e: brokerage done + performance skipped — batch totals + GET route + retry no-op',
+  { skip: !(fs.existsSync(BRK_PDF) && fs.existsSync(PERF_PDF)) },
+  async () => {
+    // Dynamic imports (same lazy pattern as pdfImportAsync.test.ts)
+    if (!saveVaultObject) {
+      ({ saveVaultObject } = await import('../../src/storage/vaultStorage.js'));
+    }
+    if (!drainPendingChunk) {
+      ({ drainPendingChunk } = await import('../../src/import/pdfImportProcessor.js'));
+    }
+
+    // Resolve householdId + userId from the authenticated session
+    const me = await authed.get('/api/auth/me');
+    assert.equal(me.status, 200, `GET /api/auth/me failed: ${JSON.stringify(me.body)}`);
+    const meBody = me.body as { user: { id: number; household: { id: number } } };
+    e2eUserId = meBody.user.id;
+    e2eHouseholdId = meBody.user.household.id;
+    assert.ok(e2eUserId, `expected userId from /api/auth/me`);
+    assert.ok(e2eHouseholdId, `expected householdId from /api/auth/me`);
+
+    const { PdfImportBatch, PdfImportItem, HoldingSnapshot, InvestmentActivity, Account } = models;
+
+    // ---- Step 1: save both PDFs to vault ----
+    const brkBytes = fs.readFileSync(BRK_PDF);
+    const perfBytes = fs.readFileSync(PERF_PDF);
+
+    const brkPut = await saveVaultObject(`${crypto.randomUUID()}.pdf`, {
+      buffer: brkBytes,
+      contentType: 'application/pdf',
+      originalName: path.basename(BRK_PDF),
+    });
+    const perfPut = await saveVaultObject(`${crypto.randomUUID()}.pdf`, {
+      buffer: perfBytes,
+      contentType: 'application/pdf',
+      originalName: path.basename(PERF_PDF),
+    });
+
+    // ---- Step 2: create batch (total=2) + two pending items ----
+    const batchId = crypto.randomUUID();
+    await PdfImportBatch.create({
+      id: batchId,
+      householdId: e2eHouseholdId,
+      userId: e2eUserId,
+      status: 'pending',
+      total: 2,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      skipped: 0,
+      startedAt: null,
+    } as never);
+
+    const brkItemId = crypto.randomUUID();
+    await PdfImportItem.create({
+      id: brkItemId,
+      batchId,
+      fileName: path.basename(BRK_PDF),
+      storedFilename: brkPut.storedFilename,
+      storageKind: brkPut.storageKind,
+      encryptionAlgorithm: brkPut.encryptionAlgorithm,
+      status: 'pending',
+    } as never);
+
+    const perfItemId = crypto.randomUUID();
+    await PdfImportItem.create({
+      id: perfItemId,
+      batchId,
+      fileName: path.basename(PERF_PDF),
+      storedFilename: perfPut.storedFilename,
+      storageKind: perfPut.storageKind,
+      encryptionAlgorithm: perfPut.encryptionAlgorithm,
+      status: 'pending',
+    } as never);
+
+    // ---- Step 3: drain ----
+    await drainPendingChunk({ maxItems: 12 });
+
+    // ---- Step 4: assert item outcomes ----
+    const brkItem = await PdfImportItem.findByPk(brkItemId);
+    assert.equal(brkItem?.status, 'done', `expected brokerage item=done, got ${brkItem?.status}`);
+    assert.ok(brkItem?.accountId, `expected brokerage item.accountId to be set`);
+
+    // Brokerage account must have committed HoldingSnapshot or InvestmentActivity rows
+    const brkAccount = await Account.findOne({ where: { id: brkItem!.accountId! } });
+    assert.ok(brkAccount, 'expected brokerage account to exist');
+    const [holdingCount, activityCount] = await Promise.all([
+      HoldingSnapshot.count({ where: { accountId: brkAccount!.id } }),
+      InvestmentActivity.count({ where: { accountId: brkAccount!.id } }),
+    ]);
+    assert.ok(
+      holdingCount > 0 || activityCount > 0,
+      `expected committed rows for brokerage account; HoldingSnapshot=${holdingCount}, InvestmentActivity=${activityCount}`,
+    );
+
+    const perfItem = await PdfImportItem.findByPk(perfItemId);
+    assert.equal(perfItem?.status, 'skipped', `expected performance item=skipped, got ${perfItem?.status}`);
+    assert.match(
+      perfItem?.reason ?? '',
+      /No parser matched/i,
+      `expected reason matching /No parser matched/, got ${JSON.stringify(perfItem?.reason)}`,
+    );
+
+    // ---- Step 5: assert batch totals ----
+    const batch = await PdfImportBatch.findByPk(batchId);
+    assert.equal(batch?.status, 'done', `expected batch status=done, got ${batch?.status}`);
+    assert.equal(batch?.succeeded, 1, `expected succeeded=1, got ${batch?.succeeded}`);
+    assert.equal(batch?.skipped, 1, `expected skipped=1, got ${batch?.skipped}`);
+    assert.equal(batch?.failed, 0, `expected failed=0, got ${batch?.failed}`);
+    assert.equal(batch?.processed, 2, `expected processed=2, got ${batch?.processed}`);
+    assert.ok(batch?.startedAt, `expected startedAt to be set`);
+
+    // ---- Step 6: GET /api/import/pdf-batch/:id ----
+    const getRes = await authed.get(`/api/import/pdf-batch/${batchId}`);
+    assert.equal(getRes.status, 200, `expected 200, got ${getRes.status}: ${JSON.stringify(getRes.body)}`);
+
+    const getBody = getRes.body as {
+      id: string; status: string; total: number; processed: number;
+      succeeded: number; failed: number; skipped: number;
+      startedAt: string | null; estimatedRemainingMs: number | null;
+      items: Array<{ fileName: string; status: string; reason: string | null }>;
+    };
+
+    assert.equal(getBody.skipped, 1, `GET /pdf-batch: expected skipped=1, got ${getBody.skipped}`);
+    // All items processed → no pending remaining → estimatedRemainingMs must be null
+    assert.equal(
+      getBody.estimatedRemainingMs,
+      null,
+      `expected estimatedRemainingMs=null when all processed, got ${getBody.estimatedRemainingMs}`,
+    );
+
+    const skippedRouteItem = getBody.items.find((i) => i.fileName === path.basename(PERF_PDF));
+    assert.ok(skippedRouteItem, `expected skipped item in GET response items`);
+    assert.equal(skippedRouteItem!.status, 'skipped');
+    assert.ok(
+      typeof skippedRouteItem!.reason === 'string' && skippedRouteItem!.reason.length > 0,
+      `expected non-empty reason on skipped item, got ${JSON.stringify(skippedRouteItem!.reason)}`,
+    );
+
+    // ---- Step 7: POST /api/import/pdf-batch/:id/retry — no-op (no failed items) ----
+    const retryRes = await authed.post(`/api/import/pdf-batch/${batchId}/retry`);
+    assert.equal(retryRes.status, 200, `expected 200 from retry, got ${retryRes.status}: ${JSON.stringify(retryRes.body)}`);
+    const retryBody = retryRes.body as { retried: number; status: string };
+    assert.equal(retryBody.retried, 0, `expected retried=0 (no failed items), got ${retryBody.retried}`);
+    assert.equal(retryBody.status, 'done', `expected batch stays done after retry no-op, got ${retryBody.status}`);
+  },
+);
