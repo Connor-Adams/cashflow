@@ -16,3 +16,6 @@ uploads/
 backend/test/fixtures/pdf/
 .fallow/
 reports/
+
+# one-off income backfill audit artifacts (backend/scripts/backfill-income-payer-anchored.ts)
+backend/income-backfill-report-*.json
