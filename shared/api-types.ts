@@ -1257,7 +1257,7 @@ export type PortfolioByAccountTypeRow = {
 }
 
 export type PortfolioByAccountTypeBucket = {
-  taxStatus: 'registered_tfsa' | 'registered_rrsp' | 'registered_fhsa' | 'registered_rrif' | 'non_registered' | 'n_a'
+  taxStatus: 'registered_tfsa' | 'registered_rrsp' | 'registered_fhsa' | 'registered_rrif' | 'registered_rdsp' | 'registered_resp' | 'non_registered' | 'n_a'
   label: string
   accounts: Array<{ id: number; name: string; currency: string }>
   holdingsCount: number
@@ -1324,7 +1324,7 @@ export type PortfolioForwardIncomeRow = {
 export type PortfolioForwardIncomeTaxBucket = {
   taxStatus:
     | 'registered_rrsp' | 'registered_tfsa' | 'registered_fhsa'
-    | 'registered_rrif' | 'non_registered' | 'n_a';
+    | 'registered_rrif' | 'registered_rdsp' | 'registered_resp' | 'non_registered' | 'n_a';
   byCurrency: Array<{ currency: string; amount: number }>;
   totalCad: number;
 };
