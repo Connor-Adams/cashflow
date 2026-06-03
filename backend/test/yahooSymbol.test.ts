@@ -59,6 +59,43 @@ test('CDR-named CAD equity → .NE primary, .TO fallback', () => {
   );
 });
 
+test('precious-metal / commodity holdings have no resolvable Yahoo symbol', () => {
+  // Sec 13 ("Physically backed gold", asset_type precious_metal, CAD) must NOT
+  // fall into the CAD-suffix branch — GOLD.TO is GoldMining Inc., a penny-stock
+  // collision. With no candidate the quote picker skips it and the route falls
+  // back to the broker-imported market value.
+  assert.deepEqual(
+    enumerateYahooSymbols('GOLD', {
+      currency: 'CAD',
+      assetType: 'precious_metal',
+      name: 'Physically backed gold',
+    }),
+    [],
+  );
+  assert.deepEqual(
+    enumerateYahooSymbols('SILVER', { currency: 'CAD', assetType: 'precious_metal', name: null }),
+    [],
+  );
+  // commodity is treated the same way (bullion / units, no clean ticker).
+  assert.deepEqual(
+    enumerateYahooSymbols('GOLD', { currency: 'CAD', assetType: 'commodity', name: null }),
+    [],
+  );
+});
+
+test('normal CAD equity is unaffected by the metals guard', () => {
+  // Guard: a regular CAD-listed stock keeps its existing TSX-primary candidates.
+  assert.deepEqual(
+    enumerateYahooSymbols('SHOP', { currency: 'CAD', assetType: 'stock', name: null }),
+    ['SHOP.TO', 'SHOP.V', 'SHOP.CN'],
+  );
+});
+
+test('toYahooSymbol returns empty string for precious-metal / commodity holdings', () => {
+  assert.equal(toYahooSymbol('GOLD', 'CAD', { assetType: 'precious_metal' }), '');
+  assert.equal(toYahooSymbol('SILVER', 'CAD', { assetType: 'commodity' }), '');
+});
+
 test('symbol already carrying a suffix or pair separator is preserved', () => {
   assert.deepEqual(
     enumerateYahooSymbols('XEQT.TO', { currency: 'CAD', assetType: null, name: null }),
