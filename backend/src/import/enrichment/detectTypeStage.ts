@@ -45,6 +45,23 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // 'purchase'. "Online transfer sent|received" is unambiguous — RBC uses it
   // exclusively for account-to-account funds movement.
   { type: 'transfer', re: /\bonline transfer (?:sent|received)\b/i },
+  // Additional internal-money-movement narratives (2026-06-03). These bank
+  // descriptions for account-to-account moves and credit-card / loan bill
+  // payments did NOT match any pattern above and fell through to the
+  // negative-default 'purchase' (or positive 'unknown'), inflating dashboard
+  // totalSpend. Each phrase is unambiguous regardless of sign — internal
+  // movement, never spend — so they are intentionally sign-agnostic. We do NOT
+  // add a bare "e-transfer sent" or "^withdrawal" rule: those are genuinely
+  // ambiguous (gambling deposits, cash spent, paying a person for goods) and
+  // are deliberately deferred.
+  { type: 'transfer', re: /\bonline banking transfer\b/i },
+  { type: 'transfer', re: /\bsent money to\b/i },
+  { type: 'transfer', re: /\breceived money from\b/i },
+  { type: 'transfer', re: /\btopped up account\b/i },
+  { type: 'payment', re: /\bonline banking (?:loan )?payment\b/i },
+  { type: 'payment', re: /\bonline bill payment for\b/i },
+  { type: 'payment', re: /\bamex bill pymt\b/i },
+  { type: 'payment', re: /\bmisc payment\b.*\b(amex|visa|mastercard|wise|questrade|bmo)\b/i },
   // RBC → Wealthsimple investment funding: "Investment WS Investments".
   // This phrase is not a securities BUY (no "bought N shares"), so it is safe
   // to match before the negative fallback. The existing `investment` patterns
