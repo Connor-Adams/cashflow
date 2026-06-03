@@ -985,14 +985,35 @@ export async function resolvePdfAccountFromHeader(
   const headerCurrency = header.currency ?? 'CAD';
   const entity = await resolveEntityForHolder(header.accountHolder, householdId);
   const overrideBusiness = entity?.kind === 'corp';
-  const [account, accountCreated] = await Account.findOrCreate({
+
+  // First try to find account by shortCode (exact match from PDF account number).
+  let account = await Account.findOne({
     where: { householdId, shortCode: header.accountSuffix },
-    defaults: {
+  });
+  let accountCreated = false;
+
+  // Fallback: if shortCode not found, try to find by name + accountType
+  // (accounts from CSV may have different shortCode but same name/type).
+  if (!account) {
+    account = await Account.findOne({
+      where: { householdId, name: template.name, accountType: template.accountType },
+    });
+    if (account && account.shortCode !== header.accountSuffix) {
+      // Update shortCode to reflect the PDF's account number.
+      await account.update({ shortCode: header.accountSuffix });
+    }
+  }
+
+  // If still not found, create new account.
+  if (!account) {
+    account = await Account.create({
       householdId, name: template.name, accountType: template.accountType,
       owner: 'me', visibility: 'private', defaultCurrency: headerCurrency,
       ownerUserId: userId, shortCode: header.accountSuffix, entityId: entity?.id ?? null,
-    },
-  });
+    });
+    accountCreated = true;
+  }
+
   if (entity && account.entityId !== entity.id) {
     await account.update({ entityId: entity.id });
   }
