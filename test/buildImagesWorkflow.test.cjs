@@ -23,7 +23,7 @@ test('detect skips by content hash via the shared script', () => {
   assert.match(workflow, /node scripts\/service-content-hash\.cjs/);
   assert.match(
     workflow,
-    /docker buildx imagetools inspect "\$\{image\}:tree-\$\{hash\}"/,
+    /skopeo inspect --raw.*"docker:\/\/\$\{image\}:tree-\$\{hash\}"/,
     'detect must check for the :tree-<hash> tag',
   );
 });

@@ -88,20 +88,6 @@ jobs:
   backend-test-integration:
     needs: install
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v6
 
@@ -117,6 +103,12 @@ jobs:
 
       - name: Extract node_modules
         run: tar -xf node_modules.tar
+
+      - name: Start PostgreSQL
+        run: |
+          sudo systemctl start postgresql.service
+          pg_isready
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
 
       - name: Run backend integration tests
         env:
