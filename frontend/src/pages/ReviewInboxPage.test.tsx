@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ReviewInboxPage } from './ReviewInboxPage'
@@ -17,6 +17,7 @@ vi.mock('@/lib/api', async () => {
     getJson: vi.fn(),
     patchJson: vi.fn(),
     postJson: vi.fn(),
+    postFormData: vi.fn(),
     deleteReq: vi.fn(),
   }
 })
@@ -396,6 +397,113 @@ describe('ReviewInboxPage itemized badge', () => {
     const position = lowItem.compareDocumentPosition(highItem)
     // eslint-disable-next-line no-bitwise
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+describe('ReviewInboxPage Add receipt', () => {
+  it('renders an "Add receipt" control on a row with itemized: null', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 100,
+        merchantClean: 'Superstore',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: null,
+      }),
+    ])
+    renderPage()
+    expect(await screen.findByText('Superstore')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add receipt/i })).toBeInTheDocument()
+  })
+
+  it('does NOT render an "Add receipt" button on a row with itemized data — shows badge instead', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 101,
+        merchantClean: 'Amazon',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: { itemCount: 5, stragglerCount: 2 },
+      }),
+    ])
+    renderPage()
+    expect(await screen.findByText('Amazon')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /add receipt/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/5 items/)).toBeInTheDocument()
+  })
+
+  it('picking a file triggers postFormData then postJson analyze, then re-loads inbox', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 102,
+        merchantClean: 'Walmart',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: null,
+      }),
+    ])
+    // postFormData returns a receipt id; postJson analyze returns itemCount > 0
+    vi.mocked(api.postFormData).mockResolvedValue({ id: 55 })
+    vi.mocked(api.postJson).mockResolvedValue({ itemCount: 3 })
+
+    renderPage()
+    await screen.findByText('Walmart')
+
+    // Clear the initial getJson call count so we can assert the reload
+    vi.mocked(api.getJson).mockClear()
+
+    const addBtn = screen.getByRole('button', { name: /add receipt/i })
+    await userEvent.click(addBtn)
+
+    const fileInput = screen.getByTestId('receipt-file-input')
+    const file = new File(['x'], 'r.jpg', { type: 'image/jpeg' })
+    fireEvent.change(fileInput, { target: { files: [file] } })
+
+    await waitFor(() => {
+      expect(api.postFormData).toHaveBeenCalledWith(
+        '/api/transactions/102/receipts',
+        expect.any(FormData),
+      )
+    })
+    await waitFor(() => {
+      expect(api.postJson).toHaveBeenCalledWith('/api/receipts/55/analyze', {})
+    })
+    // Inbox should have been re-loaded (onDone calls load())
+    await waitFor(() => {
+      expect(api.getJson).toHaveBeenCalledWith(
+        expect.stringContaining('/api/transactions?'),
+      )
+    })
+  })
+
+  it('shows "Couldn\'t read items" message when analyze returns itemCount: 0', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 103,
+        merchantClean: 'No Items Store',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: null,
+      }),
+    ])
+    vi.mocked(api.postFormData).mockResolvedValue({ id: 77 })
+    vi.mocked(api.postJson).mockResolvedValue({ itemCount: 0 })
+
+    renderPage()
+    await screen.findByText('No Items Store')
+
+    const addBtn = screen.getByRole('button', { name: /add receipt/i })
+    await userEvent.click(addBtn)
+
+    const fileInput = screen.getByTestId('receipt-file-input')
+    const file = new File(['x'], 'bad.jpg', { type: 'image/jpeg' })
+    fireEvent.change(fileInput, { target: { files: [file] } })
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/couldn't read items/i),
+      ).toBeInTheDocument()
+    })
   })
 })
 
