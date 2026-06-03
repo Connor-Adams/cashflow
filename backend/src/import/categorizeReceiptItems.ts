@@ -111,7 +111,10 @@ export async function categorizeReceiptItemsWithAi(
   if (args.orderId != null) orderWhere.id = args.orderId
   else if (args.orderIds?.length) orderWhere.id = { [Op.in]: args.orderIds }
 
-  const itemWhere: Record<string, unknown> = { inferredCategory: null }
+  // Process any item lacking a confidence (including deterministically-parsed
+  // Apple/Google/Uber items that already have a category but no confidence), so
+  // they can satisfy the SP1 review-clear bar.
+  const itemWhere: Record<string, unknown> = { confidence: null }
   if (args.itemIds?.length) itemWhere.id = { [Op.in]: args.itemIds }
 
   const itemLimit = args.itemIds?.length

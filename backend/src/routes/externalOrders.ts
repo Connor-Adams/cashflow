@@ -329,6 +329,13 @@ router.post('/import-text', aiSuggestLimiter, async (req, res, next) => {
       source: 'email-paste',
     });
 
+    const matchSummary = auth.household.id != null
+      ? await matchReceiptOrderToTransactions({
+          externalOrderId: order.id,
+          householdId: auth.household.id,
+        })
+      : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
+
     if (created) {
       await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
     }
@@ -339,10 +346,12 @@ router.post('/import-text', aiSuggestLimiter, async (req, res, next) => {
       created,
       vendor: extracted.vendor,
       items: extracted.items.length,
+      linksCreated: matchSummary.created,
+      linksUpdated: matchSummary.updated,
       householdId: auth.household.id,
     }, 'external_order_imported');
 
-    res.json({ order: order.toJSON(), created, extracted });
+    res.json({ order: order.toJSON(), created, extracted, match: matchSummary });
   } catch (e) {
     next(e);
   }
@@ -375,6 +384,13 @@ router.post(
         householdId: auth.household.id,
         source: 'image-upload',
       });
+      const matchSummary = auth.household.id != null
+        ? await matchReceiptOrderToTransactions({
+            externalOrderId: order.id,
+            householdId: auth.household.id,
+          })
+        : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
+
       if (created) {
         await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
       }
@@ -384,9 +400,11 @@ router.post(
         created,
         vendor: extracted.vendor,
         items: extracted.items.length,
+        linksCreated: matchSummary.created,
+        linksUpdated: matchSummary.updated,
         householdId: auth.household.id,
       }, 'external_order_imported');
-      res.json({ order: order.toJSON(), created, extracted });
+      res.json({ order: order.toJSON(), created, extracted, match: matchSummary });
     } catch (e) {
       next(e);
     }

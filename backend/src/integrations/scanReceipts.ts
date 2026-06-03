@@ -43,6 +43,7 @@ import { categorizeUberTrip } from '../ai/aiCategorizeUberTrip';
 import { logger } from '../observability/logger';
 import { runInteracCounterpartySync } from './interacCounterparty';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
 
 /**
  * Default sender allowlist baked into the app. Every household gets these
@@ -569,6 +570,11 @@ export async function scanInbox(
         } catch (err) {
           logger.warn({ err, orderId: result.orderId }, 'gmail_scan_match_failed');
         }
+        // Categorize regardless of match outcome: items need a confidence (so the
+        // SP1 review-clear bar can pass) even if no transaction matched yet. It is
+        // itself best-effort (never throws) and runs last so its recompute sees the
+        // accepted link (if match made one) plus the confidences it just wrote.
+        await categorizeAndApplyReceiptItems({ householdId: opts.householdId, orderId: result.orderId });
       }
 
       await recordProcessed({

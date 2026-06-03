@@ -82,16 +82,25 @@ test('parse maps ids, clamps confidence, drops unknown + dup ids, falls back to 
   assert.equal(byId.get(2)!.confidence, 60)
 })
 
-test('categorize selects only null-category non-amazon items', async () => {
+test('categorize selects non-amazon items missing a confidence, regardless of prior category', async () => {
   const other = await makeOrder('other')
   const amazon = await makeOrder('amazon')
-  const nullItem = await makeItem(other, 'MILK 2%', null)
-  await makeItem(other, 'BREAD', 'Bakery')
-  await makeItem(amazon, 'USB CABLE', null)
+  const nullCat = await makeItem(other, 'MILK 2%', null) // no category, no confidence → selected
+  const hasCat = await makeItem(other, 'BREAD', 'Bakery') // deterministic category but no confidence → now selected
+  await makeItem(amazon, 'USB CABLE', null) // amazon vendor → excluded
+  // Already-confident item → excluded (no rework).
+  await ExternalOrderItem.create({
+    externalOrderId: other,
+    title: 'DONE',
+    quantity: 1,
+    totalPrice: '5.00',
+    inferredCategory: 'Snacks',
+    confidence: '88',
+  } as never)
   const res = await categorizeReceiptItemsWithAi({ householdId: HH }, { openaiCaller: stubCaller('Groceries') })
-  assert.equal(res.suggestions.length, 1)
-  assert.equal(res.suggestions[0].itemId, nullItem)
-  assert.equal(res.suggestions[0].category, 'Groceries')
+  const ids = res.suggestions.map((s) => s.itemId).sort((a, b) => a - b)
+  assert.deepEqual(ids, [nullCat, hasCat].sort((a, b) => a - b))
+  assert.equal(res.suggestions.every((s) => s.category === 'Groceries'), true)
 })
 
 test('categorize batches items in groups of 20', async () => {
