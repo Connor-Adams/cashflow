@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Check,
@@ -36,6 +36,7 @@ import {
 import { useToast } from '@/components/ui/toast'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
+import { ItemRow } from '../components/items/ItemRow'
 import { getJson, patchJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import {
@@ -46,6 +47,7 @@ import {
 import { TAX_TREATMENTS } from '../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
+import type { ExternalOrderItemView } from '../../../shared/api-types'
 import type { Paginated, Transaction } from '../types/api'
 
 type CategoryHint = {
@@ -137,11 +139,20 @@ const CONFIDENCE_FLAG_CHIPS: Array<{
   }),
 )
 
+/** An item is a straggler (needs review) when no category has been resolved. */
+function isItemStraggler(item: ExternalOrderItemView): boolean {
+  return item.categoryOverride == null && item.inferredCategory == null
+}
+
 export function ReviewInboxPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [rows, setRows] = useState<Transaction[]>([])
   const [total, setTotal] = useState(0)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set())
+  const [itemsByTxn, setItemsByTxn] = useState<Map<number, ExternalOrderItemView[]>>(
+    () => new Map()
+  )
   const [categoryHints, setCategoryHints] = useState<CategoryHint[]>([])
   const [category, setCategory] = useState('')
   const [business, setBusiness] = useState('')
@@ -198,6 +209,34 @@ export function ReviewInboxPage() {
       setLoading(false)
     }
   }, [confidenceFlag])
+
+  const toggleExpanded = useCallback(
+    async (id: number) => {
+      const isCurrentlyExpanded = expandedIds.has(id)
+      setExpandedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) {
+          next.delete(id)
+        } else {
+          next.add(id)
+        }
+        return next
+      })
+      // Lazy-load items on first expand only
+      if (!isCurrentlyExpanded && !itemsByTxn.has(id)) {
+        try {
+          const receipts = await getJson<Array<{ items: ExternalOrderItemView[] }>>(
+            `/api/transactions/${id}/receipts`
+          )
+          const allItems = receipts.flatMap((r) => r.items)
+          setItemsByTxn((prev) => new Map(prev).set(id, allItems))
+        } catch {
+          // Silently ignore load errors; items will just be empty
+        }
+      }
+    },
+    [expandedIds, itemsByTxn]
+  )
 
   useEffect(() => {
     void load()
@@ -703,9 +742,17 @@ export function ReviewInboxPage() {
               <TableBody>
                 {visibleRows.map((row) => {
                   const isCursor = row.id === cursorRowId
+                  const isExpanded = expandedIds.has(row.id)
+                  const txnItems = itemsByTxn.get(row.id)
+                  const sortedItems = txnItems
+                    ? [
+                        ...txnItems.filter(isItemStraggler),
+                        ...txnItems.filter((it) => !isItemStraggler(it)),
+                      ]
+                    : null
                   return (
+                  <React.Fragment key={row.id}>
                   <TableRow
-                    key={row.id}
                     data-row-id={row.id}
                     data-cursor={isCursor ? 'true' : undefined}
                     data-state={selectedIds.has(row.id) ? 'selected' : undefined}
@@ -735,6 +782,23 @@ export function ReviewInboxPage() {
                         >
                           Why?
                         </button>
+                        {row.itemized != null && (
+                          <button
+                            type="button"
+                            aria-label={`${row.itemized.itemCount} items${row.itemized.stragglerCount > 0 ? `, ${row.itemized.stragglerCount} need review` : ''}`}
+                            aria-expanded={isExpanded}
+                            onClick={() => void toggleExpanded(row.id)}
+                            className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                          >
+                            <span>🧾 {row.itemized.itemCount} items</span>
+                            {row.itemized.stragglerCount > 0 && (
+                              <span className="text-amber-600">
+                                {' · '}
+                                {row.itemized.stragglerCount} need review
+                              </span>
+                            )}
+                          </button>
+                        )}
                       </span>
                     </TableCell>
                     <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
@@ -748,6 +812,42 @@ export function ReviewInboxPage() {
                     <TableCell>{row.finalBusiness ? 'Yes' : 'No'}</TableCell>
                     <TableCell>{row.importBatch}</TableCell>
                   </TableRow>
+                  {isExpanded && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="p-0">
+                        <div className="px-4 py-2">
+                          {sortedItems == null ? (
+                            <p className="text-xs text-muted-foreground">Loading items…</p>
+                          ) : sortedItems.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No items found.</p>
+                          ) : (
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-xs text-muted-foreground">
+                                  <th className="text-left font-medium pb-1">Item</th>
+                                  <th className="text-left font-medium pb-1">Qty</th>
+                                  <th className="text-left font-medium pb-1">Total</th>
+                                  <th className="text-left font-medium pb-1">Category</th>
+                                  <th className="text-left font-medium pb-1">Business %</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {sortedItems.map((item) => (
+                                  <ItemRow
+                                    key={item.id}
+                                    item={item}
+                                    categoryHints={categoryHints.map((h) => h.label)}
+                                    onSaved={() => void load()}
+                                  />
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
                   )
                 })}
                 {!loading && visibleRows.length === 0 && (

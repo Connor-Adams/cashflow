@@ -162,6 +162,134 @@ describe('ReviewInboxPage tax treatment bulk control', () => {
   })
 })
 
+describe('ReviewInboxPage itemized badge', () => {
+  it('shows item count and straggler count badge when row.itemized is set', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 42,
+        merchantClean: 'Amazon',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: { itemCount: 12, stragglerCount: 3 },
+      }),
+    ])
+    renderPage()
+    expect(await screen.findByText(/12 items/)).toBeInTheDocument()
+    expect(screen.getByText(/3 need review/)).toBeInTheDocument()
+  })
+
+  it('shows no itemized badge when row.itemized is null', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 43,
+        merchantClean: 'Coffee Shop',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: null,
+      }),
+    ])
+    renderPage()
+    await screen.findByText('Coffee Shop')
+    expect(screen.queryByText(/items/)).not.toBeInTheDocument()
+  })
+
+  it('clicking the badge loads items and renders an item row', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 44,
+        merchantClean: 'Costco',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: { itemCount: 2, stragglerCount: 1 },
+      }),
+    ])
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({
+              id: 44,
+              merchantClean: 'Costco',
+              status: 'posted',
+              reviewFlag: true,
+              itemized: { itemCount: 2, stragglerCount: 1 },
+            }),
+          ],
+          page: 1,
+          pageSize: 100,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/transactions/44/receipts') {
+        return [
+          {
+            id: 1,
+            transactionId: 44,
+            originalName: 'receipt.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 1000,
+            extractedNote: null,
+            createdAt: '2026-01-01T00:00:00Z',
+            externalOrderId: 10,
+            order: {
+              id: 10,
+              vendor: 'costco',
+              subtotal: '20.00',
+              tax: '2.60',
+              shipping: null,
+              total: '22.60',
+              currency: 'CAD',
+            },
+            items: [
+              {
+                id: 201,
+                externalOrderId: 10,
+                title: 'Olive Oil',
+                quantity: 1,
+                unitPrice: '12.00',
+                totalPrice: '12.00',
+                inferredCategory: null,
+                categoryOverride: null,
+                businessUsePercent: null,
+                businessUseOverride: null,
+              },
+              {
+                id: 202,
+                externalOrderId: 10,
+                title: 'Paper Towels',
+                quantity: 2,
+                unitPrice: '4.00',
+                totalPrice: '8.00',
+                inferredCategory: 'Household',
+                categoryOverride: null,
+                businessUsePercent: null,
+                businessUseOverride: null,
+              },
+            ],
+          },
+        ]
+      }
+      return null
+    })
+
+    renderPage()
+
+    // Click the badge to expand
+    const badge = await screen.findByRole('button', { name: /2 items/i })
+    await userEvent.click(badge)
+
+    // Should call the receipts endpoint
+    await waitFor(() => {
+      expect(api.getJson).toHaveBeenCalledWith('/api/transactions/44/receipts')
+    })
+
+    // Should render item titles
+    expect(await screen.findByText('Olive Oil')).toBeInTheDocument()
+    expect(screen.getByText('Paper Towels')).toBeInTheDocument()
+  })
+})
+
 function makeTransaction(
   overrides: Partial<Transaction> &
     Pick<Transaction, 'id' | 'merchantClean' | 'status'>,
