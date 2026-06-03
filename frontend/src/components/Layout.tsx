@@ -8,6 +8,7 @@ import { Sidebar } from './Sidebar'
 import { NotificationBell } from './notifications/NotificationBell'
 import { WhatsNewBell } from './changelog/WhatsNewBell'
 import { FeedbackButton } from './feedback/FeedbackButton'
+import { ImportProgressBadge } from './import/ImportProgressBadge'
 
 export function Layout() {
   const [layoutWidth] = useLayoutWidth()
@@ -69,6 +70,7 @@ export function Layout() {
           </button>
           <span className="topBar__wordmark">Cashflow</span>
           <div className="topBar__right ml-auto flex items-center gap-2">
+            <ImportProgressBadge />
             <button
               type="button"
               onClick={() => palette.setOpen(true)}
