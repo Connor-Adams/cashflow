@@ -23,7 +23,6 @@ import { QueryTypes, type Sequelize, type Transaction } from 'sequelize';
 import type { BundlePayload } from './bundleFormat';
 import { TABLES, TABLE_NAMES, type BundleTableSpec } from './tables';
 import { getOrCreatePersonalEntity } from '../tax/services/getOrCreatePersonalEntity';
-import { syncTransactionEntityIds } from '../tax/services/syncTransactionEntityIds';
 
 export type RestoreMode = 'merge' | 'replace';
 
@@ -58,14 +57,15 @@ const FK_REMAP: Record<string, Array<{ column: string; refTable: string }>> = {
   ],
 };
 
-/** Columns that should be NULLed when their source value can't be
- *  remapped (e.g. linked_transaction_id self-ref). entity_id is nulled
- *  because the bundle carries no tax_entities and a source-household entity
- *  id is meaningless in the target DB; it is re-derived against the target
- *  household after insert (see restoreBundle). */
+/** Columns NULLed when their source value can't be remapped — e.g.
+ *  linked_transaction_id self-ref (patched in a later pass; V1 nulls it).
+ *  entity_id is deliberately NOT listed: the bundle's source entity id is
+ *  meaningless in the target, but accounts/transactions.entity_id is NOT NULL
+ *  (migration 20260619000001) and Postgres rejects a NULL at INSERT time, so
+ *  restore re-derives the target-household entity_id up front (see
+ *  restoreBundle) rather than nulling-then-fixing. */
 const NULL_ON_RESTORE: Record<string, string[]> = {
-  accounts: ['entity_id'],
-  transactions: ['linked_transaction_id', 'entity_id'],
+  transactions: ['linked_transaction_id'],
 };
 
 function targetIsEmpty(
@@ -197,6 +197,11 @@ export async function restoreBundle(
       }
     }
 
+    // Re-derive entity_id to the TARGET household's personal entity, computed
+    // once and applied at INSERT time below (see the per-row note). The bundle
+    // carries no tax_entities, so the source entity id is meaningless here.
+    const personal = await getOrCreatePersonalEntity(householdId, { transaction: t });
+
     // Step 2: insert in forward order, building the id-remap as we go.
     const idRemap: Record<string, Map<number, number>> = {};
     for (const spec of TABLES) {
@@ -228,6 +233,18 @@ export async function restoreBundle(
         for (const col of NULL_ON_RESTORE[spec.table] ?? []) {
           if (col in row) row[col] = null;
         }
+        // entity_id is mandatory (NOT NULL, migration 20260619000001) and the
+        // bundle's source entity id is meaningless in the target DB — set the
+        // target household's personal entity at INSERT time. A NULL here would
+        // be rejected before any post-insert fix could run. Corp accounts
+        // collapse to personal in V1 (the bundle carries no tax_entities); the
+        // next import re-links them.
+        if (
+          (spec.table === 'accounts' || spec.table === 'transactions') &&
+          'entity_id' in row
+        ) {
+          row.entity_id = personal.id;
+        }
         const sourceId = Number(row.id ?? 0);
         const newId = await insertRow(sequelize, spec, row, t);
         if (sourceId && newId) {
@@ -237,24 +254,6 @@ export async function restoreBundle(
       }
       inserted[spec.table] = count;
     }
-
-    // entity_id was nulled on insert (NULL_ON_RESTORE): the bundle carries no
-    // tax_entities, so a source-household entity id is meaningless here.
-    // Re-derive against the TARGET household so restored rows stay inside the
-    // T1/T2 tax engine and satisfy the accounts/transactions → tax_entities FK:
-    // every account → the household's personal entity; every transaction → its
-    // account's entity. Corp accounts collapse to personal in V1 (no
-    // tax_entities in the bundle) and are re-linked on the next import.
-    const personal = await getOrCreatePersonalEntity(householdId, { transaction: t });
-    await sequelize.query(
-      'UPDATE accounts SET entity_id = :pid WHERE household_id = :hid AND entity_id IS NULL',
-      {
-        replacements: { pid: personal.id, hid: householdId },
-        type: QueryTypes.UPDATE,
-        transaction: t,
-      },
-    );
-    await syncTransactionEntityIds(householdId, { transaction: t });
 
     await t.commit();
   } catch (e) {
