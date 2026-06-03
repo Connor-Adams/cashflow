@@ -22,6 +22,7 @@ export class CostcoProduct extends Model<
   declare officialName: string | null;
   declare onlinePrice: string | null;
   declare source: string | null;
+  declare verified: CreationOptional<boolean>;
   declare attempts: CreationOptional<number>;
   declare fetchedAt: Date | null;
   declare readonly createdAt: CreationOptional<Date>;
@@ -39,6 +40,7 @@ export function initCostcoProduct(sequelize: Sequelize): typeof CostcoProduct {
       officialName: { type: DataTypes.STRING(512), field: 'official_name', allowNull: true },
       onlinePrice: { type: DataTypes.DECIMAL(14, 4), field: 'online_price', allowNull: true },
       source: { type: DataTypes.STRING(64), allowNull: true },
+      verified: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       attempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       fetchedAt: { type: DataTypes.DATE, field: 'fetched_at', allowNull: true },
     } as ModelAttributes<CostcoProduct>,

@@ -58,10 +58,11 @@ export type ResolvedProduct = {
   officialName: string | null;
   onlinePrice: string | null;
   source: string;
+  verified: boolean;
 };
 
 function notFound(itemNumber: string, source: string): ResolvedProduct {
-  return { itemNumber, status: 'not_found', imageUrl: null, costcoUrl: null, officialName: null, onlinePrice: null, source };
+  return { itemNumber, status: 'not_found', imageUrl: null, costcoUrl: null, officialName: null, onlinePrice: null, source, verified: true };
 }
 
 /**
@@ -91,10 +92,11 @@ export async function resolveOneItemNumber(
       officialName: match.title || null,
       onlinePrice: match.price != null ? String(match.price) : null,
       source: caller.source,
+      verified: true,
     };
   } catch (err) {
     logger.warn({ err, itemNumber, module: 'resolveCostcoProducts' }, 'costco_resolve_one_failed');
-    return { itemNumber, status: 'error', imageUrl: null, costcoUrl: null, officialName: null, onlinePrice: null, source: caller.source };
+    return { itemNumber, status: 'error', imageUrl: null, costcoUrl: null, officialName: null, onlinePrice: null, source: caller.source, verified: true };
   }
 }
 
@@ -114,6 +116,7 @@ async function upsertResolved(r: ResolvedProduct): Promise<void> {
       officialName: r.officialName,
       onlinePrice: r.onlinePrice,
       source: r.source,
+      verified: r.verified,
       attempts: 1,
       fetchedAt: new Date(),
     },
@@ -126,6 +129,7 @@ async function upsertResolved(r: ResolvedProduct): Promise<void> {
       officialName: r.officialName,
       onlinePrice: r.onlinePrice,
       source: r.source,
+      verified: r.verified,
       attempts: row.attempts + 1,
       fetchedAt: new Date(),
     });
