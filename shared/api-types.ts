@@ -135,6 +135,11 @@ export type StatementListResponse = {
   total: number
 }
 
+export type ItemizedSummary = {
+  itemCount: number
+  stragglerCount: number
+}
+
 export type Transaction = {
   id: number
   accountId: number
@@ -228,6 +233,8 @@ export type Transaction = {
    * responses; an empty array when the transaction has no labels.
    */
   labels?: TransactionLabelRef[]
+  /** Itemized summary for transactions with line items (e.g. receipts). */
+  itemized?: ItemizedSummary | null
 }
 
 /**

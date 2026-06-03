@@ -79,6 +79,7 @@ export type {
   StatementTransaction,
   StatementDetailResponse,
   StatementListResponse,
+  ItemizedSummary,
   Transaction,
   TransactionStatus,
   TransferPurpose,
