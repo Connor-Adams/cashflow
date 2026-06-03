@@ -64,7 +64,7 @@ const SYSTEM_PROMPT = `You extract structured order data from receipt emails and
 
 Reply with JSON only. Schema:
 {
-  "vendor": "amazon" | "apple" | "google" | "other",
+  "vendor": "amazon" | "apple" | "google" | "uber" | "uber_eats" | "other",
   "vendorName": string | null,
   "orderDate": "YYYY-MM-DD" | null,
   "orderId": string | null,
@@ -85,7 +85,7 @@ Reply with JSON only. Schema:
 }
 
 Rules:
-- Use "amazon" / "apple" / "google" for those three exact merchants; otherwise "other".
+- Use "amazon" / "apple" / "google" / "uber" / "uber_eats" for those exact merchants; otherwise "other".
 - Only populate "trip" for rideshare/taxi receipts (e.g. Uber/Lyft trips). For all other receipts set "trip": null.
 - inferredCategory: short labels matching common personal-finance categories ("Subscriptions", "Apps", "Music", "Streaming", "Office", "Groceries", "Dining", "Hardware", "Books"). Null if uncertain.
 - Quantities default to 1 if not stated.
@@ -109,8 +109,11 @@ function parseString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
 
-function parseVendor(v: unknown): ExtractedReceiptOrder['vendor'] {
-  if (v === 'amazon' || v === 'apple' || v === 'google' || v === 'costco') return v;
+export function parseVendor(v: unknown): ExtractedReceiptOrder['vendor'] {
+  if (
+    v === 'amazon' || v === 'apple' || v === 'google' ||
+    v === 'costco' || v === 'uber' || v === 'uber_eats'
+  ) return v;
   return 'other';
 }
 
