@@ -90,6 +90,23 @@ const rbc: CsvProfile = {
 };
 
 /**
+ * RBC personal banking (chequing/savings). Identical column layout to the `rbc`
+ * credit-card profile (Description 1/2, CAD$), but the CAD$ column is already
+ * signed (negative = withdrawal/debit, positive = deposit/credit), so it must
+ * NOT be inverted — using `rbc` here flips every sign. Auto-detect picks between
+ * the two via the "Account Type" column (see inferProfile.ts).
+ */
+const rbc_banking: CsvProfile = {
+  dateHeaders: ['Transaction Date'],
+  merchantHeaders: ['Description 1', 'Description 2'],
+  amountHeaders: ['CAD$', 'USD$'],
+  referenceHeaders: ['Cheque Number'],
+  accountNumberHeaders: ['Account Number'],
+  dateFormat: 'M/d/yyyy',
+  amountConvention: 'passthrough',
+};
+
+/**
  * TD Bank credit card (newer format).
  * Export: Transaction Date, Posting Date, Effective Date, Transaction Type,
  *         Amount, Payee
@@ -320,6 +337,7 @@ export const profiles: Record<string, CsvProfile> = {
   wealthsimple_cash,
   // Canadian banks
   rbc,
+  rbc_banking,
   td_credit_card,
   td_banking,
   scotiabank_credit_card,
@@ -354,8 +372,12 @@ const profileHints: Record<string, { label: string; hint: string }> = {
     hint: 'Monthly statement CSV (date,transaction,description,amount,balance,currency). Amount pre-signed — positive = inflow.',
   },
   rbc: {
-    label: 'RBC',
-    hint: 'Credit card & banking. Columns: Description 1/2, CAD$.',
+    label: 'RBC — Credit Card',
+    hint: 'RBC credit cards (e.g. Avion). Columns: Description 1/2, CAD$ — positive = charge.',
+  },
+  rbc_banking: {
+    label: 'RBC — Banking',
+    hint: 'RBC chequing/savings. Columns: Description 1/2, CAD$ — already signed (negative = withdrawal).',
   },
   td_credit_card: {
     label: 'TD — Credit Card',
