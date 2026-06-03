@@ -4,6 +4,10 @@ import { loadCategoryHints } from '../ai/suggestTransaction'
 import { openaiJsonWithMeta, type OpenAiJsonResult } from '../ai/openaiJson'
 import { logger } from '../observability/logger'
 import { RECEIPT_CATEGORIES } from './receiptCategories'
+import {
+  recomputeTransactionsReviewFromItems,
+  transactionIdsForOrder,
+} from './enrichment/recomputeTransactionReviewFromItems'
 
 export const RECEIPT_ITEM_CATEGORIZATION_PROMPT_VERSION = 'receipt-item-categorization-v1'
 
@@ -229,7 +233,21 @@ export async function categorizeAndApplyReceiptItems(
       { householdId: args.householdId, orderId: args.orderId, orderIds: args.orderIds, limit: args.limit },
       opts,
     )
-    return await applyReceiptItemCategorySuggestions(result.suggestions)
+    const updated = await applyReceiptItemCategorySuggestions(result.suggestions)
+    // Recompute review flags for any transactions linked to the categorized orders.
+    // Start with any explicit order ids from the caller.
+    const explicit = args.orderId != null ? [args.orderId] : (args.orderIds ?? [])
+    // Derive touched order ids from the suggestions when no explicit ids were given
+    // (e.g. the household-wide "categorize all uncategorized items" path).
+    const itemIds = result.suggestions.map((s) => s.itemId)
+    const touchedRows = itemIds.length > 0
+      ? await ExternalOrderItem.findAll({ where: { id: itemIds }, attributes: ['externalOrderId'] })
+      : []
+    const derived = touchedRows.map((r) => (r as unknown as { externalOrderId: number }).externalOrderId)
+    const orderIdList = [...new Set([...explicit, ...derived])]
+    const txnIds = (await Promise.all(orderIdList.map(transactionIdsForOrder))).flat()
+    await recomputeTransactionsReviewFromItems(txnIds)
+    return updated
   } catch (err) {
     logger.warn({ err, orderId: args.orderId, orderIds: args.orderIds }, 'receipt_item_categorization_failed')
     return 0

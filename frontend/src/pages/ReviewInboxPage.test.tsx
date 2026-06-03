@@ -162,6 +162,243 @@ describe('ReviewInboxPage tax treatment bulk control', () => {
   })
 })
 
+describe('ReviewInboxPage itemized badge', () => {
+  it('shows item count and straggler count badge when row.itemized is set', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 42,
+        merchantClean: 'Amazon',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: { itemCount: 12, stragglerCount: 3 },
+      }),
+    ])
+    renderPage()
+    expect(await screen.findByText(/12 items/)).toBeInTheDocument()
+    expect(screen.getByText(/3 need review/)).toBeInTheDocument()
+  })
+
+  it('shows no itemized badge when row.itemized is null', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 43,
+        merchantClean: 'Coffee Shop',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: null,
+      }),
+    ])
+    renderPage()
+    await screen.findByText('Coffee Shop')
+    expect(screen.queryByText(/items/)).not.toBeInTheDocument()
+  })
+
+  it('clicking the badge loads items and renders an item row', async () => {
+    mockInbox([
+      makeTransaction({
+        id: 44,
+        merchantClean: 'Costco',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: { itemCount: 2, stragglerCount: 1 },
+      }),
+    ])
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({
+              id: 44,
+              merchantClean: 'Costco',
+              status: 'posted',
+              reviewFlag: true,
+              itemized: { itemCount: 2, stragglerCount: 1 },
+            }),
+          ],
+          page: 1,
+          pageSize: 100,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/transactions/44/receipts') {
+        return [
+          {
+            id: 1,
+            transactionId: 44,
+            originalName: 'receipt.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 1000,
+            extractedNote: null,
+            createdAt: '2026-01-01T00:00:00Z',
+            externalOrderId: 10,
+            order: {
+              id: 10,
+              vendor: 'costco',
+              subtotal: '20.00',
+              tax: '2.60',
+              shipping: null,
+              total: '22.60',
+              currency: 'CAD',
+            },
+            items: [
+              {
+                id: 201,
+                externalOrderId: 10,
+                title: 'Olive Oil',
+                quantity: 1,
+                unitPrice: '12.00',
+                totalPrice: '12.00',
+                inferredCategory: null,
+                categoryOverride: null,
+                businessUsePercent: null,
+                businessUseOverride: null,
+              },
+              {
+                id: 202,
+                externalOrderId: 10,
+                title: 'Paper Towels',
+                quantity: 2,
+                unitPrice: '4.00',
+                totalPrice: '8.00',
+                inferredCategory: 'Household',
+                categoryOverride: null,
+                businessUsePercent: null,
+                businessUseOverride: null,
+              },
+            ],
+          },
+        ]
+      }
+      return null
+    })
+
+    renderPage()
+
+    // Click the badge to expand
+    const badge = await screen.findByRole('button', { name: /2 items/i })
+    await userEvent.click(badge)
+
+    // Should call the receipts endpoint
+    await waitFor(() => {
+      expect(api.getJson).toHaveBeenCalledWith('/api/transactions/44/receipts')
+    })
+
+    // Should render item titles
+    expect(await screen.findByText('Olive Oil')).toBeInTheDocument()
+    expect(screen.getByText('Paper Towels')).toBeInTheDocument()
+  })
+
+  it('item with inferredCategory but confidence < 80 is treated as a straggler (sorted to top)', async () => {
+    // Two items: one has inferredCategory+high confidence (resolved), one has
+    // inferredCategory+low confidence (straggler). The straggler must appear first
+    // in the rendered list because isItemStraggler gates on confidence >= 80.
+    mockInbox([
+      makeTransaction({
+        id: 55,
+        merchantClean: 'Costco',
+        status: 'posted',
+        reviewFlag: true,
+        itemized: { itemCount: 2, stragglerCount: 1 },
+      }),
+    ])
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({
+              id: 55,
+              merchantClean: 'Costco',
+              status: 'posted',
+              reviewFlag: true,
+              itemized: { itemCount: 2, stragglerCount: 1 },
+            }),
+          ],
+          page: 1,
+          pageSize: 100,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/transactions/55/receipts') {
+        return [
+          {
+            id: 5,
+            transactionId: 55,
+            originalName: 'receipt.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 500,
+            extractedNote: null,
+            createdAt: '2026-01-01T00:00:00Z',
+            externalOrderId: 20,
+            order: {
+              id: 20,
+              vendor: 'costco',
+              subtotal: '30.00',
+              tax: null,
+              shipping: null,
+              total: '30.00',
+              currency: 'CAD',
+            },
+            items: [
+              {
+                // Resolved: high-confidence → NOT a straggler → sorted after
+                id: 301,
+                externalOrderId: 20,
+                title: 'High Confidence Item',
+                quantity: 1,
+                unitPrice: '20.00',
+                totalPrice: '20.00',
+                inferredCategory: 'Groceries',
+                categoryOverride: null,
+                businessUsePercent: null,
+                businessUseOverride: null,
+                confidence: '90',
+              },
+              {
+                // Straggler: inferredCategory set but confidence too low (30) → straggler → sorted first
+                id: 302,
+                externalOrderId: 20,
+                title: 'Low Confidence Item',
+                quantity: 1,
+                unitPrice: '10.00',
+                totalPrice: '10.00',
+                inferredCategory: 'Electronics',
+                categoryOverride: null,
+                businessUsePercent: null,
+                businessUseOverride: null,
+                confidence: '30',
+              },
+            ],
+          },
+        ]
+      }
+      return null
+    })
+
+    renderPage()
+
+    const badge = await screen.findByRole('button', { name: /2 items/i })
+    await userEvent.click(badge)
+
+    await waitFor(() => {
+      expect(api.getJson).toHaveBeenCalledWith('/api/transactions/55/receipts')
+    })
+
+    // Both items must be visible.
+    const highItem = await screen.findByText('High Confidence Item')
+    const lowItem = screen.getByText('Low Confidence Item')
+    expect(highItem).toBeInTheDocument()
+    expect(lowItem).toBeInTheDocument()
+
+    // The low-confidence item (straggler) must appear before the high-confidence item in the DOM.
+    // Use compareDocumentPosition: DOCUMENT_POSITION_FOLLOWING (4) means lowItem precedes highItem.
+    const position = lowItem.compareDocumentPosition(highItem)
+    // eslint-disable-next-line no-bitwise
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
 function makeTransaction(
   overrides: Partial<Transaction> &
     Pick<Transaction, 'id' | 'merchantClean' | 'status'>,

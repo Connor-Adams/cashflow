@@ -22,6 +22,10 @@ import {
   recordAudit,
 } from '../audit/log';
 import {
+  transactionIdsForOrder,
+  recomputeTransactionsReviewFromItems,
+} from '../import/enrichment/recomputeTransactionReviewFromItems';
+import {
   deleteReceiptObject,
   readReceiptObject,
   saveReceiptObject,
@@ -276,6 +280,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               categoryOverride: it.categoryOverride,
               businessUsePercent: it.businessUsePercent,
               businessUseOverride: it.businessUseOverride,
+              confidence: it.confidence,
             }),
           ),
         };
@@ -423,6 +428,7 @@ router.post(
           externalOrderId: order.id,
           householdId: auth.household.id,
         });
+        await recomputeTransactionsReviewFromItems(await transactionIdsForOrder(order.id));
         // Best-effort: expand abbreviated item titles into readable names for
         // allowlisted vendors (Costco). No-ops/silently fails so a flaky
         // OpenAI call can't break receipt analysis.
@@ -497,6 +503,8 @@ router.patch('/external-order-items/:id', async (req, res, next) => {
       }
     }
     await item.update(patch);
+    const affected = await transactionIdsForOrder(item.externalOrderId);
+    await recomputeTransactionsReviewFromItems(affected);
     res.json(item.toJSON());
   } catch (e) {
     next(e);

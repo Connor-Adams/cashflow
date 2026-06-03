@@ -13,6 +13,7 @@ import {
 } from '../models';
 import { recomputeTransactionAmounts } from '../import/calculateShares';
 import { serializeTransaction } from '../util/serializeTransaction';
+import { enrichmentItemClearConfidence } from '../config/env';
 import { computeReceiptWarnings } from '../util/receiptWarnings';
 import {
   loadCategoryHints,
@@ -232,6 +233,58 @@ function logTransactionEvent(
   details: Record<string, string | number | boolean | null | undefined>
 ): void {
   logger.info(details, `transactions_${event}`);
+}
+
+type ItemizedSummary = { itemCount: number; stragglerCount: number };
+
+/**
+ * Loads per-transaction itemized receipt summaries in a single grouped query.
+ * Returns a Map from transactionId → { itemCount, stragglerCount } for every
+ * transaction that has at least one ACCEPTED order link. Transactions without
+ * an accepted order link are not present in the map (callers should ?? null).
+ *
+ * An item is considered DONE when:
+ *   - categoryOverride is non-null/non-empty, OR
+ *   - inferredCategory is non-null/non-empty AND confidence >= threshold
+ * Otherwise it is a straggler.
+ *
+ * confidence is a DECIMAL(5,2) column, so it is compared numerically. We must
+ * NOT compare it to '' (Postgres coerces '' -> numeric and throws "invalid input
+ * syntax for type numeric"); the IS NOT NULL guard is sufficient.
+ */
+export async function itemizedSummaries(
+  txnIds: number[],
+): Promise<Map<number, ItemizedSummary>> {
+  if (txnIds.length === 0) return new Map();
+  const rows = await sequelize.query<{
+    transactionId: number;
+    itemCount: number;
+    stragglerCount: number;
+  }>(
+    `SELECT tol.transaction_id AS "transactionId",
+            COUNT(i.id) AS "itemCount",
+            SUM(CASE WHEN (i.category_override IS NOT NULL AND i.category_override <> '')
+                       OR (i.inferred_category IS NOT NULL AND i.inferred_category <> ''
+                           AND i.confidence IS NOT NULL
+                           AND i.confidence >= :threshold)
+                     THEN 0 ELSE 1 END) AS "stragglerCount"
+       FROM transaction_order_links tol
+       JOIN external_order_items i ON i.external_order_id = tol.external_order_id
+      WHERE tol.status = 'accepted' AND tol.transaction_id IN (:ids)
+      GROUP BY tol.transaction_id`,
+    {
+      type: QueryTypes.SELECT,
+      replacements: { ids: txnIds, threshold: enrichmentItemClearConfidence },
+    },
+  );
+  const map = new Map<number, ItemizedSummary>();
+  for (const r of rows) {
+    map.set(Number(r.transactionId), {
+      itemCount: Number(r.itemCount),
+      stragglerCount: Number(r.stragglerCount),
+    });
+  }
+  return map;
 }
 
 /**
@@ -1015,6 +1068,7 @@ router.get('/', async (req, res, next) => {
     }
 
     const labelsMap = await loadLabelsForTransactions(txnIds);
+    const summariesMap = await itemizedSummaries(txnIds);
 
     res.json({
       data: rows.map((row) => ({
@@ -1022,6 +1076,7 @@ router.get('/', async (req, res, next) => {
         receiptCount: receiptCountMap[row.id] ?? 0,
         receiptWarnings: receiptWarningMap[row.id] ?? [],
         labels: labelsMap[row.id] ?? [],
+        itemized: summariesMap.get(row.id) ?? null,
       })),
       page,
       pageSize,

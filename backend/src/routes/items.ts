@@ -12,6 +12,10 @@ import {
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere } from '../auth/scope';
 import type { ItemRow, ItemsListResponse } from '@cashflow/shared';
+import {
+  transactionIdsForOrder,
+  recomputeTransactionsReviewFromItems,
+} from '../import/enrichment/recomputeTransactionReviewFromItems';
 
 const router = Router();
 
@@ -687,10 +691,14 @@ router.post('/external-order-items/bulk-patch', async (req, res, next) => {
         await it.update(patch, { transaction: t });
         updated += 1;
       }
-      return updated;
+      const orderIds = [...new Set(found.map((it) => it.externalOrderId))];
+      return { updated, orderIds };
     });
 
-    res.json({ updated: result });
+    const txnIds = (await Promise.all(result.orderIds.map(transactionIdsForOrder))).flat();
+    await recomputeTransactionsReviewFromItems(txnIds);
+
+    res.json({ updated: result.updated });
   } catch (e) {
     next(e);
   }
