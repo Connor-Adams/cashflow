@@ -61,3 +61,29 @@ test('inferProfileId picks generic_simple for Visa snake_case CSV', () => {
   ];
   assert.equal(inferProfileId(headers, rows, 'CAD'), 'generic_simple');
 });
+
+const RBC_HEADERS = [
+  'Account Type', 'Account Number', 'Transaction Date', 'Cheque Number',
+  'Description 1', 'Description 2', 'CAD$', 'USD$',
+];
+function rbcRow(accountType: string, cad: string) {
+  return {
+    'Account Type': accountType, 'Account Number': '6985',
+    'Transaction Date': '5/15/2026', 'Cheque Number': '',
+    'Description 1': 'ATM WITHDRAWAL', 'Description 2': '', 'CAD$': cad, 'USD$': '',
+  };
+}
+
+test('inferProfileId picks rbc_banking for an RBC chequing export', () => {
+  assert.equal(inferProfileId(RBC_HEADERS, [rbcRow('Chequing', '-90.00')], 'CAD'), 'rbc_banking');
+});
+
+test('inferProfileId keeps rbc for an RBC credit-card export', () => {
+  assert.equal(inferProfileId(RBC_HEADERS, [rbcRow('Visa', '90.00')], 'CAD'), 'rbc');
+});
+
+test('inferProfileId defaults to rbc for RBC headers without an Account Type column', () => {
+  const headers = ['Transaction Date', 'Description 1', 'Description 2', 'CAD$'];
+  const rows = [{ 'Transaction Date': '5/15/2026', 'Description 1': 'X', 'Description 2': '', 'CAD$': '-1.00' }];
+  assert.equal(inferProfileId(headers, rows, 'CAD'), 'rbc');
+});
