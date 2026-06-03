@@ -353,22 +353,28 @@ export function aggregateDashboard(
           },
         ];
 
-    for (const alloc of allocations) {
-      const key = [
-        row.currency,
-        alloc.category ?? '',
-        row.finalBusiness ? '1' : '0',
-        row.finalSplitType,
-      ].join('\0');
-      const existing = byCategory.get(key) ?? {
-        currency: row.currency,
-        category: alloc.category,
-        finalBusiness: row.finalBusiness,
-        finalSplitType: row.finalSplitType,
-        sumAmount: 0,
-      };
-      existing.sumAmount += alloc.amount;
-      byCategory.set(key, existing);
+    // Income (txnType='income') is inflow, not category data — keep it out of
+    // the per-category sumAmount breakdown so a paycheck doesn't pile into the
+    // null/Uncategorized bucket as a positive. Mirrors the categoryReports
+    // income peel and the headline peel (PR #531).
+    if (row.txnType !== 'income') {
+      for (const alloc of allocations) {
+        const key = [
+          row.currency,
+          alloc.category ?? '',
+          row.finalBusiness ? '1' : '0',
+          row.finalSplitType,
+        ].join('\0');
+        const existing = byCategory.get(key) ?? {
+          currency: row.currency,
+          category: alloc.category,
+          finalBusiness: row.finalBusiness,
+          finalSplitType: row.finalSplitType,
+          sumAmount: 0,
+        };
+        existing.sumAmount += alloc.amount;
+        byCategory.set(key, existing);
+      }
     }
 
     const monthlyKey = `${month}\0${currency}`;
