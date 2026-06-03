@@ -43,7 +43,6 @@ import type { ReceiptWithItems } from '../../../shared/api-types'
 import {
   getJson,
   patchJson,
-  postFormData,
   postJson,
 } from '../lib/api'
 import {
@@ -65,6 +64,7 @@ import type {
 import { useLabels } from '../lib/useLabels'
 import { useSessionState } from '../lib/useSessionState'
 import { notifyReceiptsChanged } from '@/hooks/useReceiptCompleteness'
+import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
 import { TAX_TREATMENTS } from '../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
@@ -229,6 +229,10 @@ export function TransactionsPage() {
   >('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const receiptFileRef = useRef<HTMLInputElement>(null)
+  const { attachAndAnalyze, error: attachErr } = useAttachAndAnalyzeReceipt(async () => {
+    notifyReceiptsChanged()
+    await load()
+  })
   const loadRequestRef = useRef(0)
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -667,15 +671,7 @@ export function TransactionsPage() {
     e.target.value = ''
     if (!file || tid == null) return
     setErr(null)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      await postFormData<{ id: number }>(`/api/transactions/${tid}/receipts`, fd)
-      notifyReceiptsChanged()
-      await load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Receipt upload failed')
-    }
+    await attachAndAnalyze(file, tid)
   }
 
   async function applyBulkAi() {
@@ -1084,6 +1080,7 @@ export function TransactionsPage() {
         ref={receiptFileRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
+        capture="environment"
         style={{ display: 'none' }}
         aria-hidden
         onChange={onReceiptPicked}
@@ -1401,7 +1398,7 @@ export function TransactionsPage() {
           </p>
         )}
       </section>
-      {err && <span className="error">{err}</span>}
+      {(err || attachErr) && <span className="error">{err || attachErr}</span>}
       {aiAuditMessage && <p className="uploadMsg">{aiAuditMessage}</p>}
       {bulkAiResults.length > 0 && (
         <section className="card aiVisibilityPanel" aria-label="Latest bulk AI results">
