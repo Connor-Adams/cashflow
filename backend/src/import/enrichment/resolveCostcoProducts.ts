@@ -26,6 +26,9 @@ export const RESOLVE_VENDORS = ['costco'] as const;
 /** Max search candidates whose product page we fetch+verify per item. */
 const MAX_CANDIDATES = 2;
 
+/** Error rows are retried on subsequent runs but capped here (see migration comment). */
+const MAX_ERROR_ATTEMPTS = 5;
+
 /** Digits-only equality; tolerates leading zeros and surrounding text. Null/empty never match. */
 export function itemNumbersMatch(a: string | null, b: string | null): boolean {
   if (a == null || b == null) return false;
@@ -147,7 +150,14 @@ export async function resolveCostcoProductsForItemNumbers(
   const numbers = [...byNumber.keys()];
 
   const existing = await CostcoProduct.findAll({ where: { itemNumber: { [Op.in]: numbers } } });
-  const skip = new Set(existing.filter((p) => TERMINAL_CACHED.has(p.status)).map((p) => p.itemNumber));
+  const skip = new Set(
+    existing
+      .filter((p) =>
+        TERMINAL_CACHED.has(p.status) ||
+        (p.status === 'error' && p.attempts >= MAX_ERROR_ATTEMPTS),
+      )
+      .map((p) => p.itemNumber),
+  );
 
   const cap = opts?.maxItems ?? costcoEnrichmentMaxItemsPerRun;
   let attempted = 0;

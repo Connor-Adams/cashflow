@@ -242,7 +242,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
       list.push(it);
       itemsByOrder.set(it.externalOrderId, list);
     }
-    const itemNumbers = [...new Set(items.map((it) => it.itemNumber).filter((x): x is string => x != null))];
+    const itemNumbers = [...new Set(items.map((it) => it.itemNumber?.trim()).filter((x): x is string => x != null && x !== ''))];
     const products = itemNumbers.length
       ? await CostcoProduct.findAll({ where: { itemNumber: { [Op.in]: itemNumbers }, status: 'resolved' } })
       : [];
@@ -286,8 +286,8 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               businessUsePercent: it.businessUsePercent,
               businessUseOverride: it.businessUseOverride,
               confidence: it.confidence,
-              imageUrl: it.itemNumber ? (productByNumber.get(it.itemNumber)?.imageUrl ?? null) : null,
-              costcoUrl: it.itemNumber ? (productByNumber.get(it.itemNumber)?.costcoUrl ?? null) : null,
+              imageUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.imageUrl ?? null) : null,
+              costcoUrl: it.itemNumber ? (productByNumber.get(it.itemNumber.trim())?.costcoUrl ?? null) : null,
             }),
           ),
         };
