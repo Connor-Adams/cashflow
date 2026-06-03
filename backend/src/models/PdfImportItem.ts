@@ -22,6 +22,7 @@ export class PdfImportItem extends Model<
   declare accountId: CreationOptional<number | null>;
   declare resultJson: CreationOptional<unknown | null>;
   declare error: CreationOptional<string | null>;
+  declare reason: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -39,6 +40,7 @@ export function initPdfImportItem(sequelize: Sequelize): typeof PdfImportItem {
       accountId: { type: DataTypes.INTEGER, field: 'account_id', allowNull: true },
       resultJson: { type: DataTypes.JSON, field: 'result_json', allowNull: true },
       error: { type: DataTypes.TEXT, allowNull: true },
+      reason: { type: DataTypes.TEXT, allowNull: true },
     } as ModelAttributes<PdfImportItem>,
     { sequelize, modelName: 'PdfImportItem', tableName: 'pdf_import_items', underscored: true, timestamps: true },
   );
