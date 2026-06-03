@@ -36,6 +36,15 @@ import {
   type PersonalScenarioComputeEntry,
 } from '@/hooks/useHouseholdPlanCompute';
 import { fmtCurrency, fmtPct, numericOrZero, sumNumeric } from '../util/format';
+import { StatCard } from '@/components/ui/stat-card';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 
 const FIELDS = [
   { key: 'salary', label: 'Salary' },
@@ -382,15 +391,13 @@ function IntegratedSummaryReady({
       <h4 className="mb-3 font-medium">Integrated summary</h4>
 
       <div className="mb-4">
-        <h5 className="text-sm font-semibold">Corp side</h5>
-        <table className="w-full text-sm">
-          <tbody>
-            <SummaryRow label="T2 federal tax" value={fmtCurrency(corpFederal)} />
-            <SummaryRow label="T2 provincial tax" value={fmtCurrency(corpProvincial)} />
-            <SummaryRow label="Dividend refund" value={fmtCurrency(corpDividendRefund)} />
-            <SummaryRow label="Net corp tax payable" value={fmtCurrency(corpNetTax)} strong />
-          </tbody>
-        </table>
+        <h5 className="mb-2 text-sm font-semibold">Corp side</h5>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="T2 federal tax" value={fmtCurrency(corpFederal)} />
+          <StatCard label="T2 provincial tax" value={fmtCurrency(corpProvincial)} />
+          <StatCard label="Dividend refund" value={fmtCurrency(corpDividendRefund)} />
+          <StatCard label="Net corp tax payable" value={fmtCurrency(corpNetTax)} />
+        </div>
       </div>
 
       <div className="mb-4">
@@ -407,15 +414,13 @@ function IntegratedSummaryReady({
       </div>
 
       <div>
-        <h5 className="text-sm font-semibold">Integration</h5>
-        <table className="w-full text-sm">
-          <tbody>
-            <SummaryRow label="Total routed to shareholders" value={fmtCurrency(totalRouted)} />
-            <SummaryRow label="Total tax (corp + personal)" value={fmtCurrency(totalTax)} />
-            <SummaryRow label="Total take-home" value={fmtCurrency(takeHome)} strong />
-            <SummaryRow label="Integrated tax rate" value={fmtPct(integratedRate)} strong />
-          </tbody>
-        </table>
+        <h5 className="mb-2 text-sm font-semibold">Integration</h5>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="Total routed to shareholders" value={fmtCurrency(totalRouted)} />
+          <StatCard label="Total tax (corp + personal)" value={fmtCurrency(totalTax)} />
+          <StatCard label="Total take-home" value={fmtCurrency(takeHome)} />
+          <StatCard label="Integrated tax rate" value={fmtPct(integratedRate)} />
+        </div>
       </div>
     </section>
   );
@@ -444,19 +449,19 @@ function PersonalSideTable({
   personalByEntity,
 }: PersonalSideTableProps) {
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs text-gray-500">
-          <th className="py-1 pr-2">Shareholder</th>
-          <th className="py-1 pr-2">Employment</th>
-          <th className="py-1 pr-2">Dividends</th>
-          <th className="py-1 pr-2">Fed tax</th>
-          <th className="py-1 pr-2">Prov tax</th>
-          <th className="py-1 pr-2">CPP</th>
-          <th className="py-1 pr-2">Net to shareholder</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table className="w-full text-sm">
+      <TableHeader>
+        <TableRow className="text-xs text-gray-500">
+          <TableHead className="py-1 pr-2">Shareholder</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Employment</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Dividends</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Fed tax</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Prov tax</TableHead>
+          <TableHead className="py-1 pr-2 text-right">CPP</TableHead>
+          <TableHead className="py-1 pr-2 text-right">Net to shareholder</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {shareholderEntityIds.map((id) => (
           <PersonalSideRow
             key={id}
@@ -465,8 +470,8 @@ function PersonalSideTable({
             personal={personalByEntity.get(id)}
           />
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -489,30 +494,15 @@ function PersonalSideRow({ id, additions, personal }: PersonalSideRowProps) {
   const totalPayable = numericOrZero(t.totalPayable);
   const netToShareholder = emp + dividends - totalPayable;
   return (
-    <tr>
-      <td className="py-1 pr-2">#{id}</td>
-      <td className="py-1 pr-2">{fmtCurrency(emp)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(dividends)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(fedTax)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(provTax)}</td>
-      <td className="py-1 pr-2">{fmtCurrency(cpp)}</td>
-      <td className="py-1 pr-2 font-medium">{fmtCurrency(netToShareholder)}</td>
-    </tr>
-  );
-}
-
-interface SummaryRowProps {
-  label: string;
-  value: string;
-  strong?: boolean;
-}
-
-function SummaryRow({ label, value, strong }: SummaryRowProps) {
-  return (
-    <tr>
-      <td className="py-1 pr-4 text-gray-600">{label}</td>
-      <td className={`py-1 ${strong ? 'font-semibold' : ''}`}>{value}</td>
-    </tr>
+    <TableRow>
+      <TableCell className="py-1 pr-2">#{id}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(emp)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(dividends)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(fedTax)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(provTax)}</TableCell>
+      <TableCell className="py-1 pr-2 text-right tabular-nums">{fmtCurrency(cpp)}</TableCell>
+      <TableCell className="py-1 pr-2 font-medium text-right tabular-nums">{fmtCurrency(netToShareholder)}</TableCell>
+    </TableRow>
   );
 }
 

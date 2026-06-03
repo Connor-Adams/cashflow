@@ -29,6 +29,7 @@ export type TxnType =
   | 'reward'
   | 'investment'
   | 'dividend'
+  | 'income'
   | 'unknown';
 
 export type SignalFields = Partial<{
@@ -52,6 +53,12 @@ export interface Signal {
   confidence: Confidence;
   fields: SignalFields;
   rationale?: string;
+  /**
+   * Set only by the item-link stage: the concrete order match to persist as a
+   * suggested TransactionOrderLink at import/backfill time. Ignored by
+   * mergeSignals (not in AUTO_FIELD_KEYS) and by TransactionSignal storage.
+   */
+  orderLink?: { externalOrderId: number; confidence: number; matchReason: string };
 }
 
 export interface PendingEnrichedTxn {

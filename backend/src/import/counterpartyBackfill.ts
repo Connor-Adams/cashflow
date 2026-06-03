@@ -5,16 +5,26 @@
  * and legacy `counterparty_raw` was NULL. Households who'd already imported
  * years of statements only got value on *new* imports. This job walks all
  * pre-existing in-scope rows (checking | savings | cash) where
- * `counterparty_raw IS NULL` and re-runs `extractCounterparty` over the
- * raw merchant line.
+ * `counterparty_contact_id IS NULL` (i.e. not yet linked to a Contact) and
+ * re-runs `extractCounterparty` over the raw merchant line.
+ *
+ * For person-kind extractions it calls `resolveCounterpartyContact` to
+ * find-or-create a Contact deduplicated by normalized name within the
+ * household, then writes both `counterparty_raw` (if still NULL) and
+ * `counterparty_contact_id` on the Transaction. Payroll / no-pattern rows
+ * get `counterparty_raw` populated but no Contact (left raw-only).
  *
  * Safety:
- *   - Idempotent. The NULL filter excludes rows the user (or a later import)
- *     already populated, so re-runs don't overwrite anything.
+ *   - Idempotent. The `counterparty_contact_id IS NULL` filter excludes rows
+ *     already linked; payroll/no-pattern rows are added to `seenIds` to skip
+ *     them on subsequent pages.
  *   - Scoped per household. The route layer authenticates the caller and
  *     passes `householdId` in; this module never sweeps cross-household.
  *   - Chunked. Walks rows in batches (default 200) ordered by (date, id) so
  *     the result is deterministic and the working set stays bounded.
+ *   - Per-row transactions. Each row's resolve+update runs in its own
+ *     Sequelize transaction so a unique-violation or error on one row rolls
+ *     back only that row and the sweep continues.
  *   - Per-process serialised. A single household can't run two backfills
  *     concurrently; the second call rejects via `isCounterpartyBackfillRunning`.
  *
@@ -28,6 +38,7 @@
 import { Op } from 'sequelize';
 import { Account, ProviderJobLog, Transaction, sequelize } from '../models';
 import { extractCounterparty } from './extractCounterparty';
+import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import type { AccountType } from '@cashflow/shared';
 import { logger } from '../observability/logger';
 
@@ -68,6 +79,7 @@ export interface CounterpartyBackfillCallbacks {
 export interface CounterpartyBackfillResult {
   processed: number;
   extracted: number;
+  linked: number;
   skipped: number;
   elapsedMs: number;
   dryRun: boolean;
@@ -76,7 +88,7 @@ export interface CounterpartyBackfillResult {
 export interface CounterpartyBackfillRunRecord {
   fetchedAt: Date;
   status: 'ok' | 'error';
-  summary: { processed: number; extracted: number; elapsedMs: number };
+  summary: { processed: number; extracted: number; linked: number; elapsedMs: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -111,13 +123,14 @@ export async function getLastCounterpartyBackfillRun(
     ],
   });
   if (!row) return null;
-  let summary = { processed: 0, extracted: 0, elapsedMs: 0 };
+  let summary = { processed: 0, extracted: 0, linked: 0, elapsedMs: 0 };
   if (row.errorMessage) {
     try {
       const parsed = JSON.parse(row.errorMessage) as Partial<typeof summary>;
       summary = {
         processed: Number(parsed.processed ?? 0),
         extracted: Number(parsed.extracted ?? 0),
+        linked: Number(parsed.linked ?? 0),
         elapsedMs: Number(parsed.elapsedMs ?? 0),
       };
     } catch {
@@ -138,6 +151,7 @@ export async function getLastCounterpartyBackfillRun(
 interface TxnRow {
   id: number;
   merchantRaw: string;
+  counterpartyRaw: string | null;
   accountType: AccountType;
 }
 
@@ -164,6 +178,7 @@ export async function runCounterpartyBackfill(
   const startedAt = Date.now();
   let processed = 0;
   let extracted = 0;
+  let linked = 0;
   let skipped = 0;
   let status: 'ok' | 'error' = 'ok';
   let errorMessage: string | null = null;
@@ -173,20 +188,19 @@ export async function runCounterpartyBackfill(
     // per-account cache; extractCounterparty wants the type for the
     // in-scope check.
     //
-    // We deliberately never advance an OFFSET — each iteration's UPDATE
-    // shrinks the result set (rows that got a counterparty now fail the
-    // NULL filter), so re-querying with `WHERE counterpartyRaw IS NULL`
-    // already returns "the next chunk". We track which rows produced
-    // a null extraction so we can paginate past them, since those stay
-    // visible in the filter forever and would otherwise loop indefinitely.
-    const seenNullIds = new Set<number>();
+    // We sweep rows where counterparty_contact_id IS NULL. Rows that
+    // successfully get a Contact linked will disappear from this filter on
+    // the next batch. Rows that extract to payroll or no-pattern (and thus
+    // never get a contactId) are added to `seenIds` so we paginate past them
+    // instead of looping forever.
+    const seenIds = new Set<number>();
     while (true) {
       const where: Record<string, unknown> = {
         householdId,
-        counterpartyRaw: { [Op.is]: null },
+        counterpartyContactId: { [Op.is]: null },
       };
-      if (seenNullIds.size > 0) {
-        where.id = { [Op.notIn]: Array.from(seenNullIds) };
+      if (seenIds.size > 0) {
+        where.id = { [Op.notIn]: Array.from(seenIds) };
       }
       const txns = await Transaction.findAll({
         where,
@@ -214,77 +228,66 @@ export async function runCounterpartyBackfill(
         return {
           id: t.id,
           merchantRaw: t.merchantRaw,
+          counterpartyRaw: t.counterpartyRaw,
           accountType: acc.accountType,
         };
       });
 
-      // Plan extractions for this batch up-front so the per-row DB write is
-      // a single UPDATE inside one transaction.
-      const updates: Array<{ id: number; counterparty: string; merchantRaw: string }> = [];
       for (const r of rows) {
+        processed++;
         try {
-          const value = extractCounterparty(r.merchantRaw, r.accountType);
-          processed++;
-          if (value != null) {
-            extracted++;
-            if (!dryRun) {
-              updates.push({ id: r.id, counterparty: value, merchantRaw: r.merchantRaw });
-            } else {
-              // In dryRun the row stays NULL; remember it so the next
-              // iteration skips past it instead of re-loading it forever.
-              seenNullIds.add(r.id);
-            }
-            callbacks.onProgress?.({
-              txnId: r.id,
-              merchantRaw: r.merchantRaw,
-              counterpartyRaw: value,
-            });
-          } else {
-            // No pattern matched — row will keep counterpartyRaw=NULL and
-            // remain visible to the filter. Mark it as seen so the loop
-            // doesn't get stuck on it.
-            seenNullIds.add(r.id);
-            callbacks.onProgress?.({
-              txnId: r.id,
-              merchantRaw: r.merchantRaw,
-              counterpartyRaw: null,
-            });
+          const cp = extractCounterparty(r.merchantRaw, r.accountType);
+          if (cp == null) {
+            seenIds.add(r.id);
+            callbacks.onProgress?.({ txnId: r.id, merchantRaw: r.merchantRaw, counterpartyRaw: null });
+            continue;
           }
+          const rawWasNull = r.counterpartyRaw == null;
+          if (dryRun) {
+            if (rawWasNull) extracted++;
+            seenIds.add(r.id);
+            callbacks.onProgress?.({ txnId: r.id, merchantRaw: r.merchantRaw, counterpartyRaw: cp.name });
+            continue;
+          }
+          await sequelize.transaction(async (t) => {
+            let contactId: number | null = null;
+            if (cp.kind === 'person') {
+              contactId = await resolveCounterpartyContact(householdId, cp, { transaction: t });
+            }
+            const patch: Record<string, unknown> = {};
+            if (rawWasNull) patch.counterpartyRaw = cp.name;
+            if (contactId != null) patch.counterpartyContactId = contactId;
+            let affected = 0;
+            if (Object.keys(patch).length > 0) {
+              const [count] = await Transaction.update(patch, {
+                where: { id: r.id, counterpartyContactId: { [Op.is]: null } },
+                transaction: t,
+              });
+              affected = count;
+            }
+            // Only count rows we actually wrote. The WHERE re-asserts
+            // counterpartyContactId IS NULL, so a concurrent importer that
+            // linked this row first yields affected=0 — don't overcount.
+            if (affected > 0) {
+              if (rawWasNull) extracted++;
+              if (contactId != null) linked++;
+            }
+            if (contactId == null) seenIds.add(r.id);
+          });
+          callbacks.onProgress?.({ txnId: r.id, merchantRaw: r.merchantRaw, counterpartyRaw: cp.name });
         } catch (err) {
           skipped++;
           const message = err instanceof Error ? err.message : String(err);
-          logger.error(
-            { err, txnId: r.id, module: 'counterparty_backfill' },
-            'counterparty_backfill_row_failed',
-          );
+          logger.error({ err, txnId: r.id, module: 'counterparty_backfill' }, 'counterparty_backfill_row_failed');
           callbacks.onError?.({ txnId: r.id, message });
+          seenIds.add(r.id);
         }
-      }
-
-      if (updates.length > 0) {
-        await sequelize.transaction(async (t) => {
-          for (const u of updates) {
-            // Belt-and-suspenders: WHERE counterpartyRaw IS NULL re-asserts
-            // the idempotency invariant at write time. If a concurrent caller
-            // already populated the row in the same tick, we skip silently.
-            await Transaction.update(
-              { counterpartyRaw: u.counterparty },
-              {
-                where: {
-                  id: u.id,
-                  counterpartyRaw: { [Op.is]: null },
-                },
-                transaction: t,
-              },
-            );
-          }
-        });
       }
 
       // Periodic progress log for long sweeps.
       if (processed % 500 === 0) {
         logger.info(
-          { householdId, processed, extracted, skipped, module: 'counterparty_backfill' },
+          { householdId, processed, extracted, linked, skipped, module: 'counterparty_backfill' },
           'counterparty_backfill_progress',
         );
       }
@@ -301,7 +304,7 @@ export async function runCounterpartyBackfill(
   }
 
   const elapsedMs = Date.now() - startedAt;
-  const summary = { processed, extracted, elapsedMs };
+  const summary = { processed, extracted, linked, elapsedMs };
 
   if (!dryRun) {
     await ProviderJobLog.create({
@@ -323,6 +326,7 @@ export async function runCounterpartyBackfill(
   return {
     processed,
     extracted,
+    linked,
     skipped,
     elapsedMs,
     dryRun,

@@ -90,6 +90,88 @@ const requestDuration = meter.createHistogram('cashflow.http.server.duration', {
   unit: 'ms',
 });
 
+const jobRunsCounter = meter.createCounter('cashflow.job.runs', {
+  description: 'Total background-job ticks by result',
+});
+
+const jobDurationHistogram = meter.createHistogram('cashflow.job.duration', {
+  description: 'Background-job tick duration',
+  unit: 'ms',
+});
+
+const jobLastSuccessMap = new Map<string, number>();
+
+meter
+  .createObservableGauge('cashflow.job.last_success_timestamp_seconds', {
+    description: 'Unix timestamp (s) of the most recent successful tick per job',
+  })
+  .addCallback((obs) => {
+    for (const [job, ts] of jobLastSuccessMap) {
+      obs.observe(ts, { 'cashflow.job.name': job });
+    }
+  });
+
+type SequelizePool = {
+  _count: number;
+  _inUseObjects: { size?: number; length?: number } | null;
+  _availableObjects: { size?: number; length?: number } | null;
+  _pendingAcquires: { size?: number; length?: number } | null;
+};
+
+function poolSize(collection: { size?: number; length?: number } | null): number {
+  if (!collection) return 0;
+  return collection.size ?? collection.length ?? 0;
+}
+
+/**
+ * Register Sequelize connection-pool observable gauges. Call once after the
+ * Sequelize instance is created (db.ts exports `sequelize`; call from server.ts
+ * or from metrics bootstrap). No-ops when OTel metrics are disabled.
+ */
+export function registerDbPoolMetrics(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sequelizeInstance: any,
+): void {
+  if (!meterProvider) return;
+  const pool = (): SequelizePool | null => sequelizeInstance?.connectionManager?.pool ?? null;
+
+  meter
+    .createObservableGauge('cashflow.db.pool.size', {
+      description: 'Total connections in the Sequelize pool',
+    })
+    .addCallback((obs) => {
+      const p = pool();
+      obs.observe(p ? p._count : 0);
+    });
+
+  meter
+    .createObservableGauge('cashflow.db.pool.in_use', {
+      description: 'Connections currently borrowed from the pool',
+    })
+    .addCallback((obs) => {
+      const p = pool();
+      obs.observe(p ? poolSize(p._inUseObjects) : 0);
+    });
+
+  meter
+    .createObservableGauge('cashflow.db.pool.available', {
+      description: 'Idle connections available in the pool',
+    })
+    .addCallback((obs) => {
+      const p = pool();
+      obs.observe(p ? poolSize(p._availableObjects) : 0);
+    });
+
+  meter
+    .createObservableGauge('cashflow.db.pool.waiting', {
+      description: 'Pending acquire requests waiting for a connection',
+    })
+    .addCallback((obs) => {
+      const p = pool();
+      obs.observe(p ? poolSize(p._pendingAcquires) : 0);
+    });
+}
+
 export function recordHttpRequestWithRecorder(
   recorder: HttpMetricRecorder,
   input: HttpMetricInput & { durationMs: number },
@@ -125,6 +207,18 @@ export function recordHttpRequest(input: HttpMetricInput & { durationMs: number 
     },
     input,
   );
+}
+
+export function recordJobRun(
+  jobName: string,
+  result: 'success' | 'failure',
+  durationMs: number,
+): void {
+  jobRunsCounter.add(1, { 'cashflow.job.name': jobName, 'cashflow.job.result': result });
+  jobDurationHistogram.record(durationMs, { 'cashflow.job.name': jobName });
+  if (result === 'success') {
+    jobLastSuccessMap.set(jobName, Date.now() / 1000);
+  }
 }
 
 export async function shutdownMetrics(): Promise<void> {

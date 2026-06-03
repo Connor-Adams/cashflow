@@ -15,6 +15,7 @@
 // Ages < 71 → 0 (no mandatory minimum). Ages 71–94 → fixed schedule. Ages
 // 95+ → 20% flat.
 import { useState } from 'react';
+import { fmtCurrency } from '../util/format';
 
 const RRIF_MIN_TABLE: Readonly<Record<number, number>> = Object.freeze({
   71: 0.0528,
@@ -105,11 +106,7 @@ export function RrifMinCalc() {
         </dd>
         <dt className="text-gray-600">Minimum withdrawal</dt>
         <dd className="font-medium text-gray-900">
-          $
-          {withdrawal.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
+          {fmtCurrency(withdrawal)}
         </dd>
       </dl>
     </div>

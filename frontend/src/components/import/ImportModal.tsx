@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 import {
   Dialog,
@@ -37,22 +38,25 @@ type UploadResult = {
   error?: string | null
 }
 
-type PdfBundleFileResult = {
-  file: string
-  accountSuffix: string | null
-  productLabel: string | null
-  accountId: number | null
+type PdfBatchItem = {
+  fileName: string
+  status: string
   accountName: string | null
-  accountCreated: boolean
-  inserted: number
   insertedTransactions: number
   insertedInvestmentActivities: number
   insertedHoldings: number
   skippedDuplicates: number
-  rowErrors: number
-  parseErrors: { rowIndex: number; message: string }[]
-  warnings: string[]
-  error?: string
+  error: string | null
+}
+
+type PdfBatchStatus = {
+  id: string
+  status: 'pending' | 'processing' | 'done' | 'failed'
+  total: number
+  processed: number
+  succeeded: number
+  failed: number
+  items: PdfBatchItem[]
 }
 
 type WsBundleFileResult = {
@@ -83,7 +87,7 @@ const MODE_LABELS: Record<DetectedMode, string> = {
 
 const MODE_DESCRIPTIONS: Record<DetectedMode, string> = {
   'pdf-bundle':
-    'Auto-detects bank (RBC, CIBC, Questrade). Accounts created on first sight from the PDF body, keyed by the last 4 of the account number.',
+    'Auto-detects issuer (RBC, CIBC, Questrade, Wealthsimple). Accounts created on first sight from the PDF body and matched by account number (last 4 for banks/cards, full ID for Wealthsimple brokerage).',
   'ws-bundle':
     'Multi-file Wealthsimple activity CSV import. Accounts auto-created per file by shortCode.',
   holdings: 'Single Wealthsimple positions CSV. Updates portfolio holdings.',
@@ -124,6 +128,7 @@ export function ImportModal({
   onCommitted,
   onAccountsChanged,
 }: ImportModalProps) {
+  const navigate = useNavigate()
   const [files, setFiles] = useState<File[]>([])
   const [autoMode, setAutoMode] = useState<DetectedMode>('standard')
   const [overrideMode, setOverrideMode] = useState<DetectedMode | null>(null)
@@ -134,6 +139,9 @@ export function ImportModal({
   const [csvProfiles, setCsvProfiles] = useState<CsvProfileOption[]>([])
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<{ variant: AlertVariant; title: string; lines?: string[] } | null>(null)
+  const [batch, setBatch] = useState<{ id: string; total: number } | null>(null)
+  const [batchStatus, setBatchStatus] = useState<PdfBatchStatus | null>(null)
+  const [showProgressLink, setShowProgressLink] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -154,11 +162,39 @@ export function ImportModal({
     setOverrideMode(null)
   }, [files])
 
+  // Poll the batch progress when a batch is in flight.
+  useEffect(() => {
+    if (!batch) return
+    let active = true
+    const tick = async () => {
+      try {
+        const s = await getJson<PdfBatchStatus>(`/api/import/pdf-batch/${batch.id}`)
+        if (!active) return
+        setBatchStatus(s)
+        if (s.status === 'done' || s.status === 'failed') {
+          if (s.succeeded > 0) onCommitted()
+          return
+        }
+      } catch { /* keep polling */ }
+      if (active) setTimeout(tick, 2000)
+    }
+    void tick()
+    return () => { active = false }
+  }, [batch, onCommitted])
+
+  // Clear stale batch progress when the modal closes so a reopen is fresh.
+  useEffect(() => {
+    if (!open) { setBatch(null); setBatchStatus(null) }
+  }, [open])
+
   function reset() {
     setFiles([])
     setBatchLabel('')
     setOverrideMode(null)
     setFeedback(null)
+    setBatch(null)
+    setBatchStatus(null)
+    setShowProgressLink(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -209,22 +245,15 @@ export function ImportModal({
       if (mode === 'pdf-bundle') {
         const fd = new FormData()
         files.forEach((f) => fd.append('files', f))
-        const { results } = await postFormData<{ results: PdfBundleFileResult[] }>(PDF_BUNDLE_URL, fd)
-        const ok = results.filter((r) => !r.error).length
-        const acctNew = results.filter((r) => r.accountCreated).length
-        const dupes = results.reduce((s, r) => s + r.skippedDuplicates, 0)
-        const lines = results.map(
-          (r) =>
-            `${r.file} → ${r.accountName ?? '—'}${r.accountCreated ? ' (new)' : ''} · txn=${r.insertedTransactions} act=${r.insertedInvestmentActivities} hld=${r.insertedHoldings}${r.error ? ` · ERR: ${r.error}` : ''}`,
-        )
-        setFeedback({
-          variant: ok === results.length ? 'success' : 'warning',
-          title: `PDF bundle: ${ok}/${results.length} imported, ${acctNew} new account(s), ${dupes} dupes skipped`,
-          lines,
-        })
-        if (acctNew > 0 && onAccountsChanged) onAccountsChanged()
-        else onCommitted()
-        reset()
+        const { batchId, total } = await postFormData<{ batchId: string; total: number }>(PDF_BUNDLE_URL, fd)
+        setBatch({ id: batchId, total })
+        setFeedback({ variant: 'success', title: `Uploaded ${total} file(s); processing…` })
+        setShowProgressLink(true)
+        // Clear the file list so the drop-zone is ready, but keep the batch/feedback visible
+        setFiles([])
+        setOverrideMode(null)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        return
       } else if (mode === 'ws-bundle') {
         const fd = new FormData()
         files.forEach((f) => fd.append('files', f))
@@ -457,6 +486,37 @@ export function ImportModal({
                 {feedback.lines.map((line, i) => (
                   <li key={i} className="truncate" title={line}>
                     {line}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {showProgressLink && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  className="text-xs underline underline-offset-2 text-blue-600 dark:text-blue-400 hover:opacity-80"
+                  onClick={() => { onOpenChange(false); navigate('/imports') }}
+                >
+                  View progress →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {batchStatus && (
+          <div className="px-4 pb-2">
+            <Alert
+              variant={batchStatus.status === 'failed' ? 'error' : batchStatus.status === 'done' ? 'success' : 'info'}
+              title={`Processing ${batchStatus.processed}/${batchStatus.total} · ${batchStatus.succeeded} ok, ${batchStatus.failed} failed${batchStatus.status === 'done' ? ' · done' : ''}`}
+            />
+            {batchStatus.items.length > 0 && (
+              <ul className="mt-2 text-xs muted max-h-48 overflow-y-auto rounded-md border border-border p-2">
+                {batchStatus.items.map((it, i) => (
+                  <li key={i} className="truncate" title={it.error ?? ''}>
+                    {it.fileName} → {it.accountName ?? '—'} · {it.status}
+                    {it.status === 'done' ? ` (txn=${it.insertedTransactions} act=${it.insertedInvestmentActivities} hld=${it.insertedHoldings} skip=${it.skippedDuplicates})` : ''}
+                    {it.error ? ` · ERR: ${it.error}` : ''}
                   </li>
                 ))}
               </ul>

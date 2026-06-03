@@ -22,6 +22,7 @@ import {
   serializeFlags,
 } from './computeImportConfidence';
 import { extractCounterparty } from './extractCounterparty';
+import { resolveCounterpartyContact } from '../contacts/findOrCreateContact';
 import type { AccountType } from '@cashflow/shared';
 import {
   enrichmentRecurringMinSupport,
@@ -32,6 +33,7 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -233,6 +235,7 @@ export async function commitStatementImport(
   const rules = await loadAllRules(account.householdId);
   const amazonOrdersCache = await loadAmazonOrdersCache(account.householdId ?? null);
   const householdAccountIds = await loadHouseholdAccountIds(account.id, account.householdId ?? null);
+  const ownerNames = await loadHouseholdOwnerNames(account.householdId ?? null);
   const overrideBusiness = preview.overrideBusiness === true;
   let insertedTransactions = 0;
   let insertedInvestmentActivities = 0;
@@ -288,6 +291,7 @@ export async function commitStatementImport(
         accountId: account.id,
         householdId: account.householdId ?? null,
         householdAccountIds,
+        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,
@@ -325,9 +329,14 @@ export async function commitStatementImport(
         amount: row.amount,
       });
 
-      const counterpartyRaw = extractCounterparty(
+      const _cp = extractCounterparty(
         row.merchantRaw,
         account.accountType as AccountType,
+      );
+      const counterpartyContactId = await resolveCounterpartyContact(
+        account.householdId ?? null,
+        _cp,
+        { transaction: t },
       );
       const txn = Transaction.build({
         accountId: account.id,
@@ -337,8 +346,8 @@ export async function commitStatementImport(
         ownershipType:
           f.autoSplitType === 'partner' || f.autoSplitType === 'shared' ? f.autoSplitType : 'me',
         ownershipContactId: null,
-        counterpartyRaw,
-        counterpartyContactId: null,
+        counterpartyRaw: _cp?.name ?? null,
+        counterpartyContactId,
         importBatch: preview.importBatch,
         date: row.date,
         merchantRaw: row.merchantRaw,
@@ -366,6 +375,11 @@ export async function commitStatementImport(
         autoSource: f.autoSource,
         autoConfidence: f.autoConfidence,
         linkedTransactionId: f.linkedTransactionId,
+        // transferLinkedAt stamps the forward pointer at the same moment the
+        // reverse pointer is written onto the sibling (Fix 2). Without this,
+        // the new txn shows as unlinked on the Transfers page even though
+        // linkedTransactionId is populated.
+        transferLinkedAt: f.linkedTransactionId != null ? new Date() : null,
         isRecurring: f.isRecurring,
         reviewFlag: f.reviewFlag,
         reviewedAt: null,
@@ -394,6 +408,30 @@ export async function commitStatementImport(
                 rationale: s.rationale ?? null,
               })),
               { transaction: sp },
+            );
+          }
+          // Fix 2: write the reverse pointer back onto the already-persisted
+          // sibling. Without this, the link is one-directional — the new txn
+          // points at the sibling but the sibling's linked_transaction_id is
+          // still NULL, so the Transfers-page unmatched queue keeps showing
+          // both legs even after import.
+          if (f.linkedTransactionId != null) {
+            await Transaction.update(
+              {
+                linkedTransactionId: txn.id,
+                transferLinkedAt: new Date(),
+                txnType: 'transfer',
+              },
+              {
+                where: {
+                  id: f.linkedTransactionId,
+                  // Guard: only back-fill if the sibling is not already
+                  // linked to a different txn (prevents clobbering a prior
+                  // manual or auto-link on a second re-import).
+                  linkedTransactionId: null,
+                },
+                transaction: sp,
+              },
             );
           }
         });

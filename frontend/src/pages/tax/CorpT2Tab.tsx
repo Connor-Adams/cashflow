@@ -15,6 +15,21 @@ import { YearStripNav } from './scenarios/YearStripNav';
 import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import type { Scenario } from '../../hooks/useScenarios';
 import { patchJson } from '../../lib/api';
+import { fmtCurrency } from './util/format';
+import { labelForTotal } from './util/labels';
+import { StatCard } from '@/components/ui/stat-card';
+import { Card } from '@/components/ui/card';
+import { CollapsibleCard } from '@/components/ui/collapsible-card';
+import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 
 const CURRENT_YEAR = new Date().getFullYear().toString();
 
@@ -70,9 +85,9 @@ export function CorpT2Tab() {
 
   return (
     <div>
-      <header style={{ marginBottom: '0.75rem' }}>
+      <header className="mb-3">
         <h2>Corp T2</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <div className="mb-2 flex items-center gap-2">
           <label>
             Fiscal Year{' '}
             <input
@@ -80,7 +95,7 @@ export function CorpT2Tab() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="e.g. 2024 or 2024-01-01/2024-12-31"
-              style={{ width: '18rem' }}
+              className="w-72"
               onKeyDown={(e) => { if (e.key === 'Enter') handleApply(); }}
             />
           </label>
@@ -93,9 +108,10 @@ export function CorpT2Tab() {
         </p>
       </header>
       {!corpEntity ? (
-        <p className="muted">
-          No corp entity for this household. Create one first (POST /api/tax/entities with kind=corp).
-        </p>
+        <EmptyState
+          title="No corporation yet"
+          description="Add a corporate entity to model its T2 return."
+        />
       ) : yearInt === null ? (
         <p className="error">Fiscal year must start with a 4-digit year (e.g. 2024 or 2024-01-01/2024-12-31).</p>
       ) : (
@@ -161,7 +177,7 @@ function AssociatedGroupInput({ corpEntity, onSaved }: AssociatedGroupInputProps
   }
 
   return (
-    <div style={{ marginBottom: '0.75rem' }}>
+    <div className="mb-3">
       <label>
         Associated group{' '}
         <input
@@ -172,12 +188,12 @@ function AssociatedGroupInput({ corpEntity, onSaved }: AssociatedGroupInputProps
           onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           placeholder="e.g. ABCorp (blank = no group)"
           disabled={saving}
-          style={{ width: '16rem' }}
+          className="w-64"
         />
       </label>
-      {saving && <span className="muted" style={{ marginLeft: '0.5rem' }}>Saving…</span>}
-      {error && <span className="error" style={{ marginLeft: '0.5rem' }}>Failed: {error}</span>}
-      <p className="muted" style={{ margin: '0.25rem 0 0' }}>
+      {saving && <span className="muted ml-2">Saving…</span>}
+      {error && <span className="error ml-2">Failed: {error}</span>}
+      <p className="muted mt-1">
         Corps sharing the same group tag share a $500k SBD limit and $50k AAII
         threshold. Leave blank for unaffiliated corps.
       </p>
@@ -355,7 +371,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
           isProjecting={isProjecting}
         />
         {chain.error && (
-          <p className="error" style={{ marginTop: '0.25rem' }}>
+          <p className="error mt-1">
             Failed to load year chain: {chain.error}
           </p>
         )}
@@ -401,7 +417,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
             <ComparisonView
               ids={compareIds}
               onClose={() => setCompareIds([])}
-              endpoint="/api/tax/corp-scenarios/compare"
+              endpoint="/api/tax/scenarios/corp/compare"
             />
           )}
         </div>
@@ -436,17 +452,17 @@ function ActiveCorpScenarioPanel({
   const isProjection = scenario.kind === 'projection_root';
   return (
     <div>
-      <header style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
-        <h3 style={{ margin: 0 }}>{scenario.name}</h3>
+      <header className="mb-3 flex items-baseline gap-3">
+        <h3 className="m-0">{scenario.name}</h3>
         <span className="muted">
           {scenario.kind === 'baseline' ? 'baseline (actuals)' : scenario.kind}
         </span>
-        <button onClick={onAddToCompare} style={{ marginLeft: 'auto' }}>
+        <button onClick={onAddToCompare} className="ml-auto">
           {inCompare ? '✓ In compare' : '+ Add to compare'}
         </button>
       </header>
       {isProjection && (
-        <div style={{ marginBottom: '0.75rem' }}>
+        <div className="mb-3">
           <AssumptionsEditor
             assumptions={scenario.assumptions as { inflation?: number; investmentReturn?: number }}
             onChange={onAssumptionsChange}
@@ -458,34 +474,47 @@ function ActiveCorpScenarioPanel({
         onChange={onOverridesChange}
         otherCorps={otherCorps}
       />
-      <section style={{ marginTop: '1rem' }}>
-        <h4>Computed totals</h4>
-        <ul>
+
+      {/* Headline — 4 most decision-relevant corp totals:
+          1. netTaxPayable  — the bottom line; primary planning target
+          2. taxableIncome  — feeds all rate calculations
+          3. activeBusinessIncome — shows SBD eligibility context
+          4. dividendRefund — actionable: drives when to pay dividends */}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Net tax payable" value={fmtCurrency(computed.totals.netTaxPayable)} />
+        <StatCard label="Taxable income" value={fmtCurrency(computed.totals.taxableIncome)} />
+        <StatCard label="Active business income" value={fmtCurrency(computed.totals.activeBusinessIncome)} />
+        <StatCard label="Dividend refund" value={fmtCurrency(computed.totals.dividendRefund)} />
+      </div>
+
+      {/* All totals, humanized */}
+      <Card className="mb-4">
+        <h4 className="mb-2 text-sm font-semibold">Computed totals</h4>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           {Object.entries(computed.totals).map(([k, v]) => (
-            <li key={k}>
-              <strong>{k}</strong>: {String(v)}
-            </li>
+            <div key={k} className="flex justify-between">
+              <dt className="text-muted-foreground">{labelForTotal(k)}</dt>
+              <dd className="tabular-nums">{fmtCurrency(v as string)}</dd>
+            </div>
           ))}
-        </ul>
-        <p className="muted">
+        </dl>
+        <p className="muted mt-2 text-xs">
           {computed.cached ? 'Cached snapshot' : 'Freshly computed'} at{' '}
           {new Date(computed.computedAt).toLocaleString()}
         </p>
-      </section>
+      </Card>
+
       {computed.warnings.length > 0 && (
-        <section style={{ marginTop: '1rem' }}>
-          <h4>Warnings</h4>
-          <ul>
-            {computed.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
+        <Alert variant="warning" title="Warnings" className="mb-4">
+          <ul className="m-0 list-disc pl-5">
+            {computed.warnings.map((w, i) => <li key={i}>{w}</li>)}
           </ul>
-        </section>
+        </Alert>
       )}
-      <section style={{ marginTop: '1rem' }}>
-        <h4>Line breakdown</h4>
+
+      <CollapsibleCard title="Return detail (T2 lines)" defaultOpen={false}>
         <CorpLineBreakdownTable lines={lines} />
-      </section>
+      </CollapsibleCard>
     </div>
   );
 }
@@ -494,15 +523,15 @@ function CorpLineBreakdownTable({ lines }: { lines: CorpTaxLineDto[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   if (lines.length === 0) return <p className="muted">No lines to display.</p>;
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>Line</th>
-          <th>Label</th>
-          <th>Amount</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Line</TableHead>
+          <TableHead>Label</TableHead>
+          <TableHead className="text-right">Amount</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {lines.map((l) => (
           <CorpLineRow
             key={l.code}
@@ -511,8 +540,8 @@ function CorpLineBreakdownTable({ lines }: { lines: CorpTaxLineDto[] }) {
             onClick={() => setExpanded(expanded === l.code ? null : l.code)}
           />
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -527,22 +556,22 @@ function CorpLineRow({
 }) {
   return (
     <>
-      <tr onClick={onClick} style={{ cursor: 'pointer' }}>
-        <td>{line.code}</td>
-        <td>{line.label}</td>
-        <td>${line.amount}</td>
-      </tr>
+      <TableRow onClick={onClick} className="cursor-pointer">
+        <TableCell>{line.code}</TableCell>
+        <TableCell>{line.label}</TableCell>
+        <TableCell className="text-right tabular-nums">{fmtCurrency(line.amount)}</TableCell>
+      </TableRow>
       {expanded && (
-        <tr>
-          <td colSpan={3}>
+        <TableRow>
+          <TableCell colSpan={3}>
             {line.formula && <p className="muted">Formula: {line.formula}</p>}
             <ul>
               {line.inputs.map((inp, idx) => (
-                <li key={idx}>{inp.source}: ${inp.amount}</li>
+                <li key={idx}>{inp.source}: {fmtCurrency(inp.amount)}</li>
               ))}
             </ul>
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       )}
     </>
   );
@@ -558,26 +587,19 @@ interface CompareBarProps {
 function CompareBar({ ids, scenarios, onRemove, onClear }: CompareBarProps) {
   const byId = new Map(scenarios.map((s) => [s.id, s]));
   return (
-    <div
-      style={{
-        marginTop: '1rem',
-        padding: '0.5rem',
-        border: '1px solid rgba(255,255,255,0.12)',
-        borderRadius: '4px',
-      }}
-    >
+    <div className="mt-4 rounded-md border border-border p-2">
       <strong>Compare ({ids.length}):</strong>{' '}
       {ids.map((id) => (
         <button
           key={id}
           onClick={() => onRemove(id)}
-          style={{ marginRight: '0.25rem' }}
+          className="mr-1"
         >
           {byId.get(id)?.name ?? `#${id}`} ×
         </button>
       ))}
       {ids.length > 0 && (
-        <button onClick={onClear} style={{ marginLeft: '0.5rem' }}>
+        <button onClick={onClear} className="ml-2">
           Clear
         </button>
       )}

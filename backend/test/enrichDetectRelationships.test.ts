@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runDetectRelationshipsStage, type RelationshipCandidate } from '../src/import/enrichment/detectRelationshipsStage';
+import { runDetectRelationshipsStage, businessDaysBetween, type RelationshipCandidate } from '../src/import/enrichment/detectRelationshipsStage';
 
 function candidate(overrides: Partial<RelationshipCandidate> & { id: number; amount: number; date: string; merchantClean: string }): RelationshipCandidate {
   return {
@@ -382,4 +382,105 @@ test('refund-link-suggested: nothing when no canonical brand is set', () => {
     ],
   });
   assert.equal(signals.length, 0);
+});
+
+// --- businessDaysBetween unit tests ---
+
+test('businessDaysBetween: same day = 0', () => {
+  assert.equal(businessDaysBetween('2025-06-06', '2025-06-06'), 0);
+});
+
+test('businessDaysBetween: Thu->Fri (consecutive weekdays) = 1', () => {
+  // Thu 2025-06-05 -> Fri 2025-06-06
+  assert.equal(businessDaysBetween('2025-06-05', '2025-06-06'), 1);
+});
+
+test('businessDaysBetween: Fri->Mon (spanning weekend) = 1 business day', () => {
+  // Fri 2025-06-06 -> Mon 2025-06-09: Sat+Sun skipped, so 1 business day
+  assert.equal(businessDaysBetween('2025-06-06', '2025-06-09'), 1);
+});
+
+test('businessDaysBetween: Mon->Wed (same week) = 2', () => {
+  // Mon 2025-06-02 -> Wed 2025-06-04
+  assert.equal(businessDaysBetween('2025-06-02', '2025-06-04'), 2);
+});
+
+test('businessDaysBetween: Fri->Tue (spanning weekend) = 2 business days', () => {
+  // Fri 2025-06-06 -> Tue 2025-06-10: Sat+Sun skipped, Mon+Tue = 2 business days
+  assert.equal(businessDaysBetween('2025-06-06', '2025-06-10'), 2);
+});
+
+test('businessDaysBetween: Fri->Wed next week = 3 business days', () => {
+  // Fri 2025-06-06 -> Wed 2025-06-11: Sat+Sun skipped, Mon+Tue+Wed = 3 business days
+  assert.equal(businessDaysBetween('2025-06-06', '2025-06-11'), 3);
+});
+
+test('businessDaysBetween: symmetric (order of args should not matter)', () => {
+  assert.equal(businessDaysBetween('2025-06-09', '2025-06-06'), businessDaysBetween('2025-06-06', '2025-06-09'));
+});
+
+// --- transfer-link weekend-aware integration tests ---
+
+test('transfer-link: Fri->Mon (3 calendar days, 1 business day) NOW links with window=2', () => {
+  // Friday 2025-06-06 out, Monday 2025-06-09 in. Calendar days = 3 (exceeds old window 2).
+  // Business days = 1 (Sat/Sun skipped). With businessDaysBetween and window=2, this links.
+  const signals = runDetectRelationshipsStage({
+    txnType: 'transfer',
+    merchantClean: 'TRANSFER OUT',
+    amount: -1000,
+    date: '2025-06-06',
+    accountId: 1,
+    householdAccountIds: [1, 2],
+    refundWindowDays: 60,
+    transferWindowDays: 2,
+    sourceReference: null,
+    candidates: [
+      candidate({ id: 999, amount: 1000, date: '2025-06-09', merchantClean: 'TRANSFER IN', accountId: 2 }),
+    ],
+  });
+  const link = signals.find((s) => s.source === 'transfer-link');
+  assert.ok(link, 'Fri->Mon transfer across weekend should now link (1 business day <= window 2)');
+  assert.equal(link!.fields.linkedTransactionId, 999);
+});
+
+test('transfer-link: Fri->Wed (3 business days) does NOT link with window=2', () => {
+  // Friday 2025-06-06 out, Wednesday 2025-06-11 in.
+  // Business days = 3 (Mon+Tue+Wed), which exceeds window=2 → must NOT link.
+  const signals = runDetectRelationshipsStage({
+    txnType: 'transfer',
+    merchantClean: 'TRANSFER OUT',
+    amount: -1000,
+    date: '2025-06-06',
+    accountId: 1,
+    householdAccountIds: [1, 2],
+    refundWindowDays: 60,
+    transferWindowDays: 2,
+    sourceReference: null,
+    candidates: [
+      candidate({ id: 888, amount: 1000, date: '2025-06-11', merchantClean: 'TRANSFER IN', accountId: 2 }),
+    ],
+  });
+  assert.equal(signals.filter((s) => s.source === 'transfer-link').length, 0,
+    'Fri->Wed (3 business days) should NOT link when window=2');
+});
+
+test('transfer-link: Mon->Wed (2 business days, same-week) still links', () => {
+  // Monday 2025-06-02 -> Wednesday 2025-06-04 = 2 business days = exactly at window edge
+  const signals = runDetectRelationshipsStage({
+    txnType: 'transfer',
+    merchantClean: 'TRANSFER OUT',
+    amount: -750,
+    date: '2025-06-02',
+    accountId: 1,
+    householdAccountIds: [1, 2],
+    refundWindowDays: 60,
+    transferWindowDays: 2,
+    sourceReference: null,
+    candidates: [
+      candidate({ id: 777, amount: 750, date: '2025-06-04', merchantClean: 'TRANSFER IN', accountId: 2 }),
+    ],
+  });
+  const link = signals.find((s) => s.source === 'transfer-link');
+  assert.ok(link, 'Mon->Wed (2 business days) should still link');
+  assert.equal(link!.fields.linkedTransactionId, 777);
 });

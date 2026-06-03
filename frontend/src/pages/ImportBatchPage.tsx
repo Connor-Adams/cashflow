@@ -52,6 +52,8 @@ export function ImportBatchPage() {
   const [rollbackOpen, setRollbackOpen] = useState(false)
   const { showToast } = useToast()
 
+  const [celebrated, setCelebrated] = useState(false)
+
   const load = useCallback(async () => {
     try {
       if (numericId != null) {
@@ -59,6 +61,13 @@ export function ImportBatchPage() {
           `/api/import/batches/${numericId}`,
         )
         setRow(detail)
+        if (!celebrated && detail.status === 'done' && (detail.rowCount ?? 0) > 0) {
+          showToast({
+            title: '🎉 Import complete!',
+            description: `${detail.rowCount} transaction${detail.rowCount === 1 ? '' : 's'} imported. Review any flagged items below.`,
+          })
+          setCelebrated(true)
+        }
         return
       }
       // Legacy label-shaped URL: scan the history list and pick the row
@@ -67,10 +76,17 @@ export function ImportBatchPage() {
       const list = await getJson<ImportHistoryRow[]>('/api/import/history')
       const match = list.find((r) => r.batchLabel === rawParam) ?? null
       setRow(match)
+      if (match && !celebrated && match.status === 'done' && (match.rowCount ?? 0) > 0) {
+        showToast({
+          title: '🎉 Import complete!',
+          description: `${match.rowCount} transaction${match.rowCount === 1 ? '' : 's'} imported. Review any flagged items below.`,
+        })
+        setCelebrated(true)
+      }
     } catch {
       setRow(null)
     }
-  }, [numericId, rawParam])
+  }, [numericId, rawParam, celebrated, setCelebrated, showToast])
 
   useEffect(() => {
     let cancelled = false

@@ -128,7 +128,10 @@ export type FairnessByCurrency = {
    */
   nonPartnerInflows: number;
   /**
-   * Cumulative settlement-adjusted balance: gross + (iPaid - partnerPaid).
+   * Cumulative settlement-adjusted balance: −partnerShareTotal + (iPaid − partnerPaid).
+   * Spend is stored negative (purchases), so negating partnerShareTotal yields the
+   * positive "what partner owes me" value. Matches `partnerMath.rawNetForRow` /
+   * `queryBuilders.executePartnerBalance` sign convention.
    * Positive: partner owes me. Negative: I owe partner.
    */
   balance: number;
@@ -153,7 +156,11 @@ export type FairnessMonthlyPoint = {
   partnerShare: number;
   /** Total settlement movement in this month (iPaid - partnerPaid). */
   settlementDelta: number;
-  /** Net change to outstanding balance in this month: partnerShare + settlementDelta. */
+  /**
+   * Net change to outstanding balance in this month: −partnerShare + settlementDelta.
+   * Spend is stored negative; negating yields "what partner owes me" delta for the month.
+   * Mirrors `partnerMath.rawNetForRow` / `queryBuilders.executePartnerBalance`.
+   */
   netDelta: number;
   /** Running cumulative balance through the END of this month. */
   cumulativeBalance: number;
@@ -386,7 +393,7 @@ export function buildFairnessByCurrency(
         currentMonthSharedSpend += Math.abs(r.amount);
       }
     }
-    const balance = partnerShareTotal + (settlement.iPaid - settlement.partnerPaid);
+    const balance = -partnerShareTotal + (settlement.iPaid - settlement.partnerPaid);
     const paidMore: FairnessPaidMore = {
       // What I covered = my-share on shared rows (purchases). Positive number for display.
       youCovered: Math.max(0, -myShareTotal),
@@ -486,7 +493,7 @@ export function buildFairnessMonthly(
   const runningByCurrency = new Map<string, number>();
   const points: FairnessMonthlyPoint[] = [];
   for (const { currency, month, acc } of entries) {
-    const netDelta = acc.partnerShare + acc.settlementDelta;
+    const netDelta = -acc.partnerShare + acc.settlementDelta;
     const running = (runningByCurrency.get(currency) ?? 0) + netDelta;
     runningByCurrency.set(currency, running);
     points.push({

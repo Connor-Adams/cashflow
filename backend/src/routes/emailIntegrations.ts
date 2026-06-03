@@ -9,7 +9,7 @@
  */
 import { Router } from 'express';
 import { currentAuth } from '../auth/middleware';
-import { ReceiptSenderAllowlist, UserEmailIntegration } from '../models';
+import { ProcessedEmailMessage, ReceiptSenderAllowlist, UserEmailIntegration } from '../models';
 import {
   DEFAULT_RECEIPT_SENDERS,
   completeConnection,
@@ -47,6 +47,41 @@ router.get('/status', async (req, res, next) => {
       ...publicStatus(integ),
       featureEnabled: emailIntegrationEnabled,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/email/history?limit=50
+ * Persistent scan log: every message the Gmail scan has processed for this
+ * household, newest first. The durable counterpart to GmailSection's
+ * in-memory live feed.
+ */
+router.get('/history', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const rows = await ProcessedEmailMessage.findAll({
+      where: { householdId: household.id },
+      order: [
+        ['scannedAt', 'DESC'],
+        ['id', 'DESC'],
+      ],
+      limit,
+    });
+    res.json(
+      rows.map((r) => ({
+        messageId: r.messageId,
+        subject: r.subject,
+        fromAddr: r.fromAddr,
+        status: r.status,
+        parser: r.parser,
+        externalOrderId: r.externalOrderId,
+        errorMessage: r.errorMessage,
+        scannedAt: r.scannedAt?.toISOString() ?? null,
+      })),
+    );
   } catch (e) {
     next(e);
   }

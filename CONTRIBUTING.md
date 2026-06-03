@@ -67,6 +67,23 @@ yarn workspace frontend run test
 yarn workspace frontend run build
 ```
 
+## Code health: dead code, complexity & duplication
+
+[**fallow**](https://github.com/fallow-rs/fallow) (`.fallowrc.json`) is the single static-analysis engine. It reports dead code (unused files/exports/types/deps, circular deps), function complexity / CRAP scores, and duplication. [**jscpd**](https://github.com/kucherenko/jscpd) (`.jscpd.json`) is kept alongside purely for its browsable HTML duplication report.
+
+The CI `code-audit` job runs both informationally (never blocks merges) and **posts a sticky pull-request comment** — a whole-repo health snapshot (dead code + complexity from fallow, duplication from jscpd) updated in place on each push. The separate `fallow.yml` workflow adds **inline review comments** on changed lines; its own summary comment is disabled (`comment: false`) in favour of the rendered one.
+
+```bash
+yarn audit:code   # fallow audit (changed files) + jscpd
+yarn deadcode     # fallow dead-code — unused files, exports, types, deps
+yarn health       # fallow health — complexity / CRAP / maintainability
+yarn dupes        # jscpd — writes reports/jscpd/html/
+```
+
+- The PR comment is rendered by `scripts/audit-summary.cjs` from the JSON reports under `reports/`.
+- jscpd's `threshold` (5% duplicated lines) acts as a ratchet — lower it as duplication drops.
+- To keep a knowingly-"unused" symbol, add a `// fallow-ignore-*` suppression comment or extend `.fallowrc.json` rather than leaving it as noise.
+
 ## Project layout
 
 | Path | Role |

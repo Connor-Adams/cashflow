@@ -11,7 +11,10 @@ import { CategoryIcon } from '../../../components/CategoryIcon'
 import { CategoryIconPicker } from '../../../components/CategoryIconPicker'
 import { useCategories } from '../../../lib/useCategories'
 import { patchJson } from '../../../lib/api'
+import { TAX_TREATMENTS } from '../../../lib/taxTreatment'
+import { TaxTreatmentSelect } from '../../../components/TaxTreatmentSelect'
 import type { CategoryIconName } from '@cashflow/shared'
+import type { TaxTreatment } from '../../../lib/taxTreatment'
 import type { Category } from '../../../types/api'
 
 export function CategoriesTab() {
@@ -27,6 +30,16 @@ export function CategoriesTab() {
       setEditing(null)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update icon')
+    }
+  }
+
+  async function setTreatment(cat: Category, next: TaxTreatment) {
+    setErr(null)
+    try {
+      await patchJson<Category>(`/api/categories/${cat.id}`, { taxTreatment: next })
+      await refresh()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not update tax treatment')
     }
   }
 
@@ -47,6 +60,12 @@ export function CategoriesTab() {
           <li key={cat.id} className="flex items-center gap-3 py-2">
             <CategoryIcon name={cat.name} size={20} />
             <span className="flex-1">{cat.name}</span>
+            <TaxTreatmentSelect
+              aria-label={`Tax treatment for ${cat.name}`}
+              value={cat.taxTreatment}
+              options={[...TAX_TREATMENTS]}
+              onChange={(t) => { if (t) void setTreatment(cat, t); }}
+            />
             <Button
               type="button"
               variant="secondary"

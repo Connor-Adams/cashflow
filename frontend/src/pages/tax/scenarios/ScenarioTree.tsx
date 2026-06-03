@@ -28,14 +28,14 @@ function buildTree(scenarios: Scenario[]): TreeNode[] {
 export function ScenarioTree({ scenarios, activeId, onSelect, onForkActive, onDeleteActive }: Props) {
   const tree = useMemo(() => buildTree(scenarios), [scenarios]);
   return (
-    <aside style={{ minWidth: 240 }}>
+    <aside className="min-w-60">
       <h3>Scenarios</h3>
       {tree.length === 0 ? (
         <p className="muted">No scenarios yet.</p>
       ) : (
         <TreeList nodes={tree} activeId={activeId} onSelect={onSelect} />
       )}
-      <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+      <div className="mt-3 flex gap-2">
         <button onClick={onForkActive} disabled={activeId === null}>+ Fork from current</button>
         <button onClick={onDeleteActive} disabled={activeId === null}>Delete</button>
       </div>
@@ -49,15 +49,15 @@ function TreeList({ nodes, activeId, onSelect }: {
   onSelect: (id: number) => void;
 }) {
   return (
-    <ul style={{ listStyle: 'none', paddingLeft: '1rem' }}>
+    <ul className="list-none m-0 space-y-1 pl-4">
       {nodes.map((n) => (
         <li key={n.scenario.id}>
           <button
             onClick={() => onSelect(n.scenario.id)}
-            style={{
-              background: n.scenario.id === activeId ? 'rgba(255,255,255,0.08)' : 'transparent',
-              border: 'none', color: 'inherit', cursor: 'pointer', padding: '0.25rem 0.5rem', textAlign: 'left',
-            }}
+            className={[
+              'border-none cursor-pointer px-2 py-1 text-left text-inherit w-full rounded',
+              n.scenario.id === activeId ? 'bg-muted' : 'bg-transparent',
+            ].join(' ')}
           >
             {n.scenario.kind === 'baseline' ? '• ' : '├ '}
             {n.scenario.name}

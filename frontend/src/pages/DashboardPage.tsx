@@ -27,15 +27,18 @@ import { SafeToSpendTile } from '@/components/dashboard/SafeToSpendTile'
 import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMonthTile'
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
+import { EmailedReceiptsTile } from '@/components/dashboard/EmailedReceiptsTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
+import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
 import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
 import { useInsightsSeen } from '@/hooks/useInsightsSeen'
 import { useAuth } from '@/lib/useAuth'
 import { formatMoney } from '../lib/formatMoney'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
+import { businessIncomeSpend } from '../lib/businessIncomeSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import {
@@ -69,6 +72,7 @@ type CurrencyMetrics = {
   totalSpend: number
   totalCredits: number
   totalPayments: number
+  totalIncome: number
   netSpend: number
   transactionCount: number
 }
@@ -79,6 +83,7 @@ type MonthlyCurrencyBreakdown = {
   totalSpend: number
   totalCredits: number
   totalPayments: number
+  totalIncome: number
   netSpend: number
 }
 
@@ -88,6 +93,7 @@ type BusinessReportRow = {
   totalSpend: number
   totalCredits: number
   netSpend: number
+  income: number
 }
 
 type CategoryReportRow = {
@@ -308,6 +314,7 @@ export function DashboardPage() {
   // initial load.
   const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([])
   const [recurringLoading, setRecurringLoading] = useState(true)
+  const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -430,6 +437,16 @@ export function DashboardPage() {
     }
   }, [currency])
 
+  useEffect(() => {
+    // Price increases are now subscription_price_increase Insights; count the
+    // open ones. GET /api/insights returns { data: [...] }.
+    void getJson<{ data: unknown[] }>(
+      '/api/insights?type=subscription_price_increase&status=open',
+    )
+      .then((res) => setPriceChangeCount(res.data.length))
+      .catch(() => setPriceChangeCount(0))
+  }, [])
+
   const currencies = useMemo(() => {
     const s = new Set<string>()
     data?.byCategory.forEach((r) => s.add(r.currency))
@@ -531,70 +548,10 @@ export function DashboardPage() {
     return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month))
   }, [data?.monthlyByCurrency, currency])
 
-  const businessReportData = useMemo(() => {
-    const rows = data?.netSpendByBusiness ?? []
-    const byFlag = new Map<
-      string,
-      {
-        label: string
-        tone: 'business' | 'personal'
-        totalSpend: number
-        totalCredits: number
-        netSpend: number
-      }
-    >()
-    for (const row of rows) {
-      if (currency && row.currency !== currency) continue
-      const key = row.business ? 'Business' : 'Personal'
-      const existing = byFlag.get(key) ?? {
-        label: key,
-        tone: row.business ? 'business' : 'personal',
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-      existing.totalSpend += row.totalSpend
-      existing.totalCredits += row.totalCredits
-      existing.netSpend += row.netSpend
-      byFlag.set(key, existing)
-    }
-    return Array.from(byFlag.values()).sort((a, b) => b.netSpend - a.netSpend)
-  }, [data?.netSpendByBusiness, currency])
-
-  const businessSpotlight = useMemo(() => {
-    const business =
-      businessReportData.find((row) => row.tone === 'business') ?? {
-        label: 'Business',
-        tone: 'business' as const,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-    const personal =
-      businessReportData.find((row) => row.tone === 'personal') ?? {
-        label: 'Personal',
-        tone: 'personal' as const,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      }
-    const totalNetSpend = business.netSpend + personal.netSpend
-    const totalGrossSpend = business.totalSpend + personal.totalSpend
-    const totalCredits = business.totalCredits + personal.totalCredits
-    const safeTotal = totalNetSpend > 0 ? totalNetSpend : 0
-    const businessShare = safeTotal === 0 ? 0 : (business.netSpend / safeTotal) * 100
-    const personalShare = safeTotal === 0 ? 0 : (personal.netSpend / safeTotal) * 100
-
-    return {
-      business,
-      personal,
-      totalNetSpend,
-      totalGrossSpend,
-      totalCredits,
-      businessShare,
-      personalShare,
-    }
-  }, [businessReportData])
+  const bizSplit = useMemo(
+    () => businessIncomeSpend(data?.netSpendByBusiness ?? [], currency),
+    [data?.netSpendByBusiness, currency]
+  )
 
   const merchantReportData = useMemo(
     () => rankByNetSpend(data?.merchantSummaries ?? [], currency),
@@ -625,12 +582,17 @@ export function DashboardPage() {
     const spendTotal = selected.reduce((sum, row) => sum + row.totalSpend, 0)
     const creditTotal = selected.reduce((sum, row) => sum + row.totalCredits, 0)
     const paymentTotal = selected.reduce((sum, row) => sum + row.totalPayments, 0)
+    const incomeTotal = selected.reduce((sum, row) => sum + (row.totalIncome ?? 0), 0)
     const netSpendTotal = selected.reduce((sum, row) => sum + row.netSpend, 0)
     const txCount = selected.reduce((sum, row) => sum + row.transactionCount, 0)
     const prevSpendTotal = prevSelected.reduce((sum, row) => sum + row.totalSpend, 0)
     const prevCreditTotal = prevSelected.reduce((sum, row) => sum + row.totalCredits, 0)
     const prevPaymentTotal = prevSelected.reduce(
       (sum, row) => sum + row.totalPayments,
+      0
+    )
+    const prevIncomeTotal = prevSelected.reduce(
+      (sum, row) => sum + (row.totalIncome ?? 0),
       0
     )
     const prevNetSpendTotal = prevSelected.reduce((sum, row) => sum + row.netSpend, 0)
@@ -647,6 +609,7 @@ export function DashboardPage() {
     const spendDelta = spendTotal - prevSpendTotal
     const creditDelta = creditTotal - prevCreditTotal
     const paymentDelta = paymentTotal - prevPaymentTotal
+    const incomeDelta = incomeTotal - prevIncomeTotal
     const netSpendDelta = netSpendTotal - prevNetSpendTotal
     const txDelta = txCount - prevTxCount
     const formatDeltaMoney = (v: number): string => {
@@ -676,6 +639,10 @@ export function DashboardPage() {
         singleCurrency != null
           ? formatMoney(paymentTotal, singleCurrency)
           : `${selected.length} currencies`,
+      incomeLabel:
+        singleCurrency != null
+          ? formatMoney(incomeTotal, singleCurrency)
+          : `${selected.length} currencies`,
       netSpendLabel:
         singleCurrency != null
           ? formatMoney(netSpendTotal, singleCurrency)
@@ -686,6 +653,7 @@ export function DashboardPage() {
       spendDeltaLabel: withPrevPeriod(formatDeltaMoney(spendDelta)),
       creditsDeltaLabel: withPrevPeriod(formatDeltaMoney(creditDelta)),
       paymentsDeltaLabel: withPrevPeriod(formatDeltaMoney(paymentDelta)),
+      incomeDeltaLabel: withPrevPeriod(formatDeltaMoney(incomeDelta)),
       netSpendDeltaLabel: withPrevPeriod(formatDeltaMoney(netSpendDelta)),
       txDeltaLabel: withPrevPeriod(formatDeltaCount(txDelta)),
       comparisonHint,
@@ -927,6 +895,8 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
+      <ActivationCardDeck />
+
       <div
         className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
@@ -965,6 +935,21 @@ export function DashboardPage() {
               <a href="#ai-insights-tile" className="text-sm font-semibold underline">
                 Jump to insights
               </a>
+            }
+          />
+        )}
+        {priceChangeCount > 0 && (
+          <BentoTile
+            span={12}
+            rows={1}
+            variant="destructive"
+            role="status"
+            aria-live="polite"
+            label={`${priceChangeCount} subscription price change${priceChangeCount === 1 ? '' : 's'} this month`}
+            actions={
+              <Link to="/subscriptions?priceChange=unack" className="text-sm font-semibold underline">
+                Review
+              </Link>
             }
           />
         )}
@@ -1131,6 +1116,14 @@ export function DashboardPage() {
                 metricKind: 'gain',
               },
               {
+                label: 'Income',
+                value: summaryStats.incomeLabel,
+                delta: hasComparisonPeriod
+                  ? summaryStats.incomeDeltaLabel
+                  : undefined,
+                metricKind: 'gain',
+              },
+              {
                 label: 'Payments / transfers',
                 value: summaryStats.paymentsLabel,
                 delta: hasComparisonPeriod
@@ -1181,96 +1174,96 @@ export function DashboardPage() {
         <CfoBriefingTile />
 
         <BentoTile
-          span={8}
+          span={4}
           rows={2}
           aria-busy={loading}
-          label="Business vs personal"
-          description="A direct split of current net spend so business charges do not get lost in the overall totals."
-          actions={
-            <div className="businessSpotlightTotals">
-              <p className="businessSpotlightTotalLabel">Combined net spend</p>
-              <p className="businessSpotlightTotalValue">
-                {formatDashboardAmount(businessSpotlight.totalNetSpend)}
-              </p>
-            </div>
-          }
+          label="Income · business vs personal"
+          description="Earned income split by business vs personal."
         >
           <div className="businessSpotlightGrid">
-            {[businessSpotlight.business, businessSpotlight.personal].map((row) => {
-              const share =
-                businessSpotlight.totalNetSpend > 0
-                  ? (row.netSpend / businessSpotlight.totalNetSpend) * 100
-                  : 0
-              return (
-                <article
-                  key={row.label}
-                  className={`businessFocusCard businessFocusCard--${row.tone}`}
-                >
-                  <p className="businessFocusLabel">{row.label}</p>
-                  <p className="businessFocusValue">
-                    {formatDashboardAmount(row.netSpend)}
-                  </p>
-                  <p className="businessFocusShare">
-                    {businessSpotlight.totalNetSpend > 0
-                      ? `${share.toFixed(0)}% of current net spend`
-                      : 'No net spend in current filters'}
-                  </p>
-                  <dl className="businessFocusMetrics">
-                    <div>
-                      <dt>Gross spend</dt>
-                      <dd>{formatDashboardAmount(row.totalSpend)}</dd>
-                    </div>
-                    <div>
-                      <dt>Credits</dt>
-                      <dd>{formatDashboardAmount(row.totalCredits)}</dd>
-                    </div>
-                  </dl>
-                </article>
-              )
-            })}
+            {([
+              ['Business', bizSplit.income.business, 'business'] as const,
+              ['Personal', bizSplit.income.personal, 'personal'] as const,
+            ]).map(([label, value, tone]) => (
+              <article key={label} className={`businessFocusCard businessFocusCard--${tone}`}>
+                <p className="businessFocusLabel">{label}</p>
+                <p className="businessFocusValue">{formatDashboardAmount(value)}</p>
+              </article>
+            ))}
           </div>
-
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              {/* Override the .businessShareLabels muted color: these split
-                  percentages are load-bearing context for the bar below and
-                  read as ghosted at --muted-foreground. Bumping to --foreground
-                  + semibold restores them as primary labels. */}
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--foreground)' }}
-              >
-                Business {businessSpotlight.businessShare.toFixed(0)}%
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Business {bizSplit.incomeShare.toFixed(0)}%
               </span>
-              <span
-                className="font-semibold"
-                style={{ color: 'var(--foreground)' }}
-              >
-                Personal {businessSpotlight.personalShare.toFixed(0)}%
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Personal {(100 - bizSplit.incomeShare).toFixed(0)}%
               </span>
             </div>
             <div
               className="businessShareBar"
               role="img"
-              aria-label={`Business ${businessSpotlight.businessShare.toFixed(
-                0
-              )} percent, personal ${businessSpotlight.personalShare.toFixed(
-                0
-              )} percent of net spend`}
+              aria-label={`Business ${bizSplit.incomeShare.toFixed(0)} percent, personal ${(100 - bizSplit.incomeShare).toFixed(0)} percent of income`}
             >
               <span
                 className="businessShareFill businessShareFill--business"
-                style={{ width: `${businessSpotlight.businessShare}%` }}
+                style={{ width: `${bizSplit.incomeShare}%` }}
               />
               <span
                 className="businessShareFill businessShareFill--personal"
-                style={{ width: `${businessSpotlight.personalShare}%` }}
+                style={{ width: `${100 - bizSplit.incomeShare}%` }}
               />
             </div>
-            <p className="muted businessShareCaption">
-              Gross spend: {formatDashboardAmount(businessSpotlight.totalGrossSpend)}.
-              Credits: {formatDashboardAmount(businessSpotlight.totalCredits)}.
-            </p>
+            {bizSplit.income.business + bizSplit.income.personal <= 0 && (
+              <p className="muted businessShareCaption">No income in current filters.</p>
+            )}
+          </div>
+        </BentoTile>
+
+        <BentoTile
+          span={4}
+          rows={2}
+          aria-busy={loading}
+          label="Spend · business vs personal"
+          description="Spend (gross outflows net of refunds) split by business vs personal."
+        >
+          <div className="businessSpotlightGrid">
+            {([
+              ['Business', bizSplit.spend.business, 'business'] as const,
+              ['Personal', bizSplit.spend.personal, 'personal'] as const,
+            ]).map(([label, value, tone]) => (
+              <article key={label} className={`businessFocusCard businessFocusCard--${tone}`}>
+                <p className="businessFocusLabel">{label}</p>
+                <p className="businessFocusValue">{formatDashboardAmount(value)}</p>
+              </article>
+            ))}
+          </div>
+          <div className="businessSharePanel">
+            <div className="businessShareLabels" aria-hidden="true">
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Business {bizSplit.spendShare.toFixed(0)}%
+              </span>
+              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                Personal {(100 - bizSplit.spendShare).toFixed(0)}%
+              </span>
+            </div>
+            <div
+              className="businessShareBar"
+              role="img"
+              aria-label={`Business ${bizSplit.spendShare.toFixed(0)} percent, personal ${(100 - bizSplit.spendShare).toFixed(0)} percent of spend`}
+            >
+              <span
+                className="businessShareFill businessShareFill--business"
+                style={{ width: `${bizSplit.spendShare}%` }}
+              />
+              <span
+                className="businessShareFill businessShareFill--personal"
+                style={{ width: `${100 - bizSplit.spendShare}%` }}
+              />
+            </div>
+            {bizSplit.spend.business + bizSplit.spend.personal <= 0 && (
+              <p className="muted businessShareCaption">No net spend in current filters.</p>
+            )}
           </div>
         </BentoTile>
 
@@ -1642,6 +1635,8 @@ export function DashboardPage() {
         />
 
         <ReceiptCoverageTile currency={currency || null} />
+
+        <EmailedReceiptsTile />
 
         <ImportHealthTile currency={currency || null} />
 

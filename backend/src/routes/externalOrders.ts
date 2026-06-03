@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { sequelize, ExternalOrder, ExternalOrderItem, ExternalOrderTender } from '../models';
+import { Op } from 'sequelize';
+import {
+  sequelize,
+  ExternalOrder,
+  ExternalOrderItem,
+  ExternalOrderTender,
+  TransactionOrderLink,
+} from '../models';
 import { currentAuth } from '../auth/middleware';
 import { logger } from '../observability/logger';
 import {
@@ -15,11 +22,76 @@ import {
   registerBuiltInReceiptPdfParsers,
 } from '../import/pdf/receipts/registry';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import { categorizeAndApplyReceiptItems } from '../import/categorizeReceiptItems';
+import {
+  EXPANSION_VENDORS,
+  maybeExpandItemNamesForOrder,
+} from '../import/enrichment/expandItemNames';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { importUploadLimiter } from './importRateLimit';
 import { rejectDemoAiRequest } from '../demo/aiAccess';
 
 const router = Router();
+
+type LinkStatus = 'linked' | 'needs_match' | 'orphan';
+
+function deriveLinkStatus(links: TransactionOrderLink[] | undefined): LinkStatus {
+  const list = links ?? [];
+  if (list.some((l) => l.status === 'accepted')) return 'linked';
+  if (list.some((l) => l.status === 'suggested')) return 'needs_match';
+  return 'orphan';
+}
+
+function serializeOrderWithLinkStatus(order: ExternalOrder) {
+  const json = order.toJSON() as Record<string, unknown>;
+  const linkStatus = deriveLinkStatus(
+    order.get('transactionLinks') as TransactionOrderLink[] | undefined,
+  );
+  delete json.transactionLinks;
+  return { ...json, linkStatus };
+}
+
+/**
+ * GET /api/external-orders?group=all|gmail|amazon|other&limit=50
+ *
+ * Vendor-agnostic list of captured receipts/orders for the caller's household,
+ * each annotated with its match status to card transactions. The canonical
+ * read surface behind the /receipts page.
+ */
+router.get('/', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const group = String(req.query.group ?? 'all').toLowerCase();
+
+    const where: Record<string, unknown> = { householdId: household.id };
+    if (group === 'gmail') {
+      where.source = { [Op.like]: 'gmail-scan:%' };
+    } else if (group === 'amazon') {
+      where.vendor = 'amazon';
+    } else if (group === 'other') {
+      where.source = { [Op.notLike]: 'gmail-scan:%' };
+      where.vendor = { [Op.ne]: 'amazon' };
+    }
+
+    const orders = await ExternalOrder.findAll({
+      where: where as never,
+      include: [
+        { model: ExternalOrderItem, as: 'items' },
+        { model: TransactionOrderLink, as: 'transactionLinks', required: false },
+      ],
+      order: [
+        ['orderDate', 'DESC'],
+        ['id', 'DESC'],
+      ],
+      limit,
+    });
+
+    res.json(orders.map(serializeOrderWithLinkStatus));
+  } catch (e) {
+    next(e);
+  }
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -112,6 +184,7 @@ export async function persistExtractedOrder(
           inferredCategory: it.inferredCategory,
           businessUsePercent: null,
           confidence: null,
+          itemNumber: it.vendorItemId ?? null,
           rawPayload: it as unknown,
         })) as never[],
         { transaction: t },
@@ -132,6 +205,106 @@ export async function persistExtractedOrder(
     return { order, created };
   });
 }
+
+/**
+ * Best-effort: kick off AI item-name expansion for a freshly-ingested order
+ * when its vendor is in the expansion allowlist (Costco). Never throws — the
+ * underlying gate no-ops when AI is disabled/unconfigured and swallows errors,
+ * so this can never block or fail receipt ingest. Mirrors how the routes
+ * already fire-and-forget matchReceiptOrderToTransactions().
+ */
+async function maybeExpandIngestedOrderItemNames(order: ExternalOrder): Promise<void> {
+  if (order.householdId == null) return;
+  if (!(EXPANSION_VENDORS as readonly string[]).includes(order.vendor)) return;
+  await maybeExpandItemNamesForOrder({ householdId: order.householdId, orderId: order.id });
+}
+
+/**
+ * POST /api/external-orders/match-unlinked
+ *
+ * Runs the receipt→transaction matcher against every ExternalOrder in this
+ * household that has no TransactionOrderLink rows (orphans). Useful for
+ * back-filling orders that were created before the auto-link was wired in.
+ *
+ * Capped at 1000 orders per call to bound runtime.
+ *
+ * Returns: { processed, linksCreated }
+ */
+router.post('/match-unlinked', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const householdId = household.id;
+
+    // Orphan = no TransactionOrderLink rows for this order.
+    // Use NOT EXISTS subquery to avoid GROUP BY / HAVING complexity with Sequelize includes.
+    const orphans = await ExternalOrder.findAll({
+      where: {
+        householdId,
+        [Op.and]: [
+          sequelize.literal(
+            `NOT EXISTS (SELECT 1 FROM "transaction_order_links" tol WHERE tol.external_order_id = "ExternalOrder"."id")`,
+          ),
+        ],
+      },
+      limit: 1000,
+    } as never);
+
+    let processed = 0;
+    let linksCreated = 0;
+
+    for (const order of orphans) {
+      try {
+        const result = await matchReceiptOrderToTransactions({
+          externalOrderId: order.id,
+          householdId,
+        });
+        linksCreated += result.created;
+        processed += 1;
+      } catch (err) {
+        logger.warn({ err, orderId: order.id }, 'match_unlinked_order_failed');
+        processed += 1;
+      }
+    }
+
+    logger.info({
+      householdId,
+      processed,
+      linksCreated,
+    }, 'match_unlinked_complete');
+
+    res.json({ processed, linksCreated });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/external-orders/categorize-items
+ *
+ * AI-categorizes this household's non-Amazon receipt line items that still have
+ * no inferredCategory (e.g. Costco till-receipt PDFs imported before AI
+ * categorization existed). Drains in passes of 200 up to a safety cap so one
+ * click clears the backlog without an unbounded request; click again if a very
+ * large backlog remains.
+ *
+ * Returns: { categorized }
+ */
+router.post('/categorize-items', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    if (rejectDemoAiRequest(req, res)) return;
+    const { household } = currentAuth(req);
+    let categorized = 0;
+    for (let pass = 0; pass < 10; pass++) {
+      const n = await categorizeAndApplyReceiptItems({ householdId: household.id, limit: 200 });
+      categorized += n;
+      if (n === 0) break;
+    }
+    logger.info({ householdId: household.id, categorized }, 'receipt_items_categorized');
+    res.json({ categorized });
+  } catch (e) {
+    next(e);
+  }
+});
 
 /**
  * POST /api/external-orders/import-text
@@ -155,6 +328,10 @@ router.post('/import-text', aiSuggestLimiter, async (req, res, next) => {
       householdId: auth.household.id,
       source: 'email-paste',
     });
+
+    if (created) {
+      await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+    }
 
     logger.info({
       source: 'email-paste',
@@ -198,6 +375,9 @@ router.post(
         householdId: auth.household.id,
         source: 'image-upload',
       });
+      if (created) {
+        await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+      }
       logger.info({
         source: 'image-upload',
         orderId: order.id,
@@ -246,6 +426,7 @@ router.post(
 
       let created = 0;
       let duplicates = 0;
+      const createdOrderIds: number[] = [];
       const errors: Array<{ rowIndex: number; message: string }> = [];
 
       for (let i = 0; i < parsed.orders.length; i++) {
@@ -256,14 +437,26 @@ router.post(
             householdId: auth.household.id,
             source: `${vendor}-csv`,
           });
-          if (result.created) created++;
-          else duplicates++;
+          if (result.created) {
+            created++;
+            createdOrderIds.push(result.order.id);
+          } else {
+            duplicates++;
+          }
         } catch (e) {
           errors.push({
             rowIndex: i,
             message: e instanceof Error ? e.message : 'persist failed',
           });
         }
+      }
+
+      if (createdOrderIds.length > 0) {
+        await categorizeAndApplyReceiptItems({
+          householdId: auth.household.id,
+          orderIds: createdOrderIds,
+          limit: 200,
+        });
       }
 
       logger.info({
@@ -341,6 +534,11 @@ router.post(
             householdId: auth.household.id,
           })
         : { created: 0, updated: 0, tendersProcessed: 0, candidatesScanned: 0 };
+
+      if (created) {
+        await categorizeAndApplyReceiptItems({ householdId: auth.household.id, orderId: order.id })
+        await maybeExpandIngestedOrderItemNames(order);
+      }
 
       logger.info({
         source: `${parser.id}-pdf`,

@@ -9,59 +9,95 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE/**'
 
-permissions:
-  contents: read
-  packages: write
-
 concurrency:
   group: build-images-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
+  # Decide which images actually need building. A service is rebuilt only when
+  # its content hash (scripts/service-content-hash.cjs) has no :tree-<hash> tag
+  # in GHCR yet. Unchanged services are skipped entirely — no build job, no
+  # buildkit boot, no Docker Hub pull. See the design spec:
+  # docs/superpowers/specs/2026-06-02-skip-unchanged-image-builds-design.md
+  detect:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Detect which images need building
+        id: detect
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+          # name|build-context|dockerfile
+          SERVICES=(
+            "backend|.|backend/Dockerfile"
+            "frontend|.|frontend/Dockerfile"
+            "otel-collector|infra/otel-collector|infra/otel-collector/Dockerfile"
+            "loki|infra/loki|infra/loki/Dockerfile"
+            "prometheus|infra/prometheus|infra/prometheus/Dockerfile"
+            "grafana|infra/grafana|infra/grafana/Dockerfile"
+            "tempo|infra/tempo|infra/tempo/Dockerfile"
+          )
+
+          include='[]'
+          for entry in "${SERVICES[@]}"; do
+            IFS='|' read -r name context file <<< "$entry"
+            hash=$(node scripts/service-content-hash.cjs "$name")
+            image="ghcr.io/${REPO_LC}-${name}"
+            # skopeo talks to the registry directly — no Docker daemon, no buildx boot.
+            if skopeo inspect --raw --creds "${GHCR_USER}:${GHCR_TOKEN}" "docker://${image}:tree-${hash}" >/dev/null 2>&1; then
+              echo "skip  ${name} (tree-${hash} already built)"
+            else
+              echo "build ${name} (tree-${hash} missing)"
+              include=$(jq -c \
+                --arg name "$name" \
+                --arg context "$context" \
+                --arg file "$file" \
+                --arg hash "$hash" \
+                '. + [{name: $name, context: $context, file: $file, hash: $hash}]' \
+                <<< "$include")
+            fi
+          done
+
+          echo "matrix={\"include\":${include}}" >> "$GITHUB_OUTPUT"
+          if [ "$include" = '[]' ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "All images already up to date; nothing to build."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: detect
+    if: ${{ needs.detect.outputs.any == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: backend
-            context: .
-            file: backend/Dockerfile
-            needs_app_args: 'true'
-          - name: frontend
-            context: .
-            file: frontend/Dockerfile
-            needs_app_args: 'true'
-          - name: otel-collector
-            context: infra/otel-collector
-            file: infra/otel-collector/Dockerfile
-            needs_app_args: 'false'
-          - name: loki
-            context: infra/loki
-            file: infra/loki/Dockerfile
-            needs_app_args: 'false'
-          - name: prometheus
-            context: infra/prometheus
-            file: infra/prometheus/Dockerfile
-            needs_app_args: 'false'
-          - name: grafana
-            context: infra/grafana
-            file: infra/grafana/Dockerfile
-            needs_app_args: 'false'
-          - name: tempo
-            context: infra/tempo
-            file: infra/tempo/Dockerfile
-            needs_app_args: 'false'
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -72,20 +108,26 @@ jobs:
         run: |
           set -euo pipefail
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          SHA_SHORT=$(git rev-parse --short HEAD)
           APP_VERSION=$(git describe --tags --always --dirty)
           echo "image=ghcr.io/${REPO_LC}-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
-          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
           echo "app_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ${{ matrix.name }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
+          # Keep v5's single-manifest output. build-push v6+ enables provenance
+          # attestations by default, turning each single-arch image into an
+          # index with an extra unknown/unknown manifest. The promote re-tag
+          # flow (imagetools create/inspect) doesn't need that.
+          provenance: false
           file: ${{ matrix.file }}
           push: true
+          # :tree-<hash> is the content-addressed identity promote resolves by.
+          # :sha-<commit> and :main are retained for traceability/rollback only.
           tags: |
-            ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.sha_short }}
+            ${{ steps.meta.outputs.image }}:tree-${{ matrix.hash }}
+            ${{ steps.meta.outputs.image }}:sha-${{ github.sha }}
             ${{ steps.meta.outputs.image }}:main
           build-args: |
             VITE_API_BASE=${{ secrets.VITE_API_BASE }}

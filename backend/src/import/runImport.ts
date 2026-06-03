@@ -1,7 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { logger } from '../observability/logger';
-import { Op } from 'sequelize';
+import { Op, fn, col, where as sqlWhere } from 'sequelize';
 import type { Account as AccountModel } from '../models/Account';
 import {
   sequelize,
@@ -37,6 +36,7 @@ import {
 import { parseWsHoldingsCsv } from './wealthsimpleHoldingsParse';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
+import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
 import {
@@ -48,18 +48,23 @@ import {
   enrichmentAmazonLinkThreshold,
   enrichmentRefundWindowDays,
   enrichmentTransferWindowDays,
-  enrichmentAiEnabled,
-  enrichmentAiMaxMerchants,
-  enrichmentAiPerRowConcurrency,
 } from '../config/env';
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
-import { runAiBatchStage, type AiBatchCandidate, type AiBatchSuggestion } from './enrichment/aiBatchStage';
-import { mergeSignals } from './enrichment/computeReviewFlag';
+// Stage 8 ai-batch over cold rows lives in a shared module so the import path
+// and the enrichment backfill path use one implementation. aiSuggestionToSignal
+// and dedupeColdRowsByMerchantKey are re-exported below because existing unit
+// tests import them from this module.
+import {
+  maybeRunAiBatchOverColdRows,
+  type ColdRow,
+} from './enrichment/aiBatchOverColdRows';
+export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
 import { openaiJson } from '../ai/openaiJson';
 import { getOpenAiConfig } from '../config/openai';
 import { loadCategoryHints } from '../ai/suggestTransaction';
@@ -450,6 +455,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         householdAccountIds,
+        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,
@@ -543,6 +549,19 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               })),
               { transaction: sp },
             );
+          }
+
+          // Persist the item-link match through the canonical TransactionOrderLink
+          // join table (status 'suggested') so imports auto-surface suggested links.
+          const orderLink = enriched.signals.find((s) => s.orderLink)?.orderLink;
+          if (orderLink) {
+            await upsertSuggestedOrderLink({
+              transactionId: txn.id,
+              externalOrderId: orderLink.externalOrderId,
+              confidence: orderLink.confidence,
+              matchReason: orderLink.matchReason,
+              transaction: sp,
+            });
           }
         });
         inserted += 1;
@@ -646,196 +665,6 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     };
   }
   return out;
-}
-
-type AiBatchSummary = {
-  attempted: boolean;
-  coldRowCount: number;
-  merchantsConsidered: number;
-  enhanced: number;
-  capped: boolean;
-  usedBatch: boolean;
-  fellBackToPerRow: boolean;
-};
-
-type ColdRow = {
-  txnId: number;
-  signals: Signal[];
-  merchantKey: string;
-  merchantRaw: string;
-  merchantClean: string;
-  merchantCanonical: string | null;
-  amount: number;
-  date: string;
-  currency: string;
-  memory: MerchantMemoryMatch | null;
-  /** Captured at insert-time so post-AI confidence reclassification doesn't
-   *  need to round-trip through the DB. */
-  accountVisibility: 'private' | 'shared';
-  txnType: string;
-};
-
-export function dedupeColdRowsByMerchantKey(coldRows: ColdRow[]): ColdRow[] {
-  const groups = new Map<string, ColdRow>();
-  for (const c of coldRows) {
-    const existing = groups.get(c.merchantKey);
-    if (existing == null || c.date > existing.date) groups.set(c.merchantKey, c);
-  }
-  return [...groups.values()];
-}
-
-function coldRowToCandidate(c: ColdRow): AiBatchCandidate {
-  return {
-    merchantKey: c.merchantKey,
-    sampleMerchantRaw: c.merchantRaw,
-    sampleMerchantClean: c.merchantClean,
-    sampleMerchantCanonical: c.merchantCanonical,
-    sampleAmount: c.amount,
-    sampleDate: c.date,
-    sampleCurrency: c.currency,
-    similarPriors: [],
-    memoryMatch: c.memory ? { category: c.memory.category, supportCount: c.memory.supportCount } : null,
-  };
-}
-
-export function aiSuggestionToSignal(sug: {
-  category: string | null;
-  business: boolean | null;
-  splitType: 'me' | 'partner' | 'shared' | null;
-  pctMe: number | null;
-  pctPartner: number | null;
-  confidence: 'high' | 'medium' | 'low';
-  rationale: string | null;
-}): Signal {
-  return {
-    source: 'ai',
-    confidence: sug.confidence,
-    fields: {
-      autoCategory: sug.category,
-      autoBusiness: sug.business,
-      autoSplitType: sug.splitType,
-      autoPctMe: sug.pctMe != null ? String(sug.pctMe) : null,
-      autoPctPartner: sug.pctPartner != null ? String(sug.pctPartner) : null,
-    },
-    ...(sug.rationale ? { rationale: sug.rationale } : {}),
-  };
-}
-
-async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: number | null): Promise<boolean> {
-  const merged = mergeSignals([...c.signals, aiSignal]);
-  // Re-classify import confidence with the merged enrichment fields. An AI
-  // suggestion that fills a category and turns reviewFlag off should move
-  // the row from 'needs_review' back to 'clean' on the dashboard.
-  const confidence = computeImportConfidence({
-    reviewFlag: merged.fields.reviewFlag,
-    finalCategory: merged.fields.autoCategory,
-    autoCategory: merged.fields.autoCategory,
-    autoSplitType: merged.fields.autoSplitType,
-    finalSplitType:
-      merged.fields.autoSplitType === 'partner' ||
-      merged.fields.autoSplitType === 'shared'
-        ? merged.fields.autoSplitType
-        : 'me',
-    txnType: c.txnType,
-    accountVisibility: c.accountVisibility,
-    linkedTransactionId: merged.fields.linkedTransactionId,
-    amount: c.amount,
-  });
-  try {
-    await Transaction.update(
-      {
-        autoCategory: merged.fields.autoCategory,
-        autoBusiness: merged.fields.autoBusiness,
-        autoSplitType: merged.fields.autoSplitType,
-        autoPctMe: merged.fields.autoPctMe,
-        autoPctPartner: merged.fields.autoPctPartner,
-        autoSource: merged.fields.autoSource,
-        autoConfidence: merged.fields.autoConfidence,
-        reviewFlag: merged.fields.reviewFlag,
-        importConfidence: confidence.state,
-        importConfidenceFlags: serializeFlags(confidence.flags),
-      },
-      { where: { id: c.txnId } },
-    );
-    await TransactionSignal.create({
-      transactionId: c.txnId,
-      source: 'ai',
-      confidence: aiSignal.confidence,
-      fields: aiSignal.fields,
-      rationale: aiSignal.rationale ?? null,
-    });
-    if (householdId != null) {
-      const { ensureCategory } = await import('../util/ensureCategory');
-      await ensureCategory(householdId, merged.fields.autoCategory);
-    }
-    return true;
-  } catch (err) {
-    logger.warn({ err, txnId: c.txnId, module: 'enrichment' }, 'enrichment_ai_batch_post_update_failed');
-    return false;
-  }
-}
-
-function emptyAiSummary(coldRowCount: number): AiBatchSummary {
-  return {
-    attempted: false,
-    coldRowCount,
-    merchantsConsidered: 0,
-    enhanced: 0,
-    capped: false,
-    usedBatch: false,
-    fellBackToPerRow: false,
-  };
-}
-
-function aiBatchPossible(coldRows: ColdRow[]): boolean {
-  if (!enrichmentAiEnabled) return false;
-  if (coldRows.length === 0) return false;
-  return getOpenAiConfig() != null;
-}
-
-async function tryEnhanceColdRow(c: ColdRow, sug: AiBatchSuggestion | undefined, householdId: number | null): Promise<boolean> {
-  if (sug == null || sug.category == null) return false;
-  return persistAiEnhancement(c, aiSuggestionToSignal(sug), householdId);
-}
-
-async function applyAiSuggestionsToColdRows(
-  coldRows: ColdRow[],
-  suggestions: Map<string, AiBatchSuggestion>,
-  householdId: number | null,
-): Promise<number> {
-  let enhanced = 0;
-  for (const c of coldRows) {
-    if (await tryEnhanceColdRow(c, suggestions.get(c.merchantKey), householdId)) enhanced += 1;
-  }
-  return enhanced;
-}
-
-async function maybeRunAiBatchOverColdRows(
-  coldRows: ColdRow[],
-  householdId: number | null,
-): Promise<AiBatchSummary> {
-  if (!aiBatchPossible(coldRows)) return emptyAiSummary(coldRows.length);
-
-  const candidates = dedupeColdRowsByMerchantKey(coldRows).map(coldRowToCandidate);
-  const categoryHints = await loadCategoryHints(householdId);
-  const result = await runAiBatchStage({
-    candidates,
-    categoryHints,
-    maxMerchants: enrichmentAiMaxMerchants,
-    perRowConcurrency: enrichmentAiPerRowConcurrency,
-    openaiCaller: (msgs) => openaiJson(msgs),
-  });
-  const enhanced = await applyAiSuggestionsToColdRows(coldRows, result.suggestions, householdId);
-
-  return {
-    attempted: true,
-    coldRowCount: coldRows.length,
-    merchantsConsidered: candidates.length,
-    enhanced,
-    capped: result.capped,
-    usedBatch: result.usedBatch,
-    fellBackToPerRow: result.fellBackToPerRow,
-  };
 }
 
 export async function runImport(options: {
@@ -992,6 +821,11 @@ export async function importWsBundleFile(opts: {
     },
   });
 
+  // WS corp accounts (Corporate Investing / Chequing / Save for Business) have
+  // no statement accountHolder to resolve, so link them to the household corp
+  // Entity (created by the Wise/RBC importer) when one exists. No-op otherwise.
+  await linkWsAccountToCorpEntity(account, parsed.productHint, opts.householdId);
+
   const profileId = parsed.isCreditCard ? 'generic_simple' : 'generic_passthrough';
 
   // Force business flag on every row imported into a corp-typed WS account.
@@ -1073,6 +907,7 @@ type PdfAccountTemplate = {
  * eSavings) are ignored at this step.
  */
 const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
+  'RBC Digital Choice Business': { name: 'RBC Digital Choice Business', accountType: 'checking' },
   'RBC Day to Day Banking': { name: 'RBC Day to Day Banking', accountType: 'checking' },
   'RBC Day to Day Savings': { name: 'RBC Day to Day Savings', accountType: 'savings' },
   'RBC High Interest eSavings': { name: 'RBC High Interest eSavings', accountType: 'savings' },
@@ -1093,6 +928,12 @@ const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
   'Wise USD': { name: 'Wise USD', accountType: 'checking' },
   'Wise GBP': { name: 'Wise GBP', accountType: 'checking' },
   'Wise EUR': { name: 'Wise EUR', accountType: 'checking' },
+  'Wealthsimple TFSA': { name: 'Wealthsimple TFSA', accountType: 'investment' },
+  'Wealthsimple FHSA': { name: 'Wealthsimple FHSA', accountType: 'investment' },
+  'Wealthsimple RRSP': { name: 'Wealthsimple RRSP', accountType: 'investment' },
+  'Wealthsimple RESP': { name: 'Wealthsimple RESP', accountType: 'investment' },
+  'Wealthsimple Investing': { name: 'Wealthsimple Investing', accountType: 'investment' },
+  'Wealthsimple Credit Card': { name: 'Wealthsimple Credit Card', accountType: 'credit_card' },
 };
 
 // Corp entity suffix patterns (Inc., Corp., Ltd., LLC, GmbH, Pty, S.A.). When a
@@ -1108,8 +949,15 @@ export async function resolveEntityForHolder(
   if (!holder) return null;
   const trimmed = holder.trim();
   if (!trimmed) return null;
+  // Case-insensitive match within the household so statements that spell the
+  // corp differently ("CDG Labs Inc." vs "CDG LABS INC.") reuse one Entity
+  // instead of forking a duplicate. A same-named entity in another household
+  // must NOT be reused — scope the match by household_id.
   const existing = await Entity.findOne({
-    where: { householdId, legalName: trimmed },
+    where: {
+      householdId,
+      [Op.and]: [sqlWhere(fn('lower', col('legal_name')), trimmed.toLowerCase())],
+    },
   });
   if (existing) return existing;
   if (!CORP_HOLDER_RE.test(trimmed)) return null;
@@ -1118,6 +966,37 @@ export async function resolveEntityForHolder(
     kind: 'corp',
     legalName: trimmed,
   });
+}
+
+/** Wealthsimple productHints that denote a corporate account. */
+const WS_CORP_PRODUCT_HINTS = new Set([
+  'corporate_investing',
+  'save_for_business',
+  'corporate_chequing',
+]);
+
+/**
+ * Link a Wealthsimple corp account to the household's corp Entity. The WS
+ * bundle importer (unlike the PDF importer) has no statement "accountHolder"
+ * to resolve, so corp WS accounts historically ended up with no corp entity
+ * (NULL or the personal default), silently excluding them from the T2 engine.
+ * When a corp Entity already exists in the household (the Wise/RBC importer
+ * auto-creates "CDG LABS INC." on first upload), point the WS corp account at
+ * it. No-op for non-corp products or when no corp entity exists yet.
+ * Case-insensitive matching lives in resolveEntityForHolder; here the corp
+ * entity is looked up by kind. Idempotent.
+ */
+export async function linkWsAccountToCorpEntity(
+  account: InstanceType<typeof Account>,
+  productHint: string,
+  householdId: number,
+): Promise<void> {
+  if (!WS_CORP_PRODUCT_HINTS.has(productHint)) return;
+  const corp = await Entity.findOne({ where: { householdId, kind: 'corp' } });
+  if (!corp) return;
+  if (account.entityId !== corp.id) {
+    await account.update({ entityId: corp.id });
+  }
 }
 
 function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult {
@@ -1138,6 +1017,56 @@ function emptyPdfBundleResult(file: string, error: string): PdfBundleFileResult 
     warnings: [],
     error,
   };
+}
+
+/**
+ * Resolve (find-or-create) the Account for a PDF statement from its parsed
+ * header, applying the corp-entity + business-override logic. Shared by the
+ * synchronous bundle path and the async pdfImportProcess worker.
+ */
+export async function resolvePdfAccountFromHeader(
+  header: import('./pdf/types').PdfStatementHeader,
+  householdId: number,
+  userId: number,
+): Promise<{ account: InstanceType<typeof Account>; accountCreated: boolean; overrideBusiness: boolean }> {
+  const template =
+    PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? { name: header.productLabel, accountType: header.accountType };
+  const headerCurrency = header.currency ?? 'CAD';
+  const entity = await resolveEntityForHolder(header.accountHolder, householdId);
+  const overrideBusiness = entity?.kind === 'corp';
+
+  // First try to find account by shortCode (exact match from PDF account number).
+  let account = await Account.findOne({
+    where: { householdId, shortCode: header.accountSuffix },
+  });
+  let accountCreated = false;
+
+  // Fallback: if shortCode not found, try to find by name + accountType
+  // (accounts from CSV may have different shortCode but same name/type).
+  if (!account) {
+    account = await Account.findOne({
+      where: { householdId, name: template.name, accountType: template.accountType },
+    });
+    if (account && account.shortCode !== header.accountSuffix) {
+      // Update shortCode to reflect the PDF's account number.
+      await account.update({ shortCode: header.accountSuffix });
+    }
+  }
+
+  // If still not found, create new account.
+  if (!account) {
+    account = await Account.create({
+      householdId, name: template.name, accountType: template.accountType,
+      owner: 'me', visibility: 'private', defaultCurrency: headerCurrency,
+      ownerUserId: userId, shortCode: header.accountSuffix, entityId: entity?.id ?? null,
+    });
+    accountCreated = true;
+  }
+
+  if (entity && account.entityId !== entity.id) {
+    await account.update({ entityId: entity.id });
+  }
+  return { account, accountCreated, overrideBusiness };
 }
 
 /**
@@ -1188,33 +1117,9 @@ export async function importPdfBundleFile(opts: {
     return emptyPdfBundleResult(file, `Parser ${parser.id} produced no header for account match`);
   }
   const header = parseOut.header;
-  const template =
-    PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? {
-      name: header.productLabel,
-      accountType: header.accountType,
-    };
-
-  const headerCurrency = header.currency ?? 'CAD';
-  const entity = await resolveEntityForHolder(header.accountHolder, opts.householdId);
-  const overrideBusiness = entity?.kind === 'corp';
-
-  const [account, accountCreated] = await Account.findOrCreate({
-    where: { householdId: opts.householdId, shortCode: header.accountSuffix },
-    defaults: {
-      householdId: opts.householdId,
-      name: template.name,
-      accountType: template.accountType,
-      owner: 'me',
-      visibility: 'private',
-      defaultCurrency: headerCurrency,
-      ownerUserId: opts.userId,
-      shortCode: header.accountSuffix,
-      entityId: entity?.id ?? null,
-    },
-  });
-  if (entity && account.entityId !== entity.id) {
-    await account.update({ entityId: entity.id });
-  }
+  const { account, accountCreated, overrideBusiness } = await resolvePdfAccountFromHeader(
+    header, opts.householdId, opts.userId,
+  );
 
   const preview = await parseStatementFile({
     buffer: opts.buffer,
@@ -1222,6 +1127,7 @@ export async function importPdfBundleFile(opts: {
     accountId: account.id,
     householdId: opts.householdId,
     overrideBusiness: overrideBusiness ? true : undefined,
+    preExtractedLines: lines,
   });
   if ('error' in preview) {
     return {

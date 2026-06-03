@@ -4,7 +4,9 @@ import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { useAuth } from '../../lib/useAuth'
 import { useActiveSettingsTopTab, type SettingsTopTab } from './useActiveSettingsTopTab'
 
-const ALL_TOP_TABS: Array<TabItem & { superadminOnly?: boolean }> = [
+const ALL_TOP_TABS: Array<
+  TabItem & { superadminOnly?: boolean; ownerOnly?: boolean }
+> = [
   { value: 'settings', label: 'Settings' },
   { value: 'imports', label: 'Imports' },
   { value: 'enrichment', label: 'Enrichment' },
@@ -12,8 +14,15 @@ const ALL_TOP_TABS: Array<TabItem & { superadminOnly?: boolean }> = [
   { value: 'members', label: 'Members' },
   { value: 'budgets', label: 'Budgets' },
   { value: 'categories', label: 'Categories' },
+  { value: 'labels', label: 'Labels' },
+  { value: 'saved-filters', label: 'Saved filters' },
   { value: 'notifications', label: 'Notifications' },
+  { value: 'feedback', label: 'Feedback', ownerOnly: true },
   { value: 'jobs', label: 'Jobs' },
+  { value: 'whatsnew', label: "What's new" },
+  { value: 'audit-tokens', label: 'AI audit tokens' },
+  { value: 'audit-log', label: 'Audit log' },
+  { value: 'backup', label: 'Backup & sync' },
 ]
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
@@ -24,8 +33,15 @@ const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   members: '/settings/members',
   budgets: '/settings/budgets',
   categories: '/settings/categories',
+  labels: '/settings/labels',
+  'saved-filters': '/settings/saved-filters',
   notifications: '/settings/notifications',
+  feedback: '/settings/feedback',
   jobs: '/settings/jobs',
+  whatsnew: '/settings/whatsnew',
+  'audit-tokens': '/settings/audit-tokens',
+  'audit-log': '/settings/audit-log',
+  backup: '/settings/backup',
 }
 
 export function SettingsPage() {
@@ -33,8 +49,11 @@ export function SettingsPage() {
   const navigate = useNavigate()
   const activeTop = useActiveSettingsTopTab()
   const isSuperadmin = auth.user?.globalRole === 'superadmin'
+  // Household owner (or superadmin) sees owner-only tabs like the feedback
+  // inbox (issue #295). The backend GET /api/feedback also enforces this.
+  const isOwner = auth.user?.household?.role === 'owner' || isSuperadmin
   const TOP_TABS: TabItem[] = ALL_TOP_TABS
-    .filter((t) => !t.superadminOnly || isSuperadmin)
+    .filter((t) => (!t.superadminOnly || isSuperadmin) && (!t.ownerOnly || isOwner))
     .map(({ value, label }) => ({ value, label }))
 
   return (

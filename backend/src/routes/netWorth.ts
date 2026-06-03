@@ -1,7 +1,9 @@
 import { Router, type Request } from 'express';
-import { Account } from '../models';
+import { Op } from 'sequelize';
+import { Account, LiabilityAccount } from '../models';
 import { visibleAccountWhere } from '../auth/scope';
 import { buildNetWorthAt, buildSeries } from '../networth/aggregate';
+import { currentOwed, utilizationPct } from '../cards/utilization';
 
 const router = Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -77,6 +79,82 @@ router.get('/series', async (req, res, next) => {
 
     const accountIds = await visibleAccountIds(req);
     const result = await buildSeries(from, to, granularity, accountIds);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Per-currency credit-utilization summary (#437). Aggregates only credit_card
+ * accounts that have a credit_limit set and are not closed as-of today. Each
+ * currency bucket reports the sum of balances / sum of limits × 100, plus a
+ * per-card breakdown so the Dashboard can drill in.
+ */
+router.get('/credit-utilization', async (req, res, next) => {
+  try {
+    const accounts = await Account.findAll({
+      where: { ...visibleAccountWhere(req), accountType: 'credit_card' },
+    });
+    if (accounts.length === 0) {
+      res.json([]);
+      return;
+    }
+    const profiles = await LiabilityAccount.findAll({
+      where: { accountId: { [Op.in]: accounts.map((a) => a.id) } },
+    });
+    const profileByAccount = new Map<number, InstanceType<typeof LiabilityAccount>>();
+    for (const p of profiles) profileByAccount.set(p.accountId, p);
+
+    const today = todayIso();
+    type CardSummary = {
+      accountId: number;
+      name: string;
+      currentBalance: number;
+      creditLimit: number;
+      utilizationPct: number;
+    };
+    type CurrencyBucket = {
+      currency: string;
+      totalBalance: number;
+      totalLimit: number;
+      cards: CardSummary[];
+    };
+    const byCurrency = new Map<string, CurrencyBucket>();
+    for (const account of accounts) {
+      if (account.closedAt && account.closedAt <= today) continue;
+      const profile = profileByAccount.get(account.id);
+      const limit = profile && profile.creditLimit != null ? Number(profile.creditLimit) : null;
+      if (limit == null || !Number.isFinite(limit) || limit <= 0) continue;
+      const balance = await currentOwed(account, today);
+      const pct = utilizationPct(balance, limit);
+      if (pct == null) continue;
+      const currency = (account.defaultCurrency ?? 'CAD').toUpperCase();
+      const bucket =
+        byCurrency.get(currency) ??
+        ({ currency, totalBalance: 0, totalLimit: 0, cards: [] } as CurrencyBucket);
+      bucket.totalBalance += balance;
+      bucket.totalLimit += limit;
+      bucket.cards.push({
+        accountId: account.id,
+        name: account.name,
+        currentBalance: balance,
+        creditLimit: limit,
+        utilizationPct: pct,
+      });
+      byCurrency.set(currency, bucket);
+    }
+
+    const result = Array.from(byCurrency.values())
+      .map((b) => ({
+        currency: b.currency,
+        utilizationPct: b.totalLimit > 0 ? (b.totalBalance / b.totalLimit) * 100 : 0,
+        cardCount: b.cards.length,
+        totalBalance: b.totalBalance,
+        totalLimit: b.totalLimit,
+        byCard: b.cards.sort((a, c) => c.utilizationPct - a.utilizationPct),
+      }))
+      .sort((a, b) => a.currency.localeCompare(b.currency));
     res.json(result);
   } catch (err) {
     next(err);

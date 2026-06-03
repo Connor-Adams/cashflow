@@ -30,18 +30,29 @@ export type AdjustedPartnerRow = RawPartnerRow & {
 /**
  * Per-row "what partner owes me" (signed): positive → partner owes me, negative → I owe partner.
  *
- * Single-payer model: the uploader (me) always pays the transactions, so every transaction's
- * partner_share is what partner owes me back. sumMy is my own portion (not a debt to anyone),
- * so it does NOT enter the net. The previous formula `sumPartner − sumMy` double-counted
- * personal spending as debt and reported wildly inflated balances.
+ * Single-payer model: the uploader (me) always pays the transactions. Spend is stored as a
+ * NEGATIVE amount (purchase < 0), so `sumPartner` is negative when partner owes me their
+ * share of an expense I paid. To convert to "what partner owes me", we negate:
+ *   net = −sumPartner
+ *
+ * Examples:
+ *   sumPartner = -100 (partner's share of a purchase) → net = +100 (partner owes me)
+ *   sumPartner = +50  (refund/inflow partly theirs)   → net = -50  (I owe partner)
+ *
+ * sumMy is my own portion (not a debt to anyone) and does NOT enter the net.
+ * This mirrors `queryBuilders.executePartnerBalance`, which already negates and is correct.
  *
  * If multi-payer is ever added (partner uploads from their own account, true joint pool),
  * this is the single place to branch on a real `paid_by` field. `ownershipType` today is
  * stamped from `autoSplitType` at import, so it is not a reliable payer signal.
  */
 export function rawNetForRow(r: RawPartnerRow): number {
+  // What the partner owes me = the NEGATION of their signed share-sum. Spend is
+  // stored negative, so a partner share of a purchase I paid (negative) means the
+  // partner owes me that amount (positive); a positive partner share (refund/inflow
+  // partly theirs) means I owe them. Mirrors queryBuilders.executePartnerBalance.
   const partner = r.sumPartner ?? 0;
-  return partner === 0 ? 0 : partner;
+  return partner === 0 ? 0 : -partner;
 }
 
 function directionFromNet(net: number): PartnerNetDirection {

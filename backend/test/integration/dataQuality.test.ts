@@ -150,27 +150,62 @@ async function attachReceipt(transactionId: number): Promise<number> {
   return row.id;
 }
 
+// Map a legacy Subscription status to the merged PlannedEvent (kind='subscription')
+// status + statusUncertain pair. Mirrors fromSubscriptionStatus in
+// src/expectations/subscriptionMapper.ts so the data-quality reader (which
+// counts statusUncertain=true rows as "stale") sees equivalent state.
+function subscriptionStatusFields(
+  status: 'active' | 'cancelled' | 'ignored' | 'unknown',
+): { status: 'planned' | 'cancelled' | 'ignored'; statusUncertain: boolean } {
+  switch (status) {
+    case 'cancelled':
+      return { status: 'cancelled', statusUncertain: false };
+    case 'ignored':
+      return { status: 'ignored', statusUncertain: false };
+    case 'unknown':
+      return { status: 'planned', statusUncertain: true };
+    case 'active':
+    default:
+      return { status: 'planned', statusUncertain: false };
+  }
+}
+
+async function ownerUserId(householdId: number): Promise<number> {
+  const models = await import('../../src/models');
+  return (
+    await models.HouseholdMember.findOne({
+      where: { householdId, role: 'owner' },
+      attributes: ['userId'],
+      raw: true,
+    })
+  )!.userId;
+}
+
 async function createSubscription(
   householdId: number,
   status: 'active' | 'cancelled' | 'ignored' | 'unknown',
   merchant: string,
 ): Promise<number> {
   const models = await import('../../src/models');
-  const row = await models.Subscription.create({
+  const row = await models.PlannedEvent.create({
+    kind: 'subscription',
+    type: 'expense',
+    source: 'recurring_detection',
+    userId: await ownerUserId(householdId),
     householdId,
-    merchantName: merchant,
+    name: merchant,
     normalizedName: merchant.toLowerCase(),
     amount: '10.00',
     currency: 'CAD',
     cadence: 'monthly',
     lastChargeDate: '2026-05-01',
     nextExpectedDate: '2026-06-01',
-    status,
+    expectedDate: '2026-06-01',
     category: null,
     annualizedCost: '120.00',
-    priceChangeDetected: false,
     cancellationUrl: null,
     notes: null,
+    ...subscriptionStatusFields(status),
   });
   return row.id;
 }

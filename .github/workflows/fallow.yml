@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -26,7 +26,9 @@ jobs:
         uses: fallow-rs/fallow@v2
         with:
           command: audit
-          comment: true
+          # Summary comment is rendered by the ci.yml `code-audit` job (see
+          # scripts/audit-summary.cjs); keep fallow's inline review comments.
+          comment: false
           review-comments: true
           review-guidance: true
           annotations: false

@@ -8,10 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   annualizeCost,
-  detectPriceIncrease,
   mergeDetectionWithExisting,
   normalizeMerchantName,
-  PRICE_INCREASE_THRESHOLD,
   type ExistingSubscriptionRow,
 } from '../src/subscriptions/detect';
 import type { RecurringItem } from '../src/routes/recurring';
@@ -44,41 +42,6 @@ test('annualizeCost takes the absolute value of negative charges', () => {
   assert.equal(annualizeCost(-15.99, 'monthly'), 15.99 * 12);
 });
 
-test('detectPriceIncrease returns false for missing prior amount', () => {
-  assert.equal(detectPriceIncrease(15.99, null), false);
-});
-
-test('detectPriceIncrease returns false for zero prior amount', () => {
-  assert.equal(detectPriceIncrease(15.99, 0), false);
-});
-
-test('detectPriceIncrease ignores small drift below the threshold', () => {
-  // 9.99 → 10.20 is ~2.1% — under the 10% threshold.
-  assert.equal(detectPriceIncrease(10.2, 9.99), false);
-});
-
-test('detectPriceIncrease flags large increases', () => {
-  // 15.99 → 17.99 is ~12.5% — above the 10% threshold.
-  assert.equal(detectPriceIncrease(17.99, 15.99), true);
-});
-
-test('detectPriceIncrease ignores price DECREASES', () => {
-  // Optimizer flags increases (a cost going UP is what users want to act on).
-  assert.equal(detectPriceIncrease(10, 20), false);
-});
-
-test('detectPriceIncrease works with sign-agnostic inputs', () => {
-  // Both arguments may arrive as negative if a caller forgets to take abs.
-  assert.equal(detectPriceIncrease(-17.99, -15.99), true);
-});
-
-test('PRICE_INCREASE_THRESHOLD is a sensible default', () => {
-  // Sanity guard against accidental tweaks — the constant powers a flag
-  // users see in the UI; doubling or zeroing it would change the alert
-  // surface materially.
-  assert.ok(PRICE_INCREASE_THRESHOLD >= 0.05 && PRICE_INCREASE_THRESHOLD <= 0.25);
-});
-
 test('normalizeMerchantName lowercases and trims', () => {
   assert.equal(normalizeMerchantName('  Netflix  '), 'netflix');
   assert.equal(normalizeMerchantName('SPOTIFY USA'), 'spotify usa');
@@ -95,7 +58,6 @@ test('mergeDetectionWithExisting inserts when no row matches', () => {
   assert.equal(op.currency, 'CAD');
   assert.equal(op.amount, '15.9900');
   assert.equal(op.status, 'active');
-  assert.equal(op.priceChangeDetected, false);
   assert.equal(op.annualizedCost, (15.99 * 12).toFixed(4));
 });
 
@@ -118,7 +80,6 @@ test('mergeDetectionWithExisting updates when a row matches normalizedName+curre
   if (op.kind !== 'update') return;
   assert.equal(op.id, 42);
   assert.equal(op.patch.amount, '17.9900');
-  assert.equal(op.patch.priceChangeDetected, true);
 });
 
 test('mergeDetectionWithExisting matches even if persisted status is cancelled or ignored', () => {
@@ -165,28 +126,6 @@ test('mergeDetectionWithExisting keys on currency so the same merchant in two cu
   assert.equal(ops.length, 2);
   assert.equal(ops[0].kind, 'update');
   assert.equal(ops[1].kind, 'insert');
-});
-
-test('mergeDetectionWithExisting computes priceChange relative to PERSISTED amount', () => {
-  // A subscription that goes 9.99 → 10.40 (~4%) should NOT flag.
-  const existing: ExistingSubscriptionRow[] = [
-    {
-      id: 7,
-      normalizedName: 'spotify',
-      currency: 'CAD',
-      amount: '9.9900',
-      status: 'active',
-      cancellationUrl: null,
-      notes: null,
-    },
-  ];
-  const ops = mergeDetectionWithExisting(
-    [item({ merchant: 'Spotify', avgAmount: 10.4 })],
-    existing,
-  );
-  assert.equal(ops[0].kind, 'update');
-  if (ops[0].kind !== 'update') return;
-  assert.equal(ops[0].patch.priceChangeDetected, false);
 });
 
 test('mergeDetectionWithExisting carries category from detection (no preservation of stale category)', () => {

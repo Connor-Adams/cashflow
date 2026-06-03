@@ -48,6 +48,7 @@ export class Transaction extends Model<
   declare autoCategory: string | null;
   declare categoryOverride: string | null;
   declare finalCategory: string | null;
+  declare taxTreatmentOverride: string | null;
 
   declare counterpartyRaw: string | null;
   declare counterpartyContactId: number | null;
@@ -198,6 +199,11 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       finalCategory: {
         type: DataTypes.STRING(128),
         field: 'final_category',
+        allowNull: true,
+      },
+      taxTreatmentOverride: {
+        type: DataTypes.STRING(32),
+        field: 'tax_treatment_override',
         allowNull: true,
       },
 
@@ -429,5 +435,45 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       delete opts._pendingRevisionDiff;
     }
   });
+
+  /**
+   * Inherit entity_id from the owning account when not explicitly set. The tax
+   * engine keys income off transactions.entity_id (buildPersonalFacts /
+   * buildCorpFacts use `where entityId=...`), so a NULL-entity transaction is
+   * silently dropped from T1/T2 even when its account is correctly tagged.
+   * Mirroring the account's entity at insert time keeps the invariant
+   * (a txn's entity == its account's entity) without a DB trigger. Lazy import
+   * of Account dodges init-order coupling.
+   */
+  const inheritEntityFromAccount = async (
+    instance: Transaction,
+    options: { transaction?: import('sequelize').Transaction },
+  ): Promise<void> => {
+    if (instance.entityId != null || instance.accountId == null) return;
+    try {
+      const { Account } = await import('./Account');
+      const account = await Account.findByPk(instance.accountId, {
+        attributes: ['id', 'entityId'],
+        transaction: options.transaction,
+      });
+      if (account?.entityId != null) {
+        instance.entityId = account.entityId;
+      }
+    } catch (e) {
+      // Best-effort: never break transaction creation if the account lookup
+      // fails. Leave entity_id null; syncTransactionEntityIds backfills later.
+      logger.warn({ err: e, accountId: instance.accountId, model: 'Transaction' }, 'inherit_entity_from_account_failed');
+    }
+  };
+  Transaction.addHook('beforeCreate', inheritEntityFromAccount);
+  Transaction.addHook('beforeBulkCreate', async (instances, options) => {
+    for (const instance of instances as Transaction[]) {
+      await inheritEntityFromAccount(
+        instance,
+        options as { transaction?: import('sequelize').Transaction },
+      );
+    }
+  });
+
   return Transaction;
 }

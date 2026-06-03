@@ -2,6 +2,7 @@ import type {
   NormalizedHoldingSnapshot,
   NormalizedInvestmentActivity,
 } from '../statementTypes';
+import type { TxnType } from '../enrichment/types';
 
 /** One positioned text fragment on a line. X-positions are in pdfjs user-space units. */
 export type PdfTextSpan = {
@@ -73,6 +74,14 @@ export type PdfParseResult = {
     amount: number;
     currency: string;
     sourceReference: string | null;
+    /**
+     * Authoritative txnType supplied by the parser when the source carries a
+     * stronger signal than the narrative detector (WS brokerage cash codes,
+     * WS credit-card TYPE column). Flows onto NormalizedCashTransaction.
+     * overrideTxnType in parseStatementFile so the commit pipeline types the
+     * row by the source code instead of guessing. Omit to let enrichment decide.
+     */
+    overrideTxnType?: TxnType;
   }>;
   /**
    * Investment activity rows (mutual fund buys/sells, distributions,
@@ -103,4 +112,18 @@ export type PdfParser = {
   sniff: (lines: PdfLine[]) => boolean;
   /** Parse all transactions out of the PDF. */
   parse: (lines: PdfLine[], ctx: PdfParseContext) => PdfParseResult;
+  /**
+   * When set, `parseStatementFile` stamps `preview.crossSourceDedup` with this
+   * value so the commit pipeline runs the fuzzy investment-activity matcher
+   * against existing DB rows before inserting. Use for parsers whose source
+   * overlaps another importer (Wealthsimple PDF vs Wealthsimple CSV).
+   */
+  crossSourceDedup?: 'fuzzy-window-5d';
+  /**
+   * Holding fingerprint scheme. Default (omitted) = the generic
+   * kind:'holding' scheme. 'ws_holding' makes emitted holdings hash
+   * identically to the Wealthsimple holdings CSV importer so the same
+   * month-end snapshot does not duplicate across the two sources.
+   */
+  holdingFingerprint?: 'ws_holding';
 };

@@ -88,6 +88,33 @@ test.skip('builds corp facts from seeded business transaction', async () => {
   assert.ok(facts.salaryPaid.equals(D(0)));
 });
 
+test('tolerates an investment activity with a null amount (e.g. activityType "other")', async () => {
+  // Regression mirror of buildPersonalFacts: InvestmentActivity.amount is nullable.
+  // The income loop builds D(a.amount) for every activity row before branching on
+  // activityType, so a non-income "other" row with a null amount used to crash with
+  // "[DecimalError] Invalid argument: null" — which would break the Corp tax tabs.
+  const household = await Household.create({ name: 'Corp Null Amount' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'NullAmt Inc.', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Corp Invest', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: null, activityType: 'other',
+    tradeDate: '2025-03-15', quantity: null, amount: null, currency: 'CAD', fees: null,
+    description: 'corporate action', sourceRowFingerprint: 'fp-corp-other-null-001', importBatch: 'seed-corp-null-amt',
+  } as never);
+
+  const facts = await buildCorpFacts(entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+
+  // A null-amount "other" activity is not income; it must be ignored, not crash.
+  assert.equal(facts.investmentIncome.interest.length, 0, 'no interest');
+  assert.equal(facts.investmentIncome.eligibleDividends.length, 0, 'no eligible dividends');
+  assert.equal(facts.investmentIncome.nonEligibleDividends.length, 0, 'no non-eligible dividends');
+});
+
 test.skip('rejects non-corp entity', async () => {
   const household = await Household.create({ name: 'Personal HH' });
   const entity = await Entity.create({

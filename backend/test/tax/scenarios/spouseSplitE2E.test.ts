@@ -17,7 +17,7 @@
  *
  * The solo-A reference is computed via a separate non-spouse-linked clone
  * entity inside the same household, then POST'd through
- * /api/tax/personal-scenarios/:id/compute so the comparison rides the same
+ * /api/tax/scenarios/personal/:id/compute so the comparison rides the same
  * engine + rate table as the plan-routed path.
  *
  * The task spec calls the route "POST /compute" but the actual handler in
@@ -139,7 +139,7 @@ test('E2E: spouse link + pension split via HouseholdPlan compute lowers joint ta
 
   // 3a. A's personal scenario: 120k employment (proxy for pension income;
   //     engine doesn't distinguish in v1) + 30k split to B.
-  const aScenRes = await authed.post('/api/tax/personal-scenarios').send({
+  const aScenRes = await authed.post('/api/tax/scenarios/personal').send({
     entityId: aEntityId,
     year: 2025,
     name: 'A pension split',
@@ -153,7 +153,7 @@ test('E2E: spouse link + pension split via HouseholdPlan compute lowers joint ta
 
   // 3b. B's personal scenario: plain baseline-style fork (no overrides) so B
   //     starts at $0 employment income and only the routed split lands.
-  const bScenRes = await authed.post('/api/tax/personal-scenarios').send({
+  const bScenRes = await authed.post('/api/tax/scenarios/personal').send({
     entityId: bEntityId,
     year: 2025,
     name: 'B recipient',
@@ -225,7 +225,7 @@ test('E2E: spouse link + pension split via HouseholdPlan compute lowers joint ta
   // --- Split benefit: joint tax < hypothetical solo-A tax ---------------
   // Spin up a sibling personal entity (NOT spouse-linked) and run it solo with
   // the full $120k employment income — that's the "no-split" reference.
-  const soloScenRes = await authed.post('/api/tax/personal-scenarios').send({
+  const soloScenRes = await authed.post('/api/tax/scenarios/personal').send({
     entityId: soloCloneEntityId,
     year: 2025,
     name: 'Solo A reference',
@@ -234,7 +234,7 @@ test('E2E: spouse link + pension split via HouseholdPlan compute lowers joint ta
   assertStatus(soloScenRes, 201);
   const soloScenarioId = soloScenRes.body.scenario.id;
   const soloComputeRes = await authed
-    .post(`/api/tax/personal-scenarios/${soloScenarioId}/compute`)
+    .post(`/api/tax/scenarios/personal/${soloScenarioId}/compute`)
     .send({});
   assertStatus(soloComputeRes, 200);
 

@@ -7,6 +7,10 @@ import { Transaction, Receipt, ExternalOrder, ExternalOrderItem, TransactionOrde
 import { extractReceiptFromImage } from '../ai/extractReceiptItems';
 import { persistExtractedOrder } from './externalOrders';
 import { matchReceiptOrderToTransactions } from '../import/matchReceiptToTransactions';
+import {
+  EXPANSION_VENDORS,
+  maybeExpandItemNamesForOrder,
+} from '../import/enrichment/expandItemNames';
 import { currentAuth } from '../auth/middleware';
 import { aiSuggestLimiter } from './aiRateLimit';
 import { getOpenAiConfig } from '../config/openai';
@@ -28,6 +32,12 @@ import {
   parseFilter,
   RECEIPT_COMPLETENESS_FILTERS,
 } from '../summary/receiptCompleteness';
+import type { TripDetailView } from '@cashflow/shared';
+
+export function orderTrip(order: Pick<ExternalOrder, 'rawPayload'>): TripDetailView | null {
+  const raw = order.rawPayload as { trip?: TripDetailView | null } | null;
+  return raw?.trip ?? null;
+}
 
 const router = Router();
 
@@ -249,6 +259,7 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
                 shipping: order.shipping,
                 total: order.total,
                 currency: order.currency,
+                trip: orderTrip(order),
               }
             : null,
           items: (r.externalOrderId != null ? (itemsByOrder.get(r.externalOrderId) ?? []) : []).map(
@@ -256,6 +267,8 @@ router.get('/transactions/:transactionId/receipts', async (req, res, next) => {
               id: it.id,
               externalOrderId: it.externalOrderId,
               title: it.title,
+              displayName: it.displayName,
+              itemNumber: it.itemNumber,
               quantity: it.quantity,
               unitPrice: it.unitPrice,
               totalPrice: it.totalPrice,
@@ -410,6 +423,15 @@ router.post(
           externalOrderId: order.id,
           householdId: auth.household.id,
         });
+        // Best-effort: expand abbreviated item titles into readable names for
+        // allowlisted vendors (Costco). No-ops/silently fails so a flaky
+        // OpenAI call can't break receipt analysis.
+        if ((EXPANSION_VENDORS as readonly string[]).includes(order.vendor)) {
+          await maybeExpandItemNamesForOrder({
+            householdId: auth.household.id,
+            orderId: order.id,
+          });
+        }
       }
       res.json({ receipt: row.toJSON(), order: order.toJSON(), extracted });
     } catch (e) {

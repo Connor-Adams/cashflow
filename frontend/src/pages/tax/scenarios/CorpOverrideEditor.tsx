@@ -136,7 +136,7 @@ export function CorpOverrideEditor({ overrides, onChange, otherCorps }: Props) {
                 const def = KEY_DEFS.find((d) => d.key === k);
                 const v = overrides[k];
                 return (
-                  <li key={k} style={{ marginBottom: '0.5rem' }}>
+                  <li key={k} className="mb-2">
                     <strong>{def?.label ?? k}</strong>{' '}
                     <input
                       type="number"
@@ -144,7 +144,7 @@ export function CorpOverrideEditor({ overrides, onChange, otherCorps }: Props) {
                       value={typeof v === 'number' ? v : 0}
                       onChange={(e) => setValue(k, Number(e.target.value))}
                     />
-                    <button onClick={() => removeKey(k)} style={{ marginLeft: '0.5rem' }}>×</button>
+                    <button onClick={() => removeKey(k)} className="ml-2">×</button>
                   </li>
                 );
               })}
@@ -161,13 +161,13 @@ export function CorpOverrideEditor({ overrides, onChange, otherCorps }: Props) {
         </>
       )}
       {available.length > 0 && (
-        <div style={{ marginTop: '0.5rem' }}>
+        <div className="mt-2">
           <select value={pendingKey} onChange={(e) => setPendingKey(e.target.value)}>
             {available.map((d) => (
               <option key={d.key} value={d.key}>{d.label}</option>
             ))}
           </select>
-          <button onClick={addKey} style={{ marginLeft: '0.5rem' }}>+ Add override</button>
+          <button onClick={addKey} className="ml-2">+ Add override</button>
         </div>
       )}
       <IntercorpDistributionAdder
@@ -204,9 +204,9 @@ function IntercorpReceiverList({
 }: IntercorpReceiverListProps) {
   const nameById = new Map((otherCorps ?? []).map((c) => [String(c.id), c.legalName]));
   return (
-    <div style={{ marginTop: '0.75rem' }}>
-      <h4 style={{ margin: '0 0 0.25rem' }}>Intercorp dividend distribution</h4>
-      <p className="muted" style={{ margin: '0 0 0.5rem' }}>
+    <div className="mt-3">
+      <h4 className="mb-1 mt-0">Intercorp dividend distribution</h4>
+      <p className="muted mb-2">
         Dividends routed from this corp to another corp in the same household
         plan. Recipients receive Part IV tax treatment automatically; the
         household-plan compute warns if the receiver has no scenario in the
@@ -217,12 +217,12 @@ function IntercorpReceiverList({
           const name = nameById.get(receiverId);
           const label = name ? `${name} (entity #${receiverId})` : `Entity #${receiverId}`;
           return (
-            <li key={receiverId} style={{ marginBottom: '0.75rem' }}>
+            <li key={receiverId} className="mb-3">
               <div>
                 <strong>→ {label}</strong>
-                <button onClick={() => onRemove(receiverId)} style={{ marginLeft: '0.5rem' }}>×</button>
+                <button onClick={() => onRemove(receiverId)} className="ml-2">×</button>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <div className="mt-1 flex flex-wrap gap-2">
                 {INTERCORP_FIELDS.map((field) => {
                   // ownershipPercent is a 0..100 integer percentage; the other
                   // 3 are CAD amounts (decimal). Distinct input props clamp the
@@ -231,7 +231,7 @@ function IntercorpReceiverList({
                   const isPercent = field === 'ownershipPercent';
                   const fallback = isPercent ? DEFAULT_OWNERSHIP_PERCENT : 0;
                   return (
-                    <label key={field} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <label key={field} className="flex items-center gap-1">
                       <span>{INTERCORP_FIELD_LABELS[field]}</span>
                       <input
                         type="number"
@@ -281,13 +281,13 @@ function IntercorpDistributionAdder({
   if (hasPlanContext) {
     if (selectableCorps.length === 0) {
       return (
-        <p className="muted" style={{ marginTop: '0.5rem' }}>
+        <p className="muted mt-2">
           All other corps in this household already have intercorp distributions.
         </p>
       );
     }
     return (
-      <div style={{ marginTop: '0.5rem' }}>
+      <div className="mt-2">
         <label>
           Route dividend to:{' '}
           <select
@@ -309,7 +309,7 @@ function IntercorpDistributionAdder({
             // Reset to default so subsequent adds pick the next available corp.
             setPendingReceiverId('');
           }}
-          style={{ marginLeft: '0.5rem' }}
+          className="ml-2"
         >
           + Add intercorp distribution
         </button>
@@ -320,7 +320,7 @@ function IntercorpDistributionAdder({
   // Fallback path: no household context wired in. Users with multiple corps
   // can still set up intercorp routing by typing the receiver entity id.
   return (
-    <div style={{ marginTop: '0.5rem' }}>
+    <div className="mt-2">
       <label>
         Intercorp receiver entity id:{' '}
         <input
@@ -340,7 +340,7 @@ function IntercorpDistributionAdder({
           onAdd(id);
           setFreeTextReceiverId('');
         }}
-        style={{ marginLeft: '0.5rem' }}
+        className="ml-2"
       >
         + Add intercorp distribution
       </button>

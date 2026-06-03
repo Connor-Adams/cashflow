@@ -30,11 +30,17 @@ import { HoldingSnapshot, initHoldingSnapshot } from './HoldingSnapshot';
 import { SecurityPrice, initSecurityPrice } from './SecurityPrice';
 import { SecurityDailyPrice, initSecurityDailyPrice } from './SecurityDailyPrice';
 import { SecurityDividend, initSecurityDividend } from './SecurityDividend';
+import {
+  DividendReconciliation,
+  initDividendReconciliation,
+} from './DividendReconciliation';
 import { FxRate, initFxRate } from './FxRate';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
+import { UserReportingToken, initUserReportingToken } from './UserReportingToken';
+import { UserAuditToken, initUserAuditToken } from './UserAuditToken';
 import { Entity, initEntity } from './Entity';
 import { TaxCategory, initTaxCategory } from './TaxCategory';
 import { TaxTag, initTaxTag } from './TaxTag';
@@ -51,6 +57,8 @@ import { InstalmentPayment, initInstalmentPayment } from './InstalmentPayment';
 import { ProviderJobLog, initProviderJobLog } from './ProviderJobLog';
 import { Job, initJob } from './Job';
 import { JobRun, initJobRun } from './JobRun';
+import { PdfImportBatch, initPdfImportBatch } from './PdfImportBatch';
+import { PdfImportItem, initPdfImportItem } from './PdfImportItem';
 import {
   PortfolioForwardProjection,
   initPortfolioForwardProjection,
@@ -67,7 +75,6 @@ import { HouseholdPlan, initHouseholdPlan } from './HouseholdPlan';
 import { Insight, initInsight } from './Insight';
 import { PlannedEvent, initPlannedEvent } from './PlannedEvent';
 import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
-import { Subscription, initSubscription } from './Subscription';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
@@ -105,7 +112,13 @@ import {
   initDebtPayoffScenario,
 } from './DebtPayoffScenario';
 import { FinancialScenario, initFinancialScenario } from './FinancialScenario';
+import { Label, initLabel } from './Label';
+import { TransactionLabel, initTransactionLabel } from './TransactionLabel';
 import { Feedback, initFeedback } from './Feedback';
+import { ClientErrorEvent, initClientErrorEvent } from './ClientErrorEvent';
+import { ServerErrorEvent, initServerErrorEvent } from './ServerErrorEvent';
+import { IncomeEntry, initIncomeEntry } from './IncomeEntry';
+import { SavedFilter, initSavedFilter } from './SavedFilter';
 
 initUser(sequelize);
 initSession(sequelize);
@@ -138,11 +151,14 @@ initHoldingSnapshot(sequelize);
 initSecurityPrice(sequelize);
 initSecurityDailyPrice(sequelize);
 initSecurityDividend(sequelize);
+initDividendReconciliation(sequelize);
 initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
+initUserReportingToken(sequelize);
+initUserAuditToken(sequelize);
 initEntity(sequelize);
 initTaxCategory(sequelize);
 initTaxTag(sequelize);
@@ -156,6 +172,8 @@ initInstalmentPayment(sequelize);
 initProviderJobLog(sequelize);
 initJob(sequelize);
 initJobRun(sequelize);
+initPdfImportBatch(sequelize);
+initPdfImportItem(sequelize);
 initPortfolioForwardProjection(sequelize);
 initPortfolioDailySnapshot(sequelize);
 registerForwardIncomeStaleHooks(sequelize);
@@ -166,7 +184,6 @@ initHouseholdPlan(sequelize);
 initInsight(sequelize);
 initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
-initSubscription(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
 initMoneyLeakDismissal(sequelize);
@@ -189,7 +206,36 @@ initSyncBackup(sequelize);
 initLiabilityAccount(sequelize);
 initDebtPayoffScenario(sequelize);
 initFinancialScenario(sequelize);
+initLabel(sequelize);
+initTransactionLabel(sequelize);
 initFeedback(sequelize);
+initClientErrorEvent(sequelize);
+initServerErrorEvent(sequelize);
+initIncomeEntry(sequelize);
+initSavedFilter(sequelize);
+
+// Transaction labels (issue #270). belongsToMany both directions so a
+// transaction can `include` its labels and a label can resolve its
+// transactions, through the join model. hasMany on the join model itself
+// powers the usageCount aggregate in GET /api/labels.
+Household.hasMany(Label, { foreignKey: 'household_id', as: 'labels' });
+Label.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+Transaction.belongsToMany(Label, {
+  through: TransactionLabel,
+  foreignKey: 'transaction_id',
+  otherKey: 'label_id',
+  as: 'labels',
+});
+Label.belongsToMany(Transaction, {
+  through: TransactionLabel,
+  foreignKey: 'label_id',
+  otherKey: 'transaction_id',
+  as: 'transactions',
+});
+Label.hasMany(TransactionLabel, { foreignKey: 'label_id', as: 'links' });
+TransactionLabel.belongsTo(Label, { foreignKey: 'label_id', as: 'label' });
+Transaction.hasMany(TransactionLabel, { foreignKey: 'transaction_id', as: 'labelLinks' });
+TransactionLabel.belongsTo(Transaction, { foreignKey: 'transaction_id', as: 'transaction' });
 
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -209,6 +255,15 @@ NotificationPreference.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Entity.belongsTo(Entity, { foreignKey: 'spouseEntityId', as: 'spouse' });
+
+// entity_id attribution for the T1/T2 tax engine. belongsTo gives
+// Account/Transaction → Entity navigation; the DB-level FK lives in migration
+// 20260618000001 (Postgres only). Reciprocal hasMany matches the repo
+// convention for owning associations.
+Entity.hasMany(Account, { foreignKey: 'entity_id', as: 'accounts' });
+Account.belongsTo(Entity, { foreignKey: 'entity_id', as: 'entity' });
+Entity.hasMany(Transaction, { foreignKey: 'entity_id', as: 'transactions' });
+Transaction.belongsTo(Entity, { foreignKey: 'entity_id', as: 'entity' });
 
 Household.hasMany(TaxTag, { foreignKey: 'household_id', as: 'taxTags' });
 TaxTag.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -300,6 +355,22 @@ Security.hasMany(SecurityDividend, {
 SecurityDividend.belongsTo(Security, {
   foreignKey: 'security_id',
   as: 'security',
+});
+SecurityDividend.hasMany(DividendReconciliation, {
+  foreignKey: 'security_dividend_id',
+  as: 'reconciliations',
+});
+DividendReconciliation.belongsTo(SecurityDividend, {
+  foreignKey: 'security_dividend_id',
+  as: 'dividend',
+});
+DividendReconciliation.belongsTo(Account, {
+  foreignKey: 'account_id',
+  as: 'account',
+});
+DividendReconciliation.belongsTo(Transaction, {
+  foreignKey: 'matched_transaction_id',
+  as: 'matchedTransaction',
 });
 User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
 Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
@@ -478,6 +549,10 @@ Household.hasMany(PlannedEvent, {
   onDelete: 'CASCADE',
   hooks: true,
 });
+Household.hasMany(PlannedEvent, {
+  foreignKey: 'household_id',
+  as: 'expectations',
+});
 PlannedEvent.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
@@ -534,14 +609,6 @@ FinancialGoal.belongsTo(Account, {
   as: 'linkedAccount',
 });
 
-Household.hasMany(Subscription, {
-  foreignKey: 'household_id',
-  as: 'subscriptions',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-Subscription.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
-
 Household.hasMany(MoneyLeakDismissal, {
   foreignKey: 'household_id',
   as: 'moneyLeakDismissals',
@@ -579,6 +646,9 @@ AiReviewRun.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
+
+PdfImportBatch.hasMany(PdfImportItem, { foreignKey: 'batch_id', as: 'items', onDelete: 'CASCADE', hooks: true });
+PdfImportItem.belongsTo(PdfImportBatch, { foreignKey: 'batch_id', as: 'batch' });
 
 // CFO briefings (issue #236). Cascades with household; user FK for the
 // actor that requested the briefing.
@@ -922,6 +992,13 @@ LiabilityAccount.belongsTo(Household, {
   foreignKey: 'household_id',
   as: 'household',
 });
+// Credit-card payment planner (#243). The funding (cash) account a card's
+// bill is paid from. SET NULL at the DB level (see the cc-fields migration) so
+// deleting the funding account unlinks the profile rather than removing it.
+LiabilityAccount.belongsTo(Account, {
+  foreignKey: 'payment_account_id',
+  as: 'paymentAccount',
+});
 
 // DebtPayoffScenario (issue #202). Household-scoped saved payoff plans. The
 // creating user is kept loosely (SET NULL) so a scenario survives the user's
@@ -944,6 +1021,16 @@ DebtPayoffScenario.belongsTo(User, {
   foreignKey: 'user_id',
   as: 'user',
 });
+
+// SavedFilter (issue #272). One row per user-named filter preset scoped to a
+// page. Cascades on user delete; no household scope (filters are personal).
+User.hasMany(SavedFilter, {
+  foreignKey: 'user_id',
+  as: 'savedFilters',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+SavedFilter.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 // In-app feedback / bug reports (issue #295). Scoped to both the submitting
 // user and their household; both cascade on delete so removing either removes
@@ -1001,6 +1088,8 @@ export {
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,
+  UserReportingToken,
+  UserAuditToken,
   Entity,
   TaxCategory,
   TaxTag,
@@ -1014,6 +1103,8 @@ export {
   ProviderJobLog,
   Job,
   JobRun,
+  PdfImportBatch,
+  PdfImportItem,
   PortfolioForwardProjection,
   PortfolioDailySnapshot,
   Scenario,
@@ -1022,7 +1113,6 @@ export {
   Insight,
   PlannedEvent,
   FinancialGoal,
-  Subscription,
   AiReviewRun,
   CfoBriefing,
   MoneyLeakDismissal,
@@ -1045,5 +1135,12 @@ export {
   LiabilityAccount,
   DebtPayoffScenario,
   FinancialScenario,
+  DividendReconciliation,
+  Label,
+  TransactionLabel,
   Feedback,
+  ClientErrorEvent,
+  ServerErrorEvent,
+  IncomeEntry,
+  SavedFilter,
 };

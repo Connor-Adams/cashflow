@@ -22,6 +22,7 @@
 import { QueryTypes, type Sequelize, type Transaction } from 'sequelize';
 import type { BundlePayload } from './bundleFormat';
 import { TABLES, TABLE_NAMES, type BundleTableSpec } from './tables';
+import { getOrCreatePersonalEntity } from '../tax/services/getOrCreatePersonalEntity';
 
 export type RestoreMode = 'merge' | 'replace';
 
@@ -56,8 +57,13 @@ const FK_REMAP: Record<string, Array<{ column: string; refTable: string }>> = {
   ],
 };
 
-/** Columns that should be NULLed when their source value can't be
- *  remapped (e.g. linked_transaction_id self-ref). */
+/** Columns NULLed when their source value can't be remapped — e.g.
+ *  linked_transaction_id self-ref (patched in a later pass; V1 nulls it).
+ *  entity_id is deliberately NOT listed: the bundle's source entity id is
+ *  meaningless in the target, but accounts/transactions.entity_id is NOT NULL
+ *  (migration 20260619000001) and Postgres rejects a NULL at INSERT time, so
+ *  restore re-derives the target-household entity_id up front (see
+ *  restoreBundle) rather than nulling-then-fixing. */
 const NULL_ON_RESTORE: Record<string, string[]> = {
   transactions: ['linked_transaction_id'],
 };
@@ -191,6 +197,11 @@ export async function restoreBundle(
       }
     }
 
+    // Re-derive entity_id to the TARGET household's personal entity, computed
+    // once and applied at INSERT time below (see the per-row note). The bundle
+    // carries no tax_entities, so the source entity id is meaningless here.
+    const personal = await getOrCreatePersonalEntity(householdId, { transaction: t });
+
     // Step 2: insert in forward order, building the id-remap as we go.
     const idRemap: Record<string, Map<number, number>> = {};
     for (const spec of TABLES) {
@@ -222,6 +233,18 @@ export async function restoreBundle(
         for (const col of NULL_ON_RESTORE[spec.table] ?? []) {
           if (col in row) row[col] = null;
         }
+        // entity_id is mandatory (NOT NULL, migration 20260619000001) and the
+        // bundle's source entity id is meaningless in the target DB — set the
+        // target household's personal entity at INSERT time. A NULL here would
+        // be rejected before any post-insert fix could run. Corp accounts
+        // collapse to personal in V1 (the bundle carries no tax_entities); the
+        // next import re-links them.
+        if (
+          (spec.table === 'accounts' || spec.table === 'transactions') &&
+          'entity_id' in row
+        ) {
+          row.entity_id = personal.id;
+        }
         const sourceId = Number(row.id ?? 0);
         const newId = await insertRow(sequelize, spec, row, t);
         if (sourceId && newId) {
@@ -231,6 +254,7 @@ export async function restoreBundle(
       }
       inserted[spec.table] = count;
     }
+
     await t.commit();
   } catch (e) {
     await t.rollback();

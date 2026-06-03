@@ -203,6 +203,168 @@ test('PATCH /api/subscriptions/:id rejects invalid status', async () => {
   assert.equal(res.status, 400);
 });
 
+// ----- #291: editable cadence -----
+
+test('PATCH /api/subscriptions/:id accepts cadence and recomputes annual cost (AC #1, #2)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const netflix = (
+    list.body.items as Array<{
+      id: number;
+      normalizedName: string;
+      amount: string;
+    }>
+  ).find((i) => i.normalizedName === 'netflix');
+  assert.ok(netflix);
+  const perPeriod = Number(netflix!.amount); // 15.99
+
+  const patched = await primaryAgent
+    .patch(`/api/subscriptions/${netflix!.id}`)
+    .send({ cadence: 'annual' });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.cadence, 'annual');
+  // Annualized cost for an annual cadence equals the per-period amount.
+  assert.equal(Number(patched.body.annualizedCost), Number(perPeriod.toFixed(4)));
+
+  // Restore monthly so later tests see the original cadence; annual cost goes
+  // back to amount * 12.
+  const restored = await primaryAgent
+    .patch(`/api/subscriptions/${netflix!.id}`)
+    .send({ cadence: 'monthly' });
+  assert.equal(restored.status, 200);
+  assert.equal(restored.body.cadence, 'monthly');
+  assert.equal(Number(restored.body.annualizedCost), Number((perPeriod * 12).toFixed(4)));
+});
+
+test('PATCH /api/subscriptions/:id rejects an invalid cadence with INVALID_CADENCE (AC #1)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  const res = await primaryAgent
+    .patch(`/api/subscriptions/${id}`)
+    .send({ cadence: 'fortnightly' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'INVALID_CADENCE');
+});
+
+test('PATCH /api/subscriptions/:id accepts each of the five cadence values (AC #2)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  for (const cadence of ['weekly', 'monthly', 'quarterly', 'semiannual', 'annual']) {
+    const res = await primaryAgent
+      .patch(`/api/subscriptions/${id}`)
+      .send({ cadence });
+    assert.equal(res.status, 200, `cadence ${cadence} should be accepted`);
+    assert.equal(res.body.cadence, cadence);
+  }
+  // Leave the row on monthly for downstream tests.
+  await primaryAgent.patch(`/api/subscriptions/${id}`).send({ cadence: 'monthly' });
+});
+
+// ----- #291: cancel-impact endpoint -----
+
+test('GET /api/subscriptions/:id/cancel-impact projects monthly spend over 12 months (AC #3, #5)', async () => {
+  // Seed a clean $20/mo subscription so the AC #5 numbers are exact.
+  await seedRecurringCharges(primaryHouseholdId, primaryAccountId, 'AcmePlus', 20, 4);
+  const list = await primaryAgent.get('/api/subscriptions');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string; cadence: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  assert.equal(acme!.cadence, 'monthly');
+
+  const res = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=12`,
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.amount, 240);
+  assert.equal(res.body.count, 12);
+  assert.equal(res.body.horizonMonths, 12);
+  assert.equal(res.body.currency, 'CAD');
+});
+
+test('GET cancel-impact reflects a corrected cadence (annual → count 1, AC #5)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  // Correct the cadence to annual; the per-period amount ($20) is unchanged,
+  // so a 12-month horizon now sees exactly one $20 occurrence.
+  await primaryAgent.patch(`/api/subscriptions/${acme!.id}`).send({ cadence: 'annual' });
+  const res = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=12`,
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.count, 1);
+  assert.equal(res.body.amount, 20);
+  // Restore for tidiness.
+  await primaryAgent.patch(`/api/subscriptions/${acme!.id}`).send({ cadence: 'monthly' });
+});
+
+test('GET cancel-impact rejects a horizon outside {6, 12, 24} (AC #4)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  for (const bad of ['18', '1', '0', 'abc', '12.5']) {
+    const res = await primaryAgent.get(
+      `/api/subscriptions/${id}/cancel-impact?horizonMonths=${bad}`,
+    );
+    assert.equal(res.status, 400, `horizonMonths=${bad} should be rejected`);
+  }
+});
+
+test('GET cancel-impact accepts the 6 and 24 month horizons (AC #4)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  const six = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=6`,
+  );
+  assert.equal(six.status, 200);
+  assert.equal(six.body.amount, 120);
+  assert.equal(six.body.count, 6);
+  const twentyFour = await primaryAgent.get(
+    `/api/subscriptions/${acme!.id}/cancel-impact?horizonMonths=24`,
+  );
+  assert.equal(twentyFour.status, 200);
+  assert.equal(twentyFour.body.amount, 480);
+  assert.equal(twentyFour.body.count, 24);
+});
+
+test('GET cancel-impact does not leak another household subscription (AC #12)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  const res = await otherAgent.get(
+    `/api/subscriptions/${id}/cancel-impact?horizonMonths=12`,
+  );
+  assert.equal(res.status, 404);
+});
+
+test('PATCH cadence is rejected across households (AC #12)', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const id = (list.body.items as Array<{ id: number }>)[0].id;
+  const res = await otherAgent
+    .patch(`/api/subscriptions/${id}`)
+    .send({ cadence: 'annual' });
+  assert.equal(res.status, 404);
+});
+
+// Restore the household to "no active subscriptions" so the summary test
+// below (which asserts active === 0) sees the same precondition it did before
+// the cadence/cancel-impact tests seeded an active AcmePlus subscription.
+test('cleanup: mark the seeded AcmePlus subscription ignored', async () => {
+  const list = await primaryAgent.get('/api/subscriptions?refresh=0');
+  const acme = (
+    list.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'acmeplus');
+  assert.ok(acme);
+  const res = await primaryAgent
+    .patch(`/api/subscriptions/${acme!.id}`)
+    .send({ status: 'ignored' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, 'ignored');
+});
+
 test('PATCH /api/subscriptions/:id rejects non-http cancellationUrl', async () => {
   const list = await primaryAgent.get('/api/subscriptions?refresh=0');
   const id = (list.body.items as Array<{ id: number }>)[0].id;
@@ -278,33 +440,54 @@ test('PATCH /api/subscriptions/:id returns 404 across households', async () => {
   assert.equal(res.status, 404);
 });
 
-test('detected price increase flags a row when amount changes above threshold', async () => {
-  // Seed Hulu at 9.99 four times centred ~5 months ago, then refresh so the
-  // detector persists a $9.99 baseline.
+test('price increase flags a row when an open subscription_price_increase Insight targets it', async () => {
+  // The chip + the DTO's priceChangeDetected now derive from an open
+  // `subscription_price_increase` Insight (entityId = the subscription's
+  // PlannedEvent id), NOT the retired planned_events.price_change_detected
+  // column. Detect Hulu as a subscription first, then seed the Insight.
   await seedRecurringCharges(primaryHouseholdId, primaryAccountId, 'Hulu', 9.99, 4, 30);
-  await primaryAgent.get('/api/subscriptions'); // first refresh — establishes baseline
+  const detected = await primaryAgent.get('/api/subscriptions'); // persists the row
+  const huluRow = (
+    detected.body.items as Array<{ id: number; normalizedName: string }>
+  ).find((i) => i.normalizedName === 'hulu');
+  assert.ok(huluRow, 'expected Hulu to be detected as a subscription');
 
-  // Now wipe Hulu's charges and re-seed at a higher amount so the new
-  // detection-derived avgAmount is well above the persisted $9.99. We
-  // can't just append — that would mix old + new amounts into the same
-  // detector group, blunting the change. Detection persistence reads the
-  // PERSISTED amount and compares it to the freshly-computed avg, so a
-  // clean swap is the cleanest way to provoke a real "price up" signal.
   const models = await import('../../src/models');
-  await models.Transaction.destroy({
-    where: { householdId: primaryHouseholdId, merchantClean: 'Hulu' },
+  await models.Insight.create({
+    householdId: primaryHouseholdId,
+    userId: null,
+    type: 'subscription_price_increase',
+    severity: 'warning',
+    title: 'Hulu price increased',
+    description: '',
+    entityType: 'expectation',
+    entityId: huluRow!.id,
+    status: 'open',
+    fingerprint: `subscription_price_increase:${huluRow!.id}:1400`,
+    metadata: { previousAmountCents: 999, newAmountCents: 1400, pctChange: 40 },
+    detectedAt: new Date('2026-05-18T00:00:00Z'),
   });
-  await seedRecurringCharges(primaryHouseholdId, primaryAccountId, 'Hulu', 14, 4, 10);
 
-  const res = await primaryAgent.get('/api/subscriptions');
+  // refresh=0 so the seeded row + Insight are read back untouched.
+  const res = await primaryAgent.get('/api/subscriptions?refresh=0');
   const hulu = (
     res.body.items as Array<{
       normalizedName: string;
       amount: string;
       priceChangeDetected: boolean;
+      pendingPriceChange: {
+        prevCents: number;
+        newCents: number;
+        pctChange: string;
+        detectedOn: string;
+      } | null;
     }>
   ).find((i) => i.normalizedName === 'hulu');
   assert.ok(hulu);
-  // 14 / 9.99 ≈ 1.40 → 40% increase, well above the 10% threshold.
   assert.equal(hulu!.priceChangeDetected, true);
+  assert.ok(hulu!.pendingPriceChange);
+  assert.equal(hulu!.pendingPriceChange!.prevCents, 999);
+  assert.equal(hulu!.pendingPriceChange!.newCents, 1400);
+  assert.equal(hulu!.pendingPriceChange!.pctChange, '40');
+  assert.equal(hulu!.pendingPriceChange!.detectedOn, '2026-05-18');
 });

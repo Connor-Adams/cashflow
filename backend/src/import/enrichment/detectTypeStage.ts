@@ -39,6 +39,19 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
     type: 'transfer',
     re: /\b(transfer (?:to|from|in|out)|wire transfer|interac e?-?transfer|pre-?authorized (?:debit|credit)|cash (?:sent|received)|direct deposit|from chequing account|eft (?:in|out)|aft)\b/i,
   },
+  // RBC internal-transfer narratives: "Online transfer sent - 6113 Connor Adams"
+  // and "Online transfer received". The existing pattern above only matches
+  // "transfer to/from/in/out", so "Online transfer sent" fell through to
+  // 'purchase'. "Online transfer sent|received" is unambiguous — RBC uses it
+  // exclusively for account-to-account funds movement.
+  { type: 'transfer', re: /\bonline transfer (?:sent|received)\b/i },
+  // RBC → Wealthsimple investment funding: "Investment WS Investments".
+  // This phrase is not a securities BUY (no "bought N shares"), so it is safe
+  // to match before the negative fallback. The existing `investment` patterns
+  // only match "bought/sold N shares" and "loan of N shares", not this phrase.
+  // We match the full phrase (not bare "investment") to avoid false-positives
+  // on other "investment" narratives like "Investment advisor fee".
+  { type: 'transfer', re: /\binvestment\s+ws\s+investments\b/i },
   // Wise FX conversion: "Converted 5,207.60 USD to 7,084.89 CAD". Both legs of
   // a Wise FX appear on the matching CAD + USD statements with a shared
   // sourceReference; classifying them as transfer lets detectRelationshipsStage
@@ -60,10 +73,70 @@ const EXACT_RAW_MATCHES: Array<{ value: string; type: TxnType }> = [
   { value: 'deposit', type: 'transfer' },
 ];
 
+// Income: external payroll / direct-deposit inflows. Distinguished from the
+// `transfer` pattern below (which also matches "direct deposit") by requiring a
+// positive amount and excluding self-deposits. A "direct deposit from <X>"
+// where <X> is the account owner's own name or an own-account word is internal
+// money movement, not earned income. Bank descriptions are truncated (35-char
+// cap in the reference data) so a corporate-entity suffix is not reliably
+// present — own-name exclusion against the household members is the precision
+// signal that separates "Direct deposit from CDG LABS INC" / "...ADAMS GREENE"
+// (income) from "...ADAMS CONNOR" (the owner paying themselves → transfer).
+const INCOME_WORD_RE = /\b(payroll|salary|paycheque|paycheck)\b/i;
+const DIRECT_DEPOSIT_FROM_RE = /\bdirect deposit from\b/i;
+const OWN_ACCOUNT_RE =
+  /\b(chequing|checking|savings|tfsa|fhsa|rrsp|rrif|rdsp|margin|crypto)\b/i;
+
+function tokenizeName(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+}
+
+/**
+ * True when the payee text names a household member — every token of some
+ * member's name is present in the payee. A token-SUPERSET test (not substring)
+ * so a shared surname alone ("ADAMS" in both "Connor Adams" and an external
+ * "ADAMS GREENE") does not misclassify external income as a self transfer.
+ */
+function isOwnNameDeposit(
+  payeeTokens: Set<string>,
+  ownerNames: string[],
+): boolean {
+  return ownerNames.some((name) => {
+    const memberTokens = tokenizeName(name);
+    return memberTokens.length > 0 && memberTokens.every((t) => payeeTokens.has(t));
+  });
+}
+
+function detectsIncome(
+  haystack: string,
+  amount: number,
+  ownerNames: string[],
+): boolean {
+  if (amount <= 0) return false;
+  if (INCOME_WORD_RE.test(haystack)) return true;
+  if (!DIRECT_DEPOSIT_FROM_RE.test(haystack)) return false;
+  if (OWN_ACCOUNT_RE.test(haystack)) return false;
+  return !isOwnNameDeposit(new Set(tokenizeName(haystack)), ownerNames);
+}
+
 export interface DetectTypeInput {
   merchantRaw: string;
   merchantClean: string;
   amount: number;
+  /**
+   * Owner-side names for the household — member User display names plus any
+   * partner Contact names (see loadHouseholdOwnerNames). Used to tell an external
+   * payroll direct deposit (income) apart from a self-deposit made under an
+   * owner's or partner's own name (transfer). Optional: when omitted, any
+   * "direct deposit from <X>" that isn't an own-account movement is treated as
+   * external income.
+   */
+  ownerNames?: string[];
 }
 
 export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
@@ -81,6 +154,17 @@ export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
         },
       ];
     }
+  }
+
+  if (detectsIncome(haystack, input.amount, input.ownerNames ?? [])) {
+    return [
+      {
+        source: 'type-detect',
+        confidence: 'high',
+        fields: { txnType: 'income' },
+        rationale: 'narrative matched income (payroll / external direct deposit)',
+      },
+    ];
   }
 
   for (const p of PATTERNS) {

@@ -412,7 +412,7 @@ export async function executeRollback(
     const unlinkedPlannedEvents = await PlannedEvent.update(
       { linkedTransactionId: null },
       {
-        where: { linkedTransactionId: { [Op.in]: txnIds } },
+        where: { kind: 'planned', linkedTransactionId: { [Op.in]: txnIds } },
         transaction: sqlTx,
       },
     ).then(([count]) => count);
@@ -512,7 +512,7 @@ async function countDependentRows(
     TransactionTaxMetadata.count({ where: filter }),
     BudgetExclusion.count({ where: filter }),
     PlannedEvent.count({
-      where: { linkedTransactionId: { [Op.in]: txnIds } },
+      where: { kind: 'planned', linkedTransactionId: { [Op.in]: txnIds } },
     }),
   ]);
   return {

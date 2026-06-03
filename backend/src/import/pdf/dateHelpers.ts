@@ -19,14 +19,24 @@ export function toIso(year: number, monthZeroBased: number, day: number): string
   return `${year}-${m}-${d}`;
 }
 
-/** Parse "January 12, 2026" → ISO. Returns null on failure. */
+/**
+ * Parse a long-form date in either ordering → ISO. Returns null on failure.
+ *   month-first: "January 12, 2026"  (RBC/CIBC/Questrade statements)
+ *   day-first:   "12 January 2026"   (Wise Canada statements)
+ */
 export function parseLongDate(s: string): string | null {
-  const m = /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})/.exec(s);
-  if (!m) return null;
-  const monthName = m[1].slice(0, 3);
-  const month = MONTHS_SHORT[monthName];
-  if (month === undefined) return null;
-  return toIso(Number(m[3]), month, Number(m[2]));
+  const NAME = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const monthFirst = new RegExp(`(${NAME})\\s+(\\d{1,2}),\\s+(\\d{4})`).exec(s);
+  if (monthFirst) {
+    const month = MONTHS_SHORT[monthFirst[1].slice(0, 3)];
+    if (month !== undefined) return toIso(Number(monthFirst[3]), month, Number(monthFirst[2]));
+  }
+  const dayFirst = new RegExp(`(\\d{1,2})\\s+(${NAME})\\s+(\\d{4})`).exec(s);
+  if (dayFirst) {
+    const month = MONTHS_SHORT[dayFirst[2].slice(0, 3)];
+    if (month !== undefined) return toIso(Number(dayFirst[3]), month, Number(dayFirst[1]));
+  }
+  return null;
 }
 
 /**

@@ -167,6 +167,8 @@ export function ReportsPage() {
   const [formNotes, setFormNotes] = useState<string>('')
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [formAmountError, setFormAmountError] = useState<string | null>(null)
+  const [formDateError, setFormDateError] = useState<string | null>(null)
   const { showToast } = useToast()
   const confirm = useConfirm()
 
@@ -353,6 +355,8 @@ export function ReportsPage() {
 
   function openSettlementDialog() {
     setFormError(null)
+    setFormAmountError(null)
+    setFormDateError(null)
     setFormContactId(contacts.length > 0 ? String(contacts[0].id) : '')
     setFormDirection('i_paid_partner')
     setFormCurrency(currency || DEFAULT_REPORTS_CURRENCY)
@@ -947,7 +951,7 @@ export function ReportsPage() {
                 >
                   {contacts.length === 0 && (
                     <NativeSelectOption value="">
-                      No contacts available
+                      No contacts — add one in Settings
                     </NativeSelectOption>
                   )}
                   {contacts.map((c) => (
@@ -983,6 +987,11 @@ export function ReportsPage() {
                   value={formCurrency}
                   onChange={(e) => setFormCurrency(e.target.value)}
                 >
+                  {availableCurrencies.length === 0 && (
+                    <NativeSelectOption value="">
+                      No currencies — add an account in Settings
+                    </NativeSelectOption>
+                  )}
                   {availableCurrencies.map((c) => (
                     <NativeSelectOption key={c} value={c}>
                       {c}
@@ -999,9 +1008,29 @@ export function ReportsPage() {
                   step="0.01"
                   min="0.01"
                   value={formAmount}
-                  onChange={(e) => setFormAmount(e.target.value)}
+                  onChange={(e) => {
+                    setFormAmount(e.target.value)
+                    const n = Number(e.target.value)
+                    if (e.target.value !== '' && (!Number.isFinite(n) || n <= 0)) {
+                      setFormAmountError('Enter a positive amount.')
+                    } else {
+                      setFormAmountError(null)
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const n = Number(e.target.value)
+                    if (!e.target.value || !Number.isFinite(n) || n <= 0) {
+                      setFormAmountError('Enter a positive amount.')
+                    }
+                  }}
                   required
+                  aria-describedby={formAmountError ? 'settlement-amount-err' : undefined}
                 />
+                {formAmountError && (
+                  <span id="settlement-amount-err" className="error text-xs" role="alert">
+                    {formAmountError}
+                  </span>
+                )}
               </Label>
               <Label htmlFor="settlement-date">
                 Date
@@ -1009,9 +1038,21 @@ export function ReportsPage() {
                   id="settlement-date"
                   type="date"
                   value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
+                  onChange={(e) => {
+                    setFormDate(e.target.value)
+                    if (e.target.value) setFormDateError(null)
+                  }}
+                  onBlur={(e) => {
+                    if (!e.target.value) setFormDateError('Date required.')
+                  }}
                   required
+                  aria-describedby={formDateError ? 'settlement-date-err' : undefined}
                 />
+                {formDateError && (
+                  <span id="settlement-date-err" className="error text-xs" role="alert">
+                    {formDateError}
+                  </span>
+                )}
               </Label>
               <Label htmlFor="settlement-notes">
                 Notes
@@ -1033,7 +1074,7 @@ export function ReportsPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={formSubmitting}>
+            <Button type="submit" disabled={formSubmitting || Boolean(formAmountError) || Boolean(formDateError)}>
               {formSubmitting ? 'Saving...' : 'Save settlement'}
             </Button>
           </DialogFooter>

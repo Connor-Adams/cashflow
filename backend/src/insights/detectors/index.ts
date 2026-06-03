@@ -56,6 +56,14 @@ export type DetectedInsight = {
 
 export type DetectorOptions = {
   now: Date;
+  /**
+   * Lowercased merchant names that are tracked subscriptions; `recurring_increase`
+   * skips these so `subscription_price_increase` owns them (no double-surfacing of
+   * the same price hike). The orchestrator builds this from both the subscription's
+   * `normalizedName` and its display `name`, each lowercased — see the note in
+   * `detectRecurringIncrease` and `runDetectorsForHousehold`.
+   */
+  subscriptionMerchants?: Set<string>;
 };
 
 // ---- helpers -----------------------------------------------------------
@@ -277,6 +285,17 @@ export function detectRecurringIncrease(
 
   const out: DetectedInsight[] = [];
   for (const bucket of buckets.values()) {
+    // Skip merchants that are tracked subscriptions — `subscription_price_increase`
+    // owns price hikes for those, so emitting a `recurring_increase` too would
+    // double-surface the same event. `bucket.merchant` is `merchantClean.trim()`,
+    // so we compare its lowercase against the (already-lowercased) guard set. The
+    // orchestrator seeds that set with BOTH the subscription's `normalizedName`
+    // (which for detection-sourced subs is `merchantClean.trim().toLowerCase()` —
+    // identical to this key) AND its display `name` lowercased, so manually-created
+    // or renamed subs whose `normalizedName` diverges from the live `merchantClean`
+    // are still caught. See `runDetectorsForHousehold`.
+    if (opts.subscriptionMerchants?.has(bucket.merchant.toLowerCase())) continue;
+
     const currentBucket = bucket.byMonth.get(currentKey);
     if (!currentBucket) continue;
 

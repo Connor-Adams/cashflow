@@ -14,10 +14,10 @@ jobs:
   install:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'yarn'
@@ -34,7 +34,7 @@ jobs:
           tar -cf node_modules.tar "${paths[@]}"
 
       - name: Upload node_modules artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: node_modules
           path: node_modules.tar
@@ -45,15 +45,15 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -67,15 +67,15 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -88,35 +88,27 @@ jobs:
   backend-test-integration:
     needs: install
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
       - name: Extract node_modules
         run: tar -xf node_modules.tar
+
+      - name: Start PostgreSQL
+        run: |
+          sudo systemctl start postgresql.service
+          pg_isready
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
 
       - name: Run backend integration tests
         env:
@@ -127,15 +119,15 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -143,7 +135,7 @@ jobs:
         run: tar -xf node_modules.tar
 
       - name: Cache TS build state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: backend/dist/.tsbuildinfo
           key: ${{ runner.os }}-backend-tsbuild-${{ github.sha }}
@@ -153,19 +145,106 @@ jobs:
       - name: Build backend
         run: yarn workspace cashflow-backend run build
 
-  frontend-test:
+  code-audit:
     needs: install
     runs-on: ubuntu-latest
+    # Informational for now: surfaces dead code + complexity (fallow) and
+    # duplication (jscpd) without blocking merges, and posts a whole-repo
+    # snapshot as a sticky PR comment. Flip the steps to required once the
+    # baseline is driven down. See CONTRIBUTING.md for `yarn audit:code`.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          # fallow health derives churn/hotspots from git history.
+          fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: Dead code & complexity (fallow)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          # fallow exits non-zero when it finds issues; don't let that (under
+          # bash -e) abort the step before the second command runs.
+          yarn --silent fallow dead-code --format json > reports/fallow-deadcode.json || true
+          yarn --silent fallow health --format json > reports/fallow-health.json || true
+
+      - name: Duplicate code (jscpd)
+        continue-on-error: true
+        run: yarn jscpd --reporters console,json,html
+
+      - name: Build audit summary
+        if: always()
+        run: node scripts/audit-summary.cjs > reports/audit-comment.md
+
+      - name: Upload jscpd report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jscpd-report
+          path: reports/jscpd
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Post audit summary comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('reports/audit-comment.md', 'utf8');
+            const marker = '<!-- code-audit-summary -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number, per_page: 100,
+            });
+            // Our rendered summary replaces fallow's native report comment
+            // (disabled via comment:false in fallow.yml). Clean up any leftover.
+            const stale = comments.find(
+              (c) => c.body && c.body.includes('<!-- fallow-id: fallow-results -->'),
+            );
+            if (stale) {
+              await github.rest.issues.deleteComment({ owner, repo, comment_id: stale.id });
+            }
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }
+
+  frontend-test:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -179,15 +258,15 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Download node_modules artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: node_modules
 
@@ -195,7 +274,7 @@ jobs:
         run: tar -xf node_modules.tar
 
       - name: Cache vite build state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             frontend/node_modules/.tmp

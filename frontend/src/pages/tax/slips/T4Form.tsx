@@ -31,7 +31,7 @@ export function T4Form({ issuer, onChange, values }: SlipFormProps) {
     <fieldset>
       <legend>T4 boxes</legend>
       {FIELDS.map(({ key, label }) => (
-        <label key={key} style={{ display: 'block' }}>
+        <label key={key} className="block">
           {label}
           <input
             type="number"

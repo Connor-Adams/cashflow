@@ -1,4 +1,5 @@
 import type { Transaction } from '../types/api'
+import type { TaxTreatment } from '@cashflow/shared'
 
 export type ReviewInboxSummary = {
   total: number
@@ -18,6 +19,7 @@ export type ReviewBulkPatchInput = {
   category: string
   business: string
   splitType: string
+  taxTreatment: TaxTreatment | ''
   markReviewed: boolean
 }
 
@@ -79,6 +81,7 @@ export function buildReviewBulkPatch(input: ReviewBulkPatchInput): Record<string
   if (input.business === 'true') patch.businessOverride = true
   if (input.business === 'false') patch.businessOverride = false
   if (input.splitType) patch.splitOverride = input.splitType
+  if (input.taxTreatment) patch.taxTreatmentOverride = input.taxTreatment
   if (input.markReviewed) patch.reviewFlag = false
 
   return patch

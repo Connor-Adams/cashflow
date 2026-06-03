@@ -2,7 +2,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../src/db';
 import {
-  Account, Entity, FxRate, HouseholdMember, InvestmentActivity, Security, TaxSlip, Transaction,
+  Account, Category, Entity, FxRate, HouseholdMember, InvestmentActivity, Security, TaxSlip, Transaction,
   Carryforward, Household, User,
 } from '../../src/models';
 import { D } from '../../src/tax/util/decimal';
@@ -146,4 +146,491 @@ test.skip('per-security dividend eligibility routes to eligible or nonEligible',
   const nonElSum = facts.nonEligibleDividends.reduce((s, d) => s.plus(d.cadAmount), D('0'));
   assert.equal(eligSum.toFixed(2), '1200.00', 'eligible + unknown both go to eligibleDividends');
   assert.equal(nonElSum.toFixed(2), '500.00', 'non_eligible dividend routes to nonEligibleDividends');
+});
+
+test('captures self-employment income/expenses from business-flagged transactions', async () => {
+  // Regression: buildPersonalFacts read (t as any).business, but the Transaction
+  // attribute is finalBusiness (column final_business). The wrong field name —
+  // hidden by an `as any` cast — meant business-flagged transactions never reached
+  // selfEmploymentIncome/selfEmploymentExpenses, silently dropping that income.
+  const household = await Household.create({ name: 'Self-Employment' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'Sole Prop', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Business', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+
+  // Business revenue (positive) and a business expense (negative), both flagged.
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-04-10', amount: '50000.0000', currency: 'CAD',
+    finalCategory: 'consulting', finalBusiness: true,
+    merchantRaw: 'CLIENT', merchantClean: 'CLIENT',
+    importBatch: 'seed-se', sourceRowFingerprint: 'fp-se-inc-001', sourceIdentityFingerprint: 'sif-se-inc-001',
+  } as never);
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-05-02', amount: '-8000.0000', currency: 'CAD',
+    finalCategory: 'supplies', finalBusiness: true,
+    merchantRaw: 'SUPPLIER', merchantClean: 'SUPPLIER',
+    importBatch: 'seed-se', sourceRowFingerprint: 'fp-se-exp-001', sourceIdentityFingerprint: 'sif-se-exp-001',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.selfEmploymentIncome.length, 1, 'business revenue captured');
+  assert.equal(facts.selfEmploymentIncome[0].cadAmount.toFixed(2), '50000.00');
+  assert.equal(facts.selfEmploymentExpenses.length, 1, 'business expense captured');
+  assert.equal(facts.selfEmploymentExpenses[0].cadAmount.toFixed(2), '8000.00');
+});
+
+test('tolerates an investment activity with a null amount (e.g. activityType "other")', async () => {
+  // Regression: InvestmentActivity.amount is nullable. The income loop builds
+  // D(a.amount) for EVERY activity row before branching on activityType, so a
+  // non-income row (activityType "other") with a null amount used to crash with
+  // "[DecimalError] Invalid argument: null" — which broke every personal Tax tab
+  // (Overview / Personal T1 / Reconciliation all funnel through buildPersonalFacts).
+  const household = await Household.create({ name: 'Null Amount Activity' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'Null Amt', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Invest', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+
+  // Mirrors prod rows (account 10, 2025-01-22): activity_type 'other', amount NULL.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: null, activityType: 'other',
+    tradeDate: '2025-01-22', quantity: null, amount: null, currency: 'CAD', fees: null,
+    description: 'corporate action', sourceRowFingerprint: 'fp-other-null-001', importBatch: 'seed-null-amt',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  // A null-amount "other" activity is not income; it must be ignored, not crash.
+  assert.equal(facts.interestIncome.length, 0, 'no interest income');
+  assert.equal(facts.eligibleDividends.length, 0, 'no eligible dividends');
+  assert.equal(facts.nonEligibleDividends.length, 0, 'no non-eligible dividends');
+});
+
+test('category taxTreatment routes a transaction into employment income', async () => {
+  const household = await Household.create({ name: 'TT employment' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Chk', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  await Category.create({
+    householdId: household.id, name: 'Salary', taxTreatment: 'employment_income',
+  } as never);
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-02-01', amount: '60000.0000', currency: 'CAD', finalCategory: 'Salary',
+    merchantRaw: 'EMP', merchantClean: 'EMP', importBatch: 's',
+    sourceRowFingerprint: 'fp-tt-emp-1', sourceIdentityFingerprint: 'sif-tt-emp-1',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.employmentIncome.length, 1, 'category treatment feeds employment income');
+  assert.equal(facts.employmentIncome[0].cadAmount.toFixed(2), '60000.00');
+});
+
+test('transaction taxTreatmentOverride wins over the category default', async () => {
+  const household = await Household.create({ name: 'TT override' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Chk', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  // Category default is 'none'; the override forces a donation.
+  await Category.create({ householdId: household.id, name: 'Misc' } as never);
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-03-01', amount: '500.0000', currency: 'CAD', finalCategory: 'Misc',
+    taxTreatmentOverride: 'donations',
+    merchantRaw: 'CH', merchantClean: 'CH', importBatch: 's',
+    sourceRowFingerprint: 'fp-tt-ovr-1', sourceIdentityFingerprint: 'sif-tt-ovr-1',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.donations.length, 1, 'override beats category default');
+  assert.equal(facts.donations[0].cadAmount.toFixed(2), '500.00');
+});
+
+// ---------------------------------------------------------------------------
+// Income-bearing InvestmentActivity types beyond dividend/interest/sell, plus
+// the cap-gains ACB window. Regression for the T1 income undercount:
+// buildPersonalFacts silently DROPPED 'reinvestment' (DRIP) and 'staking_reward'
+// rows, and fed computeAcb only the tax YEAR's activity — zeroing ACB on
+// prior-year holdings and overstating realized gains.
+// ---------------------------------------------------------------------------
+
+async function seedPersonalInvestmentAccount(name: string) {
+  const household = await Household.create({ name });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: name, jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Invest', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  return { household, entity, account };
+}
+
+const sumCad = (items: { cadAmount: ReturnType<typeof D> }[]) =>
+  items.reduce((s, i) => s.plus(i.cadAmount), D('0'));
+
+test('reinvestment (DRIP) rows are taxable dividend income, routed by security eligibility', async () => {
+  // A Questrade/OFX DRIP emits a SINGLE 'reinvestment' row carrying the dividend
+  // amount — there is NO paired 'dividend' row — so dropping it loses the income.
+  const { household, entity, account } = await seedPersonalInvestmentAccount('DRIP routing');
+  const eligSec = await Security.create({
+    symbol: 'XEI', name: 'iShares Cdn Div', currency: 'CAD', householdId: household.id, dividendEligibility: 'eligible',
+  } as never);
+  const nonElSec = await Security.create({
+    symbol: 'REIT', name: 'Small REIT', currency: 'CAD', householdId: household.id, dividendEligibility: 'non_eligible',
+  } as never);
+
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: eligSec.id, activityType: 'reinvestment',
+    tradeDate: '2025-03-15', quantity: '2.0000', amount: '100.0000', currency: 'CAD', fees: null,
+    description: 'DRIP', sourceRowFingerprint: 'fp-drip-elig', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: nonElSec.id, activityType: 'reinvestment',
+    tradeDate: '2025-06-15', quantity: '1.0000', amount: '40.0000', currency: 'CAD', fees: null,
+    description: 'DRIP', sourceRowFingerprint: 'fp-drip-nonel', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(sumCad(facts.eligibleDividends).toFixed(2), '100.00', 'eligible DRIP is dividend income');
+  assert.equal(sumCad(facts.nonEligibleDividends).toFixed(2), '40.00', 'non-eligible DRIP routes to non-eligible dividends');
+});
+
+test('staking_reward rows are taxable income on the interest line (L12100)', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Staking income');
+  const sec = await Security.create({
+    symbol: 'ETH', name: 'Ether', currency: 'CAD', householdId: household.id,
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'staking_reward',
+    tradeDate: '2025-04-01', quantity: '0.0030', amount: '8.92', currency: 'CAD', fees: null,
+    description: 'CRYPTORWD', sourceRowFingerprint: 'fp-stake-1', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(sumCad(facts.interestIncome).toFixed(2), '8.92', 'staking reward is ordinary income on L12100');
+});
+
+test('same-year buy then sell computes the capital gain from ACB (regression lock)', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Same-year sell');
+  const sec = await Security.create({ symbol: 'ABC', name: 'ABC', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-02-01', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-buy-sy', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-09-01', quantity: '100.0000', amount: '1200.0000', currency: 'CAD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-sell-sy', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1);
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '1200.00');
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '1000.00');
+});
+
+test('same-year return_of_capital reduces ACB and raises the realized gain (regression lock)', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Same-year ROC');
+  const sec = await Security.create({ symbol: 'ROC', name: 'ROC Fund', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-01-10', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-buy-roc', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'return_of_capital',
+    tradeDate: '2025-05-10', quantity: null, amount: '200.0000', currency: 'CAD', fees: null,
+    description: 'ROC', sourceRowFingerprint: 'fp-roc', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-11-10', quantity: '100.0000', amount: '1200.0000', currency: 'CAD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-sell-roc', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1);
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '800.00', 'ROC reduced ACB by 200');
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '1200.00');
+});
+
+test('capital gain uses ACB from prior-year buys, not just current-year rows', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Prior-year buy');
+  const sec = await Security.create({ symbol: 'PY', name: 'PriorYear', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2024-04-01', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-buy-py', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-04-01', quantity: '100.0000', amount: '1200.0000', currency: 'CAD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-sell-py', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1, 'only the 2025 disposition');
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '1200.00');
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '1000.00', 'ACB carried from the 2024 buy, not zeroed');
+});
+
+test('prior-year buy and return_of_capital both feed ACB for a current-year sale', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Prior-year ROC');
+  const sec = await Security.create({ symbol: 'PYR', name: 'PriorYearROC', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2024-03-01', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-buy-pyr', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'return_of_capital',
+    tradeDate: '2024-09-01', quantity: null, amount: '200.0000', currency: 'CAD', fees: null,
+    description: 'ROC', sourceRowFingerprint: 'fp-roc-pyr', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-03-01', quantity: '100.0000', amount: '1200.0000', currency: 'CAD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-sell-pyr', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1);
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '800.00', 'prior-year ROC reduced the carried ACB');
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '1200.00');
+});
+
+test('prior-year dispositions are excluded from the current-year capital gains', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Prior-year sell excluded');
+  const sec = await Security.create({ symbol: 'EX', name: 'Excl', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2023-01-01', quantity: '200.0000', amount: '2000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-buy-ex', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2024-06-01', quantity: '100.0000', amount: '1500.0000', currency: 'CAD', fees: null,
+    description: 'sell 2024', sourceRowFingerprint: 'fp-sell-ex-24', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-06-01', quantity: '100.0000', amount: '1800.0000', currency: 'CAD', fees: null,
+    description: 'sell 2025', sourceRowFingerprint: 'fp-sell-ex-25', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1, 'only the 2025 disposition is reported');
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '1800.00');
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '1000.00', 'ACB/unit 10 from the 2023 buy survives the 2024 partial sell');
+});
+
+test('a reinvestment is deduped against a synthetic Alpha Vantage dividend for the same payout', async () => {
+  // A Questrade DRIP imports as a single 'reinvestment' row with NO paired
+  // 'dividend'. The AV reconciler (which dedups only against
+  // activityType='dividend') then inserts a SYNTHETIC 'dividend' for the same
+  // ex-date payout. Counting both would double-count the dividend income.
+  const { household, entity, account } = await seedPersonalInvestmentAccount('DRIP dedup');
+  const sec = await Security.create({
+    symbol: 'XEI', name: 'iShares Cdn Div', currency: 'CAD', householdId: household.id, dividendEligibility: 'eligible',
+  } as never);
+
+  // Broker DRIP row carrying the $100 reinvested dividend.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'reinvestment',
+    tradeDate: '2025-03-12', quantity: '2.0000', amount: '100.0000', currency: 'CAD', fees: null,
+    description: 'DRIP', sourceRowFingerprint: 'fp-drip-dedup', importBatch: 'seed',
+  } as never);
+  // Synthetic AV dividend for the SAME payout, ex-date 2 days earlier (within the
+  // 5-day default dedup window).
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2025-03-10', quantity: null, amount: '100.0000', currency: 'CAD', fees: null,
+    description: 'Dividend reconciled from Alpha Vantage', sourceRowFingerprint: 'fp-av-dedup',
+    importBatch: 'alpha_vantage:dividends',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  // The payout must be counted ONCE ($100), not twice ($200).
+  assert.equal(sumCad(facts.eligibleDividends).toFixed(2), '100.00', 'DRIP + synthetic dividend is a single $100 payout');
+});
+
+test('a reinvestment outside the dedup window of any dividend is still counted', async () => {
+  // A March DRIP and an unrelated September cash dividend are different payouts;
+  // the window must not let the far dividend swallow the DRIP.
+  const { household, entity, account } = await seedPersonalInvestmentAccount('DRIP no-overlap');
+  const sec = await Security.create({
+    symbol: 'XEI', name: 'iShares Cdn Div', currency: 'CAD', householdId: household.id, dividendEligibility: 'eligible',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'reinvestment',
+    tradeDate: '2025-03-12', quantity: '2.0000', amount: '100.0000', currency: 'CAD', fees: null,
+    description: 'DRIP', sourceRowFingerprint: 'fp-drip-far', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2025-09-15', quantity: null, amount: '60.0000', currency: 'CAD', fees: null,
+    description: 'cash dividend', sourceRowFingerprint: 'fp-div-far', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(sumCad(facts.eligibleDividends).toFixed(2), '160.00', 'far-apart DRIP and dividend are both counted');
+});
+
+test('a reinvestment is NOT deduped against a same-security dividend in a DIFFERENT account', async () => {
+  // Two non-registered accounts both hold the same ETF. The AV reconciler always
+  // inserts its synthetic dividend into the SAME account as the holding, so a
+  // DRIP in account A and a cash dividend in account B on the same date are
+  // DISTINCT payouts and must both be counted.
+  const household = await Household.create({ name: 'DRIP cross-account' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'X-Acct', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const accountA = await Account.create({
+    name: 'A', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  const accountB = await Account.create({
+    name: 'B', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'XEI', name: 'iShares Cdn Div', currency: 'CAD', householdId: household.id, dividendEligibility: 'eligible',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: accountA.id, securityId: sec.id, activityType: 'reinvestment',
+    tradeDate: '2025-03-12', quantity: '2.0000', amount: '100.0000', currency: 'CAD', fees: null,
+    description: 'DRIP', sourceRowFingerprint: 'fp-xacct-drip', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: accountB.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2025-03-12', quantity: null, amount: '70.0000', currency: 'CAD', fees: null,
+    description: 'cash dividend', sourceRowFingerprint: 'fp-xacct-div', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(sumCad(facts.eligibleDividends).toFixed(2), '170.00', 'distinct accounts are distinct payouts; both counted');
+});
+
+test('investment income earned inside a registered account is excluded from personal T1 facts', async () => {
+  // Registered accounts (TFSA tax-free; RRSP/RRIF/FHSA taxed on withdrawal, not
+  // on in-account earnings) must NOT contribute interest/dividend income to the
+  // taxable T1. Only taxable accounts (non_registered / n_a) feed investment income.
+  const household = await Household.create({ name: 'Registered Exclusion' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const tfsa = await Account.create({
+    name: 'TFSA', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'registered_tfsa', defaultCurrency: 'CAD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'VFV', name: 'Vanguard SP500', currency: 'CAD', householdId: household.id,
+    dividendEligibility: 'eligible',
+  } as never);
+
+  await InvestmentActivity.create({
+    accountId: tfsa.id, securityId: null, activityType: 'interest',
+    tradeDate: '2025-03-01', quantity: null, amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'TFSA interest', sourceRowFingerprint: 'fp-reg-int-001', importBatch: 'seed-reg',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: tfsa.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2025-04-01', quantity: null, amount: '500.0000', currency: 'CAD', fees: null,
+    description: 'TFSA dividend', sourceRowFingerprint: 'fp-reg-div-001', importBatch: 'seed-reg',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.interestIncome.length, 0, 'registered (TFSA) interest is not taxable T1 income');
+  assert.equal(facts.eligibleDividends.length, 0, 'registered (TFSA) dividends are not taxable T1 income');
+  assert.equal(facts.nonEligibleDividends.length, 0, 'registered (TFSA) dividends are not taxable T1 income');
+});
+
+test('investment income earned inside a non-registered account is included', async () => {
+  // Mirror of the registered-exclusion test: a taxable account must still feed
+  // interest and dividend income — the fix restricts to taxable accounts, it
+  // must not drop them.
+  const household = await Household.create({ name: 'Non-Registered Inclusion' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const taxable = await Account.create({
+    name: 'Margin', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'VFV', name: 'Vanguard SP500', currency: 'CAD', householdId: household.id,
+    dividendEligibility: 'eligible',
+  } as never);
+
+  await InvestmentActivity.create({
+    accountId: taxable.id, securityId: null, activityType: 'interest',
+    tradeDate: '2025-03-01', quantity: null, amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'taxable interest', sourceRowFingerprint: 'fp-non-int-001', importBatch: 'seed-non',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: taxable.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2025-04-01', quantity: null, amount: '500.0000', currency: 'CAD', fees: null,
+    description: 'taxable dividend', sourceRowFingerprint: 'fp-non-div-001', importBatch: 'seed-non',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.interestIncome.length, 1, 'non-registered interest is taxable T1 income');
+  assert.equal(facts.interestIncome[0].cadAmount.toFixed(2), '1000.00');
+  assert.equal(facts.eligibleDividends.length, 1, 'non-registered dividend is taxable T1 income');
+  assert.equal(facts.eligibleDividends[0].cadAmount.toFixed(2), '500.00');
+});
+
+test('a sell inside a registered account produces no capital gain events', async () => {
+  // Dispositions inside registered accounts (RRSP/TFSA/etc.) are not taxable
+  // capital gains, so the ACB/cap-gains feed must exclude them.
+  const household = await Household.create({ name: 'Registered Cap Gain' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'personal', legalName: 'P', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const rrsp = await Account.create({
+    name: 'RRSP', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'registered_rrsp', defaultCurrency: 'CAD',
+  } as never);
+  const sec = await Security.create({
+    symbol: 'XEQT', name: 'iShares All-Equity', currency: 'CAD', householdId: household.id,
+    dividendEligibility: 'eligible',
+  } as never);
+
+  await InvestmentActivity.create({
+    accountId: rrsp.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-01-10', quantity: '100', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'RRSP buy', sourceRowFingerprint: 'fp-reg-buy-001', importBatch: 'seed-reg-cg',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: rrsp.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-06-10', quantity: '100', amount: '1500.0000', currency: 'CAD', fees: null,
+    description: 'RRSP sell', sourceRowFingerprint: 'fp-reg-sell-001', importBatch: 'seed-reg-cg',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+
+  assert.equal(facts.capitalGainEvents.length, 0, 'registered-account disposition is not a taxable capital gain');
 });

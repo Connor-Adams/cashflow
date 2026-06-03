@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -19,8 +19,23 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account, AccountType } from '../types/api'
+
+function formatMoney(value: number | null | undefined, currency: string | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  const code = (currency ?? 'CAD').toUpperCase()
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: code,
+      maximumFractionDigits: 0,
+    }).format(value)
+  } catch {
+    return `${value.toFixed(0)} ${code}`
+  }
+}
 
 const CURRENCY_OPTIONS = ['CAD', 'USD', 'EUR', 'GBP'] as const
 const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
@@ -46,6 +61,8 @@ export function AccountsPage() {
   const [editAccountType, setEditAccountType] = useState<AccountType>('checking')
   const [editVisibility, setEditVisibility] = useState<'private' | 'shared'>('private')
   const [editClosedAt, setEditClosedAt] = useState<string>('')
+  const [editCreditLimit, setEditCreditLimit] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -172,9 +189,25 @@ export function AccountsPage() {
       setErr('Default currency is required')
       return
     }
+    // creditLimit only travels on the wire for credit_card accounts; sending
+    // it for other kinds would 400. Validate > 0 inline for credit cards.
+    let creditLimitPayload: number | null | undefined = undefined
+    if (editAccountType === 'credit_card') {
+      const trimmed = editCreditLimit.trim()
+      if (trimmed === '') {
+        creditLimitPayload = null
+      } else {
+        const n = Number(trimmed)
+        if (!Number.isFinite(n) || n <= 0) {
+          setErr('Limit must be greater than 0.')
+          return
+        }
+        creditLimitPayload = n
+      }
+    }
     setErr(null)
     try {
-      await patchJson<Account>(`/api/accounts/${id}`, {
+      const payload: Record<string, unknown> = {
         name,
         owner: editOwner,
         shortCode: editShortCode.trim() || null,
@@ -182,7 +215,10 @@ export function AccountsPage() {
         accountType: editAccountType,
         visibility: editVisibility,
         closedAt: editClosedAt.trim() || null,
-      })
+      }
+      if (creditLimitPayload !== undefined) payload.creditLimit = creditLimitPayload
+      payload.notes = editNotes.trim() || null
+      await patchJson<Account>(`/api/accounts/${id}`, payload)
       setEditingId(null)
       setEditName('')
       setEditOwner('me')
@@ -191,6 +227,9 @@ export function AccountsPage() {
       setEditAccountType('checking')
       setEditVisibility('private')
       setEditClosedAt('')
+      setEditCreditLimit('')
+      setEditNotes('')
+      showToast({ title: 'Account saved.', variant: 'success', durationMs: 2000 })
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not update account')
@@ -206,6 +245,8 @@ export function AccountsPage() {
     setEditAccountType('checking')
     setEditVisibility('private')
     setEditClosedAt('')
+    setEditCreditLimit('')
+    setEditNotes('')
   }
 
   function startEdit(account: Account) {
@@ -217,6 +258,8 @@ export function AccountsPage() {
     setEditAccountType(account.accountType ?? 'checking')
     setEditVisibility(account.visibility ?? 'private')
     setEditClosedAt(account.closedAt ?? '')
+    setEditCreditLimit(account.creditLimit != null ? String(account.creditLimit) : '')
+    setEditNotes(account.notes ?? '')
   }
 
   const accountCount = accounts.length
@@ -374,17 +417,19 @@ export function AccountsPage() {
                 <TableHead>Default currency</TableHead>
                 <TableHead>Visibility</TableHead>
                 <TableHead>Closed</TableHead>
+                <TableHead>Credit limit</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
-                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={8} />
+                  <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
               ) : (
                 accounts.map((a) => (
-                  <TableRow key={a.id} className={a.closedAt ? 'opacity-60' : undefined}>
+                  <Fragment key={a.id}>
+                  <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
                       {editingId === a.id ? (
                         <select
@@ -409,7 +454,14 @@ export function AccountsPage() {
                           placeholder="Account name"
                         />
                       ) : (
-                        a.name
+                        <div>
+                          {a.name}
+                          {a.notes && (
+                            <p className="text-xs muted" style={{ marginTop: '0.125rem' }}>
+                              {a.notes.length > 100 ? `${a.notes.slice(0, 100)}…` : a.notes}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell>
@@ -488,6 +540,43 @@ export function AccountsPage() {
                       )}
                     </TableCell>
                     <TableCell>
+                      {editingId === a.id ? (
+                        editAccountType === 'credit_card' ? (
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={editCreditLimit}
+                            onChange={(e) => setEditCreditLimit(e.target.value)}
+                            placeholder="e.g. 5000"
+                            aria-label="Credit limit"
+                          />
+                        ) : (
+                          <span className="muted">—</span>
+                        )
+                      ) : a.accountType !== 'credit_card' ? (
+                        <span className="muted">—</span>
+                      ) : a.creditLimit == null ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => startEdit(a)}
+                        >
+                          Set credit limit
+                        </Button>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-sm">
+                            {formatMoney(a.currentBalance ?? 0, a.defaultCurrency)} /{' '}
+                            {formatMoney(a.creditLimit, a.defaultCurrency)}
+                          </span>
+                          <UtilizationBadge utilizationPct={a.utilizationPct} />
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <div className="accountsActionGroup">
                         {editingId === a.id ? (
                           <>
@@ -518,6 +607,33 @@ export function AccountsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {editingId === a.id && (
+                    <TableRow>
+                      <TableCell colSpan={9}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          <label className="text-sm font-medium" htmlFor={`notes-${a.id}`}>
+                            Notes
+                          </label>
+                          <textarea
+                            id={`notes-${a.id}`}
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            rows={3}
+                            maxLength={4000}
+                            placeholder="Routing number, custodian, tax ID, or any per-account reminder…"
+                            style={{ width: '100%', resize: 'vertical' }}
+                          />
+                          <span
+                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'muted'}`}
+                            aria-live="polite"
+                          >
+                            {editNotes.length}/4000
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 ))
               )}
             </TableBody>

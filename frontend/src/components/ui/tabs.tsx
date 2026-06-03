@@ -45,13 +45,16 @@ export function Tabs({ items, value, onValueChange, className, id }: TabsProps) 
             tabIndex={isActive ? 0 : -1}
             onClick={() => onValueChange(item.value)}
             onKeyDown={(event) => {
-              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+              const isArrow = event.key === 'ArrowRight' || event.key === 'ArrowLeft'
+              const isEdge = event.key === 'Home' || event.key === 'End'
+              if (!isArrow && !isEdge) return
               event.preventDefault()
               const idx = items.findIndex((i) => i.value === value)
-              const next =
-                event.key === 'ArrowRight'
-                  ? items[(idx + 1) % items.length]
-                  : items[(idx - 1 + items.length) % items.length]
+              let next: TabItem | undefined
+              if (event.key === 'Home') next = items[0]
+              else if (event.key === 'End') next = items[items.length - 1]
+              else if (event.key === 'ArrowRight') next = items[(idx + 1) % items.length]
+              else next = items[(idx - 1 + items.length) % items.length]
               if (next) onValueChange(next.value)
             }}
             className={cn(

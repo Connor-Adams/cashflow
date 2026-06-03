@@ -11,6 +11,16 @@ export type Account = {
   shortCode: string | null
   defaultCurrency: string | null
   closedAt: string | null
+  /** Credit limit (#437). Only set for credit_card accounts; null otherwise. */
+  creditLimit?: number | null
+  /** Current owed balance, derived from the transaction stream. Credit cards
+   *  only. Positive number. Null for non-credit accounts. */
+  currentBalance?: number | null
+  /** currentBalance / creditLimit × 100, or null when either is missing or
+   *  the card is closed. Frontend renders the badge tier from this. */
+  utilizationPct?: number | null
+  /** Free-form notes (max 4000 chars). Markdown rendered on the detail view. */
+  notes?: string | null
 }
 
 /**
@@ -150,6 +160,7 @@ export type Transaction = {
   autoBusiness: boolean | null
   businessOverride: boolean | null
   finalBusiness: boolean
+  taxTreatmentOverride: TaxTreatment | null
   autoSplitType: string | null
   splitOverride: string | null
   finalSplitType: string
@@ -212,6 +223,11 @@ export type Transaction = {
    */
   counterpartyContactId: number | null
   account?: Pick<Account, 'id' | 'name' | 'shortCode'>
+  /**
+   * Labels applied to this transaction (issue #270). Present on list/detail
+   * responses; an empty array when the transaction has no labels.
+   */
+  labels?: TransactionLabelRef[]
 }
 
 /**
@@ -437,13 +453,54 @@ export type Contact = {
   isPartner: boolean
 }
 
+export const TAX_TREATMENTS = [
+  'none',
+  'employment_income',
+  'donations',
+  'rrsp_contribution',
+  'fhsa_contribution',
+  'eligible_dividend',
+  'non_eligible_dividend',
+  'salary',
+  'loan_advance',
+  'loan_repayment',
+  'not_income',
+] as const
+
+export type TaxTreatment = (typeof TAX_TREATMENTS)[number]
+
+export function isTaxTreatment(value: unknown): value is TaxTreatment {
+  return (
+    typeof value === 'string' &&
+    (TAX_TREATMENTS as readonly string[]).includes(value)
+  )
+}
+
 export type Category = {
   id: number
   householdId: number
   name: string
   icon: string | null
+  taxTreatment: TaxTreatment
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * A free-text transaction label (issue #270). Household-scoped, max 32 chars,
+ * case-insensitively unique per household. `usageCount` is the number of
+ * transactions tagged with it; present on the GET /api/labels list response.
+ */
+export type Label = {
+  id: number
+  name: string
+  usageCount?: number
+}
+
+/** The shape a transaction carries for each applied label (id + name only). */
+export type TransactionLabelRef = {
+  id: number
+  name: string
 }
 
 export type AuthUser = {
@@ -471,6 +528,7 @@ export type Rule = {
   effectiveFrom: string | null
   effectiveTo: string | null
   usageCount?: number
+  updatedAt?: string
 }
 
 export type Paginated<T> = {
@@ -882,6 +940,10 @@ export type ExternalOrderItemView = {
   id: number;
   externalOrderId: number;
   title: string;
+  /** AI-expanded human-readable product name; null = show `title`. */
+  displayName?: string | null;
+  /** Vendor item/article number (e.g. Costco), when captured. */
+  itemNumber?: string | null;
   quantity: number;
   unitPrice: string | null;
   totalPrice: string | null;
@@ -889,6 +951,17 @@ export type ExternalOrderItemView = {
   categoryOverride: string | null;
   businessUsePercent: string | null;
   businessUseOverride: string | null;
+};
+
+export type TripDetailView = {
+  pickupAddress: string | null;
+  dropoffAddress: string | null;
+  distance: number | null;
+  distanceUnit: 'km' | 'mi' | null;
+  durationMinutes: number | null;
+  requestedAt: string | null;
+  driver: string | null;
+  surgeMultiplier: number | null;
 };
 
 export type ExternalOrderView = {
@@ -899,6 +972,7 @@ export type ExternalOrderView = {
   shipping: string | null;
   total: string | null;
   currency: string;
+  trip?: TripDetailView | null;
 };
 
 export type ReceiptWithItems = {
@@ -1029,6 +1103,7 @@ export type ItemRow = {
   qty: number
   unitPrice: number | null
   totalPrice: number | null
+  currency: string
   taxShare: number
   categoryEffective: string | null
   categoryOverride: string | null
@@ -1182,7 +1257,7 @@ export type PortfolioByAccountTypeRow = {
 }
 
 export type PortfolioByAccountTypeBucket = {
-  taxStatus: 'registered_tfsa' | 'registered_rrsp' | 'registered_fhsa' | 'registered_rrif' | 'non_registered' | 'n_a'
+  taxStatus: 'registered_tfsa' | 'registered_rrsp' | 'registered_fhsa' | 'registered_rrif' | 'registered_rdsp' | 'registered_resp' | 'non_registered' | 'n_a'
   label: string
   accounts: Array<{ id: number; name: string; currency: string }>
   holdingsCount: number
@@ -1249,7 +1324,7 @@ export type PortfolioForwardIncomeRow = {
 export type PortfolioForwardIncomeTaxBucket = {
   taxStatus:
     | 'registered_rrsp' | 'registered_tfsa' | 'registered_fhsa'
-    | 'registered_rrif' | 'non_registered' | 'n_a';
+    | 'registered_rrif' | 'registered_rdsp' | 'registered_resp' | 'non_registered' | 'n_a';
   byCurrency: Array<{ currency: string; amount: number }>;
   totalCad: number;
 };
@@ -1453,4 +1528,179 @@ export type DebtLiabilityProfile = {
   minimumPayment: number
   statementBalance: number | null
   dueDay: number | null
+}
+
+// ── Dividend payout reconciliation (issue #305) ──────────────────────────────
+
+export type DividendReconciliationStatus = 'upcoming' | 'matched' | 'unmatched'
+
+/** A matched or unmatched dividend reconciliation row. */
+export type DividendReconciliationRow = {
+  reconciliationId: number
+  securityDividendId: number
+  accountId: number
+  accountName: string | null
+  symbol: string | null
+  securityName: string | null
+  exDividendDate: string
+  paymentDate: string | null
+  /** per-share amount (string decimal). */
+  perShareAmount: string
+  shares: string | null
+  expectedAmount: number | null
+  actualAmount: number | null
+  currency: string | null
+  matchedTransactionId: number | null
+  matchedAt: string | null
+  matchSource: string
+  variancePct: number | null
+  varianceFlag: boolean
+}
+
+/** An upcoming (future-payment) dividend on a held security. */
+export type DividendUpcomingRow = {
+  securityDividendId: number
+  symbol: string | null
+  securityName: string | null
+  exDividendDate: string
+  paymentDate: string | null
+  perShareAmount: string
+  currency: string
+}
+
+/** GET /api/dividends response (the `data` shape depends on `status`). */
+export type DividendListResponse = {
+  status: DividendReconciliationStatus
+  windowMonths: number
+  data: DividendReconciliationRow[] | DividendUpcomingRow[]
+}
+
+/** A candidate transaction for the manual-match modal. */
+export type DividendCandidate = {
+  id: number
+  accountId: number
+  amount: number
+  date: string
+  merchant: string | null
+  currency: string
+  score: number | null
+  warning: 'debit' | 'wrong_account' | null
+}
+
+/** GET /api/dividends/:id/candidates response. */
+export type DividendCandidatesResponse = {
+  candidates: DividendCandidate[]
+}
+// ---------------------------------------------------------------------------
+// Credit-card payment planner (#243) — operational bill management.
+// ---------------------------------------------------------------------------
+
+/** How a planned card payment sizes its amount. */
+export type CardPaymentStrategy = 'statement' | 'minimum' | 'current'
+
+/** How much autopay draws each cycle. */
+export type CardAutopayType = 'full' | 'minimum' | 'fixed'
+
+/** One credit card returned by GET /api/credit-cards. */
+export type CreditCard = {
+  accountId: number
+  name: string
+  accountType: string
+  currency: string
+  /** Transaction-derived amount currently owed, as a positive number. */
+  currentBalance: number
+  /** User-entered statement-balance snapshot, or null. */
+  statementBalance: number | null
+  minimumPayment: number
+  /** Day-of-month (1-31) the payment is due, or null. */
+  dueDay: number | null
+  /** YYYY-MM-DD the current statement closed, or null. */
+  statementDate: string | null
+  autopayEnabled: boolean
+  autopayType: CardAutopayType | null
+  autopayAmount: number | null
+  /** The cash account the bill is paid from, or null. */
+  paymentAccountId: number | null
+  /** User-entered credit limit (#437), or null. */
+  creditLimit: number | null
+  /** currentBalance / creditLimit × 100, or null when either is missing or
+   *  the card is closed. */
+  utilizationPct: number | null
+  /** Next calendar due date derived from dueDay, or null. */
+  nextDueDate: string | null
+  /** Whole days until nextDueDate (>= 0), or null when no dueDay set. */
+  daysUntilDue: number | null
+  /** True when a payment is due within the warning window. */
+  dueSoon: boolean
+}
+
+/** Response shape of GET /api/credit-cards. */
+export type CreditCardsOverview = {
+  currency: string
+  asOfDate: string
+  cards: CreditCard[]
+}
+
+/** The profile row returned by PUT /api/credit-cards/:accountId. */
+export type CreditCardProfile = {
+  accountId: number
+  statementBalance: number | null
+  minimumPayment: number
+  dueDay: number | null
+  statementDate: string | null
+  autopayEnabled: boolean
+  autopayType: CardAutopayType | null
+  autopayAmount: number | null
+  paymentAccountId: number | null
+  creditLimit: number | null
+}
+
+/**
+ * Per-currency credit-utilization summary returned by
+ * GET /api/networth/credit-utilization (#437).
+ */
+export type CreditUtilizationByCurrency = {
+  currency: string
+  utilizationPct: number
+  cardCount: number
+  totalBalance: number
+  totalLimit: number
+  byCard: Array<{
+    accountId: number
+    name: string
+    currentBalance: number
+    creditLimit: number
+    utilizationPct: number
+  }>
+}
+
+/** The planned-event summary returned by the payment / mark-paid endpoints. */
+export type CardPaymentPlannedEvent = {
+  id: number
+  accountId: number | null
+  type?: string
+  name?: string
+  amount?: string
+  currency?: string
+  expectedDate?: string
+  source?: string
+  status: string
+  linkedTransactionId: number | null
+}
+
+/**
+ * Safe-to-spend impact echoed back when a card payment is planned, so the UI
+ * can warn without a follow-up request. A structural subset of the backend's
+ * full safe-to-spend result (extra fields are ignored).
+ */
+export type CardSafeToSpendImpact = {
+  currency: string
+  value: number
+  isNegative: boolean
+}
+
+/** Response shape of POST /api/credit-cards/:accountId/payment. */
+export type CreditCardPaymentResponse = {
+  plannedEvent: CardPaymentPlannedEvent
+  safeToSpend: CardSafeToSpendImpact | null
 }

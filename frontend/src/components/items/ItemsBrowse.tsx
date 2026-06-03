@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'
+import { formatMoney } from '../../lib/formatMoney'
 import type { ItemRow } from '@cashflow/shared'
 
-type GroupBy = 'receipt' | 'category' | 'none'
+type GroupBy = 'purchase' | 'category' | 'none'
 
 type Props = {
   filters: ItemsFilters
@@ -14,7 +15,7 @@ type Props = {
 
 export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
   const { items, nextCursor, loading, error, fetchMore } = useItemsQuery(filters)
-  const [groupBy, setGroupBy] = useState<GroupBy>('receipt')
+  const [groupBy, setGroupBy] = useState<GroupBy>('purchase')
   const [groupMenuOpen, setGroupMenuOpen] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -71,7 +72,7 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
               role="menu"
               className="absolute z-10 mt-1 rounded border border-border bg-card text-sm shadow"
             >
-              {(['receipt', 'category', 'none'] as GroupBy[]).map((g) => (
+              {(['purchase', 'category', 'none'] as GroupBy[]).map((g) => (
                 <button
                   key={g}
                   role="menuitem"
@@ -137,7 +138,7 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
                 </button>
                 <span className="text-muted-foreground">{r.categoryEffective ?? '—'}</span>
                 <span className="w-16 text-right">
-                  {r.totalPrice != null ? `$${r.totalPrice.toFixed(2)}` : '—'}
+                  {r.totalPrice != null ? formatMoney(r.totalPrice, r.currency) : '—'}
                 </span>
               </li>
             ))}
@@ -157,9 +158,9 @@ function groupItems(
   if (by === 'none') return [{ key: 'all', label: 'All', rows }]
   const buckets = new Map<string, { key: string; label: string; rows: ItemRow[] }>()
   for (const r of rows) {
-    const key = by === 'receipt' ? `${r.receipt.id}` : (r.categoryEffective ?? '__none__')
+    const key = by === 'purchase' ? `${r.receipt.id}` : (r.categoryEffective ?? '__none__')
     const label =
-      by === 'receipt'
+      by === 'purchase'
         ? `${r.order.vendor} · ${r.receipt.date ?? '—'}`
         : (r.categoryEffective ?? 'Uncategorized')
     if (!buckets.has(key)) buckets.set(key, { key, label, rows: [] })

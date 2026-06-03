@@ -463,6 +463,9 @@ export async function parseStatementFile(opts: {
    * (Save for business, Corporate investing).
    */
   overrideBusiness?: boolean;
+  /** Pre-extracted pdfjs lines. When set, the .pdf branch skips extractPdfLines
+   *  (avoids a second pdfjs pass when the caller already extracted). */
+  preExtractedLines?: import('./pdf/types').PdfLine[];
 }): Promise<StatementPreview | { ok: false; error: string }> {
   const account = await Account.findOne({
     where: {
@@ -734,10 +737,14 @@ export async function parseStatementFile(opts: {
     // Guard is idempotent — safe to call here so registration only runs for PDF uploads.
     registerBuiltInPdfParsers();
     let lines;
-    try {
-      lines = await extractPdfLines(opts.buffer);
-    } catch (err) {
-      return { ok: false, error: `Could not read PDF: ${(err as Error).message}` };
+    if (opts.preExtractedLines) {
+      lines = opts.preExtractedLines;
+    } else {
+      try {
+        lines = await extractPdfLines(opts.buffer);
+      } catch (err) {
+        return { ok: false, error: `Could not read PDF: ${(err as Error).message}` };
+      }
     }
     const parser = findPdfParser(lines);
     if (!parser) {
@@ -754,6 +761,10 @@ export async function parseStatementFile(opts: {
       amount: v.amount,
       currency: v.currency,
       sourceReference: v.sourceReference,
+      // Authoritative txnType from the parser (WS code / CC TYPE column) — wins
+      // over enrichment's narrative guess in the commit pipeline. undefined for
+      // parsers/rows that carry no such signal.
+      overrideTxnType: v.overrideTxnType,
       sourceRowFingerprint: rowFingerprint({
         accountId: account.id,
         date: v.date,
@@ -780,19 +791,29 @@ export async function parseStatementFile(opts: {
     }));
     const holdings: NormalizedHoldingSnapshot[] = (out.holdings ?? []).map((h) => ({
       ...h,
-      sourceRowFingerprint: stableFingerprint({
-        kind: 'holding',
-        accountId: account.id,
-        statementDate: h.statementDate,
-        symbol: h.security.symbol,
-        quantity: h.quantity,
-        marketValue: h.marketValue,
-      }),
+      sourceRowFingerprint:
+        parser.holdingFingerprint === 'ws_holding'
+          ? stableFingerprint({
+              kind: 'ws_holding',
+              accountId: account.id,
+              statementDate: h.statementDate,
+              symbol: h.security.symbol.toUpperCase(),
+              currency: h.currency,
+            })
+          : stableFingerprint({
+              kind: 'holding',
+              accountId: account.id,
+              statementDate: h.statementDate,
+              symbol: h.security.symbol,
+              quantity: h.quantity,
+              marketValue: h.marketValue,
+            }),
     }));
     const preview = {
       ...base,
       usedParser: 'pdf' as const,
       usedProfileId: parser.id,
+      ...(parser.crossSourceDedup ? { crossSourceDedup: parser.crossSourceDedup } : {}),
       transactions,
       investmentActivities,
       holdings,

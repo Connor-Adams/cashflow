@@ -69,6 +69,12 @@ export type DashboardAggregates = {
       totalSpend: number;
       totalCredits: number;
       totalPayments: number;
+      /**
+       * Income inflow (txnType='income') peeled out of totalCredits so the
+       * dashboard renders it as its own line. Excluded from netSpend — a
+       * paycheck is not a refund against spend.
+       */
+      totalIncome: number;
       netSpend: number;
       transactionCount: number;
       /**
@@ -92,6 +98,7 @@ export type DashboardAggregates = {
       totalSpend: number;
       totalCredits: number;
       totalPayments: number;
+      totalIncome: number;
       netSpend: number;
     }
   >;
@@ -102,6 +109,7 @@ export type DashboardAggregates = {
       splitType: string;
       totalSpend: number;
       totalCredits: number;
+      totalIncome: number;
       netSpend: number;
     }
   >;
@@ -113,6 +121,7 @@ export type DashboardAggregates = {
       totalSpend: number;
       totalCredits: number;
       netSpend: number;
+      income: number;
     }
   >;
   categoryReports: Map<
@@ -133,6 +142,7 @@ export type DashboardAggregates = {
       totalSpend: number;
       totalCredits: number;
       totalPayments: number;
+      totalIncome: number;
       netSpend: number;
       transactionCount: number;
       lastDate: string;
@@ -149,6 +159,7 @@ export type DashboardAggregates = {
       totalSpend: number;
       totalCredits: number;
       totalPayments: number;
+      totalIncome: number;
       netSpend: number;
       transactionCount: number;
       reviewCount: number;
@@ -219,6 +230,7 @@ export function aggregateDashboard(
       totalSpend: 0,
       totalCredits: 0,
       totalPayments: 0,
+      totalIncome: 0,
       netSpend: 0,
       transactionCount: 0,
       refundCredits: 0,
@@ -246,6 +258,7 @@ export function aggregateDashboard(
       totalSpend: 0,
       totalCredits: 0,
       totalPayments: 0,
+      totalIncome: 0,
       netSpend: 0,
       transactionCount: 0,
       lastDate: row.date,
@@ -264,6 +277,7 @@ export function aggregateDashboard(
       totalSpend: 0,
       totalCredits: 0,
       totalPayments: 0,
+      totalIncome: 0,
       netSpend: 0,
       transactionCount: 0,
       reviewCount: 0,
@@ -279,6 +293,16 @@ export function aggregateDashboard(
       metrics.totalPayments += amount;
       merchantSummary.totalPayments += amount;
       accountSummary.totalPayments += amount;
+    // NOTE: income folds into totalCredits here (headline/merchant/account).
+    // Only the per-business aggregate below splits income out — see that block.
+    } else if (positiveBucket === 'credit' && row.txnType === 'income') {
+      // Income (direct deposits, payroll) is positive inflow but NOT a refund
+      // against spend. Peel it into its own totalIncome line — mirroring the
+      // per-business `income` split below — so paychecks don't inflate the
+      // refunds/credits bucket or deflate netSpend (= totalSpend - totalCredits).
+      metrics.totalIncome += amount;
+      merchantSummary.totalIncome += amount;
+      accountSummary.totalIncome += amount;
     } else if (positiveBucket === 'credit') {
       metrics.totalCredits += amount;
       merchantSummary.totalCredits += amount;
@@ -350,22 +374,28 @@ export function aggregateDashboard(
           },
         ];
 
-    for (const alloc of allocations) {
-      const key = [
-        row.currency,
-        alloc.category ?? '',
-        row.finalBusiness ? '1' : '0',
-        row.finalSplitType,
-      ].join('\0');
-      const existing = byCategory.get(key) ?? {
-        currency: row.currency,
-        category: alloc.category,
-        finalBusiness: row.finalBusiness,
-        finalSplitType: row.finalSplitType,
-        sumAmount: 0,
-      };
-      existing.sumAmount += alloc.amount;
-      byCategory.set(key, existing);
+    // Income (txnType='income') is inflow, not category data — keep it out of
+    // the per-category sumAmount breakdown so a paycheck doesn't pile into the
+    // null/Uncategorized bucket as a positive. Mirrors the categoryReports
+    // income peel and the headline peel (PR #531).
+    if (row.txnType !== 'income') {
+      for (const alloc of allocations) {
+        const key = [
+          row.currency,
+          alloc.category ?? '',
+          row.finalBusiness ? '1' : '0',
+          row.finalSplitType,
+        ].join('\0');
+        const existing = byCategory.get(key) ?? {
+          currency: row.currency,
+          category: alloc.category,
+          finalBusiness: row.finalBusiness,
+          finalSplitType: row.finalSplitType,
+          sumAmount: 0,
+        };
+        existing.sumAmount += alloc.amount;
+        byCategory.set(key, existing);
+      }
     }
 
     const monthlyKey = `${month}\0${currency}`;
@@ -375,6 +405,7 @@ export function aggregateDashboard(
       totalSpend: 0,
       totalCredits: 0,
       totalPayments: 0,
+      totalIncome: 0,
       netSpend: 0,
     };
     const splitKey = `${currency}\0${row.finalSplitType}`;
@@ -383,12 +414,18 @@ export function aggregateDashboard(
       splitType: row.finalSplitType,
       totalSpend: 0,
       totalCredits: 0,
+      totalIncome: 0,
       netSpend: 0,
     };
     if (amount < 0 && !nonSpend) {
       const spend = -amount;
       monthly.totalSpend += spend;
       split.totalSpend += spend;
+    } else if (amount > 0 && row.txnType === 'income') {
+      // Income peeled out of credits here too, so the monthly curve and split
+      // tiles reconcile with the income-free headline netSpend.
+      monthly.totalIncome += amount;
+      split.totalIncome += amount;
     } else if (amount > 0) {
       monthly.totalCredits += amount;
       split.totalCredits += amount;
@@ -421,11 +458,24 @@ export function aggregateDashboard(
           totalSpend: 0,
           totalCredits: 0,
           netSpend: 0,
+          income: 0,
         };
+        // Income (txnType='income') is peeled into its own `income` bucket so
+        // the dashboard can show business/personal Income and Spend separately;
+        // netSpend (= totalSpend - totalCredits) is Spend and excludes income.
+        // This split is intentionally tile-scoped: the metrics / merchant /
+        // account / category aggregates above still fold income into credits.
+        // Negative-amount income (a reversal) is non-spend (income ∈
+        // NON_SPEND_TXN_TYPES) so it hits neither branch and contributes to
+        // nothing — correct: an income reversal is money-movement, not spend.
         if (part < 0 && !nonSpend) {
           business.totalSpend += -part;
         } else if (part > 0) {
-          business.totalCredits += part;
+          if (row.txnType === 'income') {
+            business.income += part;
+          } else {
+            business.totalCredits += part;
+          }
         }
         business.netSpend = business.totalSpend - business.totalCredits;
         netSpendByBusiness.set(businessKey, business);
@@ -443,7 +493,9 @@ export function aggregateDashboard(
       };
       if (alloc.amount < 0 && !nonSpend) {
         category.totalSpend += -alloc.amount;
-      } else if (alloc.amount > 0) {
+      } else if (alloc.amount > 0 && row.txnType !== 'income') {
+        // Income is inflow, not a credit against any spend category — exclude
+        // it from category reports (it has no meaningful category to net).
         category.totalCredits += alloc.amount;
       }
       category.netSpend = category.totalSpend - category.totalCredits;

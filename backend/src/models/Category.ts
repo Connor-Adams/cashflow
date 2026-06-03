@@ -16,6 +16,7 @@ export class Category extends Model<
   declare householdId: number;
   declare name: string;
   declare icon: string | null;
+  declare taxTreatment: CreationOptional<string>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -31,6 +32,12 @@ export function initCategory(sequelize: Sequelize): typeof Category {
       },
       name: { type: DataTypes.STRING(128), allowNull: false },
       icon: { type: DataTypes.STRING(64), allowNull: true },
+      taxTreatment: {
+        type: DataTypes.STRING(32),
+        field: 'tax_treatment',
+        allowNull: false,
+        defaultValue: 'none',
+      },
     } as ModelAttributes<Category>,
     {
       sequelize,

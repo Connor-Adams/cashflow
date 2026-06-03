@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   summarizeOpenForContact,
   todayIso,
@@ -120,12 +121,11 @@ router.post('/', async (req, res, next) => {
       }
       isPartner = parsed;
     }
-    const row = await Contact.create({
-      householdId: household.id,
-      name,
-      notes: b.notes != null ? String(b.notes) : null,
-      isPartner,
-    });
+    const row = await findOrCreateContactByName(household.id, name);
+    let changed = false;
+    if (b.notes != null) { row.set('notes', String(b.notes)); changed = true; }
+    if (isPartner) { row.set('isPartner', true); changed = true; }
+    if (changed) await row.save();
     res.status(201).json(row);
   } catch (e) {
     next(e);
