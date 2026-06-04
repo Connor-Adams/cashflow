@@ -60,6 +60,29 @@ test('computeTwr — multi-period chain', () => {
   approxEqual(computeTwr(points), 20, 0.1);
 });
 
+test('computeTwr — trailing zero/stale final MV must NOT collapse to -100%', () => {
+  // Real growth +20% over the period, then the final day has a stale/missing MV of 0
+  // (e.g. price coverage ended). The trailing zero must not collapse TWR to -100%.
+  const points: DailyPoint[] = [
+    { date: '2026-01-01', marketValueCad: 1000, cashFlowCad: 0 },
+    { date: '2026-01-02', marketValueCad: 1200, cashFlowCad: 0 },
+    { date: '2026-01-03', marketValueCad: 0, cashFlowCad: 0 },
+  ];
+  approxEqual(computeTwr(points), 20, 0.1);
+});
+
+test('computeTwr — mid-series cashflow still computes correctly with trailing zero (regression)', () => {
+  // Day1 1000 → Day2 1100 (+10%) → Day3 2000 (deposit 800, +9.09%) → Day4 stale 0.
+  // TWR should remain (1.10)(1.0909) - 1 = 20%, ignoring the trailing zero.
+  const points: DailyPoint[] = [
+    { date: '2026-01-01', marketValueCad: 1000, cashFlowCad: 0 },
+    { date: '2026-01-02', marketValueCad: 1100, cashFlowCad: 0 },
+    { date: '2026-01-03', marketValueCad: 2000, cashFlowCad: 800 },
+    { date: '2026-01-04', marketValueCad: 0, cashFlowCad: 0 },
+  ];
+  approxEqual(computeTwr(points), 20, 0.1);
+});
+
 test('computeXirr — single deposit + 1Y final value of 1.10x → ~10%', () => {
   const cf: IrrCashFlow[] = [
     { date: '2025-01-01', amount: -1000 },

@@ -65,13 +65,17 @@ async function makeHousehold(name = 'Test Household') {
   return models.Household.create({ name });
 }
 
-async function makeAccount(householdId: number, opts: { name?: string; type?: string } = {}) {
+async function makeAccount(
+  householdId: number,
+  opts: { name?: string; type?: string; closedAt?: string | null } = {},
+) {
   return models.Account.create({
     householdId,
     name: opts.name ?? 'Brokerage',
     owner: 'shared',
     accountType: opts.type ?? 'investment',
     currency: 'USD',
+    closedAt: opts.closedAt ?? null,
   });
 }
 
@@ -397,4 +401,56 @@ test('markStaleForAllHoldersOfSecurity: marks rows across households', async () 
   for (const row of rows) {
     assert.ok(row.staleAt !== null, `staleAt should be set for household ${row.householdId}`);
   }
+});
+
+test('builder: excludes holdings from closed investment accounts', async () => {
+  const hh = await makeHousehold();
+  const openAcct = await makeAccount(hh.id, { name: 'Open Brokerage' });
+  // Closed before asOf — its holdings must NOT count toward the projection.
+  const closedAcct = await makeAccount(hh.id, { name: 'Closed Margin', closedAt: '2024-12-19' });
+  const sec = await makeSecurity(hh.id, { symbol: 'CADIV', currency: 'CAD' });
+
+  // Open account: 100 shares. Closed account: 225 shares of the SAME security.
+  await makeHolding({ accountId: openAcct.id, householdId: hh.id, securityId: sec.id, statementDate: '2025-05-01', quantity: '100', currency: 'CAD' });
+  await makeHolding({ accountId: closedAcct.id, householdId: hh.id, securityId: sec.id, statementDate: '2024-12-01', quantity: '225', currency: 'CAD' });
+
+  // 4 quarterly dividends of $0.19 → $0.76/yr per share.
+  const asOf = new Date('2026-05-01T00:00:00.000Z');
+  await makeDividend({ securityId: sec.id, exDate: '2025-05-15', amount: '0.19', currency: 'CAD' });
+  await makeDividend({ securityId: sec.id, exDate: '2025-08-15', amount: '0.19', currency: 'CAD' });
+  await makeDividend({ securityId: sec.id, exDate: '2025-11-15', amount: '0.19', currency: 'CAD' });
+  await makeDividend({ securityId: sec.id, exDate: '2026-02-15', amount: '0.19', currency: 'CAD' });
+
+  const result = await rebuildForwardProjectionsForHousehold(hh.id, asOf);
+  assert.equal(result.rebuilt, 1);
+
+  const row = await models.PortfolioForwardProjection.findOne({ where: { householdId: hh.id, securityId: sec.id } });
+  assert.ok(row, 'projection row should exist');
+  assert.equal(Number(row.qtyBasis), 100, `qtyBasis should be 100 (open account only), got ${row.qtyBasis}`);
+  assert.ok(
+    Math.abs(Number(row.projectedAnnualIncomeNative) - 76) < 1,
+    `projectedAnnualIncomeNative should be ~76 (100 sh × $0.76), got ${row.projectedAnnualIncomeNative}`,
+  );
+});
+
+test('builder: counts accounts whose closedAt is after asOf (future close)', async () => {
+  const hh = await makeHousehold();
+  // closedAt is AFTER asOf → account is still open as of the projection date.
+  const futureClosedAcct = await makeAccount(hh.id, { name: 'Future Close', closedAt: '2026-12-31' });
+  const sec = await makeSecurity(hh.id, { symbol: 'CADIV', currency: 'CAD' });
+
+  await makeHolding({ accountId: futureClosedAcct.id, householdId: hh.id, securityId: sec.id, statementDate: '2025-05-01', quantity: '100', currency: 'CAD' });
+
+  const asOf = new Date('2026-05-01T00:00:00.000Z');
+  await makeDividend({ securityId: sec.id, exDate: '2025-05-15', amount: '0.19', currency: 'CAD' });
+  await makeDividend({ securityId: sec.id, exDate: '2025-08-15', amount: '0.19', currency: 'CAD' });
+  await makeDividend({ securityId: sec.id, exDate: '2025-11-15', amount: '0.19', currency: 'CAD' });
+  await makeDividend({ securityId: sec.id, exDate: '2026-02-15', amount: '0.19', currency: 'CAD' });
+
+  const result = await rebuildForwardProjectionsForHousehold(hh.id, asOf);
+  assert.equal(result.rebuilt, 1);
+
+  const row = await models.PortfolioForwardProjection.findOne({ where: { householdId: hh.id, securityId: sec.id } });
+  assert.ok(row, 'projection row should exist');
+  assert.equal(Number(row.qtyBasis), 100, `future-closed account should still count, got qtyBasis ${row.qtyBasis}`);
 });

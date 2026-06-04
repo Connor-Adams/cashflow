@@ -5,14 +5,21 @@ export interface DailyPoint {
 }
 
 export function computeTwr(points: DailyPoint[]): number {
-  if (points.length < 2) return 0;
-  if (points[0].marketValueCad === 0) return 0;
+  // Drop trailing zero-market-value points. A trailing 0 is a stale/missing-data
+  // day (e.g. daily-price coverage ended), not a real liquidation, and would
+  // otherwise drive the final period return to -1 and collapse TWR to -100%.
+  let end = points.length;
+  while (end > 0 && points[end - 1].marketValueCad === 0) end -= 1;
+  const series = end === points.length ? points : points.slice(0, end);
+
+  if (series.length < 2) return 0;
+  if (series[0].marketValueCad === 0) return 0;
 
   let product = 1;
-  for (let i = 1; i < points.length; i++) {
-    const mvStart = points[i - 1].marketValueCad;
-    const mvEnd = points[i].marketValueCad;
-    const cashFlow = points[i].cashFlowCad;
+  for (let i = 1; i < series.length; i++) {
+    const mvStart = series[i - 1].marketValueCad;
+    const mvEnd = series[i].marketValueCad;
+    const cashFlow = series[i].cashFlowCad;
     if (mvStart === 0) continue;
     const r = (mvEnd - cashFlow) / mvStart - 1;
     product *= 1 + r;

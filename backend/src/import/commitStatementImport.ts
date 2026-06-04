@@ -259,6 +259,7 @@ export async function commitStatementImport(
         incomingStatus: 'posted',
         incomingDate: row.date,
         incomingAmount: row.amount,
+        incomingCurrency: row.currency,
         incomingMerchantRaw: row.merchantRaw,
       });
       if (dedup.kind !== 'no-match') {

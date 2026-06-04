@@ -440,3 +440,93 @@ test('purchase: a normal coffee purchase still classifies as purchase', () => {
   });
   assert.equal(out[0].fields.txnType, 'purchase');
 });
+
+// === Additional internal-money-movement patterns (2026-06-03) ===
+// Common bank narratives for account-to-account transfers and credit-card /
+// loan bill payments that did NOT match any existing PATTERN and so fell
+// through to the negative-default 'purchase' (or positive 'unknown'),
+// inflating dashboard totalSpend. Each phrase below is unambiguous regardless
+// of sign — these are exclusively internal money movement, never spend.
+
+test('transfer: "ONLINE BANKING TRANSFER - 9865" is a transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING TRANSFER - 9865',
+    merchantClean: 'ONLINE BANKING TRANSFER - 9865',
+    amount: -2447.88,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: "Sent money to <person>" is a transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Sent money to Connor Adams',
+    merchantClean: 'Sent money to Connor Adams',
+    amount: -5000,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: "Received money from <X>" is a transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Received money from RBC Bank (Georgi)',
+    merchantClean: 'Received money from RBC Bank (Georgi)',
+    amount: 41024.86,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: "Topped up account" is a transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Topped up account',
+    merchantClean: 'Topped up account',
+    amount: 25758,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('payment: "ONLINE BANKING PAYMENT - 3380 BMO MASTERCD" is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING PAYMENT - 3380 BMO MASTERCD',
+    merchantClean: 'ONLINE BANKING PAYMENT - 3380 BMO MASTERCD',
+    amount: -9351.93,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: "Online bill payment for CIBC MASTERCARD" is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Online bill payment for CIBC MASTERCARD ...',
+    merchantClean: 'Online bill payment for CIBC MASTERCARD ...',
+    amount: -4049,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: "MISC PAYMENT AMEX BILL PYMT" is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'MISC PAYMENT AMEX BILL PYMT',
+    merchantClean: 'MISC PAYMENT AMEX BILL PYMT',
+    amount: -64163.96,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('GUARD: normal purchase "TIM HORTONS #123" stays purchase', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'TIM HORTONS #123',
+    merchantClean: 'TIM HORTONS #123',
+    amount: -4.5,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
+
+test('GUARD: "E-TRANSFER SENT BET365" stays purchase (not over-broadened)', () => {
+  // Intentionally NOT reclassified — bare "e-transfer sent" is ambiguous
+  // (gambling deposits, paying a person for goods), so it is deferred.
+  const out = runDetectTypeStage({
+    merchantRaw: 'E-TRANSFER SENT BET365',
+    merchantClean: 'E-TRANSFER SENT BET365',
+    amount: -100,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
