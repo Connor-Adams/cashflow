@@ -42,7 +42,7 @@ test('resolveCostcoProductsForItemNumbers caches resolved + not_found rows', asy
       { itemNumber: '1011242', name: 'KS ORG PNT BTR' },
       { itemNumber: '5550000', name: 'WAREHOUSE ONLY' },
     ],
-    caller,
+    resolve.strictResolver(caller),
   );
 
   const resolved = await CostcoProduct.findOne({ where: { itemNumber: '1011242' } });
@@ -65,7 +65,7 @@ test('already-cached item numbers (resolved/not_found) are not re-queried', asyn
   };
   await resolve.resolveCostcoProductsForItemNumbers(
     [{ itemNumber: '1011242', name: 'KS ORG PNT BTR' }, { itemNumber: '5550000', name: 'WAREHOUSE ONLY' }],
-    caller,
+    resolve.strictResolver(caller),
   );
   assert.equal(searchCalls, 0);
   assert.equal((await CostcoProduct.findOne({ where: { itemNumber: '1011242' } }))?.status, 'resolved');
@@ -84,7 +84,7 @@ test('per-run item cap bounds how many new item numbers are attempted', async ()
       { itemNumber: '6000002', name: 'b' },
       { itemNumber: '6000003', name: 'c' },
     ],
-    caller,
+    resolve.strictResolver(caller),
     { maxItems: 2 },
   );
   assert.equal(searchCalls, 2);

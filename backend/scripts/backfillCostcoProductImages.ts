@@ -15,11 +15,10 @@ import { sequelize, ExternalOrder, ExternalOrderItem } from '../src/models';
 import {
   RESOLVE_VENDORS,
   resolveCostcoProductsForItemNumbers,
+  selectResolver,
   type ItemNumberToResolve,
 } from '../src/import/enrichment/resolveCostcoProducts';
 import { costcoEnrichmentEnabled } from '../src/config/env';
-import { getCostcoScraperConfig } from '../src/config/costco';
-import { defaultCostcoScraperCaller } from '../src/integrations/costco/scraperClient';
 
 type Flags = { dryRun: boolean; limit: number | null; householdId: number | null };
 
@@ -62,8 +61,8 @@ async function main() {
   const flags = parseFlags(process.argv.slice(2));
   console.log('[backfill-costco-images] flags:', flags);
 
-  if (!flags.dryRun && (!costcoEnrichmentEnabled || getCostcoScraperConfig() == null)) {
-    console.error('[backfill-costco-images] aborting: COSTCO_ENRICHMENT_ENABLED not true or COSTCO_SCRAPER_API_KEY not set. Use --dry-run to preview.');
+  if (!flags.dryRun && !costcoEnrichmentEnabled) {
+    console.error('[backfill-costco-images] aborting: COSTCO_ENRICHMENT_ENABLED not true. Use --dry-run to preview.');
     await sequelize.close();
     process.exit(1);
   }
@@ -77,16 +76,16 @@ async function main() {
     return;
   }
 
-  const caller = defaultCostcoScraperCaller();
-  if (caller == null) {
-    console.error('[backfill-costco-images] no scraper caller configured');
+  const resolveItem = selectResolver();
+  if (resolveItem == null) {
+    console.error('[backfill-costco-images] no resolver configured (set COSTCO_SCRAPER_PROVIDER + provider keys)');
     await sequelize.close();
     process.exit(1);
   }
 
   const resolved = await resolveCostcoProductsForItemNumbers(
     candidates,
-    caller,
+    resolveItem,
     flags.limit != null ? { maxItems: flags.limit } : undefined,
   );
   console.log(`[backfill-costco-images] done: newly resolved=${resolved}`);
