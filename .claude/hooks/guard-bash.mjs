@@ -12,7 +12,7 @@ const FORBIDDEN_STAGED = /(\.sqlite(-journal)?$)|(^|\/)node_modules\/|(^|\/)back
 
 // Pure classifier. Caller supplies stagedFiles (or null when not a git commit/add)
 // and worktree facts. Returns { deny?: string, warnings: string[] }.
-export function classifyBash({ command, cwd, stagedFiles, worktreeRoot, worktreeHasNodeModules }) {
+export function classifyBash({ command, stagedFiles, worktreeRoot, worktreeHasNodeModules }) {
   const warnings = [];
   const inWorktree = !!worktreeRoot;
   const isGitCommit = /\bgit\s+commit\b/.test(command);
