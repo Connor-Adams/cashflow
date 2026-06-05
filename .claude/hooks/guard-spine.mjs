@@ -14,7 +14,7 @@ export function classifySpine({ filePath, fileExists }) {
   if (!filePath || fileExists) return {}; // only nudge on a NEW file
   const isModel = /\/backend\/src\/models\/[^/]+\.[tj]s$/.test(filePath);
   const isMigration = /\/backend\/src\/migrations\/[^/]+\.(c|m)?js$/.test(filePath);
-  const isRoute = /\/routes\/[^/]+\.ts$/.test(filePath);
+  const isRoute = /\/backend\/(?:[^/]+\/)*routes\/[^/]+\.ts$/.test(filePath);
   if (!isModel && !isMigration && !isRoute) return {};
   const kind = isModel ? 'model' : isMigration ? 'migration' : 'route';
   return {

@@ -31,7 +31,7 @@ export function classifyBash({ command, stagedFiles, worktreeRoot, worktreeHasNo
 
   // G4b — warn: route registry / app.ts changed → run the mount-order test.
   if (Array.isArray(stagedFiles) &&
-      stagedFiles.some((f) => /routeRegistry\.ts$|(^|\/)src\/app\.ts$/.test(f))) {
+      stagedFiles.some((f) => /routeRegistry\.ts$|(^|\/)backend\/src\/app\.ts$/.test(f))) {
     warnings.push(
       'routeRegistry.ts/app.ts staged — run the mount-order regression test before merge: ' +
       '`cd backend && yarn tsx --import ./test/setup.ts --test test/appRouteOrder.test.ts`.');
@@ -96,7 +96,7 @@ async function main() {
   const worktreeHasNodeModules = worktreeRoot ? existsSync(`${worktreeRoot}/node_modules`) : null;
 
   const { deny, warnings } = classifyBash({
-    command, cwd, stagedFiles, worktreeRoot, worktreeHasNodeModules,
+    command, stagedFiles, worktreeRoot, worktreeHasNodeModules,
   });
 
   if (deny) {

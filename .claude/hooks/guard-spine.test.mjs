@@ -25,3 +25,17 @@ test('warns on a NEW migration file', () => {
   const { warning } = classifySpine({ filePath: '/x/backend/src/migrations/20260605-foo.js', fileExists: false });
   assert.match(warning, /migration/);
 });
+
+test('warns on a NEW top-level backend route file', () => {
+  const { warning } = classifySpine({ filePath: '/x/backend/src/routes/foo.ts', fileExists: false });
+  assert.match(warning, /route/);
+});
+
+test('silent on a frontend route file (not backend)', () => {
+  assert.deepEqual(classifySpine({ filePath: '/x/frontend/src/routes/Foo.ts', fileExists: false }), {});
+});
+
+test('warns on a NEW .cjs migration file', () => {
+  const { warning } = classifySpine({ filePath: '/x/backend/src/migrations/20260605-foo.cjs', fileExists: false });
+  assert.match(warning, /migration/);
+});

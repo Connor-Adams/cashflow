@@ -30,6 +30,12 @@ test('G4b warns when routeRegistry.ts is staged', () => {
   assert.match(r.warnings[0], /mount-order/);
 });
 
+test('G4b does NOT warn on a non-backend src/app.ts', () => {
+  const r = classifyBash({ command: 'git commit -m x', cwd: REPO_ROOT,
+    stagedFiles: ['frontend/src/app.ts'], worktreeRoot: null, worktreeHasNodeModules: null });
+  assert.deepEqual(r.warnings, []);
+});
+
 test('G1a warns on yarn install under a worktree', () => {
   const r = classifyBash({ command: 'yarn install', cwd: WT,
     stagedFiles: null, worktreeRoot: WT, worktreeHasNodeModules: false });
