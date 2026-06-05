@@ -89,6 +89,7 @@ yarn dupes        # jscpd — writes reports/jscpd/html/
 | Path | Role |
 |------|------|
 | `backend/src/` | Express API, Sequelize models, CSV import |
+| `backend/src/routeRegistry.ts` | Declarative ordered router-mount registry (mount order + auth boundary as data; locked by `backend/test/appRouteOrder.test.ts`) |
 | `backend/src/migrations/` | Sequelize migrations (JavaScript) |
 | `frontend/src/` | React UI |
 | `shared/api-types.ts` | API DTO types shared with the frontend |
