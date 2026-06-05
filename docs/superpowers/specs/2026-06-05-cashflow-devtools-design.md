@@ -118,10 +118,11 @@ Parse `tool_input.command` and `cwd`. Apply, in order:
 | **G4b** mount-order | command is `git commit`; staged set includes `routeRegistry.ts` or `src/app.ts` | **warn** — "routeRegistry/app.ts changed — run `appRouteOrder.test.ts` before merge." |
 | **G1a** worktree install | `cwd` contains `/.claude/worktrees/` and command matches `yarn\s+(install|setup)\b` or a bare `yarn` with no subcommand (`yarn test`/`yarn dev`/etc. must NOT match) | **warn** — vite-link failure + PATH workaround. |
 | **G1b** main-path-in-worktree | `cwd` is under `/.claude/worktrees/<name>/` and command contains an absolute `<repo>/(backend\|frontend\|shared)/…` path that is NOT under the current worktree | **warn** — "that path hits the MAIN checkout, not this worktree." |
+| **G1c** worktree commit | `cwd` is under `/.claude/worktrees/<name>/` that has no `node_modules`, and command is `git commit` | **warn** — "prefix `PATH=<repo>/node_modules/.bin:$PATH` or husky→lint-staged fails (code 127)." |
 
 Precedence: if **G4a** matches, emit the `deny` and stop (deny short-circuits the
-tool). Otherwise concatenate any warnings (G4b/G1a/G1b) into one `additionalContext`
-string. The `git diff --cached` call runs **only** when the command involves `git
+tool). Otherwise concatenate any warnings (G4b/G1a/G1b/G1c) into one
+`additionalContext` string. The `git diff --cached` call runs **only** when the command involves `git
 commit`/`git add` — never on unrelated Bash.
 
 ### `guard-spine.mjs` — matcher `Write` (G2)
@@ -208,6 +209,8 @@ Hooks are pure stdin→stdout, so test by fixture. Colocate `guard-bash.test.mjs
 - G4b warns when `routeRegistry.ts` is staged; silent otherwise.
 - G1a warns on `yarn install` when `cwd` is a worktree; silent when `cwd` is the main
   checkout.
+- G1c warns on `git commit` when `cwd` is a worktree without `node_modules`; silent
+  when `node_modules` is present or `cwd` is the main checkout.
 - G2 warns on a new `backend/src/models/Foo.ts`; silent on an edit to an existing
   model and on a non-matching path.
 
