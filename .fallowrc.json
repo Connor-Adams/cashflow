@@ -3,7 +3,8 @@
   "entry": [
     "backend/src/server.ts",
     "backend/src/migrations/**/*.js",
-    "backend/test/**/*.test.ts",
+    "backend/src/**/*.test.ts",
+    "backend/test/integration/**/*.test.ts",
     "backend/test/setup.ts",
     "backend/scripts/**/*.{ts,cjs,js}",
     "backend/sequelize.config.cjs",

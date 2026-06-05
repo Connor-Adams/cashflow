@@ -115,9 +115,10 @@ yarn test    # backend unit + integration + frontend Vitest
 yarn ci      # everything CI runs: typecheck, tests, production builds
 ```
 
-Backend unit tests are auto-discovered: any `*.test.ts` under `backend/test/`
-runs (the `test/integration/` subset, which needs Postgres, runs separately via
-`test:integration`). No test glob to maintain.
+Backend unit tests are **colocated** (`foo.test.ts` beside `foo.ts` under
+`backend/src/`) and auto-discovered, so a new test runs with no glob to maintain.
+Integration tests live in `backend/test/integration/` (Postgres, run via
+`test:integration`); migration tests live in `backend/src/migrations/__tests__/`.
 
 Coverage spans split math, rule matching, CSV row mapping, env validation,
 import integration (HTTP + DB), and frontend unit tests. Sample CSV:

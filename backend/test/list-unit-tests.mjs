@@ -32,12 +32,12 @@ import path from 'node:path';
 
 // backend/ package root (this file lives at backend/test/list-unit-tests.mjs)
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const testRoot = path.join(backendRoot, 'test');
+const srcRoot = path.join(backendRoot, 'src');
 
-// Directory subtrees (relative to test/) that the unit runner must never load.
-// Integration is the only one today; keep it data-driven so future exclusions
-// are a one-line change rather than a fork of the discovery logic.
-const EXCLUDED_DIRS = new Set(['integration']);
+// Unit tests are colocated under src/ (foo.test.ts beside foo.ts). Integration
+// tests live in test/integration/ (run by `test:integration`) and are outside
+// this walk entirely. Kept data-driven in case a src subtree ever needs skipping.
+const EXCLUDED_DIRS = new Set();
 
 /** @param {string} dir absolute dir to walk @param {string} rel path relative to test/ */
 function walk(dir, rel) {
@@ -46,24 +46,23 @@ function walk(dir, rel) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const relPath = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      // Skip excluded top-level subtrees (e.g. test/integration).
+      // Skip excluded top-level subtrees (none today).
       if (!rel && EXCLUDED_DIRS.has(entry.name)) continue;
       found.push(...walk(path.join(dir, entry.name), relPath));
     } else if (entry.isFile() && entry.name.endsWith('.test.ts')) {
-      // Emit paths relative to the backend root so the runner resolves them
-      // the same way the old hand-written globs did (cwd = backend/).
-      found.push(`test/${relPath}`);
+      // Emit paths relative to the backend root (cwd = backend/ when run).
+      found.push(`src/${relPath}`);
     }
   }
   return found;
 }
 
-const files = walk(testRoot, '').sort();
+const files = walk(srcRoot, '').sort();
 
 if (files.length === 0) {
   process.stderr.write(
-    'list-unit-tests: discovered ZERO unit test files under backend/test/ ' +
-      '(excluding integration). Refusing to emit an empty list — a bare ' +
+    'list-unit-tests: discovered ZERO unit test files under backend/src/. ' +
+      'Refusing to emit an empty list — a bare ' +
       '`tsx --test` would default-discover the whole tree, including ' +
       'integration. Exiting nonzero so the test command aborts.\n',
   );
