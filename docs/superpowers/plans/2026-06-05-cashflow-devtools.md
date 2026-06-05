@@ -228,7 +228,7 @@ export function classifySpine({ filePath, fileExists }) {
   if (!filePath || fileExists) return {}; // only nudge on a NEW file
   const isModel = /\/backend\/src\/models\/[^/]+\.[tj]s$/.test(filePath);
   const isMigration = /\/backend\/src\/migrations\/[^/]+\.(c|m)?js$/.test(filePath);
-  const isRoute = /\/routes\/[^/]+\.ts$/.test(filePath);
+  const isRoute = /\/backend\/(?:[^/]+\/)*routes\/[^/]+\.ts$/.test(filePath);
   if (!isModel && !isMigration && !isRoute) return {};
   const kind = isModel ? 'model' : isMigration ? 'migration' : 'route';
   return {
@@ -388,7 +388,7 @@ const FORBIDDEN_STAGED = /(\.sqlite(-journal)?$)|(^|\/)node_modules\/|(^|\/)back
 
 // Pure classifier. Caller supplies stagedFiles (or null when not a git commit/add)
 // and worktree facts. Returns { deny?: string, warnings: string[] }.
-export function classifyBash({ command, cwd, stagedFiles, worktreeRoot, worktreeHasNodeModules }) {
+export function classifyBash({ command, stagedFiles, worktreeRoot, worktreeHasNodeModules }) {
   const warnings = [];
   const inWorktree = !!worktreeRoot;
   const isGitCommit = /\bgit\s+commit\b/.test(command);
@@ -407,7 +407,7 @@ export function classifyBash({ command, cwd, stagedFiles, worktreeRoot, worktree
 
   // G4b — warn: route registry / app.ts changed → run the mount-order test.
   if (Array.isArray(stagedFiles) &&
-      stagedFiles.some((f) => /routeRegistry\.ts$|(^|\/)src\/app\.ts$/.test(f))) {
+      stagedFiles.some((f) => /routeRegistry\.ts$|(^|\/)backend\/src\/app\.ts$/.test(f))) {
     warnings.push(
       'routeRegistry.ts/app.ts staged — run the mount-order regression test before merge: ' +
       '`cd backend && yarn tsx --import ./test/setup.ts --test test/appRouteOrder.test.ts`.');
@@ -472,7 +472,7 @@ async function main() {
   const worktreeHasNodeModules = worktreeRoot ? existsSync(`${worktreeRoot}/node_modules`) : null;
 
   const { deny, warnings } = classifyBash({
-    command, cwd, stagedFiles, worktreeRoot, worktreeHasNodeModules,
+    command, stagedFiles, worktreeRoot, worktreeHasNodeModules,
   });
 
   if (deny) {
@@ -777,7 +777,7 @@ Expected: frontmatter shows `name: cashflow-fleet-status`; grep ≥ `3`.
 
 ## Final verification
 
-- [ ] **Repo tests pass:** `node --test .claude/hooks/` → all spine + bash tests green.
+- [ ] **Repo tests pass:** `node --test .claude/hooks/*.test.mjs` → all 20 spine + bash tests green. (`node --test <dir>` does NOT recurse in this Node setup — use the glob.)
 - [ ] **Repo committed cleanly:** `git log --oneline -5` shows the four `feat(devtools)` commits; `git status` clean.
 - [ ] **Global edits verified:** the four grep checks in Tasks 5–8 pass.
 - [ ] **Live hook check (manual, optional):** in a fresh session rooted at the repo,
@@ -792,5 +792,12 @@ Expected: frontmatter shows `name: cashflow-fleet-status`; grep ≥ `3`.
    the GraphQL mutations need them; `conventions.md` is the canonical mirror.
 3. **Hooks designed as pure `classify*` functions** + a thin `main()` stdin wrapper,
    so the test suite is fast and side-effect-free (git/fs facts are injected).
+4. **Post-implementation code-review fixes (applied during execution):** removed an
+   unused `cwd` param from `classifyBash`; anchored the G4b `app.ts` regex and the
+   guard-spine `isRoute` regex to `backend/` (they were matching any workspace's
+   `app.ts` / `routes/`); strengthened the suite to 20 tests (added frontend-route
+   and non-backend-`app.ts` negatives, a top-level backend route, a `.cjs` migration).
+   Run hook tests with `node --test .claude/hooks/*.test.mjs` (the `<dir>` form does
+   not recurse here).
 ```
 
