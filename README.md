@@ -115,6 +115,10 @@ yarn test    # backend unit + integration + frontend Vitest
 yarn ci      # everything CI runs: typecheck, tests, production builds
 ```
 
+Backend unit tests are auto-discovered: any `*.test.ts` under `backend/test/`
+runs (the `test/integration/` subset, which needs Postgres, runs separately via
+`test:integration`). No test glob to maintain.
+
 Coverage spans split math, rule matching, CSV row mapping, env validation,
 import integration (HTTP + DB), and frontend unit tests. Sample CSV:
 `backend/test/fixtures/sample.csv`.

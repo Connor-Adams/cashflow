@@ -1,10 +1,18 @@
-# Cashflow — build guidance for Claude
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Cashflow is a local-first personal & partner expense tracker: import card CSVs and
+PDF statements, categorize and split transactions, attach receipts, track
+investments, and roll spend into per-currency summaries. Yarn-1 workspace monorepo
+(`backend`, `frontend`, `shared`).
 
 ## Primitives spine (READ BEFORE ADDING ANY MODEL, ROUTE, OR PAGE)
 
 Cashflow is built on **13 canonical primitives**. A primitive is a distinct
 *status machine + noun*, not a data shape. Full spec:
-`docs/superpowers/specs/2026-05-30-cashflow-primitives-design.md`.
+`docs/superpowers/specs/2026-05-30-cashflow-primitives-design.md` (it carries the
+table mapping each primitive to the physical models it folds).
 
 The 13: **Transaction, Expectation, Account, Holding, Principal, Counterparty,
 Scenario, Budget, Goal, Proposal, Observation, Document, Period.**
@@ -34,3 +42,92 @@ Three checks, in order:
 3. Does the shape mirror an existing primitive under a new name? Yes → fold.
 
 Do not fork same-machine objects; do not merge different-machine objects.
+
+## Commands
+
+Run everything from the **repo root** — yarn-1 workspaces hoist to the root.
+Never install or run from a sub-directory; if stray `backend/node_modules` or
+`frontend/node_modules` exist, delete them and reinstall at root.
+
+| Task | Command |
+|---|---|
+| Install + migrate | `yarn setup` |
+| Dev (API + Vite together) | `yarn dev` — API on `:3001`, UI on `:5173` (proxies `/api`) |
+| Everything CI runs | `yarn ci` — typecheck, all tests, both production builds |
+| All tests | `yarn test` |
+| Backend typecheck | `yarn workspace cashflow-backend run typecheck` |
+| Backend / frontend lint | `yarn workspace cashflow-backend run lint` · `yarn workspace frontend run lint` |
+| Migrate / undo | `yarn db:migrate` · `yarn workspace cashflow-backend run db:migrate:undo` |
+| Code health | `yarn audit:code` (fallow + jscpd); also `yarn deadcode`, `yarn health`, `yarn dupes` |
+
+### Running a single test
+
+Backend tests use **`node:test` via `tsx`** (not vitest/jest); frontend uses **vitest**.
+
+- Backend, one file: `cd backend && yarn tsx --import ./test/setup.ts --test test/mapRow.test.ts`
+- Backend, filter by name: append `--test-name-pattern '<regex>'`
+- Frontend, one file: `yarn workspace frontend run test ReceiptsPage`
+- Frontend, filter by name: `yarn workspace frontend run test -- -t 'renders empty state'`
+
+> **Backend tests are auto-discovered.** `backend/scripts/run-unit-tests.sh`
+> (via `backend/test/list-unit-tests.mjs`) recursively finds every
+> `backend/test/**/*.test.ts` *except* `test/integration/**`, so a test added in
+> any sub-directory runs automatically — no glob to maintain. The runner exits
+> non-zero if zero files are discovered (guards against a silent empty run).
+> `test:coverage` keeps the two-phase c8 accumulation (unit, then integration).
+
+- **Unit** tests get a per-process SQLite temp DB (`backend/test/setup.ts`, keyed
+  by PID — parallel workers don't collide). No external services needed.
+- **Integration** tests (`backend/test/integration/*.test.ts`, via
+  `...run test:integration`) need **Postgres**; set `TEST_DATABASE_URL`. CI runs
+  them in a dedicated job with a Postgres service.
+
+## Architecture
+
+Three workspaces: **`backend`** (Express + Sequelize API), **`frontend`** (Vite +
+React 19), **`shared`** — a single file, `shared/api-types.ts`, the API DTO
+contract imported by both sides as `@cashflow/shared`. Also: `infra/` (local
+observability stack), `docs/` (specs under `docs/superpowers/`, ADRs under
+`docs/adr/`), and root `test/*.test.cjs` (workflow/release tests, `yarn test:workflows`).
+
+### Backend (`backend/src/`)
+- **Router mounts live in a declarative registry**, `backend/src/routeRegistry.ts`
+  — ordered `preAuthRoutes`, the `requireAuth` boundary, then `gatedRoutes`;
+  `app.ts` calls `mountRoutes(app)` and owns only the surrounding middleware
+  pipeline + terminal error handlers. **Mount order is still load-bearing**
+  (specific before catch-all `/api`; capture CORS before the global `cors()`;
+  folded endpoints return `410 Gone`, e.g. `/api/tax/{personal,corp}-scenarios` →
+  `/api/tax/scenarios/:kind`) — but it is now data with a `why` per entry, and
+  `backend/test/appRouteOrder.test.ts` locks the invariants so a bad reorder or a
+  dropped fold-stub fails CI.
+- **~90 Sequelize models** in `models/` are the *physical* tables; the **13
+  primitives** are the *conceptual* spine many of them fold into. Consult the
+  spine table before adding a model.
+- **Feature modules** are the top-level dirs under `src/` (`ai/`, `amazon/`,
+  `import/`, `portfolio/`, `tax/`, `forecast/`, `budgets/`, `insights/`,
+  `scenarios/`, …): domain logic paired with a `routes/*.ts` router.
+- **Migrations** are JavaScript in `backend/src/migrations/` (Sequelize CLI),
+  named `YYYYMMDD...-slug.js`.
+- **Auth** is cookie-session and **household-scoped**: `attachAuth` then a global
+  `requireAuth` at `/api`; request context (`withContext`) carries
+  `userId`/`householdId`/`role` for logging. Health, config, auth, capture,
+  reporting (`/api/v1`), and audit routes mount *before* `requireAuth`.
+- **DB is dual-dialect**: SQLite by default (file `backend/data/cashflow.sqlite`),
+  Postgres when `DATABASE_URL` / `TEST_DATABASE_URL` is set. Write Sequelize that
+  runs on both. Multi-currency throughout (`DEFAULT_CURRENCY=CAD`, `FxRate` table).
+- **Observability**: pino logs + OpenTelemetry traces/metrics over OTLP. `infra/`
+  brings up Grafana/Loki/Tempo/Prometheus locally via docker-compose; see
+  `docs/observability.md`.
+
+### Frontend (`frontend/src/`)
+React 19 + react-router-dom v7, Tailwind v4 (with Radix primitives, lucide icons,
+recharts). Pages in `pages/`, the shared API client in `lib/api.ts`, types from
+`@cashflow/shared`. `yarn workspace frontend run build` also emits the Amazon and
+Apple **bookmarklets** (`vite.bookmarklets.config.ts`) that POST receipts/orders to
+`/api/capture`. Prefer Tailwind utilities over raw CSS in `App.css`.
+
+### Deploy
+Image-based: on merge to `main`, CI builds and pushes `backend`/`frontend` images
+to GHCR — **`main` does not auto-deploy**. Publishing a GitHub Release re-tags the
+images `:production` and fires Railway redeploys. Full pipeline, version-bump
+rules, and rollback steps are in `README.md`.
