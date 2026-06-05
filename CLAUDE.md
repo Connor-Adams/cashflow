@@ -64,17 +64,23 @@ Never install or run from a sub-directory; if stray `backend/node_modules` or
 
 Backend tests use **`node:test` via `tsx`** (not vitest/jest); frontend uses **vitest**.
 
-- Backend, one file: `cd backend && yarn tsx --import ./test/setup.ts --test test/mapRow.test.ts`
+- Backend, one file: `cd backend && yarn tsx --import ./test/setup.ts --test src/fx/toCad.test.ts`
 - Backend, filter by name: append `--test-name-pattern '<regex>'`
 - Frontend, one file: `yarn workspace frontend run test ReceiptsPage`
 - Frontend, filter by name: `yarn workspace frontend run test -- -t 'renders empty state'`
 
-> **Backend tests are auto-discovered.** `backend/scripts/run-unit-tests.sh`
-> (via `backend/test/list-unit-tests.mjs`) recursively finds every
-> `backend/test/**/*.test.ts` *except* `test/integration/**`, so a test added in
-> any sub-directory runs automatically — no glob to maintain. The runner exits
-> non-zero if zero files are discovered (guards against a silent empty run).
-> `test:coverage` keeps the two-phase c8 accumulation (unit, then integration).
+> **Unit tests are colocated** — `foo.test.ts` beside `foo.ts` under `backend/src/`.
+> `backend/scripts/run-unit-tests.sh` (via `backend/test/list-unit-tests.mjs`)
+> recursively discovers every `backend/src/**/*.test.ts`, so a new colocated test
+> runs automatically — no glob to maintain. The runner exits non-zero if zero
+> files are discovered (guards a silent empty run); `test:coverage` keeps the
+> two-phase c8 accumulation (unit, then integration).
+>
+> Two carve-outs: **integration** tests stay in `backend/test/integration/`
+> (cross-cutting, Postgres), and **migration** tests live in
+> `backend/src/migrations/__tests__/` — NOT directly in `src/migrations/`, because
+> `sequelize-cli` scans that dir for migrations and would try to load a `.test.ts`
+> as one (it doesn't recurse into the subdir).
 
 - **Unit** tests get a per-process SQLite temp DB (`backend/test/setup.ts`, keyed
   by PID — parallel workers don't collide). No external services needed.
