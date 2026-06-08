@@ -64,9 +64,9 @@ export function Layout() {
       <Sidebar open={sidebarOpen} onClose={closeSidebar} />
 
       {/* Mobile backdrop. Hidden via CSS on desktop. */}
-      <Button
+      <button
         type="button"
-        variant="ghost"
+        data-slot="backdrop"
         aria-label="Close navigation"
         className="sidebarBackdrop"
         onClick={closeSidebar}
