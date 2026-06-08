@@ -344,6 +344,78 @@ the last line of defense for the whole pipeline.
    Prometheus is the problem, `railway redeploy --service prometheus --yes`.
 5. Recovery: `up{job="cashflow-otel-collector"}` returns to `1`; TempoExportFailing/LokiExportFailing become evaluable again.
 
+
+#### BackendDown
+
+**Rule:** `cashflow-backend-down` — fires when `absent(cashflow_up)` for ≥2m.
+
+**What it means:** The cashflow backend is not reporting its heartbeat gauge
+to Prometheus. The process is likely down or failing to push metrics through
+the otel-collector.
+
+**Note:** If OtelCollectorScrapeDown is also firing, the collector pipeline
+is the root cause, not necessarily the backend.
+
+**Remediation:**
+1. `railway logs -s cashflow-backend -n 100` — check for crash loops or OOM kills.
+2. If the backend is running but metrics are absent, verify the otel-collector is healthy (check OtelCollectorScrapeDown).
+3. `railway redeploy --service cashflow-backend --yes` if the process is stuck.
+4. Recovery: `cashflow_up` gauge reappears in Prometheus.
+
+#### HighHttp5xxRate
+
+**Rule:** `cashflow-high-http-5xx-rate` — fires when the 5xx error rate
+exceeds 2% of total requests over a 5-minute window, sustained for ≥5m.
+
+**What it means:** More than 2% of HTTP requests are returning server errors.
+
+**Remediation:**
+1. Check backend logs for unhandled exceptions or database connectivity errors.
+2. Review the API health dashboard route breakdown for which endpoints are failing.
+3. Check downstream dependencies (database, external APIs) for outages.
+4. Recovery: 5xx rate drops below 2%.
+
+#### HighRouteLatencyP99
+
+**Rule:** `cashflow-high-route-latency-p99` — fires when the 99th-percentile
+HTTP response time exceeds 1000ms for ≥5m.
+
+**What it means:** Request latency is significantly degraded. The p99 baseline
+under normal load is ~150ms; the 1000ms threshold gives 6x headroom and
+catches sustained degradation without alerting on transient spikes.
+
+**Remediation:**
+1. Check the route breakdown panel in the API health dashboard for slow endpoints.
+2. Look for slow database queries or missing indexes.
+3. Check for external API timeouts or memory pressure causing GC pauses.
+4. Recovery: p99 latency drops below 1000ms.
+
+#### OutboundDependencyFailing
+
+**Rule:** `cashflow-outbound-dependency-failing` — fires when an external
+service returns 5xx errors for ≥5m, identified by `server_address` label.
+
+**What it means:** A third-party dependency (Yahoo Finance API, Plaid, email
+service, etc.) is returning server errors.
+
+**Remediation:**
+1. Check which `server_address` is affected in the alert labels.
+2. Verify whether the provider has a known outage.
+3. If transient, the alert will auto-resolve when the dependency recovers.
+
+#### JobFailing
+
+**Rule:** `cashflow-job-failing` — fires when
+`increase(cashflow_job_runs_total{result="failure"}[15m]) > 0` for ≥5m.
+
+**What it means:** One or more background jobs have failed at least once in
+the last 15 minutes. Recurring failures indicate a persistent error; a single
+failure may be transient.
+
+**Remediation:**
+1. Check the `job` label to identify which job failed.
+2. Review backend logs filtered by job name for error details.
+3. Recovery: job succeeds on next tick.
 ### Verification
 
 Once `restartPolicyType: ALWAYS` is set on tempo, simulate the original
