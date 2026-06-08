@@ -26,6 +26,7 @@ import {
   type PlannedEventLike,
 } from '../forecast/expandRecurrence';
 import { projectGoal } from '../goals/projection';
+import { toUnits, fromUnits } from '../util/numbers';
 
 /** Cash-bearing account types — match the forecast engine's exclusion list. */
 const CASH_EXCLUDED_TYPES = new Set(['investment', 'credit_card']);
@@ -146,16 +147,16 @@ export async function resolveDefaultCurrency(
     if (a.closedAt && a.closedAt <= asOfDate) return false;
     return true;
   });
-  const totals = new Map<string, number>();
+  const totalsU = new Map<string, number>();
   for (const acc of eligible) {
     const bal = await balanceAtDate(acc, asOfDate);
     for (const { currency, amount } of bal) {
-      totals.set(currency, (totals.get(currency) ?? 0) + amount);
+      totalsU.set(currency, (totalsU.get(currency) ?? 0) + toUnits(amount));
     }
   }
   let best: { currency: string; absAmount: number } | null = null;
-  for (const [ccy, amt] of totals) {
-    const abs = Math.abs(amt);
+  for (const [ccy, amtU] of totalsU) {
+    const abs = Math.abs(amtU);
     // Prefer CAD on ties — Cashflow's primary currency.
     if (
       !best ||
@@ -179,16 +180,16 @@ export async function getCurrentCash(
   asOfDate: string,
 ): Promise<number> {
   const accounts = await Account.findAll({ where: { householdId } });
-  let total = 0;
+  let totalU = 0;
   for (const acc of accounts) {
     if (CASH_EXCLUDED_TYPES.has(acc.accountType)) continue;
     if (acc.closedAt && acc.closedAt <= asOfDate) continue;
     const bal = await balanceAtDate(acc, asOfDate);
     for (const { currency: ccy, amount } of bal) {
-      if (ccy === currency) total += amount;
+      if (ccy === currency) totalU += toUnits(amount);
     }
   }
-  return total;
+  return fromUnits(totalU);
 }
 
 /**
@@ -216,7 +217,7 @@ export async function getUpcomingRequiredExpenses(
     type: 'expense',
   };
   const rows = await PlannedEvent.findAll({ where });
-  let total = 0;
+  let totalU = 0;
   for (const row of rows) {
     const eventLike: PlannedEventLike = {
       id: row.id,
@@ -227,9 +228,9 @@ export async function getUpcomingRequiredExpenses(
     const occs = expandRecurrence(eventLike, asOfDate, windowEndDate);
     const amount = Number(row.amount);
     if (!Number.isFinite(amount)) continue;
-    total += amount * occs.length;
+    totalU += toUnits(amount) * occs.length;
   }
-  return total;
+  return fromUnits(totalU);
 }
 
 /**
@@ -248,7 +249,7 @@ export async function getRequiredSavingsContributions(
   const rows = await FinancialGoal.findAll({
     where: { householdId, status: 'active', currency },
   });
-  let total = 0;
+  let totalU = 0;
   for (const row of rows) {
     const projection = projectGoal({
       targetAmount: String(row.targetAmount),
@@ -260,17 +261,17 @@ export async function getRequiredSavingsContributions(
     });
     const required = projection.requiredMonthlyContribution;
     if (required != null) {
-      total += Number(required);
+      totalU += toUnits(Number(required));
       continue;
     }
     // No projection (no targetDate). Fall back to the user-declared
     // monthly contribution as the floor.
     if (row.monthlyContribution != null) {
       const n = Number(row.monthlyContribution);
-      if (Number.isFinite(n) && n > 0) total += n;
+      if (Number.isFinite(n) && n > 0) totalU += toUnits(n);
     }
   }
-  return total;
+  return fromUnits(totalU);
 }
 
 /**
@@ -287,17 +288,17 @@ export async function getExpectedCreditCardPayments(
   asOfDate: string,
 ): Promise<number> {
   const accounts = await Account.findAll({ where: { householdId } });
-  let total = 0;
+  let totalU = 0;
   for (const acc of accounts) {
     if (!CREDIT_CARD_TYPES.has(acc.accountType)) continue;
     if (acc.closedAt && acc.closedAt <= asOfDate) continue;
     const bal = await balanceAtDate(acc, asOfDate);
     for (const { currency: ccy, amount } of bal) {
       if (ccy !== currency) continue;
-      if (amount < 0) total += -amount;
+      if (amount < 0) totalU += toUnits(-amount);
     }
   }
-  return total;
+  return fromUnits(totalU);
 }
 
 /** Lazy-load (or default) the user's settings row. */

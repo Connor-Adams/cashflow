@@ -888,6 +888,7 @@ export function ReviewInboxPage() {
                                     key={item.id}
                                     item={item}
                                     categoryHints={categoryHints.map((h) => h.label)}
+                                    currency={row.currency}
                                     onSaved={() => void load()}
                                   />
                                 ))}

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useConfirm } from '@/components/ui/dialog'
 import { postJson } from '../../../lib/api'
+import { formatMoney } from '../../../lib/formatMoney'
 import {
   listCaptureTokens,
   mintCaptureToken,
@@ -518,7 +519,7 @@ export function ImportsTab() {
                     <li key={i}>
                       {item.title}
                       {item.quantity > 1 && ` × ${item.quantity}`}
-                      {item.totalPrice != null && ` — ${item.totalPrice}`}
+                      {item.totalPrice != null && ` — ${formatMoney(item.totalPrice, receiptResult.extracted.currency ?? undefined)}`}
                       {item.inferredCategory && <span className="muted"> · {item.inferredCategory}</span>}
                     </li>
                   ))}

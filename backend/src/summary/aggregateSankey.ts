@@ -44,7 +44,7 @@
  * so the drill-down endpoint can return the transaction IDs that flowed
  * through a clicked link without re-running the aggregation.
  */
-import { num } from '../util/numbers';
+import { num, toUnits, fromUnits } from '../util/numbers';
 import {
   classifyPositiveAmount,
   isNonCategorical,
@@ -197,11 +197,12 @@ export function aggregateSankey(
     totalTransactionCount += 1;
     const nonSpend = isNonSpend(row.txnType, row.accountType);
 
+    // Accumulate in integer units (×10 000) to avoid float drift.
+    const amtU = toUnits(amount);
     if (amount < 0 && !nonSpend) {
       // -------- SPEND row ------------------------------------------------
-      const spend = -amount;
       if (row.finalBusiness) {
-        businessBucket.netSpend += spend;
+        businessBucket.netSpend += -amtU;
         businessBucket.txnIds.push(row.id);
       } else {
         const label = resolveCategoryLabel(row);
@@ -210,7 +211,7 @@ export function aggregateSankey(
           netSpend: 0,
           txnIds: [],
         };
-        bucket.netSpend += spend;
+        bucket.netSpend += -amtU;
         bucket.txnIds.push(row.id);
         categoryBuckets.set(label, bucket);
       }
@@ -239,7 +240,7 @@ export function aggregateSankey(
       //   - refund/reward (or fallback credit) → net against the category
       //     it offset, same semantics as dashboard's netSpend.
       if (row.txnType === 'income') {
-        totalIncome += amount;
+        totalIncome += amtU;
         incomeTxnIds.push(row.id);
         continue;
       }
@@ -248,7 +249,7 @@ export function aggregateSankey(
       // Routed to the business bucket if business=true, otherwise to the
       // row's resolved category.
       if (row.finalBusiness) {
-        businessBucket.netSpend -= amount;
+        businessBucket.netSpend -= amtU;
         businessBucket.txnIds.push(row.id);
       } else {
         const label = resolveCategoryLabel(row);
@@ -257,7 +258,7 @@ export function aggregateSankey(
           netSpend: 0,
           txnIds: [],
         };
-        cat.netSpend -= amount;
+        cat.netSpend -= amtU;
         cat.txnIds.push(row.id);
         categoryBuckets.set(label, cat);
       }
@@ -299,10 +300,11 @@ export function aggregateSankey(
 
   // Compute totalSpend from the FINAL buckets (post-overflow, post-business
   // routing) so it reconciles with the rendered link widths.
-  const totalSpend = sinkBuckets.reduce((sum, b) => sum + b.netSpend, 0);
+  // Both totalIncome and bucket.netSpend are still in integer units here.
+  const totalSpendU = sinkBuckets.reduce((sum, b) => sum + b.netSpend, 0);
 
   // -------- Empty state ----------------------------------------------
-  if (totalIncome === 0 && totalSpend === 0) {
+  if (totalIncome === 0 && totalSpendU === 0) {
     return {
       currency,
       totalIncome: 0,
@@ -333,7 +335,7 @@ export function aggregateSankey(
     else if (sink.label === UNCATEGORIZED_LABEL) kind = 'uncategorized';
     nodes.push({ name: sink.label, kind });
 
-    links.push({ source: 0, target: targetIdx, value: sink.netSpend });
+    links.push({ source: 0, target: targetIdx, value: fromUnits(sink.netSpend) });
     edgeMap.set(`0-${targetIdx}`, sink.txnIds);
   }
 
@@ -345,8 +347,8 @@ export function aggregateSankey(
 
   return {
     currency,
-    totalIncome,
-    totalSpend,
+    totalIncome: fromUnits(totalIncome),
+    totalSpend: fromUnits(totalSpendU),
     transactionCount: totalTransactionCount,
     nodes,
     links,

@@ -99,6 +99,7 @@ export async function projectPersonalFactsFromPrevYear(
     instalmentsPaid: instRows.length > 0
       ? instRows.reduce((sum, r) => sum.plus(D(r.amount as unknown as string)), D('0'))
       : D(cfRows.find(c => c.kind === 'instalments_paid')?.amount ?? '0'),
+    fhsaLifetimeContributions: D(cfRows.find(c => c.kind === 'fhsa_lifetime_contribs')?.amount ?? '0'),
   };
 
   return {

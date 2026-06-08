@@ -41,9 +41,10 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const investmentTaxableIncome = interest.plus(rent).plus(nonElDivReceived).plus(elDivReceived);
   push('L440', 'Investment taxable income', investmentTaxableIncome);
 
-  // Taxable capital gains
+  // Taxable capital gains — corps use the high rate (66.67%) on ALL gains
   const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
-  const includableGains = maxZero(grossGains.times(r.capitalGainsInclusion));
+  const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
+  const includableGains = maxZero(grossGains.times(corpInclusionRate));
   push('L445', 'Taxable capital gains', includableGains);
 
   // Taxable income

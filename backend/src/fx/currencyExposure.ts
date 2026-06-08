@@ -66,6 +66,8 @@ interface RawBucket {
   absSumNative: number;
 }
 
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
+
 function aggregateByCurrency(txns: ExposureTxnRow[]): Map<string, RawBucket> {
   const out = new Map<string, RawBucket>();
   for (const txn of txns) {
@@ -137,7 +139,7 @@ export async function computeCurrencyExposure(
       continue;
     }
 
-    const converted = bucket.sumNative * fx.rate;
+    const converted = round4(bucket.sumNative * fx.rate);
     rows.push({
       currency: bucket.currency,
       transactionCount: bucket.transactionCount,

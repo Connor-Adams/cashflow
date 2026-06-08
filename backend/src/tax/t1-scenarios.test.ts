@@ -10,6 +10,7 @@ const emptyCarryFwd = {
   rrspRoom: D('0'),
   nonCapLoss: D('0'),
   instalmentsPaid: D('0'),
+  fhsaLifetimeContributions: D('0'),
 };
 
 function baseFacts(): TaxYearFacts {
@@ -187,7 +188,7 @@ test('Scenario G: OAS clawback — net income $100k triggers L23500 and increase
     ...baseFacts(),
     employmentIncome: [{ source: 'T4', amount: D('100000'), cadAmount: D('100000') }],
     fhsaContribs: [{ source: 'FHSA', amount: D('8000'), date: '2024-02-01' }],
-    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('100000'), nonCapLoss: D('0'), instalmentsPaid: D('0') },
+    carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('100000'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
   };
   const retWithFhsa = buildT1(factsWithFhsa, r);
   const oasLineFhsa = retWithFhsa.lines.find((l) => l.code === 'L23500');

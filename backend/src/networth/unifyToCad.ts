@@ -28,6 +28,8 @@ export type UnifyResult = {
   gaps: UnifyGap[];
 };
 
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
+
 const defaultFxLookup: FxLookup = (from, to, asOf) => ensureFxRate(from, to, asOf);
 
 export async function unifyToCad(
@@ -51,8 +53,8 @@ export async function unifyToCad(
       gaps.push({ date: asOf, currency, reason: 'fx_rate_unavailable' });
       continue;
     }
-    totalAssets += asset * fx.rate;
-    totalLiabilities += liability * fx.rate;
+    totalAssets += round4(asset * fx.rate);
+    totalLiabilities += round4(liability * fx.rate);
     fxRatesUsed.push({ from: currency, to: 'CAD', rate: fx.rate, ratedDate: fx.ratedDate });
   }
 

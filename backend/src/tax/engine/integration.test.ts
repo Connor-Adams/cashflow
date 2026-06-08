@@ -83,8 +83,8 @@ test('Integration: mixed active + investment income — GRIP, CDA, RDTOH additio
   // GRIP: 50000 × (1 - 0.15 - 0.115) = 50000 × 0.735 = 36750
   assert.equal(integ.gripAddition.toFixed(2), '36750.00');
 
-  // CDA: gross cap gain = 150000 - 100000 - 5000 = 45000; non-taxable = 45000 × 0.5 = 22500
-  assert.equal(integ.cdaAddition.toFixed(2), '22500.00');
+  // CDA: gross cap gain = 150000 - 100000 - 5000 = 45000; non-taxable = 45000 × (1 - 0.666667) = 14999.985
+  assert.equal(integ.cdaAddition.toFixed(2), '14999.98');
 
   // ERDTOH: (interest=40000 + rent=20000 + elDiv=0) × 0.3833 = 60000 × 0.3833 = 22998
   assert.equal(integ.erdtohAddition.toFixed(4), '22998.0000');
@@ -124,7 +124,7 @@ test('Integration: cap losses do not produce negative CDA', () => {
   };
 
   const integ = computeIntegration(facts, D('0'), r);
-  // grossGains = -10000; cdaAddition = maxZero(-10000) × 0.5 = 0
+  // grossGains = -10000; cdaAddition = maxZero(-10000) × (1 - 0.666667) = 0
   assert.equal(integ.cdaAddition.toFixed(2), '0.00');
 });
 

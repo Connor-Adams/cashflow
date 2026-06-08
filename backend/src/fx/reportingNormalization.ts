@@ -67,6 +67,8 @@ export interface NormalizationResult {
  * Cuts the work to one FX lookup per non-identity currency regardless of how
  * many metrics share the same currency.
  */
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
+
 async function resolveFxRates(
   currencies: Set<string>,
   reporting: string,
@@ -153,7 +155,7 @@ export async function normalizeToReportingCurrency(
         });
         continue;
       }
-      const converted = amount * fx.rate;
+      const converted = round4(amount * fx.rate);
       normalized += converted;
       contributions.push({
         currency: cur,

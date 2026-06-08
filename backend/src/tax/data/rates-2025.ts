@@ -52,9 +52,12 @@ export const RATES_2025: RateTable = {
     maxInsurable: D('65700'),
     employeeRate: D('0.0166'),
   },
-  // Capital gains inclusion rate: 0.5 — the 66.67% increase announced in 2024 was
-  // deferred/cancelled as of the 2026-05-24 review date; verify with CRA before filing.
+  // Capital gains inclusion rate: tiered since June 25, 2024 for individuals —
+  // 50% on first $250K, 66.67% above $250K. This flat 0.5 is the base rate;
+  // the tiered bump is applied in the capital-gains calculation logic.
   capitalGainsInclusion: D('0.5'),
+  capitalGainsInclusionHigh: D('0.666667'),
+  capitalGainsInclusionThreshold: D('250000'),
   onSurtaxBands: [
     { threshold: D('5710'), rate: D('0.20') },
     { threshold: D('7307'), rate: D('0.36') },

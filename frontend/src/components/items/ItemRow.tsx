@@ -1,15 +1,18 @@
 import { useState, useRef } from 'react'
 import { patchJson } from '../../lib/api'
+import { formatMoney } from '../../lib/formatMoney'
 import type { ExternalOrderItemView } from '../../../../shared/api-types'
 
 export type ItemRowProps = {
   item: ExternalOrderItemView
   categoryHints: string[]
+  /** ISO 4217 currency code for formatting prices (e.g. "CAD", "USD"). */
+  currency?: string
   /** Called after a successful PATCH (category or business). Optional. */
   onSaved?: () => void
 }
 
-export function ItemRow({ item, categoryHints, onSaved }: ItemRowProps) {
+export function ItemRow({ item, categoryHints, currency, onSaved }: ItemRowProps) {
   const initialCategory = item.categoryOverride ?? item.inferredCategory ?? ''
   const initialBusiness = item.businessUseOverride ?? item.businessUsePercent ?? ''
 
@@ -78,7 +81,7 @@ export function ItemRow({ item, categoryHints, onSaved }: ItemRowProps) {
         </div>
       </td>
       <td>{item.quantity}</td>
-      <td>{item.totalPrice ?? '—'}</td>
+      <td>{item.totalPrice != null ? formatMoney(Number(item.totalPrice), currency) : '—'}</td>
       <td>
         <select
           value={category}

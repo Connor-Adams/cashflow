@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ReceiptWithItems } from '../../../shared/api-types'
+import { formatMoney } from '../lib/formatMoney'
 import { ItemRow } from './items/ItemRow'
 
 type Props = {
@@ -88,32 +89,32 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
         </thead>
         <tbody>
           {items.map((item) => (
-            <ItemRow key={item.id} item={item} categoryHints={categoryHints} />
+            <ItemRow key={item.id} item={item} categoryHints={categoryHints} currency={order.currency} />
           ))}
         </tbody>
         <tfoot>
           {order.subtotal != null && (
             <tr>
               <td colSpan={4}>Subtotal</td>
-              <td>{order.subtotal}</td>
+              <td>{formatMoney(Number(order.subtotal), order.currency)}</td>
             </tr>
           )}
           {order.tax != null && (
             <tr>
               <td colSpan={4}>Tax</td>
-              <td>{order.tax}</td>
+              <td>{formatMoney(Number(order.tax), order.currency)}</td>
             </tr>
           )}
           {order.shipping != null && (
             <tr>
               <td colSpan={4}>Shipping</td>
-              <td>{order.shipping}</td>
+              <td>{formatMoney(Number(order.shipping), order.currency)}</td>
             </tr>
           )}
           {order.total != null && (
             <tr>
               <td colSpan={4}>Total</td>
-              <td>{order.total}</td>
+              <td>{formatMoney(Number(order.total), order.currency)}</td>
             </tr>
           )}
         </tfoot>

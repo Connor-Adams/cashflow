@@ -65,8 +65,9 @@ export const RATES_2026: RateTable = {
     maxInsurable: D('67500'),
     employeeRate: D('0.0166'),
   },
-  // Capital gains inclusion: 0.5 — verify any legislative changes before filing
   capitalGainsInclusion: D('0.5'),
+  capitalGainsInclusionHigh: D('0.666667'),
+  capitalGainsInclusionThreshold: D('250000'),
   // ON surtax bands: 2025 values indexed by ~1.027 ≈ 5,864 / 7,504
   onSurtaxBands: [
     { threshold: D('5864'), rate: D('0.20') },

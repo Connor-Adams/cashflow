@@ -17,7 +17,9 @@ export type CarryforwardKind =
   | 'nerdtoh'
   | 'non_cap_loss'
   | 'aaii'
-  | 'instalments_paid';
+  | 'instalments_paid'
+  | 'fhsa_room'
+  | 'fhsa_lifetime_contribs';
 
 export class Carryforward extends Model<
   InferAttributes<Carryforward>,

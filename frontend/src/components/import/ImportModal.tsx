@@ -110,6 +110,7 @@ function isWealthsimpleExport(name: string): boolean {
   return WS_CREDIT_CARD_RE.test(name) || WS_MONTHLY_RE.test(name)
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function detectMode(files: File[]): DetectedMode {
   if (files.length === 0) return 'standard'
   const allPdf = files.every((f) => f.name.toLowerCase().endsWith('.pdf'))
@@ -135,6 +136,7 @@ export function detectMode(files: File[]): DetectedMode {
  * wrong-profile hint, instead of the old quiet "Imported 0 row(s)" success that
  * made a totally-failed import look fine.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function singleImportFeedback(
   result: UploadResult,
   profileId: string,
