@@ -61,6 +61,7 @@ test('T1 totalPayable excludes employment CPP/EI (L43500 bug fix)', () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
     },
     ageAtYearEnd: 40,
   };

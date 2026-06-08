@@ -78,7 +78,9 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       source: `${e.source} ${e.date}`,
       amount: e.proceeds.minus(e.acb).minus(e.outlays),
     })),
-    `gross × ${r.capitalGainsInclusion.toString()} − applied losses`);
+    r.capitalGainsInclusionHigh
+      ? `first $${r.capitalGainsInclusionThreshold!.toFixed(0)} × ${r.capitalGainsInclusion.toString()}, excess × ${r.capitalGainsInclusionHigh.toString()} − applied losses`
+      : `gross × ${r.capitalGainsInclusion.toString()} − applied losses`);
 
   // Self-employment L13500 = revenue − expenses
   const seRev = sumD(facts.selfEmploymentIncome.map((i) => i.cadAmount));

@@ -38,3 +38,45 @@ test('gain $2000 with $400 carried loss: taxable = 1000 - 400 = 600', () => {
   assert.equal(result.taxable.toFixed(2), '600.00');
   assert.equal(result.carryforwardRemaining.toFixed(2), '0.00');
 });
+
+// --- Tiered inclusion (2024+): 50% up to $250K, 66.67% above ---
+
+test('tiered: gains below $250K threshold → flat 50%', () => {
+  const r = ratesFor(2024);
+  const result = taxableCapitalGains([ev(100000)], r, D('0'));
+  assert.equal(result.taxable.toFixed(2), '50000.00');
+});
+
+test('tiered: gains at exactly $250K threshold → flat 50%', () => {
+  const r = ratesFor(2024);
+  const result = taxableCapitalGains([ev(250000)], r, D('0'));
+  assert.equal(result.taxable.toFixed(2), '125000.00');
+});
+
+test('tiered: gains $400K → first $250K at 50% + $150K at 66.67%', () => {
+  const r = ratesFor(2024);
+  const result = taxableCapitalGains([ev(400000)], r, D('0'));
+  // $250K × 0.5 = $125,000 + $150K × 0.666667 = $100,000.05
+  assert.equal(result.taxable.toFixed(2), '225000.05');
+});
+
+test('tiered: gains $500K with $50K carryforward loss', () => {
+  const r = ratesFor(2024);
+  const result = taxableCapitalGains([ev(500000)], r, D('50000'));
+  // $250K × 0.5 = $125,000 + $250K × 0.666667 = $166,666.75
+  // total includable = $291,666.75, minus $50K loss = $241,666.75
+  assert.equal(result.taxable.toFixed(2), '241666.75');
+  assert.equal(result.carryforwardRemaining.toFixed(2), '0.00');
+});
+
+test('tiered: loss year still rolls forward correctly', () => {
+  const r = ratesFor(2024);
+  const lossEvent: CapGainEvent = {
+    source: 'test', securityId: 1,
+    proceeds: D('500'), acb: D('1000'), outlays: D('0'), date: '2024-06-01',
+  };
+  const result = taxableCapitalGains([lossEvent], r, D('200'));
+  assert.equal(result.taxable.toFixed(2), '0.00');
+  // $500 loss × 50% = $250 added to existing $200 carryforward
+  assert.equal(result.carryforwardRemaining.toFixed(2), '450.00');
+});

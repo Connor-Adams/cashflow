@@ -1,4 +1,4 @@
-import { num } from '../util/numbers';
+import { num, toUnits, fromUnits } from '../util/numbers';
 import {
   classifyPositiveAmount,
   isNonCategorical,
@@ -285,14 +285,17 @@ export function aggregateDashboard(
     accountSummary.transactionCount += 1;
     if (row.reviewFlag) accountSummary.reviewCount += 1;
 
+    // Accumulate in integer units (×10 000) to avoid float drift over
+    // thousands of rows. Converted back to dollars in the finalize pass.
+    const amtU = toUnits(amount);
     if (amount < 0 && !nonSpend) {
-      metrics.totalSpend += -amount;
-      merchantSummary.totalSpend += -amount;
-      accountSummary.totalSpend += -amount;
+      metrics.totalSpend += -amtU;
+      merchantSummary.totalSpend += -amtU;
+      accountSummary.totalSpend += -amtU;
     } else if (positiveBucket === 'payment') {
-      metrics.totalPayments += amount;
-      merchantSummary.totalPayments += amount;
-      accountSummary.totalPayments += amount;
+      metrics.totalPayments += amtU;
+      merchantSummary.totalPayments += amtU;
+      accountSummary.totalPayments += amtU;
     // NOTE: income folds into totalCredits here (headline/merchant/account).
     // Only the per-business aggregate below splits income out — see that block.
     } else if (positiveBucket === 'credit' && row.txnType === 'income') {
@@ -300,19 +303,19 @@ export function aggregateDashboard(
       // against spend. Peel it into its own totalIncome line — mirroring the
       // per-business `income` split below — so paychecks don't inflate the
       // refunds/credits bucket or deflate netSpend (= totalSpend - totalCredits).
-      metrics.totalIncome += amount;
-      merchantSummary.totalIncome += amount;
-      accountSummary.totalIncome += amount;
+      metrics.totalIncome += amtU;
+      merchantSummary.totalIncome += amtU;
+      accountSummary.totalIncome += amtU;
     } else if (positiveBucket === 'credit') {
-      metrics.totalCredits += amount;
-      merchantSummary.totalCredits += amount;
-      accountSummary.totalCredits += amount;
+      metrics.totalCredits += amtU;
+      merchantSummary.totalCredits += amtU;
+      accountSummary.totalCredits += amtU;
       // Refund-attributable credits (issue #215): a refund row counts only
       // when it's tied back to an original purchase, so reward/cashback/
       // statement-credit rows that route through the same 'credit' bucket
       // don't inflate the "refunded" subtotal.
       if (row.txnType === 'refund' && row.linkedTransactionId != null) {
-        metrics.refundCredits += amount;
+        metrics.refundCredits += amtU;
         metrics.linkedRefundCount += 1;
       }
     }
@@ -393,7 +396,7 @@ export function aggregateDashboard(
           finalSplitType: row.finalSplitType,
           sumAmount: 0,
         };
-        existing.sumAmount += alloc.amount;
+        existing.sumAmount += toUnits(alloc.amount);
         byCategory.set(key, existing);
       }
     }
@@ -418,17 +421,16 @@ export function aggregateDashboard(
       netSpend: 0,
     };
     if (amount < 0 && !nonSpend) {
-      const spend = -amount;
-      monthly.totalSpend += spend;
-      split.totalSpend += spend;
+      monthly.totalSpend += -amtU;
+      split.totalSpend += -amtU;
     } else if (amount > 0 && row.txnType === 'income') {
       // Income peeled out of credits here too, so the monthly curve and split
       // tiles reconcile with the income-free headline netSpend.
-      monthly.totalIncome += amount;
-      split.totalIncome += amount;
+      monthly.totalIncome += amtU;
+      split.totalIncome += amtU;
     } else if (amount > 0) {
-      monthly.totalCredits += amount;
-      split.totalCredits += amount;
+      monthly.totalCredits += amtU;
+      split.totalCredits += amtU;
     }
     // Note: negative-amount non-spend rows (transfers, investment buys, etc)
     // contribute to neither side; they're tracked elsewhere (transaction
@@ -451,6 +453,7 @@ export function aggregateDashboard(
         [false, personalPart],
       ] as const) {
         if (part === 0) continue;
+        const partU = toUnits(part);
         const businessKey = `${currency}\0${isBiz ? '1' : '0'}`;
         const business = netSpendByBusiness.get(businessKey) ?? {
           currency,
@@ -469,12 +472,12 @@ export function aggregateDashboard(
         // NON_SPEND_TXN_TYPES) so it hits neither branch and contributes to
         // nothing — correct: an income reversal is money-movement, not spend.
         if (part < 0 && !nonSpend) {
-          business.totalSpend += -part;
+          business.totalSpend += -partU;
         } else if (part > 0) {
           if (row.txnType === 'income') {
-            business.income += part;
+            business.income += partU;
           } else {
-            business.totalCredits += part;
+            business.totalCredits += partU;
           }
         }
         business.netSpend = business.totalSpend - business.totalCredits;
@@ -492,15 +495,70 @@ export function aggregateDashboard(
         netSpend: 0,
       };
       if (alloc.amount < 0 && !nonSpend) {
-        category.totalSpend += -alloc.amount;
+        category.totalSpend += toUnits(-alloc.amount);
       } else if (alloc.amount > 0 && row.txnType !== 'income') {
         // Income is inflow, not a credit against any spend category — exclude
         // it from category reports (it has no meaningful category to net).
-        category.totalCredits += alloc.amount;
+        category.totalCredits += toUnits(alloc.amount);
       }
       category.netSpend = category.totalSpend - category.totalCredits;
       categoryReports.set(categoryKey, category);
     }
+  }
+
+  // ---- Finalize: convert integer-unit accumulators back to dollars ------
+  // All numeric fields were accumulated as ×10 000 integers to avoid
+  // IEEE-754 drift. Divide back at the output boundary so the API
+  // contract (dollar-denominated numbers) is unchanged.
+  for (const v of byCategory.values()) {
+    v.sumAmount = fromUnits(v.sumAmount);
+  }
+  for (const v of metricsByCurrency.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+    v.refundCredits = fromUnits(v.refundCredits);
+    // linkedRefundCount is a count, not money — leave as-is.
+  }
+  for (const v of monthlyByCurrency.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of netSpendBySplit.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of netSpendByBusiness.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.netSpend = fromUnits(v.netSpend);
+    v.income = fromUnits(v.income);
+  }
+  for (const v of categoryReports.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of merchantSummaries.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of accountSummaries.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
   }
 
   return {

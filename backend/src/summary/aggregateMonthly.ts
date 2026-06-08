@@ -1,4 +1,4 @@
-import { num } from '../util/numbers';
+import { num, toUnits, fromUnits } from '../util/numbers';
 import { classifyPositiveAmount, isNonCategorical } from './classifyTransactionFlow';
 import { splitTxnByItems } from '../import/splitTxnByItems';
 import type { ItemAllocationContext } from './loadItemAllocations';
@@ -103,7 +103,7 @@ export function aggregateMonthly(
       currency: row.currency,
       sumAmount: 0,
     };
-    existing.sumAmount += amount;
+    existing.sumAmount += toUnits(amount);
     points.set(key, existing);
 
     const allocations = itemContext
@@ -138,10 +138,18 @@ export function aggregateMonthly(
         category: alloc.category,
         sumAmount: 0,
       };
-      catExisting.sumAmount += alloc.amount;
+      catExisting.sumAmount += toUnits(alloc.amount);
       categoryPoints.set(catKey, catExisting);
     }
   }
+  // Finalize: convert integer-unit accumulators back to dollars.
+  for (const v of points.values()) {
+    v.sumAmount = fromUnits(v.sumAmount);
+  }
+  for (const v of categoryPoints.values()) {
+    v.sumAmount = fromUnits(v.sumAmount);
+  }
+
   return {
     points: Array.from(points.values()),
     categoryPoints: Array.from(categoryPoints.values()),

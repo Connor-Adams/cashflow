@@ -35,6 +35,8 @@ type FetchRate = (
   date: string
 ) => Promise<{ rate: number } | null>;
 
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
+
 const defaultFetchRate: FetchRate = async (from, to, date) => {
   const result = await ensureFxRate(from, to, date);
   return result ? { rate: result.rate } : null;
@@ -92,8 +94,8 @@ export async function normalizeActivitiesToCad(
 
     normalized.push({
       ...activity,
-      amount: activity.amount == null ? null : activity.amount * rate,
-      fees: activity.fees == null ? null : activity.fees * rate,
+      amount: activity.amount == null ? null : round4(activity.amount * rate),
+      fees: activity.fees == null ? null : round4(activity.fees * rate),
       currency: baseCurrency,
     });
   }

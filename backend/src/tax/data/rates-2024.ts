@@ -53,6 +53,8 @@ export const RATES_2024: RateTable = {
     employeeRate: D('0.0166'),
   },
   capitalGainsInclusion: D('0.5'),
+  capitalGainsInclusionHigh: D('0.666667'),
+  capitalGainsInclusionThreshold: D('250000'),
   onSurtaxBands: [
     { threshold: D('5554'), rate: D('0.20') },
     { threshold: D('7108'), rate: D('0.36') },
