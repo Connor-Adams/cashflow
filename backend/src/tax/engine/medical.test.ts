@@ -8,11 +8,11 @@ import type { TaxYearFacts } from './types.js';
 
 test('medicalCreditFederal computes correctly for $5000 expenses at $60k income', () => {
   const r = ratesFor(2025);
-  // threshold = min(60000 × 0.03, 2837) = min(1800, 2837) = 1800
+  // threshold = min(60000 × 0.03, 2834) = min(1800, 2834) = 1800
   // eligible = 5000 - 1800 = 3200
-  // credit = 3200 × 0.15 = 480
+  // credit = 3200 × 0.145 = 464 (2025 blended lowest rate per Bill C-4)
   const credit = medicalCreditFederal(D('5000'), D('60000'), r);
-  assert.equal(credit.toFixed(2), '480.00');
+  assert.equal(credit.toFixed(2), '464.00');
 });
 
 test('buildT1 applies medical credit to federal tax', () => {
