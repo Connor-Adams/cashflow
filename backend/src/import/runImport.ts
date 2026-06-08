@@ -34,6 +34,7 @@ import {
   findOrCreateSecurity,
 } from './commitStatementImport';
 import { parseWsHoldingsCsv } from './wealthsimpleHoldingsParse';
+import { wsRecordsHaveSecurityActivity } from './wealthsimpleInvestParse';
 import { assertUnderRoot } from './pathUtils';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { upsertSuggestedOrderLink } from '../amazon/matcher';
@@ -830,6 +831,30 @@ export async function importWsBundleFile(opts: {
   // Entity (created by the Wise/RBC importer) when one exists. No-op otherwise.
   await linkWsAccountToCorpEntity(account, parsed.productHint, opts.householdId);
 
+  // Self-heal a mis-typed account. A monthly WS statement carrying
+  // security-bearing activity (BUY/SELL/DIV/CRYPTORWD) means this is a
+  // brokerage account — even if it was first created as 'checking' because its
+  // filename display name didn't match an investment hint (e.g. "TFSA account"
+  // fails the exact-match check). accountType is otherwise locked on first
+  // findOrCreate, so without this the InvestmentActivity extraction gate in
+  // parseStatementFile (which keys on accountType==='investment') silently
+  // drops every BUY/SELL/DIV and corrupts portfolio valuation. Upgrade BEFORE
+  // parsing so the activities are emitted. Pure-cash codes (CONT/INT/FEE/AFT_*/
+  // P2P_*) never trigger this, so a HISA like "Save for Business" — whose
+  // statements only ever show CONT + Interest — stays 'checking'.
+  const accountTypeWarnings: string[] = [];
+  if (!parsed.isCreditCard && account.accountType !== 'investment') {
+    const parsedCsv = parseCsvRecords(opts.buffer.toString('utf8'));
+    if (parsedCsv.ok && wsRecordsHaveSecurityActivity(parsedCsv.records)) {
+      const from = account.accountType;
+      await account.update({ accountType: 'investment' });
+      accountTypeWarnings.push(
+        `Upgraded account #${account.id} accountType ${from} → investment ` +
+          `(statement carries BUY/SELL/DIV activity)`,
+      );
+    }
+  }
+
   const profileId = parsed.isCreditCard ? 'generic_simple' : 'generic_passthrough';
 
   // Force business flag on every row imported into a corp-typed WS account.
@@ -874,7 +899,7 @@ export async function importWsBundleFile(opts: {
     skippedDuplicates: commit.skippedDuplicates,
     rowErrors: commit.rowErrors,
     parseErrors: commit.parseErrors,
-    warnings: commit.warnings,
+    warnings: [...accountTypeWarnings, ...commit.warnings],
   };
 }
 
