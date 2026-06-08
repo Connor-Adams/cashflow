@@ -78,6 +78,37 @@ const CRYPTO_STAKING_FEE_RE =
 // emitted InvestmentActivity has amount=0 and quantity=coin received.
 const CRYPTORWD_RE = /^([\d.]+)\s+of\s+([A-Z0-9]+)\s+rewards?\s+earned/i;
 
+/**
+ * WS TX codes that imply the account holds securities (a brokerage account),
+ * as opposed to cash movements that also appear on chequing/HISA statements
+ * (CONT, INT, FPLINT, FEE, AFT_*, P2P_*, E_TRF*). Used by the bundle importer
+ * to self-heal an account mis-typed as `checking` when its statement actually
+ * carries trading/dividend activity — WITHOUT mis-upgrading a pure-cash
+ * account like "Save for Business" (which only ever shows CONT + Interest).
+ */
+const SECURITY_BEARING_WS_CODES: ReadonlySet<string> = new Set([
+  'BUY',
+  'SELL',
+  'DIV',
+  'CRYPTORWD',
+]);
+
+/**
+ * True when any row of a parsed WS monthly-statement CSV carries a
+ * security-bearing TX code. Reads the `transaction` column (case-insensitive,
+ * tolerating the capitalized `Transaction` header variant). Pure — no DB.
+ */
+export function wsRecordsHaveSecurityActivity(
+  records: Array<Record<string, string>>,
+): boolean {
+  return records.some((row) => {
+    const code = String(row['transaction'] ?? row['Transaction'] ?? '')
+      .trim()
+      .toUpperCase();
+    return SECURITY_BEARING_WS_CODES.has(code);
+  });
+}
+
 function parseAmount(raw: string): number {
   const n = parseFloat(raw);
   return Number.isFinite(n) ? n : 0;

@@ -7,6 +7,11 @@ import { balanceAtDate } from '../networth/balanceAtDate';
 import { buildSeries, monthEndDatesInRange, daysInRange } from '../networth/aggregate';
 import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
+import { isNonSpend } from '../summary/classifyTransactionFlow';
+import {
+  summarizeReportingCashflow,
+  type ReportingTxnRow,
+} from '../reporting/cashflowTotals';
 
 // Categories considered essential for runway calculation.
 const ESSENTIAL_CATEGORIES = new Set([
@@ -83,17 +88,9 @@ router.get('/summary', async (req, res, next) => {
       raw: true,
     });
 
-    let totalSpend = 0;
-    let totalIncome = 0;
-    for (const t of txns as unknown as { amount: unknown; txnType: string | null }[]) {
-      const amount = num(t.amount);
-      if (amount == null) continue;
-      if (amount < 0) {
-        totalSpend += Math.abs(amount);
-      } else if (t.txnType !== 'payment' && t.txnType !== 'transfer') {
-        totalIncome += amount;
-      }
-    }
+    const { totalSpend, totalIncome } = summarizeReportingCashflow(
+      txns as unknown as ReportingTxnRow[],
+    );
 
     const months = 3;
     const monthlyBurn = round2(totalSpend / months);
@@ -266,10 +263,17 @@ router.get('/cashflow/monthly', async (req, res, next) => {
       if (!byMonth.has(month)) byMonth.set(month, { income: 0, expenses: 0, recurringExpenses: 0 });
       const bucket = byMonth.get(month)!;
       if (amount < 0) {
+        // Exclude money-movement (transfers, investment buys, statement
+        // payments, refunds-reversals) from expenses — same rule as the
+        // dashboard's isNonSpend, so monthly burn reconciles.
+        if (isNonSpend(t.txnType, null)) continue;
         const abs = Math.abs(amount);
         bucket.expenses += abs;
         if (t.isRecurring) bucket.recurringExpenses += abs;
-      } else if (t.txnType !== 'payment' && t.txnType !== 'transfer') {
+      } else if (t.txnType === 'income') {
+        // Income peel: only real income inflates the income line. Refunds,
+        // rewards, and untyped deposits are NOT income (previously every
+        // positive non-payment/transfer bled in, inflating savings rate).
         bucket.income += amount;
       }
     }
@@ -387,14 +391,9 @@ router.get('/projections', async (req, res, next) => {
       raw: true,
     });
 
-    let totalSpend = 0;
-    let totalIncome = 0;
-    for (const t of txns as unknown as { amount: unknown; txnType: string | null }[]) {
-      const amount = num(t.amount);
-      if (amount == null) continue;
-      if (amount < 0) totalSpend += Math.abs(amount);
-      else if (t.txnType !== 'payment' && t.txnType !== 'transfer') totalIncome += amount;
-    }
+    const { totalSpend, totalIncome } = summarizeReportingCashflow(
+      txns as unknown as ReportingTxnRow[],
+    );
     const months = 3;
     const monthlyIncome = round2(totalIncome / months);
     const monthlyExpenses = round2(totalSpend / months);
@@ -485,21 +484,10 @@ router.get('/runway', async (req, res, next) => {
       raw: true,
     });
 
-    let totalSpend = 0;
-    let essentialSpend = 0;
-    let totalIncome = 0;
-    for (const t of txns as unknown as { amount: unknown; txnType: string | null; finalCategory: string | null }[]) {
-      const amount = num(t.amount);
-      if (amount == null) continue;
-      if (amount < 0) {
-        const abs = Math.abs(amount);
-        totalSpend += abs;
-        const cat = (t.finalCategory ?? '').toLowerCase();
-        if (ESSENTIAL_CATEGORIES.has(cat)) essentialSpend += abs;
-      } else if (t.txnType !== 'payment' && t.txnType !== 'transfer') {
-        totalIncome += amount;
-      }
-    }
+    const { totalSpend, essentialSpend } = summarizeReportingCashflow(
+      txns as unknown as ReportingTxnRow[],
+      ESSENTIAL_CATEGORIES,
+    );
 
     const months = 3;
     const averageMonthlyBurn = round2(totalSpend / months);
