@@ -253,9 +253,9 @@ function SidebarNavSections({
     <nav className="sidebar__nav" aria-label="Main">
       {sections.map((section) => (
         <div key={section.id} className="sidebar__section">
-          <Button
+          <button
             type="button"
-            variant="ghost"
+            data-slot="sidebar-header"
             className="sidebar__sectionHeader"
             aria-expanded={!collapsed.has(section.id)}
             onClick={() => onToggle(section.id)}
@@ -265,7 +265,7 @@ function SidebarNavSections({
               aria-hidden="true"
               className={`sidebar__sectionChevron${collapsed.has(section.id) ? ' sidebar__sectionChevron--collapsed' : ''}`}
             />
-          </Button>
+          </button>
           {!collapsed.has(section.id) && (
             <div className="sidebar__sectionItems">
               {section.items.map((item) => (
@@ -335,7 +335,7 @@ function SidebarFooter() {
         variant="secondary"
         size="sm"
         onClick={() => void auth.logout()}
-        className="sidebar__logout"
+        className="sidebar__logout w-full justify-start gap-2"
       >
         <LogOut aria-hidden="true" />
         Log out
@@ -381,7 +381,7 @@ function ThemeToggleButton() {
       title={`Switch to ${targetLabel} mode`}
       aria-label={`Switch to ${targetLabel} theme`}
       aria-pressed={isDark}
-      className="sidebar__themeToggle"
+      className="sidebar__themeToggle w-full justify-start gap-2"
     >
       {isDark ? <Sun size={18} /> : <Moon size={18} />}
       <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
