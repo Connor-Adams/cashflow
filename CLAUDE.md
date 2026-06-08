@@ -75,6 +75,10 @@ Backend tests use **`node:test` via `tsx`** (not vitest/jest); frontend uses **v
 > runs automatically — no glob to maintain. The runner exits non-zero if zero
 > files are discovered (guards a silent empty run); `test:coverage` keeps the
 > two-phase c8 accumulation (unit, then integration).
+> `backend/.c8rc.json` sets `merge-async: true` so c8 merges the ~1500
+> `coverage/tmp` fragments incrementally; the default sync merge loads them all
+> at once and OOM-aborts (exit 134, V8 `JsonParser` heap abort) once the
+> accumulated fragments exceed the merge process's old-space.
 >
 > Two carve-outs: **integration** tests stay in `backend/test/integration/`
 > (cross-cutting, Postgres), and **migration** tests live in

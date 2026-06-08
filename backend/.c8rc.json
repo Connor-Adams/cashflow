@@ -4,5 +4,6 @@
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.d.ts", "src/types/**", "test/**", "**/*.test.ts"],
   "reporter": ["text", "lcov", "json-summary"],
-  "reports-dir": "coverage"
+  "reports-dir": "coverage",
+  "merge-async": true
 }
