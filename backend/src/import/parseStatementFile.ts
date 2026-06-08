@@ -371,6 +371,23 @@ function parseOfx(
   return { transactions, investmentActivities, holdings, warnings };
 }
 
+type TxnDupKeyFields = { date: string; amount: number | string; currency: string; merchantRaw: string };
+
+function txnDupKey(r: TxnDupKeyFields): string {
+  return `${r.date}|${String(r.amount)}|${r.currency}|${r.merchantRaw}`;
+}
+
+function normalizeSourceRef(v: string | null | undefined): string | null {
+  return v == null || v === '' ? null : v;
+}
+
+function isTxnDuplicate(newRef: string | null, existingRefs: Array<string | null>): boolean {
+  if (existingRefs.length === 0) return false;
+  if (existingRefs.includes(newRef)) return true;
+  if (newRef == null) return existingRefs.some((er) => er != null);
+  return existingRefs.some((er) => er == null);
+}
+
 async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): Promise<void> {
   const txnKeys = preview.transactions.map((r) => ({
     date: r.date,
@@ -389,23 +406,14 @@ async function markDuplicates(preview: Omit<StatementPreview, 'previewToken'>): 
     : [];
   const txnIndex = new Map<string, Array<string | null>>();
   for (const e of existingTxns) {
-    const k = `${e.date}|${String(e.amount)}|${e.currency}|${e.merchantRaw}`;
+    const k = txnDupKey(e);
     const list = txnIndex.get(k) ?? [];
     list.push(e.sourceReference ?? null);
     txnIndex.set(k, list);
   }
   preview.transactions.forEach((r) => {
-    const key = `${r.date}|${String(r.amount)}|${r.currency}|${r.merchantRaw}`;
-    const existingRefs = txnIndex.get(key);
-    if (!existingRefs || existingRefs.length === 0) {
-      r.duplicate = false;
-      return;
-    }
-    const newRef = r.sourceReference == null || r.sourceReference === '' ? null : r.sourceReference;
-    if (existingRefs.some((er) => er === newRef)) { r.duplicate = true; return; }
-    if (newRef == null && existingRefs.some((er) => er != null)) { r.duplicate = true; return; }
-    if (newRef != null && existingRefs.some((er) => er == null)) { r.duplicate = true; return; }
-    r.duplicate = false;
+    const existingRefs = txnIndex.get(txnDupKey(r)) ?? [];
+    r.duplicate = isTxnDuplicate(normalizeSourceRef(r.sourceReference), existingRefs);
   });
 
   const [acts, holds] = await Promise.all([
