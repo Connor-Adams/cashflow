@@ -204,17 +204,18 @@ export function JobsTab() {
     <div className="jobsTabRoot space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Scheduled jobs</h2>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           role="switch"
           aria-checked={autoRefresh}
           aria-label="Auto-refresh"
           onClick={() => setAutoRefresh((v) => !v)}
-          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-muted/50"
         >
           <span className={cn('h-2 w-2 rounded-full', autoRefresh ? 'bg-emerald-500' : 'bg-slate-400')} />
           Auto-refresh
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -254,15 +255,17 @@ export function JobsTab() {
                   <Fragment key={j.name}>
                     <tr className="hover:bg-muted/30">
                       <td className={TD}>
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           aria-label={`${isExpanded ? 'Hide' : 'Show'} runs for ${j.name}`}
                           onClick={() => void toggleExpanded(j)}
-                          className="inline-flex items-center gap-1 font-medium"
+                          className="font-medium"
                         >
                           {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                           {j.name}
-                        </button>
+                        </Button>
                       </td>
                       <td className={TD}>
                         <span
@@ -273,19 +276,21 @@ export function JobsTab() {
                         </span>
                       </td>
                       <td className={TD}>
-                        <button
+                        <Button
                           role="switch"
+                          variant="ghost"
+                          size="sm"
                           aria-checked={j.enabled}
                           aria-label={`${j.name} enabled`}
                           disabled={isRunning}
                           onClick={() => void toggleEnabled(j)}
                           className={cn(
-                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-50',
+                            'rounded-full px-2 py-0.5 text-xs font-medium',
                             j.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
                           )}
                         >
                           {j.enabled ? 'on' : 'off'}
-                        </button>
+                        </Button>
                       </td>
                       <td className={TD}>
                         <span className="inline-flex items-center gap-2">

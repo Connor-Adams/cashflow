@@ -16,6 +16,7 @@ import { AssumptionsEditor } from './scenarios/AssumptionsEditor';
 import { RrifMinCalc } from './scenarios/RrifMinCalc';
 import { fmtCurrency } from './util/format';
 import { labelForTotal } from './util/labels';
+import { Button } from '@/components/ui/button';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
@@ -303,9 +304,9 @@ function ActiveScenarioPanel({
         <span className="muted">
           {scenario.kind === 'baseline' ? 'baseline (actuals)' : scenario.kind}
         </span>
-        <button onClick={onAddToCompare} className="ml-auto">
+        <Button variant="secondary" size="sm" onClick={onAddToCompare} className="ml-auto">
           {inCompare ? '✓ In compare' : '+ Add to compare'}
-        </button>
+        </Button>
       </header>
       {isProjection && (
         <div className="mb-3">
@@ -440,18 +441,20 @@ function CompareBar({ ids, scenarios, onRemove, onClear }: CompareBarProps) {
     <div className="mt-4 rounded-md border border-border p-2">
       <strong>Compare ({ids.length}):</strong>{' '}
       {ids.map((id) => (
-        <button
+        <Button
           key={id}
+          variant="ghost"
+          size="sm"
           onClick={() => onRemove(id)}
           className="mr-1"
         >
           {byId.get(id)?.name ?? `#${id}`} ×
-        </button>
+        </Button>
       ))}
       {ids.length > 0 && (
-        <button onClick={onClear} className="ml-2">
+        <Button variant="ghost" size="sm" onClick={onClear} className="ml-2">
           Clear
-        </button>
+        </Button>
       )}
       {ids.length < 2 && (
         <span className="muted"> Add at least 2 to see the diff.</span>

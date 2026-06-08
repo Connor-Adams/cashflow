@@ -399,7 +399,7 @@ export function RulesPage() {
             )}
             {previewState !== null && previewState !== 'counting' && (
               'error' in previewState ? (
-                <span style={{ fontSize: 12, color: 'var(--color-destructive, #dc2626)' }}>
+                <span style={{ fontSize: 12, color: 'var(--color-destructive)' }}>
                   Invalid pattern: {previewState.error}
                 </span>
               ) : (
@@ -429,7 +429,7 @@ export function RulesPage() {
               substring matches any part of the description; regex is for patterns (advanced).
             </span>
             {patternError && (
-              <span style={{ fontSize: 12, color: 'var(--color-destructive, #dc2626)' }} role="alert">
+              <span style={{ fontSize: 12, color: 'var(--color-destructive)' }} role="alert">
                 {patternError}
               </span>
             )}
@@ -509,14 +509,14 @@ export function RulesPage() {
             <div style={{ gridColumn: '1 / -1' }}>
               <span className="muted" style={{ fontSize: 12 }}>Must sum to 100%</span>
               {shareError && (
-                <span style={{ fontSize: 12, color: 'var(--color-destructive, #dc2626)', marginLeft: 8 }} role="alert">
+                <span style={{ fontSize: 12, color: 'var(--color-destructive)', marginLeft: 8 }} role="alert">
                   {shareError}
                 </span>
               )}
             </div>
           )}
         </div>
-        <button type="submit" disabled={!isNewFormValid}>Add rule</button>
+        <Button type="submit" disabled={!isNewFormValid}>Add rule</Button>
       </form>
 
       {autoSuggestions.length > 0 && (
@@ -563,18 +563,22 @@ export function RulesPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
-                        <button
+                        <Button
                           type="button"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => void acceptAutoSuggestion(s)}
                         >
                           Accept
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="sm"
                           onClick={() => void dismissAutoSuggestion(s)}
                         >
                           Dismiss
-                        </button>
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -619,9 +623,9 @@ export function RulesPage() {
                       {p.supportCount} rows #{p.exampleTransactionIds.join(', #')}
                     </TableCell>
                     <TableCell>
-                      <button type="button" onClick={() => void approveProposal(p)}>
+                      <Button type="button" variant="secondary" size="sm" onClick={() => void approveProposal(p)}>
                         Approve
-                      </button>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -682,9 +686,9 @@ export function RulesPage() {
                     <TableCell>{r.usageCount ?? 0}</TableCell>
                     <TableCell className="text-muted-foreground">{r.updatedAt ? r.updatedAt.slice(0, 10) : '—'}</TableCell>
                     <TableCell>
-                      <button type="button" onClick={() => void remove(r)}>
+                      <Button type="button" variant="destructive" size="sm" onClick={() => void remove(r)}>
                         Delete
-                      </button>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))

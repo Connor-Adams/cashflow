@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 
 export type PerformanceCaveatsBannerProps = {
@@ -21,9 +22,9 @@ export function PerformanceCaveatsBanner({
           {benchmarkIsPartial && <span className="ml-2">Benchmark data incomplete for {benchmarkSymbol}.</span>}
         </div>
         {missingDataReasons.length > 0 && (
-          <button type="button" onClick={() => setExpanded((v) => !v)} className="text-sm underline">
+          <Button type="button" variant="link" size="sm" onClick={() => setExpanded((v) => !v)}>
             {expanded ? 'Hide details' : 'Show details'}
-          </button>
+          </Button>
         )}
       </div>
       {expanded && missingDataReasons.length > 0 && (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { CategoryIcon } from './CategoryIcon'
 
 function arrangeOptionsBySpace(options: string[]): string[] {
@@ -91,9 +92,11 @@ export function CategoryCloudPicker({
           role="listbox"
         >
           {arrangedOptions.map((option) => (
-            <button
+            <Button
               key={option}
               type="button"
+              variant="ghost"
+              size="sm"
               className={['categoryCloudPicker__item', itemClassName]
                 .filter(Boolean)
                 .join(' ')}
@@ -112,7 +115,7 @@ export function CategoryCloudPicker({
                 <CategoryIcon name={option} />
                 {option}
               </span>
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}

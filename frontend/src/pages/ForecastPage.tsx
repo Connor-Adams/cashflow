@@ -266,8 +266,8 @@ export function ForecastPage() {
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="forecastFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--chart-income)" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="var(--chart-income)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -288,11 +288,11 @@ export function ForecastPage() {
                   }}
                   labelFormatter={(label) => (typeof label === 'string' ? label : String(label ?? ''))}
                 />
-                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
+                <ReferenceLine y={0} stroke="var(--chart-danger-line)" strokeDasharray="4 4" />
                 <Area
                   type="monotone"
                   dataKey="balance"
-                  stroke="#059669"
+                  stroke="var(--chart-income-stroke)"
                   fill="url(#forecastFill)"
                   strokeWidth={2}
                 />

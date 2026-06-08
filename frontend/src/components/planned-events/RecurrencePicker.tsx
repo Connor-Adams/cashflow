@@ -157,20 +157,18 @@ export function RecurrencePicker({ value, onChange, expectedDate, id }: Props) {
             {WEEKDAYS.map(({ day, short, long }) => {
               const active = byDay.includes(day)
               return (
-                <button
+                <Button
                   key={day}
                   type="button"
+                  variant={active ? 'default' : 'outline'}
+                  size="sm"
                   aria-label={long}
                   aria-pressed={active}
                   onClick={() => toggleDay(day)}
-                  className={`h-7 w-7 rounded-full text-xs font-medium border transition-colors ${
-                    active
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-background text-muted-foreground border-input hover:border-ring'
-                  }`}
+                  className="h-7 w-7 rounded-full"
                 >
                   {short}
-                </button>
+                </Button>
               )
             })}
           </div>

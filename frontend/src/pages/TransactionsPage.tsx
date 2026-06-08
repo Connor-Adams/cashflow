@@ -1354,14 +1354,15 @@ export function TransactionsPage() {
                   >
                     {filter.label}
                   </Link>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     onClick={filter.clear}
                     className="transactionsFilterPill__clear"
                     aria-label={`Clear ${filter.label}`}
                   >
                     ×
-                  </button>
+                  </Button>
                 </span>
               ) : (
                 <Button
@@ -2283,14 +2284,15 @@ function TransactionRow({
             <span>{(t.receiptCount ?? 0) > 0 ? 'Add receipt' : 'Attach receipt'}</span>
           </Button>
           {(t.receiptCount ?? 0) > 0 && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               className="txnReceiptAction"
               onClick={() => onViewItems(t.id)}
               title="View receipt items"
             >
               View items
-            </button>
+            </Button>
           )}
           {t.receiptWarnings?.length ? (
             <span className="txnBadge txnBadge--review" title={t.receiptWarnings.join(', ')}>

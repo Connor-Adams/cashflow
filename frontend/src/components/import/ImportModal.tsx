@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
@@ -434,13 +435,15 @@ export function ImportModal({
               <div className="rounded-md border border-border">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-border text-xs muted">
                   <span>{files.length} file(s) · {(totalBytes / 1024).toFixed(1)} KB</span>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     className="underline"
                     onClick={() => setFiles([])}
                   >
                     Clear
-                  </button>
+                  </Button>
                 </div>
                 <ul className="max-h-64 overflow-y-auto text-sm">
                   {files.map((f, i) => (
@@ -449,14 +452,16 @@ export function ImportModal({
                       className="flex items-center justify-between px-3 py-1.5 border-b border-border last:border-b-0"
                     >
                       <span className="truncate" title={f.name}>{f.name}</span>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
                         className="muted hover:text-foreground ml-2 text-xs"
                         onClick={() => removeFile(i)}
                         aria-label={`Remove ${f.name}`}
                       >
                         ×
-                      </button>
+                      </Button>
                     </li>
                   ))}
                 </ul>
@@ -543,13 +548,15 @@ export function ImportModal({
             )}
             {showProgressLink && (
               <div className="mt-2">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   className="text-xs underline underline-offset-2 text-blue-600 dark:text-blue-400 hover:opacity-80"
                   onClick={() => { onOpenChange(false); navigate('/imports') }}
                 >
                   View progress →
-                </button>
+                </Button>
               </div>
             )}
           </div>

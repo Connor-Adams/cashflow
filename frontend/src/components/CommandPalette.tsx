@@ -303,6 +303,7 @@ export function CommandPalette({
                   return (
                     <button
                       key={cmd.id}
+                      data-slot="listbox-option"
                       id={`command-palette-option-${cmd.id}`}
                       role="option"
                       type="button"

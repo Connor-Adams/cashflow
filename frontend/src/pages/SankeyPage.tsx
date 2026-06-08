@@ -45,11 +45,11 @@ const DEFAULT_CURRENCY = 'CAD'
  * recharts components use so the Sankey feels like the rest of the app.
  */
 const NODE_COLORS: Record<SankeyNodeType['kind'], string> = {
-  income: '#10b981', // emerald — money in
-  category: '#3b82f6', // blue — typical spend
-  business: '#8b5cf6', // violet — deductible business spend
-  savings: '#06b6d4', // cyan — savings & investments (future use)
-  uncategorized: '#9ca3af', // slate — needs review
+  income: 'var(--chart-income)',
+  category: 'var(--chart-category)',
+  business: 'var(--chart-business-alt)',
+  savings: 'var(--chart-savings)',
+  uncategorized: 'var(--chart-uncategorized)',
 }
 
 /**
@@ -412,7 +412,7 @@ function SankeyNode({
         height={height}
         fill={fill}
         fillOpacity={0.95}
-        stroke="#0f172a"
+        stroke="var(--chart-link-stroke)"
         strokeOpacity={0.2}
       />
       <text
@@ -482,7 +482,7 @@ function SankeyLinkPath({
     <path
       d={d}
       fill="none"
-      stroke="#3b82f6"
+      stroke="var(--chart-category)"
       strokeOpacity={0.35}
       strokeWidth={linkWidth}
       onClick={handleClick}

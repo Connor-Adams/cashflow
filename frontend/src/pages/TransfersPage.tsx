@@ -315,7 +315,7 @@ function Stat({
   tone?: 'warn'
 }) {
   return (
-    <div style={{ padding: 12, border: '1px solid var(--muted, #ddd)', borderRadius: 6 }}>
+    <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
       <div className="muted" style={{ fontSize: 12 }}>
         {label}
       </div>
@@ -323,7 +323,7 @@ function Stat({
         style={{
           fontSize: 20,
           fontWeight: 600,
-          color: tone === 'warn' ? 'var(--accent-warm, #b45309)' : undefined,
+          color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
         }}
       >
         {value}

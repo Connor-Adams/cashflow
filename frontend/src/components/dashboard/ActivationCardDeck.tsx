@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { getJson, postJson } from '@/lib/api'
 
 type ActivationState = {
@@ -100,14 +101,16 @@ export function ActivationCardDeck() {
           key={card.id}
           className="relative rounded-xl border border-border bg-card p-4 shadow-sm"
         >
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             aria-label={`Dismiss ${card.title}`}
             onClick={() => void dismiss(card.id)}
-            className="absolute right-3 top-3 text-muted-foreground hover:text-foreground"
+            className="absolute right-3 top-3"
           >
             ×
-          </button>
+          </Button>
           <h3 className="mb-1 pr-6 text-sm font-semibold">{card.title}</h3>
           <p className="mb-3 text-xs text-muted-foreground">{card.description}</p>
           <Link
