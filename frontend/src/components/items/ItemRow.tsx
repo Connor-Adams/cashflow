@@ -67,7 +67,7 @@ export function ItemRow({ item, categoryHints, currency, onSaved }: ItemRowProps
                 title={item.imageVerified === false ? 'Best-effort match (unverified)' : undefined}
                 width={40}
                 height={40}
-                style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid #eee', opacity: item.imageVerified === false ? 0.6 : 1 }}
+                style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid var(--border)', opacity: item.imageVerified === false ? 0.6 : 1 }}
                 loading="lazy"
               />
             </a>
@@ -75,7 +75,7 @@ export function ItemRow({ item, categoryHints, currency, onSaved }: ItemRowProps
           <div>
             {item.displayName ?? item.title}
             {item.displayName && (
-              <div style={{ fontSize: '0.8em', color: '#888' }}>{item.title}</div>
+              <div style={{ fontSize: '0.8em', color: 'var(--muted-foreground)' }}>{item.title}</div>
             )}
           </div>
         </div>

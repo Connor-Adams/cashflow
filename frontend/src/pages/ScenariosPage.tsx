@@ -97,7 +97,7 @@ type SparklineProps = {
 
 function Sparkline({
   points,
-  color = '#6366f1',
+  color = 'var(--chart-scenario)',
   width = 120,
   height = 36,
   'aria-label': ariaLabel,
@@ -538,7 +538,7 @@ function ComparisonPanel({
             {rj.baseline.dailyPoints.length > 1 && (
               <Sparkline
                 points={rj.baseline.dailyPoints}
-                color="#6366f1"
+                color="var(--chart-scenario)"
                 aria-label={`${scenario.name} baseline forecast sparkline`}
               />
             )}
@@ -571,7 +571,7 @@ function ComparisonPanel({
             {rj.scenario.dailyPoints.length > 1 && (
               <Sparkline
                 points={rj.scenario.dailyPoints}
-                color={rj.deltas.closing >= 0 ? '#16a34a' : '#dc2626'}
+                color={rj.deltas.closing >= 0 ? 'var(--chart-scenario-pos)' : 'var(--chart-scenario-neg)'}
                 aria-label={`${scenario.name} scenario forecast sparkline`}
               />
             )}
@@ -726,13 +726,14 @@ export function ScenariosPage() {
                     className={isExpanded ? 'bg-muted/40' : ''}
                   >
                     <TableCell>
-                      <button
+                      <Button
                         type="button"
-                        className="text-left font-medium hover:underline focus:outline-none"
+                        variant="link"
+                        className="text-left font-medium"
                         onClick={() => setExpanded(isExpanded ? null : s.id)}
                       >
                         {s.name}
-                      </button>
+                      </Button>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {s.assumptionsJson.baselineDays ?? 30}d

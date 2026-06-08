@@ -3,6 +3,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -33,7 +34,9 @@ import { InboxSummaryTile } from '@/components/dashboard/InboxSummaryTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
 import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
-import { formatMoney } from '../lib/formatMoney'
+
+import { formatCurrency } from '../lib/formatCurrency'
+import { DeltaBadge } from '../components/ui/DeltaBadge'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
 import { businessIncomeSpend } from '../lib/businessIncomeSpend'
 import { summaryQueryString } from '../lib/summaryQuery'
@@ -419,15 +422,14 @@ export function DashboardPage() {
     }
     // Flip sign so spend reads as positive money-out. Charges land in the DB
     // as negative; refunds/credits as positive. After negation a typical
-    // spend category shows a positive bar (going up), and a category that
-    // net-refunded shows a negative bar (going down) which reads as
+    // spend category shows a positive bar (going right), and a category that
+    // net-refunded shows a negative bar (going left) which reads as
     // "money came back from this category".
-    return Array.from(byCat.entries()).map(([name, total]) => ({ name, total: -total }))
+    // Sort descending by absolute value so the biggest spenders are at the top.
+    return Array.from(byCat.entries())
+      .map(([name, total]) => ({ name, total: -total }))
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
   }, [data, currency])
-
-  // Threshold for switching the category-axis layout. Above this count,
-  // labels overlap even on a wide viewport with default tick spacing.
-  const hasManyCategories = chartData.length > 10
 
   // Drill from a category bar into a pre-filtered Transactions view. Preserves
   // the active currency and date filters so the destination opens with the
@@ -567,50 +569,37 @@ export function DashboardPage() {
     const incomeDelta = incomeTotal - prevIncomeTotal
     const netSpendDelta = netSpendTotal - prevNetSpendTotal
     const txDelta = txCount - prevTxCount
-    const formatDeltaMoney = (v: number): string => {
-      const abs = Math.abs(v)
-      const sign = v > 0 ? '+' : v < 0 ? '-' : ''
-      if (singleCurrency == null) return `${sign}${abs.toFixed(2)}`
-      return `${sign}${formatMoney(abs, singleCurrency)}`
-    }
-    const formatDeltaCount = (v: number): string =>
-      `${v > 0 ? '+' : ''}${Math.trunc(v)}`
-    // The previous-period prefix lives on Dashboard's delta strings so the
-    // shared StatCard renders it inside the colored badge. Sign detection in
-    // stat-card tolerates the leading descriptor.
-    const withPrevPeriod = (label: string): string =>
-      `vs previous period: ${label}`
-
     return {
       spendLabel:
         singleCurrency != null
-          ? formatMoney(spendTotal, singleCurrency)
+          ? formatCurrency(spendTotal, singleCurrency)
           : `${selected.length} currencies`,
       creditsLabel:
         singleCurrency != null
-          ? formatMoney(creditTotal, singleCurrency)
+          ? formatCurrency(creditTotal, singleCurrency)
           : `${selected.length} currencies`,
       paymentsLabel:
         singleCurrency != null
-          ? formatMoney(paymentTotal, singleCurrency)
+          ? formatCurrency(paymentTotal, singleCurrency)
           : `${selected.length} currencies`,
       incomeLabel:
         singleCurrency != null
-          ? formatMoney(incomeTotal, singleCurrency)
+          ? formatCurrency(incomeTotal, singleCurrency)
           : `${selected.length} currencies`,
       netSpendLabel:
         singleCurrency != null
-          ? formatMoney(netSpendTotal, singleCurrency)
+          ? formatCurrency(netSpendTotal, singleCurrency)
           : `${selected.length} currencies`,
       moneyHint:
         singleCurrency != null ? `In ${singleCurrency}` : 'Across selected currencies',
       txCount,
-      spendDeltaLabel: withPrevPeriod(formatDeltaMoney(spendDelta)),
-      creditsDeltaLabel: withPrevPeriod(formatDeltaMoney(creditDelta)),
-      paymentsDeltaLabel: withPrevPeriod(formatDeltaMoney(paymentDelta)),
-      incomeDeltaLabel: withPrevPeriod(formatDeltaMoney(incomeDelta)),
-      netSpendDeltaLabel: withPrevPeriod(formatDeltaMoney(netSpendDelta)),
-      txDeltaLabel: withPrevPeriod(formatDeltaCount(txDelta)),
+      spendDelta,
+      creditDelta,
+      paymentDelta,
+      incomeDelta,
+      netSpendDelta,
+      txDelta,
+      deltaCurrency: singleCurrency,
       comparisonHint,
       merchantCount: merchantReportData.length,
       accountCount: accountReportData.length,
@@ -659,7 +648,7 @@ export function DashboardPage() {
   const displayCurrency = currency || (currencies.length === 1 ? currencies[0] : '')
   const formatDashboardAmount = (value: number): string =>
     displayCurrency
-      ? formatMoney(value, displayCurrency)
+      ? formatCurrency(value, displayCurrency)
       : new Intl.NumberFormat(undefined, {
           maximumFractionDigits: 2,
         }).format(value)
@@ -694,9 +683,7 @@ export function DashboardPage() {
     return formatShortMonth(value)
   }
 
-  // Column specs for the bento table-tiles. Defined inside the component
-  // so the render closures can reference `formatMoney` directly without
-  // tunneling it through the column spec.
+  // Column specs for the bento table-tiles.
   const merchantColumns: TableTileColumn<MerchantSummaryRow>[] = [
     { key: 'merchant', label: 'Merchant', render: (r) => r.merchant },
     {
@@ -710,7 +697,7 @@ export function DashboardPage() {
       key: 'net',
       label: 'Net spend',
       align: 'right',
-      render: (r) => formatMoney(r.netSpend, r.currency),
+      render: (r) => formatCurrency(r.netSpend, r.currency),
     },
   ]
 
@@ -731,7 +718,7 @@ export function DashboardPage() {
       key: 'net',
       label: 'Net spend',
       align: 'right',
-      render: (r) => formatMoney(r.netSpend, r.currency),
+      render: (r) => formatCurrency(r.netSpend, r.currency),
     },
   ]
 
@@ -754,14 +741,12 @@ export function DashboardPage() {
       label: 'Amount',
       align: 'right',
       width: '6rem',
-      render: (r) => formatMoney(r.amount, r.currency),
+      render: (r) => formatCurrency(r.amount, r.currency),
     },
   ]
 
   // Review banner pins to 8 cols so it lines up with the HeroTile beneath
-  // it instead of sprawling full-width across an empty middle. The AI
-  // action banner takes the remaining 4 cols when both fire, otherwise
-  // stretches across the full row.
+  // it instead of sprawling full-width across an empty middle.
   const showReviewBanner = summaryStats.reviewCount > 0
   const reviewBannerSpan: BentoSpan = 8
 
@@ -988,8 +973,8 @@ export function DashboardPage() {
                       )}
                     </div>
                     <p className="budgetPill__amount">
-                      {formatMoney(item.spent, item.currency)} /{' '}
-                      {formatMoney(item.target, item.currency)}{' '}
+                      {formatCurrency(item.spent, item.currency)} /{' '}
+                      {formatCurrency(item.target, item.currency)}{' '}
                       <span className="budgetPill__currency">{item.currency}</span>
                     </p>
                     {item.pacingState && elapsedRounded !== null && (
@@ -1030,14 +1015,15 @@ export function DashboardPage() {
           <HeroTile
             netSpendLabel={summaryStats.netSpendLabel}
             netSpendDelta={
-              hasComparisonPeriod ? summaryStats.netSpendDeltaLabel : undefined
+              hasComparisonPeriod ? summaryStats.netSpendDelta : undefined
             }
+            deltaCurrency={summaryStats.deltaCurrency ?? ''}
             subMetrics={[
               {
                 label: 'Spend',
                 value: summaryStats.spendLabel,
                 delta: hasComparisonPeriod
-                  ? summaryStats.spendDeltaLabel
+                  ? summaryStats.spendDelta
                   : undefined,
                 metricKind: 'spend',
               },
@@ -1045,7 +1031,7 @@ export function DashboardPage() {
                 label: 'Refunds / credits',
                 value: summaryStats.creditsLabel,
                 delta: hasComparisonPeriod
-                  ? summaryStats.creditsDeltaLabel
+                  ? summaryStats.creditDelta
                   : undefined,
                 metricKind: 'gain',
               },
@@ -1053,7 +1039,7 @@ export function DashboardPage() {
                 label: 'Income',
                 value: summaryStats.incomeLabel,
                 delta: hasComparisonPeriod
-                  ? summaryStats.incomeDeltaLabel
+                  ? summaryStats.incomeDelta
                   : undefined,
                 metricKind: 'gain',
               },
@@ -1061,7 +1047,7 @@ export function DashboardPage() {
                 label: 'Payments / transfers',
                 value: summaryStats.paymentsLabel,
                 delta: hasComparisonPeriod
-                  ? summaryStats.paymentsDeltaLabel
+                  ? summaryStats.paymentDelta
                   : undefined,
                 metricKind: 'neutral',
               },
@@ -1082,20 +1068,19 @@ export function DashboardPage() {
                 label: 'Transactions',
                 value: summaryStats.txCount,
                 hint: 'Rows in current filters',
-                delta: hasComparisonPeriod ? summaryStats.txDeltaLabel : undefined,
-                metricKind: 'neutral',
+                delta: hasComparisonPeriod ? (
+                  <DeltaBadge delta={summaryStats.txDelta} metricKind="neutral" />
+                ) : undefined,
               },
               {
                 label: 'Merchants',
                 value: summaryStats.merchantCount,
                 hint: 'Distinct merchants',
-                metricKind: 'neutral',
               },
               {
                 label: 'Accounts',
                 value: summaryStats.accountCount,
                 hint: 'With activity in period',
-                metricKind: 'neutral',
               },
             ]}
           />
@@ -1237,27 +1222,23 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={110}>
-              <BarChart data={chartData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis
-                  dataKey="name"
-                  // Category-count-aware label handling: once there are more
-                  // than 10 categories, default Recharts spacing overlaps even
-                  // on wide viewports. Steepen the angle and give the axis
-                  // more vertical space so every label still renders without
-                  // clipping (long names like "Snowboarding Gear" need both
-                  // the steeper angle and the extra height to fit).
-                  tick={hasManyCategories ? { fontSize: 11 } : narrowAxisTick}
-                  interval={0}
-                  minTickGap={isNarrowViewport ? 12 : 5}
-                  angle={hasManyCategories ? -55 : 0}
-                  textAnchor={hasManyCategories ? 'end' : 'middle'}
-                  height={hasManyCategories ? 110 : undefined}
-                />
+            <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 32)}>
+              <BarChart
+                data={chartData}
+                layout="vertical"
+                margin={{ top: 4, right: 60, bottom: 4, left: 4 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                 <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={{ fontSize: 12 }}
+                  interval={0}
+                  width={isNarrowViewport ? 90 : 120}
+                />
+                <XAxis
+                  type="number"
                   tick={narrowAxisTick}
-                  width={isNarrowViewport ? 44 : 60}
                   tickFormatter={compactCurrencyTickFormatter}
                 />
                 <Tooltip
@@ -1269,7 +1250,7 @@ export function DashboardPage() {
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return ''
                     return currency
-                      ? formatMoney(v, currency)
+                      ? formatCurrency(v, currency)
                       : new Intl.NumberFormat(undefined, {
                           maximumFractionDigits: 2,
                         }).format(v)
@@ -1290,7 +1271,22 @@ export function DashboardPage() {
                         : ''
                     if (name) navigateToCategory(name)
                   }}
-                />
+                >
+                  <LabelList
+                    dataKey="total"
+                    position="right"
+                    style={{ fontSize: 11, fill: 'var(--foreground)' }}
+                    formatter={(value) => {
+                      const v = typeof value === 'number' ? value : Number(value)
+                      if (!Number.isFinite(v)) return ''
+                      return currency
+                        ? formatCurrency(v, currency)
+                        : new Intl.NumberFormat(undefined, {
+                            maximumFractionDigits: 0,
+                          }).format(v)
+                    }}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -1317,7 +1313,6 @@ export function DashboardPage() {
             </p>
           ) : null}
         </BentoTile>
-
 
         <BentoTile
           span={6}
@@ -1420,7 +1415,7 @@ export function DashboardPage() {
                     if (value == null) return null
                     const v = typeof value === 'number' ? value : Number(value)
                     if (!Number.isFinite(v)) return null
-                    return formatMoney(v, String(name))
+                    return formatCurrency(v, String(name))
                   }}
                 />
                 <Legend

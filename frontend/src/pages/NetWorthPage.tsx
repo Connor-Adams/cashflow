@@ -21,6 +21,7 @@ import {
   TableRow,
   TableCell,
 } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/formatMoney'
 import {
   fromDateInputValue,
@@ -146,16 +147,15 @@ export function NetWorthPage() {
         </div>
         <div className="flex gap-1">
           {(['1M', '3M', '1Y', 'All'] as Range[]).map((r) => (
-            <button
+            <Button
               key={r}
               type="button"
+              variant={range === r ? 'default' : 'outline'}
+              size="sm"
               onClick={() => setRange(r)}
-              className={`px-3 py-1 text-sm rounded ${
-                range === r ? 'bg-primary text-primary-foreground' : 'border'
-              }`}
             >
               {r}
-            </button>
+            </Button>
           ))}
         </div>
       </header>
@@ -171,13 +171,15 @@ export function NetWorthPage() {
             {needsOpeningCount === 1 ? 's' : 've'} no opening balance set —
             derived totals will be off until you set them.
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={openEditorAndScroll}
-            className="rounded border border-amber-600 px-3 py-1 text-sm font-medium"
+            className="border-amber-600"
           >
             Set opening balances
-          </button>
+          </Button>
         </div>
       )}
 
@@ -302,13 +304,14 @@ export function NetWorthPage() {
       </div>
 
       <div ref={editorRef} className="rounded border">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setEditorOpen((v) => !v)}
           className="w-full text-left p-4 font-medium"
         >
           Opening balances {editorOpen ? '−' : '+'}
-        </button>
+        </Button>
         {editorOpen && (
           <div className="p-4 space-y-3 border-t">
             {editableAccounts.length === 0 ? (
@@ -347,14 +350,15 @@ export function NetWorthPage() {
                         }))
                       }
                     />
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => saveOpening(row.accountId)}
                       aria-label={`Save ${row.label}`}
-                      className="rounded border px-3 py-1 text-sm"
                     >
                       Save
-                    </button>
+                    </Button>
                   </div>
                   {openingErrors[row.accountId] && (
                     <span

@@ -1,4 +1,5 @@
 import { ensureFxRate } from '../fx/bankOfCanada';
+import { toUnits, fromUnits } from '../util/numbers';
 
 export type FxLookup = (
   from: string,
@@ -28,8 +29,6 @@ export type UnifyResult = {
   gaps: UnifyGap[];
 };
 
-const round4 = (n: number) => Math.round(n * 10000) / 10000;
-
 const defaultFxLookup: FxLookup = (from, to, asOf) => ensureFxRate(from, to, asOf);
 
 export async function unifyToCad(
@@ -37,15 +36,15 @@ export async function unifyToCad(
   asOf: string,
   fxLookup: FxLookup = defaultFxLookup
 ): Promise<UnifyResult> {
-  let totalAssets = 0;
-  let totalLiabilities = 0;
+  let totalAssetsU = 0;
+  let totalLiabilitiesU = 0;
   const fxRatesUsed: FxRateUsed[] = [];
   const gaps: UnifyGap[] = [];
 
   for (const [currency, { asset, liability }] of Object.entries(perCurrency)) {
     if (currency === 'CAD') {
-      totalAssets += asset;
-      totalLiabilities += liability;
+      totalAssetsU += toUnits(asset);
+      totalLiabilitiesU += toUnits(liability);
       continue;
     }
     const fx = await fxLookup(currency, 'CAD', asOf);
@@ -53,10 +52,10 @@ export async function unifyToCad(
       gaps.push({ date: asOf, currency, reason: 'fx_rate_unavailable' });
       continue;
     }
-    totalAssets += round4(asset * fx.rate);
-    totalLiabilities += round4(liability * fx.rate);
+    totalAssetsU += toUnits(asset * fx.rate);
+    totalLiabilitiesU += toUnits(liability * fx.rate);
     fxRatesUsed.push({ from: currency, to: 'CAD', rate: fx.rate, ratedDate: fx.ratedDate });
   }
 
-  return { totalAssets, totalLiabilities, fxRatesUsed, gaps };
+  return { totalAssets: fromUnits(totalAssetsU), totalLiabilities: fromUnits(totalLiabilitiesU), fxRatesUsed, gaps };
 }

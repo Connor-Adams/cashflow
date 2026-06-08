@@ -371,13 +371,14 @@ function ReviewDialog({
               {row.date} &bull; {formatMoney(Number(row.amount), row.currency)}
             </p>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
             aria-label="Close"
           >
             <XCircle className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         <div className="space-y-2">

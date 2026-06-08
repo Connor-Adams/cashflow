@@ -122,8 +122,9 @@ export function MatchDividendModal({
               const isSelected = c.id === selectedId
               return (
                 <li key={c.id}>
-                  <button
+                  <Button
                     type="button"
+                    variant={isSelected ? 'outline' : 'ghost'}
                     role="radio"
                     aria-checked={isSelected}
                     data-testid="dividend-candidate"
@@ -131,10 +132,10 @@ export function MatchDividendModal({
                       setSelectedId(c.id)
                       setConfirmWrong(false)
                     }}
-                    className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm h-auto ${
                       isSelected
                         ? 'border-primary bg-muted'
-                        : 'border-border hover:bg-muted/60'
+                        : ''
                     }`}
                   >
                     <span className="flex flex-col">
@@ -149,7 +150,7 @@ export function MatchDividendModal({
                         {formatMoney(c.amount, c.currency)}
                       </span>
                     </span>
-                  </button>
+                  </Button>
                 </li>
               )
             })}

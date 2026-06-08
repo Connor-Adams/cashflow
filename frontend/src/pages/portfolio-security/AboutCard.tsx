@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import type { PortfolioSecurityOverview } from '../../types/api'
 
@@ -37,13 +38,14 @@ export function AboutCard({ overview }: AboutCardProps) {
         <p className="mt-3 text-sm">
           {shown}{' '}
           {desc.length > TRUNCATE_LEN && (
-            <button
+            <Button
               type="button"
+              variant="link"
               className="underline text-foreground"
               onClick={() => setExpanded(!expanded)}
             >
               {expanded ? 'Show less' : 'Show more'}
-            </button>
+            </Button>
           )}
         </p>
       )}

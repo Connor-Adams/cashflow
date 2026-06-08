@@ -221,13 +221,14 @@ export function PurchasesPage() {
                 <TableRow key={p.transactionId}>
                   <TableCell>{p.transaction.date}</TableCell>
                   <TableCell>
-                    <button
+                    <Button
                       type="button"
-                      className="text-left underline-offset-2 hover:underline"
+                      variant="link"
+                      className="text-left"
                       onClick={() => setSelected(p)}
                     >
                       {p.transaction.merchant}
-                    </button>
+                    </Button>
                   </TableCell>
                   <TableCell>{p.transaction.accountName ?? '—'}</TableCell>
                   <TableCell className="text-right tabular-nums">

@@ -2,7 +2,8 @@ import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { ImportModal, detectMode, singleImportFeedback } from './ImportModal'
+import { ImportModal } from './ImportModal'
+import { detectMode, singleImportFeedback } from './importUtils'
 import * as api from '@/lib/api'
 
 const csv = (name: string) => new File([''], name, { type: 'text/csv' })

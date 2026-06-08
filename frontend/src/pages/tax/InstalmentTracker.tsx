@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { useInstalments } from '../../hooks/useInstalments';
 import { fmtCurrency } from './util/format';
 import {
@@ -131,9 +132,9 @@ export function InstalmentTracker({ year }: Props) {
             />
           </label>
           {submitError && <p className="error">{submitError}</p>}
-          <button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? 'Saving…' : 'Add payment'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

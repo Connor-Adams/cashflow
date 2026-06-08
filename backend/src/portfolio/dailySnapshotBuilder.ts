@@ -7,6 +7,7 @@ import { Security } from '../models/Security';
 import { SecurityDailyPrice } from '../models/SecurityDailyPrice';
 import { HoldingSnapshot } from '../models/HoldingSnapshot';
 import { FxRate } from '../models/FxRate';
+import { toUnits, fromUnits } from '../util/numbers';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -210,7 +211,7 @@ export async function buildDailySnapshotsForHousehold(args: BuildDailySnapshotsA
     let dayHasPartial = false;
     for (const acct of accounts) {
       const acctCurrency = acct.defaultCurrency ?? 'CAD';
-      let mvNative = 0;
+      let mvNativeU = 0;
       const reasons: string[] = [];
 
       const heldKeys = [...qty.keys()].filter((k) => k.startsWith(`${acct.id}:`));
@@ -224,14 +225,14 @@ export async function buildDailySnapshotsForHousehold(args: BuildDailySnapshotsA
         // 1. Exact daily price for the day.
         const exact = priceByKey.get(`${securityId}:${d}`);
         if (exact != null) {
-          mvNative += q * exact;
+          mvNativeU += toUnits(q * exact);
           continue;
         }
 
         // 2. Carry forward the most recent price within the staleness window.
         const carried = floorByDate(pricesBySec.get(securityId), d);
         if (carried != null && daysBetween(carried.date, d) <= CARRY_FORWARD_MAX_DAYS) {
-          mvNative += q * carried.price;
+          mvNativeU += toUnits(q * carried.price);
           reasons.push(`stale_price:${symbol}@${carried.date}`);
           continue;
         }
@@ -240,7 +241,7 @@ export async function buildDailySnapshotsForHousehold(args: BuildDailySnapshotsA
         //    ETFs and anything without a daily price feed).
         const broker = floorByDate(holdingsByKey.get(key), d);
         if (broker != null) {
-          mvNative += broker.marketValue;
+          mvNativeU += toUnits(broker.marketValue);
           reasons.push(`broker_value:${symbol}`);
           continue;
         }
@@ -259,10 +260,11 @@ export async function buildDailySnapshotsForHousehold(args: BuildDailySnapshotsA
         }
       }
 
-      const cashFlowNative = todays
+      const cashFlowNative = fromUnits(todays
         .filter((a) => a.accountId === acct.id && a.activityType === 'transfer')
-        .reduce((s, a) => s + Number(a.amount ?? '0'), 0);
+        .reduce((s, a) => s + toUnits(Number(a.amount ?? '0')), 0));
 
+      const mvNative = fromUnits(mvNativeU);
       const mvCad = mvNative * fxRate;
       const cashFlowCad = cashFlowNative * fxRate;
       const isPartial = reasons.length > 0;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Command as CommandIcon, Menu } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { useLayoutWidth } from '../lib/layoutWidth'
 import { useCommandPalette } from '../hooks/useCommandPalette'
 import { CommandPalette } from './CommandPalette'
@@ -65,6 +66,7 @@ export function Layout() {
       {/* Mobile backdrop. Hidden via CSS on desktop. */}
       <button
         type="button"
+        data-slot="backdrop"
         aria-label="Close navigation"
         className="sidebarBackdrop"
         onClick={closeSidebar}
@@ -73,8 +75,9 @@ export function Layout() {
 
       <div className="layoutMain">
         <header className="topBar" aria-label="Top bar">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             className="hamburger"
             onClick={openSidebar}
             aria-label="Open navigation"
@@ -82,12 +85,14 @@ export function Layout() {
             aria-controls="primary-navigation"
           >
             <Menu size={20} aria-hidden="true" />
-          </button>
+          </Button>
           <span className="topBar__wordmark">Cashflow</span>
           <div className="topBar__right ml-auto flex items-center gap-2">
             <ImportProgressBadge />
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => palette.setOpen(true)}
               aria-label="Open command palette"
               title="Command palette (⌘K / Ctrl+K)"
@@ -99,7 +104,7 @@ export function Layout() {
               <kbd className="ml-1 hidden font-mono text-[10px] sm:inline">
                 ⌘K
               </kbd>
-            </button>
+            </Button>
             <WhatsNewBell />
             <NotificationBell />
             <FeedbackButton />

@@ -617,3 +617,72 @@ test('GUARD: WS "Contribution (executed at ...)" stays unknown (deposit pattern 
   });
   assert.equal(out[0].fields.txnType, 'unknown');
 });
+
+// === Spend-inflation fix (2026-06-08) ===
+// 37 transactions ($46K) over 6 months were misclassified as 'purchase' —
+// WS Cash withdrawals, e-transfers to own WS account, gold/investment buys,
+// and loan interest. These patterns are unambiguous; generic ATM withdrawals
+// and person-to-person e-transfers remain deliberately deferred.
+
+test('transfer: WS Cash "Withdrawal (executed at YYYY-MM-DD)" is a transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Withdrawal (executed at 2026-03-18)',
+    merchantClean: 'Withdrawal (executed at 2026-03-18)',
+    amount: -10960.52,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: e-transfer to own Wealthsimple Cash account', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'E-TRANSFER SENT WEALTHSIMPLE CASH 93LJEX',
+    merchantClean: 'E-TRANSFER SENT WEALTHSIMPLE CASH 93LJEX',
+    amount: -1000,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('investment: WS physically-backed gold purchase', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'GOLD - Physically backed gold: Bought 0.4769 ounces at $7266.17 per ounce (executed at 2026-03-05)',
+    merchantClean: 'GOLD - Physically backed gold: Bought 0.4769 ounces at $7266.17 per ounce (executed at 2026-03-05)',
+    amount: -3500,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('investment: generic "INVESTMENT PURCHASE" brokerage line', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'INVESTMENT PURCHASE',
+    merchantClean: 'INVESTMENT PURCHASE',
+    amount: -1500,
+  });
+  assert.equal(out[0].fields.txnType, 'investment');
+});
+
+test('fee: "LOAN INTEREST" is a fee, not a purchase', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'LOAN INTEREST',
+    merchantClean: 'LOAN INTEREST',
+    amount: -80.9,
+  });
+  assert.equal(out[0].fields.txnType, 'fee');
+});
+
+test('GUARD: "ATM WITHDRAWAL" stays purchase (ambiguous cash-spending)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'ATM WITHDRAWAL - KF457038',
+    merchantClean: 'ATM WITHDRAWAL - KF457038',
+    amount: -90,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
+
+test('GUARD: "E-TRANSFER SENT STEPHEN" stays purchase (person-to-person, ambiguous)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'E-TRANSFER SENT STEPHEN 8NB7UU',
+    merchantClean: 'E-TRANSFER SENT STEPHEN 8NB7UU',
+    amount: -6700,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});

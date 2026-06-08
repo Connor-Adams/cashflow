@@ -253,8 +253,9 @@ function SidebarNavSections({
     <nav className="sidebar__nav" aria-label="Main">
       {sections.map((section) => (
         <div key={section.id} className="sidebar__section">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             className="sidebar__sectionHeader"
             aria-expanded={!collapsed.has(section.id)}
             onClick={() => onToggle(section.id)}
@@ -264,7 +265,7 @@ function SidebarNavSections({
               aria-hidden="true"
               className={`sidebar__sectionChevron${collapsed.has(section.id) ? ' sidebar__sectionChevron--collapsed' : ''}`}
             />
-          </button>
+          </Button>
           {!collapsed.has(section.id) && (
             <div className="sidebar__sectionItems">
               {section.items.map((item) => (

@@ -114,12 +114,14 @@ export function ReportingTokensTab() {
               Copy
             </Button>
           </div>
-          <button
+          <Button
+            type="button"
+            variant="link"
             className="text-xs text-amber-700 dark:text-amber-300 underline"
             onClick={() => setRevealed(null)}
           >
             I've saved it — dismiss
-          </button>
+          </Button>
         </Card>
       )}
 

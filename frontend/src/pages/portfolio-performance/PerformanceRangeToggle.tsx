@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import type { PortfolioPerformanceRange } from '../../types/api'
 
 export type PerformanceRangeToggleProps = {
@@ -20,15 +21,16 @@ export function PerformanceRangeToggle({ value, onChange }: PerformanceRangeTogg
       {OPTIONS.map((opt) => {
         const selected = opt.value === value
         return (
-          <button
+          <Button
             key={opt.value}
             type="button"
+            variant={selected ? 'default' : 'outline'}
             aria-pressed={selected}
             onClick={() => onChange(opt.value)}
             className={`px-3 py-1 text-sm rounded border ${selected ? 'bg-primary text-primary-foreground' : 'bg-background'}`}
           >
             {opt.label}
-          </button>
+          </Button>
         )
       })}
     </div>

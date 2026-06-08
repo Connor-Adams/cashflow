@@ -321,8 +321,9 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
               >
                 Try again
               </Button>
-              <button
+              <Button
                 type="button"
+                variant="link"
                 className="text-sm underline"
                 onClick={() => {
                   onDone()
@@ -330,22 +331,23 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 }}
               >
                 Set up account manually
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {/* Skip link — keyboard reachable (AC #3, #9). */}
         <div className="mt-6 text-center">
-          <button
+          <Button
             type="button"
+            variant="link"
             onClick={onSkip}
             disabled={status === 'loading'}
             className="text-sm underline disabled:opacity-50"
             style={{ color: 'var(--muted-foreground)' }}
           >
             Skip for now
-          </button>
+          </Button>
         </div>
       </div>
     </div>
