@@ -65,7 +65,7 @@ export function NetWorthTile() {
         ) : (
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-2xl font-semibold">
+              <div className="text-4xl font-semibold tabular-nums">
                 {formatMoney(current.data.total, 'CAD')}
               </div>
               <div className="text-xs text-muted-foreground">
