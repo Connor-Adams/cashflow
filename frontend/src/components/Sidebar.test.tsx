@@ -80,10 +80,10 @@ describe('Sidebar rail (PR 0)', () => {
 
   it('drops the items folded into Accounts/Scenarios/Portfolio tabs (PR 3)', () => {
     renderSidebar()
-    for (const name of ['Credit cards', 'Statements', 'Debt payoff', 'Opportunity cost', 'Net worth', 'Tax']) {
+    for (const name of ['Credit cards', 'Statements', 'Debt payoff', 'Opportunity cost', 'Net worth']) {
       expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
     }
-    for (const name of ['Accounts', 'Scenarios', 'Portfolio']) {
+    for (const name of ['Accounts', 'Scenarios', 'Portfolio', 'Tax']) {
       expect(screen.getByRole('link', { name })).toBeInTheDocument()
     }
   })

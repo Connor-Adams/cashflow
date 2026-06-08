@@ -22,6 +22,7 @@ import {
   Moon,
   GitCompare,
   Target,
+  Calculator,
   Upload,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -76,6 +77,7 @@ const navSections: NavSection[] = [
       { to: '/planned', label: 'Planned', icon: CalendarClock, visibilityKey: 'planned' },
       { to: '/goals', label: 'Goals', icon: Target, visibilityKey: 'goals' },
       { to: '/scenarios', label: 'Scenarios', icon: GitCompare, visibilityKey: 'scenarios' },
+      { to: '/scenarios/tax', label: 'Tax', icon: Calculator },
     ],
   },
   {
