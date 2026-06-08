@@ -64,6 +64,9 @@ test('T1 totalPayable excludes employment CPP/EI (L43500 bug fix)', () => {
       fhsaLifetimeContributions: D('0'),
     },
     ageAtYearEnd: 40,
+    rentalIncome: [],
+    rentalExpenses: [],
+    medicalExpenses: [],
   };
 
   const ret = buildT1(facts, r);
