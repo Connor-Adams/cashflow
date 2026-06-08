@@ -66,7 +66,7 @@ import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
 import { LargePurchasesPage } from './pages/LargePurchasesPage'
 import { UnifiedInboxPage } from './pages/UnifiedInboxPage'
-import { InsightsPage } from './pages/InsightsPage'
+// InsightsPage kept on disk — route redirects to /inbox?view=insights (Phase 1 IA cleanup)
 import { ChatPage } from './pages/ChatPage'
 import { SearchPage } from './pages/SearchPage'
 import { VaultPage } from './pages/VaultPage'
@@ -210,7 +210,7 @@ function AppRoutes() {
             path="cfo/briefings"
             element={<Navigate to="/inbox?view=cfo-briefings-pending" replace />}
           />
-          <Route path="insights" element={<InsightsPage />} />
+          <Route path="insights" element={<Navigate to="/inbox?view=insights" replace />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="ask" element={<Navigate to="/chat" replace />} />
           <Route path="search" element={<Navigate to="/transactions/search" replace />} />

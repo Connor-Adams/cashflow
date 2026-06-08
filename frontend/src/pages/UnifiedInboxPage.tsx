@@ -99,6 +99,13 @@ type ActionKind = 'accept' | 'dismiss' | 'apply' | 'reject' | 'resolve'
 
 type SourceAction = { label: string; kind: ActionKind; variant: 'primary' | 'secondary' }
 
+const DISMISS_KIND: Record<ReviewItemSource, ActionKind> = {
+  'ai-suggestion': 'reject',
+  'ai-review': 'dismiss',
+  'cfo-briefing': 'dismiss',
+  'chat-proposal': 'reject',
+}
+
 const ACTIONS_BY_SOURCE: Record<ReviewItemSource, SourceAction[]> = {
   'ai-suggestion': [
     { label: 'Apply', kind: 'apply', variant: 'primary' },
@@ -287,7 +294,12 @@ function CardBody({ item }: { item: ReviewItem }) {
     case 'cfo-briefing':
       return <ActionItemCardBody item={item} />
     default:
-      return null
+      return (
+        <div>
+          <strong>{item.source}</strong>
+          <p className="muted mb-0 text-xs">{item.native_status}</p>
+        </div>
+      )
   }
 }
 
@@ -353,6 +365,7 @@ export function UnifiedInboxPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const query = useMemo(() => {
     const params = new URLSearchParams()
@@ -459,9 +472,33 @@ export function UnifiedInboxPage() {
     [load],
   )
 
+  const bulkDismiss = useCallback(async () => {
+    const pending = items
+      .filter((i) => i.status_common === 'pending' && matchesSearch(i, search))
+    if (pending.length === 0) return
+    setBulkBusy(true)
+    try {
+      for (const item of pending) {
+        const kind = DISMISS_KIND[item.source]
+        const path = writeEndpoint(item, kind)
+        if (path) await postJson(path)
+      }
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Bulk dismiss failed')
+    } finally {
+      setBulkBusy(false)
+    }
+  }, [items, search, load])
+
   const visible = useMemo(
     () => items.filter((i) => matchesSearch(i, search)),
     [items, search],
+  )
+
+  const pendingVisible = useMemo(
+    () => visible.filter((i) => i.status_common === 'pending'),
+    [visible],
   )
 
   const allSourcesActive = sources.size === ALL_SOURCES.length
@@ -535,6 +572,20 @@ export function UnifiedInboxPage() {
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
+      {pendingVisible.length > 1 && (
+        <div className="mb-3 flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={bulkBusy}
+            onClick={() => void bulkDismiss()}
+          >
+            {bulkBusy ? 'Dismissing…' : `Dismiss all ${pendingVisible.length} pending`}
+          </Button>
+        </div>
+      )}
+
       {loading ? (
         <p className="muted">Loading…</p>
       ) : visible.length === 0 ? (
@@ -548,7 +599,7 @@ export function UnifiedInboxPage() {
             <ReviewItemCard
               key={item.id}
               item={item}
-              busy={busyId === item.id}
+              busy={bulkBusy || busyId === item.id}
               onAction={(it, kind) => void onAction(it, kind)}
             />
           ))}

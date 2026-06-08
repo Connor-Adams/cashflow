@@ -82,7 +82,7 @@ const VENDOR_MERCHANT_PATTERNS: Record<string, RegExp> = {
 
 export function txnMatchesVendor(vendor: string, txn: Transaction): boolean {
   const pat = VENDOR_MERCHANT_PATTERNS[vendor];
-  if (!pat) return false;
+  if (!pat) return true;
   return pat.test(`${txn.merchantRaw} ${txn.merchantClean}`);
 }
 
@@ -127,6 +127,12 @@ function scoreLast4Component(payment: CandidatePayment, txn: Transaction): Compo
     : { points: 0, reason: null };
 }
 
+function scoreCurrencyComponent(txn: Transaction, order: ExternalOrder): Component {
+  if (!order.currency || !txn.currency) return { points: 0, reason: null };
+  if (txn.currency.toUpperCase() === order.currency.toUpperCase()) return { points: 0, reason: null };
+  return { points: -40, reason: `currency mismatch (${txn.currency} vs ${order.currency})` };
+}
+
 export function scoreReceiptMatch(
   txn: Transaction,
   order: ExternalOrder,
@@ -137,6 +143,7 @@ export function scoreReceiptMatch(
     scoreDateComponent(txn.date, order.orderDate),
     scoreVendorComponent(order, txn),
     scoreLast4Component(payment, txn),
+    scoreCurrencyComponent(txn, order),
   ];
   const score = components.reduce((a, c) => a + c.points, 0);
   const reasons = components.map((c) => c.reason).filter((r): r is string => r != null);

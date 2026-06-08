@@ -34,21 +34,21 @@ describe('SettingsPage shell', () => {
     const tabs = screen.getAllByRole('tab')
     expect(tabs.map((t) => t.textContent)).toEqual([
       'Settings',
-      'Imports',
-      'Enrichment',
-      'Contacts',
       'Members',
-      'Budgets',
+      'Contacts',
       'Categories',
       'Labels',
+      'Budgets',
       'Saved filters',
       'Notifications',
+      'Enrichment',
+      'Imports',
       'Jobs',
-      "What's new",
       'AI audit tokens',
       'Reporting tokens',
       'Audit log',
       'Backup & sync',
+      "What's new",
     ])
   })
 

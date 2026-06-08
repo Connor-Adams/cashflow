@@ -15,6 +15,11 @@ vi.mock('../hooks/useTheme', () => ({
 vi.mock('@/hooks/useAiInboxCount', () => ({ useAiInboxCount: () => ({ count: 0 }) }))
 vi.mock('@/hooks/useInsightsCount', () => ({ useInsightsCount: () => ({ count: 0 }) }))
 vi.mock('@/hooks/useAiStatus', () => ({ useAiStatus: () => ({ openai: true }) }))
+vi.mock('@/hooks/useNavVisibility', () => ({
+  useNavVisibility: () => ({
+    income: true, planned: true, goals: true, scenarios: true, vault: true, budgets: true,
+  }),
+}))
 vi.mock('../lib/version', () => ({
   FRONTEND_VERSION: 'test',
   useBackendVersion: () => ({ status: 'ok', version: 'test' }),

@@ -9,7 +9,6 @@ import {
   Receipt,
   CreditCard,
   Inbox,
-  Lightbulb,
   LineChart,
   LayoutDashboard,
   Lock,
@@ -32,6 +31,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useAiInboxCount } from '@/hooks/useAiInboxCount'
 import { useInsightsCount } from '@/hooks/useInsightsCount'
 import { useAiStatus } from '@/hooks/useAiStatus'
+import { useNavVisibility, type NavFeature } from '@/hooks/useNavVisibility'
 import { FRONTEND_VERSION, useBackendVersion } from '../lib/version'
 
 type NavItem = {
@@ -39,6 +39,7 @@ type NavItem = {
   label: string
   icon: typeof LayoutDashboard
   end?: boolean
+  visibilityKey?: NavFeature
 }
 
 type NavSection = {
@@ -62,7 +63,7 @@ const navSections: NavSection[] = [
     label: 'Money',
     items: [
       { to: '/accounts', label: 'Accounts', icon: CreditCard },
-      { to: '/income', label: 'Income', icon: DollarSign },
+      { to: '/income', label: 'Income', icon: DollarSign, visibilityKey: 'income' },
       { to: '/transactions', label: 'Transactions', icon: ReceiptText },
       { to: '/receipts', label: 'Receipts', icon: Receipt },
       { to: '/import', label: 'Import', icon: Upload },
@@ -72,9 +73,9 @@ const navSections: NavSection[] = [
     id: 'planning',
     label: 'Planning',
     items: [
-      { to: '/planned', label: 'Planned', icon: CalendarClock },
-      { to: '/goals', label: 'Goals', icon: Target },
-      { to: '/scenarios', label: 'Scenarios', icon: GitCompare },
+      { to: '/planned', label: 'Planned', icon: CalendarClock, visibilityKey: 'planned' },
+      { to: '/goals', label: 'Goals', icon: Target, visibilityKey: 'goals' },
+      { to: '/scenarios', label: 'Scenarios', icon: GitCompare, visibilityKey: 'scenarios' },
     ],
   },
   {
@@ -89,9 +90,8 @@ const navSections: NavSection[] = [
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-      { to: '/insights', label: 'Insights', icon: Lightbulb },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
-      { to: '/vault', label: 'Vault', icon: Lock },
+      { to: '/vault', label: 'Vault', icon: Lock, visibilityKey: 'vault' },
       { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
     ],
   },
@@ -170,6 +170,7 @@ type SidebarProps = {
  */
 export function Sidebar({ open, onClose }: SidebarProps) {
   const aiStatus = useAiStatus()
+  const navVis = useNavVisibility()
   const { collapsed, toggle, expand } = useSidebarCollapsed()
   const location = useLocation()
 
@@ -187,12 +188,17 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   }, [location.pathname, expand])
 
   const filteredSections = useMemo<NavSection[]>(() => {
-    if (aiStatus?.openai === true) return navSections
-    return navSections.map((section) => ({
-      ...section,
-      items: section.items.filter((i) => i.to !== '/chat'),
-    }))
-  }, [aiStatus])
+    return navSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((i) => {
+          if (i.to === '/chat' && aiStatus?.openai !== true) return false
+          if (i.visibilityKey && !navVis[i.visibilityKey]) return false
+          return true
+        }),
+      }))
+      .filter((section) => section.items.length > 0)
+  }, [aiStatus, navVis])
 
   return (
     <aside
@@ -239,8 +245,7 @@ function SidebarNavSections({
   const { count: insightsCount } = useInsightsCount()
 
   function badgeFor(to: string): number {
-    if (to === '/inbox') return aiInboxCount
-    if (to === '/insights') return insightsCount
+    if (to === '/inbox') return aiInboxCount + insightsCount
     return 0
   }
 
@@ -343,7 +348,7 @@ function SidebarVersion() {
   const backend = useBackendVersion()
   const backendVersion =
     backend.status === 'ok' ? backend.version : backend.status === 'loading' ? '…' : '?'
-  const drift = backend.status === 'ok' && backend.version !== FRONTEND_VERSION
+  const drift = import.meta.env.DEV && backend.status === 'ok' && backend.version !== FRONTEND_VERSION
   return (
     <div className="sidebar__version" data-drift={drift} aria-label="Build versions">
       <span className="sidebar__versionRow">

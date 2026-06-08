@@ -4,27 +4,31 @@ import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { useAuth } from '../../lib/useAuth'
 import { useActiveSettingsTopTab, type SettingsTopTab } from './useActiveSettingsTopTab'
 
-const ALL_TOP_TABS: Array<
-  TabItem & { superadminOnly?: boolean; ownerOnly?: boolean }
-> = [
+type SettingsTab = TabItem & { superadminOnly?: boolean; ownerOnly?: boolean }
+
+const WORKSPACE_TABS: SettingsTab[] = [
   { value: 'settings', label: 'Settings' },
-  { value: 'imports', label: 'Imports' },
-  { value: 'enrichment', label: 'Enrichment' },
-  { value: 'contacts', label: 'Contacts' },
   { value: 'members', label: 'Members' },
-  { value: 'budgets', label: 'Budgets' },
+  { value: 'contacts', label: 'Contacts' },
   { value: 'categories', label: 'Categories' },
   { value: 'labels', label: 'Labels' },
+  { value: 'budgets', label: 'Budgets' },
   { value: 'saved-filters', label: 'Saved filters' },
   { value: 'notifications', label: 'Notifications' },
-  { value: 'feedback', label: 'Feedback', ownerOnly: true },
+  { value: 'enrichment', label: 'Enrichment' },
+  { value: 'imports', label: 'Imports' },
+]
+
+const ADVANCED_TABS: SettingsTab[] = [
   { value: 'jobs', label: 'Jobs' },
-  { value: 'whatsnew', label: "What's new" },
   { value: 'audit-tokens', label: 'AI audit tokens' },
   { value: 'reporting-tokens', label: 'Reporting tokens' },
   { value: 'audit-log', label: 'Audit log' },
   { value: 'backup', label: 'Backup & sync' },
+  { value: 'feedback', label: 'Feedback', ownerOnly: true },
+  { value: 'whatsnew', label: "What's new" },
 ]
+
 
 const TOP_TAB_PATHS: Record<SettingsTopTab, string> = {
   settings: '/settings/display',
@@ -54,9 +58,12 @@ export function SettingsPage() {
   // Household owner (or superadmin) sees owner-only tabs like the feedback
   // inbox (issue #295). The backend GET /api/feedback also enforces this.
   const isOwner = auth.user?.household?.role === 'owner' || isSuperadmin
-  const TOP_TABS: TabItem[] = ALL_TOP_TABS
-    .filter((t) => (!t.superadminOnly || isSuperadmin) && (!t.ownerOnly || isOwner))
-    .map(({ value, label }) => ({ value, label }))
+  const filterTabs = (tabs: SettingsTab[]): TabItem[] =>
+    tabs
+      .filter((t) => (!t.superadminOnly || isSuperadmin) && (!t.ownerOnly || isOwner))
+      .map(({ value, label }) => ({ value, label }))
+  const workspaceTabs = filterTabs(WORKSPACE_TABS)
+  const advancedTabs = filterTabs(ADVANCED_TABS)
 
   return (
     <div className="page">
@@ -70,11 +77,24 @@ export function SettingsPage() {
         }
       />
       <div className="settingsTopTabs">
-        <Tabs
-          items={TOP_TABS}
-          value={activeTop}
-          onValueChange={(v) => navigate(TOP_TAB_PATHS[v as SettingsTopTab])}
-        />
+        <div className="flex flex-col gap-2">
+          <div>
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Workspace</span>
+            <Tabs
+              items={workspaceTabs}
+              value={activeTop}
+              onValueChange={(v) => navigate(TOP_TAB_PATHS[v as SettingsTopTab])}
+            />
+          </div>
+          <div>
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Advanced</span>
+            <Tabs
+              items={advancedTabs}
+              value={activeTop}
+              onValueChange={(v) => navigate(TOP_TAB_PATHS[v as SettingsTopTab])}
+            />
+          </div>
+        </div>
       </div>
       <Outlet />
     </div>
