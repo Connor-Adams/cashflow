@@ -11,6 +11,7 @@ function emptyFacts(): TaxYearFacts {
     employmentIncome: [], selfEmploymentIncome: [], selfEmploymentExpenses: [],
     interestIncome: [], eligibleDividends: [], nonEligibleDividends: [],
     capitalGainEvents: [], rrspContribs: [], fhsaContribs: [], donations: [],
+    rentalIncome: [], rentalExpenses: [], medicalExpenses: [],
     slips: [],
     carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
     ageAtYearEnd: 40,

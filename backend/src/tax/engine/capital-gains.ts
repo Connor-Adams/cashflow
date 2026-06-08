@@ -20,7 +20,14 @@ export function taxableCapitalGains(
   netCapLossCarryforward: Decimal
 ): CapGainsResult {
   const gross = events.reduce<Decimal>(
-    (acc, e) => acc.plus(e.proceeds.minus(e.acb).minus(e.outlays)),
+    (acc, e) => {
+      const rawGain = e.proceeds.minus(e.acb).minus(e.outlays);
+      const denied = e.superficialLossDenied ?? D('0');
+      const adjusted = rawGain.lessThan(0)
+        ? rawGain.plus(denied)
+        : rawGain;
+      return acc.plus(adjusted);
+    },
     D('0')
   );
   const includable = computePersonalInclusion(gross, r);

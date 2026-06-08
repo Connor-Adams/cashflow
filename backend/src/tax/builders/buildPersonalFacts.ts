@@ -71,6 +71,10 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const donations: IncomeItem[] = [];
   const rrspContribs: RrspContrib[] = [];
   const fhsaContribs: RrspContrib[] = [];
+  const medicalExpenses: IncomeItem[] = [];
+  let pensionTotal = D('0');
+  const rentalIncome: IncomeItem[] = [];
+  const rentalExpenses: IncomeItem[] = [];
 
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
@@ -103,6 +107,18 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     }
     else if (treatment === 'fhsa_contribution') {
       fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+    }
+    else if (treatment === 'medical_expense') {
+      medicalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
+    }
+    else if (treatment === 'pension_income') {
+      pensionTotal = pensionTotal.plus(cad);
+    }
+    else if (treatment === 'rental_income') {
+      rentalIncome.push(item);
+    }
+    else if (treatment === 'rental_expense') {
+      rentalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
     }
     else if (t.finalBusiness && cad.greaterThan(0)) selfEmploymentIncome.push(item);
     else if (t.finalBusiness && cad.lessThan(0))
@@ -221,6 +237,22 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       // Prior-year dispositions are already reported on their own year's return;
       // here they only serve to advance the ACB state. Keep just this year's.
       if (realized.tradeDate < yearStart || realized.tradeDate > yearEnd) continue;
+      const rawGain = D(realized.proceeds).minus(D(realized.costRemoved));
+      let superficialLossDenied: typeof rawGain | undefined;
+      if (rawGain.lessThan(0)) {
+        const sellDate = new Date(`${realized.tradeDate}T00:00:00.000Z`);
+        const windowEnd = new Date(sellDate.getTime() + 30 * 86_400_000);
+        const windowEndStr = windowEnd.toISOString().slice(0, 10);
+        const repurchase = acbActivity.find(
+          a => a.securityId === sid
+            && (a.activityType === 'buy' || a.activityType === 'reinvestment')
+            && (a.tradeDate as unknown as string) > realized.tradeDate
+            && (a.tradeDate as unknown as string) <= windowEndStr
+        );
+        if (repurchase) {
+          superficialLossDenied = rawGain.negated();
+        }
+      }
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,
         securityId: sid,
@@ -228,6 +260,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
         acb: D(realized.costRemoved),
         outlays: D(0),
         date: realized.tradeDate,
+        ...(superficialLossDenied ? { superficialLossDenied } : {}),
       });
     }
   }
@@ -242,6 +275,15 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       Object.entries((s.boxValues ?? {}) as Record<string, number | string>).map(([k, v]) => [k, D(v as any)])
     ),
   }));
+
+  // T4A box 016 (pension) + box 024 (annuity) → pension income
+  const t4aSlips = slipRows.filter(s => s.slipType === 'T4A');
+  for (const s of t4aSlips) {
+    const boxes = (s.boxValues ?? {}) as Record<string, number | string>;
+    const box016 = D(boxes['box016'] ?? boxes['box16'] ?? 0);
+    const box024 = D(boxes['box024'] ?? boxes['box24'] ?? 0);
+    pensionTotal = pensionTotal.plus(box016).plus(box024);
+  }
 
   // Carryforwards as of prior year
   const cf = await Carryforward.findAll({ where: { entityId, asOfYear: year - 1 } });
@@ -293,5 +335,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     slips,
     carryforwards,
     ageAtYearEnd,
+    pensionIncome: pensionTotal.greaterThan(0) ? pensionTotal : undefined,
+    medicalExpenses,
+    rentalIncome,
+    rentalExpenses,
   };
 }

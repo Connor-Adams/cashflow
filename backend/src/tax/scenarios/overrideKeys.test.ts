@@ -13,6 +13,7 @@ function emptyFacts(): TaxYearFacts {
     employmentIncome: [], selfEmploymentIncome: [], selfEmploymentExpenses: [],
     interestIncome: [], eligibleDividends: [], nonEligibleDividends: [],
     capitalGainEvents: [], rrspContribs: [], fhsaContribs: [], donations: [],
+    rentalIncome: [], rentalExpenses: [], medicalExpenses: [],
     slips: [],
     carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('0'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
     ageAtYearEnd: 40,
@@ -118,7 +119,7 @@ test('apply: pensionSplit.transferAmount stamps synthetic pensionSplit field on 
   assert.equal(facts.pensionSplit!.transferAmount.toFixed(2), '15000.00');
 });
 
-test('apply: income.pensionIncome double-stamps facts.pensionIncome AND employmentIncome[]', () => {
+test('apply: income.pensionIncome stamps facts.pensionIncome only (L11500 handles totalIncome)', () => {
   const entry = getOverrideKey('income.pensionIncome')!;
   assert.equal(entry.kind, 'personal');
   entry.validate(50000);
@@ -129,11 +130,9 @@ test('apply: income.pensionIncome double-stamps facts.pensionIncome AND employme
   const facts = entry.apply(base, 50000);
   // facts.pensionIncome adds rather than replaces
   assert.equal(facts.pensionIncome!.toFixed(2), '51000.00');
-  // employmentIncome[] gets the new item appended (not replaced)
-  assert.equal(facts.employmentIncome.length, 2);
+  // employmentIncome[] is NOT touched — L11500 in t1.ts now handles pension in totalIncome
+  assert.equal(facts.employmentIncome.length, 1);
   assert.equal(facts.employmentIncome[0].source, 'slip:T4');
-  assert.equal(facts.employmentIncome[1].source, 'override:income.pensionIncome');
-  assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '50000.00');
 });
 
 test('apply: income.cppRetirement appends to employmentIncome[] only (no pensionIncome touch)', () => {
