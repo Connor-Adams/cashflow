@@ -55,23 +55,75 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     t4s.length > 0 ? 'sum(T4.box14)' : 'sum(employmentTransactions.cad)'
   );
 
-  // Interest L12100
-  const interest = sumD(facts.interestIncome.map((i) => i.cadAmount));
-  push('L12100', 'Interest and other investment income', interest,
-    facts.interestIncome.map((i) => ({ source: i.source, amount: i.cadAmount })));
+  // T5 slip reconciliation: prefer slip amounts when present
+  const t5s = facts.slips.filter(s => s.slipType === 'T5');
+  const t5Box13Total = sumD(t5s.map(s => s.boxes['box13'] ?? D('0')));
+  const t5Box25Total = sumD(t5s.map(s => s.boxes['box25'] ?? D('0')));
+  const t5Box26Total = sumD(t5s.map(s => s.boxes['box26'] ?? D('0')));
 
-  // Eligible dividends L12000 (grossed-up amount)
-  const eligibleActual = sumD(facts.eligibleDividends.map((i) => i.cadAmount));
-  const eligibleGrossed = grossUpEligible(eligibleActual, r);
+  // T3 slip reconciliation
+  const t3s = facts.slips.filter(s => s.slipType === 'T3');
+  const t3Box26Total = sumD(t3s.map(s => s.boxes['box26'] ?? D('0')));
+  const t3Box49Total = sumD(t3s.map(s => s.boxes['box49'] ?? D('0')));
+  const t3Box32Total = sumD(t3s.map(s => s.boxes['box32'] ?? D('0')));
+
+  // Interest L12100 — prefer T5 box 13 + T3 box 26 when slips exist
+  const computedInterest = sumD(facts.interestIncome.map(i => i.cadAmount));
+  const slipInterest = t5Box13Total.plus(t3Box26Total);
+  const hasInterestSlips = t5s.some(s => (s.boxes['box13'] ?? D('0')).greaterThan(0))
+    || t3s.some(s => (s.boxes['box26'] ?? D('0')).greaterThan(0));
+  const interest = hasInterestSlips ? slipInterest : computedInterest;
+  if (hasInterestSlips && slipInterest.minus(computedInterest).abs().greaterThan(50)) {
+    warnings.push(
+      `T5/T3 interest total $${slipInterest.toFixed(2)} differs from computed interest $${computedInterest.toFixed(2)} by $${slipInterest.minus(computedInterest).abs().toFixed(2)}.`
+    );
+  }
+  push('L12100', 'Interest and other investment income', interest,
+    hasInterestSlips
+      ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 13`, amount: s.boxes['box13'] ?? D('0') })),
+         ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 26`, amount: s.boxes['box26'] ?? D('0') }))]
+      : facts.interestIncome.map(i => ({ source: i.source, amount: i.cadAmount })));
+
+  // Eligible dividends L12000 — T5 box 25 / T3 box 49 are already grossed-up (taxable amount)
+  const eligibleActual = sumD(facts.eligibleDividends.map(i => i.cadAmount));
+  const slipEligibleGrossed = t5Box25Total.plus(t3Box49Total);
+  const hasEligibleSlips = t5s.some(s => (s.boxes['box25'] ?? D('0')).greaterThan(0))
+    || t3s.some(s => (s.boxes['box49'] ?? D('0')).greaterThan(0));
+  const eligibleGrossed = hasEligibleSlips ? slipEligibleGrossed : grossUpEligible(eligibleActual, r);
+  if (hasEligibleSlips) {
+    const computedGrossed = grossUpEligible(eligibleActual, r);
+    if (slipEligibleGrossed.minus(computedGrossed).abs().greaterThan(50)) {
+      warnings.push(
+        `T5/T3 eligible dividend (taxable) $${slipEligibleGrossed.toFixed(2)} differs from computed grossed-up $${computedGrossed.toFixed(2)}.`
+      );
+    }
+  }
   push('L12000', 'Taxable amount of eligible dividends', eligibleGrossed,
-    facts.eligibleDividends.map((i) => ({ source: i.source, amount: i.cadAmount })),
-    `${r.dividendGrossUpEligible.plus(1).toString()} × actual`);
+    hasEligibleSlips
+      ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 25`, amount: s.boxes['box25'] ?? D('0') })),
+         ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 49`, amount: s.boxes['box49'] ?? D('0') }))]
+      : facts.eligibleDividends.map(i => ({ source: i.source, amount: i.cadAmount })),
+    hasEligibleSlips ? 'from T5/T3 slips (pre-grossed)' : `${r.dividendGrossUpEligible.plus(1).toString()} × actual`);
 
   // Non-eligible dividends L12010
-  const nonElActual = sumD(facts.nonEligibleDividends.map((i) => i.cadAmount));
-  const nonElGrossed = grossUpNonEligible(nonElActual, r);
+  const nonElActual = sumD(facts.nonEligibleDividends.map(i => i.cadAmount));
+  const slipNonElGrossed = t5Box26Total.plus(t3Box32Total);
+  const hasNonElSlips = t5s.some(s => (s.boxes['box26'] ?? D('0')).greaterThan(0))
+    || t3s.some(s => (s.boxes['box32'] ?? D('0')).greaterThan(0));
+  const nonElGrossed = hasNonElSlips ? slipNonElGrossed : grossUpNonEligible(nonElActual, r);
+  if (hasNonElSlips) {
+    const computedGrossed = grossUpNonEligible(nonElActual, r);
+    if (slipNonElGrossed.minus(computedGrossed).abs().greaterThan(50)) {
+      warnings.push(
+        `T5/T3 non-eligible dividend (taxable) $${slipNonElGrossed.toFixed(2)} differs from computed grossed-up $${computedGrossed.toFixed(2)}.`
+      );
+    }
+  }
   push('L12010', 'Taxable amount of non-eligible dividends', nonElGrossed,
-    facts.nonEligibleDividends.map((i) => ({ source: i.source, amount: i.cadAmount })));
+    hasNonElSlips
+      ? [...t5s.map(s => ({ source: `Slip T5 #${s.slipId} box 26`, amount: s.boxes['box26'] ?? D('0') })),
+         ...t3s.map(s => ({ source: `Slip T3 #${s.slipId} box 32`, amount: s.boxes['box32'] ?? D('0') }))]
+      : facts.nonEligibleDividends.map(i => ({ source: i.source, amount: i.cadAmount })));
 
   // Capital gains L12700
   const cg = taxableCapitalGains(facts.capitalGainEvents, r, facts.carryforwards.netCapitalLoss);
