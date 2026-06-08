@@ -46,9 +46,9 @@ test('txnMatchesVendor matches the right merchant string per vendor', () => {
   assert.equal(txnMatchesVendor('costco', a), false);
 });
 
-test('txnMatchesVendor returns false for an unknown vendor key', () => {
+test('txnMatchesVendor passes through for an unknown vendor key', () => {
   const t = makeTxn({ merchantRaw: 'COSTCO', merchantClean: 'Costco' });
-  assert.equal(txnMatchesVendor('not-a-real-vendor', t), false);
+  assert.equal(txnMatchesVendor('not-a-real-vendor', t), true);
 });
 
 test('scoreReceiptMatch: exact amount + same date + merchant match gives high confidence', () => {
@@ -145,6 +145,35 @@ test('scoreReceiptMatch: last4 with no match in notes does not boost', () => {
   const order = makeOrder({ orderDate: '2025-12-13' });
   // 50 + 25 + 15 + 0 (last4 9999 != 3114) = 90
   const { confidence } = scoreReceiptMatch(txn, order, pay(947.04, '3114'));
+  assert.equal(confidence, 90);
+});
+
+test('scoreReceiptMatch: currency mismatch penalizes by -40', () => {
+  const txn = makeTxn({
+    amount: '-947.04',
+    date: '2025-12-13',
+    merchantRaw: 'COSTCO WHOLESALE',
+    merchantClean: 'Costco',
+    currency: 'CAD',
+  } as any);
+  const order = makeOrder({ orderDate: '2025-12-13', currency: 'USD' } as any);
+  // 50 (amount) + 25 (date) + 15 (vendor) + 0 (no last4) + -40 (currency) = 50
+  const { confidence, matchReason } = scoreReceiptMatch(txn, order, pay(947.04));
+  assert.equal(confidence, 50);
+  assert.match(matchReason, /currency mismatch/);
+});
+
+test('scoreReceiptMatch: matching currency does not penalize', () => {
+  const txn = makeTxn({
+    amount: '-947.04',
+    date: '2025-12-13',
+    merchantRaw: 'COSTCO WHOLESALE',
+    merchantClean: 'Costco',
+    currency: 'CAD',
+  } as any);
+  const order = makeOrder({ orderDate: '2025-12-13', currency: 'CAD' } as any);
+  // 50 (amount) + 25 (date) + 15 (vendor) + 0 (no last4) + 0 (currency match) = 90
+  const { confidence } = scoreReceiptMatch(txn, order, pay(947.04));
   assert.equal(confidence, 90);
 });
 

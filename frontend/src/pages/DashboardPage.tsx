@@ -30,13 +30,11 @@ import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { EmailedReceiptsTile } from '@/components/dashboard/EmailedReceiptsTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
-import { CfoBriefingTile } from '@/components/dashboard/CfoBriefingTile'
+import { InboxSummaryTile } from '@/components/dashboard/InboxSummaryTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
 import { ActivationCardDeck } from '@/components/dashboard/ActivationCardDeck'
 import { TableTile, type TableTileColumn } from '@/components/dashboard/TableTile'
-import { SeverityBadge, type InsightSeverity } from '@/components/ai/SeverityBadge'
-import { useInsightsSeen } from '@/hooks/useInsightsSeen'
-import { useAuth } from '@/lib/useAuth'
+
 import { formatCurrency } from '../lib/formatCurrency'
 import { DeltaBadge } from '../components/ui/DeltaBadge'
 import { rankByNetSpend } from '../lib/rankByNetSpend'
@@ -156,23 +154,6 @@ type MonthlyResp = {
   points: { month: string; currency: string; sumAmount: number }[]
 }
 
-type AiInsight = {
-  title: string
-  summary: string
-  severity: InsightSeverity
-  metric: string
-  amount: number
-  comparison: string
-  supportingTransactionIds: number[]
-  rationale: string
-  suggestedAction: string
-}
-
-type AiInsightsResp = {
-  period: string
-  currency: string
-  insights: AiInsight[]
-}
 
 // Ordinal palette for the multi-currency line chart. Each entry resolves
 // against the active theme (Honey & Ink dual-mode tokens in index.css).
@@ -309,7 +290,6 @@ export function DashboardPage() {
     CategoryReportRow[]
   >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
-  const [aiInsights, setAiInsights] = useState<AiInsightsResp | null>(null)
   const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
   // Recurring charges, fetched separately so a /api/recurring failure
   // never tanks the rest of the dashboard. Empty list on failure or
@@ -319,18 +299,6 @@ export function DashboardPage() {
   const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
-
-  const auth = useAuth()
-  const userIdForSeen = String(auth.user?.id ?? 'anon')
-  const { isSeen, markSeen } = useInsightsSeen(userIdForSeen)
-  const sortedInsights = aiInsights
-    ? [...aiInsights.insights].sort((a, b) => {
-        const order: Record<string, number> = { action: 0, watch: 1, info: 2 }
-        return (order[a.severity] ?? 3) - (order[b.severity] ?? 3)
-      })
-    : []
-  const hasActionSeverity = sortedInsights.some((i) => i.severity === 'action')
-
 
   const summaryQs = useMemo(
     () => summaryQueryString({ currency, dateFrom, dateTo }),
@@ -347,13 +315,7 @@ export function DashboardPage() {
       setLoading(true)
       setErr(null)
       try {
-        const insightQs = new URLSearchParams({
-          currency,
-          period: (dateTo || todayDateInputValue()).slice(0, 7),
-        })
-        insightQs.set('dateFrom', dateFrom)
-        insightQs.set('dateTo', dateTo)
-        const [d, m, prev, insights] = await Promise.all([
+        const [d, m, prev] = await Promise.all([
           getJson<DashResp>(`/api/summary/dashboard${summaryQs}`),
           getJson<MonthlyResp>(`/api/summary/monthly${summaryQs}`),
           previousRange
@@ -365,18 +327,12 @@ export function DashboardPage() {
                 })}`
               )
             : Promise.resolve<DashResp | null>(null),
-          currency
-            ? getJson<AiInsightsResp>(
-                `/api/ai/insights?${insightQs.toString()}`
-              )
-            : Promise.resolve<AiInsightsResp | null>(null),
         ])
         if (!cancelled) {
           setData(d)
           setMonthly(m)
           setPreviousMetricsByCurrency(prev?.metricsByCurrency ?? [])
           setPreviousCategoryReports(prev?.categoryReports ?? [])
-          setAiInsights(insights)
         }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
@@ -790,15 +746,9 @@ export function DashboardPage() {
   ]
 
   // Review banner pins to 8 cols so it lines up with the HeroTile beneath
-  // it instead of sprawling full-width across an empty middle. The AI
-  // action banner takes the remaining 4 cols when both fire, otherwise
-  // stretches across the full row.
+  // it instead of sprawling full-width across an empty middle.
   const showReviewBanner = summaryStats.reviewCount > 0
-  const showAiActionBanner = hasActionSeverity
-  const bannerCount =
-    (showReviewBanner ? 1 : 0) + (showAiActionBanner ? 1 : 0)
   const reviewBannerSpan: BentoSpan = 8
-  const aiBannerSpan: BentoSpan = bannerCount === 2 ? 4 : 12
 
   return (
     <div className="page">
@@ -904,23 +854,6 @@ export function DashboardPage() {
                   Open Review Inbox
                 </Link>
               </>
-            }
-          />
-        )}
-        {showAiActionBanner && (
-          <BentoTile
-            span={aiBannerSpan}
-            rows={1}
-            variant="destructive"
-            role="status"
-            aria-live="polite"
-            label={`AI flagged ${sortedInsights.filter((i) => i.severity === 'action').length} action item${
-              sortedInsights.filter((i) => i.severity === 'action').length === 1 ? '' : 's'
-            } this month`}
-            actions={
-              <a href="#ai-insights-tile" className="text-sm font-semibold underline">
-                Jump to insights
-              </a>
             }
           />
         )}
@@ -1157,7 +1090,7 @@ export function DashboardPage() {
 
         <SafeToSpendTile currency={currency || null} />
 
-        <CfoBriefingTile />
+        <InboxSummaryTile />
 
         <BentoTile
           span={4}
@@ -1379,70 +1312,6 @@ export function DashboardPage() {
               {chartData.length > 8 ? '…' : '.'}
             </p>
           ) : null}
-        </BentoTile>
-
-        <BentoTile
-          span={4}
-          rows={2}
-          aria-busy={loading}
-          label="AI insights"
-          id="ai-insights-tile"
-          description={
-            aiInsights
-              ? `${aiInsights.currency} · ${aiInsights.period}`
-              : 'Awaiting fetch'
-          }
-        >
-          <div className="aiVisibilityList">
-            {!aiInsights ? (
-              <p className="emptyState">
-                {loading ? 'Loading insights…' : 'No insights available yet.'}
-              </p>
-            ) : aiInsights.insights.length === 0 ? (
-              <p className="emptyState">No AI insights for {aiInsights.period} yet.</p>
-            ) : (
-              sortedInsights.map((insight) => {
-                const unread = !isSeen(aiInsights.period, insight.metric, insight.title)
-                return (
-                  <article
-                    key={`${insight.metric}-${insight.title}`}
-                    className={`aiVisibilityItem${unread ? ' is-unread' : ''}`}
-                    onClick={() => markSeen(aiInsights.period, insight.metric, insight.title)}
-                  >
-                    <div className="aiVisibilityItemHeader">
-                      {unread ? <span className="unreadDot" aria-label="New" /> : null}
-                      <strong>{insight.title}</strong>
-                      <SeverityBadge severity={insight.severity} />
-                    </div>
-                    <p>{insight.summary}</p>
-                    <p className="muted">
-                      {insight.comparison} · {formatDashboardAmount(insight.amount)}
-                    </p>
-                    {insight.supportingTransactionIds.length > 0 ? (
-                      <p className="muted aiVisibilitySupportingIds">
-                        Transactions:{' '}
-                        {insight.supportingTransactionIds.map((id, idx) => (
-                          <span key={`${id}-${idx}`}>
-                            {idx > 0 ? ', ' : null}
-                            <Link to={`/transactions?ids=${id}`}>#{id}</Link>
-                          </span>
-                        ))}
-                      </p>
-                    ) : null}
-                    <p className="muted">{insight.suggestedAction}</p>
-                    {insight.supportingTransactionIds.length > 0 ? (
-                      <Link
-                        to={`/transactions?ids=${insight.supportingTransactionIds.join(',')}`}
-                        className="aiVisibilityAction"
-                      >
-                        Open these transactions
-                      </Link>
-                    ) : null}
-                  </article>
-                )
-              })
-            )}
-          </div>
         </BentoTile>
 
         <BentoTile
