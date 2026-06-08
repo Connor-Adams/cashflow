@@ -1,7 +1,7 @@
 import { D, Decimal, sumD, maxZero } from '../util/decimal';
 import type { RateTable, TaxLine, TaxReturn, TaxYearFacts } from './types';
 import { applyBrackets } from './brackets';
-import { computeCppEmployee, computeEiEmployee } from './cpp-ei';
+import { computeCppEmployee, computeEiEmployee, computeCppSelfEmployed } from './cpp-ei';
 import { grossUpEligible, grossUpNonEligible, dtcFederal, dtcOntario } from './dividends';
 import { taxableCapitalGains } from './capital-gains';
 import {
@@ -93,6 +93,9 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     ],
     'sum(SE revenue) − sum(SE expenses)');
 
+  // SE CPP — compute immediately after seNet (needed before netIncome)
+  const seCppContrib = seNet.greaterThan(0) ? computeCppSelfEmployed(seNet, r) : D('0');
+
   // Total income L15000
   const totalIncome = sumD([employmentLine, interest, eligibleGrossed, nonElGrossed, cg.taxable, seNet]);
   push('L15000', 'Total income', totalIncome);
@@ -109,8 +112,15 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     facts.fhsaContribs.map((c) => ({ source: c.source, amount: c.amount })),
     `min(fhsaContribs, fhsaAnnualLimit=${r.fhsaAnnualLimit.toFixed(2)})`);
 
+  // SE CPP deductible half L22200 — deductible against net income (employer half)
+  const seCppDeductible = seCppContrib.dividedBy(2);
+  if (seCppContrib.greaterThan(0)) {
+    push('L22200', 'CPP on self-employment (deductible half)', seCppDeductible, [],
+      'SE CPP total / 2');
+  }
+
   // Net income L23600
-  const netIncome = maxZero(totalIncome.minus(rrsp).minus(fhsa));
+  const netIncome = maxZero(totalIncome.minus(rrsp).minus(fhsa).minus(seCppDeductible));
   push('L23600', 'Net income', netIncome);
 
   // OAS clawback / social benefits repayment L23500 — computed on net income before adjustments
@@ -139,7 +149,8 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const employmentFedAmt = employmentAmountFederalApplied(employmentLine, r);
   const cppEmployee = computeCppEmployee(employmentLine, r);
   const eiEmployee = computeEiEmployee(employmentLine, r);
-  const cppEiCreditEligible = cppEiCreditAmount(cppEmployee, eiEmployee);
+  const seCppEmployeeHalf = seCppContrib.dividedBy(2);
+  const cppEiCreditEligible = cppEiCreditAmount(cppEmployee.plus(seCppEmployeeHalf), eiEmployee);
   const fedCreditAmountsTotal = sumD([bpaFedAmt, spousalFedAmt, ageFedAmt, employmentFedAmt, cppEiCreditEligible]);
   const fedNonRefundableLowRatePart = fedCreditAmountsTotal.times(r.donationLowRate);
 
@@ -215,8 +226,14 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   push('L42801', 'ON surtax', onSurtax);
   push('L42802', 'Ontario Health Premium', ohp);
 
+  // SE CPP payable L31000 — both halves owed by SE individual
+  if (seCppContrib.greaterThan(0)) {
+    push('L31000', 'CPP contributions on self-employment', seCppContrib, [],
+      '2 × computeCppEmployee(seNet)');
+  }
+
   // Totals
-  const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, oasRepayment]);
+  const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, oasRepayment, seCppContrib]);
   push('L43500', 'Total payable', totalPayable);
 
   // Tax deducted at source: sum T4 box 22 across all T4 slips.
@@ -241,7 +258,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       taxableIncome,
       federalTax,
       provincialTax: onTax.plus(onSurtax).plus(ohp),
-      cppContrib: cppEmployee,
+      cppContrib: cppEmployee.plus(seCppContrib),
       eiPremium: eiEmployee,
       totalPayable,
       refundOrOwing,
