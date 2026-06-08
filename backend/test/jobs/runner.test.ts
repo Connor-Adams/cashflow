@@ -85,8 +85,9 @@ test('concurrent ticks: second sees skipped_reentrant in-process', async () => {
     return {};
   });
   const first = runner.tick(def);
-  // Give first a moment to set the guard
-  await new Promise((r) => setImmediate(r));
+  while (!runner.isTickRunning('r_reentrant')) {
+    await new Promise((r) => setImmediate(r));
+  }
   const second = await runner.tick(def);
   assert.equal(second.status, 'skipped_reentrant');
   release();
