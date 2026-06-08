@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { BentoTile } from './BentoTile'
 import { useSafeToSpend } from '@/hooks/useSafeToSpend'
 import { formatMoney } from '@/lib/formatMoney'
@@ -118,14 +119,15 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
             </div>
           </div>
 
-          <button
+          <Button
             type="button"
+            variant="link"
+            size="sm"
             onClick={() => setShowBreakdown((s) => !s)}
             aria-expanded={showBreakdown}
-            className="text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline"
           >
             {showBreakdown ? 'Hide breakdown' : 'Show breakdown'}
-          </button>
+          </Button>
 
           {showBreakdown ? (
             <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2 text-sm">

@@ -20,6 +20,7 @@ import {
   useTaxTags,
   type TaxScope,
 } from '../../hooks/useTaxHygiene';
+import { Button } from '@/components/ui/button';
 import { fmtCurrency, fmtPct } from './util/format';
 import {
   Table,
@@ -114,24 +115,21 @@ function ScopeBar({ scope, onChange, onExport }: ScopeBarProps) {
     <div className="flex flex-wrap items-center gap-2">
       <span className="muted">Scope:</span>
       {SCOPES.map((s) => (
-        <button
+        <Button
           key={s}
           type="button"
+          variant={scope === s ? 'primary' : 'outline'}
+          size="sm"
           onClick={() => onChange(s)}
           aria-pressed={scope === s}
-          className={
-            scope === s
-              ? 'cursor-pointer rounded border border-border bg-primary px-3 py-1 text-primary-foreground'
-              : 'cursor-pointer rounded border border-border bg-transparent px-3 py-1'
-          }
         >
           {TAX_SCOPE_LABELS[s]}
-        </button>
+        </Button>
       ))}
       <span className="flex-1" />
-      <button type="button" onClick={onExport}>
+      <Button type="button" variant="secondary" size="sm" onClick={onExport}>
         Export tax CSV
-      </button>
+      </Button>
     </div>
   );
 }
@@ -299,9 +297,9 @@ function ReviewQueueSection({
                   {fmtPct(Number(r.deductiblePercent))}
                 </TableCell>
                 <TableCell>
-                  <button type="button" onClick={() => handleApprove(r.id)}>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => handleApprove(r.id)}>
                     Mark reviewed
-                  </button>
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}

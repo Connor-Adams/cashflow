@@ -708,32 +708,36 @@ export function ReviewInboxPage() {
             {CONFIDENCE_FLAG_CHIPS.map((chip) => {
               const active = confidenceFlag === chip.token
               return (
-                <button
+                <Button
                   key={chip.token}
                   type="button"
+                  variant={active ? 'default' : 'outline'}
+                  size="sm"
                   onClick={() =>
                     setConfidenceFlag(active ? null : chip.token)
                   }
                   className={
                     active
-                      ? 'rounded-full border border-foreground bg-foreground px-2.5 py-0.5 text-xs font-semibold text-background'
-                      : 'rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground'
+                      ? 'rounded-full px-2.5 py-0.5 text-xs font-semibold'
+                      : 'rounded-full px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground'
                   }
                   aria-pressed={active}
                   data-testid={`confidence-chip-${chip.token}`}
                 >
                   {chip.label}
-                </button>
+                </Button>
               )
             })}
             {confidenceFlag ? (
-              <button
+              <Button
                 type="button"
+                variant="link"
+                size="sm"
                 onClick={() => setConfidenceFlag(null)}
-                className="text-xs text-muted-foreground underline hover:text-foreground"
+                className="text-xs text-muted-foreground"
               >
                 Clear
-              </button>
+              </Button>
             ) : null}
           </div>
 
@@ -805,20 +809,24 @@ export function ReviewInboxPage() {
                         ) : (
                           <span className="reviewInboxHint">No rule</span>
                         )}
-                        <button
+                        <Button
                           type="button"
+                          variant="link"
+                          size="sm"
                           className="reviewInboxHintLink"
                           onClick={() => setSignalsDialogTxnId(row.id)}
                         >
                           Why?
-                        </button>
+                        </Button>
                         {row.itemized != null ? (
-                          <button
+                          <Button
                             type="button"
+                            variant="outline"
+                            size="sm"
                             aria-label={`${row.itemized.itemCount} items${row.itemized.stragglerCount > 0 ? `, ${row.itemized.stragglerCount} need review` : ''}`}
                             aria-expanded={isExpanded}
                             onClick={() => void toggleExpanded(row.id)}
-                            className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                            className="text-xs font-medium text-muted-foreground hover:text-foreground"
                           >
                             <span>🧾 {row.itemized.itemCount} items</span>
                             {row.itemized.stragglerCount > 0 && (
@@ -827,22 +835,24 @@ export function ReviewInboxPage() {
                                 {row.itemized.stragglerCount} need review
                               </span>
                             )}
-                          </button>
+                          </Button>
                         ) : busyTxnId === row.id ? (
                           <span className="text-xs text-muted-foreground italic">Analyzing…</span>
                         ) : (
                           <>
-                            <button
+                            <Button
                               type="button"
+                              variant="outline"
+                              size="sm"
                               aria-label="Add receipt"
                               onClick={() => {
                                 setReceiptTargetTxnId(row.id)
                                 receiptInputRef.current?.click()
                               }}
-                              className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                              className="text-xs font-medium text-muted-foreground hover:text-foreground"
                             >
                               📷 Add receipt
-                            </button>
+                            </Button>
                             {lastAnalyzedTxnId === row.id && lastItemCount === 0 && attachErr == null && (
                               <span className="text-xs text-amber-600">
                                 {"Couldn't read items — try another photo."}
@@ -888,6 +898,7 @@ export function ReviewInboxPage() {
                                     key={item.id}
                                     item={item}
                                     categoryHints={categoryHints.map((h) => h.label)}
+                                    currency={row.currency}
                                     onSaved={() => void load()}
                                   />
                                 ))}

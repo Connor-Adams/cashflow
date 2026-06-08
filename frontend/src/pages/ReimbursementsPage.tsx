@@ -647,12 +647,13 @@ function MatchDialog({
                   Matching searches all accounts visible to you in {row.currency}.
                   If the repayment came in via a different currency or account,
                   it won't appear here.{' '}
-                  <button
-                    className="underline"
+                  <Button
+                    variant="link"
+                    className="inline h-auto p-0"
                     onClick={() => { onClose(); navigate('/settings') }}
                   >
                     Edit in settings
-                  </button>
+                  </Button>
                 </div>
               )}
               <Button

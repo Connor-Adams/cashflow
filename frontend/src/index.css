@@ -150,6 +150,21 @@
   --chart-line-5: var(--moss);
   --chart-line-6: var(--clay);
 
+  /* Extended chart tokens — Sankey, Forecast, Scenarios, Portfolio */
+  --chart-income: #10b981;
+  --chart-income-stroke: #059669;
+  --chart-category: #3b82f6;
+  --chart-business-alt: #8b5cf6;
+  --chart-savings: #06b6d4;
+  --chart-uncategorized: #9ca3af;
+  --chart-scenario: #6366f1;
+  --chart-scenario-pos: #16a34a;
+  --chart-scenario-neg: #dc2626;
+  --chart-reference: #94a3b8;
+  --chart-portfolio: #2563eb;
+  --chart-danger-line: #ef4444;
+  --chart-link-stroke: #0f172a;
+
   /* Legacy aliases — one migration cycle, then removed.
    * App.css component classes (.navLink.isActive, .brandMark, .superadminBadge,
    * etc.) still reference these. They'll get sweeped in a follow-up. */

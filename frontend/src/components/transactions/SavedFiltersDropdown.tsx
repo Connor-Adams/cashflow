@@ -185,13 +185,15 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
             {!loading && loadErr && (
               <div className="px-3 py-2 text-sm text-red-600">
                 Couldn't load filters.{' '}
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   className="underline"
                   onClick={() => void load()}
                 >
                   Retry
-                </button>
+                </Button>
               </div>
             )}
 
@@ -202,9 +204,11 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
             {!loading && !loadErr && filters.map((f) => {
               const isActive = f.id === activeId
               return (
-                <button
+                <Button
                   key={f.id}
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   role="option"
                   aria-selected={isActive}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
@@ -212,29 +216,33 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
                 >
                   {isActive && <span className="text-primary">✓</span>}
                   <span className={isActive ? 'font-semibold' : ''}>{f.name}</span>
-                </button>
+                </Button>
               )
             })}
 
             <div className="mx-3 my-1 border-t border-border" />
 
             {activeFilter && isDirty && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 className="flex w-full items-center px-3 py-2 text-left text-sm hover:bg-accent"
                 onClick={() => void updateFilter(activeFilter)}
               >
                 Update '{activeFilter.name}'
-              </button>
+              </Button>
             )}
 
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               className="flex w-full items-center px-3 py-2 text-left text-sm hover:bg-accent"
               onClick={() => void openSave()}
             >
               Save current filter…
-            </button>
+            </Button>
           </div>
         )}
       </div>

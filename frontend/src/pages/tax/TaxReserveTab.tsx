@@ -24,6 +24,7 @@ import {
   type Periodicity,
   type ReserveSettingDto,
 } from '../../hooks/useTaxReserve';
+import { Button } from '@/components/ui/button';
 import { fmtCurrency, fmtPct } from './util/format';
 import {
   Table,
@@ -91,7 +92,7 @@ function Disclaimer({ text }: { text?: string }) {
     <aside
       role="note"
       aria-label="Reserve calculator disclaimer"
-      className="rounded-[6px] border border-[var(--warning-border,#f59e0b)] bg-[var(--warning-bg,#fffbeb)] px-3 py-2 text-sm text-[var(--warning-fg,#92400e)]"
+      className="rounded-[6px] border border-[var(--warning)] bg-[var(--warning-bg)] px-3 py-2 text-sm text-[var(--warning-foreground)]"
     >
       <strong>Note:</strong> {body}
     </aside>
@@ -111,19 +112,16 @@ function PeriodicityBar({
     <div className="flex flex-wrap items-center gap-2">
       <span className="muted">Bucket by:</span>
       {PERIODICITIES.map((p) => (
-        <button
+        <Button
           key={p}
           type="button"
+          variant={periodicity === p ? 'primary' : 'outline'}
+          size="sm"
           onClick={() => onChange(p)}
           aria-pressed={periodicity === p}
-          className={
-            periodicity === p
-              ? 'cursor-pointer rounded border border-border bg-primary px-3 py-1 text-primary-foreground'
-              : 'cursor-pointer rounded border border-border bg-transparent px-3 py-1'
-          }
         >
           {PERIODICITY_LABELS[p]}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -268,19 +266,21 @@ function SettingsRow({
         />
       </TableCell>
       <TableCell className="whitespace-nowrap">
-        <button type="button" onClick={handleSave} disabled={saving}>
+        <Button type="button" variant="primary" size="sm" onClick={handleSave} disabled={saving}>
           Save
-        </button>
+        </Button>
         {!row.isDefault && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={handleReset}
             disabled={saving}
             className="ml-1"
             title="Revert to the default 25% reserve"
           >
             Reset
-          </button>
+          </Button>
         )}
         {errorMsg && (
           <span className="error ml-2">
@@ -357,7 +357,7 @@ function SummarySection({ rows, loading, error }: SummarySectionProps) {
                 {fmtCurrency(r.components.deductibleExpenses)}
               </TableCell>
               <TableCell
-                className={`text-right${r.netBusinessIncome < 0 ? ' text-[var(--danger,#b91c1c)]' : ''}`}
+                className={`text-right${r.netBusinessIncome < 0 ? ' text-[var(--danger)]' : ''}`}
               >
                 {fmtCurrency(r.netBusinessIncome)}
               </TableCell>

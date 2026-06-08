@@ -104,14 +104,15 @@ function BulkPatchBody({ preview }: { preview: Preview }) {
       ) : null}
       {sample.length > 0 ? (
         <div>
-          <button
+          <Button
             type="button"
-            className="text-xs underline underline-offset-2"
+            variant="link"
+            size="sm"
             aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? 'Hide' : `Show ${sample.length} sample rows`}
-          </button>
+          </Button>
           {expanded ? (
             <ul className="mt-2 space-y-1 text-xs">
               {sample.slice(0, 10).map((row, idx) => (

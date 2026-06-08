@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
+import { Button } from '@/components/ui/button'
 import { postJson } from '../../lib/api'
 import type { Label, TransactionLabelRef } from '../../types/api'
 
@@ -151,15 +152,16 @@ export function LabelChipPicker({
             className="group inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
           >
             {label.name}
-            <button
+            <Button
               type="button"
+              variant="ghost"
               aria-label={`Remove ${label.name}`}
               className="text-slate-400 hover:text-slate-700"
               disabled={busy}
               onClick={() => void removeLabel(label.id)}
             >
               ×
-            </button>
+            </Button>
           </span>
         ))}
         <div className="relative">
@@ -185,8 +187,9 @@ export function LabelChipPicker({
             >
               {matches.map((label, i) => (
                 <li key={label.id}>
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     role="option"
                     aria-selected={i === highlight}
                     className={
@@ -198,7 +201,7 @@ export function LabelChipPicker({
                     onClick={() => void applyExisting(label)}
                   >
                     {label.name}
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

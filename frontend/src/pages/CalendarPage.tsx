@@ -624,8 +624,9 @@ export function CalendarPage() {
               />
               <p className="muted text-xs" style={{ marginTop: '0.75rem' }}>
                 Need to link this event to a transaction?{' '}
-                <button
+                <Button
                   type="button"
+                  variant="link"
                   className="underline"
                   onClick={() => {
                     cancelEdit()
@@ -633,7 +634,7 @@ export function CalendarPage() {
                   }}
                 >
                   Open the full editor
-                </button>
+                </Button>
                 .
               </p>
             </DialogBody>
@@ -754,9 +755,10 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
           const visible = events.slice(0, 3)
           const hidden = events.length - visible.length
           return (
-            <button
+            <Button
               key={cell.iso}
               type="button"
+              variant="ghost"
               role="gridcell"
               onClick={() => onDayClick(cell.iso)}
               aria-label={`${cell.iso}, ${events.length} event${events.length === 1 ? '' : 's'}`}
@@ -799,7 +801,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
               {hidden > 0 ? (
                 <span className="muted text-xs">+{hidden} more</span>
               ) : null}
-            </button>
+            </Button>
           )
         })}
       </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableHeader,
@@ -94,7 +95,7 @@ export function OverrideEditor({ overrides, onChange }: Props) {
                     onChange={(e) => setValue(k, Number(e.target.value))}
                   />
                 )}
-                <button onClick={() => removeKey(k)} className="ml-2">×</button>
+                <Button variant="ghost" size="sm" onClick={() => removeKey(k)} className="ml-2">×</Button>
               </li>
             );
           })}
@@ -107,7 +108,7 @@ export function OverrideEditor({ overrides, onChange }: Props) {
               <option key={d.key} value={d.key}>{d.label}</option>
             ))}
           </select>
-          <button onClick={addKey}>+ Add override</button>
+          <Button variant="secondary" size="sm" onClick={addKey}>+ Add override</Button>
         </div>
       )}
     </section>
@@ -166,7 +167,7 @@ function DispositionArrayEditor({ value, onChange }: {
                 />
               </TableCell>
               <TableCell>
-                <button onClick={() => removeRow(i)}>×</button>
+                <Button variant="ghost" size="sm" onClick={() => removeRow(i)}>×</Button>
               </TableCell>
             </TableRow>
           ))}
@@ -177,7 +178,7 @@ function DispositionArrayEditor({ value, onChange }: {
           ? `${value.length} disposition${value.length === 1 ? '' : 's'} · gain = proceeds − ACB for each row`
           : null}
       </p>
-      <button onClick={addRow}>+ Add disposition</button>
+      <Button variant="secondary" size="sm" onClick={addRow}>+ Add disposition</Button>
     </div>
   );
 }

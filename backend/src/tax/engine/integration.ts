@@ -61,7 +61,8 @@ export function computeIntegration(
   const gripAddition = generalRateIncome.times(generalRetention);
 
   const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
-  const cdaAddition = maxZero(grossGains).times(D('1').minus(r.capitalGainsInclusion));
+  const corpInclusionRate = r.capitalGainsInclusionHigh ?? r.capitalGainsInclusion;
+  const cdaAddition = maxZero(grossGains).times(D('1').minus(corpInclusionRate));
 
   const interest = sumD(facts.investmentIncome.interest.map(i => i.cadAmount));
   const rent = sumD(facts.investmentIncome.rentNet.map(i => i.cadAmount));

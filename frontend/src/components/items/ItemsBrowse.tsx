@@ -73,8 +73,9 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
               className="absolute z-10 mt-1 rounded border border-border bg-card text-sm shadow"
             >
               {(['purchase', 'category', 'none'] as GroupBy[]).map((g) => (
-                <button
+                <Button
                   key={g}
+                  variant="ghost"
                   role="menuitem"
                   className="block w-full px-3 py-1 text-left hover:bg-muted"
                   onClick={() => {
@@ -83,7 +84,7 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
                   }}
                 >
                   {g}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -133,9 +134,9 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
                   checked={selected.has(r.id)}
                   onChange={() => toggleSelect(r.id)}
                 />
-                <button className="flex-1 text-left" onClick={() => onOpenItem(r.id, r)}>
+                <Button variant="ghost" className="flex-1 text-left" onClick={() => onOpenItem(r.id, r)}>
                   {r.title}
-                </button>
+                </Button>
                 <span className="text-muted-foreground">{r.categoryEffective ?? '—'}</span>
                 <span className="w-16 text-right">
                   {r.totalPrice != null ? formatMoney(r.totalPrice, r.currency) : '—'}

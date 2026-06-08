@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { BentoTile } from './BentoTile'
 import {
   useReceiptCompleteness,
@@ -74,19 +75,17 @@ export function ReceiptCoverageTile({ currency = 'CAD' }: Props) {
           {FILTER_OPTIONS.map((opt) => {
             const active = filter === opt.value
             return (
-              <button
+              <Button
                 key={opt.value}
                 type="button"
+                variant={active ? 'secondary' : 'ghost'}
+                size="sm"
                 onClick={() => setFilter(opt.value)}
-                className={
-                  active
-                    ? 'rounded-sm bg-background px-2 py-1 font-semibold text-foreground shadow-sm'
-                    : 'rounded-sm px-2 py-1 text-muted-foreground hover:text-foreground'
-                }
+                className="px-2 py-1"
                 aria-pressed={active}
               >
                 {opt.label}
-              </button>
+              </Button>
             )
           })}
         </div>

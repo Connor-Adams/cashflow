@@ -1,4 +1,5 @@
 import { CATEGORY_ICON_NAMES, type CategoryIconName } from '@cashflow/shared'
+import { Button } from '@/components/ui/button'
 import { CATEGORY_ICON_COMPONENTS } from './CategoryIcon'
 import { cn } from '@/lib/utils'
 
@@ -14,8 +15,9 @@ const CELL_ACTIVE = 'border-[var(--accent)] bg-[var(--accent)]/15'
 export function CategoryIconPicker({ value, onSelect }: Props) {
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(48px,1fr))] gap-1 max-h-[400px] overflow-y-auto">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         aria-pressed={value === null}
         aria-label="None"
         onClick={() => onSelect(null)}
@@ -23,14 +25,15 @@ export function CategoryIconPicker({ value, onSelect }: Props) {
         title="None"
       >
         <span className="text-[11px]">None</span>
-      </button>
+      </Button>
       {CATEGORY_ICON_NAMES.map((name) => {
         const Icon = CATEGORY_ICON_COMPONENTS[name]
         const active = value === name
         return (
-          <button
+          <Button
             key={name}
             type="button"
+            variant="ghost"
             aria-pressed={active}
             aria-label={name}
             onClick={() => onSelect(name)}
@@ -38,7 +41,7 @@ export function CategoryIconPicker({ value, onSelect }: Props) {
             title={name}
           >
             <Icon size={20} />
-          </button>
+          </Button>
         )
       })}
     </div>

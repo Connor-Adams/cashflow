@@ -344,7 +344,7 @@ function SummaryStat({
         style={{
           fontSize: 20,
           fontWeight: 600,
-          color: tone === 'warn' ? 'var(--accent-warm, #b45309)' : undefined,
+          color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
         }}
       >
         {value}

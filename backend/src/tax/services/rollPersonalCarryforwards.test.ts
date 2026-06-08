@@ -77,19 +77,22 @@ function makeFacts(overrides: Partial<TaxYearFacts> = {}): TaxYearFacts {
     nonEligibleDividends: [],
     capitalGainEvents: [],
     rrspContribs: [],
+    fhsaContribs: [],
+    donations: [],
     slips: [],
     carryforwards: {
       netCapitalLoss: D('0'),
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
     },
     ageAtYearEnd: 40,
     ...overrides,
   };
 }
 
-test('roll basic case: no income, no gains — preserves zero balances and writes 4 rows', async () => {
+test('roll basic case: no income, no gains — preserves zero balances and writes 5 rows', async () => {
   const household = await Household.create({ name: 'Roll test basic' });
   const entity = await Entity.create({
     householdId: household.id,
@@ -102,13 +105,14 @@ test('roll basic case: no income, no gains — preserves zero balances and write
   const facts = makeFacts();
   const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
 
-  assert.equal(result.written.length, 4);
+  assert.equal(result.written.length, 5);
 
   const kinds = result.written.map(w => w.kind);
   assert.ok(kinds.includes('cap_loss'));
   assert.ok(kinds.includes('non_cap_loss'));
   assert.ok(kinds.includes('rrsp_room'));
   assert.ok(kinds.includes('fhsa_room'));
+  assert.ok(kinds.includes('fhsa_lifetime_contribs'));
 
   // All balances should be zero with no income (except fhsa_room)
   for (const w of result.written) {
@@ -117,14 +121,14 @@ test('roll basic case: no income, no gains — preserves zero balances and write
     }
   }
 
-  // FHSA room should equal annual limit (8000 default when fhsaAnnualLimit not on rate)
+  // FHSA room should equal annual limit (8000) when no lifetime contributions
   const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
   assert.ok(fhsaRow);
   assert.equal(fhsaRow.amount.toFixed(2), '8000.00');
 
   // Verify rows were upserted to DB
   const dbRows = await Carryforward.findAll({ where: { entityId: entity.id, asOfYear: 2025 } });
-  assert.equal(dbRows.length, 4);
+  assert.equal(dbRows.length, 5);
 });
 
 test('roll loss year: capital loss event adds to carry', async () => {
@@ -153,6 +157,7 @@ test('roll loss year: capital loss event adds to carry', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
     },
   });
 
@@ -191,6 +196,7 @@ test('roll gain year: cap gain reduces carry', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
     },
   });
 
@@ -221,6 +227,7 @@ test('roll RRSP room earned: employment income generates room', async () => {
       rrspRoom: D('5000'), // prior room
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
     },
   });
 
@@ -252,6 +259,7 @@ test('roll RRSP room: capped at rrspAnnualLimit', async () => {
       rrspRoom: D('0'),
       nonCapLoss: D('0'),
       instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
     },
   });
 
@@ -286,4 +294,145 @@ test('roll upsert: calling twice with different facts updates DB row', async () 
   assert.equal(rows.length, 1, 'upsert should keep only 1 row per kind+year');
   // 50000 * 0.18 = 9000, capped fine; rrsp_room = 9000
   assert.equal(Number(rows[0].amount).toFixed(2), '9000.00');
+});
+
+// ---------------------------------------------------------------------------
+// FHSA lifetime limit tests
+// ---------------------------------------------------------------------------
+
+test('FHSA: contributions this year reduce room and accumulate lifetime total', async () => {
+  const household = await Household.create({ name: 'FHSA contribs' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'FHSA Contrib',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  const facts = makeFacts({
+    fhsaContribs: [{ source: 'FHSA', amount: D('5000'), date: '2025-03-01' }],
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('0'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
+    },
+  });
+
+  const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
+
+  // Lifetime contributions: 0 + 5000 = 5000
+  const lifetimeRow = result.written.find(w => w.kind === 'fhsa_lifetime_contribs');
+  assert.ok(lifetimeRow);
+  assert.equal(lifetimeRow.amount.toFixed(2), '5000.00');
+
+  // Room = min(8000, 40000 - 5000) = min(8000, 35000) = 8000
+  const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
+  assert.ok(fhsaRow);
+  assert.equal(fhsaRow.amount.toFixed(2), '8000.00');
+});
+
+test('FHSA: lifetime contributions approaching cap reduce room below annual limit', async () => {
+  const household = await Household.create({ name: 'FHSA near cap' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'FHSA Near Cap',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  // Prior lifetime: $35,000. This year: $8,000. Total = $43,000 but capped at $40k.
+  // Effective this-year contribs that count: still $8,000 (we track the full amount).
+  // newLifetimeContribs = 35000 + 8000 = 43000
+  // lifetimeRemaining = max(0, 40000 - 43000) = 0
+  // fhsaRoom = min(8000, 0) = 0
+  const facts = makeFacts({
+    fhsaContribs: [{ source: 'FHSA', amount: D('8000'), date: '2025-02-01' }],
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('0'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('35000'),
+    },
+  });
+
+  const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
+
+  // Lifetime total = 35000 + 8000 = 43000
+  const lifetimeRow = result.written.find(w => w.kind === 'fhsa_lifetime_contribs');
+  assert.ok(lifetimeRow);
+  assert.equal(lifetimeRow.amount.toFixed(2), '43000.00');
+
+  // Room = min(8000, max(0, 40000 - 43000)) = min(8000, 0) = 0
+  const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
+  assert.ok(fhsaRow);
+  assert.equal(fhsaRow.amount.toFixed(2), '0.00');
+});
+
+test('FHSA: exactly at $40k lifetime cap — room is zero', async () => {
+  const household = await Household.create({ name: 'FHSA at cap' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'FHSA At Cap',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  // Prior lifetime = $40,000, no new contribs this year.
+  const facts = makeFacts({
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('0'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('40000'),
+    },
+  });
+
+  const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
+
+  // Room = min(8000, max(0, 40000 - 40000)) = min(8000, 0) = 0
+  const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
+  assert.ok(fhsaRow);
+  assert.equal(fhsaRow.amount.toFixed(2), '0.00');
+
+  // Lifetime stays at 40000 (no new contribs)
+  const lifetimeRow = result.written.find(w => w.kind === 'fhsa_lifetime_contribs');
+  assert.ok(lifetimeRow);
+  assert.equal(lifetimeRow.amount.toFixed(2), '40000.00');
+});
+
+test('FHSA: partial room when near lifetime limit', async () => {
+  const household = await Household.create({ name: 'FHSA partial' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'FHSA Partial',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  // Prior lifetime = $35,000, no new contribs this year.
+  // Room = min(8000, 40000 - 35000) = min(8000, 5000) = 5000
+  const facts = makeFacts({
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('0'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('35000'),
+    },
+  });
+
+  const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
+
+  // Room = min(8000, 5000) = 5000
+  const fhsaRow = result.written.find(w => w.kind === 'fhsa_room');
+  assert.ok(fhsaRow);
+  assert.equal(fhsaRow.amount.toFixed(2), '5000.00');
 });

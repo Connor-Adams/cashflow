@@ -62,9 +62,9 @@ test('AAII: mixed interest + dividends + rent + capital gain', () => {
       { source: 'stock', securityId: 1, proceeds: D('20000'), acb: D('10000'), outlays: D('0'), date: '2024-06-01' },
     ],
   };
-  // interest(10k) + elDiv(5k) + nonElDiv(2k) + rent(8k) + gain(10k)×0.5(5k) = 30k
+  // interest(10k) + elDiv(5k) + nonElDiv(2k) + rent(8k) + gain(10k)×0.666667(6666.67) = 31666.67
   const aaii = computeAaii(facts, r);
-  assert.equal(aaii.toFixed(2), '30000.00');
+  assert.equal(aaii.toFixed(2), '31666.67');
 });
 
 test('AAII: capital loss year clamps to zero', () => {
@@ -75,7 +75,7 @@ test('AAII: capital loss year clamps to zero', () => {
       { source: 'stock', securityId: 1, proceeds: D('5000'), acb: D('15000'), outlays: D('0'), date: '2024-06-01' },
     ],
   };
-  // grossGains = -10000; includableGains = -5000; AAII clamped at 0
+  // grossGains = -10000; includableGains = -6666.67; AAII clamped at 0
   const aaii = computeAaii(facts, r);
   assert.equal(aaii.toFixed(2), '0.00');
 });
@@ -88,7 +88,7 @@ test('AAII: capital loss offsets interest income, not below zero', () => {
       interest: [{ source: 'GIC', amount: D('3000'), cadAmount: D('3000') }],
     },
     capitalGainEvents: [
-      // Net loss of $20k → includable = -$10k; 3k - 10k = -7k clamped to 0
+      // Net loss of $20k → includable = -$13333.34; 3k - 13333.34 = -10333.34 clamped to 0
       { source: 'stock', securityId: 1, proceeds: D('0'), acb: D('20000'), outlays: D('0'), date: '2024-06-01' },
     ],
   };

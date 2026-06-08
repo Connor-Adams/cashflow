@@ -37,6 +37,8 @@ export type PersonalCarryforwards = {
   rrspRoom: Decimal;
   nonCapLoss: Decimal;
   instalmentsPaid: Decimal;
+  /** Cumulative FHSA contributions across all years (tracks $40k lifetime cap). */
+  fhsaLifetimeContributions: Decimal;
 };
 
 export type CorpFiscalYear = {
@@ -208,6 +210,8 @@ export type RateTable = {
     employeeRate: Decimal;
   };
   capitalGainsInclusion: Decimal;
+  capitalGainsInclusionHigh?: Decimal;
+  capitalGainsInclusionThreshold?: Decimal;
   onSurtaxBands?: Array<{ threshold: Decimal; rate: Decimal }>;
   ontarioHealthPremium: Array<{ upTo: Decimal | null; flat: Decimal; marginalRate: Decimal }>;
   donationLowRate: Decimal;
