@@ -180,9 +180,50 @@ test('classifyPositiveAmount: missing txnType falls back to merchant regex', () 
     classifyPositiveAmount({ txnType: 'purchase', merchantRaw: 'MERCHANDISE REFUND' }),
     'credit'
   );
+  // No refund/payment keyword: an unsignaled positive is NOT assumed to be a
+  // refund-against-spend. It routes to 'skip' (contributes to nothing) rather
+  // than 'credit'. (Differs from classifyPositiveFlow, whose standalone default
+  // stays 'credit' — see its own tests above.)
   assert.equal(
     classifyPositiveAmount({ txnType: 'fee', merchantRaw: 'annual fee waiver' }),
+    'skip'
+  );
+});
+
+test('classifyPositiveAmount: unsignaled positive inflow routes to skip, not credit', () => {
+  // Regression for the ~$108k net-spend bug: positive deposits / transfers /
+  // benefits / principal movements carried txnType=unknown and, with no
+  // refund/payment keyword, defaulted to 'credit' — wrongly subtracting from
+  // net spend (= totalSpend - totalCredits). They must route to 'skip'.
+  for (const merchantRaw of [
+    'ATM DEPOSIT - KF470333',
+    'WWW PMT TIN0-03100 (5,000.00) Principal',
+    'Cash correction',
+    'EI CANADA',
+    'Deposit (executed at 2026-03-17)',
+  ]) {
+    assert.equal(
+      classifyPositiveAmount({ txnType: 'unknown', merchantRaw }),
+      'skip',
+      `${merchantRaw} should be skip, not credit`
+    );
+  }
+});
+
+test('classifyPositiveAmount: explicit refund/payment keyword still wins over the skip default', () => {
+  // The skip default must NOT swallow genuine refunds/credits that carry a
+  // CREDIT_PATTERNS keyword, nor statement payments matching PAYMENT_PATTERNS.
+  assert.equal(
+    classifyPositiveAmount({ txnType: 'unknown', merchantRaw: 'MERCHANDISE REFUND' }),
     'credit'
+  );
+  assert.equal(
+    classifyPositiveAmount({ txnType: 'unknown', merchantRaw: 'STATEMENT CREDIT' }),
+    'credit'
+  );
+  assert.equal(
+    classifyPositiveAmount({ txnType: 'unknown', merchantRaw: 'AUTOPAY THANK YOU' }),
+    'payment'
   );
 });
 

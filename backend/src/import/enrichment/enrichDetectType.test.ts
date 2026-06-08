@@ -530,3 +530,90 @@ test('GUARD: "E-TRANSFER SENT BET365" stays purchase (not over-broadened)', () =
   });
   assert.equal(out[0].fields.txnType, 'purchase');
 });
+
+// === Government benefit income + WS deposit/correction (2026-06-06) ===
+// Net-spend audit: these positive inflows carried txnType='unknown' and, before
+// the classifier harden, deflated net spend via the 'credit' bucket. Government
+// benefits are external INCOME; Wealthsimple "Deposit (executed)" / "Cash
+// correction" are internal account funding (TRANSFER).
+
+test('income: EI CANADA government benefit deposit', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'EI CANADA',
+    merchantClean: 'EI CANADA',
+    amount: 2000,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+  assert.equal(out[0].confidence, 'high');
+});
+
+test('income: employment insurance benefit', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'EMPLOYMENT INSURANCE BENEFIT',
+    merchantClean: 'EMPLOYMENT INSURANCE BENEFIT',
+    amount: 638,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+});
+
+test('income: CRA "Canada PRO" benefit deposit', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'CANADA PRO DEPOSIT',
+    merchantClean: 'CANADA PRO DEPOSIT',
+    amount: 257.5,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+});
+
+test('income: GST/HST credit', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'CANADA GST/HST CREDIT',
+    merchantClean: 'CANADA GST/HST CREDIT',
+    amount: 122,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'income');
+});
+
+test('GUARD: "CANADA GOOSE" purchase is not a government benefit', () => {
+  // The brand shares the "canada" prefix; the benefit regex must require a
+  // specific benefit word after "canada", so a clothing purchase stays purchase.
+  const out = runDetectTypeStage({
+    merchantRaw: 'CANADA GOOSE #12 TORONTO',
+    merchantClean: 'Canada Goose',
+    amount: -850,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
+
+test('transfer: WS "Deposit (executed at ...)" is a transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Deposit (executed at 2026-03-17)',
+    merchantClean: 'Deposit (executed at 2026-03-17)',
+    amount: 6000,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('transfer: WS "Cash correction (executed at ...)" is a transfer', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Cash correction (executed at 2026-02-05)',
+    merchantClean: 'Cash correction (executed at 2026-02-05)',
+    amount: 2525,
+  });
+  assert.equal(out[0].fields.txnType, 'transfer');
+});
+
+test('GUARD: WS "Contribution (executed at ...)" stays unknown (deposit pattern must not swallow it)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'Contribution (executed at 2025-12-18)',
+    merchantClean: 'Contribution (executed at 2025-12-18)',
+    amount: 9000,
+    ownerNames: HH_MEMBERS,
+  });
+  assert.equal(out[0].fields.txnType, 'unknown');
+});
