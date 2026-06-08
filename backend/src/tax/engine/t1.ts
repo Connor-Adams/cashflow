@@ -1,6 +1,7 @@
 import { D, Decimal, sumD, maxZero } from '../util/decimal';
 import type { RateTable, TaxLine, TaxReturn, TaxYearFacts } from './types';
 import { applyBrackets } from './brackets';
+import { computeAmt } from './amt';
 import { computeCppEmployee, computeEiEmployee, computeCppSelfEmployed } from './cpp-ei';
 import { grossUpEligible, grossUpNonEligible, dtcFederal, dtcOntario } from './dividends';
 import { taxableCapitalGains } from './capital-gains';
@@ -286,6 +287,28 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       { source: 'DTC non-eligible', amount: fedDtcNonEligible },
     ]);
 
+  // Alternative Minimum Tax (AMT) — post-2024 reformed rules
+  const amtResult = computeAmt({
+    taxableIncome,
+    regularFederalTax: federalTax,
+    capitalGainsGross: cg.gross,
+    capitalGainsTaxable: cg.taxable,
+    eligibleDividendsGrossed: eligibleGrossed,
+    nonEligibleDividendsGrossed: nonElGrossed,
+    totalNonRefundableCredits: fedNonRefundableLowRatePart,
+    totalDtcCredits: fedDtcEligible.plus(fedDtcNonEligible),
+    rates: r,
+  });
+  if (amtResult.amtAdditional.greaterThan(0)) {
+    push('L41400', 'Additional federal tax — AMT', amtResult.amtAdditional, [],
+      `AMT payable $${amtResult.amtPayable.toFixed(2)} exceeds regular federal tax $${federalTax.toFixed(2)}`);
+    warnings.push(
+      `Alternative Minimum Tax applies: $${amtResult.amtAdditional.toFixed(2)} additional federal tax. ` +
+      `AMT base: $${amtResult.amtBase.toFixed(2)} (adjusted taxable income above $${r.amtExemption.toFixed(0)} exemption).`
+    );
+  }
+  const federalTaxWithAmt = federalTax.plus(amtResult.amtAdditional);
+
   // Ontario tax before credits
   const onTaxBeforeCredits = applyBrackets(taxableIncome, r.provincialBrackets);
   const bpaOnAmt = basicPersonalAmountOntarioApplied(taxableIncome, r);
@@ -321,7 +344,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   }
 
   // Totals
-  const totalPayable = sumD([federalTax, onTax, onSurtax, ohp, oasRepayment, seCppContrib]);
+  const totalPayable = sumD([federalTaxWithAmt, onTax, onSurtax, ohp, oasRepayment, seCppContrib]);
   push('L43500', 'Total payable', totalPayable);
 
   // Tax deducted at source: sum T4 box 22 across all T4 slips.
@@ -344,7 +367,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       totalIncome,
       netIncome,
       taxableIncome,
-      federalTax,
+      federalTax: federalTaxWithAmt,
       provincialTax: onTax.plus(onSurtax).plus(ohp),
       cppContrib: cppEmployee.plus(seCppContrib),
       eiPremium: eiEmployee,
