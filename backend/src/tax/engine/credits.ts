@@ -125,6 +125,19 @@ export function medicalCreditFederal(
   return eligible.times(r.donationLowRate); // federal lowest rate = 15%
 }
 
+export function medicalCreditOntario(
+  medicalExpenses: Decimal,
+  netIncome: Decimal,
+  r: RateTable,
+): Decimal {
+  const threshold = Decimal.min(
+    netIncome.times(r.medicalThresholdPercent),
+    r.medicalThresholdCap,
+  );
+  const eligible = maxZero(medicalExpenses.minus(threshold));
+  return eligible.times(r.provincialBrackets[0].rate);
+}
+
 // ─── Phase 2 credits ──────────────────────────────────────────────────────────
 
 /**

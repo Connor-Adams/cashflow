@@ -20,6 +20,8 @@ import {
   tuitionCreditFederal,
   pensionIncomeCreditFederal,
   pensionIncomeCreditOntario,
+  medicalCreditFederal,
+  medicalCreditOntario,
   oasClawback,
 } from './credits';
 
@@ -169,6 +171,9 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const tuitionFedCredit = tuitionCreditFederal(facts.tuitionFees ?? D('0'), r);
   const pensionFedCredit = pensionIncomeCreditFederal(facts.pensionIncome ?? D('0'), r);
 
+  const totalMedical = sumD(facts.medicalExpenses.map(i => i.cadAmount));
+  const medicalFedCredit = medicalCreditFederal(totalMedical, netIncome, r);
+
   // Federal DTC (reduces federal tax dollar-for-dollar in credit-value form)
   const fedDtcEligible = dtcFederal(eligibleGrossed, 'eligible', r);
   const fedDtcNonEligible = dtcFederal(nonElGrossed, 'non_eligible', r);
@@ -181,6 +186,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       .minus(caregiverFedCredit)
       .minus(tuitionFedCredit)
       .minus(pensionFedCredit)
+      .minus(medicalFedCredit)
       .minus(fedDtcEligible)
       .minus(fedDtcNonEligible)
   );
@@ -196,6 +202,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       { source: 'Caregiver credit', amount: caregiverFedCredit },
       { source: 'Tuition credit', amount: tuitionFedCredit },
       { source: 'Pension income credit', amount: pensionFedCredit },
+      { source: 'Medical credit', amount: medicalFedCredit },
       { source: 'DTC eligible', amount: fedDtcEligible },
       { source: 'DTC non-eligible', amount: fedDtcNonEligible },
     ]);
@@ -208,6 +215,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const onCreditTotal = sumD([bpaOnAmt, spousalOnAmt, ageOnAmt, cppEiCreditEligible]).times(r.provincialBrackets[0].rate);
   const onDonationsCredit = donationCreditOntario(totalDonations, taxableIncome, r);
   const onPensionCredit = pensionIncomeCreditOntario(facts.pensionIncome ?? D('0'), r);
+  const onMedicalCredit = medicalCreditOntario(totalMedical, netIncome, r);
   const onDtcEligible = dtcOntario(eligibleGrossed, 'eligible', r);
   const onDtcNonEligible = dtcOntario(nonElGrossed, 'non_eligible', r);
   const onTax = maxZero(
@@ -215,6 +223,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       .minus(onCreditTotal)
       .minus(onDonationsCredit)
       .minus(onPensionCredit)
+      .minus(onMedicalCredit)
       .minus(onDtcEligible)
       .minus(onDtcNonEligible),
   );

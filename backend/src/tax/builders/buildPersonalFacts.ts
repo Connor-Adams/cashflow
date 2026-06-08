@@ -71,6 +71,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const donations: IncomeItem[] = [];
   const rrspContribs: RrspContrib[] = [];
   const fhsaContribs: RrspContrib[] = [];
+  const medicalExpenses: IncomeItem[] = [];
 
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
@@ -103,6 +104,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     }
     else if (treatment === 'fhsa_contribution') {
       fhsaContribs.push({ source: item.source, amount: cad.abs(), date: t.date as unknown as string });
+    }
+    else if (treatment === 'medical_expense') {
+      medicalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
     }
     else if (t.finalBusiness && cad.greaterThan(0)) selfEmploymentIncome.push(item);
     else if (t.finalBusiness && cad.lessThan(0))
@@ -293,5 +297,8 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     slips,
     carryforwards,
     ageAtYearEnd,
+    medicalExpenses,
+    rentalIncome: [],
+    rentalExpenses: [],
   };
 }
