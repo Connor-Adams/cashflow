@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWsInvestRow, type WsRow } from './wealthsimpleInvestParse';
+import {
+  parseWsInvestRow,
+  wsRecordsHaveSecurityActivity,
+  type WsRow,
+} from './wealthsimpleInvestParse';
 
 const ACCOUNT_ID = 42;
 const DEFAULT_CCY = 'CAD';
@@ -353,4 +357,72 @@ test('currency falls back to default when row currency empty', () => {
   );
   assert.ok(r);
   assert.equal(r.currency, 'USD');
+});
+
+// ─── wsRecordsHaveSecurityActivity ──────────────────────────────────────────
+// Drives the import-time accountType self-heal: a WS monthly statement that
+// carries SECURITY-bearing activity (BUY/SELL/DIV/CRYPTORWD) implies a
+// brokerage account. Pure cash codes (CONT/INT/FPLINT/FEE/AFT_*/P2P_*) must
+// NOT trigger it, so a HISA like "Save for Business" (CONT + Interest received)
+// is never mis-upgraded to 'investment'.
+
+function rec(transaction: string, key: 'transaction' | 'Transaction' = 'transaction') {
+  return { [key]: transaction, description: 'x', amount: '1', currency: 'CAD' } as Record<
+    string,
+    string
+  >;
+}
+
+test('security activity: BUY present → true', () => {
+  assert.equal(wsRecordsHaveSecurityActivity([rec('CONT'), rec('BUY')]), true);
+});
+
+test('security activity: SELL present → true', () => {
+  assert.equal(wsRecordsHaveSecurityActivity([rec('SELL')]), true);
+});
+
+test('security activity: DIV present → true', () => {
+  assert.equal(wsRecordsHaveSecurityActivity([rec('DIV')]), true);
+});
+
+test('security activity: CRYPTORWD present → true', () => {
+  assert.equal(wsRecordsHaveSecurityActivity([rec('CRYPTORWD')]), true);
+});
+
+test('security activity: case-insensitive code → true', () => {
+  assert.equal(wsRecordsHaveSecurityActivity([rec('buy')]), true);
+});
+
+test('security activity: capitalized "Transaction" header key → true', () => {
+  assert.equal(wsRecordsHaveSecurityActivity([rec('DIV', 'Transaction')]), true);
+});
+
+test('cash-only HISA codes (CONT + INT) → false (Save-for-Business class)', () => {
+  assert.equal(
+    wsRecordsHaveSecurityActivity([rec('CONT'), rec('INT'), rec('CONT')]),
+    false,
+  );
+});
+
+test('cash movement codes (AFT_OUT / P2P_SENT / FPLINT / FEE) → false', () => {
+  assert.equal(
+    wsRecordsHaveSecurityActivity([
+      rec('AFT_OUT'),
+      rec('P2P_SENT'),
+      rec('FPLINT'),
+      rec('FEE'),
+    ]),
+    false,
+  );
+});
+
+test('security activity: empty record set → false', () => {
+  assert.equal(wsRecordsHaveSecurityActivity([]), false);
+});
+
+test('security activity: missing transaction column → false', () => {
+  assert.equal(
+    wsRecordsHaveSecurityActivity([{ description: 'x', amount: '1' } as Record<string, string>]),
+    false,
+  );
 });
