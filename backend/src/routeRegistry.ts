@@ -114,6 +114,7 @@ import syncRouter from './routes/sync';
 import jobsRouter from './jobs/api';
 import searchRouter from './routes/search';
 import incomeRouter from './routes/income';
+import navStatusRouter from './routes/navStatus';
 import { requireAuth } from './auth/middleware';
 
 /**
@@ -200,6 +201,7 @@ export const preAuthRoutes: RouteEntry[] = [
  * stub, and the bare-`/api` catch-all routers at the tail.
  */
 export const gatedRoutes: RouteEntry[] = [
+  { paths: '/api/nav/status', handlers: [navStatusRouter], why: 'Sidebar feature-visibility flags (Phase 1 IA cleanup). Derived read-only counts, no new primitive.' },
   { paths: '/api/jobs', handlers: [jobsRouter] },
   { paths: '/api/search', handlers: [searchRouter] },
   { paths: '/api/accounts', handlers: [accountsRouter] },

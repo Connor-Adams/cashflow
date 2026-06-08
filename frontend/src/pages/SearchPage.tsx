@@ -249,30 +249,36 @@ export function SearchPage() {
                 key={s.id}
                 className="inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-sm"
               >
-                <button
+                <Button
                   type="button"
+                  variant="link"
+                  size="sm"
                   onClick={() => loadSaved(s)}
-                  className="font-medium hover:underline"
+                  className="font-medium"
                   title={s.query}
                 >
                   {s.name}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   aria-label={`Rename ${s.name}`}
                   onClick={() => void renameSaved(s)}
                   className="text-slate-400 hover:text-slate-700"
                 >
                   ✎
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   aria-label={`Delete ${s.name}`}
                   onClick={() => void deleteSaved(s)}
                   className="text-slate-400 hover:text-red-600"
                 >
                   <Trash2 className="h-3 w-3" />
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -285,13 +291,15 @@ export function SearchPage() {
           <ul className="flex flex-wrap gap-2">
             {EXAMPLES.map((ex) => (
               <li key={ex}>
-                <button
+                <Button
                   type="button"
-                  className="inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-xs hover:border-slate-400"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
                   onClick={() => applyExample(ex)}
                 >
                   {ex}
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -317,16 +325,18 @@ export function SearchPage() {
                   {c.label}
                 </Badge>
               ))}
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setQuery('')
                   setResponse(null)
                 }}
-                className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900"
+                className="text-xs text-slate-500 hover:text-slate-900"
               >
                 <X className="h-3 w-3" /> Clear
-              </button>
+              </Button>
             </div>
           )}
 

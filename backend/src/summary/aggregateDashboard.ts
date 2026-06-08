@@ -1,4 +1,4 @@
-import { num } from '../util/numbers';
+import { num, toUnits, fromUnits } from '../util/numbers';
 import {
   classifyPositiveAmount,
   isNonCategorical,
@@ -285,14 +285,17 @@ export function aggregateDashboard(
     accountSummary.transactionCount += 1;
     if (row.reviewFlag) accountSummary.reviewCount += 1;
 
+    // Accumulate in integer units (×10 000) to avoid float drift over
+    // thousands of rows. Converted back to dollars in the finalize pass.
+    const amtU = toUnits(amount);
     if (amount < 0 && !nonSpend) {
-      metrics.totalSpend += -amount;
-      merchantSummary.totalSpend += -amount;
-      accountSummary.totalSpend += -amount;
+      metrics.totalSpend += -amtU;
+      merchantSummary.totalSpend += -amtU;
+      accountSummary.totalSpend += -amtU;
     } else if (positiveBucket === 'payment') {
-      metrics.totalPayments += amount;
-      merchantSummary.totalPayments += amount;
-      accountSummary.totalPayments += amount;
+      metrics.totalPayments += amtU;
+      merchantSummary.totalPayments += amtU;
+      accountSummary.totalPayments += amtU;
     // NOTE: income folds into totalCredits here (headline/merchant/account).
     // Only the per-business aggregate below splits income out — see that block.
     } else if (positiveBucket === 'credit' && row.txnType === 'income') {
@@ -300,19 +303,19 @@ export function aggregateDashboard(
       // against spend. Peel it into its own totalIncome line — mirroring the
       // per-business `income` split below — so paychecks don't inflate the
       // refunds/credits bucket or deflate netSpend (= totalSpend - totalCredits).
-      metrics.totalIncome += amount;
-      merchantSummary.totalIncome += amount;
-      accountSummary.totalIncome += amount;
+      metrics.totalIncome += amtU;
+      merchantSummary.totalIncome += amtU;
+      accountSummary.totalIncome += amtU;
     } else if (positiveBucket === 'credit') {
-      metrics.totalCredits += amount;
-      merchantSummary.totalCredits += amount;
-      accountSummary.totalCredits += amount;
+      metrics.totalCredits += amtU;
+      merchantSummary.totalCredits += amtU;
+      accountSummary.totalCredits += amtU;
       // Refund-attributable credits (issue #215): a refund row counts only
       // when it's tied back to an original purchase, so reward/cashback/
       // statement-credit rows that route through the same 'credit' bucket
       // don't inflate the "refunded" subtotal.
       if (row.txnType === 'refund' && row.linkedTransactionId != null) {
-        metrics.refundCredits += amount;
+        metrics.refundCredits += amtU;
         metrics.linkedRefundCount += 1;
       }
     }
@@ -338,66 +341,10 @@ export function aggregateDashboard(
       });
     }
 
-    // Per-category skip: statement payments (positive) aren't category
-    // signal. Refunds/rewards/income (positiveBucket==='credit') stay
-    // IN — they net against category spend meaningfully (Amazon refund
-    // credits the Groceries category it offset).
-    if (amount > 0 && positiveBucket === 'payment') {
-      continue;
-    }
-    // Non-categorical (transfer/invest/dividend, either sign, or any
-    // invest-account row) is money movement, not category data.
-    if (isNonCategorical(row.txnType, account?.accountType)) {
-      continue;
-    }
-    const allocations = itemContext
-      ? splitTxnByItems({
-          txn: {
-            id: row.id,
-            amount: String(row.amount),
-            currency: row.currency,
-            finalCategory: row.finalCategory,
-            finalBusiness: row.finalBusiness,
-            finalSplitType: row.finalSplitType,
-            businessAmount: row.businessAmount ?? '0',
-          },
-          links: itemContext.linksByTxn.get(row.id) ?? [],
-          ordersById: itemContext.ordersById,
-          itemsByOrder: itemContext.itemsByOrder,
-        })
-      : [
-          {
-            category: row.finalCategory,
-            amount,
-            businessAmount: 0,
-            currency: row.currency,
-          },
-        ];
-
-    // Income (txnType='income') is inflow, not category data — keep it out of
-    // the per-category sumAmount breakdown so a paycheck doesn't pile into the
-    // null/Uncategorized bucket as a positive. Mirrors the categoryReports
-    // income peel and the headline peel (PR #531).
-    if (row.txnType !== 'income') {
-      for (const alloc of allocations) {
-        const key = [
-          row.currency,
-          alloc.category ?? '',
-          row.finalBusiness ? '1' : '0',
-          row.finalSplitType,
-        ].join('\0');
-        const existing = byCategory.get(key) ?? {
-          currency: row.currency,
-          category: alloc.category,
-          finalBusiness: row.finalBusiness,
-          finalSplitType: row.finalSplitType,
-          sumAmount: 0,
-        };
-        existing.sumAmount += alloc.amount;
-        byCategory.set(key, existing);
-      }
-    }
-
+    // --- Monthly / split / business aggregation (runs for ALL rows) --------
+    // These must come BEFORE the per-category `continue` guards below,
+    // because payments and non-categorical rows are still valid monthly/
+    // split/business data even though they aren't category data.
     const monthlyKey = `${month}\0${currency}`;
     const monthly = monthlyByCurrency.get(monthlyKey) ?? {
       month,
@@ -418,89 +365,183 @@ export function aggregateDashboard(
       netSpend: 0,
     };
     if (amount < 0 && !nonSpend) {
-      const spend = -amount;
-      monthly.totalSpend += spend;
-      split.totalSpend += spend;
-    } else if (amount > 0 && row.txnType === 'income') {
-      // Income peeled out of credits here too, so the monthly curve and split
-      // tiles reconcile with the income-free headline netSpend.
-      monthly.totalIncome += amount;
-      split.totalIncome += amount;
-    } else if (amount > 0) {
-      monthly.totalCredits += amount;
-      split.totalCredits += amount;
+      monthly.totalSpend += -amtU;
+      split.totalSpend += -amtU;
+    } else if (positiveBucket === 'payment') {
+      monthly.totalPayments += amtU;
+    } else if (positiveBucket === 'credit' && row.txnType === 'income') {
+      monthly.totalIncome += amtU;
+      split.totalIncome += amtU;
+    } else if (positiveBucket === 'credit') {
+      monthly.totalCredits += amtU;
+      split.totalCredits += amtU;
     }
-    // Note: negative-amount non-spend rows (transfers, investment buys, etc)
-    // contribute to neither side; they're tracked elsewhere (transaction
-    // count is still incremented above) but don't move spend or credit
-    // totals because they aren't consumption nor income.
     monthly.netSpend = monthly.totalSpend - monthly.totalCredits;
     split.netSpend = split.totalSpend - split.totalCredits;
     monthlyByCurrency.set(monthlyKey, monthly);
     netSpendBySplit.set(splitKey, split);
 
-    // Per-allocation business/personal split: an item's business_use% rides
-    // on the allocation, so one row can land in both business=true and
-    // business=false buckets. The pre-allocator path keyed on row.finalBusiness
-    // and dropped 100% of the row into a single bucket.
-    for (const alloc of allocations) {
-      const businessPart = alloc.businessAmount;
-      const personalPart = alloc.amount - alloc.businessAmount;
-      for (const [isBiz, part] of [
-        [true, businessPart],
-        [false, personalPart],
-      ] as const) {
-        if (part === 0) continue;
-        const businessKey = `${currency}\0${isBiz ? '1' : '0'}`;
-        const business = netSpendByBusiness.get(businessKey) ?? {
+    // Per-business aggregation needs allocations, which require
+    // non-categorical rows to be present. But business split only makes
+    // sense for spend/credit/income — not payments or non-categorical.
+    // Guard it with the same exclusions as byCategory below.
+    const skipForCategory = (amount > 0 && positiveBucket === 'payment')
+      || isNonCategorical(row.txnType, account?.accountType);
+
+    if (!skipForCategory) {
+      const allocations = itemContext
+        ? splitTxnByItems({
+            txn: {
+              id: row.id,
+              amount: String(row.amount),
+              currency: row.currency,
+              finalCategory: row.finalCategory,
+              finalBusiness: row.finalBusiness,
+              finalSplitType: row.finalSplitType,
+              businessAmount: row.businessAmount ?? '0',
+            },
+            links: itemContext.linksByTxn.get(row.id) ?? [],
+            ordersById: itemContext.ordersById,
+            itemsByOrder: itemContext.itemsByOrder,
+          })
+        : [
+            {
+              category: row.finalCategory,
+              amount,
+              businessAmount: 0,
+              currency: row.currency,
+            },
+          ];
+
+      // Income (txnType='income') is inflow, not category data — keep it out of
+      // the per-category sumAmount breakdown so a paycheck doesn't pile into the
+      // null/Uncategorized bucket as a positive. Mirrors the categoryReports
+      // income peel and the headline peel (PR #531).
+      if (row.txnType !== 'income') {
+        for (const alloc of allocations) {
+          const key = [
+            row.currency,
+            alloc.category ?? '',
+            row.finalBusiness ? '1' : '0',
+            row.finalSplitType,
+          ].join('\0');
+          const existing = byCategory.get(key) ?? {
+            currency: row.currency,
+            category: alloc.category,
+            finalBusiness: row.finalBusiness,
+            finalSplitType: row.finalSplitType,
+            sumAmount: 0,
+          };
+          existing.sumAmount += toUnits(alloc.amount);
+          byCategory.set(key, existing);
+        }
+      }
+
+      for (const alloc of allocations) {
+        const businessPart = alloc.businessAmount;
+        const personalPart = alloc.amount - alloc.businessAmount;
+        for (const [isBiz, part] of [
+          [true, businessPart],
+          [false, personalPart],
+        ] as const) {
+          if (part === 0) continue;
+          const partU = toUnits(part);
+          const businessKey = `${currency}\0${isBiz ? '1' : '0'}`;
+          const business = netSpendByBusiness.get(businessKey) ?? {
+            currency,
+            business: isBiz,
+            totalSpend: 0,
+            totalCredits: 0,
+            netSpend: 0,
+            income: 0,
+          };
+          if (part < 0 && !nonSpend) {
+            business.totalSpend += -partU;
+          } else if (part > 0) {
+            if (row.txnType === 'income') {
+              business.income += partU;
+            } else {
+              business.totalCredits += partU;
+            }
+          }
+          business.netSpend = business.totalSpend - business.totalCredits;
+          netSpendByBusiness.set(businessKey, business);
+        }
+      }
+
+      for (const alloc of allocations) {
+        const categoryKey = `${currency}\0${alloc.category ?? ''}`;
+        const category = categoryReports.get(categoryKey) ?? {
           currency,
-          business: isBiz,
+          category: alloc.category,
           totalSpend: 0,
           totalCredits: 0,
           netSpend: 0,
-          income: 0,
         };
-        // Income (txnType='income') is peeled into its own `income` bucket so
-        // the dashboard can show business/personal Income and Spend separately;
-        // netSpend (= totalSpend - totalCredits) is Spend and excludes income.
-        // This split is intentionally tile-scoped: the metrics / merchant /
-        // account / category aggregates above still fold income into credits.
-        // Negative-amount income (a reversal) is non-spend (income ∈
-        // NON_SPEND_TXN_TYPES) so it hits neither branch and contributes to
-        // nothing — correct: an income reversal is money-movement, not spend.
-        if (part < 0 && !nonSpend) {
-          business.totalSpend += -part;
-        } else if (part > 0) {
-          if (row.txnType === 'income') {
-            business.income += part;
-          } else {
-            business.totalCredits += part;
-          }
+        if (alloc.amount < 0 && !nonSpend) {
+          category.totalSpend += toUnits(-alloc.amount);
+        } else if (alloc.amount > 0 && row.txnType !== 'income') {
+          category.totalCredits += toUnits(alloc.amount);
         }
-        business.netSpend = business.totalSpend - business.totalCredits;
-        netSpendByBusiness.set(businessKey, business);
+        category.netSpend = category.totalSpend - category.totalCredits;
+        categoryReports.set(categoryKey, category);
       }
     }
+  }
 
-    for (const alloc of allocations) {
-      const categoryKey = `${currency}\0${alloc.category ?? ''}`;
-      const category = categoryReports.get(categoryKey) ?? {
-        currency,
-        category: alloc.category,
-        totalSpend: 0,
-        totalCredits: 0,
-        netSpend: 0,
-      };
-      if (alloc.amount < 0 && !nonSpend) {
-        category.totalSpend += -alloc.amount;
-      } else if (alloc.amount > 0 && row.txnType !== 'income') {
-        // Income is inflow, not a credit against any spend category — exclude
-        // it from category reports (it has no meaningful category to net).
-        category.totalCredits += alloc.amount;
-      }
-      category.netSpend = category.totalSpend - category.totalCredits;
-      categoryReports.set(categoryKey, category);
-    }
+  // ---- Finalize: convert integer-unit accumulators back to dollars ------
+  // All numeric fields were accumulated as ×10 000 integers to avoid
+  // IEEE-754 drift. Divide back at the output boundary so the API
+  // contract (dollar-denominated numbers) is unchanged.
+  for (const v of byCategory.values()) {
+    v.sumAmount = fromUnits(v.sumAmount);
+  }
+  for (const v of metricsByCurrency.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+    v.refundCredits = fromUnits(v.refundCredits);
+    // linkedRefundCount is a count, not money — leave as-is.
+  }
+  for (const v of monthlyByCurrency.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of netSpendBySplit.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of netSpendByBusiness.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.netSpend = fromUnits(v.netSpend);
+    v.income = fromUnits(v.income);
+  }
+  for (const v of categoryReports.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of merchantSummaries.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
+  }
+  for (const v of accountSummaries.values()) {
+    v.totalSpend = fromUnits(v.totalSpend);
+    v.totalCredits = fromUnits(v.totalCredits);
+    v.totalPayments = fromUnits(v.totalPayments);
+    v.totalIncome = fromUnits(v.totalIncome);
+    v.netSpend = fromUnits(v.netSpend);
   }
 
   return {

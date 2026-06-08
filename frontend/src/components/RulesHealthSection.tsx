@@ -8,6 +8,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { StatCard } from '@/components/ui/stat-card'
+import { Button } from '@/components/ui/button'
 import { getJson, postJson } from '../lib/api'
 
 /** Shape returned by GET /api/rules/health. Kept inline so the component
@@ -199,15 +200,17 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
                   <TableCell>{s.category ?? '—'}</TableCell>
                   <TableCell>{s.supportCount} txns</TableCell>
                   <TableCell>
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       disabled={creatingPattern === s.merchantPattern}
                       onClick={() => void createFromSuggestion(s)}
                     >
                       {creatingPattern === s.merchantPattern
                         ? 'Creating…'
                         : 'Create rule'}
-                    </button>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}

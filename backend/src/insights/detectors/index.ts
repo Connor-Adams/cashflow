@@ -171,9 +171,7 @@ export function detectDuplicateTransactions(
 
 const SPIKE_HISTORY_MONTHS = 3;
 const SPIKE_MULT = 2; // current > 2× prior avg
-// TODO(threshold): conservative $50 floor avoids triggering on coffee — revisit
-// after first round of usage to see how many false positives slip through.
-const SPIKE_MIN_CURRENT = 50;
+const SPIKE_MIN_CURRENT = 100;
 
 export function detectMerchantSpendSpike(
   rows: DetectorTransaction[],

@@ -91,6 +91,7 @@ yarn dupes        # jscpd — writes reports/jscpd/html/
 | `backend/src/` | Express API, Sequelize models, CSV import |
 | `backend/src/routeRegistry.ts` | Declarative ordered router-mount registry (mount order + auth boundary as data; locked by `backend/test/appRouteOrder.test.ts`) |
 | `backend/src/migrations/` | Sequelize migrations (JavaScript) |
+| `backend/src/**/*.test.ts` | Colocated unit tests (beside the code). Integration tests in `backend/test/integration/`; migration tests in `backend/src/migrations/__tests__/` |
 | `frontend/src/` | React UI |
 | `shared/api-types.ts` | API DTO types shared with the frontend |
 

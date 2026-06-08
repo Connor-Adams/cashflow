@@ -7,6 +7,8 @@ import { balanceAtDate } from '../networth/balanceAtDate';
 import { buildSeries, monthEndDatesInRange, daysInRange } from '../networth/aggregate';
 import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
+import { isNonSpend } from '../summary/classifyTransactionFlow';
+import { summarizeReportingCashflow } from '../reporting/cashflowTotals';
 
 // Categories considered essential for runway calculation.
 const ESSENTIAL_CATEGORIES = new Set([
@@ -73,27 +75,23 @@ router.get('/summary', async (req, res, next) => {
     threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90);
     const fromDate = threeMonthsAgo.toISOString().slice(0, 10);
 
-    const txns = await Transaction.findAll({
+    const rawTxnRows = await Transaction.findAll({
       where: {
         householdId: household.id,
         currency,
         date: { [Op.gte]: fromDate, [Op.lte]: today },
       },
       attributes: ['amount', 'txnType'],
+      include: [{ association: 'account', attributes: ['accountType'] }],
       raw: true,
     });
 
-    let totalSpend = 0;
-    let totalIncome = 0;
-    for (const t of txns as unknown as { amount: unknown; txnType: string | null }[]) {
-      const amount = num(t.amount);
-      if (amount == null) continue;
-      if (amount < 0) {
-        totalSpend += Math.abs(amount);
-      } else if (t.txnType !== 'payment' && t.txnType !== 'transfer') {
-        totalIncome += amount;
-      }
-    }
+    const summaryTxns = (rawTxnRows as unknown as Array<Record<string, unknown>>).map((t) => ({
+      amount: t.amount,
+      txnType: t.txnType as string | null,
+      accountType: (t['account.accountType'] ?? null) as string | null,
+    }));
+    const { totalSpend, totalIncome } = summarizeReportingCashflow(summaryTxns);
 
     const months = 3;
     const monthlyBurn = round2(totalSpend / months);
@@ -266,10 +264,17 @@ router.get('/cashflow/monthly', async (req, res, next) => {
       if (!byMonth.has(month)) byMonth.set(month, { income: 0, expenses: 0, recurringExpenses: 0 });
       const bucket = byMonth.get(month)!;
       if (amount < 0) {
+        // Exclude money-movement (transfers, investment buys, statement
+        // payments, refunds-reversals) from expenses — same rule as the
+        // dashboard's isNonSpend, so monthly burn reconciles.
+        if (isNonSpend(t.txnType, null)) continue;
         const abs = Math.abs(amount);
         bucket.expenses += abs;
         if (t.isRecurring) bucket.recurringExpenses += abs;
-      } else if (t.txnType !== 'payment' && t.txnType !== 'transfer') {
+      } else if (t.txnType === 'income') {
+        // Income peel: only real income inflates the income line. Refunds,
+        // rewards, and untyped deposits are NOT income (previously every
+        // positive non-payment/transfer bled in, inflating savings rate).
         bucket.income += amount;
       }
     }
@@ -377,24 +382,23 @@ router.get('/projections', async (req, res, next) => {
     threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90);
     const fromDate = threeMonthsAgo.toISOString().slice(0, 10);
 
-    const txns = await Transaction.findAll({
+    const rawProjRows = await Transaction.findAll({
       where: {
         householdId: household.id,
         currency,
         date: { [Op.gte]: fromDate, [Op.lte]: today },
       },
       attributes: ['amount', 'txnType'],
+      include: [{ association: 'account', attributes: ['accountType'] }],
       raw: true,
     });
 
-    let totalSpend = 0;
-    let totalIncome = 0;
-    for (const t of txns as unknown as { amount: unknown; txnType: string | null }[]) {
-      const amount = num(t.amount);
-      if (amount == null) continue;
-      if (amount < 0) totalSpend += Math.abs(amount);
-      else if (t.txnType !== 'payment' && t.txnType !== 'transfer') totalIncome += amount;
-    }
+    const projTxns = (rawProjRows as unknown as Array<Record<string, unknown>>).map((t) => ({
+      amount: t.amount,
+      txnType: t.txnType as string | null,
+      accountType: (t['account.accountType'] ?? null) as string | null,
+    }));
+    const { totalSpend, totalIncome } = summarizeReportingCashflow(projTxns);
     const months = 3;
     const monthlyIncome = round2(totalIncome / months);
     const monthlyExpenses = round2(totalSpend / months);
@@ -475,31 +479,27 @@ router.get('/runway', async (req, res, next) => {
     threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90);
     const fromDate = threeMonthsAgo.toISOString().slice(0, 10);
 
-    const txns = await Transaction.findAll({
+    const rawRunwayRows = await Transaction.findAll({
       where: {
         householdId: household.id,
         currency,
         date: { [Op.gte]: fromDate, [Op.lte]: today },
       },
       attributes: ['amount', 'txnType', 'finalCategory'],
+      include: [{ association: 'account', attributes: ['accountType'] }],
       raw: true,
     });
 
-    let totalSpend = 0;
-    let essentialSpend = 0;
-    let totalIncome = 0;
-    for (const t of txns as unknown as { amount: unknown; txnType: string | null; finalCategory: string | null }[]) {
-      const amount = num(t.amount);
-      if (amount == null) continue;
-      if (amount < 0) {
-        const abs = Math.abs(amount);
-        totalSpend += abs;
-        const cat = (t.finalCategory ?? '').toLowerCase();
-        if (ESSENTIAL_CATEGORIES.has(cat)) essentialSpend += abs;
-      } else if (t.txnType !== 'payment' && t.txnType !== 'transfer') {
-        totalIncome += amount;
-      }
-    }
+    const runwayTxns = (rawRunwayRows as unknown as Array<Record<string, unknown>>).map((t) => ({
+      amount: t.amount,
+      txnType: t.txnType as string | null,
+      finalCategory: (t.finalCategory ?? null) as string | null,
+      accountType: (t['account.accountType'] ?? null) as string | null,
+    }));
+    const { totalSpend, essentialSpend } = summarizeReportingCashflow(
+      runwayTxns,
+      ESSENTIAL_CATEGORIES,
+    );
 
     const months = 3;
     const averageMonthlyBurn = round2(totalSpend / months);
@@ -568,7 +568,7 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: start, [Op.lte]: end },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory'],
+        attributes: ['amount', 'finalCategory', 'txnType'],
         raw: true,
       }),
       Transaction.findAll({
@@ -578,14 +578,15 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: prevStart, [Op.lte]: prevEnd },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory'],
+        attributes: ['amount', 'finalCategory', 'txnType'],
         raw: true,
       }),
     ]);
 
-    type Row = { amount: unknown; finalCategory: string | null };
+    type Row = { amount: unknown; finalCategory: string | null; txnType: string | null };
     const currMap = new Map<string, { amount: number; count: number }>();
     for (const t of currTxns as unknown as Row[]) {
+      if (isNonSpend(t.txnType, null)) continue;
       const a = num(t.amount);
       if (a == null) continue;
       const cat = t.finalCategory ?? 'Uncategorized';
@@ -597,6 +598,7 @@ router.get('/spending/by-category', async (req, res, next) => {
 
     const prevMap = new Map<string, number>();
     for (const t of prevTxns as unknown as Row[]) {
+      if (isNonSpend(t.txnType, null)) continue;
       const a = num(t.amount);
       if (a == null) continue;
       const cat = t.finalCategory ?? 'Uncategorized';

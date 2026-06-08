@@ -159,19 +159,20 @@ export function InsightsPage() {
         aria-label="Filter by status"
       >
         {TAB_ORDER.map((t) => (
-          <button
+          <Button
             key={t}
             type="button"
+            variant="ghost"
             onClick={() => setTab(t)}
             aria-pressed={tab === t}
             className={
               tab === t
-                ? 'px-3 py-2 border-b-2 border-[var(--primary)] font-semibold'
-                : 'px-3 py-2 border-b-2 border-transparent text-[var(--muted-foreground)]'
+                ? 'px-3 py-2 border-b-2 border-[var(--primary)] font-semibold rounded-none'
+                : 'px-3 py-2 border-b-2 border-transparent text-[var(--muted-foreground)] rounded-none'
             }
           >
             {TAB_LABEL[t]} <span className="text-xs">({counts[t]})</span>
-          </button>
+          </Button>
         ))}
       </nav>
 

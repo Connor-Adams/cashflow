@@ -125,10 +125,6 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
       return {
         ...facts,
         pensionIncome: (facts.pensionIncome ?? D('0')).plus(d),
-        employmentIncome: [
-          ...facts.employmentIncome,
-          { source: 'override:income.pensionIncome', amount: d, cadAmount: d },
-        ],
       };
     },
   },

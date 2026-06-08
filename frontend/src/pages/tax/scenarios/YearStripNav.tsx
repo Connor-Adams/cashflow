@@ -21,6 +21,8 @@
 // awkward refactor when we add per-entity context (e.g. a label, an aria
 // region name, or analytics tagging) in a follow-up.
 
+import { Button } from '@/components/ui/button';
+
 interface ChainEntryShape {
   scenario: { id: number; year: number; kind: string; name: string };
   computed?: unknown;
@@ -66,15 +68,12 @@ export function YearStripNav({
               (activeScenarioId === null || activeScenarioId === scenario.id);
             return (
               <li key={scenario.id}>
-                <button
+                <Button
                   type="button"
+                  variant={isActive ? 'primary' : 'outline'}
+                  size="sm"
                   onClick={() => onSelectYear(scenario.year, scenario.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={
-                    isActive
-                      ? 'rounded-md border border-blue-500 bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700'
-                      : 'rounded-md border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700 hover:border-gray-300 hover:bg-gray-50'
-                  }
                   title={`${scenario.name}${scenario.kind === 'projection_root' ? ' (projection)' : ''}`}
                 >
                   <span>{scenario.year}</span>
@@ -86,21 +85,23 @@ export function YearStripNav({
                       proj
                     </span>
                   )}
-                </button>
+                </Button>
               </li>
             );
           })}
         </ul>
       )}
 
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={onProjectNextYear}
         disabled={isProjecting || chain.length === 0}
-        className="ml-auto rounded-md border border-dashed border-gray-300 px-3 py-1 text-sm text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        className="ml-auto border-dashed"
       >
         {isProjecting ? 'Projecting…' : '+ Project next year'}
-      </button>
+      </Button>
     </nav>
   );
 }

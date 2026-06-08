@@ -24,6 +24,7 @@ export type CapGainEvent = {
   acb: Decimal;
   outlays: Decimal;
   date: string;
+  superficialLossDenied?: Decimal;
 };
 
 export type RrspContrib = {
@@ -37,6 +38,8 @@ export type PersonalCarryforwards = {
   rrspRoom: Decimal;
   nonCapLoss: Decimal;
   instalmentsPaid: Decimal;
+  /** Cumulative FHSA contributions across all years (tracks $40k lifetime cap). */
+  fhsaLifetimeContributions: Decimal;
 };
 
 export type CorpFiscalYear = {
@@ -139,6 +142,9 @@ export type TaxYearFacts = {
   /** P10: pension-split synthetic field. Stamped by override key, read by spouseRouter. */
   pensionSplit?: { transferAmount: Decimal };
   ageAtYearEnd: number;
+  rentalIncome: IncomeItem[];
+  rentalExpenses: IncomeItem[];
+  medicalExpenses: IncomeItem[];
 };
 
 export type TaxLine = {
@@ -208,6 +214,8 @@ export type RateTable = {
     employeeRate: Decimal;
   };
   capitalGainsInclusion: Decimal;
+  capitalGainsInclusionHigh?: Decimal;
+  capitalGainsInclusionThreshold?: Decimal;
   onSurtaxBands?: Array<{ threshold: Decimal; rate: Decimal }>;
   ontarioHealthPremium: Array<{ upTo: Decimal | null; flat: Decimal; marginalRate: Decimal }>;
   donationLowRate: Decimal;
@@ -230,6 +238,11 @@ export type RateTable = {
   oasClawbackThreshold: Decimal;               // $90,997 (2024)
   oasClawbackRate: Decimal;                    // 0.15
   fhsaAnnualLimit: Decimal;                    // $8,000
+  amtRate: Decimal;
+  amtExemption: Decimal;
+  amtCapGainsInclusion: Decimal;
+  amtNonRefCreditFraction: Decimal;
+  amtDtcFraction: Decimal;
   sources: { name: string; url: string }[];
 
   // Phase 3 — Corp T2

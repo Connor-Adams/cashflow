@@ -395,7 +395,6 @@ describe('ReviewInboxPage itemized badge', () => {
     // The low-confidence item (straggler) must appear before the high-confidence item in the DOM.
     // Use compareDocumentPosition: DOCUMENT_POSITION_FOLLOWING (4) means lowItem precedes highItem.
     const position = lowItem.compareDocumentPosition(highItem)
-    // eslint-disable-next-line no-bitwise
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import type { Notification, NotificationSeverity } from '@/types/api'
 
 /**
@@ -66,13 +67,15 @@ export function NotificationPanel({
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
         <h2 className="text-sm font-semibold text-gray-900">Notifications</h2>
         {hasUnread && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             className="text-xs text-blue-600 hover:underline"
             onClick={() => void onMarkAllRead()}
           >
             Mark all as read
-          </button>
+          </Button>
         )}
       </div>
 
@@ -90,13 +93,15 @@ export function NotificationPanel({
       {listStatus === 'error' && (
         <div className="px-4 py-6 text-center text-sm text-gray-600">
           <p className="mb-3">Couldn&apos;t load notifications.</p>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             className="text-blue-600 hover:underline"
             onClick={() => void onRetry()}
           >
             Try again
-          </button>
+          </Button>
         </div>
       )}
 
@@ -118,8 +123,9 @@ export function NotificationPanel({
             const isUnread = n.readAt == null
             return (
               <li key={n.id}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   className={`w-full text-left px-4 py-3 flex gap-3 hover:bg-gray-50 ${
                     isUnread ? 'border-l-2 border-l-blue-500' : 'border-l-2 border-l-transparent'
                   }`}
@@ -140,7 +146,7 @@ export function NotificationPanel({
                       {n.body}
                     </p>
                   </div>
-                </button>
+                </Button>
               </li>
             )
           })}

@@ -65,8 +65,9 @@ export const RATES_2026: RateTable = {
     maxInsurable: D('67500'),
     employeeRate: D('0.0166'),
   },
-  // Capital gains inclusion: 0.5 — verify any legislative changes before filing
   capitalGainsInclusion: D('0.5'),
+  capitalGainsInclusionHigh: D('0.666667'),
+  capitalGainsInclusionThreshold: D('250000'),
   // ON surtax bands: 2025 values indexed by ~1.027 ≈ 5,864 / 7,504
   onSurtaxBands: [
     { threshold: D('5864'), rate: D('0.20') },
@@ -113,6 +114,11 @@ export const RATES_2026: RateTable = {
   oasClawbackRate: D('0.15'),
   // FHSA annual deduction limit (fixed at $8,000 — not indexed)
   fhsaAnnualLimit: D('8000'),
+  amtRate: D('0.205'),
+  amtExemption: D('182674'),
+  amtCapGainsInclusion: D('1'),
+  amtNonRefCreditFraction: D('0.5'),
+  amtDtcFraction: D('0.5'),
   sources: [
     { name: 'CRA 2026 indexation announcement (projected)', url: 'https://www.canada.ca/en/revenue-agency/news/newsroom/tax-tips/tax-tips-2025.html' },
     { name: 'ON Min of Finance 2026 personal income tax rates (TBD)', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },

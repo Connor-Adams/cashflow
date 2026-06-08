@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { HelpCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { FeedbackPanel } from './FeedbackPanel'
 
 /**
@@ -13,16 +14,17 @@ export function FeedbackButton() {
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={() => setOpen(true)}
         aria-label="Help and feedback"
         title="Help and feedback"
-        className="inline-flex items-center justify-center rounded-md border border-border bg-background/60 p-1.5 text-muted-foreground hover:text-foreground"
         data-testid="top-bar-feedback-trigger"
       >
         <HelpCircle size={18} aria-hidden="true" />
-      </button>
+      </Button>
       <FeedbackPanel open={open} onOpenChange={setOpen} />
     </>
   )

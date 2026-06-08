@@ -58,6 +58,14 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   { type: 'transfer', re: /\bsent money to\b/i },
   { type: 'transfer', re: /\breceived money from\b/i },
   { type: 'transfer', re: /\btopped up account\b/i },
+  // Wealthsimple cash-account ledger entries — internal funding / adjustments,
+  // not spend or income. "Deposit (executed at ...)" is a cash deposit; "Cash
+  // correction" a balance adjustment. Narrow regexes: the "(executed" anchor
+  // keeps "Deposit (executed)" from catching "Direct deposit" (income, handled
+  // above) or a bare "term deposit", and excludes "Contribution (executed at)"
+  // which intentionally stays 'unknown'.
+  { type: 'transfer', re: /\bdeposit \(executed\b/i },
+  { type: 'transfer', re: /\bcash correction\b/i },
   { type: 'payment', re: /\bonline banking (?:loan )?payment\b/i },
   { type: 'payment', re: /\bonline bill payment for\b/i },
   { type: 'payment', re: /\bamex bill pymt\b/i },
@@ -69,6 +77,18 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // We match the full phrase (not bare "investment") to avoid false-positives
   // on other "investment" narratives like "Investment advisor fee".
   { type: 'transfer', re: /\binvestment\s+ws\s+investments\b/i },
+  // WS Cash withdrawal: "Withdrawal (executed at YYYY-MM-DD)". Distinct from a
+  // generic ATM withdrawal (which remains ambiguous — could be cash-spending).
+  { type: 'transfer', re: /\bwithdrawal\s+\(executed at\b/i },
+  // E-transfer to own Wealthsimple Cash account — account funding, not spend.
+  // Generic "E-TRANSFER SENT <person>" remains deliberately deferred (ambiguous).
+  { type: 'transfer', re: /\be-transfer sent wealthsimple\b/i },
+  // WS physically-backed gold purchase: "GOLD - Physically backed gold: Bought".
+  { type: 'investment', re: /\bgold\s*-\s*physically backed gold:\s*bought\b/i },
+  // Generic "INVESTMENT PURCHASE" line from brokerage statements.
+  { type: 'investment', re: /\binvestment purchase\b/i },
+  // Loan interest charges — interest expense, not a purchase.
+  { type: 'fee', re: /\bloan interest\b/i },
   // Wise FX conversion: "Converted 5,207.60 USD to 7,084.89 CAD". Both legs of
   // a Wise FX appear on the matching CAD + USD statements with a shared
   // sourceReference; classifying them as transfer lets detectRelationshipsStage
@@ -103,6 +123,13 @@ const INCOME_WORD_RE = /\b(payroll|salary|paycheque|paycheck)\b/i;
 const DIRECT_DEPOSIT_FROM_RE = /\bdirect deposit from\b/i;
 const OWN_ACCOUNT_RE =
   /\b(chequing|checking|savings|tfsa|fhsa|rrsp|rrif|rdsp|margin|crypto)\b/i;
+// Government benefit inflows — EI, CRA benefits, GST/HST credit, OAS, etc. —
+// are external income (positive, taxable or benefit money in), not refunds or
+// internal transfers. Confirmed prod narrative: "EI CANADA". Each alternative
+// requires a SPECIFIC benefit token (not a bare "canada") so brand names that
+// share a prefix — "CANADA GOOSE", "CANADA COMPUTERS" — do not match.
+const GOV_BENEFIT_RE =
+  /\b(ei canada|employment insurance|canada (?:pro|fed|rit|workers benefit|child benefit|recovery benefit|emergency (?:response|student) benefit)|fed(?:eral)?\s*\/?\s*prov(?:incial)?\s+pymt|canada (?:gst|hst)|gst\/hst credit|old age security|canada pension plan|universal child care benefit)\b/i;
 
 function tokenizeName(s: string): string[] {
   return s
@@ -136,6 +163,7 @@ function detectsIncome(
 ): boolean {
   if (amount <= 0) return false;
   if (INCOME_WORD_RE.test(haystack)) return true;
+  if (GOV_BENEFIT_RE.test(haystack)) return true;
   if (!DIRECT_DEPOSIT_FROM_RE.test(haystack)) return false;
   if (OWN_ACCOUNT_RE.test(haystack)) return false;
   return !isOwnNameDeposit(new Set(tokenizeName(haystack)), ownerNames);
@@ -179,7 +207,8 @@ export function runDetectTypeStage(input: DetectTypeInput): Signal[] {
         source: 'type-detect',
         confidence: 'high',
         fields: { txnType: 'income' },
-        rationale: 'narrative matched income (payroll / external direct deposit)',
+        rationale:
+          'narrative matched income (payroll / government benefit / external direct deposit)',
       },
     ];
   }

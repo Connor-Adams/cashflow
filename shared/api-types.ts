@@ -472,6 +472,10 @@ export const TAX_TREATMENTS = [
   'loan_advance',
   'loan_repayment',
   'not_income',
+  'rental_income',
+  'rental_expense',
+  'pension_income',
+  'medical_expense',
 ] as const
 
 export type TaxTreatment = (typeof TAX_TREATMENTS)[number]

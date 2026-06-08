@@ -9,6 +9,7 @@ import {
   type FxLookup,
 } from './unifyToCad';
 import { ensureFxRate } from '../fx/bankOfCanada';
+import { toUnits, fromUnits } from '../util/numbers';
 
 // Investment accounts derive their net-worth contribution from holdings
 // market value, NOT from the cash-flow transaction stream — txns on these
@@ -170,7 +171,7 @@ export async function buildNetWorthAt(
         row.dataQualityWarning = 'asset_balance_negative';
       } else {
         perCurrency[currency] ??= { asset: 0, liability: 0 };
-        perCurrency[currency][kind] += amount;
+        perCurrency[currency][kind] += toUnits(amount);
       }
       (kind === 'asset' ? assets : liabilities).push(row);
     }
@@ -185,14 +186,14 @@ export async function buildNetWorthAt(
   >();
   for (const row of portfolio.rows) {
     perCurrency[row.currency] ??= { asset: 0, liability: 0 };
-    perCurrency[row.currency].asset += row.marketValue;
+    perCurrency[row.currency].asset += toUnits(row.marketValue);
     const key = `${row.accountId}:${row.currency}`;
     const entry = portfolioByAcc.get(key) ?? {
       accountId: row.accountId,
       currency: row.currency,
       total: 0,
     };
-    entry.total += row.marketValue;
+    entry.total += toUnits(row.marketValue);
     portfolioByAcc.set(key, entry);
   }
   for (const { accountId, currency, total } of portfolioByAcc.values()) {
@@ -202,7 +203,7 @@ export async function buildNetWorthAt(
       accountId,
       label: `Portfolio (${acc?.name ?? accountId})`,
       currency,
-      native: total,
+      native: fromUnits(total),
       cadValue: null,
       // Portfolio rows come from holdings × price; no opening balance concept.
       openingBalanceSet: true,
@@ -210,7 +211,11 @@ export async function buildNetWorthAt(
   }
   gaps.push(...portfolio.gaps);
 
-  const unified = await unifyToCad(perCurrency, asOf, fxLookup);
+  const perCurrencyDollars: PerCurrencyByKind = {};
+  for (const [currency, { asset, liability }] of Object.entries(perCurrency)) {
+    perCurrencyDollars[currency] = { asset: fromUnits(asset), liability: fromUnits(liability) };
+  }
+  const unified = await unifyToCad(perCurrencyDollars, asOf, fxLookup);
   gaps.push(...unified.gaps);
 
   return {

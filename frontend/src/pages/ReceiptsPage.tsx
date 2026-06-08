@@ -1,4 +1,5 @@
 import { useSearchParams } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
 import { GmailSection } from '@/pages/settings/sections/GmailSection'
 import { GmailScanHistory } from '@/components/receipts/GmailScanHistory'
@@ -48,19 +49,20 @@ export function ReceiptsPage() {
 
       <nav className="flex gap-2 border-b border-[var(--border)]" aria-label="Filter receipts by source">
         {GROUPS.map((g) => (
-          <button
+          <Button
             key={g.value}
             type="button"
+            variant="ghost"
             onClick={() => selectGroup(g.value)}
             aria-pressed={group === g.value}
             className={
               group === g.value
-                ? 'px-3 py-2 border-b-2 border-[var(--primary)] font-semibold'
-                : 'px-3 py-2 border-b-2 border-transparent text-[var(--muted-foreground)]'
+                ? 'px-3 py-2 border-b-2 border-[var(--primary)] font-semibold rounded-none'
+                : 'px-3 py-2 border-b-2 border-transparent text-[var(--muted-foreground)] rounded-none'
             }
           >
             {g.label}
-          </button>
+          </Button>
         ))}
       </nav>
 

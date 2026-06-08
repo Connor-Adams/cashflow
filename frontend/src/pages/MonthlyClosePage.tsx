@@ -501,8 +501,9 @@ export function MonthlyClosePage() {
                     key={task.id}
                     className="flex flex-wrap items-center gap-3 p-3"
                   >
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       aria-label={
                         task.isComplete
                           ? `Mark ${meta?.title ?? task.taskKey} incomplete`
@@ -525,7 +526,7 @@ export function MonthlyClosePage() {
                           aria-hidden="true"
                         />
                       )}
-                    </button>
+                    </Button>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium">
                         {meta?.title ?? task.taskKey}
@@ -557,13 +558,14 @@ export function MonthlyClosePage() {
           <ul className="space-y-2">
             {history.map((row) => (
               <li key={row.id} className="flex items-center gap-3 text-sm">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   className="underline underline-offset-2"
                   onClick={() => setPeriodMonth(row.periodMonth)}
                 >
                   {formatMonthLabel(row.periodMonth)}
-                </button>
+                </Button>
                 <Badge variant={row.status === 'closed' ? 'secondary' : 'outline'}>
                   {row.status}
                 </Badge>

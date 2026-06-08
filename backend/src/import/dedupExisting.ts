@@ -16,6 +16,29 @@ function normalizeRef(v: string | null | undefined): string | null {
   return s === '' ? null : s;
 }
 
+function exactRefMatch(
+  candidates: Transaction[],
+  incomingRef: string | null,
+): Transaction | null {
+  return candidates.find((c) => normalizeRef(c.sourceReference) === incomingRef) ?? null;
+}
+
+function existingPopulatedWhenIncomingNull(
+  candidates: Transaction[],
+  incomingRef: string | null,
+): Transaction | null {
+  if (incomingRef != null) return null;
+  return candidates.find((c) => normalizeRef(c.sourceReference) != null) ?? null;
+}
+
+function existingNullWhenIncomingPopulated(
+  candidates: Transaction[],
+  incomingRef: string | null,
+): Transaction | null {
+  if (incomingRef == null) return null;
+  return candidates.find((c) => normalizeRef(c.sourceReference) == null) ?? null;
+}
+
 function normalizePendingMatchText(v: string | null | undefined): string {
   return String(v ?? '')
     .trim()
@@ -70,20 +93,20 @@ async function promotePending(existing: InstanceType<typeof Transaction>, incomi
  * The identity fingerprint deliberately excludes `merchantClean` and
  * `sourceReference`, both of which drift over time:
  *   - `merchantClean` changes whenever `normalizeMerchant` rules evolve
- *   - `sourceReference` flips NULL → AT… when Amex pending txns clear
+ *   - `sourceReference` flips NULL -> AT... when Amex pending txns clear
  * Either change would otherwise produce a "new" fingerprint and cause a
  * re-imported CSV to insert duplicates.
  *
  * NULL-as-wildcard semantics on `source_reference` are preserved so we
  * don't collapse legitimate same-merchant/same-day/same-amount repeats
  * (e.g., two $25 Starbucks runs on 2025-12-08):
- *   - same identity, same source_reference (incl. both NULL) → duplicate
- *   - same identity, incoming NULL + existing populated      → duplicate
- *   - same identity, incoming populated + existing NULL      → duplicate-backfilled
+ *   - same identity, same source_reference (incl. both NULL) -> duplicate
+ *   - same identity, incoming NULL + existing populated      -> duplicate
+ *   - same identity, incoming populated + existing NULL      -> duplicate-backfilled
  *       (we write incoming.source_reference onto the existing row, scoped
  *        save so the audit-only sourceRowFingerprint stays untouched)
- *   - same identity, both populated and different            → no-match
- *       (legitimate distinct charges — preserved as in the prior dedup)
+ *   - same identity, both populated and different            -> no-match
+ *       (legitimate distinct charges -- preserved as in the prior dedup)
  */
 export async function findExistingForDedup(args: {
   accountId: number;
@@ -104,42 +127,33 @@ export async function findExistingForDedup(args: {
     },
     transaction: args.t,
   });
-  for (const existing of candidates) {
-    if (normalizeRef(existing.sourceReference) === incomingRef) {
-      if (existing.status === 'pending' && args.incomingStatus === 'posted') {
-        return promotePending(existing, incomingRef, args.t);
-      }
-      return { kind: 'duplicate', existingId: existing.id };
+  const exact = exactRefMatch(candidates, incomingRef);
+  if (exact) {
+    if (exact.status === 'pending' && args.incomingStatus === 'posted') {
+      return promotePending(exact, incomingRef, args.t);
     }
+    return { kind: 'duplicate', existingId: exact.id };
   }
 
-  if (incomingRef == null) {
-    const anyPopulated = candidates.find(
-      (c) => normalizeRef(c.sourceReference) != null,
-    );
-    if (anyPopulated) return { kind: 'duplicate', existingId: anyPopulated.id };
-  }
+  const wildcardHit = existingPopulatedWhenIncomingNull(candidates, incomingRef);
+  if (wildcardHit) return { kind: 'duplicate', existingId: wildcardHit.id };
 
-  if (incomingRef != null) {
-    const nullExisting = candidates.find(
-      (c) => normalizeRef(c.sourceReference) == null,
-    );
-    if (nullExisting) {
-      if (nullExisting.status === 'pending' && args.incomingStatus === 'posted') {
-        return promotePending(nullExisting, incomingRef, args.t);
-      }
-      nullExisting.sourceReference = incomingRef;
-      // Scoped save: only persist the sourceReference column. The audit-hash
-      // `sourceRowFingerprint` is intentionally left as the null-era hash —
-      // a mild mismatch is acceptable on backfill-arm rows, and rewriting it
-      // would risk colliding with the existing
-      // transactions_account_fingerprint_unique safety-net index.
-      await nullExisting.save({
-        transaction: args.t,
-        fields: ['sourceReference'],
-      });
-      return { kind: 'duplicate-backfilled', existingId: nullExisting.id };
+  const toBackfill = existingNullWhenIncomingPopulated(candidates, incomingRef);
+  if (toBackfill && incomingRef != null) {
+    if (toBackfill.status === 'pending' && args.incomingStatus === 'posted') {
+      return promotePending(toBackfill, incomingRef, args.t);
     }
+    toBackfill.sourceReference = incomingRef;
+    // Scoped save: only persist the sourceReference column. The audit-hash
+    // `sourceRowFingerprint` is intentionally left as the null-era hash --
+    // a mild mismatch is acceptable on backfill-arm rows, and rewriting it
+    // would risk colliding with the existing
+    // transactions_account_fingerprint_unique safety-net index.
+    await toBackfill.save({
+      transaction: args.t,
+      fields: ['sourceReference'],
+    });
+    return { kind: 'duplicate-backfilled', existingId: toBackfill.id };
   }
 
   if (
@@ -172,13 +186,13 @@ export async function findExistingForDedup(args: {
   // Final fallback tier: cross-parser merchant drift. The same statement
   // re-imported in a different format (e.g. CSV first, then the Wealthsimple
   // credit-card PDF parser) can reconstruct `merchantRaw` differently for some
-  // rows — "PIZZAVILLE #118" vs "PIZZAVILLE #1 18", "DAIRY QUEEN #11989 GRI"
+  // rows -- "PIZZAVILLE #118" vs "PIZZAVILLE #1 18", "DAIRY QUEEN #11989 GRI"
   // vs "DAIRY QUEEN #1 1989 GRI". That flips the identity fingerprint, so every
   // tier above misses and the row gets inserted again, double-counting balance.
   //
   // For a posted incoming row, look for an existing POSTED row in the same
-  // account with the same date/amount/currency whose merchant — after
-  // aggressive normalization (lowercase + strip all non-alphanumerics) —
+  // account with the same date/amount/currency whose merchant -- after
+  // aggressive normalization (lowercase + strip all non-alphanumerics) --
   // equals the incoming merchant's. Same date+amount+currency keeps this tight;
   // the aggressive key keeps genuinely-different merchants apart.
   if (

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { useTaxSlips, type SlipDto } from '../../hooks/useTaxSlips';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { SLIP_FORMS, slipPreview } from './slips/registry';
@@ -86,7 +87,7 @@ export function SlipsTab({ year }: { year: number }) {
           onChange={handleBoxChange}
           values={form.boxValues}
         />
-        <button type="submit">Add slip</button>
+        <Button type="submit">Add slip</Button>
       </form>
       {error && <p className="error">{error}</p>}
     </div>

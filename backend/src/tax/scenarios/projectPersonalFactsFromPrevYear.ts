@@ -99,6 +99,7 @@ export async function projectPersonalFactsFromPrevYear(
     instalmentsPaid: instRows.length > 0
       ? instRows.reduce((sum, r) => sum.plus(D(r.amount as unknown as string)), D('0'))
       : D(cfRows.find(c => c.kind === 'instalments_paid')?.amount ?? '0'),
+    fhsaLifetimeContributions: D(cfRows.find(c => c.kind === 'fhsa_lifetime_contribs')?.amount ?? '0'),
   };
 
   return {
@@ -114,6 +115,9 @@ export async function projectPersonalFactsFromPrevYear(
     rrspContribs: scaleRrsp(parentFacts.rrspContribs),
     fhsaContribs: scaleRrsp(parentFacts.fhsaContribs),
     donations: scaleItems(parentFacts.donations, 'donations'),
+    rentalIncome: scaleItems(parentFacts.rentalIncome, 'rental-income'),
+    rentalExpenses: scaleItems(parentFacts.rentalExpenses, 'rental-exp'),
+    medicalExpenses: scaleItems(parentFacts.medicalExpenses, 'medical-exp'),
     slips: [], // future slips don't exist
     carryforwards,
     ageAtYearEnd: parentFacts.ageAtYearEnd + 1,
