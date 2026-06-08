@@ -556,7 +556,7 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: start, [Op.lte]: end },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory'],
+        attributes: ['amount', 'finalCategory', 'txnType'],
         raw: true,
       }),
       Transaction.findAll({
@@ -566,14 +566,15 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: prevStart, [Op.lte]: prevEnd },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory'],
+        attributes: ['amount', 'finalCategory', 'txnType'],
         raw: true,
       }),
     ]);
 
-    type Row = { amount: unknown; finalCategory: string | null };
+    type Row = { amount: unknown; finalCategory: string | null; txnType: string | null };
     const currMap = new Map<string, { amount: number; count: number }>();
     for (const t of currTxns as unknown as Row[]) {
+      if (isNonSpend(t.txnType, null)) continue;
       const a = num(t.amount);
       if (a == null) continue;
       const cat = t.finalCategory ?? 'Uncategorized';
@@ -585,6 +586,7 @@ router.get('/spending/by-category', async (req, res, next) => {
 
     const prevMap = new Map<string, number>();
     for (const t of prevTxns as unknown as Row[]) {
+      if (isNonSpend(t.txnType, null)) continue;
       const a = num(t.amount);
       if (a == null) continue;
       const cat = t.finalCategory ?? 'Uncategorized';
