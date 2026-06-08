@@ -102,6 +102,10 @@
   --accent: var(--plum-50);
   --accent-foreground: var(--plum-700);
 
+  /* Semantic text links (WCAG AA ≥ 4.5:1 on --card and --background) */
+  --text-link: var(--rust-500);
+  --text-link-hover: var(--rust-600);
+
   /* Semantic signals */
   --success: var(--jade-400);
   --success-bg: var(--jade-50);
@@ -183,6 +187,10 @@
   /* Accent */
   --accent: var(--plum-700);
   --accent-foreground: var(--bone);
+
+  /* Semantic text links (WCAG AA ≥ 4.5:1 on --graphite and --ink) */
+  --text-link: var(--rust-300);
+  --text-link-hover: var(--rust-200);
 
   /* Semantic signals */
   --success: var(--jade-300);

@@ -265,7 +265,16 @@
   }
 
   .page a {
-    color: var(--accent-soft);
+    color: var(--text-link);
+    text-decoration-line: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 2px;
+    transition: text-decoration-color 0.15s;
+  }
+  .page a:hover,
+  .page a:focus-visible {
+    color: var(--text-link-hover);
+    text-decoration-color: currentColor;
   }
 
   [data-slot='alert'] a {
@@ -1072,7 +1081,7 @@
   }
 
   .aiVisibilityAction:hover {
-    color: var(--accent);
+    color: var(--text-link-hover);
   }
 
   .transactionsTableCard {
@@ -1281,7 +1290,7 @@
   }
 
   .businessFocusValue {
-    @apply mb-1 mt-1 text-[1.7rem] font-semibold tracking-tight;
+    @apply mb-1 mt-1 text-2xl font-semibold tabular-nums tracking-tight;
   }
 
   .businessSharePanel {
@@ -1532,7 +1541,7 @@
   }
 
   .kpiStack__value {
-    @apply m-0 truncate text-2xl font-semibold tabular-nums;
+    @apply m-0 truncate text-xl font-semibold tabular-nums;
     color: var(--foreground);
   }
 

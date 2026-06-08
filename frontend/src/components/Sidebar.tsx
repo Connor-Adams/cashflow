@@ -89,7 +89,7 @@ const navSections: NavSection[] = [
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
-      { to: '/insights', label: 'Insights', icon: Lightbulb },
+      { to: '/insights', label: 'AI insights', icon: Lightbulb },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
       { to: '/vault', label: 'Vault', icon: Lock },
       { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },
