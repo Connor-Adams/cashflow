@@ -115,6 +115,9 @@ export async function projectPersonalFactsFromPrevYear(
     rrspContribs: scaleRrsp(parentFacts.rrspContribs),
     fhsaContribs: scaleRrsp(parentFacts.fhsaContribs),
     donations: scaleItems(parentFacts.donations, 'donations'),
+    rentalIncome: scaleItems(parentFacts.rentalIncome, 'rental-income'),
+    rentalExpenses: scaleItems(parentFacts.rentalExpenses, 'rental-exp'),
+    medicalExpenses: scaleItems(parentFacts.medicalExpenses, 'medical-exp'),
     slips: [], // future slips don't exist
     carryforwards,
     ageAtYearEnd: parentFacts.ageAtYearEnd + 1,

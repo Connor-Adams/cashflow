@@ -79,6 +79,9 @@ function makeFacts(overrides: Partial<TaxYearFacts> = {}): TaxYearFacts {
     rrspContribs: [],
     fhsaContribs: [],
     donations: [],
+    rentalIncome: [],
+    rentalExpenses: [],
+    medicalExpenses: [],
     slips: [],
     carryforwards: {
       netCapitalLoss: D('0'),
