@@ -10,6 +10,7 @@ export type ReportingTxnRow = {
   amount: unknown;
   txnType: string | null;
   finalCategory?: string | null;
+  accountType?: string | null;
 };
 
 export type ReportingCashflowTotals = {
@@ -50,7 +51,7 @@ export function summarizeReportingCashflow(
     if (amount == null) continue;
 
     if (amount < 0) {
-      if (isNonSpend(row.txnType, null)) continue;
+      if (isNonSpend(row.txnType, row.accountType ?? null)) continue;
       const abs = Math.abs(amount);
       totalSpend += abs;
       if (essentialCategories) {
