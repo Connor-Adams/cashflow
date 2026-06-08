@@ -100,6 +100,11 @@ export const RATES_2025: RateTable = {
   oasClawbackRate: D('0.15'),
   // FHSA annual deduction limit (fixed at $8,000 — not indexed)
   fhsaAnnualLimit: D('8000'),
+  amtRate: D('0.205'),
+  amtExemption: D('177882'),
+  amtCapGainsInclusion: D('1'),
+  amtNonRefCreditFraction: D('0.5'),
+  amtDtcFraction: D('0.5'),
   sources: [
     { name: 'CRA T1-2025 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2025 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },
