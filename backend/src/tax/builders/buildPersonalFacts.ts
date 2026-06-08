@@ -72,6 +72,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const rrspContribs: RrspContrib[] = [];
   const fhsaContribs: RrspContrib[] = [];
   const medicalExpenses: IncomeItem[] = [];
+  let pensionTotal = D('0');
+  const rentalIncome: IncomeItem[] = [];
+  const rentalExpenses: IncomeItem[] = [];
 
   for (const t of txns) {
     const { cad } = await toCad(D(t.amount as unknown as string), t.currency ?? 'CAD', t.date as unknown as string);
@@ -107,6 +110,15 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     }
     else if (treatment === 'medical_expense') {
       medicalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
+    }
+    else if (treatment === 'pension_income') {
+      pensionTotal = pensionTotal.plus(cad);
+    }
+    else if (treatment === 'rental_income') {
+      rentalIncome.push(item);
+    }
+    else if (treatment === 'rental_expense') {
+      rentalExpenses.push({ ...item, cadAmount: cad.abs(), amount: D(t.amount as unknown as string).abs() });
     }
     else if (t.finalBusiness && cad.greaterThan(0)) selfEmploymentIncome.push(item);
     else if (t.finalBusiness && cad.lessThan(0))
@@ -247,6 +259,15 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     ),
   }));
 
+  // T4A box 016 (pension) + box 024 (annuity) → pension income
+  const t4aSlips = slipRows.filter(s => s.slipType === 'T4A');
+  for (const s of t4aSlips) {
+    const boxes = (s.boxValues ?? {}) as Record<string, number | string>;
+    const box016 = D(boxes['box016'] ?? boxes['box16'] ?? 0);
+    const box024 = D(boxes['box024'] ?? boxes['box24'] ?? 0);
+    pensionTotal = pensionTotal.plus(box016).plus(box024);
+  }
+
   // Carryforwards as of prior year
   const cf = await Carryforward.findAll({ where: { entityId, asOfYear: year - 1 } });
   const carryforwards: PersonalCarryforwards = {
@@ -297,8 +318,9 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     slips,
     carryforwards,
     ageAtYearEnd,
+    pensionIncome: pensionTotal.greaterThan(0) ? pensionTotal : undefined,
     medicalExpenses,
-    rentalIncome: [],
-    rentalExpenses: [],
+    rentalIncome,
+    rentalExpenses,
   };
 }

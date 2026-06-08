@@ -98,8 +98,27 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   // SE CPP — compute immediately after seNet (needed before netIncome)
   const seCppContrib = seNet.greaterThan(0) ? computeCppSelfEmployed(seNet, r) : D('0');
 
+  // Pension income L11500
+  const pensionAmt = facts.pensionIncome ?? D('0');
+  if (pensionAmt.greaterThan(0)) {
+    push('L11500', 'Pension income', pensionAmt, [{ source: 'pension', amount: pensionAmt }]);
+  }
+
+  // Rental income L12600 (net of expenses)
+  const rentalGross = sumD(facts.rentalIncome.map(i => i.cadAmount));
+  const rentalExp = sumD(facts.rentalExpenses.map(i => i.cadAmount));
+  const rentalNet = rentalGross.minus(rentalExp);
+  if (!rentalNet.equals(0)) {
+    push('L12600', 'Net rental income', rentalNet,
+      [
+        ...facts.rentalIncome.map(i => ({ source: i.source, amount: i.cadAmount })),
+        ...facts.rentalExpenses.map(i => ({ source: i.source, amount: i.cadAmount.negated() })),
+      ],
+      'sum(rental revenue) − sum(rental expenses)');
+  }
+
   // Total income L15000
-  const totalIncome = sumD([employmentLine, interest, eligibleGrossed, nonElGrossed, cg.taxable, seNet]);
+  const totalIncome = sumD([employmentLine, interest, eligibleGrossed, nonElGrossed, cg.taxable, seNet, pensionAmt, rentalNet]);
   push('L15000', 'Total income', totalIncome);
 
   // RRSP deduction L20800
