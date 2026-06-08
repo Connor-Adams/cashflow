@@ -3,6 +3,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -464,15 +465,14 @@ export function DashboardPage() {
     }
     // Flip sign so spend reads as positive money-out. Charges land in the DB
     // as negative; refunds/credits as positive. After negation a typical
-    // spend category shows a positive bar (going up), and a category that
-    // net-refunded shows a negative bar (going down) which reads as
+    // spend category shows a positive bar (going right), and a category that
+    // net-refunded shows a negative bar (going left) which reads as
     // "money came back from this category".
-    return Array.from(byCat.entries()).map(([name, total]) => ({ name, total: -total }))
+    // Sort descending by absolute value so the biggest spenders are at the top.
+    return Array.from(byCat.entries())
+      .map(([name, total]) => ({ name, total: -total }))
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
   }, [data, currency])
-
-  // Threshold for switching the category-axis layout. Above this count,
-  // labels overlap even on a wide viewport with default tick spacing.
-  const hasManyCategories = chartData.length > 10
 
   // Drill from a category bar into a pre-filtered Transactions view. Preserves
   // the active currency and date filters so the destination opens with the
@@ -1303,27 +1303,23 @@ export function DashboardPage() {
               </div>
             ) : null
           ) : (
-            <ResponsiveContainer width="100%" height={110}>
-              <BarChart data={chartData} margin={narrowChartMargin}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis
-                  dataKey="name"
-                  // Category-count-aware label handling: once there are more
-                  // than 10 categories, default Recharts spacing overlaps even
-                  // on wide viewports. Steepen the angle and give the axis
-                  // more vertical space so every label still renders without
-                  // clipping (long names like "Snowboarding Gear" need both
-                  // the steeper angle and the extra height to fit).
-                  tick={hasManyCategories ? { fontSize: 11 } : narrowAxisTick}
-                  interval={0}
-                  minTickGap={isNarrowViewport ? 12 : 5}
-                  angle={hasManyCategories ? -55 : 0}
-                  textAnchor={hasManyCategories ? 'end' : 'middle'}
-                  height={hasManyCategories ? 110 : undefined}
-                />
+            <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 32)}>
+              <BarChart
+                data={chartData}
+                layout="vertical"
+                margin={{ top: 4, right: 60, bottom: 4, left: 4 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                 <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={{ fontSize: 12 }}
+                  interval={0}
+                  width={isNarrowViewport ? 90 : 120}
+                />
+                <XAxis
+                  type="number"
                   tick={narrowAxisTick}
-                  width={isNarrowViewport ? 44 : 60}
                   tickFormatter={compactCurrencyTickFormatter}
                 />
                 <Tooltip
@@ -1356,7 +1352,22 @@ export function DashboardPage() {
                         : ''
                     if (name) navigateToCategory(name)
                   }}
-                />
+                >
+                  <LabelList
+                    dataKey="total"
+                    position="right"
+                    style={{ fontSize: 11, fill: 'var(--foreground)' }}
+                    formatter={(value) => {
+                      const v = typeof value === 'number' ? value : Number(value)
+                      if (!Number.isFinite(v)) return ''
+                      return currency
+                        ? formatMoney(v, currency)
+                        : new Intl.NumberFormat(undefined, {
+                            maximumFractionDigits: 0,
+                          }).format(v)
+                    }}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
