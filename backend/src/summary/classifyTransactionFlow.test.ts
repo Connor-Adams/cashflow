@@ -69,10 +69,8 @@ test('classifyPositiveFlow: "CREDIT CARD PAYMENT" routes to payment, not credit'
   // catch bare "CREDIT CARD PAYMENT" as txnType='payment' (its regex only
   // matches "online payment|payment received|payment thank you|autopay|
   // statement credit"), so this string falls through to classifyPositiveFlow
-  // with txnType='unknown'. A bare /\bcredit\b/ in CREDIT_PATTERNS would
-  // over-match here and mis-route a statement payment to 'credit'. The fix
-  // is to omit the bare pattern; the function's default is already 'credit'
-  // so refund-intent strings like "COURTESY CREDIT" still land correctly.
+  // with txnType='unknown'. The /\bpayment\b/ pattern in PAYMENT_PATTERNS
+  // fires correctly, routing these to 'payment'.
   assert.equal(
     classifyPositiveFlow({ merchantRaw: 'CREDIT CARD PAYMENT' }),
     'payment'
@@ -87,19 +85,37 @@ test('classifyPositiveFlow: "CREDIT CARD PAYMENT" routes to payment, not credit'
   );
 });
 
-test('classifyPositiveFlow: bare "credit" without a payment keyword still routes to credit (via default)', () => {
-  // Defense for the deleted /\bcredit\b/ pattern: refund-intent strings that
-  // contain only "credit" with no payment keyword (e.g. courtesy adjustments
-  // a bank labels just "CREDIT") still land on the default return of 'credit'.
-  // No CREDIT_PATTERNS match needed because nothing in PAYMENT_PATTERNS fires
-  // either.
+test('classifyPositiveFlow: bare "credit" without a refund/payment keyword routes to skip (no keyword match)', () => {
+  // "COURTESY CREDIT" and "MERCHANT CREDIT" contain "credit" but no
+  // CREDIT_PATTERNS keyword (statement credit requires the full phrase) and no
+  // PAYMENT_PATTERNS keyword. They fall through to the default, which is 'skip'
+  // — unknown positive inflows contribute to nothing rather than deflating net
+  // spend as false credits.
   assert.equal(
     classifyPositiveFlow({ merchantRaw: 'COURTESY CREDIT' }),
-    'credit'
+    'skip'
   );
   assert.equal(
     classifyPositiveFlow({ merchantRaw: 'MERCHANT CREDIT' }),
-    'credit'
+    'skip'
+  );
+});
+
+test('classifyPositiveFlow defaults to skip for unknown deposits', () => {
+  // Unrecognized positive deposits (business payments, self-transfers, ATM
+  // deposits, WS contributions) must not deflate net spend by landing in
+  // totalCredits. The default is 'skip' so they contribute to nothing.
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'CDG LABS INC' }),
+    'skip'
+  );
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'ATM DEPOSIT - KF470333' }),
+    'skip'
+  );
+  assert.equal(
+    classifyPositiveFlow({ merchantRaw: 'EI CANADA' }),
+    'skip'
   );
 });
 
@@ -182,8 +198,8 @@ test('classifyPositiveAmount: missing txnType falls back to merchant regex', () 
   );
   // No refund/payment keyword: an unsignaled positive is NOT assumed to be a
   // refund-against-spend. It routes to 'skip' (contributes to nothing) rather
-  // than 'credit'. (Differs from classifyPositiveFlow, whose standalone default
-  // stays 'credit' — see its own tests above.)
+  // than 'credit'. Both classifyPositiveFlow and classifyPositiveAmount now
+  // share this default.
   assert.equal(
     classifyPositiveAmount({ txnType: 'fee', merchantRaw: 'annual fee waiver' }),
     'skip'
