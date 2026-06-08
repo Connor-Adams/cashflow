@@ -417,7 +417,12 @@ export function DashboardPage() {
     const byCat = new Map<string, number>()
     for (const r of data?.byCategory ?? []) {
       if (currency && r.currency !== currency) continue
-      const label = r.category ?? '(uncategorized)'
+      const raw = (r.category ?? '').trim().toLowerCase()
+      if (raw === 'investments') continue
+      const label =
+        raw === '' || raw === 'uncategorized'
+          ? '(uncategorized)'
+          : r.category!
       byCat.set(label, (byCat.get(label) ?? 0) + r.sumAmount)
     }
     // Flip sign so spend reads as positive money-out. Charges land in the DB
