@@ -69,6 +69,18 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // We match the full phrase (not bare "investment") to avoid false-positives
   // on other "investment" narratives like "Investment advisor fee".
   { type: 'transfer', re: /\binvestment\s+ws\s+investments\b/i },
+  // WS Cash withdrawal: "Withdrawal (executed at YYYY-MM-DD)". Distinct from a
+  // generic ATM withdrawal (which remains ambiguous — could be cash-spending).
+  { type: 'transfer', re: /\bwithdrawal\s+\(executed at\b/i },
+  // E-transfer to own Wealthsimple Cash account — account funding, not spend.
+  // Generic "E-TRANSFER SENT <person>" remains deliberately deferred (ambiguous).
+  { type: 'transfer', re: /\be-transfer sent wealthsimple\b/i },
+  // WS physically-backed gold purchase: "GOLD - Physically backed gold: Bought".
+  { type: 'investment', re: /\bgold\s*-\s*physically backed gold:\s*bought\b/i },
+  // Generic "INVESTMENT PURCHASE" line from brokerage statements.
+  { type: 'investment', re: /\binvestment purchase\b/i },
+  // Loan interest charges — interest expense, not a purchase.
+  { type: 'fee', re: /\bloan interest\b/i },
   // Wise FX conversion: "Converted 5,207.60 USD to 7,084.89 CAD". Both legs of
   // a Wise FX appear on the matching CAD + USD statements with a shared
   // sourceReference; classifying them as transfer lets detectRelationshipsStage
