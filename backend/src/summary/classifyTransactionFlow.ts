@@ -93,8 +93,8 @@ function normalizeText(parts: Array<string | null | undefined>): string {
  * Merchant-text match: 'credit' for an explicit refund/credit keyword,
  * 'payment' for a statement-payment keyword, or null when neither fires.
  * Returning null (rather than a default) lets each caller pick its own default
- * for an unsignaled positive — classifyPositiveFlow defaults to 'credit' for
- * backward compatibility; classifyPositiveAmount defaults to 'skip'.
+ * for an unsignaled positive — both classifyPositiveFlow and
+ * classifyPositiveAmount default to 'skip'.
  */
 function matchPositiveText(input: {
   merchantRaw?: string | null;
@@ -117,15 +117,15 @@ function matchPositiveText(input: {
 
 /**
  * Merchant-text-only classifier. Used as a fallback when txnType is missing
- * or ambiguous. Returns 'credit' by default (preserved for direct callers:
- * forecast, moneyLeaks, financialScenarios, subscriptions).
+ * or ambiguous. Defaults to 'skip' for unrecognized positive deposits so they
+ * contribute to nothing rather than deflating net spend as false credits.
  */
 export function classifyPositiveFlow(input: {
   merchantRaw?: string | null;
   merchantClean?: string | null;
   category?: string | null;
-}): PositiveFlowKind {
-  return matchPositiveText(input) ?? 'credit';
+}): PositiveBucket {
+  return matchPositiveText(input) ?? 'skip';
 }
 
 /**

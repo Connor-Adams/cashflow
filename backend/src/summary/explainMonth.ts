@@ -24,6 +24,7 @@
 
 import { num } from '../util/numbers';
 import type { SubscriptionCadence } from '../models/PlannedEvent';
+import { isNonSpend } from './classifyTransactionFlow';
 
 /** Transaction row consumed by the aggregator. Mirrors the attribute list
  *  the route requests from Sequelize — kept here so editors get type
@@ -39,6 +40,7 @@ export interface ExplainMonthTxnRow {
   merchantRaw: string | null;
   reviewFlag: boolean;
   receiptCount: number;
+  txnType: string | null;
 }
 
 /** Subscription row consumed by the aggregator. Same shape as
@@ -191,6 +193,7 @@ function tallyByCurrency(rows: ExplainMonthTxnRow[]): Map<string, CurrencyBucket
   for (const row of rows) {
     const amount = num(row.amount);
     if (amount == null) continue;
+    if (isNonSpend(row.txnType, null)) continue;
     const bucket = out.get(row.currency) ?? {
       currency: row.currency,
       spend: 0,

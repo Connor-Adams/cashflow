@@ -26,6 +26,7 @@ function txn(overrides: Partial<ExplainMonthTxnRow> = {}): ExplainMonthTxnRow {
     merchantRaw: 'LOBLAWS #1234',
     reviewFlag: false,
     receiptCount: 0,
+    txnType: null,
     ...overrides,
   };
 }
@@ -365,6 +366,30 @@ test('explainMonth aiSummary defaults to null (the route fills it in)', () => {
     currency: null,
   });
   assert.equal(result.aiSummary, null);
+});
+
+test('tallyByCurrency excludes non-spend txnTypes (transfer, investment, payment)', () => {
+  const result = explainMonth({
+    month: '2026-05',
+    currentTxns: [
+      txn({ id: 1, amount: '-50', finalCategory: 'Groceries', txnType: null }),
+      txn({ id: 2, amount: '-685000', finalCategory: 'Transfer', txnType: 'transfer' }),
+      txn({ id: 3, amount: '-97000', finalCategory: 'Investment', txnType: 'investment' }),
+      txn({ id: 4, amount: '-131000', finalCategory: 'Payment', txnType: 'payment' }),
+      txn({ id: 5, amount: '-200', finalCategory: 'Dining', txnType: 'refund' }),
+      txn({ id: 6, amount: '-75', finalCategory: 'Coffee', txnType: 'reward' }),
+      txn({ id: 7, amount: '-100', finalCategory: 'Shopping', txnType: 'purchase' }),
+    ],
+    previousTxns: [],
+    subscriptions: [],
+    currency: null,
+  });
+  const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
+  assert.ok(cad);
+  // Only txnType=null ($50) and txnType='purchase' ($100) count as spend.
+  // transfer, investment, payment, refund, reward are all non-spend.
+  assert.equal(cad!.currentSpend, 150);
+  assert.equal(cad!.currentIncome, 0);
 });
 
 test('explainMonth: missing_receipt sorts by amount desc', () => {

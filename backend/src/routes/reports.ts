@@ -139,6 +139,7 @@ interface TxnRawRow {
   merchantRaw: string | null;
   reviewFlag: boolean;
   receiptCount: string | number | null;
+  txnType: string | null;
 }
 
 function rowToTxn(row: TxnRawRow): ExplainMonthTxnRow {
@@ -155,6 +156,7 @@ function rowToTxn(row: TxnRawRow): ExplainMonthTxnRow {
     merchantRaw: row.merchantRaw,
     reviewFlag: Boolean(row.reviewFlag),
     receiptCount: Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0,
+    txnType: row.txnType ?? null,
   };
 }
 
@@ -181,6 +183,7 @@ async function fetchTransactionsWithReceipts(
       'merchantClean',
       'merchantRaw',
       'reviewFlag',
+      'txnType',
     ],
     include: [
       {
@@ -201,6 +204,7 @@ async function fetchTransactionsWithReceipts(
     merchantClean: string | null;
     merchantRaw: string | null;
     reviewFlag: boolean;
+    txnType: string | null;
     receipts?: Array<{ id: number }>;
   };
   return rows.map((r) => {
@@ -215,6 +219,7 @@ async function fetchTransactionsWithReceipts(
       merchantClean: json.merchantClean,
       merchantRaw: json.merchantRaw,
       reviewFlag: json.reviewFlag,
+      txnType: json.txnType,
       receiptCount: (json.receipts ?? []).length,
     });
   });

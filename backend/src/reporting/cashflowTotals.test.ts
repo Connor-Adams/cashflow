@@ -65,6 +65,15 @@ test('unparseable amounts are skipped', () => {
   assert.equal(out.totalIncome, 0);
 });
 
+test('investment-account purchase is excluded from spend via accountType', () => {
+  const rows: ReportingTxnRow[] = [
+    { amount: -200, txnType: 'purchase', accountType: 'investment' },
+    { amount: -50, txnType: 'purchase' },
+  ];
+  const out = summarizeReportingCashflow(rows);
+  assert.equal(out.totalSpend, 50);
+});
+
 test('mixed realistic set reconciles', () => {
   const rows: ReportingTxnRow[] = [
     { amount: 10726.4, txnType: 'income' }, // payroll
