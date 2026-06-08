@@ -237,6 +237,22 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
       // Prior-year dispositions are already reported on their own year's return;
       // here they only serve to advance the ACB state. Keep just this year's.
       if (realized.tradeDate < yearStart || realized.tradeDate > yearEnd) continue;
+      const rawGain = D(realized.proceeds).minus(D(realized.costRemoved));
+      let superficialLossDenied: typeof rawGain | undefined;
+      if (rawGain.lessThan(0)) {
+        const sellDate = new Date(`${realized.tradeDate}T00:00:00.000Z`);
+        const windowEnd = new Date(sellDate.getTime() + 30 * 86_400_000);
+        const windowEndStr = windowEnd.toISOString().slice(0, 10);
+        const repurchase = acbActivity.find(
+          a => a.securityId === sid
+            && (a.activityType === 'buy' || a.activityType === 'reinvestment')
+            && (a.tradeDate as unknown as string) > realized.tradeDate
+            && (a.tradeDate as unknown as string) <= windowEndStr
+        );
+        if (repurchase) {
+          superficialLossDenied = rawGain.negated();
+        }
+      }
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,
         securityId: sid,
@@ -244,6 +260,7 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
         acb: D(realized.costRemoved),
         outlays: D(0),
         date: realized.tradeDate,
+        ...(superficialLossDenied ? { superficialLossDenied } : {}),
       });
     }
   }

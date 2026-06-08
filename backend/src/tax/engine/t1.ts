@@ -84,6 +84,14 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       ? `first $${r.capitalGainsInclusionThreshold!.toFixed(0)} × ${r.capitalGainsInclusion.toString()}, excess × ${r.capitalGainsInclusionHigh.toString()} − applied losses`
       : `gross × ${r.capitalGainsInclusion.toString()} − applied losses`);
 
+  for (const e of facts.capitalGainEvents) {
+    if (e.superficialLossDenied?.greaterThan(0)) {
+      warnings.push(
+        `Superficial loss denied: ${e.source} — $${e.superficialLossDenied.toFixed(2)} loss denied (repurchase within 30 days)`
+      );
+    }
+  }
+
   // Self-employment L13500 = revenue − expenses
   const seRev = sumD(facts.selfEmploymentIncome.map((i) => i.cadAmount));
   const seExp = sumD(facts.selfEmploymentExpenses.map((i) => i.cadAmount));

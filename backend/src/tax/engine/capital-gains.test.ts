@@ -80,3 +80,60 @@ test('tiered: loss year still rolls forward correctly', () => {
   // $500 loss × 50% = $250 added to existing $200 carryforward
   assert.equal(result.carryforwardRemaining.toFixed(2), '450.00');
 });
+
+// --- Superficial loss rule (ITA 40(2)(g)) ---
+
+test('superficial loss denied when same security repurchased within 30 days', () => {
+  const r = ratesFor(2025);
+  const events: CapGainEvent[] = [
+    {
+      source: 'XYZ sell',
+      securityId: 100,
+      proceeds: D('8000'),
+      acb: D('10000'),
+      outlays: D('0'),
+      date: '2025-03-15',
+      superficialLossDenied: D('2000'),
+    },
+  ];
+  const result = taxableCapitalGains(events, r, D('0'));
+  // Loss of $2000 fully denied → gross gain = 0, taxable = 0
+  assert.equal(result.gross.toFixed(2), '0.00');
+  assert.equal(result.taxable.toFixed(2), '0.00');
+});
+
+test('partial superficial loss denial', () => {
+  const r = ratesFor(2025);
+  const events: CapGainEvent[] = [
+    {
+      source: 'XYZ sell',
+      securityId: 100,
+      proceeds: D('8000'),
+      acb: D('10000'),
+      outlays: D('0'),
+      date: '2025-03-15',
+      superficialLossDenied: D('1500'),
+    },
+  ];
+  const result = taxableCapitalGains(events, r, D('0'));
+  // Loss = 2000, denied = 1500, allowable loss = 500
+  // gross = -500, taxable = 0 (net loss)
+  assert.equal(result.gross.toFixed(2), '-500.00');
+  assert.equal(result.taxable.toFixed(2), '0.00');
+});
+
+test('no superficial loss flag means full loss allowed', () => {
+  const r = ratesFor(2025);
+  const events: CapGainEvent[] = [
+    {
+      source: 'XYZ sell',
+      securityId: 100,
+      proceeds: D('8000'),
+      acb: D('10000'),
+      outlays: D('0'),
+      date: '2025-03-15',
+    },
+  ];
+  const result = taxableCapitalGains(events, r, D('0'));
+  assert.equal(result.gross.toFixed(2), '-2000.00');
+});
