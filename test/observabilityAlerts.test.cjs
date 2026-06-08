@@ -76,6 +76,42 @@ test('grafana provisions alert rules for tempo, loki, and collector reachability
   assert.match(rules, /title:\s*OtelCollectorScrapeDown\b/);
   assert.match(rules, /up\{job="cashflow-otel-collector"\}\s*==\s*0/);
 
+  // Application-level alerts (issues #417, #418).
+  assert.match(rules, /title:\s*BackendDown\b/, 'must include BackendDown alert');
+  assert.match(rules, /absent\(cashflow_up\)/, 'BackendDown must use absent(cashflow_up)');
+
+  assert.match(rules, /title:\s*HighHttp5xxRate\b/, 'must include HighHttp5xxRate alert');
+  assert.match(
+    rules,
+    /cashflow_http_server_requests_total\{http_response_status_code=~"5\.\."\}/,
+    'HighHttp5xxRate must query 5xx counter',
+  );
+
+  assert.match(rules, /title:\s*HighRouteLatencyP99\b/, 'must include HighRouteLatencyP99 alert');
+  assert.match(
+    rules,
+    /cashflow_http_server_duration_milliseconds_bucket/,
+    'HighRouteLatencyP99 must use duration histogram',
+  );
+
+  assert.match(
+    rules,
+    /title:\s*OutboundDependencyFailing\b/,
+    'must include OutboundDependencyFailing alert',
+  );
+  assert.match(
+    rules,
+    /http_client_request_duration_seconds_count/,
+    'OutboundDependencyFailing must use HTTP client metric',
+  );
+
+  assert.match(rules, /title:\s*JobFailing\b/, 'must include JobFailing alert');
+  assert.match(
+    rules,
+    /cashflow_job_runs_total\{result="failure"\}/,
+    'JobFailing must use cashflow_job_runs_total metric',
+  );
+
   // Every alert must fire within 5 minutes per the issue SLO.
   // `for: 1m` on top of the [5m] rate window keeps the worst-case alert
   // latency under 6 minutes, with most fires landing in 1-2 minutes.
