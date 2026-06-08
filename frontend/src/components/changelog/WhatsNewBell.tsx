@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { getJson, patchJson } from '@/lib/api'
 import type { ChangelogLatest } from '@/lib/changelog'
 import { ChangelogModal } from './ChangelogModal'
@@ -32,9 +33,11 @@ export function WhatsNewBell() {
 
   return (
     <>
-      <button
+      <Button
         type="button"
-        className="relative inline-flex items-center rounded-full px-2 py-1 text-xs font-medium hover:bg-muted"
+        variant="ghost"
+        size="sm"
+        className="relative inline-flex items-center"
         onClick={() => setOpen(true)}
         data-testid="whats-new-pill"
       >
@@ -46,7 +49,7 @@ export function WhatsNewBell() {
             data-testid="whats-new-badge"
           />
         )}
-      </button>
+      </Button>
       <ChangelogModal
         open={open}
         title={latest.title ?? "What's new"}

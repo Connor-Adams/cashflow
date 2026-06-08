@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { patchJson } from '@/lib/api';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
 import { useClassificationQueue } from '../../hooks/useClassificationQueue';
@@ -97,9 +98,9 @@ export function ClassifyTab({ year }: { year: number }) {
               <li key={c.targetId} className="flex items-center gap-3 py-2">
                 <span aria-hidden>✓</span>
                 <span className="flex-1 text-sm">{c.label}</span>
-                <button type="button" className="text-sm underline" onClick={() => void undo(c)} disabled={undoInFlight.has(c.targetId)}>
+                <Button type="button" variant="link" size="sm" onClick={() => void undo(c)} disabled={undoInFlight.has(c.targetId)}>
                   Undo
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

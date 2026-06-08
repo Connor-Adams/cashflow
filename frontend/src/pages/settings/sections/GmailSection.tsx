@@ -491,19 +491,14 @@ export function GmailSection() {
                         />
                         <code style={{ flex: 1 }}>{row.emailAddress}</code>
                         {row.label && <span className="muted">{row.label}</span>}
-                        <button
+                        <Button
                           type="button"
+                          variant="destructive"
+                          size="sm"
                           onClick={() => void deleteAllowlistRow(row.id)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--destructive, #c00)',
-                            cursor: 'pointer',
-                            fontSize: '0.85rem',
-                          }}
                         >
                           Remove
-                        </button>
+                        </Button>
                       </li>
                     ))}
                   </ul>

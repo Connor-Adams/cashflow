@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useShareholderLoans, type ShareholderLoanKind, type ShareholderLoanDto } from '../../hooks/useShareholderLoans';
 import { useTaxEntities } from '../../hooks/useTaxEntities';
+import { Button } from '@/components/ui/button';
 import { fmtCurrency } from './util/format';
 import { StatCard } from '@/components/ui/stat-card';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -130,10 +131,10 @@ export function ShareholderLoanTab() {
           </label>
           {formError && <p className="error">{formError}</p>}
           <div className="flex gap-2">
-            <button type="submit" disabled={submitting || !corpEntity}>
+            <Button type="submit" variant="primary" size="sm" disabled={submitting || !corpEntity}>
               {submitting ? 'Saving…' : 'Add'}
-            </button>
-            <button type="button" onClick={() => { void refresh(); }}>Refresh</button>
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => { void refresh(); }}>Refresh</Button>
           </div>
         </form>
       </section>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
 
 interface KeyDef {
   key: string;
@@ -144,7 +145,7 @@ export function CorpOverrideEditor({ overrides, onChange, otherCorps }: Props) {
                       value={typeof v === 'number' ? v : 0}
                       onChange={(e) => setValue(k, Number(e.target.value))}
                     />
-                    <button onClick={() => removeKey(k)} className="ml-2">×</button>
+                    <Button variant="ghost" size="sm" onClick={() => removeKey(k)} className="ml-2">×</Button>
                   </li>
                 );
               })}
@@ -167,7 +168,7 @@ export function CorpOverrideEditor({ overrides, onChange, otherCorps }: Props) {
               <option key={d.key} value={d.key}>{d.label}</option>
             ))}
           </select>
-          <button onClick={addKey} className="ml-2">+ Add override</button>
+          <Button variant="secondary" size="sm" onClick={addKey} className="ml-2">+ Add override</Button>
         </div>
       )}
       <IntercorpDistributionAdder
@@ -220,7 +221,7 @@ function IntercorpReceiverList({
             <li key={receiverId} className="mb-3">
               <div>
                 <strong>→ {label}</strong>
-                <button onClick={() => onRemove(receiverId)} className="ml-2">×</button>
+                <Button variant="ghost" size="sm" onClick={() => onRemove(receiverId)} className="ml-2">×</Button>
               </div>
               <div className="mt-1 flex flex-wrap gap-2">
                 {INTERCORP_FIELDS.map((field) => {
@@ -301,7 +302,9 @@ function IntercorpDistributionAdder({
             ))}
           </select>
         </label>
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => {
             const id = Number(effectivePendingReceiverId);
             if (!Number.isInteger(id) || id <= 0) return;
@@ -312,7 +315,7 @@ function IntercorpDistributionAdder({
           className="ml-2"
         >
           + Add intercorp distribution
-        </button>
+        </Button>
       </div>
     );
   }
@@ -332,7 +335,9 @@ function IntercorpDistributionAdder({
           placeholder="e.g. 7"
         />
       </label>
-      <button
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={() => {
           const id = Number(freeTextReceiverId);
           if (!Number.isInteger(id) || id <= 0) return;
@@ -343,7 +348,7 @@ function IntercorpDistributionAdder({
         className="ml-2"
       >
         + Add intercorp distribution
-      </button>
+      </Button>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { patchJson } from '../../lib/api'
 
@@ -32,7 +33,7 @@ export function BenchmarkPickerCard({ currentSymbol, onChange }: BenchmarkPicker
       <div className="flex items-center justify-between">
         <p className="text-sm">Benchmark: <strong>{currentSymbol}</strong></p>
         {!editing && (
-          <button type="button" onClick={() => setEditing(true)} className="text-sm underline">Change</button>
+          <Button type="button" variant="ghost" onClick={() => setEditing(true)} className="text-sm underline">Change</Button>
         )}
       </div>
       {editing && (
@@ -46,14 +47,14 @@ export function BenchmarkPickerCard({ currentSymbol, onChange }: BenchmarkPicker
               maxLength={16}
             />
           </label>
-          <button
+          <Button
             type="button"
             disabled={saving}
             onClick={handleSave}
             className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
-          </button>
+          </Button>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
       )}

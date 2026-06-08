@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import { ItemRow } from './items/ItemRow'
 
@@ -34,22 +35,23 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
 
   if (receipt.externalOrderId == null || receipt.order == null) {
     return (
-      <div style={{ marginBottom: '1rem', padding: '0.75rem', border: '1px solid #ddd', borderRadius: '4px' }}>
+      <div style={{ marginBottom: '1rem', padding: '0.75rem', border: '1px solid var(--border)', borderRadius: '4px' }}>
         <div style={{ marginBottom: '0.5rem' }}>
           <strong>{receipt.originalName}</strong>
         </div>
         {extractError && (
-          <p role="alert" style={{ color: 'red', marginBottom: '0.5rem' }}>
+          <p role="alert" style={{ color: 'var(--destructive)', marginBottom: '0.5rem' }}>
             {extractError}
           </p>
         )}
-        <button
+        <Button
           type="button"
+          variant="secondary"
           disabled={extracting}
           onClick={() => void handleExtract()}
         >
           {extracting ? 'Extracting…' : 'Extract items'}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -60,15 +62,15 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
     <div style={{ marginBottom: '1.5rem' }}>
       <div style={{ marginBottom: '0.5rem' }}>
         <strong>{order.vendor === 'uber' ? 'Uber' : order.vendor === 'uber_eats' ? 'Uber Eats' : order.vendor}</strong>{' '}
-        <span style={{ color: '#666' }}>{receipt.originalName}</span>
+        <span style={{ color: 'var(--muted-foreground)' }}>{receipt.originalName}</span>
       </div>
 
       {order.trip && (
-        <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: '#444' }}>
+        <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--foreground)' }}>
           <div>
             {order.trip.pickupAddress ?? '—'} → {order.trip.dropoffAddress ?? '—'}
           </div>
-          <div style={{ color: '#666' }}>
+          <div style={{ color: 'var(--muted-foreground)' }}>
             {order.trip.distance != null && `${order.trip.distance} ${order.trip.distanceUnit ?? ''}`}
             {order.trip.distance != null && order.trip.durationMinutes != null && ' · '}
             {order.trip.durationMinutes != null && `${order.trip.durationMinutes} min`}
@@ -135,9 +137,9 @@ export default function ReceiptItemsDrawer({
     <div className="receiptItemsDrawer" role="dialog" aria-modal="true" aria-labelledby="receipt-items-drawer-title">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 id="receipt-items-drawer-title" style={{ margin: 0 }}>Receipt Items</h2>
-        <button type="button" onClick={onClose}>
+        <Button type="button" variant="secondary" onClick={onClose}>
           Close
-        </button>
+        </Button>
       </div>
 
       {receipts.map((receipt) => (

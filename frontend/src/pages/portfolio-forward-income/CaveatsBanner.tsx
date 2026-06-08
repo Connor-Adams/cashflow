@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 
 export type CaveatsBannerProps = {
@@ -19,13 +20,14 @@ export function CaveatsBanner({ unreliableSymbols, holdingsWithoutHistory }: Cav
         <span className="text-sm">
           {total} holdings have unreliable or missing income projections.
         </span>
-        <button
+        <Button
           type="button"
+          variant="link"
+          size="sm"
           onClick={() => setExpanded((v) => !v)}
-          className="text-sm underline"
         >
           {expanded ? 'Hide details' : 'Show details'}
-        </button>
+        </Button>
       </div>
       {expanded && (
         <div className="mt-3 text-sm">

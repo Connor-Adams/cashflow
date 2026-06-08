@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { useScenarioComparison } from '../../../hooks/useScenarioComparison';
 import { fmtCurrency } from '../util/format';
 import {
@@ -37,7 +38,7 @@ export function ComparisonView({ ids, onClose, endpoint }: Props) {
     <div className="mt-4 rounded-md border border-border">
       <header className="flex items-baseline justify-between px-4 py-3 border-b border-border">
         <h3 className="text-base font-semibold">Comparing {data.length} scenario{data.length === 1 ? '' : 's'}</h3>
-        <button onClick={onClose}>Close</button>
+        <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
       </header>
       <Table>
         <TableHeader>

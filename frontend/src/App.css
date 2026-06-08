@@ -3,22 +3,6 @@
 /* Tokens live in index.css. This file owns component classes only. */
 
 @layer base {
-  /* Legacy fallback while older pages migrate to local ui primitives. */
-  button:not([data-slot]) {
-    @apply inline-flex min-h-10 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition-colors duration-150;
-    border-color: var(--border);
-    background: color-mix(in srgb, var(--bg2) 88%, black 4%);
-    color: var(--fg);
-  }
-
-  button:not([data-slot]):hover:enabled {
-    background: color-mix(in srgb, var(--bg3) 88%, white 4%);
-    border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
-  }
-
-  button:not([data-slot]):disabled {
-    @apply cursor-not-allowed opacity-50;
-  }
 
   input:not([data-slot]),
   select:not([data-slot]),
@@ -265,7 +249,7 @@
   }
 
   .page a {
-    color: var(--accent-soft);
+    color: var(--primary);
   }
 
   [data-slot='alert'] a {
@@ -696,7 +680,7 @@
 
   .settingsWidthOption small {
     @apply text-xs leading-5;
-    color: var(--muted);
+    color: var(--muted-foreground);
   }
 
   .rulesFormGrid {
