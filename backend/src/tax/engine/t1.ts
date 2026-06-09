@@ -148,7 +148,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   // Self-employment L13500 = revenue − expenses
   const seRev = sumD(facts.selfEmploymentIncome.map((i) => i.cadAmount));
   const seExp = sumD(facts.selfEmploymentExpenses.map((i) => i.cadAmount));
-  const seNet = maxZero(seRev.minus(seExp));
+  const seNet = seRev.minus(seExp);
   push('L13500', 'Self-employment income (net)', seNet,
     [
       ...facts.selfEmploymentIncome.map((i) => ({ source: i.source, amount: i.cadAmount })),
