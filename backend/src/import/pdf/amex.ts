@@ -155,7 +155,7 @@ export const amexParser: PdfParser = {
 
       txnSections.push(pending.section);
       transactions.push({
-        date: pending.postDate,
+        date: pending.transDate,
         merchantRaw,
         merchantClean: normalizeMerchant(pending.merchantRaw),
         amount,
