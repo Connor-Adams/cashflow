@@ -89,7 +89,7 @@ const MODE_LABELS: Record<DetectedMode, string> = {
 
 const MODE_DESCRIPTIONS: Record<DetectedMode, string> = {
   'pdf-bundle':
-    'Auto-detects issuer (RBC, CIBC, Questrade, Wealthsimple). Accounts created on first sight from the PDF body and matched by account number (last 4 for banks/cards, full ID for Wealthsimple brokerage).',
+    'Auto-detects issuer (Amex, RBC, CIBC, Questrade, Wealthsimple, Wise). Accounts created on first sight from the PDF body and matched by account number.',
   'ws-bundle':
     'Multi-file Wealthsimple activity CSV import. Accounts auto-created per file by shortCode.',
   holdings: 'Single Wealthsimple positions CSV. Updates portfolio holdings.',
