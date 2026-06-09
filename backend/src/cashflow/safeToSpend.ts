@@ -29,7 +29,7 @@ import { projectGoal } from '../goals/projection';
 import { toUnits, fromUnits } from '../util/numbers';
 
 /** Cash-bearing account types — match the forecast engine's exclusion list. */
-const CASH_EXCLUDED_TYPES = new Set(['investment', 'credit_card']);
+const CASH_EXCLUDED_TYPES = new Set(['investment', 'credit_card', 'loan']);
 
 /** Credit-card account types — used to size the expected-payments deduction. */
 const CREDIT_CARD_TYPES = new Set(['credit_card']);
