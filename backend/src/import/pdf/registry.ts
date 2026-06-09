@@ -42,7 +42,9 @@ export function registerBuiltInPdfParsers(): void {
   const { rbcBusinessBankingParser } = require('./rbcBusinessBanking');
   const { wealthsimpleCreditCardParser } = require('./wealthsimpleCreditCard');
   const { wealthsimpleBrokerageParser } = require('./wealthsimpleBrokerage');
+  const { amexReserveParser } = require('./amexReserve');
   /* eslint-enable @typescript-eslint/no-require-imports */
+  registerPdfParser(amexReserveParser);
   registerPdfParser(cibcCostcoMastercardParser);
   registerPdfParser(rbcPersonalBankingParser);
   registerPdfParser(rbcBusinessBankingParser);
