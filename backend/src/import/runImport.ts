@@ -963,6 +963,7 @@ const PDF_ACCOUNT_TEMPLATES: Record<string, PdfAccountTemplate> = {
   'Wealthsimple RESP': { name: 'Wealthsimple RESP', accountType: 'investment' },
   'Wealthsimple Investing': { name: 'Wealthsimple Investing', accountType: 'investment' },
   'Wealthsimple Credit Card': { name: 'Wealthsimple Credit Card', accountType: 'credit_card' },
+  'American Express Aeroplan Reserve Card': { name: 'Amex Reserve', accountType: 'credit_card' },
 };
 
 // Corp entity suffix patterns (Inc., Corp., Ltd., LLC, GmbH, Pty, S.A.). When a
