@@ -44,8 +44,9 @@ export type MonthlyResult = {
  * line-item categories into the monthly trend instead of the txn category.
  *
  * Excluded:
- *  - statement payments (positive amount with txnType resolving to 'payment'
- *    via `classifyPositiveAmount` — not category data, would inflate)
+ *  - statement payments, both legs (any txnType='payment' row, plus positive
+ *    amounts resolving to 'payment' via `classifyPositiveAmount` merchant
+ *    text — not category data, would double count the card spend they cover)
  *  - non-categorical money movement (transfer / investment / dividend, plus
  *    anything on an investment account — see `classifyTransactionFlow`)
  *  - income (txnType='income', either sign) — inflow is not category spend
@@ -77,6 +78,12 @@ export function aggregateMonthly(
     // (categoryPoints) — both signs dropped (a negative income reversal is
     // money-movement, not spend). Keeps points == Σ categoryPoints intact.
     if (row.txnType === 'income') continue;
+    // Statement payments are money movement, not category data — BOTH legs:
+    // the positive card-side leg (txnType or merchant-text via
+    // classifyPositiveAmount) and the negative checking-side leg
+    // (txnType='payment'). The card purchases the payment covers are already
+    // summed, so keeping either leg would double count the month.
+    if (row.txnType === 'payment') continue;
     if (
       amount > 0 &&
       classifyPositiveAmount({

@@ -14,6 +14,7 @@
  */
 import { Op } from 'sequelize';
 import { Insight, Transaction, PartnerSettlement, Contact, Receipt, PlannedEvent, sequelize } from '../models';
+import { isNonSpend } from '../summary/classifyTransactionFlow';
 import {
   detectDuplicateTransactions,
   detectMerchantSpendSpike,
@@ -43,10 +44,23 @@ async function loadTransactions(
 ): Promise<DetectorTransaction[]> {
   const cutoff = new Date(now.getTime() - TRANSACTION_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
-  const rows = await Transaction.findAll({
+  const allRows = await Transaction.findAll({
     where: { householdId, date: { [Op.gte]: cutoffIso } },
-    attributes: ['id', 'date', 'merchantClean', 'amount', 'currency', 'finalCategory'],
+    attributes: ['id', 'date', 'merchantClean', 'amount', 'currency', 'finalCategory', 'txnType'],
+    include: [{ association: 'account', attributes: ['accountType'] }],
     raw: true,
+  });
+  // Money-movement rows (transfers, brokerage buys, statement payments,
+  // refunds/rewards, plus anything on an investment account) are not spend.
+  // Without this peel, recurring same-amount transfers emit duplicate
+  // "charges" and a growing card bill payment emits a spend spike — the
+  // insight descriptions would present money movement as spending.
+  const rows = allRows.filter((r) => {
+    const raw = r as unknown as Record<string, unknown>;
+    return !isNonSpend(
+      (raw.txnType ?? null) as string | null,
+      (raw['account.accountType'] ?? null) as string | null,
+    );
   });
   const ids = rows.map((r) => r.id);
   // Receipt counts per transaction — single query, single pass aggregate
