@@ -123,6 +123,32 @@ test('quantity that fails to parse skips the row', () => {
   assert.match(out.warnings[0], /Quantity/);
 });
 
+test('non-CAD holding reads cost basis from Book Value (Market), matching row currency', () => {
+  // Book Value (CAD) is pre-converted to CAD; storing it on a USD-currency row
+  // would FX-convert the cost basis a second time downstream.
+  const usdRow =
+    '"RRSP","RRSP","Trade","HQ7XYZ123USD","AAPL","NASDAQ","XNAS","Apple Inc","EQUITY","10","LONG","200","USD","2740","CAD","2000","USD","2100","USD","100","USD"';
+  const out = parseWsHoldingsCsv(build([usdRow]));
+  assert.ok(!('error' in out), `expected ok, got ${JSON.stringify(out)}`);
+  assert.equal(out.rows.length, 1);
+  const r = out.rows[0];
+  assert.equal(r.currency, 'USD');
+  assert.equal(r.costBasis, 2000);
+});
+
+test('falls back to Book Value (CAD) when Book Value (Market) column is absent', () => {
+  const header =
+    'Account Number,Symbol,Name,Security Type,Quantity,Market Value Currency,Book Value (CAD)';
+  const csv = [
+    header,
+    '"HQ6LMLTK8CAD","VFV","Vanguard S&P 500","EXCHANGE_TRADED_FUND","10","CAD","5498.1"',
+    AS_OF,
+  ].join('\n');
+  const out = parseWsHoldingsCsv(csv);
+  assert.ok(!('error' in out), `expected ok, got ${JSON.stringify(out)}`);
+  assert.equal(out.rows[0].costBasis, 5498.1);
+});
+
 test('null-able numeric fields parse as null when blank', () => {
   // Market Price, Market Value, Book Value (CAD), Market Unrealized Returns all blank.
   const blanks =

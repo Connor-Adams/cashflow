@@ -133,6 +133,61 @@ test('mapCsvRow keeps WS purchase rows negative under wealthsimple_cash', () => 
   assert.equal(r.value.amount, -4.75);
 });
 
+test('mapCsvRow honors trailing CR suffix as credit under invert_sign', () => {
+  const row = {
+    Date: '03/15/2025',
+    Description: 'SOME VENDOR',
+    Amount: '25.00 CR',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'amex', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 25);
+});
+
+test('mapCsvRow honors trailing DR suffix as debit under passthrough', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: '25.00DR',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, -25);
+});
+
+test('mapCsvRow rejects amounts with unrecognized trailing text', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: '25.00 USD',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_simple', 'CAD');
+  assert.ok('error' in r, 'partial-parsing garbage suffixes silently corrupts amounts');
+  if (!('error' in r)) return;
+  assert.match(r.error, /Invalid amount/);
+});
+
+test('mapCsvRow trusts pre-signed amounts under passthrough despite payment-like Type', () => {
+  // 'Card payment' on a bank/chequing export is money LEAVING the account;
+  // the credit-card-centric /\bpayment\b/ heuristic must not flip it positive.
+  const row = {
+    Date: '2025-02-01',
+    Type: 'Card payment',
+    Description: 'HYDRO BILL',
+    Amount: '-12.50',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r));
+  if ('error' in r) return;
+  assert.equal(r.value.amount, -12.5);
+});
+
 test('mapCsvRow keeps WS cash dividend positive under wealthsimple_cash', () => {
   const row = {
     date: '2025-04-30',

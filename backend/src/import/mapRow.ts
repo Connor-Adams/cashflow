@@ -103,16 +103,32 @@ function matchDirection(
   return null;
 }
 
+function pickFirstNonEmptyColumnWithHeader(
+  row: Record<string, string>,
+  headerMap: Record<string, string>,
+  candidates: string[]
+): { value: string; header: string } | null {
+  for (const candidate of candidates) {
+    const value = pickColumn(row, headerMap, [candidate]);
+    if (value != null && String(value).trim() !== '') {
+      return { value, header: candidate };
+    }
+  }
+  return null;
+}
+
 function pickFirstNonEmptyColumn(
   row: Record<string, string>,
   headerMap: Record<string, string>,
   candidates: string[]
 ): string | undefined {
-  for (const candidate of candidates) {
-    const value = pickColumn(row, headerMap, [candidate]);
-    if (value != null && String(value).trim() !== '') return value;
-  }
-  return undefined;
+  return pickFirstNonEmptyColumnWithHeader(row, headerMap, candidates)?.value;
+}
+
+/** Currency code embedded in an amount header name (e.g. 'USD$', 'Amount (USD)'). */
+function currencyFromAmountHeader(header: string): string | null {
+  const m = /\b(CAD|USD|GBP|EUR|AUD|NZD|CHF|JPY)\b/i.exec(header);
+  return m ? m[1].toUpperCase() : null;
 }
 
 function inferAmountDirection(
@@ -146,8 +162,31 @@ function parseRawNumber(raw: unknown): number | null {
   if (raw == null || raw === '') return null;
   let s = String(raw).replace(/,/g, '').trim();
   if (s.startsWith('(') && s.endsWith(')')) s = `-${s.slice(1, -1)}`;
-  const n = parseFloat(s);
-  return Number.isNaN(n) ? null : n;
+  if (s === '') return null;
+  // Strict Number(), not parseFloat: partial parsing would silently drop
+  // trailing text ('25.00 CR' -> 25) and corrupt the amount.
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Trailing CR/DR marker (statement-style exports), e.g. '25.00 CR'. */
+const AMOUNT_DIRECTION_SUFFIX_RE = /^(.+?)\s*(CR|DR)\.?$/i;
+
+function splitAmountDirectionSuffix(rawAmount: unknown): {
+  amount: unknown;
+  direction: AmountDirection | null;
+} {
+  if (typeof rawAmount !== 'string') {
+    return { amount: rawAmount, direction: null };
+  }
+  const m = AMOUNT_DIRECTION_SUFFIX_RE.exec(rawAmount.trim());
+  if (!m || parseRawNumber(m[1]) === null) {
+    return { amount: rawAmount, direction: null };
+  }
+  return {
+    amount: m[1],
+    direction: m[2].toUpperCase() === 'CR' ? 'credit' : 'debit',
+  };
 }
 
 function normalizeAmount(
@@ -155,14 +194,22 @@ function normalizeAmount(
   convention: CsvProfile['amountConvention'],
   direction: AmountDirection | null
 ): number | null {
-  const n = parseRawNumber(rawAmount);
+  const { amount: rawValue, direction: suffixDirection } =
+    splitAmountDirectionSuffix(rawAmount);
+  const n = parseRawNumber(rawValue);
   if (n === null) return null;
+  // An explicit CR/DR marker on the amount cell beats every other signal.
+  if (suffixDirection === 'credit') return Math.abs(n);
+  if (suffixDirection === 'debit') return -Math.abs(n);
+  // passthrough — amount is already signed correctly in source; Type/narrative
+  // heuristics must not override it (e.g. Type 'Card payment' on a chequing
+  // export is an outflow, not a credit).
+  if (convention === 'passthrough') return n;
   if (direction === 'credit') return Math.abs(n);
   if (direction === 'debit') return -Math.abs(n);
   if (convention === 'charges_negative') return n > 0 ? -Math.abs(n) : n;
   if (convention === 'charges_positive') return n < 0 ? Math.abs(n) : n;
   if (convention === 'invert_sign') return -n;
-  // passthrough — amount is already signed correctly in source
   return n;
 }
 
@@ -211,14 +258,20 @@ export function mapCsvRow(
   const merchantRaw =
     pickFirstNonEmptyColumn(row, headerMap, profile.merchantHeaders) ??
     pickFirstNonEmptyColumn(row, headerMap, MERCHANT_FALLBACK_HEADERS);
-  const amountRaw = pickColumn(row, headerMap, profile.amountHeaders);
+  // Fall through empty amount cells: dual-currency exports (e.g. RBC's
+  // CAD$/USD$) populate exactly one of the candidate columns per row.
+  const amountPick = pickFirstNonEmptyColumnWithHeader(
+    row,
+    headerMap,
+    profile.amountHeaders
+  );
   const currencyRaw = pickColumn(row, headerMap, profile.currencyHeaders ?? []);
   const refRaw = pickColumn(row, headerMap, profile.referenceHeaders ?? []);
 
   const hasSplitColumns =
     (profile.debitAmountHeaders?.length ?? 0) > 0 ||
     (profile.creditAmountHeaders?.length ?? 0) > 0;
-  const hasAmountRaw = amountRaw != null && String(amountRaw).trim() !== '';
+  const hasAmountRaw = amountPick != null;
 
   const missing =
     dateRaw == null ||
@@ -241,6 +294,7 @@ export function mapCsvRow(
 
   // Split debit/credit columns take priority over single-column amount.
   let amount: number | null = null;
+  let amountFromSingleColumn = false;
   if (hasSplitColumns) {
     amount = resolveSplitAmount(
       row,
@@ -249,20 +303,28 @@ export function mapCsvRow(
       profile.creditAmountHeaders ?? []
     );
     // Fall back to single-column if split columns are both empty (e.g. balance-only row).
-    if (amount === null && hasAmountRaw) {
+    if (amount === null && amountPick) {
       const dir = inferAmountDirection(row, headerMap);
-      amount = normalizeAmount(amountRaw, profile.amountConvention, dir);
+      amount = normalizeAmount(amountPick.value, profile.amountConvention, dir);
+      amountFromSingleColumn = amount != null;
     }
   } else {
     const dir = inferAmountDirection(row, headerMap);
-    amount = normalizeAmount(amountRaw, profile.amountConvention, dir);
+    amount = normalizeAmount(amountPick?.value, profile.amountConvention, dir);
+    amountFromSingleColumn = amount != null;
   }
   if (amount == null) {
-    return { error: `Invalid amount: ${amountRaw ?? '(split columns)'}` };
+    return { error: `Invalid amount: ${amountPick?.value ?? '(split columns)'}` };
   }
 
   const merchantClean = normalizeMerchant(merchantRaw);
-  const currency = (currencyRaw || defaultCurrency || 'CAD')
+  // When the file has no currency column, a currency embedded in the matched
+  // amount header (e.g. RBC's USD$) labels the row better than the default.
+  const headerCurrency =
+    amountFromSingleColumn && amountPick
+      ? currencyFromAmountHeader(amountPick.header)
+      : null;
+  const currency = (currencyRaw || headerCurrency || defaultCurrency || 'CAD')
     .toString()
     .trim()
     .toUpperCase()

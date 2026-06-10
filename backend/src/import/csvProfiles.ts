@@ -216,7 +216,8 @@ const cibc: CsvProfile = {
  * Tangerine (personal banking and credit card).
  * Export: Date, Transaction, Name, Memo, Amount
  * Amount is pre-signed: negative = charge/withdrawal, positive = deposit/credit.
- * Direction inference handles common cases; passthrough preserves the sign otherwise.
+ * Passthrough preserves the source sign (direction heuristics never override
+ * pre-signed amounts).
  */
 const tangerine: CsvProfile = {
   dateHeaders: ['Date'],
@@ -357,7 +358,7 @@ const profileHints: Record<string, { label: string; hint: string }> = {
   },
   generic_simple: {
     label: 'Generic (ISO dates)',
-    hint: 'yyyy-MM-dd dates; single Amount column, negative = charge.',
+    hint: 'yyyy-MM-dd dates; single Amount column, positive = charge (credits detected from description). For pre-signed files use Generic (pre-signed).',
   },
   generic_amex: {
     label: 'Generic (Amex-style)',

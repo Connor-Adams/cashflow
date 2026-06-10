@@ -163,7 +163,10 @@ export function parseWsHoldingsCsv(
       quantity,
       price: parseNumeric(r['Market Price']),
       marketValue: parseNumeric(r['Market Value']),
-      costBasis: parseNumeric(r['Book Value (CAD)']),
+      // Cost basis must be in the row's (market) currency — 'Book Value (CAD)'
+      // is pre-converted to CAD and would be FX-converted a second time by
+      // portfolio consumers (costBasisCad = costBasis * fxRate).
+      costBasis: parseNumeric(r['Book Value (Market)'] ?? r['Book Value (CAD)']),
       unrealizedGainLoss: parseNumeric(r['Market Unrealized Returns']),
     });
   }
