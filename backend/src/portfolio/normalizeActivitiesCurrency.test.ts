@@ -126,3 +126,41 @@ test('mixed stream with already-CAD activities is not converted alongside USD on
   assert.equal(normalized[2].currency, 'CAD');
   APPROX(normalized[2].amount!, 390);
 });
+
+test('default FX path converts at the rate in effect on the trade date, not a newer cached rate', async () => {
+  // ensureFxRate's recency window has no upper date bound, so a freshly
+  // cached TODAY rate satisfies its lookup for a 2020 trade date. The
+  // default fetcher must reject rates published after the activity date
+  // and fall back to the nearest historical row.
+  const { FxRate, sequelize } = await import('../models');
+  await sequelize.sync({ force: true });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in normalizeActivitiesCurrency.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    await FxRate.create({
+      fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: today,
+      rate: '1.37', source: 'test', fetchedAt: new Date(),
+    });
+    await FxRate.create({
+      fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2020-01-10',
+      rate: '1.305', source: 'test', fetchedAt: new Date(),
+    });
+
+    const activities = [
+      act({ tradeDate: '2020-01-05', amount: 500, currency: 'CAD' }),
+      act({ tradeDate: '2020-01-15', amount: 1000, currency: 'USD' }),
+    ];
+    const { normalized, warnings } = await normalizeActivitiesToCad(activities);
+    assert.equal(warnings.length, 0, warnings.join('; '));
+    APPROX(
+      normalized[1].amount!,
+      1305,
+      `expected 1000 × 1.305 (2020 rate), got ${normalized[1].amount}`,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -10,6 +10,7 @@ import {
   computeWeightPct,
   computeTotalReturnPct,
   computeUnifiedTodayDelta,
+  loadMetricsContext,
   type MetricsContext,
 } from './metrics';
 
@@ -53,7 +54,7 @@ test('computeRowMetrics todayChangePct null when no latestQuote', () => {
 test('computeRowMetrics thirtyDayReturnPct adds dividends to numerator', () => {
   const ctx = emptyContext();
   ctx.latestQuotes.set(1, { price: 110, currency: 'USD' });
-  ctx.daily30dAgo.set(1, { adjClose: 100 });
+  ctx.daily30dAgo.set(1, { close: 100 });
   ctx.divPerUnit30d.set(1, 2);
   const m = computeRowMetrics({ ctx, securityId: 1, qty: 10, costBasis: 800 });
   // ((110 + 2) - 100) / 100 = 12 %
@@ -63,7 +64,7 @@ test('computeRowMetrics thirtyDayReturnPct adds dividends to numerator', () => {
 test('computeRowMetrics thirtyDayReturnPct falls back to latestDaily when no quote', () => {
   const ctx = emptyContext();
   ctx.latestDaily.set(1, { close: 110, adjClose: 110, date: '2026-05-24' });
-  ctx.daily30dAgo.set(1, { adjClose: 100 });
+  ctx.daily30dAgo.set(1, { close: 100 });
   const m = computeRowMetrics({ ctx, securityId: 1, qty: 10, costBasis: 800 });
   assert.equal(m.thirtyDayReturnPct, 10);
 });
@@ -178,4 +179,42 @@ test('computeUnifiedTodayDelta null when FX rate missing for a non-CAD currency'
   });
   assert.equal(out.todayChangeCad, null);
   assert.equal(out.todayChangePct, null);
+});
+
+test('thirtyDayReturnPct must not double-count a dividend already deflated into adjClose', async () => {
+  // Stock trades flat at $100 all month and pays $2 mid-window. Yahoo deflates
+  // the 30d-ago adjClose to ~98.04, but the dividend is added explicitly via
+  // divPerUnit30d — using adjClose as the base counts it twice (~4.04%).
+  // True 30-day total return: (100 + 2 - 100) / 100 = 2%.
+  const { sequelize } = await import('../db');
+  await sequelize.sync({ force: true });
+  const { SecurityDailyPrice, SecurityDividend, Security, Household } = await import('../models');
+  await Household.create({ id: 1, name: 'T' });
+  const sec = await Security.create({
+    householdId: 1, symbol: 'FLAT', name: 'Flat Corp', assetType: 'stock', currency: 'CAD',
+  });
+
+  const day = (offset: number) => new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10);
+  await SecurityDailyPrice.create({
+    securityId: sec.id, date: day(35), open: '100', high: '100', low: '100',
+    close: '100', adjClose: '98.04', volume: '0', source: 'test', fetchedAt: new Date(),
+  });
+  await SecurityDailyPrice.create({
+    securityId: sec.id, date: day(0), open: '100', high: '100', low: '100',
+    close: '100', adjClose: '100', volume: '0', source: 'test', fetchedAt: new Date(),
+  });
+  await SecurityDividend.create({
+    securityId: sec.id, exDividendDate: day(15), amount: '2', currency: 'CAD',
+    source: 'test', fetchedAt: new Date(),
+  });
+
+  const ctx = await loadMetricsContext({
+    securityIds: [sec.id], currencies: ['CAD'], accountIds: [],
+  });
+  const m = computeRowMetrics({ ctx, securityId: sec.id, qty: 10, costBasis: 1000 });
+  assert.ok(m.thirtyDayReturnPct != null);
+  assert.ok(
+    Math.abs((m.thirtyDayReturnPct as number) - 2) < 0.01,
+    `expected ~2%, got ${m.thirtyDayReturnPct}`,
+  );
 });

@@ -16,13 +16,19 @@ export function computeTwr(points: DailyPoint[]): number {
   if (series[0].marketValueCad === 0) return 0;
 
   let product = 1;
+  let mvStart = series[0].marketValueCad;
+  let pendingFlow = 0;
   for (let i = 1; i < series.length; i++) {
-    const mvStart = series[i - 1].marketValueCad;
     const mvEnd = series[i].marketValueCad;
-    const cashFlow = series[i].cashFlowCad;
-    if (mvStart === 0) continue;
-    const r = (mvEnd - cashFlow) / mvStart - 1;
+    pendingFlow += series[i].cashFlowCad;
+    // An interior zero is a missing-data day (price coverage gap), not a real
+    // liquidation — bridge it: defer the period until MV resumes so the gap
+    // doesn't multiply a -100% into the chain.
+    if (mvEnd === 0) continue;
+    const r = (mvEnd - pendingFlow) / mvStart - 1;
     product *= 1 + r;
+    mvStart = mvEnd;
+    pendingFlow = 0;
   }
   return (product - 1) * 100;
 }

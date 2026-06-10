@@ -83,6 +83,38 @@ test('computeTwr — mid-series cashflow still computes correctly with trailing 
   approxEqual(computeTwr(points), 20, 0.1);
 });
 
+test('computeTwr — interior zero (missing-data day) must NOT pin TWR to -100%', () => {
+  // Price coverage lapses for one day (MV 0), then resumes at the same value.
+  // True return is 0%, not -100%.
+  const points: DailyPoint[] = [
+    { date: '2026-01-01', marketValueCad: 100, cashFlowCad: 0 },
+    { date: '2026-01-02', marketValueCad: 0, cashFlowCad: 0 },
+    { date: '2026-01-03', marketValueCad: 100, cashFlowCad: 0 },
+  ];
+  approxEqual(computeTwr(points), 0);
+});
+
+test('computeTwr — multi-day interior gap bridges to the resumed MV', () => {
+  // 1000 → gap (two zero days) → 1200: the +20% spans the gap.
+  const points: DailyPoint[] = [
+    { date: '2026-01-01', marketValueCad: 1000, cashFlowCad: 0 },
+    { date: '2026-01-02', marketValueCad: 0, cashFlowCad: 0 },
+    { date: '2026-01-03', marketValueCad: 0, cashFlowCad: 0 },
+    { date: '2026-01-04', marketValueCad: 1200, cashFlowCad: 0 },
+  ];
+  approxEqual(computeTwr(points), 20, 0.1);
+});
+
+test('computeTwr — cash flow landing inside an interior gap is still removed from the return', () => {
+  // 1000 → gap day with a $500 deposit → 1500 on resume. No real growth.
+  const points: DailyPoint[] = [
+    { date: '2026-01-01', marketValueCad: 1000, cashFlowCad: 0 },
+    { date: '2026-01-02', marketValueCad: 0, cashFlowCad: 500 },
+    { date: '2026-01-03', marketValueCad: 1500, cashFlowCad: 0 },
+  ];
+  approxEqual(computeTwr(points), 0);
+});
+
 test('computeXirr — single deposit + 1Y final value of 1.10x → ~10%', () => {
   const cf: IrrCashFlow[] = [
     { date: '2025-01-01', amount: -1000 },

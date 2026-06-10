@@ -381,3 +381,106 @@ test('second call refreshes projections when dividend added between calls', asyn
   // ~$0.15/share * 12 * 100 shares = $180
   assert.ok(secondIncome > 100, `expected secondIncome > 100, got ${secondIncome}`);
 });
+
+// ─── FX hard-failure handling: stale-rate fallback, never silent parity ──────
+
+test('falls back to the most recent cached FX rate instead of valuing USD at parity', async () => {
+  const { household, user, agent } = await makeHousehold('usd-fx-stale');
+  const { seedSecurity, seedHolding, seedDividend } = await import('./portfolioFixtures.js');
+
+  const acct = await seedAccountWithTax(household.id, user.id, 'RRSP-USD2', 'RRSPUSD2', 'registered_rrsp');
+  const vxus = await seedSecurity(models, household.id, 'VXUS', 'Vanguard Intl', 'ETF', 'USD');
+
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: household.id,
+    securityId: vxus.id,
+    statementDate: '2025-01-31',
+    quantity: 100,
+    price: 20,
+    marketValue: 2000,
+    costBasis: 1800,
+    currency: 'USD',
+  });
+
+  // Monthly dividends anchored to the run date (same pattern as the CAD test).
+  const now = new Date();
+  const months = Array.from({ length: 12 }, (_, i) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
+      .toISOString()
+      .slice(0, 10),
+  );
+  for (const date of months) {
+    await seedDividend(models, { securityId: vxus.id, exDividendDate: date, amount: 0.10, currency: 'USD' });
+  }
+
+  // ONLY a stale USD→CAD rate exists (outside ensureFxRate's 7-day window)
+  // and the BoC API is unreachable. The endpoint must use the stale rate,
+  // not silently value USD income at parity (rate 1).
+  await models.FxRate.destroy({ where: {} });
+  const staleDate = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  await models.FxRate.create({
+    fromCurrency: 'USD',
+    toCurrency: 'CAD',
+    ratedDate: staleDate,
+    rate: '1.30',
+    source: 'fixture',
+    fetchedAt: new Date(),
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('BoC unreachable (stubbed in test)');
+  }) as unknown as typeof fetch;
+  try {
+    const res = await agent.get('/api/portfolio/forward-income');
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const row = res.body.rows.find((r: { symbol: string }) => r.symbol === 'VXUS');
+    assert.ok(row, 'VXUS row present');
+    assert.ok(row.projectedAnnualIncomeNative > 100, `native=${row.projectedAnnualIncomeNative}`);
+    assert.ok(
+      Math.abs(row.projectedAnnualIncomeCad - row.projectedAnnualIncomeNative * 1.30) < 1,
+      `expected CAD ≈ native × 1.30, got cad=${row.projectedAnnualIncomeCad} native=${row.projectedAnnualIncomeNative}`,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('returns 502 when no FX data exists at all for a held currency', async () => {
+  const { household, user, agent } = await makeHousehold('usd-fx-none');
+  const { seedSecurity, seedHolding, seedDividend } = await import('./portfolioFixtures.js');
+
+  const acct = await seedAccountWithTax(household.id, user.id, 'RRSP-USD3', 'RRSPUSD3', 'registered_rrsp');
+  const vea = await seedSecurity(models, household.id, 'VEA', 'Vanguard Dev Mkts', 'ETF', 'USD');
+
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: household.id,
+    securityId: vea.id,
+    statementDate: '2025-01-31',
+    quantity: 10,
+    price: 50,
+    marketValue: 500,
+    costBasis: 400,
+    currency: 'USD',
+  });
+  await seedDividend(models, {
+    securityId: vea.id,
+    exDividendDate: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10),
+    amount: 0.50,
+    currency: 'USD',
+  });
+
+  await models.FxRate.destroy({ where: {} });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('BoC unreachable (stubbed in test)');
+  }) as unknown as typeof fetch;
+  try {
+    const res = await agent.get('/api/portfolio/forward-income');
+    assert.equal(res.status, 502, JSON.stringify(res.body));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

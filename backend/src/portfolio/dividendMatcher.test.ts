@@ -45,6 +45,16 @@ test('scores an exact same-day credit highly', () => {
   assert.ok(score != null && score > 0, `expected positive score, got ${score}`);
 });
 
+test('rejects a candidate in a different currency (no cross-currency numeric match)', () => {
+  // A CAD credit numerically equal to a USD expectation is unit confusion,
+  // not a match — the true converted deposit would be ~1.37× the figure.
+  const score = scoreDividendCandidate(expectation, txn({ currency: 'CAD' }), {
+    dateToleranceDays: 5,
+    amountTolerancePct: 2,
+  });
+  assert.equal(score, null);
+});
+
 test('rejects a debit (negative amount)', () => {
   const score = scoreDividendCandidate(expectation, txn({ amount: -100 }), {
     dateToleranceDays: 5,
