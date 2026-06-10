@@ -1,4 +1,4 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, type Transaction as SequelizeTransaction } from 'sequelize';
 import { sequelize, Account, ExternalOrder, ExternalOrderItem, HouseholdMember, User, Contact } from '../../models';
 import type { ExternalOrderItem as ExternalOrderItemType } from '../../models/ExternalOrderItem';
 import type { LinkItemsCandidateOrder } from './linkItemsStage';
@@ -80,6 +80,12 @@ export async function loadRecurringHistory(
   householdId: number | null,
   merchantClean: string,
   beforeDate: string,
+  /**
+   * Thread the import transaction when calling from inside one: on Postgres a
+   * raw query without it runs on a separate pooled connection and cannot see
+   * rows inserted earlier in the same import (READ COMMITTED).
+   */
+  transaction?: SequelizeTransaction,
 ): Promise<RecurringHistoryRow[]> {
   if (!merchantClean) return [];
   const rows = await sequelize.query<{ date: string; amount: number; finalCategory: string | null }>(
@@ -92,6 +98,7 @@ export async function loadRecurringHistory(
     {
       replacements: [householdId, householdId, merchantClean, beforeDate],
       type: QueryTypes.SELECT,
+      transaction,
     },
   );
   return rows.map((r) => ({ date: r.date, amount: Number(r.amount), finalCategory: r.finalCategory }));
@@ -103,6 +110,8 @@ export async function loadRelationshipCandidates(
   merchantClean: string,
   date: string,
   refundWindowDays: number,
+  /** Same rationale as loadRecurringHistory — see its doc comment. */
+  transaction?: SequelizeTransaction,
 ): Promise<RelationshipCandidate[]> {
   if (householdAccountIds.length === 0) return [];
   const windowStart = new Date(`${date}T00:00:00Z`);
@@ -159,6 +168,7 @@ export async function loadRelationshipCandidates(
     {
       replacements: [...householdAccountIds, windowStartStr, windowEndStr, ...householdReplacements],
       type: QueryTypes.SELECT,
+      transaction,
     },
   );
   return rows.map((r) => ({

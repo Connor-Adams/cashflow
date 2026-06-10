@@ -67,6 +67,22 @@ test('scoreReceiptMatch: exact amount + same date + merchant match gives high co
   assert.match(matchReason, /merchant matches costco/);
 });
 
+test('scoreReceiptMatch: unknown vendor (no merchant pattern) earns no vendor bonus', () => {
+  // Email-scanned receipts default to vendor 'other' — with no pattern there is
+  // no merchant evidence, so the +15 must not be awarded. 50 (amount) +
+  // 25 (same-day) + 0 (no vendor evidence) = 75 < AUTO_ACCEPT_THRESHOLD 85.
+  const txn = makeTxn({
+    amount: '-947.04',
+    date: '2025-12-13',
+    merchantRaw: 'SOME UNRELATED MERCHANT',
+    merchantClean: 'Some Unrelated Merchant',
+  });
+  const order = makeOrder({ vendor: 'other', orderDate: '2025-12-13' });
+  const { confidence, matchReason } = scoreReceiptMatch(txn, order, pay(947.04));
+  assert.equal(confidence, 75);
+  assert.doesNotMatch(matchReason, /merchant matches/);
+});
+
 test('scoreReceiptMatch: payment last4 contributes +20 when matching', () => {
   const txn = makeTxn({
     amount: '-1863.72',

@@ -266,12 +266,18 @@ export async function commitStatementImport(
         skippedDuplicates += 1;
         continue;
       }
-      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean, row.amount);
+      // All three reads thread `t` — see the matching comment in runImport.ts:
+      // un-threaded raw queries cannot see rows inserted earlier in this same
+      // import on Postgres (READ COMMITTED, separate pooled connection).
+      const memory = await findMerchantMemory(account.householdId ?? null, row.merchantClean, row.amount, {
+        transaction: t,
+      });
 
       const recurringHistory = await loadRecurringHistory(
         account.householdId ?? null,
         row.merchantClean,
         row.date,
+        t,
       );
       const relationshipCandidates = await loadRelationshipCandidates(
         account.householdId ?? null,
@@ -279,6 +285,7 @@ export async function commitStatementImport(
         row.merchantClean,
         row.date,
         enrichmentRefundWindowDays,
+        t,
       );
 
       const enriched = await enrichTransaction({

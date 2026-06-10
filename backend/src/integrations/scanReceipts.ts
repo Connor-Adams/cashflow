@@ -38,6 +38,7 @@ import {
   type OauthTokenResponse,
 } from './gmail';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
+import { defaultCurrency } from '../config/env';
 import { uberVendorOverride } from './parsers/uber';
 import { categorizeUberTrip } from '../ai/aiCategorizeUberTrip';
 import { logger } from '../observability/logger';
@@ -230,6 +231,16 @@ export async function disconnect(userId: number): Promise<void> {
     }, 'gmail_revoke_failed');
   }
   await integ.destroy();
+}
+
+/**
+ * ExternalOrder.currency is NOT NULL, but AI extraction legitimately returns
+ * currency null when the receipt shows none. Default to the app's currency
+ * (CAD), never a hardcoded 'USD': a fabricated USD makes the receipt matcher's
+ * -40 currency penalty kill otherwise-perfect matches against CAD card rows.
+ */
+export function receiptCurrencyOrDefault(extractedCurrency: string | null | undefined): string {
+  return extractedCurrency ?? defaultCurrency;
 }
 
 export interface ScanResultMessage {
@@ -527,7 +538,7 @@ export async function scanInbox(
             tax: null,
             shipping: null,
             total: extracted!.total != null ? String(extracted!.total) : null,
-            currency: extracted!.currency ?? 'USD',
+            currency: receiptCurrencyOrDefault(extracted!.currency),
             paymentLast4: extracted!.paymentLast4,
             source: `gmail-scan:${parser}`,
             rawPayload: { extracted, gmailMessageId: summary.id, parser, trip: extracted!.trip ?? null } as unknown,
