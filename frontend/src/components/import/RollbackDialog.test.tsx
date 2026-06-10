@@ -19,6 +19,8 @@ function cleanImpact(overrides: Partial<RollbackImpact> = {}): RollbackImpact {
       transactionTaxMetadata: 0,
       budgetExclusions: 0,
       plannedEventsUnlinked: 0,
+      investmentActivities: 0,
+      holdingSnapshots: 0,
     },
     sample: [
       {
@@ -108,6 +110,8 @@ describe('RollbackDialog', () => {
       deletedTransactionTaxMetadata: 0,
       deletedBudgetExclusions: 0,
       unlinkedPlannedEvents: 0,
+      deletedInvestmentActivities: 0,
+      deletedHoldingSnapshots: 0,
     } as never)
     const onRolledBack = vi.fn()
     const onClose = vi.fn()
