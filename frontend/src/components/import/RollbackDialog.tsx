@@ -41,6 +41,8 @@ export type RollbackImpact = {
     transactionTaxMetadata: number
     budgetExclusions: number
     plannedEventsUnlinked: number
+    investmentActivities: number
+    holdingSnapshots: number
   }
   sample: Array<{
     id: number
@@ -60,6 +62,8 @@ export type RollbackResult = {
   deletedTransactionTaxMetadata: number
   deletedBudgetExclusions: number
   unlinkedPlannedEvents: number
+  deletedInvestmentActivities: number
+  deletedHoldingSnapshots: number
 }
 
 type RollbackDialogProps = {
@@ -206,6 +210,8 @@ function RollbackCounts({ impact }: { impact: RollbackImpact }) {
     { label: 'Tax metadata to clear', value: counts.transactionTaxMetadata },
     { label: 'Budget exclusions to clear', value: counts.budgetExclusions },
     { label: 'Planned events to unlink', value: counts.plannedEventsUnlinked },
+    { label: 'Investment activities to delete', value: counts.investmentActivities },
+    { label: 'Holding snapshots to delete', value: counts.holdingSnapshots },
   ]
   return (
     <dl

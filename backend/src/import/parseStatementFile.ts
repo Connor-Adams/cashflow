@@ -373,8 +373,19 @@ function parseOfx(
 
 type TxnDupKeyFields = { date: string; amount: number | string; currency: string; merchantRaw: string };
 
-function txnDupKey(r: TxnDupKeyFields): string {
-  return `${r.date}|${String(r.amount)}|${r.currency}|${r.merchantRaw}`;
+/**
+ * Dup-detection map key. The amount MUST be coerced through Number():
+ * incoming preview rows carry a JS number ('-123.45') while existing rows
+ * carry the Transaction.amount model attribute, a DECIMAL(14,4) declared as
+ * string — Postgres returns it padded to the typmod scale ('-123.4500').
+ * Without the coercion the two representations never collide in the Map and
+ * every preview row reads as non-duplicate in production (SQLite's numeric
+ * affinity returns a plain number, which is why tests passed).
+ *
+ * Exported for tests.
+ */
+export function txnDupKey(r: TxnDupKeyFields): string {
+  return `${r.date}|${Number(r.amount)}|${r.currency}|${r.merchantRaw}`;
 }
 
 function normalizeSourceRef(v: string | null | undefined): string | null {

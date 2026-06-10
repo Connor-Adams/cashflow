@@ -67,13 +67,38 @@ function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function promotePending(existing: InstanceType<typeof Transaction>, incomingRef: string | null, t: SequelizeTransaction): Promise<DedupOutcome> {
+async function promotePending(
+  existing: InstanceType<typeof Transaction>,
+  incomingRef: string | null,
+  t: SequelizeTransaction,
+  // The settled identity the incoming posted row presents. Promotion must
+  // adopt it (date + identity fingerprint): the row was matched via the
+  // pending-window tier precisely because its pending-era hold date (and the
+  // fingerprint hashed from it) differ from the settled charge. If we left
+  // them in place, a SECOND source re-presenting the same settled transaction
+  // (CSV first, then the same statement as PDF) would miss every tier — the
+  // fingerprint lookup (pending-date hash), the pending window (row is now
+  // 'posted'), and the drift tier (exact-date match) — and insert a
+  // duplicate, double-counting spend.
+  incomingIdentity?: { sourceIdentityFingerprint: string; date?: string },
+): Promise<DedupOutcome> {
   existing.status = 'posted';
-  if (incomingRef != null) existing.sourceReference = incomingRef;
-  await existing.save({
-    transaction: t,
-    fields: incomingRef == null ? ['status'] : ['status', 'sourceReference'],
-  });
+  const fields: string[] = ['status'];
+  if (incomingRef != null) {
+    existing.sourceReference = incomingRef;
+    fields.push('sourceReference');
+  }
+  if (incomingIdentity) {
+    if (incomingIdentity.date != null && existing.date !== incomingIdentity.date) {
+      existing.date = incomingIdentity.date;
+      fields.push('date');
+    }
+    if (existing.sourceIdentityFingerprint !== incomingIdentity.sourceIdentityFingerprint) {
+      existing.sourceIdentityFingerprint = incomingIdentity.sourceIdentityFingerprint;
+      fields.push('sourceIdentityFingerprint');
+    }
+  }
+  await existing.save({ transaction: t, fields: fields as never });
   logger.info(
     {
       transactionId: existing.id,
@@ -127,10 +152,14 @@ export async function findExistingForDedup(args: {
     },
     transaction: args.t,
   });
+  const incomingIdentity = {
+    sourceIdentityFingerprint: args.sourceIdentityFingerprint,
+    date: args.incomingDate,
+  };
   const exact = exactRefMatch(candidates, incomingRef);
   if (exact) {
     if (exact.status === 'pending' && args.incomingStatus === 'posted') {
-      return promotePending(exact, incomingRef, args.t);
+      return promotePending(exact, incomingRef, args.t, incomingIdentity);
     }
     return { kind: 'duplicate', existingId: exact.id };
   }
@@ -141,7 +170,7 @@ export async function findExistingForDedup(args: {
   const toBackfill = existingNullWhenIncomingPopulated(candidates, incomingRef);
   if (toBackfill && incomingRef != null) {
     if (toBackfill.status === 'pending' && args.incomingStatus === 'posted') {
-      return promotePending(toBackfill, incomingRef, args.t);
+      return promotePending(toBackfill, incomingRef, args.t, incomingIdentity);
     }
     toBackfill.sourceReference = incomingRef;
     // Scoped save: only persist the sourceReference column. The audit-hash
@@ -179,7 +208,7 @@ export async function findExistingForDedup(args: {
           normalizePendingMatchText(row.merchantClean) === incomingText),
     );
     if (match) {
-      return promotePending(match, incomingRef, args.t);
+      return promotePending(match, incomingRef, args.t, incomingIdentity);
     }
   }
 
