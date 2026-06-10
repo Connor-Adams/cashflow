@@ -15,7 +15,13 @@ import { toUnits, fromUnits } from '../util/numbers';
 // market value, NOT from the cash-flow transaction stream — txns on these
 // accounts (buys, transfers, dividends) net out to portfolio value, and
 // summing them as a balance double-counts or produces nonsense.
-const PORTFOLIO_DRIVEN_TYPES = new Set(['investment']);
+//
+// Exported so other holdings-vs-balance call sites (routes/reporting.ts)
+// apply the exact same split: only these account types feed
+// portfolioMarketValueAt; everything else contributes its txn-stream
+// balance only. Holdings on a mistyped non-investment account would
+// otherwise count on top of that account's full balance.
+export const PORTFOLIO_DRIVEN_TYPES = new Set(['investment']);
 
 export type DataQualityWarning = 'asset_balance_negative';
 

@@ -1,4 +1,5 @@
 import { Op } from 'sequelize';
+import { latestActivePositions } from '../portfolio/latestHoldings';
 
 export type PortfolioRow = {
   accountId: number;
@@ -83,33 +84,17 @@ export async function portfolioMarketValueAt(
     ],
   });
 
-  // Per-account latest statement date ≤ asOf (rows are statementDate DESC,
-  // so the first row seen per account carries it). A position whose own
-  // latest snapshot predates the account's newest statement was absent from
-  // that statement — i.e. fully sold — so it contributes zero from that date
-  // onward instead of carrying its last pre-sale value forward forever.
-  // Imports write no zero-quantity tombstones, so absence is the only sale
-  // signal we have.
-  const accountLatestDate = new Map<number, string>();
-  const latest = new Map<string, (typeof allHoldings)[number]>();
-  for (const h of allHoldings) {
-    if (!accountLatestDate.has(h.accountId)) {
-      accountLatestDate.set(h.accountId, h.statementDate);
-    }
-    const key = `${h.accountId}:${h.securityId}`;
-    if (!latest.has(key)) latest.set(key, h);
-  }
-  for (const [key, h] of latest) {
-    const accountLatest = accountLatestDate.get(h.accountId);
-    if (accountLatest != null && h.statementDate < accountLatest) {
-      latest.delete(key);
-    }
-  }
-  if (latest.size === 0) return { rows: [], gaps: [] };
+  // Current position per (account, security) pair within the asOf-capped
+  // scope. A position whose own latest snapshot predates the account's
+  // newest statement ≤ asOf was absent from that statement — i.e. fully
+  // sold — so it contributes zero from that date onward instead of carrying
+  // its last pre-sale value forward forever. The inference lives in
+  // portfolio/latestHoldings.ts, shared with routes/portfolio.ts so the
+  // Portfolio page and net worth always agree.
+  const latest = latestActivePositions(allHoldings);
+  if (latest.length === 0) return { rows: [], gaps: [] };
 
-  const securityIds = Array.from(
-    new Set(Array.from(latest.values(), (h) => h.securityId))
-  );
+  const securityIds = Array.from(new Set(latest.map((h) => h.securityId)));
   const asOfEndOfDay = `${asOf}T23:59:59.999Z`;
   const allPrices = await SecurityPrice.findAll({
     where: {
@@ -126,7 +111,7 @@ export async function portfolioMarketValueAt(
   const rows: PortfolioRow[] = [];
   const gaps: PortfolioGap[] = [];
 
-  for (const h of latest.values()) {
+  for (const h of latest) {
     const price = priceBySecurity.get(h.securityId);
     const quantity = n(h.quantity) ?? 0;
     const quotePrice = n(price?.price);

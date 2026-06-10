@@ -21,6 +21,7 @@ import {
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
+import { latestActivePositions } from '../portfolio/latestHoldings';
 import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
 import {
@@ -132,6 +133,10 @@ async function buildUnifiedCadTotal(
  * Pull the most-recent HoldingSnapshot row for every (account, security)
  * tuple in the caller's visible scope. Returns the rows AND a parallel
  * map of accountId → Account so callers can attach an account name.
+ *
+ * Positions absent from their account's newest statement are excluded
+ * (fully sold — see latestActivePositions), matching net worth's
+ * portfolioMarketValueAt so the Portfolio page never disagrees with it.
  */
 async function loadVisibleLatestHoldings(req: Request): Promise<{
   accounts: Account[];
@@ -156,15 +161,7 @@ async function loadVisibleLatestHoldings(req: Request): Promise<{
       ['id', 'DESC'],
     ],
   });
-  const seen = new Set<string>();
-  const latestHoldings: HoldingSnapshot[] = [];
-  for (const row of snapshots) {
-    const key = `${row.accountId}:${row.securityId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    latestHoldings.push(row);
-  }
-  return { accounts, latestHoldings };
+  return { accounts, latestHoldings: latestActivePositions(snapshots) };
 }
 
 router.get('/', async (req, res, next) => {

@@ -4,7 +4,12 @@ import { Account, Transaction, TaxReserveSetting, Label, PlannedEvent, FinanceEv
 import { DEFAULT_TAX_RESERVE_PERCENT } from '../models/TaxReserveSetting';
 import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { balanceAtDate } from '../networth/balanceAtDate';
-import { buildSeries, monthEndDatesInRange, daysInRange } from '../networth/aggregate';
+import {
+  buildSeries,
+  monthEndDatesInRange,
+  daysInRange,
+  PORTFOLIO_DRIVEN_TYPES,
+} from '../networth/aggregate';
 import { portfolioMarketValueAt } from '../networth/portfolioMarketValueAt';
 import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
@@ -21,7 +26,18 @@ const ESSENTIAL_CATEGORIES = new Set([
 const router = Router();
 
 const LIQUID_ACCOUNT_TYPES = new Set(['checking', 'savings', 'cash']);
-const INVESTMENT_ACCOUNT_TYPES = new Set(['investment']);
+
+/**
+ * Accounts whose holdings (not txn stream) drive value — only their ids may
+ * be passed to portfolioMarketValueAt. Mirrors networth/aggregate's
+ * buildNetWorthAt: holdings on a mistyped non-investment account must not
+ * count on top of that account's txn-stream balance.
+ */
+function portfolioAccountIds(accounts: Array<{ id: number; accountType: string | null }>): number[] {
+  return accounts
+    .filter((a) => PORTFOLIO_DRIVEN_TYPES.has(a.accountType ?? ''))
+    .map((a) => a.id);
+}
 
 // Maps internal accountType values to the contract's four canonical types.
 function mapAccountType(raw: string | null): 'cash' | 'credit_card' | 'investment' | 'loan' {
@@ -54,14 +70,14 @@ router.get('/summary', async (req, res, next) => {
         // transfers, dividends) doesn't sum to a meaningful balance. Holdings
         // market value is added below instead — mirrors networth/aggregate's
         // PORTFOLIO_DRIVEN_TYPES skip so this netWorth agrees with /net-worth.
-        if (INVESTMENT_ACCOUNT_TYPES.has(acc.accountType ?? '')) return;
+        if (PORTFOLIO_DRIVEN_TYPES.has(acc.accountType ?? '')) return;
         const bals = await balanceAtDate(acc, today);
         for (const { currency, amount } of bals) {
           balEntries.push({ accountType: acc.accountType ?? 'checking', currency, amount });
         }
       }),
     );
-    const portfolio = await portfolioMarketValueAt(today, accounts.map((a) => a.id));
+    const portfolio = await portfolioMarketValueAt(today, portfolioAccountIds(accounts));
     for (const row of portfolio.rows) {
       balEntries.push({ accountType: 'investment', currency: row.currency, amount: row.marketValue });
     }
@@ -436,7 +452,7 @@ router.get('/projections', async (req, res, next) => {
         const type = acc.accountType ?? 'checking';
         // Investment accounts contribute holdings market value (below) —
         // their txn-stream balance is a meaningless buy/transfer residual.
-        if (INVESTMENT_ACCOUNT_TYPES.has(type)) return;
+        if (PORTFOLIO_DRIVEN_TYPES.has(type)) return;
         const bals = await balanceAtDate(acc, today);
         for (const { currency: c, amount } of bals) {
           if (c !== currency) continue;
@@ -445,7 +461,7 @@ router.get('/projections', async (req, res, next) => {
         }
       }),
     );
-    const projPortfolio = await portfolioMarketValueAt(today, accounts.map((a) => a.id));
+    const projPortfolio = await portfolioMarketValueAt(today, portfolioAccountIds(accounts));
     for (const row of projPortfolio.rows) {
       if (row.currency === currency) investmentValue += row.marketValue;
     }
