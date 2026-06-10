@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express';
-import { Op } from 'sequelize';
+import { Op, col, fn } from 'sequelize';
 import { logger } from '../observability/logger';
 import {
   Account,
@@ -1508,6 +1508,32 @@ router.get('/security/:id', async (req, res, next) => {
       if (!latestByAccount.has(h.accountId)) latestByAccount.set(h.accountId, h);
     }
 
+    // allHoldings is scoped to this one security, so the account's newest
+    // statement date is not in that result set — load it across ALL
+    // securities. A position whose latest snapshot predates its account's
+    // newest statement was absent from that statement, i.e. fully sold
+    // (imports write no zero-quantity tombstones; same inference as
+    // latestActivePositions). Judged per account so a newer statement on one
+    // account never zeroes another's position.
+    const staleAccountIds = new Set<number>();
+    if (latestByAccount.size > 0) {
+      const newestRows = (await HoldingSnapshot.findAll({
+        attributes: [
+          'accountId',
+          [fn('MAX', col('statement_date')), 'maxStatementDate'],
+        ],
+        where: { accountId: [...latestByAccount.keys()] },
+        group: ['account_id'],
+        raw: true,
+      })) as unknown as Array<{ accountId: number; maxStatementDate: string }>;
+      for (const row of newestRows) {
+        const latest = latestByAccount.get(row.accountId);
+        if (latest && latest.statementDate < row.maxStatementDate) {
+          staleAccountIds.add(row.accountId);
+        }
+      }
+    }
+
     // Group activities by account.
     const actsByAccount = new Map<number, InvestmentActivity[]>();
     for (const a of allActivities) {
@@ -1541,7 +1567,10 @@ router.get('/security/:id', async (req, res, next) => {
 
     for (const accId of involvedAccountIds) {
       const acctName = accountById.get(accId)?.name ?? String(accId);
-      const latestHolding = latestByAccount.get(accId);
+      // Fully sold → no current holding; ACB history below still applies.
+      const latestHolding = staleAccountIds.has(accId)
+        ? undefined
+        : latestByAccount.get(accId);
       const acts = actsByAccount.get(accId) ?? [];
       const acbInput: AcbActivity[] = acts.map((r) => ({
         id: r.id,
