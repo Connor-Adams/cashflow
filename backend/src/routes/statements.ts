@@ -33,10 +33,11 @@ import {
   sequelize,
 } from '../models';
 import {
+  householdWhere,
   visibleAccountWhere,
   visibleStatementWhere,
-  visibleTransactionWhere,
 } from '../auth/scope';
+import { accountKind } from '../networth/accountKind';
 import { currentAuth } from '../auth/middleware';
 import { logger } from '../observability/logger';
 import { aiSuggestLimiter } from './aiRateLimit';
@@ -264,10 +265,15 @@ router.post('/', async (req, res, next) => {
  */
 router.get('/', async (req, res, next) => {
   try {
-    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
+    // parseInt('abc') is NaN and Math.max(1, NaN) is NaN — guard with a
+    // finite check so malformed params fall back to the defaults instead
+    // of feeding NaN limit/offset into Sequelize.
+    const rawPage = parseInt(String(req.query.page ?? '1'), 10);
+    const page = Math.max(1, Number.isInteger(rawPage) ? rawPage : 1);
+    const rawPageSize = parseInt(String(req.query.pageSize ?? '50'), 10);
     const pageSize = Math.min(
       100,
-      Math.max(1, parseInt(String(req.query.pageSize ?? '50'), 10)),
+      Math.max(1, Number.isInteger(rawPageSize) ? rawPageSize : 50),
     );
     const offset = (page - 1) * pageSize;
     const where: Record<string, unknown> = { ...visibleStatementWhere(req) };
@@ -310,10 +316,9 @@ router.get('/', async (req, res, next) => {
 });
 
 /**
- * Pure helper: gather the per-account transactions inside the statement's
- * window and feed them to {@link computeReconciliation}. Exported via
- * `getReconciliationFor` for testability, but the route is the only caller
- * today.
+ * Gather the account's posted, statement-currency transactions inside the
+ * statement's window and feed them to {@link computeReconciliation}.
+ * Liability accounts are compared in the bank's positive-owed convention.
  */
 async function getReconciliationFor(
   statement: AccountStatement,
@@ -321,8 +326,21 @@ async function getReconciliationFor(
 ) {
   const txns = await Transaction.findAll({
     where: {
-      ...visibleTransactionWhere(req),
+      // Reconciliation is an account-level ledger check against the bank's
+      // numbers: every household row on the account is real money in the
+      // bank's closing balance, so scope by household only — NOT by the
+      // viewer's per-transaction visibility (otherwise the same statement
+      // reports different math to each spouse). The statement itself is
+      // still visibility-scoped by the caller via loadVisibleStatement.
+      ...householdWhere(req),
       accountId: statement.accountId,
+      // A bank statement reflects posted activity only — pending rows are
+      // not part of the reported closing balance.
+      status: { [Op.ne]: 'pending' },
+      // Multi-currency accounts: only rows in the statement's currency
+      // explain its balances (mirrors networth/balanceAtDate's
+      // per-currency bucketing).
+      currency: statement.currency,
       date: { [Op.between]: [statement.periodStart, statement.periodEnd] },
     },
     attributes: [
@@ -343,10 +361,22 @@ async function getReconciliationFor(
       ['id', 'ASC'],
     ],
   });
+  // Liability statements (credit card / loan / mortgage) print balances as
+  // positive amounts owed, while charges are stored negative internally
+  // (csvProfiles invert_sign). Negate the transaction stream so
+  // expectedClosing stays in the bank's positive-owed convention the user
+  // transcribed from the statement.
+  const account = await Account.findByPk(statement.accountId, {
+    attributes: ['id', 'accountType'],
+  });
+  const isLiability =
+    account != null && accountKind(account.accountType) === 'liability';
   const result = computeReconciliation({
     openingBalance: statement.openingBalance,
     closingBalance: statement.closingBalance,
-    transactions: txns.map((t) => ({ amount: t.amount })),
+    transactions: txns.map((t) => ({
+      amount: isLiability ? -Number(t.amount) : t.amount,
+    })),
   });
   return {
     reconciliation: {
