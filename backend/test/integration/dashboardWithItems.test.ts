@@ -170,7 +170,7 @@ test('dashboard: splits txn across item categories with pro-rated tax', async ()
     externalOrderId: order.id,
     confidence: '95',
     matchReason: 'test',
-    status: 'confirmed',
+    status: 'accepted',
     linkedAmount: '105.00',
   });
 
@@ -411,7 +411,7 @@ test('dashboard: netSpendByBusiness splits across buckets via item business%', a
     externalOrderId: order.id,
     confidence: '95',
     matchReason: 'test',
-    status: 'confirmed',
+    status: 'accepted',
     linkedAmount: '100.00',
   });
 

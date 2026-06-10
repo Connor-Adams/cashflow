@@ -97,6 +97,15 @@ export function RulesPage() {
     if (splitType !== 'shared') { setShareError(null); return true; }
     const me = parseFloat(pctMe)
     const partner = parseFloat(pctPartner)
+    // Range-check each provided side on its own: a single filled field is
+    // valid (the backend gives the other side the remainder), but it must
+    // still be a real percentage.
+    for (const [label, v] of [['Your share', me], ["Partner's share", partner]] as const) {
+      if (!isNaN(v) && (v < 0 || v > 100)) {
+        setShareError(`${label} must be between 0 and 100%`)
+        return false
+      }
+    }
     if (!isNaN(me) && !isNaN(partner)) {
       const sum = Math.round((me + partner) * 10) / 10
       if (Math.abs(sum - 100) > 0.05) {

@@ -57,7 +57,7 @@ test('loadItemAllocationContext: returns maps keyed by txn id / order id', async
     externalOrderId: order.id,
     confidence: '90',
     matchReason: 'test',
-    status: 'confirmed',
+    status: 'accepted',
     linkedAmount: '100.00',
   } as never);
 
@@ -67,4 +67,63 @@ test('loadItemAllocationContext: returns maps keyed by txn id / order id', async
   assert.ok(ctx.ordersById.has(order.id), 'ordersById should contain the order');
   assert.equal(Number(ctx.ordersById.get(order.id)?.total), 100);
   assert.equal(ctx.itemsByOrder.get(order.id)?.[0]?.inferredCategory, 'Groceries');
+});
+
+test('loadItemAllocationContext: excludes suggested and rejected links', async () => {
+  const account = await Account.create({ name: 'Status Account' } as never);
+  const txn = await Transaction.create({
+    accountId: account.id,
+    importBatch: 'test',
+    date: '2026-01-02',
+    merchantRaw: 'Amazon',
+    merchantClean: 'Amazon',
+    amount: '-100.00',
+    currency: 'CAD',
+    sourceRowFingerprint: 'fp-lia-002',
+    sourceIdentityFingerprint: 'sif-lia-002',
+  } as never);
+
+  const mkOrder = async (key: string) => {
+    const order = await ExternalOrder.create({
+      vendor: 'amazon',
+      dedupeKey: key,
+      total: '100.00',
+      subtotal: '100.00',
+      currency: 'CAD',
+      source: 'test',
+    } as never);
+    await ExternalOrderItem.create({
+      externalOrderId: order.id,
+      title: 'Widget',
+      quantity: 1,
+      totalPrice: '100.00',
+      inferredCategory: 'Shopping',
+    } as never);
+    return order;
+  };
+  const accepted = await mkOrder('k-accepted');
+  const suggested = await mkOrder('k-suggested');
+  const rejected = await mkOrder('k-rejected');
+  for (const [order, status] of [
+    [accepted, 'accepted'],
+    [suggested, 'suggested'],
+    [rejected, 'rejected'],
+  ] as const) {
+    await TransactionOrderLink.create({
+      transactionId: txn.id,
+      externalOrderId: order.id,
+      confidence: '90',
+      matchReason: 'test',
+      status,
+      linkedAmount: '100.00',
+    } as never);
+  }
+
+  const ctx = await loadItemAllocationContext([txn.id]);
+  // Only the accepted link may feed splitTxnByItems — a stale suggested or
+  // superseded/rejected link would double-count the txn across categories.
+  assert.equal(ctx.linksByTxn.get(txn.id)?.length, 1);
+  assert.equal(ctx.linksByTxn.get(txn.id)?.[0]?.externalOrderId, accepted.id);
+  assert.equal(ctx.ordersById.has(suggested.id), false);
+  assert.equal(ctx.ordersById.has(rejected.id), false);
 });
