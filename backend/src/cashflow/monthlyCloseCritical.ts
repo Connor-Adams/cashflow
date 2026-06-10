@@ -12,7 +12,13 @@
  */
 
 import { Op } from 'sequelize';
-import { PartnerSettlement, Transaction } from '../models';
+import { PartnerSettlement, Transaction, sequelize } from '../models';
+import {
+  applySettlements,
+  type RawPartnerRow,
+  type SettlementSummary,
+} from '../summary/partnerMath';
+import { num } from '../util/numbers';
 
 export type MonthlyCloseCriticalCounts = {
   /** Transactions still flagged for review in the period. */
@@ -96,47 +102,91 @@ export async function detectMonthlyCloseCritical(
     },
   });
 
-  // Outstanding partner balance — sum settlements grouped by (contact,
-  // currency), then count buckets with a non-zero net.
-  //
-  // We don't need to look at shared transactions here: the partner-balance
-  // workflow expectation is that the user has already settled (or is
-  // about to settle) the imbalance, which is recorded as PartnerSettlement
-  // rows. The cheap heuristic is "do you have ANY non-zero
-  // (contact,currency) settlement bucket as of the end of this period?".
-  //
-  // Since the production fairness math is computed over shared-spend +
-  // settlements, that view is the ground truth for "balance is zero".
-  // For the close warning we deliberately keep the simpler check — any
-  // open partner relationship with non-zero residual settlement
-  // mismatch is surfaced — and rely on the dedicated /partner page for
-  // the full reconciliation.
-  const settlements = (await PartnerSettlement.findAll({
-    where: {
-      ...householdScope,
-      settledDate: {
-        [Op.lt]: range.endExclusive,
+  // Outstanding partner balance — same ground truth as the /api/summary
+  // /partner endpoint (`partnerMath.applySettlements`): per (contact,
+  // currency) bucket, net = rawNet(shared spend) + settledAmount
+  // (iPaid − partnerPaid), computed from the start of time through
+  // period_end. Summing settlement rows alone is wrong in both
+  // directions: unsettled shared spend with no settlement rows would
+  // never warn, and any one-directional settlement that squares a real
+  // balance would warn forever after.
+  const [spendRows, settlements] = await Promise.all([
+    Transaction.findAll({
+      where: {
+        ...householdScope,
+        date: {
+          [Op.lt]: range.endExclusive,
+        },
       },
-    },
-    attributes: ['contactId', 'currency', 'direction', 'amount'],
-    raw: true,
-  })) as ReadonlyArray<{
-    contactId: number;
-    currency: string;
-    direction: 'i_paid_partner' | 'partner_paid_me';
-    amount: string;
-  }>;
+      attributes: [
+        'currency',
+        'ownershipContactId',
+        [
+          sequelize.fn('SUM', sequelize.col('partner_share_amount')),
+          'sumPartner',
+        ],
+      ],
+      group: ['currency', 'ownershipContactId'],
+      raw: true,
+    }) as unknown as Promise<
+      ReadonlyArray<{
+        currency: string;
+        ownershipContactId: number | null;
+        sumPartner: unknown;
+      }>
+    >,
+    PartnerSettlement.findAll({
+      where: {
+        ...householdScope,
+        settledDate: {
+          [Op.lt]: range.endExclusive,
+        },
+      },
+      attributes: ['contactId', 'currency', 'direction', 'amount'],
+      raw: true,
+    }) as unknown as Promise<
+      ReadonlyArray<{
+        contactId: number;
+        currency: string;
+        direction: 'i_paid_partner' | 'partner_paid_me';
+        amount: string;
+      }>
+    >,
+  ]);
 
-  const bucketMap = new Map<string, number>();
+  const settlementByKey = new Map<string, SettlementSummary>();
   for (const row of settlements) {
-    const key = `${row.contactId}|${row.currency}`;
-    const value = Number(row.amount) || 0;
-    const signed = row.direction === 'i_paid_partner' ? value : -value;
-    bucketMap.set(key, (bucketMap.get(key) ?? 0) + signed);
+    const amount = num(row.amount) ?? 0;
+    const key = `${row.contactId}\0${row.currency}`;
+    const existing = settlementByKey.get(key) ?? {
+      contactId: row.contactId,
+      currency: row.currency,
+      iPaid: 0,
+      partnerPaid: 0,
+    };
+    if (row.direction === 'i_paid_partner') existing.iPaid += amount;
+    else existing.partnerPaid += amount;
+    settlementByKey.set(key, existing);
   }
+
+  const rawRows: RawPartnerRow[] = spendRows.map((r) => ({
+    currency: r.currency,
+    // Buckets are already collapsed per (contact, currency); the ownership
+    // type does not enter the net math (see partnerMath.rawNetForRow).
+    ownershipType: 'aggregate',
+    ownershipContactId: r.ownershipContactId,
+    contactName: null,
+    sumMy: null,
+    sumPartner: num(r.sumPartner),
+  }));
+
+  const adjusted = applySettlements(
+    rawRows,
+    Array.from(settlementByKey.values()),
+  );
   let outstandingPartnerBuckets = 0;
-  for (const total of bucketMap.values()) {
-    if (Math.abs(total) >= 0.005) outstandingPartnerBuckets += 1;
+  for (const row of adjusted) {
+    if (Math.abs(row.net) >= 0.005) outstandingPartnerBuckets += 1;
   }
 
   const reasons: MonthlyCloseCriticalReason[] = [];
