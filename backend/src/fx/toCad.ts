@@ -57,10 +57,10 @@ export async function toCad(
   });
 
   const fresh = await ensureFxRate(currency, 'CAD', date);
-  // ensureFxRate's 7-day cache window has no upper bound, so it can return a
-  // future-dated row when the user asks for an old date. Treat that case as a
-  // miss here — the fallbacks below will surface it as `fallback_any` instead
-  // of misleadingly labeling a future rate as `cached`/`fetched`.
+  // Defensive: ensureFxRate's cache window and the BoC fetch are both bounded
+  // at `date`, so ratedDate should never exceed it — but guard anyway so a
+  // future-dated row can never masquerade as `cached`/`fetched` (the fallbacks
+  // below would surface it as `fallback_any` instead).
   if (fresh && fresh.ratedDate <= date) {
     const source: ToCadSource =
       preExisting && preExisting.ratedDate === fresh.ratedDate ? 'cached' : 'fetched';

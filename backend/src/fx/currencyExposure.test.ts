@@ -122,6 +122,23 @@ test('aggregates by currency case-insensitively but emits uppercase', async () =
   assert.equal(usd.sumNative, 100);
 });
 
+test('shareOfTotal is volume-based: offsetting flows do not cancel to 0%', async () => {
+  // USD has 4x the CAD volume but nets to zero. Exposure share must reflect
+  // volume (abs amounts), not the net — otherwise heavy two-way activity
+  // reports ~0% exposure.
+  const txns = [txn('USD', 100), txn('USD', -100), txn('CAD', 50)];
+  const result = await computeCurrencyExposure(txns, '2026-05-01', 'CAD', stubFx);
+  const usd = result.byCurrency.find((r) => r.currency === 'USD');
+  const cad = result.byCurrency.find((r) => r.currency === 'CAD');
+  assert.ok(usd);
+  assert.ok(cad);
+  // Net conversion is unchanged: USD nets to 0.
+  assert.equal(usd.cadEquivalent, 0);
+  // Volume: USD 200 native → 270 CAD; CAD 50. Total volume 320.
+  assert.ok(Math.abs(usd.shareOfTotal - 270 / 320) < 0.0001);
+  assert.ok(Math.abs(cad.shareOfTotal - 50 / 320) < 0.0001);
+});
+
 test('shareOfTotal handles zero-total edge', async () => {
   // Two transactions that net to zero CAD-equivalent.
   const txns = [txn('CAD', 100), txn('CAD', -100)];

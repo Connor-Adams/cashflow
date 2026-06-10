@@ -213,6 +213,42 @@ test('ensureFxRate: cache miss fetches from BoC and persists row', async () => {
   }
 });
 
+test('ensureFxRate: historical asOf ignores newer cached rows and fetches the historical rate', async () => {
+  // A current-day row exists (e.g. from the daily USD/CAD backfill job) —
+  // far newer than the historical asOf being requested. It must NOT satisfy
+  // the cache for a 2023 lookup.
+  await FxRate.create({
+    fromCurrency: 'USD',
+    toCurrency: 'CAD',
+    ratedDate: '2026-06-01',
+    rate: '1.3700',
+    source: 'bank_of_canada',
+    fetchedAt: new Date(),
+  });
+
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = false;
+  globalThis.fetch = (async () => {
+    fetchCalled = true;
+    return new Response(
+      JSON.stringify({
+        observations: [{ d: '2023-06-30', FXUSDCAD: { v: '1.3240' } }],
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  try {
+    const result = await ensureFxRate('USD', 'CAD', '2023-06-30');
+    assert.ok(result !== null);
+    assert.equal(fetchCalled, true, 'rows newer than asOf must not satisfy the cache');
+    assert.equal(result.rate, 1.324);
+    assert.equal(result.ratedDate, '2023-06-30');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await FxRate.destroy({ where: { fromCurrency: 'USD', toCurrency: 'CAD' } });
+  }
+});
+
 test('ensureFxRate: HTTP failure returns null', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
