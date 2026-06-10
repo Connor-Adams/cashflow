@@ -72,3 +72,39 @@ test('rbc credit-card profile still inverts (positive source charge -> negative)
 test('listImportProfiles includes rbc_banking', () => {
   assert.ok(listImportProfiles().some((p) => p.id === 'rbc_banking'));
 });
+
+test('rbc USD rows import from the USD$ column when CAD$ is blank', () => {
+  // RBC exports always include both CAD$ and USD$; a USD transaction leaves
+  // CAD$ empty. The row must not be dropped as "missing columns".
+  const row = { ...rbcRow('Visa', '', 'US VENDOR'), 'USD$': '12.50' };
+  const m = mapCsvRow(row, RBC_HEADERS, 'rbc', 'CAD');
+  assert.ok(!('error' in m), `expected mapped row, got ${JSON.stringify(m)}`);
+  if ('error' in m) return;
+  assert.equal(m.value.amount, -12.5);
+  assert.equal(m.value.currency, 'USD');
+});
+
+test('rbc_banking USD rows keep source sign and USD currency', () => {
+  const row = { ...rbcRow('Chequing', '', 'US VENDOR'), 'USD$': '-40.00' };
+  const m = mapCsvRow(row, RBC_HEADERS, 'rbc_banking', 'CAD');
+  assert.ok(!('error' in m), `expected mapped row, got ${JSON.stringify(m)}`);
+  if ('error' in m) return;
+  assert.equal(m.value.amount, -40);
+  assert.equal(m.value.currency, 'USD');
+});
+
+test('rbc CAD rows still default to CAD currency', () => {
+  const m = mapCsvRow(rbcRow('Visa', '90.00'), RBC_HEADERS, 'rbc', 'CAD');
+  assert.ok(!('error' in m));
+  if ('error' in m) return;
+  assert.equal(m.value.currency, 'CAD');
+});
+
+test('generic_simple hint describes its charges_negative convention, not a pre-signed file', () => {
+  const entry = listImportProfiles().find((p) => p.id === 'generic_simple');
+  assert.ok(entry);
+  // The convention forces positive amounts negative, so the hint must not
+  // claim 'negative = charge' (that describes the pre-signed profile).
+  assert.match(entry!.hint, /positive = charge/i);
+  assert.doesNotMatch(entry!.hint, /negative = charge/i);
+});
