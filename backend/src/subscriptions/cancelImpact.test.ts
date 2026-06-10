@@ -138,6 +138,20 @@ test('weekly $10 over 6 months → count 26, amount 260', () => {
   assert.equal(impact.amount, 260);
 });
 
+test('annual $600 over 6 months → expected count 0.5, amount 300 (never a full renewal)', () => {
+  // 1 per year * (6/12) = 0.5 expected occurrences. Rounding 0.5 up to a
+  // whole renewal would claim a full year's charge ($600) saved inside six
+  // months — the expectation ($300) is the honest figure when the renewal
+  // date is unknown.
+  const impact = computeCancelImpact({
+    perPeriodAmount: 600,
+    cadence: 'annual',
+    horizonMonths: 6,
+  });
+  assert.equal(impact.count, 0.5);
+  assert.equal(impact.amount, 300);
+});
+
 test('quarterly $30 over 6 months → count 2, amount 60', () => {
   // 4 per year * (6/12) = 2 occurrences.
   const impact = computeCancelImpact({

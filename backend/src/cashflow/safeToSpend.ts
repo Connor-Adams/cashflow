@@ -23,6 +23,7 @@ import { PlannedEvent } from '../models/PlannedEvent';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
   expandRecurrence,
+  cadenceToRecurrenceRule,
   type PlannedEventLike,
 } from '../forecast/expandRecurrence';
 import { projectGoal } from '../goals/projection';
@@ -198,6 +199,11 @@ export async function getCurrentCash(
  * household. `debt_payment` is handled separately by the credit-card branch
  * (`expectedCreditCardPayments`) so we don't double-count.
  *
+ * Both ordinary planned events and subscription-kind expectations count.
+ * Subscriptions carry a `cadence` + `nextExpectedDate` instead of a
+ * recurrenceRule, so we synthesize a rule for them — mirrors the forecast
+ * route (routes/forecast.ts), which fixed the same exclusion for the chart.
+ *
  * The amount of each row is multiplied by the number of occurrences that
  * fall inside the window (per `expandRecurrence`) — a weekly subscription
  * within a 30-day window contributes ~4x its single-row amount.
@@ -210,7 +216,7 @@ export async function getUpcomingRequiredExpenses(
 ): Promise<number> {
   const where: WhereOptions = {
     householdId,
-    kind: 'planned',
+    kind: { [Op.in]: ['planned', 'subscription'] },
     currency,
     status: 'planned',
     expectedDate: { [Op.lte]: windowEndDate },
@@ -219,10 +225,21 @@ export async function getUpcomingRequiredExpenses(
   const rows = await PlannedEvent.findAll({ where });
   let totalU = 0;
   for (const row of rows) {
+    const hasExplicitRule =
+      row.recurrenceRule != null && row.recurrenceRule.trim() !== '';
+    const recurrenceRule = hasExplicitRule
+      ? row.recurrenceRule
+      : row.kind === 'subscription'
+        ? cadenceToRecurrenceRule(row.cadence)
+        : null;
+    const seedDate =
+      row.kind === 'subscription' && row.nextExpectedDate
+        ? row.nextExpectedDate
+        : row.expectedDate;
     const eventLike: PlannedEventLike = {
       id: row.id,
-      expectedDate: row.expectedDate,
-      recurrenceRule: row.recurrenceRule,
+      expectedDate: seedDate,
+      recurrenceRule,
       status: row.status,
     };
     const occs = expandRecurrence(eventLike, asOfDate, windowEndDate);

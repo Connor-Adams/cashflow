@@ -104,6 +104,53 @@ test('expandRecurrence: monthly RRULE clamps to last day for short months', () =
   assert.ok(dates.includes('2026-04-30'));
 });
 
+test('expandRecurrence: monthly day-31 anchor recovers after a short month (no BYMONTHDAY)', () => {
+  // cadenceToRecurrenceRule emits bare FREQ=MONTHLY for subscriptions, so the
+  // anchor day must come from the seed date: Jan 31 → Feb 28 (clamped) must
+  // recover to Mar 31, not drift to the 28th forever.
+  const event: PlannedEventLike = {
+    id: 11,
+    expectedDate: '2026-01-31',
+    recurrenceRule: 'FREQ=MONTHLY',
+    status: 'planned',
+  };
+  const occs = expandRecurrence(event, '2026-01-01', '2026-04-30');
+  assert.deepEqual(
+    occs.map((o) => o.date),
+    ['2026-01-31', '2026-02-28', '2026-03-31', '2026-04-30'],
+  );
+});
+
+test('expandRecurrence: quarterly (INTERVAL=3) day-31 anchor clamps per-month without drifting', () => {
+  // Jan 31 quarterly: Apr 30 (clamped), then back to Jul 31 and Oct 31 —
+  // not Jul 30 / Oct 30 forever.
+  const event: PlannedEventLike = {
+    id: 12,
+    expectedDate: '2026-01-31',
+    recurrenceRule: 'FREQ=MONTHLY;INTERVAL=3',
+    status: 'planned',
+  };
+  const occs = expandRecurrence(event, '2026-01-01', '2026-12-31');
+  assert.deepEqual(
+    occs.map((o) => o.date),
+    ['2026-01-31', '2026-04-30', '2026-07-31', '2026-10-31'],
+  );
+});
+
+test('expandRecurrence: yearly Feb-29 anchor returns to Feb 29 in leap years', () => {
+  const event: PlannedEventLike = {
+    id: 13,
+    expectedDate: '2024-02-29',
+    recurrenceRule: 'FREQ=YEARLY',
+    status: 'planned',
+  };
+  const occs = expandRecurrence(event, '2024-01-01', '2028-12-31');
+  assert.deepEqual(
+    occs.map((o) => o.date),
+    ['2024-02-29', '2025-02-28', '2026-02-28', '2027-02-28', '2028-02-29'],
+  );
+});
+
 test('expandRecurrence: weekly RRULE expands every 7 days', () => {
   // Coffee subscription, every Friday, starting May 1 (a Fri). Window:
   // May 8 to May 31 → Fri 8/15/22/29.
