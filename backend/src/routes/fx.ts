@@ -39,8 +39,14 @@ import {
   type ReportingAggregate,
 } from '../fx/reportingNormalization';
 import { looseHistoricalFxLookup } from '../networth/aggregate';
+import { withCadCrossRates } from '../fx/crossCurrencyFxLookup';
 
 const router = Router();
+
+// looseHistoricalFxLookup only resolves X→CAD (the FxRate table carries only
+// CAD-cross series). These routes accept any reportingCurrency, so wrap it to
+// derive CAD→X (inverse) and X→Y (chained via CAD) pairs.
+const reportingFxLookup = withCadCrossRates(looseHistoricalFxLookup);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCY_RE = /^[A-Z]{3}$/;
@@ -125,7 +131,7 @@ router.get('/exposure', async (req, res, next) => {
       })),
       asOf,
       reportingCurrency,
-      looseHistoricalFxLookup
+      reportingFxLookup
     );
     res.json(result);
   } catch (err) {
@@ -388,7 +394,7 @@ router.get('/reporting', async (req, res, next) => {
       aggs,
       reportingCurrency,
       asOf,
-      looseHistoricalFxLookup
+      reportingFxLookup
     );
 
     res.json({
