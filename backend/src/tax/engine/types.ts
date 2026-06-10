@@ -121,6 +121,20 @@ export type TaxYearFacts = {
   year: number;
   jurisdiction: 'CA-ON';
   employmentIncome: IncomeItem[];
+  /**
+   * Plan-scoped salary additions (e.g. household-plan routed ownerComp salary).
+   * Unlike `employmentIncome` actuals — which buildT1 IGNORES whenever T4 slips
+   * exist (slip-preference dedup) — these are always added on top of L10100.
+   */
+  employmentIncomeAdditions?: IncomeItem[];
+  /** CPP/QPP retirement benefits (L11400). Not pensionable/insurable earnings. */
+  cppBenefits?: Decimal;
+  /**
+   * OAS pension (L11300). Not pensionable/insurable earnings. Also caps the
+   * L23500 social-benefits repayment: the recovery tax cannot exceed OAS
+   * actually received (absent/zero → no clawback).
+   */
+  oasBenefits?: Decimal;
   selfEmploymentIncome: IncomeItem[];
   selfEmploymentExpenses: IncomeItem[];
   interestIncome: IncomeItem[];
@@ -136,14 +150,6 @@ export type TaxYearFacts = {
   caregiverDependents?: Array<{ name: string; netIncome: Decimal; eligibleAmount: Decimal }>;
   tuitionFees?: Decimal;
   pensionIncome?: Decimal; // sum of L11500 + L11600 pension lines, before 65 vs 65+ split
-  /**
-   * OAS benefits received in the year — caps the L23500 social-benefits
-   * repayment (recovery tax cannot exceed OAS received; absent/zero → no
-   * clawback). Annotation only: the engine does NOT add it to income; the
-   * `income.oasRetirement` override key appends the amount to
-   * employmentIncome[] for income inclusion and stamps this field.
-   */
-  oasIncome?: Decimal;
   spouse?: {
     netIncome: Decimal;
   };

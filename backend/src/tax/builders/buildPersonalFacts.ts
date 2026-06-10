@@ -209,13 +209,16 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   // per-security history up to year-end — NOT just this tax year's rows. A
   // year-windowed feed makes prior-year buys (and return_of_capital) invisible,
   // collapsing ACB to ~0 and grossly overstating realized gains as near-$0-cost
-  // dispositions. We walk all activity at-or-before year-end, then keep only the
-  // dispositions that actually settled DURING the tax year.
+  // dispositions. We walk all activity through 30 days past year-end (so the
+  // superficial-loss check can see January repurchases for late-December
+  // dispositions), then keep only the dispositions that actually settled
+  // DURING the tax year.
+  const acbFeedEnd = `${year + 1}-01-30`;
   const acbActivity = accountIds.length
     ? await InvestmentActivity.findAll({
         where: {
           accountId: accountIds,
-          tradeDate: { [Op.lte]: yearEnd },
+          tradeDate: { [Op.lte]: acbFeedEnd },
         },
       })
     : [];
@@ -224,33 +227,64 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
   const securityIds = Array.from(new Set(acbActivity.map((a) => a.securityId).filter((x): x is number => x != null)));
   for (const sid of securityIds) {
     const acts = acbActivity.filter((a) => a.securityId === sid);
-    const acb = computeAcb(acts.map((a) => ({
-      id: a.id as number,
-      activityType: a.activityType as string,
-      tradeDate: a.tradeDate as unknown as string,
-      quantity: a.quantity != null ? Number(a.quantity) : null,
-      amount: a.amount != null ? Number(a.amount) : null,
-      currency: a.currency as string,
-      fees: a.fees != null ? Number(a.fees) : null,
-    })));
+    // CRA requires per-leg FX conversion: each buy/sell/fee leg converts at its
+    // own trade-date rate, so the ACB walk — and the CapGainEvent the T1 engine
+    // treats as CAD — is genuinely in CAD (proceeds at the sale-date rate, cost
+    // base accumulated at acquisition-date rates).
+    const acbInput = [];
+    for (const a of acts) {
+      const currency = (a.currency as string | null) ?? 'CAD';
+      const tradeDate = a.tradeDate as unknown as string;
+      let amount = a.amount != null ? Number(a.amount) : null;
+      let fees = a.fees != null ? Number(a.fees) : null;
+      if (currency !== 'CAD') {
+        if (amount != null) amount = (await toCad(D(amount), currency, tradeDate)).cad.toNumber();
+        if (fees != null) fees = (await toCad(D(fees), currency, tradeDate)).cad.toNumber();
+      }
+      acbInput.push({
+        id: a.id as number,
+        activityType: a.activityType as string,
+        tradeDate,
+        quantity: a.quantity != null ? Number(a.quantity) : null,
+        amount,
+        currency: 'CAD',
+        fees,
+        splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
+      });
+    }
+    const acb = computeAcb(acbInput);
     for (const realized of acb.realizedEvents) {
       // Prior-year dispositions are already reported on their own year's return;
       // here they only serve to advance the ACB state. Keep just this year's.
       if (realized.tradeDate < yearStart || realized.tradeDate > yearEnd) continue;
       const rawGain = D(realized.proceeds).minus(D(realized.costRemoved));
       let superficialLossDenied: typeof rawGain | undefined;
-      if (rawGain.lessThan(0)) {
+      if (rawGain.lessThan(0) && realized.qtySold > 0) {
+        // CRA superficial-loss window: 30 days BEFORE through 30 days after the
+        // disposition (61 days, same-day included), AND identical property must
+        // still be held at the end of the window. Denial is proportional per
+        // CRA's administrative formula min(S, P, B) / S × loss, where S = units
+        // sold, P = units acquired in the window, B = units held at window end.
         const sellDate = new Date(`${realized.tradeDate}T00:00:00.000Z`);
-        const windowEnd = new Date(sellDate.getTime() + 30 * 86_400_000);
-        const windowEndStr = windowEnd.toISOString().slice(0, 10);
-        const repurchase = acbActivity.find(
-          a => a.securityId === sid
-            && (a.activityType === 'buy' || a.activityType === 'reinvestment')
-            && (a.tradeDate as unknown as string) > realized.tradeDate
-            && (a.tradeDate as unknown as string) <= windowEndStr
-        );
-        if (repurchase) {
-          superficialLossDenied = rawGain.negated();
+        const windowStartStr = new Date(sellDate.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+        const windowEndStr = new Date(sellDate.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+        const acquiredInWindow = acts
+          .filter(a =>
+            (a.activityType === 'buy' || a.activityType === 'reinvestment')
+            && (a.tradeDate as unknown as string) >= windowStartStr
+            && (a.tradeDate as unknown as string) <= windowEndStr)
+          .reduce((sum, a) => sum + (a.quantity != null ? Number(a.quantity) : 0), 0);
+        // Units held at window end: last ACB timeline state at-or-before the
+        // window end (timeline is chronological; the feed extends 30 days past
+        // year-end so December windows are fully covered).
+        let heldAtWindowEnd = 0;
+        for (const st of acb.timeline) {
+          if (st.asOf > windowEndStr) break;
+          heldAtWindowEnd = st.quantity;
+        }
+        if (acquiredInWindow > 0 && heldAtWindowEnd > 0) {
+          const deniedUnits = Math.min(realized.qtySold, acquiredInWindow, heldAtWindowEnd);
+          superficialLossDenied = rawGain.negated().times(deniedUnits).dividedBy(realized.qtySold);
         }
       }
       capitalGainEvents.push({

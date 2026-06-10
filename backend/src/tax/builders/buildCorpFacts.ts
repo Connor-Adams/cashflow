@@ -104,17 +104,31 @@ export async function buildCorpFacts(
   );
   for (const sid of securityIds) {
     const acts = activity.filter((a) => a.securityId === sid);
-    const acb = computeAcb(
-      acts.map((a) => ({
+    // CRA requires per-leg FX conversion: each buy/sell/fee leg converts at its
+    // own trade-date rate, so the ACB walk — and the CapGainEvent the T2 engine
+    // feeds into AAII / CDA / RDTOH math — is genuinely in CAD.
+    const acbInput = [];
+    for (const a of acts) {
+      const currency = (a as unknown as { currency?: string }).currency ?? 'CAD';
+      const tradeDate = a.tradeDate as unknown as string;
+      let amount = a.amount != null ? Number(a.amount) : null;
+      let fees = a.fees != null ? Number(a.fees) : null;
+      if (currency !== 'CAD') {
+        if (amount != null) amount = (await toCad(D(amount), currency, tradeDate)).cad.toNumber();
+        if (fees != null) fees = (await toCad(D(fees), currency, tradeDate)).cad.toNumber();
+      }
+      acbInput.push({
         id: a.id as number,
         activityType: a.activityType as string,
-        tradeDate: a.tradeDate as unknown as string,
+        tradeDate,
         quantity: a.quantity != null ? Number(a.quantity) : null,
-        amount: a.amount != null ? Number(a.amount) : null,
-        currency: (a as unknown as { currency?: string }).currency ?? 'CAD',
-        fees: a.fees != null ? Number(a.fees) : null,
-      })),
-    );
+        amount,
+        currency: 'CAD',
+        fees,
+        splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
+      });
+    }
+    const acb = computeAcb(acbInput);
     for (const realized of acb.realizedEvents) {
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,

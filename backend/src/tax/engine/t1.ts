@@ -48,12 +48,21 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       `T4 box 14 total $${t4Box14Total.toFixed(2)} differs from computed employment income $${computedEmployment.toFixed(2)} by more than $50.`
     );
   }
-  const employmentLine = t4s.length > 0 ? t4Box14Total : computedEmployment;
+  // Plan-scoped additions (routed ownerComp salary) are covered by no T4 slip,
+  // so they ride on top of the slip-vs-computed preference instead of being
+  // discarded by it. The >$50 reconciliation warning above compares actuals only.
+  const employmentAdditions = facts.employmentIncomeAdditions ?? [];
+  const employmentAdditionsTotal = sumD(employmentAdditions.map((i) => i.cadAmount));
+  const employmentLine = (t4s.length > 0 ? t4Box14Total : computedEmployment)
+    .plus(employmentAdditionsTotal);
   push('L10100', 'Employment income', employmentLine,
-    t4s.length > 0
-      ? t4s.map((s) => ({ source: `Slip T4 #${s.slipId} box 14`, amount: s.boxes['box14'] ?? D('0') }))
-      : facts.employmentIncome.map((i) => ({ source: i.source, amount: i.cadAmount })),
-    t4s.length > 0 ? 'sum(T4.box14)' : 'sum(employmentTransactions.cad)'
+    [
+      ...(t4s.length > 0
+        ? t4s.map((s) => ({ source: `Slip T4 #${s.slipId} box 14`, amount: s.boxes['box14'] ?? D('0') }))
+        : facts.employmentIncome.map((i) => ({ source: i.source, amount: i.cadAmount }))),
+      ...employmentAdditions.map((i) => ({ source: i.source, amount: i.cadAmount })),
+    ],
+    t4s.length > 0 ? 'sum(T4.box14) + additions' : 'sum(employmentTransactions.cad) + additions'
   );
 
   // T5 slip reconciliation: prefer slip amounts when present
@@ -159,10 +168,25 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   // SE CPP — compute immediately after seNet (needed before netIncome)
   const seCppContrib = seNet.greaterThan(0) ? computeCppSelfEmployed(seNet, r) : D('0');
 
-  // Pension income L11500
+  // Pension income L11500. May be negative when a pension-split transfer-out
+  // (deduction L21000 on a real T1) exceeds pension actuals — the net effect
+  // on income is identical, but credits below must floor at zero.
   const pensionAmt = facts.pensionIncome ?? D('0');
   if (pensionAmt.greaterThan(0)) {
     push('L11500', 'Pension income', pensionAmt, [{ source: 'pension', amount: pensionAmt }]);
+  }
+
+  // CPP/QPP retirement benefits L11400 and OAS pension L11300 — fully taxable
+  // ordinary income, but NOT pensionable or insurable earnings: they attract no
+  // CPP contributions, EI premiums, or Canada employment amount, and are not
+  // eligible pension income for the pension credit.
+  const cppBenefits = facts.cppBenefits ?? D('0');
+  if (cppBenefits.greaterThan(0)) {
+    push('L11400', 'CPP/QPP benefits', cppBenefits, [{ source: 'CPP/QPP benefits', amount: cppBenefits }]);
+  }
+  const oasBenefits = facts.oasBenefits ?? D('0');
+  if (oasBenefits.greaterThan(0)) {
+    push('L11300', 'OAS pension', oasBenefits, [{ source: 'OAS pension', amount: oasBenefits }]);
   }
 
   // Rental income L12600 (net of expenses)
@@ -179,7 +203,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   }
 
   // Total income L15000
-  const totalIncome = sumD([employmentLine, interest, eligibleGrossed, nonElGrossed, cg.taxable, seNet, pensionAmt, rentalNet]);
+  const totalIncome = sumD([employmentLine, interest, eligibleGrossed, nonElGrossed, cg.taxable, seNet, pensionAmt, cppBenefits, oasBenefits, rentalNet]);
   push('L15000', 'Total income', totalIncome);
 
   // RRSP deduction L20800
@@ -207,7 +231,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
 
   // OAS clawback / social benefits repayment L23500 — computed on net income
   // before adjustments, capped at the OAS benefits actually received.
-  const oasRepayment = oasClawback(netIncome, facts.oasIncome ?? D('0'), r);
+  const oasRepayment = oasClawback(netIncome, oasBenefits, r);
   if (oasRepayment.greaterThan(0)) {
     push('L23500', 'Social benefits repayment (OAS clawback)', oasRepayment, [],
       `min(OAS received, 15% × max(0, netIncome − ${r.oasClawbackThreshold.toFixed(2)}))`);
@@ -250,7 +274,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
     r,
   );
   const tuitionFedCredit = tuitionCreditFederal(facts.tuitionFees ?? D('0'), r);
-  const pensionFedCredit = pensionIncomeCreditFederal(facts.pensionIncome ?? D('0'), r);
+  const pensionFedCredit = pensionIncomeCreditFederal(maxZero(pensionAmt), r);
 
   const totalMedical = sumD(facts.medicalExpenses.map(i => i.cadAmount));
   const medicalFedCredit = medicalCreditFederal(totalMedical, netIncome, r);
@@ -317,7 +341,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const ageOnAmt = ageCreditOntario(facts.ageAtYearEnd, netIncome, r);
   const onCreditTotal = sumD([bpaOnAmt, spousalOnAmt, ageOnAmt, cppEiCreditEligible]).times(r.provincialBrackets[0].rate);
   const onDonationsCredit = donationCreditOntario(totalDonations, taxableIncome, r);
-  const onPensionCredit = pensionIncomeCreditOntario(facts.pensionIncome ?? D('0'), r);
+  const onPensionCredit = pensionIncomeCreditOntario(maxZero(pensionAmt), r);
   const onMedicalCredit = medicalCreditOntario(totalMedical, netIncome, r);
   const onDtcEligible = dtcOntario(eligibleGrossed, 'eligible', r);
   const onDtcNonEligible = dtcOntario(nonElGrossed, 'non_eligible', r);

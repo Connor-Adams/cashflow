@@ -3,8 +3,9 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../../db';
 import {
-  Account, Entity, Household, HouseholdPlan, Scenario, ShareholderLoan, Transaction,
+  Account, Entity, Household, HouseholdPlan, Scenario, ShareholderLoan, TaxSlip, Transaction,
 } from '../../models';
+import { D } from '../util/decimal';
 import { computeHouseholdPlan } from './computeHouseholdPlan';
 import { ensureCorpBaselineScenario } from './resolveCorpScenario';
 import { ensureBaselineScenario } from './resolveScenario';
@@ -376,15 +377,60 @@ test('computeHouseholdPlan applies pension split between two linked spouses', as
   assert.equal(aResult.computed.factsHash, 'household-integrated');
   assert.equal(bResult.computed.factsHash, 'household-integrated');
 
-  // A's L10100 = 120k − 30k = 90k after the split shift; B's = 0 + 30k.
+  // Pension-split shifts are PENSION income, not employment (audit fix): A's
+  // L10100 stays at the full 120k (no phantom CPP/EI reduction), the −30k nets
+  // off A's totalIncome like the L21000 deduction would, and B's +30k lands on
+  // the pension line (L11500), not L10100.
   const aEmp = (aResult.computed.lines as Array<{ code: string; amount: string }>)
     .find((l) => l.code === 'L10100');
-  const bEmp = (bResult.computed.lines as Array<{ code: string; amount: string }>)
-    .find((l) => l.code === 'L10100');
+  const bPension = (bResult.computed.lines as Array<{ code: string; amount: string }>)
+    .find((l) => l.code === 'L11500');
   assert.ok(aEmp, 'expected L10100 on A');
-  assert.ok(bEmp, 'expected L10100 on B');
-  assert.equal(aEmp.amount, '90000');
-  assert.equal(bEmp.amount, '30000');
+  assert.ok(bPension, 'expected L11500 on B for the routed split');
+  assert.equal(aEmp.amount, '120000', 'employment income is not reduced by a pension split');
+  assert.equal(bPension.amount, '30000');
+  assert.equal(
+    D(aResult.computed.totals.totalIncome as string).toFixed(2), '90000.00',
+    'A totalIncome reflects 120k − 30k transfer-out',
+  );
+  assert.equal(
+    D(bResult.computed.totals.totalIncome as string).toFixed(2), '30000.00',
+    'B totalIncome reflects +30k transfer-in',
+  );
+});
+
+test('routed ownerComp salary reaches the T1 even when the shareholder has a T4 slip', async () => {
+  // Regression (audit fix): buildT1 prefers T4 box 14 over computed employment
+  // rows, so a routed salary injected as a plain employmentIncome row was
+  // silently discarded for anyone with a T4 — an ownerComp.<id>.salary of $60k
+  // changed that shareholder's T1 by $0.
+  const { household, personal, corp } = await seedHouseholdWithCorpAndPersonal();
+  await TaxSlip.create({
+    entityId: personal.id, year: 2025, slipType: 'T4', issuer: 'DayJob Inc.',
+    boxValues: { box14: 80000 },
+  } as never);
+  const plan = await HouseholdPlan.create({
+    householdId: household.id, name: 'Salary with T4', notes: null,
+  });
+  const corpBaseline = await ensureCorpBaselineScenario(corp.id, 2025);
+  await Scenario.create({
+    parentId: corpBaseline.id, householdPlanId: plan.id,
+    entityId: corp.id, year: 2025, name: 'Salary heavy', kind: 'fork',
+    overrides: {
+      [`ownerComp.${personal.id}.salary`]: 60000,
+      'corp.salaryPaid': 60000,
+    },
+    assumptions: {}, nextYearId: null, notes: null,
+  });
+  const personalBaseline = await ensureBaselineScenario(personal.id, 2025);
+  await personalBaseline.update({ householdPlanId: plan.id });
+
+  const out = await computeHouseholdPlan(plan.id);
+  assert.equal(out.personal.length, 1);
+  const empLine = (out.personal[0].computed.lines as Array<{ code: string; amount: string }>)
+    .find((l) => l.code === 'L10100');
+  assert.ok(empLine, 'expected L10100 line on personal T1');
+  assert.equal(empLine.amount, '140000', 'T4 box 14 (80k) + routed salary (60k)');
 });
 
 test('corp dividend ledger auto-flows to the owner T1 (non-eligible)', async () => {

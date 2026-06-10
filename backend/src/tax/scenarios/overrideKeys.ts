@@ -136,13 +136,13 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     validate: (v) => assertNumber(v, 'income.cppRetirement'),
     apply: (facts, value) => {
       assertNumber(value, 'income.cppRetirement');
+      // L11400 — NOT employment income: CPP benefits are neither pensionable
+      // nor insurable, so routing them through employmentIncome manufactured
+      // phantom CPP contributions, EI premiums, and the employment amount.
       const d = D(String(value));
       return {
         ...facts,
-        employmentIncome: [
-          ...facts.employmentIncome,
-          { source: 'override:income.cppRetirement', amount: d, cadAmount: d },
-        ],
+        cppBenefits: (facts.cppBenefits ?? D('0')).plus(d),
       };
     },
   },
@@ -154,15 +154,12 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     validate: (v) => assertNumber(v, 'income.oasRetirement'),
     apply: (facts, value) => {
       assertNumber(value, 'income.oasRetirement');
+      // L11300 — see income.cppRetirement note. The same field is read by the
+      // L23500 clawback: repayment caps at OAS actually received.
       const d = D(String(value));
       return {
         ...facts,
-        employmentIncome: [
-          ...facts.employmentIncome,
-          { source: 'override:income.oasRetirement', amount: d, cadAmount: d },
-        ],
-        // Annotation read by the L23500 clawback: repayment caps at OAS received.
-        oasIncome: (facts.oasIncome ?? D('0')).plus(d),
+        oasBenefits: (facts.oasBenefits ?? D('0')).plus(d),
       };
     },
   },

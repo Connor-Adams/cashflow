@@ -173,43 +173,37 @@ function buildRouterInputs(
   return { ownerCompPlans, corpReturns };
 }
 
-// Merge an `IncomeItem`-shaped row into one of the personal facts arrays. The
-// router emits a single per-source aggregate per addition kind, so we append
-// at most one row per call. Optionally folds in spouseRouter shifts: a positive
-// IncomeItem for `pensionSplitTransferIn` and a negative IncomeItem for
-// `pensionSplitTransferOut` (negative `cadAmount` subtracts via sum in
-// `buildT1`'s computed-employment path on L10100).
+// Merge router output into the personal facts. The router emits a single
+// per-source aggregate per addition kind, so we append at most one row per
+// call. Routed salary rides `employmentIncomeAdditions` (NOT a plain
+// `employmentIncome` row) so buildT1 adds it on top of L10100 even when T4
+// slips exist — the slip-preference dedup would otherwise silently discard it.
+// spouseRouter pension-split shifts fold into `pensionIncome`: a split is
+// pension income (L11600 in / L21000 out), not employment — routing it through
+// L10100 manufactured phantom CPP/EI (and negative EI on large transfer-outs).
 function applyAdditionsAndShifts(
   baseFacts: TaxYearFacts,
   additions: PersonalAdditions | null,
   shift: SpouseShift | null,
 ): TaxYearFacts {
   const factsPlus: TaxYearFacts = { ...baseFacts };
-  const employmentExtras = [...factsPlus.employmentIncome];
 
   if (additions && additions.employmentIncome.greaterThan(0)) {
-    employmentExtras.push({
-      source: 'integration:routed-salary',
-      amount: additions.employmentIncome,
-      cadAmount: additions.employmentIncome,
-    });
+    factsPlus.employmentIncomeAdditions = [
+      ...(factsPlus.employmentIncomeAdditions ?? []),
+      {
+        source: 'integration:routed-salary',
+        amount: additions.employmentIncome,
+        cadAmount: additions.employmentIncome,
+      },
+    ];
   }
-  if (shift && shift.pensionSplitTransferIn.greaterThan(0)) {
-    employmentExtras.push({
-      source: 'spouseRouter:pensionSplit.transferIn',
-      amount: shift.pensionSplitTransferIn,
-      cadAmount: shift.pensionSplitTransferIn,
-    });
+  if (shift) {
+    const net = shift.pensionSplitTransferIn.minus(shift.pensionSplitTransferOut);
+    if (!net.isZero()) {
+      factsPlus.pensionIncome = (baseFacts.pensionIncome ?? D('0')).plus(net);
+    }
   }
-  if (shift && shift.pensionSplitTransferOut.greaterThan(0)) {
-    const out = shift.pensionSplitTransferOut.negated();
-    employmentExtras.push({
-      source: 'spouseRouter:pensionSplit.transferOut',
-      amount: out,
-      cadAmount: out,
-    });
-  }
-  factsPlus.employmentIncome = employmentExtras;
 
   if (additions) {
     if (additions.eligibleDividends.greaterThan(0)) {

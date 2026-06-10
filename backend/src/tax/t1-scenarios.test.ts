@@ -176,9 +176,8 @@ test('Scenario G: OAS clawback — only applies to OAS actually received, capped
     ageAtYearEnd: 72,
     employmentIncome: [
       { source: 'pension draw', amount: D('100000'), cadAmount: D('100000') },
-      { source: 'OAS', amount: D('8500'), cadAmount: D('8500') },
     ],
-    oasIncome: D('8500'),
+    oasBenefits: D('8500'),
   };
   const retWithOas = buildT1(factsWithOas, r);
   const oasLine = retWithOas.lines.find((l) => l.code === 'L23500');
@@ -196,9 +195,8 @@ test('Scenario G: OAS clawback — only applies to OAS actually received, capped
     ageAtYearEnd: 72,
     employmentIncome: [
       { source: 'pension draw', amount: D('200000'), cadAmount: D('200000') },
-      { source: 'OAS', amount: D('8500'), cadAmount: D('8500') },
     ],
-    oasIncome: D('8500'),
+    oasBenefits: D('8500'),
   };
   const retCapped = buildT1(factsCapped, r);
   const cappedLine = retCapped.lines.find((l) => l.code === 'L23500');
@@ -211,9 +209,8 @@ test('Scenario G: OAS clawback — only applies to OAS actually received, capped
     ageAtYearEnd: 72,
     employmentIncome: [
       { source: 'pension draw', amount: D('91500'), cadAmount: D('91500') },
-      { source: 'OAS', amount: D('8500'), cadAmount: D('8500') },
     ],
-    oasIncome: D('8500'),
+    oasBenefits: D('8500'),
     fhsaContribs: [{ source: 'FHSA', amount: D('8000'), date: '2024-02-01' }],
     carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('100000'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
   };
