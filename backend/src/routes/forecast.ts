@@ -385,19 +385,28 @@ router.get('/', async (req, res, next) => {
 
       // For each detected item, project occurrences forward using its
       // cadence and avgAmount. The detector emits `nextExpected` and a
-      // `cadence` ('monthly'|'weekly') — we step forward from there.
+      // `cadence` ('monthly'|'weekly') — expand on a true calendar schedule
+      // (like the income path below): fixed 30-day steps drift across month
+      // boundaries and add a spurious extra charge when the window length is
+      // a multiple of 30 (e.g. a 90-day window saw 4 "monthly" charges).
       let recurringIdCounter = 1;
       for (const item of recurringItems) {
         if (plannedNameKeys.has(item.merchant.trim().toLowerCase())) continue;
-        const stepDays = item.cadence === 'weekly' ? 7 : 30;
-        let cursor = item.nextExpected;
-        // If the predicted next-expected date is already past, fast-forward
-        // it to land in or after the window.
-        while (cursor < dateFrom) cursor = addDaysIso(cursor, stepDays);
+        const rule = item.cadence === 'weekly' ? 'FREQ=WEEKLY' : 'FREQ=MONTHLY';
         const id = recurringIdCounter++;
-        while (cursor <= dateTo) {
+        const occs = expandRecurrence(
+          {
+            id,
+            expectedDate: item.nextExpected,
+            recurrenceRule: rule,
+            status: 'planned',
+          },
+          dateFrom,
+          dateTo,
+        );
+        for (const occ of occs) {
           allOccurrences.push({
-            date: cursor,
+            date: occ.date,
             amount: item.avgAmount,
             direction: 'out',
             sourceType: 'recurring_detection',
@@ -405,7 +414,6 @@ router.get('/', async (req, res, next) => {
             sourceName: item.merchant,
             accountId: null,
           });
-          cursor = addDaysIso(cursor, stepDays);
         }
       }
 

@@ -161,21 +161,20 @@ function addDays(iso: string, n: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function addMonths(iso: string, n: number, byMonthDay: number | null): string {
+function addMonths(iso: string, n: number, targetDay: number): string {
   const [y, m] = iso.split('-').map((p) => parseInt(p, 10));
   const totalMonths = (y * 12 + (m - 1) + n);
   const ny = Math.floor(totalMonths / 12);
   const nm = (totalMonths % 12) + 1;
-  const targetDay = byMonthDay ?? parseInt(iso.split('-')[2], 10);
   const clamped = Math.min(targetDay, daysInMonth(ny, nm));
   return toIso(ny, nm, clamped);
 }
 
-function addYears(iso: string, n: number): string {
-  const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10));
-  // Feb 29 → Feb 28 in non-leap years (keep month/day, clamp day to month).
+function addYears(iso: string, n: number, targetDay: number): string {
+  const [y, m] = iso.split('-').map((p) => parseInt(p, 10));
+  // Feb 29 → Feb 28 in non-leap years (keep month, clamp day to month).
   const ny = y + n;
-  const clamped = Math.min(d, daysInMonth(ny, m));
+  const clamped = Math.min(targetDay, daysInMonth(ny, m));
   return toIso(ny, m, clamped);
 }
 
@@ -213,6 +212,11 @@ export function expandRecurrence(
   const occurrences: Occurrence[] = [];
   let current = seedDate;
   let step = 0;
+  // Anchor the day-of-month/day-of-year on the SEED date (or explicit
+  // BYMONTHDAY), never on the previous occurrence: stepping from a clamped
+  // date (Jan 31 → Feb 28) must recover to the anchor day in longer months
+  // (Mar 31), not drift to the 28th forever. Same for yearly Feb-29 anchors.
+  const anchorDay = parseInt(seedDate.split('-')[2], 10);
 
   // Generate occurrences in order. Stop when:
   //   - we exceed COUNT
@@ -240,10 +244,10 @@ export function expandRecurrence(
         next = addDays(current, 7 * rule.interval);
         break;
       case 'MONTHLY':
-        next = addMonths(current, rule.interval, rule.byMonthDay);
+        next = addMonths(current, rule.interval, rule.byMonthDay ?? anchorDay);
         break;
       case 'YEARLY':
-        next = addYears(current, rule.interval);
+        next = addYears(current, rule.interval, anchorDay);
         break;
     }
     // Guard against an INTERVAL=0 or similar parse miss that would loop

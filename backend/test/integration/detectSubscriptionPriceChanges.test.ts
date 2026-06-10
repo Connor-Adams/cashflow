@@ -169,3 +169,33 @@ test('upserts (does not duplicate or reopen) on a re-run with the same increase'
   const after = await models.Insight.findOne({ where: { type: 'subscription_price_increase' } });
   assert.equal(after!.status, 'dismissed');
 });
+
+test('does NOT emit when the most recent matching row is a refund/credit', async () => {
+  // A positive refund (e.g. a two-month credit) must not be read as the
+  // latest charge — Math.abs would turn it into a fake +100% price hike.
+  const { householdId, userId, accountId } = await seedHousehold();
+  await seedSub(householdId, userId, 'Crave');
+  await seedTxn(householdId, accountId, 'Crave', '-9.99', '2026-04-20');
+  await seedTxn(householdId, accountId, 'Crave', '-9.99', '2026-05-20');
+  await seedTxn(householdId, accountId, 'Crave', '19.98', '2026-06-05'); // refund, most recent
+  const r = await detect();
+  assert.equal(r.detected, 0);
+  assert.equal(await models.Insight.count(), 0);
+});
+
+test('refunds inside the 90-day window do not pollute the median baseline', async () => {
+  // Charges $10 → $11 (+10%) with a small unrelated credit in between. The
+  // baseline must stay at the $10 charge median, not the charge/credit mix.
+  const { householdId, userId, accountId } = await seedHousehold();
+  await seedSub(householdId, userId, 'Disney');
+  await seedTxn(householdId, accountId, 'Disney', '-10.00', '2026-04-25');
+  await seedTxn(householdId, accountId, 'Disney', '1.00', '2026-05-10'); // credit
+  await seedTxn(householdId, accountId, 'Disney', '-11.00', '2026-06-01');
+  const r = await detect();
+  assert.equal(r.detected, 1);
+  const ins = await models.Insight.findOne({ where: { type: 'subscription_price_increase' } });
+  assert.ok(ins);
+  const md = ins!.metadata as { newAmountCents: number; previousAmountCents: number };
+  assert.equal(md.newAmountCents, 1100);
+  assert.equal(md.previousAmountCents, 1000);
+});
