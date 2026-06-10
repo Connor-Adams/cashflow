@@ -25,6 +25,11 @@ import {
 import { SkeletonRow } from '@/components/ui/skeleton'
 import { EmptyTableRow } from '@/components/ui/empty-state'
 import { getJson } from '../../lib/api'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '../../lib/dateInput'
 import { formatMoney } from '../../lib/formatMoney'
 
 interface TopItem {
@@ -59,13 +64,12 @@ interface TrendResponse {
 }
 
 function defaultDateRange(): { from: string; to: string } {
-  const to = new Date()
-  const from = new Date()
-  from.setDate(from.getDate() - 90)
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  }
+  // Anchor at UTC midnight of the user's local calendar day (issue #280) so
+  // the default range ends on the day the user's clock shows, not UTC's.
+  const to = fromDateInputValue(todayDateInputValue())!
+  const from = new Date(to)
+  from.setUTCDate(from.getUTCDate() - 90)
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 export function AnalyzeTab() {

@@ -8,6 +8,7 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table';
+import { todayDateInputValue } from '@/lib/dateInput';
 
 interface KeyDef {
   key: string;
@@ -124,7 +125,7 @@ function DispositionArrayEditor({ value, onChange }: {
     onChange(next);
   }
   function addRow() {
-    onChange([...value, { proceeds: 0, acb: 0, date: new Date().toISOString().slice(0, 10) }]);
+    onChange([...value, { proceeds: 0, acb: 0, date: todayDateInputValue() }]);
   }
   function removeRow(i: number) {
     onChange(value.filter((_, idx) => idx !== i));

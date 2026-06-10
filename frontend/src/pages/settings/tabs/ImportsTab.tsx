@@ -481,13 +481,13 @@ export function ImportsTab() {
                 <strong>{receiptResult.created ? 'Created' : 'Already on file'}:</strong>{' '}
                 {receiptResult.extracted.vendorName ?? receiptResult.extracted.vendor}
                 {receiptResult.extracted.orderDate && ` · ${receiptResult.extracted.orderDate}`}
-                {receiptResult.extracted.total != null && ` · ${receiptResult.extracted.total} ${receiptResult.extracted.currency ?? ''}`}
+                {receiptResult.extracted.total != null && ` · ${formatMoney(Number(receiptResult.extracted.total), receiptResult.extracted.currency ?? undefined)}`}
               </div>
               {receiptResult.extracted.tenders && receiptResult.extracted.tenders.length > 1 && (
                 <div className="muted" style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
                   Split tender:{' '}
                   {receiptResult.extracted.tenders
-                    .map((t) => `${t.network ?? 'card'}${t.paymentLast4 ? ` ••${t.paymentLast4}` : ''} ${t.amount}`)
+                    .map((t) => `${t.network ?? 'card'}${t.paymentLast4 ? ` ••${t.paymentLast4}` : ''} ${formatMoney(Number(t.amount), receiptResult.extracted.currency ?? undefined)}`)
                     .join(' + ')}
                 </div>
               )}
