@@ -186,6 +186,68 @@ test('parser end-to-end — January 2026 statement (rollover period, payment + 5
   assert.equal(Math.round(chargeSum * 100) / 100, -2278);
 });
 
+// ─── Section sum cross-check (synthetic lines, no fixtures needed) ────────────
+//
+// The printed "Total for …" of "Your new charges and credits" is NET of
+// credits, so the parsed sum must accumulate signed amounts in the statement's
+// own convention (charges positive, CR credits negative) — an absolute-value
+// sum both false-alarms on any CR credit and can never catch a sign flip.
+
+import type { PdfLine } from './types';
+
+function mkSyn(text: string, page = 1): PdfLine {
+  return { page, y: 0, text, items: [{ x: 18, width: text.length * 5, str: text }] };
+}
+
+const SYN_HEADER: PdfLine[] = [
+  mkSyn('CIBC Costco Mastercard'),
+  mkSyn('Statement Date January 12, 2026'),
+  mkSyn('December statement period December 13, 2025 to January 12, 2026'),
+  mkSyn('5160 XXXX XXXX 3114'),
+];
+
+test('section cross-check does not false-alarm on a CR credit against the NET printed total', () => {
+  const lines = [
+    ...SYN_HEADER,
+    mkSyn('Your new charges and credits', 2),
+    mkSyn('Dec 13   Dec 15   COSTCO WHOLESALE W1168 GUELPH   ON   Retail and Grocery   1,000.00', 2),
+    mkSyn('Dec 20   Dec 21   COSTCO REFUND W1168 GUELPH   ON   Retail and Grocery   125.00 CR', 2),
+    mkSyn('Total for 5160 XXXX XXXX 3114   $875.00', 2),
+  ];
+  const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.deepEqual(out.parseErrors, []);
+  assert.deepEqual(
+    out.transactions.map((t) => t.amount).sort((a, b) => a - b),
+    [-1000, 125],
+  );
+  assert.deepEqual(out.warnings, []);
+});
+
+test('section cross-check still fires on a genuine mismatch', () => {
+  const lines = [
+    ...SYN_HEADER,
+    mkSyn('Your new charges and credits', 2),
+    mkSyn('Dec 13   Dec 15   COSTCO WHOLESALE W1168 GUELPH   ON   Retail and Grocery   1,000.00', 2),
+    mkSyn('Total for 5160 XXXX XXXX 3114   $1,500.00', 2),
+  ];
+  const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(out.warnings.length, 1);
+  assert.ok(out.warnings[0].includes('sum mismatch'));
+});
+
+test('payments section reconciles against its printed total in the statement convention', () => {
+  const lines = [
+    ...SYN_HEADER,
+    mkSyn('Your payments', 2),
+    mkSyn('Dec 24           Dec 29          PAYMENT THANK YOU/PAIEMENT MERCI            577.04', 2),
+    mkSyn('Total payments   $577.04', 2),
+  ];
+  const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(out.transactions.length, 1);
+  assert.equal(out.transactions[0].amount, 577.04);
+  assert.deepEqual(out.warnings, []);
+});
+
 test('parser produces a deterministic merchantClean (uppercased, collapsed whitespace, no trailing province)', { skip: skipNoFixtures }, async () => {
   const lines = await loadFixture('cibc-costco-2025-12-12.pdf');
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });

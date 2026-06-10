@@ -101,10 +101,14 @@ function parseFxAmount(s: string): number {
 
 type PendingTxn = {
   section: Section;
+  rowIndex: number;
   transDate: string;
   postDate: string;
   merchantRaw: string;
-  amount: number;
+  // null until the standalone amount line is matched — a 0 sentinel would
+  // both import unmatched rows as $0.00 and let a stray later amount line
+  // attach to a genuine $0.00 row.
+  amount: number | null;
   sourceReference: string | null;
   fxCurrency: string | null;
   fxAmount: number | null;
@@ -132,25 +136,36 @@ export const amexReserveParser: PdfParser = {
 
     function flush(): void {
       if (!pending) return;
+      const row = pending;
+      pending = null;
+      if (row.amount === null) {
+        // No amount line ever matched this row (layout drift, malformed
+        // amount) — surface it instead of importing a $0.00 transaction.
+        parseErrors.push({
+          rowIndex: row.rowIndex,
+          message: `No amount line found for transaction "${row.merchantRaw}" (${row.transDate})`,
+        });
+        return;
+      }
       // Negate: Amex PDF positive = charge, negative = credit/payment.
       // Cashflow credit-card convention: positive = money in, negative = money out.
-      const amount = -pending.amount;
+      // (A genuine $0.00 row would negate to -0 — normalize to 0.)
+      const amount = row.amount === 0 ? 0 : -row.amount;
 
-      let merchantRaw = pending.merchantRaw;
-      if (pending.fxCurrency && pending.fxAmount != null && pending.fxRate != null) {
-        merchantRaw += ` [${pending.fxCurrency} ${pending.fxAmount.toFixed(2)} @ ${pending.fxRate}]`;
+      let merchantRaw = row.merchantRaw;
+      if (row.fxCurrency && row.fxAmount != null && row.fxRate != null) {
+        merchantRaw += ` [${row.fxCurrency} ${row.fxAmount.toFixed(2)} @ ${row.fxRate}]`;
       }
 
-      txnSections.push(pending.section);
+      txnSections.push(row.section);
       transactions.push({
-        date: pending.postDate,
+        date: row.postDate,
         merchantRaw,
-        merchantClean: normalizeMerchant(pending.merchantRaw),
+        merchantClean: normalizeMerchant(row.merchantRaw),
         amount,
         currency: ctx.defaultCurrency,
-        sourceReference: pending.sourceReference,
+        sourceReference: row.sourceReference,
       });
-      pending = null;
     }
 
     // Skip account holder name lines dynamically
@@ -183,7 +198,7 @@ export const amexReserveParser: PdfParser = {
       if (holderRe && holderRe.test(text)) continue;
 
       if (isAmountLine(l)) {
-        if (pending && pending.amount === 0) {
+        if (pending && pending.amount === null) {
           pending.amount = parseAmount(text);
         }
         continue;
@@ -211,10 +226,11 @@ export const amexReserveParser: PdfParser = {
           const postDate = monthDayToIso(rowMatch[2], period);
           pending = {
             section: currentSection,
+            rowIndex: i + 1,
             transDate,
             postDate,
             merchantRaw: rowMatch[3].trim(),
-            amount: 0,
+            amount: null,
             sourceReference: null,
             fxCurrency: null,
             fxAmount: null,

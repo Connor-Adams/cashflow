@@ -274,6 +274,53 @@ test('reconciliation gate passes cleanly for a correct credit line statement', (
   assert.equal(result.transactions[0].amount, -500);
 });
 
+// ─── opening principal extraction ─────────────────────────────────────────────
+//
+// Signing is delta-based from the opening principal, so a missing/unparseable
+// opening must be a hard parse error: defaulting to 0 flips the sign of leading
+// payment rows exactly when the reconciliation gate (which needs the same
+// summary lines) is also skipped. A "Principal balance on July 8, 2025" line
+// whose dollar figure wrapped to the next line must NOT parse the year 2025 as
+// a $2,025.00 balance.
+
+const WRAPPED_OPENING_LINES: PdfLine[] = [
+  mkHeader('ROYAL BANK OF CANADA', 1, 730),
+  mkHeader(' Your Royal Credit Line', 1, 719),
+  mkHeader(' Statement', 1, 691),
+  mkHeader('From July 8, 2025 to August 4, 2025', 1, 671),
+  mkHeader(' Your loan account number:   73772650-001', 1, 627),
+  // Dollar figure wrapped to the next line — no money token on this line.
+  mkHeader('Principal balance on July 8, 2025', 1, 424),
+  mkHeader(' Details of your account activity', 1, 185),
+  mkLine(' 9 Jul   WWW TFR TIN0-02268   4,000.00   -4,000.00', 1, 151, 47.3),
+  mkHeader(' Your LoanProtector insurance coverage summary', 1, 100),
+];
+
+const NO_SUMMARY_LINES: PdfLine[] = [
+  mkHeader('ROYAL BANK OF CANADA', 1, 730),
+  mkHeader(' Your Royal Credit Line', 1, 719),
+  mkHeader(' Statement', 1, 691),
+  mkHeader('From July 8, 2025 to August 4, 2025', 1, 671),
+  mkHeader(' Your loan account number:   73772650-001', 1, 627),
+  mkHeader(' Details of your account activity', 1, 185),
+  mkLine(' 9 Jul   WWW TFR TIN0-02268   4,000.00   -4,000.00', 1, 151, 47.3),
+  mkHeader(' Your LoanProtector insurance coverage summary', 1, 100),
+];
+
+test('parse throws when the opening principal line has no dollar figure (wrapped amount, not year-as-balance)', () => {
+  assert.throws(
+    () => rbcCreditLineParser.parse(WRAPPED_OPENING_LINES, { defaultCurrency: 'CAD' }),
+    /opening principal/i,
+  );
+});
+
+test('parse throws when the opening principal summary line is missing entirely', () => {
+  assert.throws(
+    () => rbcCreditLineParser.parse(NO_SUMMARY_LINES, { defaultCurrency: 'CAD' }),
+    /opening principal/i,
+  );
+});
+
 // ─── full parse integration ───────────────────────────────────────────────────
 
 test('rbcCreditLineParser.parse: correct header + transactions for glued-row fixture', () => {

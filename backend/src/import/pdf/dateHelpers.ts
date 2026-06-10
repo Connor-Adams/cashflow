@@ -77,6 +77,13 @@ export function parsePeriod(s: string): Period | null {
  * (period-start or period-end) whose calendar makes the date land inside the
  * statement window with a small slack (trans date can precede period start
  * by a few days; post date sits inside).
+ *
+ * TRANSACTION dates (vs post dates — Amex resolves both here) can precede the
+ * statement opening by weeks (delayed merchant postings: hotels, transit
+ * aggregation, foreign merchants), including crossing into the prior calendar
+ * year ("Dec 31" on a Jan 15-Feb 14 statement). When the tight window finds no
+ * year, retry with a wide early window and startYear-1 as a candidate rather
+ * than dropping the row.
  */
 export function inferYearForMonthDay(monthDay: string, period: Period): number {
   const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(monthDay);
@@ -95,6 +102,14 @@ export function inferYearForMonthDay(monthDay: string, period: Period): number {
   for (const year of candidates) {
     const ms = Date.UTC(year, month, day);
     if (ms >= startMs - slackMs && ms <= endMs + slackMs) return year;
+  }
+  // Fallback for early trans dates. Tried only after the tight window fails,
+  // so in-period dates (incl. annual statements, where any month-day fits the
+  // first pass) are never re-resolved into the prior year.
+  const earlySlackMs = 45 * 24 * 60 * 60 * 1000;
+  for (const year of [startYear - 1, ...candidates]) {
+    const ms = Date.UTC(year, month, day);
+    if (ms >= startMs - earlySlackMs && ms <= endMs + slackMs) return year;
   }
   throw new Error(
     `Month-day ${monthDay} does not fit statement period ${period.start}…${period.end}`,
