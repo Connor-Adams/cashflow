@@ -54,10 +54,17 @@ function normalizeDate(value: string | null | undefined): string | null {
   if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
   const m = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
   if (!m) return null;
-  const year = m[3].length === 2 ? `20${m[3]}` : m[3];
-  const month = m[1].padStart(2, '0');
-  const day = m[2].padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const year = Number(m[3].length === 2 ? `20${m[3]}` : m[3]);
+  let month = Number(m[1]);
+  let day = Number(m[2]);
+  // Ambiguous between MM/DD and DD/MM: keep the MM/DD assumption unless the
+  // first component cannot be a month (Amazon.ca exports are often day-first).
+  if (month > 12 && day <= 12) [month, day] = [day, month];
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  // Reject impossible calendar dates (e.g. Feb 31) instead of emitting them.
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 export function normalizeTitle(title: string): string {

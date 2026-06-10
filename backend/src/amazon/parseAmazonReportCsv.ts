@@ -42,20 +42,61 @@ function canonical(header: string): string {
   return header.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function read(row: Record<string, string>, key: keyof typeof aliases): string | null {
+// Columns that carry a PER-ROW (per item/shipment) amount in Amazon's data
+// export, as opposed to an order-level amount repeated on every row. When
+// rows are grouped into one order these must be summed, not first-row-wins
+// (e.g. the data export's 'Total Amount' is that row's subtotal + tax).
+const PER_ROW_AMOUNT_COLUMNS = new Set(
+  [
+    'shipment item subtotal',
+    'shipment item subtotal tax',
+    'unit price tax',
+    'price tax',
+    'total amount',
+    'transaction amount',
+    'shipping charge',
+  ].map(canonical),
+);
+
+type ReadEntry = { value: string; alias: string };
+
+function readEntry(row: Record<string, string>, key: keyof typeof aliases): ReadEntry | null {
   const wanted = new Set(aliases[key].map(canonical));
   for (const [header, value] of Object.entries(row)) {
-    if (wanted.has(canonical(header)) && String(value || '').trim()) return String(value).trim();
+    const alias = canonical(header);
+    if (wanted.has(alias) && String(value || '').trim()) {
+      return { value: String(value).trim(), alias };
+    }
   }
   return null;
 }
 
+function read(row: Record<string, string>, key: keyof typeof aliases): string | null {
+  return readEntry(row, key)?.value ?? null;
+}
+
+/** Fold a grouped row's amount into the order: sum per-row columns, first-row-wins otherwise. */
+function foldAmount(
+  current: number | null | undefined,
+  next: number | null | undefined,
+  alias: string | undefined,
+): number | null {
+  if (next == null) return current ?? null;
+  if (alias != null && PER_ROW_AMOUNT_COLUMNS.has(alias)) {
+    return current == null ? next : Math.round((current + next) * 100) / 100;
+  }
+  return current ?? next;
+}
+
 function parseMoney(value: string | null): number | null {
   if (!value) return null;
+  // Accounting-style '(12.34)' means a negative (refund/credit).
+  const negative = /^\s*\(.*\)\s*$/.test(value);
   const cleaned = value.replace(/[,$]/g, '').replace(/[^\d.-]/g, '');
   if (!cleaned) return null;
   const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
+  if (!Number.isFinite(n)) return null;
+  return negative && n > 0 ? -n : n;
 }
 
 function parseQty(value: string | null): number | null {
@@ -80,7 +121,8 @@ export function parseAmazonReportCsv(text: string): ParseResult {
   parsed.records.forEach((row, index) => {
     const rowIndex = index + 2;
     const title = read(row, 'title');
-    const total = parseMoney(read(row, 'total'));
+    const totalEntry = readEntry(row, 'total');
+    const total = parseMoney(totalEntry?.value ?? null);
     const totalPrice = parseMoney(read(row, 'totalPrice'));
     const unitPrice = parseMoney(read(row, 'unitPrice'));
     if (!title) {
@@ -92,13 +134,16 @@ export function parseAmazonReportCsv(text: string): ParseResult {
     const shipmentDate = read(row, 'shipmentDate');
     const currency = read(row, 'currency') || 'CAD';
     const paymentLast4 = parseLast4(read(row, 'paymentLast4'));
+    const subtotalEntry = readEntry(row, 'subtotal');
+    const taxEntry = readEntry(row, 'tax');
+    const shippingEntry = readEntry(row, 'shipping');
     const rawOrder: RawAmazonOrder = {
       vendorOrderId,
       orderDate,
       shipmentDate,
-      subtotal: parseMoney(read(row, 'subtotal')),
-      tax: parseMoney(read(row, 'tax')),
-      shipping: parseMoney(read(row, 'shipping')),
+      subtotal: parseMoney(subtotalEntry?.value ?? null),
+      tax: parseMoney(taxEntry?.value ?? null),
+      shipping: parseMoney(shippingEntry?.value ?? null),
       total,
       currency,
       paymentLast4,
@@ -131,10 +176,10 @@ export function parseAmazonReportCsv(text: string): ParseResult {
     const existing = byKey.get(key);
     if (existing) {
       existing.items.push(rawOrder.items[0]);
-      existing.subtotal ??= rawOrder.subtotal;
-      existing.tax ??= rawOrder.tax;
-      existing.shipping ??= rawOrder.shipping;
-      existing.total ??= rawOrder.total;
+      existing.subtotal = foldAmount(existing.subtotal, rawOrder.subtotal, subtotalEntry?.alias);
+      existing.tax = foldAmount(existing.tax, rawOrder.tax, taxEntry?.alias);
+      existing.shipping = foldAmount(existing.shipping, rawOrder.shipping, shippingEntry?.alias);
+      existing.total = foldAmount(existing.total, rawOrder.total, totalEntry?.alias);
     } else {
       byKey.set(key, rawOrder);
     }

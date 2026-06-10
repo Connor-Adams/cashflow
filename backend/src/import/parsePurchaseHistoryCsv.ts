@@ -95,7 +95,13 @@ function classifyColumn(header: string): ColumnRole | null {
 
 function num(raw: string | undefined): number | null {
   if (raw == null) return null;
-  const trimmed = String(raw).replace(/[,$]/g, '').trim();
+  // Strip alphabetic currency prefixes ('CA$4.99', 'US$1.99', 'USD 5.99' in
+  // Google Pay / Takeout exports) before commas and currency symbols.
+  const trimmed = String(raw)
+    .trim()
+    .replace(/^[A-Za-z]{1,3}(?=[\s$])/, '')
+    .replace(/[,$]/g, '')
+    .trim();
   if (!trimmed) return null;
   const n = Number(trimmed);
   return Number.isFinite(n) ? n : null;

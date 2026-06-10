@@ -70,6 +70,21 @@ test('amount with currency symbols and commas is parsed', () => {
   assert.equal(result.orders[0].total, 1299);
 });
 
+test('amount with alphabetic currency prefixes (CA$, US$, USD) is parsed', () => {
+  const csv = [
+    'Date,Title,Amount',
+    '2026-05-01,YouTube Premium,CA$13.99',
+    '2026-05-02,Pixel Game,US$1.99',
+    '2026-05-03,Movie Rental,USD 5.99',
+  ].join('\n');
+
+  const result = parsePurchaseHistoryCsv(csv, { vendor: 'google' });
+  assert.deepEqual(
+    result.orders.map((o) => o.total),
+    [13.99, 1.99, 5.99],
+  );
+});
+
 test('appends subtitle (developer/publisher) to title for context', () => {
   const csv = [
     'Date,App Name,Developer,Cost',
