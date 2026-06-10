@@ -140,6 +140,30 @@ async function seedPortfolioFixture(): Promise<void> {
   } as never);
 }
 
+/** A mistyped NON-investment account that has both a txn-stream balance and
+ *  stray HoldingSnapshot rows (statement imported into the wrong account).
+ *  Its holdings must not count on top of its txn balance — mirrors
+ *  networth/aggregate's PORTFOLIO_DRIVEN_TYPES filter (PR #604). */
+async function seedMistypedFixture(): Promise<void> {
+  const checking = await seedAccount('Chequing', 'checking');
+  await seedTxn(checking, isoDaysAgo(10), 3000, 'income');
+  const sec = await models.Security.create({
+    symbol: 'XEQT',
+    name: 'XEQT',
+    currency: 'CAD',
+  } as never);
+  await models.HoldingSnapshot.create({
+    accountId: checking,
+    securityId: sec.id,
+    statementDate: isoDaysAgo(5),
+    quantity: '500',
+    marketValue: '50000',
+    currency: 'CAD',
+    sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
+    importBatch: 'reporting-test',
+  } as never);
+}
+
 // ---- GET /tax -------------------------------------------------------------
 
 test('GET /tax: grossIncome counts only txnType=income rows', async () => {
@@ -172,6 +196,16 @@ test('GET /summary: netWorth uses holdings market value for investment accounts'
   assert.equal(res.body.liquidCash, 3000);
 });
 
+test('GET /summary: holdings on a non-investment account do not double-count', async () => {
+  await seedMistypedFixture();
+  const res = await request(app).get('/summary');
+  assert.equal(res.status, 200);
+  // The checking account already contributed its full txn-stream balance;
+  // its stray holdings must not add another 50k on top.
+  assert.equal(res.body.netWorth, 3000);
+  assert.equal(res.body.liquidCash, 3000);
+});
+
 // ---- GET /projections -------------------------------------------------------
 
 test('GET /projections: investment value comes from holdings market value', async () => {
@@ -182,6 +216,15 @@ test('GET /projections: investment value comes from holdings market value', asyn
   assert.equal(first.projectedInvestments, 100000);
   assert.equal(first.projectedCash, 3000);
   assert.equal(first.projectedNetWorth, 103000);
+});
+
+test('GET /projections: holdings on a non-investment account are not investment value', async () => {
+  await seedMistypedFixture();
+  const res = await request(app).get('/projections');
+  assert.equal(res.status, 200);
+  const first = res.body.projections[0];
+  assert.equal(first.projectedInvestments, 0);
+  assert.equal(first.projectedNetWorth, 3000);
 });
 
 // ---- GET /cashflow/monthly ---------------------------------------------------
