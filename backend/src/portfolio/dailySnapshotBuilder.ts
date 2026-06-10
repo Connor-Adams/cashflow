@@ -47,19 +47,31 @@ function floorByDate<T extends { date: string }>(arr: T[] | undefined, d: string
 }
 
 // Apply an activity's quantity delta to the running per-(account,security) map.
+// Mirrors the position-changing types the ACB engine recognizes (acb.ts):
+// transfer_in is buy-like, transfer_out is sell-like, split multiplies qty.
 function applyActivityQty(qty: Map<string, number>, a: InvestmentActivity): void {
   if (a.securityId == null) return;
   const key = `${a.accountId}:${a.securityId}`;
   const cur = qty.get(key) ?? 0;
   const qChange = Number(a.quantity ?? '0');
-  if (a.activityType === 'buy' || a.activityType === 'reinvestment') {
+  if (a.activityType === 'buy' || a.activityType === 'reinvestment' || a.activityType === 'transfer_in') {
     qty.set(key, cur + qChange);
-  } else if (a.activityType === 'sell') {
+  } else if (a.activityType === 'sell' || a.activityType === 'transfer_out') {
     qty.set(key, cur - qChange);
   } else if (a.activityType === 'transfer' && qChange > 0) {
     qty.set(key, cur + qChange);
+  } else if (a.activityType === 'split') {
+    const ratio = Number(a.splitRatio ?? '0');
+    if (Number.isFinite(ratio) && ratio > 0 && cur !== 0) {
+      qty.set(key, cur * ratio);
+    }
   }
 }
+
+// Activity types that represent EXTERNAL money/asset movement (deposits,
+// withdrawals, in-kind transfers). These are TWR/XIRR cash-flow events;
+// buys/sells/dividends are internal and excluded.
+const CASH_FLOW_ACTIVITY_TYPES = new Set(['transfer', 'transfer_in', 'transfer_out']);
 
 export interface BuildDailySnapshotsArgs {
   householdId: number;
@@ -131,11 +143,15 @@ export async function buildDailySnapshotsForHousehold(args: BuildDailySnapshotsA
     : [];
   const priceByKey = new Map<string, number>();
   // Per-security ascending [date, price] arrays for carry-forward lookups.
+  // Valuation uses the unadjusted close: adjClose is deflated by subsequent
+  // dividends (and shifts every refetch), so it understates historical MV and
+  // injects fake day-over-day jumps at rebuild boundaries. adjClose belongs
+  // in return-only contexts (e.g. the benchmark series).
   const pricesBySec = new Map<number, Array<{ date: string; price: number }>>();
   for (const p of allPrices) {
-    priceByKey.set(`${p.securityId}:${p.date}`, Number(p.adjClose));
+    priceByKey.set(`${p.securityId}:${p.date}`, Number(p.close));
     const arr = pricesBySec.get(p.securityId) ?? [];
-    arr.push({ date: p.date, price: Number(p.adjClose) });
+    arr.push({ date: p.date, price: Number(p.close) });
     pricesBySec.set(p.securityId, arr);
   }
   for (const arr of pricesBySec.values()) {
@@ -176,9 +192,18 @@ export async function buildDailySnapshotsForHousehold(args: BuildDailySnapshotsA
         where: { fromCurrency: { [Op.in]: accountCurrencies }, toCurrency: 'CAD', ratedDate: { [Op.lte]: to } },
       })
     : [];
-  const fxByKey = new Map<string, number>();
+  // Per-currency ascending [date, rate] arrays. BoC publishes business days
+  // only, so weekend/holiday snapshots must carry the last published rate
+  // forward (a missing exact-date row is NOT missing data — the prior
+  // business day's rate IS the rate in effect).
+  const fxByCurrency = new Map<string, Array<{ date: string; rate: number }>>();
   for (const f of allFx) {
-    fxByKey.set(`${f.fromCurrency}:${f.ratedDate}`, Number(f.rate));
+    const arr = fxByCurrency.get(f.fromCurrency) ?? [];
+    arr.push({ date: f.ratedDate, rate: Number(f.rate) });
+    fxByCurrency.set(f.fromCurrency, arr);
+  }
+  for (const arr of fxByCurrency.values()) {
+    arr.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
 
   // Running qty per (accountId, securityId).
@@ -252,16 +277,21 @@ export async function buildDailySnapshotsForHousehold(args: BuildDailySnapshotsA
 
       let fxRate = 1;
       if (acctCurrency !== 'CAD') {
-        const lookup = fxByKey.get(`${acctCurrency}:${d}`);
+        const lookup = floorByDate(fxByCurrency.get(acctCurrency), d);
         if (lookup == null) {
           reasons.push(`no_fx:${acctCurrency}`);
         } else {
-          fxRate = lookup;
+          fxRate = lookup.rate;
+          // A rate older than the carry-forward window still beats valuing at
+          // parity (rate 1), but the day is flagged so it can be rebuilt.
+          if (daysBetween(lookup.date, d) > CARRY_FORWARD_MAX_DAYS) {
+            reasons.push(`stale_fx:${acctCurrency}@${lookup.date}`);
+          }
         }
       }
 
       const cashFlowNative = fromUnits(todays
-        .filter((a) => a.accountId === acct.id && a.activityType === 'transfer')
+        .filter((a) => a.accountId === acct.id && CASH_FLOW_ACTIVITY_TYPES.has(a.activityType))
         .reduce((s, a) => s + toUnits(Number(a.amount ?? '0')), 0));
 
       const mvNative = fromUnits(mvNativeU);
