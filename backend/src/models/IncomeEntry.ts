@@ -41,17 +41,42 @@ export class IncomeEntry extends Model<
   declare readonly updatedAt: CreationOptional<Date>;
 }
 
+// Postgres hydrates BIGINT (int8) columns as strings — db.ts installs no pg
+// type parser (a global INT8 parser would also retype COUNT() everywhere).
+// Coerce at the model boundary so cents are numbers on both dialects.
+function numericGet(field: 'id' | 'grossAmountCents' | 'taxWithheldCents' | 'netAmountCents') {
+  return function (this: IncomeEntry) {
+    const raw = this.getDataValue(field);
+    return raw == null ? raw : Number(raw);
+  };
+}
+
 export function initIncomeEntry(sequelize: Sequelize): typeof IncomeEntry {
   IncomeEntry.init(
     {
-      id: { type: DataTypes.BIGINT, autoIncrement: true, primaryKey: true },
+      id: { type: DataTypes.BIGINT, autoIncrement: true, primaryKey: true, get: numericGet('id') },
       userId: { type: DataTypes.INTEGER, field: 'user_id', allowNull: false },
       householdId: { type: DataTypes.INTEGER, field: 'household_id', allowNull: false },
       occurredOn: { type: DataTypes.DATEONLY, field: 'occurred_on', allowNull: false },
-      grossAmountCents: { type: DataTypes.BIGINT, field: 'gross_amount_cents', allowNull: false },
+      grossAmountCents: {
+        type: DataTypes.BIGINT,
+        field: 'gross_amount_cents',
+        allowNull: false,
+        get: numericGet('grossAmountCents'),
+      },
       currency: { type: DataTypes.STRING(3), allowNull: false },
-      taxWithheldCents: { type: DataTypes.BIGINT, field: 'tax_withheld_cents', allowNull: true },
-      netAmountCents: { type: DataTypes.BIGINT, field: 'net_amount_cents', allowNull: false },
+      taxWithheldCents: {
+        type: DataTypes.BIGINT,
+        field: 'tax_withheld_cents',
+        allowNull: true,
+        get: numericGet('taxWithheldCents'),
+      },
+      netAmountCents: {
+        type: DataTypes.BIGINT,
+        field: 'net_amount_cents',
+        allowNull: false,
+        get: numericGet('netAmountCents'),
+      },
       categoryId: { type: DataTypes.INTEGER, field: 'category_id', allowNull: true },
       counterpartyContactId: { type: DataTypes.INTEGER, field: 'counterparty_contact_id', allowNull: true },
       source: {
