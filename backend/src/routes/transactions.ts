@@ -499,6 +499,23 @@ export async function applyPatchBody(
           throw err;
         }
         txn.set('status', b[k]);
+      } else if (k === 'pctMeOverride' || k === 'pctPartnerOverride') {
+        // Fractions (0–1) stored as DECIMAL(5,4): percent-scale values like 50
+        // overflow on Postgres but store fine on SQLite, so validate here
+        // before the dialects can diverge.
+        if (b[k] == null || b[k] === '') {
+          txn.set(k, null);
+        } else {
+          const v = Number(b[k]);
+          if (!Number.isFinite(v) || v < 0 || v > 1) {
+            const err = new Error(
+              `${k} must be a fraction between 0 and 1`,
+            ) as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          txn.set(k, v as never);
+        }
       } else {
         txn.set(k, b[k] as never);
       }

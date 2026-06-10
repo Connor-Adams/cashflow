@@ -297,6 +297,175 @@ test('splitTxnByItems: applies businessUseOverride to businessAmount per allocat
   assert.ok(Math.abs(out[0].businessAmount - -50) < 0.05, `got ${out[0].businessAmount}, want ~-50`);
 });
 
+test('splitTxnByItems: falls back to txn-level business fraction when items carry no business pct', () => {
+  const ordersById = new Map([
+    [
+      10,
+      {
+        id: 10,
+        subtotal: '95.00',
+        tax: null,
+        shipping: null,
+        total: '100.00',
+        currency: 'CAD',
+      },
+    ],
+  ]);
+  const itemsByOrder = new Map([
+    [
+      10,
+      [
+        {
+          id: 1,
+          totalPrice: '95.00',
+          unitPrice: null,
+          quantity: 1,
+          inferredCategory: 'Office',
+          categoryOverride: null,
+          businessUsePercent: null,
+          businessUseOverride: null,
+        },
+      ],
+    ],
+  ]);
+  const out = splitTxnByItems(
+    input({
+      txn: {
+        id: 1,
+        amount: '-100.00',
+        currency: 'CAD',
+        finalCategory: 'Shopping',
+        finalBusiness: true,
+        finalSplitType: 'me',
+        businessAmount: '-100.00',
+      },
+      links: [{ externalOrderId: 10, linkedAmount: null }],
+      ordersById,
+      itemsByOrder,
+    }),
+  );
+  // Itemizing a fully-business txn must not shift its spend to personal: the
+  // item allocation AND the drift bucket both keep the txn business fraction.
+  const office = out.find((a) => a.category === 'Office');
+  const drift = out.find((a) => a.category === 'Shopping');
+  assert.ok(Math.abs((office?.businessAmount ?? 0) - -95) < 0.05, `office biz ${office?.businessAmount}, want ~-95`);
+  assert.ok(Math.abs((drift?.businessAmount ?? 0) - -5) < 0.05, `drift biz ${drift?.businessAmount}, want ~-5`);
+  const bizSum = out.reduce((s, a) => s + a.businessAmount, 0);
+  assert.ok(Math.abs(bizSum - -100) < 0.05, `business sum ${bizSum}, want ~-100`);
+});
+
+test('splitTxnByItems: explicit item business pct beats the txn-level fallback', () => {
+  const ordersById = new Map([
+    [
+      10,
+      {
+        id: 10,
+        subtotal: '100.00',
+        tax: null,
+        shipping: null,
+        total: '100.00',
+        currency: 'CAD',
+      },
+    ],
+  ]);
+  const itemsByOrder = new Map([
+    [
+      10,
+      [
+        {
+          id: 1,
+          totalPrice: '100.00',
+          unitPrice: null,
+          quantity: 1,
+          inferredCategory: 'Office',
+          categoryOverride: null,
+          businessUsePercent: '0.00',
+          businessUseOverride: null,
+        },
+      ],
+    ],
+  ]);
+  const out = splitTxnByItems(
+    input({
+      txn: {
+        id: 1,
+        amount: '-100.00',
+        currency: 'CAD',
+        finalCategory: 'Shopping',
+        finalBusiness: true,
+        finalSplitType: 'me',
+        businessAmount: '-100.00',
+      },
+      links: [{ externalOrderId: 10, linkedAmount: null }],
+      ordersById,
+      itemsByOrder,
+    }),
+  );
+  // An explicit per-item 0% is finer-grained knowledge than the txn flag.
+  assert.equal(out[0].category, 'Office');
+  assert.ok(Math.abs(out[0].businessAmount) < 0.005, `got ${out[0].businessAmount}, want 0`);
+});
+
+test('splitTxnByItems: cross-currency links are not allocated as txn-currency amounts', () => {
+  const ordersById = new Map([
+    [
+      10,
+      {
+        id: 10,
+        subtotal: '100.00',
+        tax: null,
+        shipping: null,
+        total: '100.00',
+        currency: 'USD',
+      },
+    ],
+  ]);
+  const itemsByOrder = new Map([
+    [
+      10,
+      [
+        {
+          id: 1,
+          totalPrice: '100.00',
+          unitPrice: null,
+          quantity: 1,
+          inferredCategory: 'Electronics',
+          categoryOverride: null,
+          businessUsePercent: null,
+          businessUseOverride: null,
+        },
+      ],
+    ],
+  ]);
+  const out = splitTxnByItems(
+    input({
+      txn: {
+        id: 1,
+        amount: '-137.00',
+        currency: 'CAD',
+        finalCategory: 'Shopping',
+        finalBusiness: false,
+        finalSplitType: 'me',
+        businessAmount: '0',
+      },
+      links: [{ externalOrderId: 10, linkedAmount: null }],
+      ordersById,
+      itemsByOrder,
+    }),
+  );
+  // A USD order's item prices are not CAD amounts: itemizing would book
+  // CAD -100 to Electronics and a phantom CAD -37 drift row. Fall back to the
+  // txn's own category instead.
+  assert.deepStrictEqual(out, [
+    {
+      category: 'Shopping',
+      amount: -137,
+      businessAmount: 0,
+      currency: 'CAD',
+    },
+  ]);
+});
+
 test('splitTxnByItems: multi-item + linkedAmount split-tender allocates correctly', () => {
   const ordersById = new Map([
     [

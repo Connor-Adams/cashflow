@@ -119,6 +119,29 @@ type AiAuditResult = AiAuditIssue & {
   status: 'open' | 'applied' | 'dismissed'
 }
 
+/**
+ * Stored pct overrides are 0–1 fractions (backend canonical unit); the
+ * editors speak percent (0–100), matching RulesPage. Round to 2 decimals to
+ * absorb DECIMAL(5,4) float noise (0.3333 -> "33.33").
+ */
+function pctOverrideToInput(v: number | string | null | undefined): string {
+  if (v == null || v === '') return ''
+  const n = Number(v)
+  if (!Number.isFinite(n)) return ''
+  return String(Math.round(n * 10000) / 100)
+}
+
+/** True when a non-empty percent input parsed to an out-of-range fraction. */
+function isShareInputInvalid(raw: string, parsedFraction: number | null): boolean {
+  if (raw.trim() === '') return false
+  return (
+    parsedFraction == null ||
+    !Number.isFinite(parsedFraction) ||
+    parsedFraction < 0 ||
+    parsedFraction > 1
+  )
+}
+
 function formatAiSuggestion(suggestion: AiSuggestion): string {
   const parts = [
     suggestion.category ? `Category: ${suggestion.category}` : null,
@@ -432,15 +455,16 @@ export function TransactionsPage() {
       patch.businessOverride = bulkBiz === 'true'
     if (bulkSplit === 'me' || bulkSplit === 'partner' || bulkSplit === 'shared')
       patch.splitOverride = bulkSplit
+    // Inputs are percent (0–100); the API stores 0–1 fractions.
     if (bulkPctMe.trim()) {
       const n = Number(bulkPctMe)
-      if (!Number.isFinite(n)) return null
-      patch.pctMeOverride = n
+      if (!Number.isFinite(n) || n < 0 || n > 100) return null
+      patch.pctMeOverride = n / 100
     }
     if (bulkPctPartner.trim()) {
       const n = Number(bulkPctPartner)
-      if (!Number.isFinite(n)) return null
-      patch.pctPartnerOverride = n
+      if (!Number.isFinite(n) || n < 0 || n > 100) return null
+      patch.pctPartnerOverride = n / 100
     }
     if (bulkMarkReviewed) patch.reviewFlag = false
     return Object.keys(patch).length ? patch : null
@@ -913,9 +937,10 @@ export function TransactionsPage() {
     if (typeof patch.businessOverride === 'boolean')
       parts.push(`business=${patch.businessOverride ? 'yes' : 'no'}`)
     if (typeof patch.splitOverride === 'string') parts.push(`split=${patch.splitOverride}`)
-    if (typeof patch.pctMeOverride === 'number') parts.push(`pct me=${patch.pctMeOverride}`)
+    if (typeof patch.pctMeOverride === 'number')
+      parts.push(`pct me=${pctOverrideToInput(patch.pctMeOverride)}%`)
     if (typeof patch.pctPartnerOverride === 'number')
-      parts.push(`pct partner=${patch.pctPartnerOverride}`)
+      parts.push(`pct partner=${pctOverrideToInput(patch.pctPartnerOverride)}%`)
     if (patch.reviewFlag === false) parts.push('mark reviewed')
     return parts.length ? parts.join(', ') : 'no fields'
   }
@@ -1622,7 +1647,7 @@ export function TransactionsPage() {
               value={bulkPctMe}
               onChange={(e) => setBulkPctMe(e.target.value)}
               style={{ width: 64 }}
-              placeholder="0.5"
+              placeholder="50"
             />
           </Label>
           <Label>
@@ -1631,7 +1656,7 @@ export function TransactionsPage() {
               value={bulkPctPartner}
               onChange={(e) => setBulkPctPartner(e.target.value)}
               style={{ width: 64 }}
-              placeholder="0.5"
+              placeholder="50"
             />
           </Label>
           <Label className="checkRow">
@@ -1972,11 +1997,9 @@ function TransactionRow({
     t.taxTreatmentOverride ?? ''
   )
   const [split, setSplit] = useState(t.splitOverride ?? '')
-  const [pctMe, setPctMe] = useState(
-    t.pctMeOverride != null ? String(t.pctMeOverride) : ''
-  )
+  const [pctMe, setPctMe] = useState(pctOverrideToInput(t.pctMeOverride))
   const [pctPartner, setPctPartner] = useState(
-    t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : ''
+    pctOverrideToInput(t.pctPartnerOverride)
   )
   const [visibility, setVisibility] = useState<'private' | 'shared'>(
     t.visibility ?? 'private'
@@ -1994,12 +2017,13 @@ function TransactionRow({
   const [reimburseOpen, setReimburseOpen] = useState(false)
   const rowConfirmAction = useConfirm()
   const rowToast = useToast()
-  const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe)
+  // Inputs are percent (0–100); the API stores 0–1 fractions.
+  const parsedPctMe = pctMe.trim() === '' ? null : Number(pctMe) / 100
   const parsedPctPartner =
-    pctPartner.trim() === '' ? null : Number(pctPartner)
+    pctPartner.trim() === '' ? null : Number(pctPartner) / 100
   const hasInvalidShareOverride =
-    (pctMe.trim() !== '' && !Number.isFinite(parsedPctMe)) ||
-    (pctPartner.trim() !== '' && !Number.isFinite(parsedPctPartner))
+    isShareInputInvalid(pctMe, parsedPctMe) ||
+    isShareInputInvalid(pctPartner, parsedPctPartner)
   const isDirty =
     cat !== (t.categoryOverride ?? '') ||
     biz !==
@@ -2010,8 +2034,8 @@ function TransactionRow({
           : 'false') ||
     taxOverride !== (t.taxTreatmentOverride ?? '') ||
     split !== (t.splitOverride ?? '') ||
-    pctMe !== (t.pctMeOverride != null ? String(t.pctMeOverride) : '') ||
-    pctPartner !== (t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '') ||
+    pctMe !== pctOverrideToInput(t.pctMeOverride) ||
+    pctPartner !== pctOverrideToInput(t.pctPartnerOverride) ||
     visibility !== (t.visibility ?? 'private') ||
     ownershipType !== (t.ownershipType ?? 'me') ||
     ownershipContactId !== (t.ownershipContactId != null ? String(t.ownershipContactId) : '')
@@ -2028,8 +2052,8 @@ function TransactionRow({
     )
     setTaxOverride(t.taxTreatmentOverride ?? '')
     setSplit(t.splitOverride ?? '')
-    setPctMe(t.pctMeOverride != null ? String(t.pctMeOverride) : '')
-    setPctPartner(t.pctPartnerOverride != null ? String(t.pctPartnerOverride) : '')
+    setPctMe(pctOverrideToInput(t.pctMeOverride))
+    setPctPartner(pctOverrideToInput(t.pctPartnerOverride))
     setVisibility(t.visibility ?? 'private')
     setOwnershipType(t.ownershipType ?? 'me')
     setOwnershipContactId(t.ownershipContactId != null ? String(t.ownershipContactId) : '')
@@ -2352,8 +2376,9 @@ function TransactionRow({
                     setBiz(s.business ? 'true' : 'false')
                   }
                   if (s.splitType) setSplit(s.splitType)
-                  if (s.pctMe != null) setPctMe(String(s.pctMe))
-                  if (s.pctPartner != null) setPctPartner(String(s.pctPartner))
+                  if (s.pctMe != null) setPctMe(pctOverrideToInput(s.pctMe))
+                  if (s.pctPartner != null)
+                    setPctPartner(pctOverrideToInput(s.pctPartner))
                 } catch (e) {
                   onError(e instanceof Error ? e.message : 'AI suggestion failed')
                 } finally {
@@ -2392,7 +2417,7 @@ function TransactionRow({
             disabled={!isDirty && !t.reviewFlag}
             onClick={() => {
               if (hasInvalidShareOverride) {
-                onError('Percent overrides must be valid numbers.')
+                onError('Share overrides must be percentages between 0 and 100.')
                 return
               }
               if (ownershipType === 'contact' && !ownershipContactId) {

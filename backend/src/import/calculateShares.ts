@@ -32,10 +32,17 @@ export function splitAmount(
   if (finalSplitType === 'partner') {
     return { myShareAmount: 0, partnerShareAmount: a };
   }
-  let pm = pctMe != null && pctMe !== '' ? Number(pctMe) : 0.5;
-  let pp = pctPartner != null && pctPartner !== '' ? Number(pctPartner) : 0.5;
-  if (Number.isNaN(pm)) pm = 0.5;
-  if (Number.isNaN(pp)) pp = 0.5;
+  const pmRaw = pctMe != null && pctMe !== '' ? Number(pctMe) : NaN;
+  const ppRaw = pctPartner != null && pctPartner !== '' ? Number(pctPartner) : NaN;
+  // A single provided side means "the other side gets the remainder" — not a
+  // phantom 0.5 that the sum-normalization below would blend in (0.8/null must
+  // be 80/20, not 0.8/1.3 = 61.5/38.5).
+  let pm = Number.isNaN(pmRaw)
+    ? Number.isNaN(ppRaw) ? 0.5 : Math.max(0, 1 - ppRaw)
+    : pmRaw;
+  let pp = Number.isNaN(ppRaw)
+    ? Number.isNaN(pmRaw) ? 0.5 : Math.max(0, 1 - pmRaw)
+    : ppRaw;
   const sum = pm + pp;
   if (sum > 0) {
     pm /= sum;

@@ -223,6 +223,90 @@ describe('TransactionsPage tax treatment override control', () => {
   })
 })
 
+describe('TransactionsPage share override percent units', () => {
+  function mockOneTransaction(overrides: Partial<Transaction> = {}) {
+    vi.mocked(api.getJson).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/transactions?')) {
+        return {
+          data: [
+            makeTransaction({
+              id: 7,
+              merchantClean: 'Split Merchant',
+              status: 'posted',
+              ...overrides,
+            }),
+          ],
+          page: 1,
+          pageSize: 25,
+          total: 1,
+        }
+      }
+      if (path === '/api/transactions/category-hints') return { categories: [] }
+      if (path === '/api/ai/status') return { openai: false }
+      if (path === '/api/contacts') return []
+      return null
+    })
+  }
+
+  it('displays a stored fraction override as a percentage in the row editor', async () => {
+    mockOneTransaction({ pctMeOverride: 0.25, pctPartnerOverride: 0.75 })
+    renderPage()
+    const meInput = await screen.findByLabelText(/my share override for transaction 7/i)
+    const ptnInput = screen.getByLabelText(/partner share override for transaction 7/i)
+    expect(meInput).toHaveValue('25')
+    expect(ptnInput).toHaveValue('75')
+  })
+
+  it('sends a 0-1 fraction when a percentage is typed in the row editor', async () => {
+    mockOneTransaction()
+    vi.mocked(api.patchJson).mockResolvedValue({})
+    renderPage()
+    const meInput = await screen.findByLabelText(/my share override for transaction 7/i)
+    await userEvent.type(meInput, '50')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() =>
+      expect(api.patchJson).toHaveBeenCalledWith(
+        '/api/transactions/7',
+        expect.objectContaining({ pctMeOverride: 0.5 }),
+      ),
+    )
+  })
+
+  it('does not save an out-of-range row percentage', async () => {
+    mockOneTransaction()
+    renderPage()
+    const meInput = await screen.findByLabelText(/my share override for transaction 7/i)
+    await userEvent.type(meInput, '150')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    expect(api.patchJson).not.toHaveBeenCalled()
+  })
+
+  it('converts the bulk % me input from percent to fraction', async () => {
+    mockOneTransaction()
+    vi.mocked(api.postJson).mockResolvedValue({ updated: 1 })
+    renderPage()
+    await userEvent.click(await screen.findByLabelText(/select transaction 7/i))
+    await userEvent.type(screen.getByLabelText('% me'), '50')
+    await userEvent.click(screen.getByRole('button', { name: /apply to selected/i }))
+    await waitFor(() =>
+      expect(api.postJson).toHaveBeenCalledWith(
+        '/api/transactions/bulk-patch',
+        expect.objectContaining({
+          patch: expect.objectContaining({ pctMeOverride: 0.5 }),
+        }),
+      ),
+    )
+  })
+
+  it('disables bulk apply for an out-of-range percentage', async () => {
+    mockOneTransaction()
+    renderPage()
+    await userEvent.click(await screen.findByLabelText(/select transaction 7/i))
+    await userEvent.type(screen.getByLabelText('% me'), '150')
+    expect(screen.getByRole('button', { name: /apply to selected/i })).toBeDisabled()
+  })
+})
+
 function makeTransaction(
   overrides: Partial<Transaction> & Pick<Transaction, 'id' | 'merchantClean' | 'status'>,
 ): Transaction {

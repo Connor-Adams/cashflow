@@ -1,5 +1,6 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { RulesPage } from './RulesPage'
@@ -96,6 +97,51 @@ describe('RulesPage', () => {
       await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
       const row = screen.getByText('amazon').closest('tr')!
       expect(row.className).not.toContain('isFocused')
+    })
+  })
+
+  describe('shared split share validation', () => {
+    function renderRules() {
+      return render(
+        <MemoryRouter initialEntries={['/rules']}>
+          <ToastProvider>
+            <RulesPage />
+          </ToastProvider>
+        </MemoryRouter>,
+      )
+    }
+
+    it('rejects an out-of-range single share with an inline error', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+      await userEvent.selectOptions(screen.getByLabelText(/^split$/i), 'shared')
+      await userEvent.type(screen.getByLabelText(/your share/i), '150')
+      expect(await screen.findByRole('alert')).toHaveTextContent(/between 0 and 100/i)
+      expect(screen.getByRole('button', { name: /add rule/i })).toBeDisabled()
+    })
+
+    it('submits a single-sided share as a fraction with the other side omitted', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+      await userEvent.type(screen.getByLabelText(/^pattern$/i), 'costco')
+      await userEvent.selectOptions(screen.getByLabelText(/^split$/i), 'shared')
+      await userEvent.type(screen.getByLabelText(/your share/i), '60')
+      await userEvent.click(screen.getByRole('button', { name: /add rule/i }))
+      await waitFor(() => {
+        const post = vi
+          .mocked(fetch)
+          .mock.calls.find(
+            (c) =>
+              String(c[0]).endsWith('/api/rules') &&
+              (c[1] as RequestInit | undefined)?.method === 'POST',
+          )
+        expect(post).toBeTruthy()
+        const body = JSON.parse(String((post![1] as RequestInit).body))
+        // The backend treats a missing side as the complement (1 - pctMe), so
+        // 60 must arrive as the fraction '0.6' with pctPartner null.
+        expect(body.pctMe).toBe('0.6')
+        expect(body.pctPartner).toBeNull()
+      })
     })
   })
 
