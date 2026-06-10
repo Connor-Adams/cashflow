@@ -40,7 +40,9 @@ function n(raw: unknown): number | null {
  * holdings without quotes still show a sensible currency.
  *
  * Pairs with no qualifying holding (statementDate ≤ asOf) are treated as zero
- * positions (no row, no gap).
+ * positions (no row, no gap). Likewise, a pair whose latest snapshot predates
+ * the account's newest statement ≤ asOf was absent from that statement
+ * (fully sold) and is treated as zero from that date onward.
  *
  * SecurityPrice.pricedAt is a DATETIME, so we compare against
  * `${asOf}T23:59:59.999Z` to include same-day prices. HoldingSnapshot.statementDate
@@ -72,13 +74,36 @@ export async function portfolioMarketValueAt(
       accountId: activeIds,
       statementDate: { [Op.lte]: asOf },
     },
-    order: [['statementDate', 'DESC']],
+    // id DESC tiebreaker so same-day duplicate snapshots (corrected
+    // re-imports) resolve deterministically to the newest row, matching
+    // routes/portfolio.ts.
+    order: [
+      ['statementDate', 'DESC'],
+      ['id', 'DESC'],
+    ],
   });
 
+  // Per-account latest statement date ≤ asOf (rows are statementDate DESC,
+  // so the first row seen per account carries it). A position whose own
+  // latest snapshot predates the account's newest statement was absent from
+  // that statement — i.e. fully sold — so it contributes zero from that date
+  // onward instead of carrying its last pre-sale value forward forever.
+  // Imports write no zero-quantity tombstones, so absence is the only sale
+  // signal we have.
+  const accountLatestDate = new Map<number, string>();
   const latest = new Map<string, (typeof allHoldings)[number]>();
   for (const h of allHoldings) {
+    if (!accountLatestDate.has(h.accountId)) {
+      accountLatestDate.set(h.accountId, h.statementDate);
+    }
     const key = `${h.accountId}:${h.securityId}`;
     if (!latest.has(key)) latest.set(key, h);
+  }
+  for (const [key, h] of latest) {
+    const accountLatest = accountLatestDate.get(h.accountId);
+    if (accountLatest != null && h.statementDate < accountLatest) {
+      latest.delete(key);
+    }
   }
   if (latest.size === 0) return { rows: [], gaps: [] };
 
