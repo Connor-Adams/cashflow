@@ -30,15 +30,30 @@
  */
 import type { ExtractedReceiptOrder, ExtractedReceiptItem } from '../../ai/extractReceiptItems';
 
+// Amount: digits with optional thousands commas and a 2-digit decimal tail
+// ('1,234.56'), or a bare decimal comma ('44,97' in EU-formatted emails).
+const AMOUNT_SRC = '((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:[.,][0-9]{2}))';
+
 const ORDER_ID_RE = /\bOrder\s*#?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})\b/i;
-const TOTAL_RE = /\bOrder\s*Total\b\s*[:\-]?\s*\$?\s*([0-9]+(?:[.,][0-9]{2}))/i;
-const SUBTOTAL_RE = /\bOrder\s*Subtotal\b\s*[:\-]?\s*\$?\s*([0-9]+(?:[.,][0-9]{2}))/i;
-const TAX_RE = /\bTax\b\s*[:\-]?\s*\$?\s*([0-9]+(?:[.,][0-9]{2}))/i;
-const SHIPPING_RE = /\bShipping(?:\s*&\s*handling)?\b\s*[:\-]?\s*\$?\s*([0-9]+(?:[.,][0-9]{2}))/i;
+const TOTAL_RE = new RegExp(`\\bOrder\\s*Total\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
+const SUBTOTAL_RE = new RegExp(`\\bOrder\\s*Subtotal\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
+const TAX_RE = new RegExp(`\\bTax\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`, 'i');
+const SHIPPING_RE = new RegExp(
+  `\\bShipping(?:\\s*&\\s*handling)?\\b\\s*[:\\-]?\\s*\\$?\\s*${AMOUNT_SRC}`,
+  'i',
+);
 const DATE_RE = /\b(?:Placed\s*on|Order\s*placed|Date|Order\s*Date)\b\s*[:\-]?\s*([A-Za-z]{3,9}\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})/i;
 const QUANTITY_RE = /\bQuantity\s*[:\-]?\s*([0-9]+)/i;
-const PRICE_RE = /\$\s*([0-9]+(?:\.[0-9]{2}))/;
+const PRICE_RE = /\$\s*((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2})/;
 const LAST4_RE = /(?:ending\s*in)\s*(\d{4})/i;
+
+/** '1,234.56' (thousands commas) and '44,97' (decimal comma) both parse. */
+function parseAmount(raw: string): number {
+  if (!raw.includes('.') && /,[0-9]{2}$/.test(raw)) {
+    return Number(`${raw.slice(0, -3).replace(/,/g, '')}.${raw.slice(-2)}`);
+  }
+  return Number(raw.replace(/,/g, ''));
+}
 
 function normalizeDate(raw: string): string | null {
   const d = new Date(raw.trim());
@@ -81,13 +96,15 @@ function extractItems(body: string): ExtractedReceiptItem[] {
 
     const price = line.match(PRICE_RE);
     if (price && pendingTitle) {
-      const total = Number(price[1]);
-      if (Number.isFinite(total) && total > 0) {
+      // The per-item "$ price" line is the UNIT price: the docstring example's
+      // subtotal only reconciles as 24.99 + 2 x 9.99 = 44.97.
+      const unitPrice = parseAmount(price[1]);
+      if (Number.isFinite(unitPrice) && unitPrice > 0) {
         items.push({
           title: pendingTitle.slice(0, 256),
           quantity: pendingQuantity,
-          unitPrice: total / pendingQuantity,
-          totalPrice: total,
+          unitPrice,
+          totalPrice: Math.round(unitPrice * pendingQuantity * 100) / 100,
           inferredCategory: null,
         });
         pendingTitle = null;
@@ -114,7 +131,7 @@ export function parseAmazonReceiptEmail(body: string): ExtractedReceiptOrder | n
 
   const orderId = body.match(ORDER_ID_RE)?.[1] ?? null;
   const totalMatch = body.match(TOTAL_RE) ?? body.match(SUBTOTAL_RE);
-  const total = totalMatch ? Number(totalMatch[1].replace(',', '.')) : null;
+  const total = totalMatch ? parseAmount(totalMatch[1]) : null;
   const dateMatch = body.match(DATE_RE);
   const orderDate = dateMatch ? normalizeDate(dateMatch[1]) : null;
   const last4 = body.match(LAST4_RE)?.[1] ?? null;

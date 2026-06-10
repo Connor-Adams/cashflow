@@ -56,6 +56,44 @@ test('CSV parser handles Amazon data export order history columns', () => {
   assert.equal(result.orders[0].items[0].title, 'Ergonomic Wrist Rest');
 });
 
+test('CSV parser sums per-row amount columns across grouped data-export rows', () => {
+  const csv = [
+    'ASIN,Currency,Order Date,Order ID,Original Quantity,Payment Method Type,Product Name,Ship Date,Shipment Item Subtotal,Shipment Item Subtotal Tax,Shipping Charge,Total Amount,Unit Price,Unit Price Tax',
+    'B000000001,CAD,2026-01-25T16:01:44Z,701-0000000-0000001,1,AmericanExpress - 1001,Ergonomic Wrist Rest,2026-01-25T20:40:47Z,43.92,5.71,0,49.63,43.92,5.71',
+    'B000000002,CAD,2026-01-25T16:01:44Z,701-0000000-0000001,1,AmericanExpress - 1001,Desk Mat,2026-01-26T20:40:47Z,20.00,2.60,0,22.60,20.00,2.60',
+  ].join('\n');
+  const result = parseAmazonReportCsv(csv);
+  assert.equal(result.failedRows.length, 0);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].items.length, 2);
+  assert.equal(result.orders[0].subtotal, 63.92);
+  assert.equal(result.orders[0].tax, 8.31);
+  assert.equal(result.orders[0].total, 72.23);
+});
+
+test('CSV parser keeps repeated order-level Order Total without double counting', () => {
+  const csv = [
+    'Order ID,Order Date,Title,Quantity,Item Total,Order Total',
+    '701-2222222-2222222,2026-05-01,USB-C Cable,2,12.50,25.00',
+    '701-2222222-2222222,2026-05-01,Keyboard,1,12.50,25.00',
+  ].join('\n');
+  const result = parseAmazonReportCsv(csv);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].items.length, 2);
+  assert.equal(result.orders[0].total, 25);
+});
+
+test('CSV parser parses accounting-style parenthesized negatives as refunds', () => {
+  const csv = [
+    'Order ID,Order Date,Title,Quantity,Item Total,Order Total',
+    '701-3333333-3333333,2026-05-03,Returned Gadget,1,(12.34),($12.34)',
+  ].join('\n');
+  const result = parseAmazonReportCsv(csv);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].total, -12.34);
+  assert.equal(result.orders[0].items[0].totalPrice, -12.34);
+});
+
 test('fallback categorizer works', () => {
   assert.equal(categorizeAmazonItem('USB-C monitor cable'), 'Office Equipment');
   assert.equal(categorizeAmazonItem('protein coffee snacks'), 'Meals & Groceries');
