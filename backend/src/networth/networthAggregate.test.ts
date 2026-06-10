@@ -161,6 +161,28 @@ test('buildNetWorthAt: investment accounts skip txn-stream balance', async () =>
   assert.ok(result.breakdown.assets.some((r) => r.source === 'portfolio'));
 });
 
+test('buildNetWorthAt: holdings on a non-investment account are not double counted', async () => {
+  // Statement imported into a mistyped (checking) account: the txn-stream
+  // balance is authoritative; holdings on it must NOT add on top.
+  const acc = await seedAcc({ accountType: 'checking', opening: 1000 });
+  const sec = await models.Security.create({ symbol: 'VFV', name: 'VFV', currency: 'CAD' } as never);
+  await models.HoldingSnapshot.create({
+    accountId: acc.id, securityId: sec.id,
+    statementDate: '2026-01-01', quantity: '10', currency: 'CAD',
+    sourceRowFingerprint: 'h-mistyped', importBatch: 'test',
+  } as never);
+  await models.SecurityPrice.create({
+    securityId: sec.id, provider: 'test', symbol: 'VFV',
+    pricedAt: new Date('2026-01-01T16:00:00Z'),
+    price: '100', currency: 'CAD',
+    fetchedAt: new Date('2026-01-01T16:00:00Z'),
+  } as never);
+
+  const result = await agg.buildNetWorthAt('2026-02-01', [acc.id], stubFx);
+  assert.equal(result.assetsTotal, 1000); // txn-stream balance only
+  assert.ok(!result.breakdown.assets.some((r) => r.source === 'portfolio'));
+});
+
 test('buildNetWorthAt: asset with negative balance is flagged and excluded from totals', async () => {
   // Checking account with no opening and a net-negative txn run — should
   // not poison the assetsTotal. Row surfaces with dataQualityWarning.

@@ -205,6 +205,76 @@ test('portfolioMarketValueAt: excludes accounts closed on or before asOf', async
   assert.deepEqual(result.gaps, []);
 });
 
+test('portfolioMarketValueAt: position absent from the account newest statement is valued at zero', async () => {
+  const acc = await seedAccount('RRSP');
+  const kept = await seedSecurity('KEPT');
+  const sold = await seedSecurity('SOLD');
+  // January statement holds both; the February statement lists only KEPT —
+  // SOLD was fully liquidated and simply stops appearing (imports write no
+  // zero-quantity tombstones).
+  await seedHolding(acc.id, kept.id, '2026-01-31', 10);
+  await seedHolding(acc.id, sold.id, '2026-01-31', 5);
+  await seedHolding(acc.id, kept.id, '2026-02-28', 10);
+  await seedPrice(kept.id, '2026-01-15T16:00:00Z', 100);
+  await seedPrice(sold.id, '2026-01-15T16:00:00Z', 50);
+
+  // After the February statement: SOLD no longer contributes.
+  const after = await mod.portfolioMarketValueAt('2026-03-15', [acc.id]);
+  assert.equal(after.rows.length, 1);
+  assert.equal(after.rows[0].securityId, kept.id);
+  assert.equal(after.rows[0].marketValue, 1000);
+  assert.deepEqual(after.gaps, []);
+
+  // Before the February statement the SOLD position still counts.
+  const before = await mod.portfolioMarketValueAt('2026-02-10', [acc.id]);
+  assert.equal(before.rows.length, 2);
+  const soldRow = before.rows.find((r) => r.securityId === sold.id);
+  assert.equal(soldRow?.marketValue, 250);
+});
+
+test('portfolioMarketValueAt: stale (sold) position emits no price_unavailable gap', async () => {
+  const acc = await seedAccount('RRSP');
+  const kept = await seedSecurity('KEPT');
+  const sold = await seedSecurity('SOLD');
+  await seedHolding(acc.id, sold.id, '2026-01-31', 5); // no price, no marketValue
+  await seedHolding(acc.id, kept.id, '2026-02-28', 10);
+  await seedPrice(kept.id, '2026-01-15T16:00:00Z', 100);
+
+  const result = await mod.portfolioMarketValueAt('2026-03-15', [acc.id]);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].securityId, kept.id);
+  assert.deepEqual(result.gaps, []);
+});
+
+test('portfolioMarketValueAt: newer statement on one account does not zero another account positions', async () => {
+  const a1 = await seedAccount('A1');
+  const a2 = await seedAccount('A2');
+  const sec = await seedSecurity('VFV');
+  await seedHolding(a1.id, sec.id, '2026-01-31', 10);
+  await seedHolding(a2.id, sec.id, '2026-02-28', 3);
+  await seedPrice(sec.id, '2026-01-15T16:00:00Z', 100);
+
+  const result = await mod.portfolioMarketValueAt('2026-03-15', [a1.id, a2.id]);
+  assert.equal(result.rows.length, 2);
+  const r1 = result.rows.find((r) => r.accountId === a1.id);
+  assert.equal(r1?.marketValue, 1000);
+});
+
+test('portfolioMarketValueAt: same-day duplicate snapshots resolve to the newest row (id DESC)', async () => {
+  // Re-importing a corrected statement for the same date persists both rows
+  // (different fingerprints). The newest row must win deterministically,
+  // matching routes/portfolio.ts's ['id', 'DESC'] tiebreaker.
+  const acc = await seedAccount('RRSP');
+  const sec = await seedSecurity('VFV');
+  await seedHolding(acc.id, sec.id, '2026-01-31', 10);
+  await seedHolding(acc.id, sec.id, '2026-01-31', 12); // corrected re-import
+  await seedPrice(sec.id, '2026-01-15T16:00:00Z', 100);
+
+  const result = await mod.portfolioMarketValueAt('2026-02-10', [acc.id]);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].marketValue, 1200);
+});
+
 test('portfolioMarketValueAt: includes accounts closed after asOf', async () => {
   const acc = await seedAccount('Active');
   const sec = await seedSecurity('VFV');

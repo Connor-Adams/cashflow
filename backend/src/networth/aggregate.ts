@@ -131,7 +131,6 @@ export async function buildNetWorthAt(
   const accounts = allAccounts.filter(
     (a) => !a.closedAt || a.closedAt > asOf
   );
-  const activeAccountIds = accounts.map((a) => a.id);
 
   for (const acc of accounts) {
     const kind = accountKind(acc.accountType);
@@ -178,8 +177,16 @@ export async function buildNetWorthAt(
   }
 
   // Portfolio market-value contributions (the canonical source for
-  // investment accounts; ignored for non-investment accounts).
-  const portfolio = await portfolioMarketValueAt(asOf, activeAccountIds);
+  // investment accounts). Only portfolio-driven accounts participate:
+  // non-investment accounts already contributed their full txn-stream
+  // balance above, so counting any stray HoldingSnapshot rows on them
+  // (statement imported into a mistyped account) would double count.
+  // Matches the Portfolio page, which loads holdings only for
+  // accountType 'investment' (routes/portfolio.ts).
+  const portfolioAccountIds = accounts
+    .filter((a) => PORTFOLIO_DRIVEN_TYPES.has(a.accountType))
+    .map((a) => a.id);
+  const portfolio = await portfolioMarketValueAt(asOf, portfolioAccountIds);
   const portfolioByAcc = new Map<
     string,
     { accountId: number; currency: string; total: number }

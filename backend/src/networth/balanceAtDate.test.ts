@@ -104,3 +104,38 @@ test('balanceAtDate: returns zero-amount default-currency row when no txns and n
   const result = await balanceAtDateMod.balanceAtDate(acc, '2026-02-01');
   assert.deepEqual(result, [{ currency: 'CAD', amount: 0 }]);
 });
+
+test('balanceAtDate: derives backward when asOf precedes openingBalanceDate', async () => {
+  // Anchor: $10,000 as of 2026-04-01 set over already-imported history.
+  // Balance at 2026-01-31 = 10000 − sum(txns in (2026-01-31, 2026-04-01])
+  //                       = 10000 − (−3000 − 2000) = 15000.
+  const acc = await seedAccount({ openingBalance: 10000, openingBalanceDate: '2026-04-01' });
+  await seedTxn(acc.id, '2026-01-10', -500); // on/before asOf: outside the backward window
+  await seedTxn(acc.id, '2026-02-15', -3000);
+  await seedTxn(acc.id, '2026-03-10', -2000);
+  await seedTxn(acc.id, '2026-04-15', 700); // after the anchor: outside the window
+  const result = await balanceAtDateMod.balanceAtDate(acc, '2026-01-31');
+  assert.deepEqual(result, [{ currency: 'CAD', amount: 15000 }]);
+});
+
+test('balanceAtDate: asOf equal to openingBalanceDate returns the anchor balance', async () => {
+  const acc = await seedAccount({ openingBalance: 500, openingBalanceDate: '2026-01-31' });
+  await seedTxn(acc.id, '2026-01-15', -999);
+  await seedTxn(acc.id, '2026-02-15', 100);
+  const result = await balanceAtDateMod.balanceAtDate(acc, '2026-01-31');
+  assert.deepEqual(result, [{ currency: 'CAD', amount: 500 }]);
+});
+
+test('balanceAtDate: backward derivation negates non-default-currency txns in the window', async () => {
+  // The anchor implies a 0 balance for non-default currencies at the anchor
+  // date (same assumption the forward path makes), so deriving backward a
+  // USD inflow inside the window yields a negative USD balance at asOf.
+  const acc = await seedAccount({ defaultCurrency: 'CAD', openingBalance: 1000, openingBalanceDate: '2026-03-01' });
+  await seedTxn(acc.id, '2026-02-10', 200, 'USD');
+  const result = await balanceAtDateMod.balanceAtDate(acc, '2026-01-31');
+  const sorted = [...result].sort((a, b) => a.currency.localeCompare(b.currency));
+  assert.deepEqual(sorted, [
+    { currency: 'CAD', amount: 1000 },
+    { currency: 'USD', amount: -200 },
+  ]);
+});
