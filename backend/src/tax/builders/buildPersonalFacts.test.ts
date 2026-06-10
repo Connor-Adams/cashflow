@@ -603,6 +603,165 @@ test('investment income earned inside a non-registered account is included', asy
   assert.equal(facts.eligibleDividends[0].cadAmount.toFixed(2), '500.00');
 });
 
+test('a stock split adjusts per-unit ACB for subsequent sells (splitRatio passthrough)', async () => {
+  // Regression: the map into computeAcb dropped splitRatio, so the ACB engine
+  // skipped splits with a warning. Post-split sells then computed against the
+  // un-halved per-unit ACB, fabricating capital losses.
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Split passthrough');
+  const sec = await Security.create({ symbol: 'SPL', name: 'Split Co', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-01-10', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-buy-spl', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'split',
+    tradeDate: '2025-03-01', quantity: null, amount: null, currency: 'CAD', fees: null,
+    splitRatio: '2', description: '2:1 split', sourceRowFingerprint: 'fp-split-spl', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-06-01', quantity: '100.0000', amount: '600.0000', currency: 'CAD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-sell-spl', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1);
+  // Post-split: 200 units, cost 1000 → ACB/unit 5. Sell 100 → costRemoved 500.
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '500.00', 'split halves the per-unit ACB');
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '600.00');
+  assert.equal(facts.capitalGainEvents[0].superficialLossDenied, undefined, 'a +100 gain is not a superficial loss');
+});
+
+test('USD dispositions convert proceeds and ACB to CAD at per-leg trade-date rates', async () => {
+  // CRA: convert proceeds at the sale-date rate and ACB at the acquisition-date
+  // rate. The CapGainEvent must reach the T1 engine in CAD, not USD.
+  const { household, entity, account } = await seedPersonalInvestmentAccount('USD cap gains');
+  const sec = await Security.create({ symbol: 'AAPL', name: 'Apple', currency: 'USD', householdId: household.id } as never);
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2025-02-01',
+    rate: '1.30', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2025-08-01',
+    rate: '1.40', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-02-01', quantity: '100.0000', amount: '1000.0000', currency: 'USD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-buy-usd', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-08-01', quantity: '100.0000', amount: '1500.0000', currency: 'USD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-sell-usd', importBatch: 'seed',
+  } as never);
+
+  // Stub fetch so a cache miss can never reach the Bank of Canada API.
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in buildPersonalFacts.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    const facts = await buildPersonalFacts(entity.id, 2025);
+    assert.equal(facts.capitalGainEvents.length, 1);
+    assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '2100.00', 'US$1500 × 1.40 sale-date rate');
+    assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '1300.00', 'US$1000 × 1.30 buy-date rate');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Superficial-loss window (audit fix): CRA's window is 30 days BEFORE through
+// 30 days after the disposition (61 days), the property must still be held at
+// the end of the window, and denial is proportional: min(S, P, B) / S × loss.
+// ---------------------------------------------------------------------------
+
+test('superficial loss: a buy within 30 days BEFORE the loss sale (still held) is denied', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Superficial pre-buy');
+  const sec = await Security.create({ symbol: 'PRE', name: 'PreBuy', currency: 'CAD', householdId: household.id } as never);
+  // 2024: establish 100 @ $10. 2025-03-01: buy 100 more @ $6 (inside the window).
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2024-06-01', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-pre-b1', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-03-01', quantity: '100.0000', amount: '600.0000', currency: 'CAD', fees: null,
+    description: 'buy in window', sourceRowFingerprint: 'fp-pre-b2', importBatch: 'seed',
+  } as never);
+  // Sell 100 @ $5 on 2025-03-10: ACB/unit = 1600/200 = 8 → loss 300. The
+  // 2025-03-01 buy is 9 days BEFORE the sale and 100 units remain at +30d.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-03-10', quantity: '100.0000', amount: '500.0000', currency: 'CAD', fees: null,
+    description: 'loss sale', sourceRowFingerprint: 'fp-pre-s1', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1);
+  assert.ok(facts.capitalGainEvents[0].superficialLossDenied, 'pre-sale repurchase must trigger denial');
+  assert.equal(
+    facts.capitalGainEvents[0].superficialLossDenied!.toFixed(2), '300.00',
+    'min(S=100, P=100, B=100)/S × $300 loss = full denial',
+  );
+});
+
+test('superficial loss: denial is proportional to min(sold, acquired, still-held)', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Superficial proportional');
+  const sec = await Security.create({ symbol: 'PROP', name: 'Proportional', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2024-01-15', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-prop-b1', importBatch: 'seed',
+  } as never);
+  // Sell all 100 @ $6 → loss $400; rebuy only 40 within 30 days and hold them.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-05-01', quantity: '100.0000', amount: '600.0000', currency: 'CAD', fees: null,
+    description: 'loss sale', sourceRowFingerprint: 'fp-prop-s1', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-05-15', quantity: '40.0000', amount: '240.0000', currency: 'CAD', fees: null,
+    description: 'partial rebuy', sourceRowFingerprint: 'fp-prop-b2', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1);
+  assert.ok(facts.capitalGainEvents[0].superficialLossDenied, 'partial rebuy still triggers denial');
+  assert.equal(
+    facts.capitalGainEvents[0].superficialLossDenied!.toFixed(2), '160.00',
+    'min(S=100, P=40, B=40)/100 × $400 = $160 denied, $240 claimable',
+  );
+});
+
+test('superficial loss: NOT denied when the position is fully closed at window end', async () => {
+  // Buying 20 days before a full liquidation is inside the 61-day window, but
+  // condition (b) fails: nothing identical is held 30 days after the sale.
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Superficial closed');
+  const sec = await Security.create({ symbol: 'CLSD', name: 'Closed', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-03-01', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-clsd-b1', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-03-20', quantity: '100.0000', amount: '700.0000', currency: 'CAD', fees: null,
+    description: 'full liquidation at a loss', sourceRowFingerprint: 'fp-clsd-s1', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 1);
+  assert.equal(
+    facts.capitalGainEvents[0].superficialLossDenied, undefined,
+    'no identical property held at window end → the $300 loss is claimable',
+  );
+});
+
 test('a sell inside a registered account produces no capital gain events', async () => {
   // Dispositions inside registered accounts (RRSP/TFSA/etc.) are not taxable
   // capital gains, so the ACB/cap-gains feed must exclude them.

@@ -1,5 +1,6 @@
-import { Decimal, maxZero, sumD } from '../util/decimal';
+import { D, Decimal, maxZero, sumD } from '../util/decimal';
 import { Carryforward } from '../../models';
+import { taxableCapitalGains } from '../engine/capital-gains';
 import type { TaxReturn, TaxYearFacts, RateTable } from '../engine/types';
 
 export type RollResult = {
@@ -14,28 +15,30 @@ export type RollResult = {
 export async function rollPersonalCarryforwards(
   entityId: number,
   year: number,
-  _ret: TaxReturn,
+  ret: TaxReturn,
   facts: TaxYearFacts,
   r: RateTable,
 ): Promise<RollResult> {
-  // Net capital loss carried = prior balance + new losses - amounts applied.
-  // Approximate from facts: if sum(proceeds - acb - outlays) < 0, the includable
-  // portion (grossLoss * inclusionRate) is added to the carry; otherwise it absorbs the carry.
-  const grossGains = sumD(facts.capitalGainEvents.map(e =>
-    e.proceeds.minus(e.acb).minus(e.outlays)
-  ));
-  const includableThisYear = grossGains.times(r.capitalGainsInclusion);
-  let netCapLoss = facts.carryforwards.netCapitalLoss;
-  if (includableThisYear.lessThan(0)) {
-    netCapLoss = netCapLoss.plus(includableThisYear.negated());
-  } else {
-    netCapLoss = maxZero(netCapLoss.minus(includableThisYear));
-  }
+  // Net capital loss carried = prior balance + new includable losses − amounts
+  // applied against gains. Delegate to the engine so the roll matches buildT1
+  // exactly: superficial-loss-denied amounts are added back (a denied loss
+  // adjusts the repurchased shares' ACB, never the carry) and the tiered
+  // post-June-2024 inclusion rate is honoured.
+  const netCapLoss = taxableCapitalGains(
+    facts.capitalGainEvents,
+    r,
+    facts.carryforwards.netCapitalLoss,
+  ).carryforwardRemaining;
 
-  // Non-cap loss: Phase 4 PR 1 — preserve prior balance only.
-  // Auto-detection of new non-cap losses is deferred to a future phase when the
-  // full taxable-income picture is available through the engine.
-  const nonCapLoss = facts.carryforwards.nonCapLoss;
+  // Non-cap loss: subtract the amount buildT1 applied on L26000 this year
+  // (applied = min(netIncome, carry)) so the same loss can't deduct again in
+  // year N+1. ret.totals.netIncome is a Decimal on the live-engine path but a
+  // JSON-serialised string on the projection path — coerce defensively.
+  // Auto-detection of NEW non-cap losses (e.g. an SE loss exceeding income) is
+  // still deferred until the engine surfaces the full loss picture.
+  const netIncome = maxZero(D(String(ret.totals?.netIncome ?? 0)));
+  const nonCapLossApplied = Decimal.min(netIncome, facts.carryforwards.nonCapLoss);
+  const nonCapLoss = maxZero(facts.carryforwards.nonCapLoss.minus(nonCapLossApplied));
 
   // RRSP room: prior balance + 18% x earned income, capped at annual limit,
   // minus contributions made this year.

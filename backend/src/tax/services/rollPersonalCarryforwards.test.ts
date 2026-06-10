@@ -43,15 +43,17 @@ after(() => {
   }
 });
 
-/** Build a minimal TaxReturn shell — roll service doesn't use it in Phase 4 PR 1. */
-function makeRet(): TaxReturn {
+/** Build a minimal TaxReturn shell; netIncome drives the non-cap-loss decrement. */
+function makeRet(netIncome: ReturnType<typeof D> | string = D('0')): TaxReturn {
   const zero = D('0');
   return {
     year: 2025,
     lines: [],
     totals: {
       totalIncome: zero,
-      netIncome: zero,
+      // The projection path (projectPersonalFactsFromPrevYear) passes
+      // JSON-serialised totals, so netIncome may arrive as a plain string.
+      netIncome: netIncome as never,
       taxableIncome: zero,
       federalTax: zero,
       provincialTax: zero,
@@ -297,6 +299,149 @@ test('roll upsert: calling twice with different facts updates DB row', async () 
   assert.equal(rows.length, 1, 'upsert should keep only 1 row per kind+year');
   // 50000 * 0.18 = 9000, capped fine; rrsp_room = 9000
   assert.equal(Number(rows[0].amount).toFixed(2), '9000.00');
+});
+
+// ---------------------------------------------------------------------------
+// Non-capital loss decrement (audit fix): the engine applies
+// min(netIncome, nonCapLoss) on L26000 — the roll must subtract that applied
+// amount instead of writing the prior balance back unreduced (which made the
+// same loss deduct every projected year).
+// ---------------------------------------------------------------------------
+
+test('non-cap loss roll: amount applied against net income is decremented', async () => {
+  const household = await Household.create({ name: 'Roll test noncap applied' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'Roll NonCap',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  const facts = makeFacts({
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('50000'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
+    },
+  });
+
+  // buildT1 applied min(netIncome=20000, carry=50000) = 20000 on L26000.
+  const result = await rollPersonalCarryforwards(
+    entity.id, 2025, makeRet(D('20000')), facts, RATES_2025,
+  );
+
+  const row = result.written.find(w => w.kind === 'non_cap_loss');
+  assert.ok(row);
+  assert.equal(row.amount.toFixed(2), '30000.00', 'carry must shrink by the applied amount');
+});
+
+test('non-cap loss roll: fully consumed when net income exceeds the carry', async () => {
+  const household = await Household.create({ name: 'Roll test noncap consumed' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'Roll NonCap Consumed',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  const facts = makeFacts({
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('10000'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
+    },
+  });
+
+  const result = await rollPersonalCarryforwards(
+    entity.id, 2025, makeRet(D('80000')), facts, RATES_2025,
+  );
+
+  const row = result.written.find(w => w.kind === 'non_cap_loss');
+  assert.ok(row);
+  assert.equal(row.amount.toFixed(2), '0.00');
+});
+
+test('non-cap loss roll: tolerates serialized string netIncome (projection path)', async () => {
+  const household = await Household.create({ name: 'Roll test noncap string' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'Roll NonCap String',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  const facts = makeFacts({
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('50000'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
+    },
+  });
+
+  // projectPersonalFactsFromPrevYear reconstructs the return from JSON, so
+  // totals.netIncome arrives as a plain string.
+  const result = await rollPersonalCarryforwards(
+    entity.id, 2025, makeRet('20000'), facts, RATES_2025,
+  );
+
+  const row = result.written.find(w => w.kind === 'non_cap_loss');
+  assert.ok(row);
+  assert.equal(row.amount.toFixed(2), '30000.00');
+});
+
+// ---------------------------------------------------------------------------
+// Superficial-loss-denied portion (audit fix): a denied loss is added back to
+// the gross gain by the engine (capital-gains.ts) — the roll must mirror that
+// instead of banking the denied portion into the carryforward. (CRA: denied
+// losses adjust the ACB of the repurchased shares, never the loss carry.)
+// ---------------------------------------------------------------------------
+
+test('cap loss roll: superficialLossDenied portion is NOT banked into the carry', async () => {
+  const household = await Household.create({ name: 'Roll test superficial' });
+  const entity = await Entity.create({
+    householdId: household.id,
+    kind: 'personal',
+    legalName: 'Roll Superficial',
+    jurisdiction: 'CA-ON',
+    fiscalYearEnd: null,
+  } as never);
+
+  const facts = makeFacts({
+    capitalGainEvents: [
+      {
+        source: 'sell XYZ with repurchase',
+        securityId: 1,
+        proceeds: D('5000'),
+        acb: D('15000'),  // raw loss −10000
+        outlays: D('0'),
+        date: '2025-06-15',
+        superficialLossDenied: D('4000'), // only −6000 is claimable
+      },
+    ],
+    carryforwards: {
+      netCapitalLoss: D('0'),
+      rrspRoom: D('0'),
+      nonCapLoss: D('0'),
+      instalmentsPaid: D('0'),
+      fhsaLifetimeContributions: D('0'),
+    },
+  });
+
+  const result = await rollPersonalCarryforwards(entity.id, 2025, makeRet(), facts, RATES_2025);
+
+  const capLossRow = result.written.find(w => w.kind === 'cap_loss');
+  assert.ok(capLossRow);
+  // adjusted gross = −10000 + 4000 = −6000 → includable −3000 at 0.5 → carry 3000
+  assert.equal(capLossRow.amount.toFixed(2), '3000.00', 'denied portion must not grow the carry');
 });
 
 // ---------------------------------------------------------------------------

@@ -121,6 +121,16 @@ export type TaxYearFacts = {
   year: number;
   jurisdiction: 'CA-ON';
   employmentIncome: IncomeItem[];
+  /**
+   * Plan-scoped salary additions (e.g. household-plan routed ownerComp salary).
+   * Unlike `employmentIncome` actuals — which buildT1 IGNORES whenever T4 slips
+   * exist (slip-preference dedup) — these are always added on top of L10100.
+   */
+  employmentIncomeAdditions?: IncomeItem[];
+  /** CPP/QPP retirement benefits (L11400). Not pensionable/insurable earnings. */
+  cppBenefits?: Decimal;
+  /** OAS pension (L11300). Not pensionable/insurable earnings. */
+  oasBenefits?: Decimal;
   selfEmploymentIncome: IncomeItem[];
   selfEmploymentExpenses: IncomeItem[];
   interestIncome: IncomeItem[];

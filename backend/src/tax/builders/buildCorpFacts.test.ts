@@ -5,6 +5,7 @@ import {
   Account,
   Carryforward,
   Entity,
+  FxRate,
   Household,
   InvestmentActivity,
   Security,
@@ -113,6 +114,85 @@ test('tolerates an investment activity with a null amount (e.g. activityType "ot
   assert.equal(facts.investmentIncome.interest.length, 0, 'no interest');
   assert.equal(facts.investmentIncome.eligibleDividends.length, 0, 'no eligible dividends');
   assert.equal(facts.investmentIncome.nonEligibleDividends.length, 0, 'no non-eligible dividends');
+});
+
+async function seedCorpInvestmentAccount(name: string) {
+  const household = await Household.create({ name });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: `${name} Inc.`, jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Corp Invest', householdId: household.id, accountType: 'investment',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  return { household, entity, account };
+}
+
+test('corp USD dispositions convert proceeds and ACB to CAD at per-leg trade-date rates', async () => {
+  // Same CRA per-leg conversion rule as the personal builder: a USD gain must
+  // reach AAII / CDA / RDTOH math in CAD, not native currency.
+  const { household, entity, account } = await seedCorpInvestmentAccount('Corp USD gains');
+  const sec = await Security.create({ symbol: 'MSFT', name: 'Microsoft', currency: 'USD', householdId: household.id } as never);
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2025-02-01',
+    rate: '1.30', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await FxRate.create({
+    fromCurrency: 'USD', toCurrency: 'CAD', ratedDate: '2025-08-01',
+    rate: '1.40', source: 'manual_seed', fetchedAt: new Date(),
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-02-01', quantity: '100.0000', amount: '1000.0000', currency: 'USD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-corp-buy-usd', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-08-01', quantity: '100.0000', amount: '1500.0000', currency: 'USD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-corp-sell-usd', importBatch: 'seed',
+  } as never);
+
+  // Stub fetch so a cache miss can never reach the Bank of Canada API.
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('network disabled in buildCorpFacts.test.ts');
+  }) as unknown as typeof fetch;
+  try {
+    const facts = await buildCorpFacts(entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+    assert.equal(facts.capitalGainEvents.length, 1);
+    assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '2100.00', 'US$1500 × 1.40 sale-date rate');
+    assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '1300.00', 'US$1000 × 1.30 buy-date rate');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('corp stock split adjusts per-unit ACB for subsequent sells (splitRatio passthrough)', async () => {
+  // Regression mirror of buildPersonalFacts: the map into computeAcb dropped
+  // splitRatio, so post-split sells fabricated losses against un-halved ACB.
+  const { household, entity, account } = await seedCorpInvestmentAccount('Corp split');
+  const sec = await Security.create({ symbol: 'SPLC', name: 'Split Corp', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-01-10', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-corp-buy-spl', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'split',
+    tradeDate: '2025-03-01', quantity: null, amount: null, currency: 'CAD', fees: null,
+    splitRatio: '2', description: '2:1 split', sourceRowFingerprint: 'fp-corp-split-spl', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-06-01', quantity: '100.0000', amount: '600.0000', currency: 'CAD', fees: null,
+    description: 'sell', sourceRowFingerprint: 'fp-corp-sell-spl', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildCorpFacts(entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+  assert.equal(facts.capitalGainEvents.length, 1);
+  // Post-split: 200 units, cost 1000 → ACB/unit 5. Sell 100 → costRemoved 500.
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '500.00', 'split halves the per-unit ACB');
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '600.00');
 });
 
 test.skip('rejects non-corp entity', async () => {

@@ -135,22 +135,28 @@ test('apply: income.pensionIncome stamps facts.pensionIncome only (L11500 handle
   assert.equal(facts.employmentIncome[0].source, 'slip:T4');
 });
 
-test('apply: income.cppRetirement appends to employmentIncome[] only (no pensionIncome touch)', () => {
+test('apply: income.cppRetirement stamps facts.cppBenefits (not employment income)', () => {
+  // CPP retirement benefits belong on L11400 — they are neither pensionable nor
+  // insurable, so injecting them as employment income manufactured phantom CPP
+  // contributions, EI premiums, and the Canada employment amount.
   const entry = getOverrideKey('income.cppRetirement')!;
   assert.equal(entry.kind, 'personal');
   entry.validate(16000);
   const base = emptyFacts();
   base.employmentIncome = [{ source: 'slip:T4', amount: D('80000'), cadAmount: D('80000') }];
   const facts = entry.apply(base, 16000);
-  // pensionIncome left untouched (undefined in base)
+  // pensionIncome left untouched (CPP is not eligible pension income)
   assert.equal(facts.pensionIncome, undefined);
-  // appended, not replaced
-  assert.equal(facts.employmentIncome.length, 2);
-  assert.equal(facts.employmentIncome[1].source, 'override:income.cppRetirement');
-  assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '16000.00');
+  // employmentIncome[] NOT touched
+  assert.equal(facts.employmentIncome.length, 1);
+  assert.equal(facts.employmentIncome[0].source, 'slip:T4');
+  // accumulates onto cppBenefits
+  assert.equal(facts.cppBenefits!.toFixed(2), '16000.00');
+  const again = entry.apply(facts, 1000);
+  assert.equal(again.cppBenefits!.toFixed(2), '17000.00', 'repeated applies accumulate');
 });
 
-test('apply: income.oasRetirement appends to employmentIncome[] only (no pensionIncome touch)', () => {
+test('apply: income.oasRetirement stamps facts.oasBenefits (not employment income)', () => {
   const entry = getOverrideKey('income.oasRetirement')!;
   assert.equal(entry.kind, 'personal');
   entry.validate(8500);
@@ -158,7 +164,7 @@ test('apply: income.oasRetirement appends to employmentIncome[] only (no pension
   base.employmentIncome = [{ source: 'slip:T4', amount: D('80000'), cadAmount: D('80000') }];
   const facts = entry.apply(base, 8500);
   assert.equal(facts.pensionIncome, undefined);
-  assert.equal(facts.employmentIncome.length, 2);
-  assert.equal(facts.employmentIncome[1].source, 'override:income.oasRetirement');
-  assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '8500.00');
+  assert.equal(facts.employmentIncome.length, 1);
+  assert.equal(facts.employmentIncome[0].source, 'slip:T4');
+  assert.equal(facts.oasBenefits!.toFixed(2), '8500.00');
 });
