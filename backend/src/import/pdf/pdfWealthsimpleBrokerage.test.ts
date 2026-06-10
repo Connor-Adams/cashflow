@@ -352,6 +352,30 @@ test('brokerage parses DIV wrapping 2 continuation lines (received-on date)', ()
   assert.equal(fee.tradeDate, '2025-02-28');
 });
 
+test('brokerage emits DCTFEE on a cash account as a cash transaction, not an investment fee activity', () => {
+  // DCTFEE (debit-card transaction fee) is a cash-account code: it must reach
+  // the cash ledger via CASH_TXN_CODES, not be intercepted by the
+  // InvestmentActivity taxonomy (which would understate spend and attach a
+  // spurious investment fee to a chequing account).
+  const lines: PdfLine[] = [
+    mk('ORDER EXECUTION ONLY ACCOUNT', 1, 798.8),
+    mk(' Account No.   Owner   Statement Period', 1, 762.2),
+    mk(' WK3DD9X35CAD   Connor Adams   2026-02-01 - 2026-02-28', 1, 749.6),
+    mk('Phone: (416) 595-7200 Fax: (647) 245-1002', 1, 713.2),
+    mk(' Chequing Account', 1, 699.9),
+    mk(' Activity - Current period', 2, 786.3),
+    mk(' Date   Transaction   Description   Charged ($)   Credit ($)   Balance ($)', 2, 769.6),
+    mk('2026-02-27   DCTFEE   Debit card transaction fee   $1.50   $0.00   $1,052.38', 2, 758.4),
+  ];
+  const result = wealthsimpleBrokerageParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.investmentActivities!.length, 0,
+    `DCTFEE must not become an InvestmentActivity: ${JSON.stringify(result.investmentActivities)}`);
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, -1.5); // Charged → outflow
+  assert.equal(result.transactions[0].overrideTxnType, 'fee');
+  assert.ok(!result.warnings.some((w) => /DCTFEE/.test(w)));
+});
+
 test('brokerage emits cash-account SPEND as a cash transaction (not an unmapped warn-skip)', () => {
   // Cash/Chequing accounts flow through this parser and carry cash-movement
   // codes the equity taxonomy does not map. These are now emitted as cash

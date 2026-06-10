@@ -110,22 +110,28 @@ function extractTrailingMoneyTokens(text: string): number[] {
 /**
  * Extract the opening balance from the summary section.
  * Format: "Principal balance on [period-start-date]   $X.XX" (positive value).
- * Returns the positive principal balance (we track it as negative internally).
+ * Returns the positive principal balance (we track it as negative internally),
+ * or null when the line is missing or carries no dollar figure (e.g. the
+ * amount wrapped to the next line). Only money-shaped tokens count — a bare
+ * "2025" from the date must not parse as a $2,025.00 balance. The caller
+ * treats null as a hard parse error: signing is delta-based from the opening,
+ * so defaulting to 0 silently flips leading payment rows.
  */
-function extractOpeningPrincipal(lines: PdfLine[]): number {
-  // We look for the first "Principal balance on" line that refers to the opening date.
+function extractOpeningPrincipal(lines: PdfLine[]): number | null {
+  // The FIRST "Principal balance on" line is the opening one — do NOT fall
+  // through to later lines (the next one is the closing balance).
   for (const l of lines) {
     if (/Principal balance on\b/i.test(l.text)) {
-      // Extract the date and check if it's before or at period start.
-      // Simpler: take the FIRST such line encountered (it's the opening).
       const tokens = l.text.trim().split(/\s+/);
       for (let i = tokens.length - 1; i >= 0; i--) {
+        if (!isMoneyToken(tokens[i])) continue;
         const v = parseMoney(tokens[i]);
         if (Number.isFinite(v)) return Math.abs(v);
       }
+      return null;
     }
   }
-  return 0;
+  return null;
 }
 
 /**
@@ -140,6 +146,7 @@ function extractClosingPrincipal(lines: PdfLine[]): number | null {
     if (/Principal balance on\b/i.test(l.text)) {
       const tokens = l.text.trim().split(/\s+/);
       for (let i = tokens.length - 1; i >= 0; i--) {
+        if (!isMoneyToken(tokens[i])) continue;
         const v = parseMoney(tokens[i]);
         if (Number.isFinite(v)) {
           closing = Math.abs(v);
@@ -382,6 +389,13 @@ export const rbcCreditLineParser: PdfParser = {
     const period: Period = { start: header.periodStart, end: header.periodEnd };
 
     const openingPrincipal = extractOpeningPrincipal(lines);
+    if (openingPrincipal === null) {
+      throw new Error(
+        'RBC Credit Line: could not extract opening principal balance ' +
+          '("Principal balance on …" line missing or without a dollar figure) — ' +
+          'transaction signs would be unverifiable',
+      );
+    }
     const closingPrincipal = extractClosingPrincipal(lines);
 
     const { rows, parseErrors } = parseRbcCreditLineActivity(lines, period, openingPrincipal);

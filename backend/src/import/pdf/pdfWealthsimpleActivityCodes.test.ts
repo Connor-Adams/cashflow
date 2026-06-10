@@ -40,6 +40,13 @@ test('unknown code returns null', () => {
   assert.equal(wsPdfCodeToActivity('ZZZ'), null);
 });
 
+test('DCTFEE is a cash-account code, not an InvestmentActivity', () => {
+  // wsPdfCodeToActivity must return null so the brokerage parser's
+  // CASH_TXN_CODES branch routes debit-card fees to the cash ledger — a MAP
+  // entry would intercept them as investment fee activities.
+  assert.equal(wsPdfCodeToActivity('DCTFEE'), null);
+});
+
 // ---------------------------------------------------------------------------
 // Cash-code → TxnType (overrideTxnType source for the brokerage cash branch).
 // ---------------------------------------------------------------------------
