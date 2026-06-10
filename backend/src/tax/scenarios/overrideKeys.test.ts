@@ -150,7 +150,7 @@ test('apply: income.cppRetirement appends to employmentIncome[] only (no pension
   assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '16000.00');
 });
 
-test('apply: income.oasRetirement appends to employmentIncome[] only (no pensionIncome touch)', () => {
+test('apply: income.oasRetirement appends to employmentIncome[] and stamps oasIncome (no pensionIncome touch)', () => {
   const entry = getOverrideKey('income.oasRetirement')!;
   assert.equal(entry.kind, 'personal');
   entry.validate(8500);
@@ -161,4 +161,6 @@ test('apply: income.oasRetirement appends to employmentIncome[] only (no pension
   assert.equal(facts.employmentIncome.length, 2);
   assert.equal(facts.employmentIncome[1].source, 'override:income.oasRetirement');
   assert.equal(facts.employmentIncome[1].cadAmount.toFixed(2), '8500.00');
+  // oasIncome annotation caps the L23500 recovery tax at benefits received
+  assert.equal(facts.oasIncome?.toFixed(2), '8500.00');
 });

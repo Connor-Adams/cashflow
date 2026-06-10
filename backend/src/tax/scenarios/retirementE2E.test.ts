@@ -139,7 +139,8 @@ test('age-72 senior — $74.5k retirement income → no OAS clawback, pension cr
   );
 
   // L42000 (net federal tax) inputs include 'Pension income credit' line.
-  // pensionIncome=$50k is capped at $2,000, × 0.15 federal low rate = $300 credit.
+  // pensionIncome=$50k is capped at $2,000, × 0.14 federal low rate (Bill C-4,
+  // full-year 14% in 2026) = $280 credit.
   const l42000 = lines.find((l) => l.code === 'L42000') as
     | undefined
     | { inputs: { source: string; amount: string }[] };
@@ -148,8 +149,8 @@ test('age-72 senior — $74.5k retirement income → no OAS clawback, pension cr
   assert.ok(pensionCredit, 'L42000 inputs should include "Pension income credit"');
   assert.equal(
     D(pensionCredit.amount).toFixed(2),
-    '300.00',
-    `pension income credit should be min(50000,2000)×0.15=300.00, got ${pensionCredit.amount}`,
+    '280.00',
+    `pension income credit should be min(50000,2000)×0.14=280.00, got ${pensionCredit.amount}`,
   );
 
   // Age amount applied: ageAtYearEnd=72 ≥ 65, so the age × low-rate row should
@@ -230,5 +231,5 @@ test('age-72 senior — $144.5k retirement income → OAS clawback fires (L23500
   assert.ok(l42000, 'L42000 should be present');
   const pensionCredit = l42000.inputs.find((i) => i.source === 'Pension income credit');
   assert.ok(pensionCredit, 'pension credit should still apply at any income level');
-  assert.equal(D(pensionCredit.amount).toFixed(2), '300.00');
+  assert.equal(D(pensionCredit.amount).toFixed(2), '280.00');
 });

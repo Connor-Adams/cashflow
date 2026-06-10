@@ -28,7 +28,21 @@ export function computeAmt(input: AmtInput): AmtResult {
     ? input.capitalGainsGross.times(r.amtCapGainsInclusion).minus(input.capitalGainsTaxable)
     : D('0');
 
-  const adjustedTaxableIncome = input.taxableIncome.plus(maxZero(cgAddBack));
+  // Dividends enter the AMT base at their ACTUAL amount: taxable income
+  // carries the grossed-up figures, so back the gross-up out.
+  const eligibleGrossUp = input.eligibleDividendsGrossed.minus(
+    input.eligibleDividendsGrossed.dividedBy(D('1').plus(r.dividendGrossUpEligible)),
+  );
+  const nonEligibleGrossUp = input.nonEligibleDividendsGrossed.minus(
+    input.nonEligibleDividendsGrossed.dividedBy(D('1').plus(r.dividendGrossUpNonEligible)),
+  );
+
+  const adjustedTaxableIncome = maxZero(
+    input.taxableIncome
+      .plus(maxZero(cgAddBack))
+      .minus(eligibleGrossUp)
+      .minus(nonEligibleGrossUp),
+  );
 
   // Step 2: AMT base = adjusted income minus exemption
   const amtBase = maxZero(adjustedTaxableIncome.minus(r.amtExemption));
@@ -36,7 +50,9 @@ export function computeAmt(input: AmtInput): AmtResult {
   // Step 3: AMT before credits = base × AMT rate
   const amtBeforeCredits = amtBase.times(r.amtRate);
 
-  // Step 4: Allowed credits = fraction of non-refundable credits + fraction of DTC
+  // Step 4: Allowed credits = fraction of non-refundable credits + fraction of
+  // DTC (amtDtcFraction is 0 — the dividend tax credit is fully denied under
+  // AMT, matching the gross-up exclusion above)
   const allowedCredits = input.totalNonRefundableCredits.times(r.amtNonRefCreditFraction)
     .plus(input.totalDtcCredits.times(r.amtDtcFraction));
 

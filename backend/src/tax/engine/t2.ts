@@ -47,27 +47,45 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const includableGains = maxZero(grossGains.times(corpInclusionRate));
   push('L445', 'Taxable capital gains', includableGains);
 
-  // Taxable income
-  const taxableIncome = sbd.eligible.plus(sbd.generalRate).plus(investmentTaxableIncome).plus(includableGains)
-    .minus(facts.carryforwards.nonCapLoss).minus(facts.carryforwards.netCapitalLoss);
-  push('L300T', 'Taxable income', maxZero(taxableIncome));
+  // Taxable income — net capital losses (s.111(1)(b)) only deduct against
+  // taxable capital gains; non-capital losses (s.111(1)(a)) against any income.
+  const netCapitalLossApplied = Decimal.min(facts.carryforwards.netCapitalLoss, includableGains);
+  const taxableIncome = maxZero(
+    sbd.eligible.plus(sbd.generalRate).plus(investmentTaxableIncome).plus(includableGains)
+      .minus(facts.carryforwards.nonCapLoss).minus(netCapitalLossApplied),
+  );
+  push('L300T', 'Taxable income', taxableIncome);
+
+  // Allocate taxable income to the rate pools so loss carryforwards flow into
+  // the tax calc (losses displace general-rate income first, then investment
+  // income, then SBD income — mirroring the statutory residuals):
+  // - SBD applies to the least of ABI, taxable income, business limit (s.125(1))
+  // - investment-rate income is capped at taxable income minus the SBD amount (s.123.3)
+  // - general-rate income is the residual
+  const sbdTaxBase = Decimal.min(sbd.eligible, taxableIncome);
+  const aiiTaxBase = Decimal.min(
+    investmentTaxableIncome.plus(includableGains).minus(netCapitalLossApplied),
+    taxableIncome.minus(sbdTaxBase),
+  );
+  const generalTaxBase = taxableIncome.minus(sbdTaxBase).minus(aiiTaxBase);
 
   // Federal tax
-  const fedSbdTax = sbd.eligible.times(r.corpAbiSbdRateFederal);
-  const fedGeneralTax = sbd.generalRate.times(r.corpGeneralRateFederal);
-  const fedInvestmentTax = investmentTaxableIncome.plus(includableGains).times(r.corpInvestmentRateFederal);
+  const fedSbdTax = sbdTaxBase.times(r.corpAbiSbdRateFederal);
+  const fedGeneralTax = generalTaxBase.times(r.corpGeneralRateFederal);
+  const fedInvestmentTax = aiiTaxBase.times(r.corpInvestmentRateFederal);
   const federalTax = fedSbdTax.plus(fedGeneralTax).plus(fedInvestmentTax);
   push('L700F', 'Federal tax', federalTax);
 
   // ON tax
-  const onSbdTax = sbd.eligible.times(r.corpAbiSbdRateOntario);
-  const onGeneralTax = sbd.generalRate.times(r.corpGeneralRateOntario);
-  const onInvestmentTax = investmentTaxableIncome.plus(includableGains).times(r.corpInvestmentRateOntario);
+  const onSbdTax = sbdTaxBase.times(r.corpAbiSbdRateOntario);
+  const onGeneralTax = generalTaxBase.times(r.corpGeneralRateOntario);
+  const onInvestmentTax = aiiTaxBase.times(r.corpInvestmentRateOntario);
   const provincialTax = onSbdTax.plus(onGeneralTax).plus(onInvestmentTax);
   push('L700P', 'Ontario corporate tax', provincialTax);
 
-  // Refundable tax on AII (added to NERDTOH)
-  const refundableTaxOnAii = investmentTaxableIncome.times(r.corpRefundableTaxOnAII);
+  // Refundable tax on AII (added to NERDTOH) — base includes taxable capital
+  // gains and is capped by the loss deductions above (via aiiTaxBase)
+  const refundableTaxOnAii = aiiTaxBase.times(r.corpRefundableTaxOnAII);
   push('L450', 'Refundable Part I tax on investment income', refundableTaxOnAii);
 
   // Integration: GRIP, CDA, RDTOH additions, dividend refund
@@ -93,8 +111,14 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
     .plus(openingGripBoost)
     .minus(sumD(facts.dividendsPaid.filter(d => d.kind === 'eligible').map(d => d.amount)));
   const cdaEnding = facts.carryforwards.cda.plus(integ.cdaAddition);
-  const erdtohEnding = facts.carryforwards.erdtoh.plus(integ.erdtohAddition); // refund subtracted below
-  const nerdtohEnding = facts.carryforwards.nerdtoh.plus(integ.nerdtohAddition);
+  // Each refund draws only on its own pool: eligible-dividend refunds reduce
+  // ERDTOH, non-eligible refunds reduce NERDTOH.
+  const erdtohEnding = maxZero(
+    facts.carryforwards.erdtoh.plus(integ.erdtohAddition).minus(integ.refundForEligible),
+  );
+  const nerdtohEnding = maxZero(
+    facts.carryforwards.nerdtoh.plus(integ.nerdtohAddition).minus(integ.refundForNonEligible),
+  );
 
   return {
     fiscalYear: facts.fiscalYear,
@@ -104,7 +128,7 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
       sbdEligibleIncome: sbd.eligible,
       generalRateIncome: sbd.generalRate,
       aii: aaii,
-      taxableIncome: maxZero(taxableIncome),
+      taxableIncome,
       federalTax,
       provincialTax,
       refundableTaxOnAii,
@@ -112,7 +136,7 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
       netTaxPayable,
       gripEnding: maxZero(gripEnding),
       cdaEnding,
-      erdtohEnding: maxZero(erdtohEnding.minus(integ.dividendRefund)),
+      erdtohEnding,
       nerdtohEnding,
     },
     warnings,

@@ -136,6 +136,14 @@ export type TaxYearFacts = {
   caregiverDependents?: Array<{ name: string; netIncome: Decimal; eligibleAmount: Decimal }>;
   tuitionFees?: Decimal;
   pensionIncome?: Decimal; // sum of L11500 + L11600 pension lines, before 65 vs 65+ split
+  /**
+   * OAS benefits received in the year — caps the L23500 social-benefits
+   * repayment (recovery tax cannot exceed OAS received; absent/zero → no
+   * clawback). Annotation only: the engine does NOT add it to income; the
+   * `income.oasRetirement` override key appends the amount to
+   * employmentIncome[] for income inclusion and stamps this field.
+   */
+  oasIncome?: Decimal;
   spouse?: {
     netIncome: Decimal;
   };

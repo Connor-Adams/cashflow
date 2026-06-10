@@ -259,22 +259,36 @@ test('pensionIncomeCreditOntario: pension $2,000 capped at $1,641 → $1,641 × 
 });
 
 // ─── Phase 2: OAS Clawback ────────────────────────────────────────────────────
+// CRA recovery tax: lesser of (OAS benefits received, 15% × net income above
+// the threshold). No OAS received → nothing to repay.
 
 test('oasClawback: net income below threshold = $0', () => {
   const r = ratesFor(2024);
   // Threshold $90,997; income $80,000 → no clawback
-  assert.equal(oasClawback(D('80000'), r).toFixed(2), '0.00');
+  assert.equal(oasClawback(D('80000'), D('8500'), r).toFixed(2), '0.00');
 });
 
 test('oasClawback: net income exactly at threshold = $0', () => {
   const r = ratesFor(2024);
-  assert.equal(oasClawback(r.oasClawbackThreshold, r).toFixed(2), '0.00');
+  assert.equal(oasClawback(r.oasClawbackThreshold, D('8500'), r).toFixed(2), '0.00');
 });
 
-test('oasClawback: net income $100,000 → ($100,000 - $90,997) × 15% = $1,350.45', () => {
+test('oasClawback: net income $100,000 with $8,500 OAS → ($100,000 - $90,997) × 15% = $1,350.45', () => {
   const r = ratesFor(2024);
   const expected = D('100000').minus(r.oasClawbackThreshold).times(r.oasClawbackRate);
-  assert.equal(oasClawback(D('100000'), r).toFixed(2), expected.toFixed(2));
+  assert.equal(oasClawback(D('100000'), D('8500'), r).toFixed(2), expected.toFixed(2));
   // Verify: $9,003 × 15% = $1,350.45
-  assert.equal(oasClawback(D('100000'), r).toFixed(2), '1350.45');
+  assert.equal(oasClawback(D('100000'), D('8500'), r).toFixed(2), '1350.45');
+});
+
+test('oasClawback: repayment capped at OAS benefits received', () => {
+  const r = ratesFor(2024);
+  // $200,000 net income → 15% × $109,003 = $16,350.45 uncapped, but only
+  // $8,500 of OAS was received — repayment cannot exceed benefits received.
+  assert.equal(oasClawback(D('200000'), D('8500'), r).toFixed(2), '8500.00');
+});
+
+test('oasClawback: no OAS received = $0 regardless of income', () => {
+  const r = ratesFor(2024);
+  assert.equal(oasClawback(D('200000'), D('0'), r).toFixed(2), '0.00');
 });

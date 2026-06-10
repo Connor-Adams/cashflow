@@ -121,5 +121,8 @@ export async function projectPersonalFactsFromPrevYear(
     slips: [], // future slips don't exist
     carryforwards,
     ageAtYearEnd: parentFacts.ageAtYearEnd + 1,
+    // OAS received carries forward unscaled — it caps the L23500 clawback for
+    // the projected year (the OAS income item itself is scaled with employment).
+    oasIncome: parentFacts.oasIncome,
   };
 }

@@ -197,10 +197,16 @@ export function pensionIncomeCreditOntario(pensionIncome: Decimal, r: RateTable)
 
 /**
  * OAS clawback / social benefits repayment (L23500).
- * 15% of net income above the OAS clawback threshold.
+ * Lesser of (OAS benefits received in the year, 15% of net income above the
+ * OAS clawback threshold) — you cannot repay more OAS than you received, and
+ * a taxpayer who received no OAS repays nothing.
  * This is added to total payable (increases tax owing).
  */
-export function oasClawback(netIncomeBeforeAdjustments: Decimal, r: RateTable): Decimal {
+export function oasClawback(
+  netIncomeBeforeAdjustments: Decimal,
+  oasReceived: Decimal,
+  r: RateTable,
+): Decimal {
   const above = maxZero(netIncomeBeforeAdjustments.minus(r.oasClawbackThreshold));
-  return above.times(r.oasClawbackRate);
+  return Decimal.min(oasReceived, above.times(r.oasClawbackRate));
 }

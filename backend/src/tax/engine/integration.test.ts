@@ -86,15 +86,44 @@ test('Integration: mixed active + investment income — GRIP, CDA, RDTOH additio
   // CDA: gross cap gain = 150000 - 100000 - 5000 = 45000; non-taxable = 45000 × (1 - 0.666667) = 14999.985
   assert.equal(integ.cdaAddition.toFixed(2), '14999.98');
 
-  // ERDTOH: (interest=40000 + rent=20000 + elDiv=0) × 0.3833 = 60000 × 0.3833 = 22998
-  assert.equal(integ.erdtohAddition.toFixed(4), '22998.0000');
+  // ERDTOH: Part IV tax on portfolio ELIGIBLE dividends only — none here → 0.
+  // (Interest and rent are refundable Part I tax → NERDTOH, not ERDTOH.)
+  assert.equal(integ.erdtohAddition.toFixed(4), '0.0000');
 
-  // NERDTOH: nonElDiv=10000 × 0.3067 = 3067
+  // NERDTOH: refundable Part I tax on AII (interest 40000 + rent 20000 +
+  // taxable gains 45000 × 0.666667 = 30000.015) × 0.3067 = 27603.0046005,
+  // plus nonElDiv 10000 × 0.3067 = 3067 → 30670.0046005
+  assert.equal(integ.nerdtohAddition.toFixed(4), '30670.0046');
+
+  // Dividend refund: 30000 non-eligible paid × 0.3833 = 11499;
+  // NERDTOH avail = 5000 + 30670.0046 = 35670.0046 → refund = 11499
+  assert.equal(integ.dividendRefund.toFixed(4), '11499.0000');
+  assert.equal(integ.refundForEligible.toFixed(4), '0.0000');
+  assert.equal(integ.refundForNonEligible.toFixed(4), '11499.0000');
+});
+
+test('Integration: net capital loss carryforward shrinks the refundable AII (NERDTOH) base', () => {
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    investmentIncome: {
+      ...baseFacts().investmentIncome,
+      interest: [{ source: 'GIC', amount: D('10000'), cadAmount: D('10000') }],
+    },
+    capitalGainEvents: [
+      // gross gain 30000 → taxable 30000 × 0.666667 = 20000.01
+      { source: 'stock', securityId: 1, proceeds: D('30000'), acb: D('0'), outlays: D('0'), date: '2024-06-01' },
+    ],
+    carryforwards: {
+      ...baseFacts().carryforwards,
+      netCapitalLoss: D('50000'), // only deductible against taxable gains
+    },
+  };
+
+  const integ = computeIntegration(facts, D('0'), r);
+  // Taxable gains fully absorbed by the loss carryforward (capped at gains);
+  // AII base = interest 10000 + gains 0 → NERDTOH = 10000 × 0.3067 = 3067
   assert.equal(integ.nerdtohAddition.toFixed(4), '3067.0000');
-
-  // Dividend refund: 30000 non-eligible paid × 0.3833 = 11499; NERDTOH avail = 5000 + 3067 = 8067
-  // refund = min(11499, 8067) = 8067
-  assert.equal(integ.dividendRefund.toFixed(4), '8067.0000');
+  assert.equal(integ.erdtohAddition.toFixed(2), '0.00');
 });
 
 test('Integration: eligible dividend refund capped by ERDTOH balance', () => {
