@@ -62,6 +62,7 @@ async function createTxn(
   merchant: string,
   amount: number,
   category: string | null = null,
+  txnType: string = 'purchase',
 ): Promise<number> {
   const t = await models.Transaction.create({
     accountId,
@@ -75,6 +76,7 @@ async function createTxn(
     merchantClean: merchant,
     amount: amount.toFixed(4),
     currency: 'CAD',
+    txnType,
     notes: null,
     sourceReference: null,
     sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
@@ -146,6 +148,49 @@ test('runDetectorsForHousehold scopes by household_id (no cross-household leakag
   const bRows = await models.Insight.findAll({ where: { householdId: b.householdId } });
   assert.ok(aRows.length >= 1);
   assert.equal(bRows.length, 0);
+});
+
+test('runDetectorsForHousehold ignores money-movement rows (transfers, card payments, investment accounts)', async () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const { householdId, accountId } = await seedHousehold('A');
+  // Recurring same-amount internal transfers two days apart — not duplicate
+  // charges, and not missing-receipt spend either.
+  await createTxn(householdId, accountId, isoDaysAgo(now, 12), 'Online transfer sent', -2500, null, 'transfer');
+  await createTxn(householdId, accountId, isoDaysAgo(now, 10), 'Online transfer sent', -2500, null, 'transfer');
+  // A growing monthly card bill payment — money movement, not a spend spike.
+  await createTxn(householdId, accountId, '2026-04-10', 'Amex Bill Pymt', -2000, null, 'payment');
+  await createTxn(householdId, accountId, '2026-05-10', 'Amex Bill Pymt', -5000, null, 'payment');
+  // A brokerage debit that missed every detectTypeStage pattern (defaults to
+  // 'purchase') on an investment account — portfolio churn, not spend.
+  const inv = await models.Account.create({
+    householdId,
+    ownerUserId: null,
+    owner: 'me',
+    visibility: 'shared',
+    name: 'Brokerage',
+    accountType: 'investment',
+    defaultCurrency: 'CAD',
+    shortCode: 'INV',
+  });
+  await createTxn(householdId, inv.id, isoDaysAgo(now, 10), 'WS BUY 100 XEQT', -5000, null, 'purchase');
+
+  await runDetectorsForHousehold(householdId, { now });
+  const persisted = await models.Insight.findAll({ where: { householdId } });
+  assert.equal(
+    persisted.filter((p) => p.type === 'duplicate_transactions').length,
+    0,
+    'transfers must not surface as duplicate charges',
+  );
+  assert.equal(
+    persisted.filter((p) => p.type === 'merchant_spend_spike').length,
+    0,
+    'a growing bill payment is not a spend spike',
+  );
+  assert.equal(
+    persisted.filter((p) => p.type === 'missing_receipt').length,
+    0,
+    'money-movement rows are not missing-receipt spend',
+  );
 });
 
 test('runDetectorsForHousehold preserves user status across reruns (dismissed stays dismissed)', async () => {

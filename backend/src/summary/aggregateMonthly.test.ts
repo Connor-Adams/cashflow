@@ -126,6 +126,25 @@ test('aggregateMonthly: excludes positive payments and non-categorical flows', (
   assert.equal(out.categoryPoints.length, 1);
 });
 
+test('aggregateMonthly: excludes the negative checking-side leg of a statement payment', () => {
+  // "AMEX BILL PYMT" −$2,000 on checking is txnType='payment'. The card
+  // purchases it pays off are already in the curve — counting the leg too
+  // would render a doubled month and a phantom Uncategorized point.
+  const out = aggregateMonthly(
+    [
+      row({ id: 1, date: '2026-06-01', amount: -2000, txnType: 'payment', finalCategory: null }),
+      row({ id: 2, date: '2026-06-02', amount: -10, finalCategory: 'Dining' }),
+    ],
+    new Map(),
+  );
+  const jun = out.points.find((p) => p.month === '2026-06');
+  assert.ok(jun);
+  assert.equal(jun.sumAmount, -10, 'payment leg excluded from the activity curve');
+  assert.equal(out.categoryPoints.length, 1);
+  assert.equal(out.categoryPoints[0].category, 'Dining');
+  assert.equal(out.categoryPoints[0].sumAmount, -10);
+});
+
 test('aggregateMonthly: income (txnType=income) is excluded from both points and categoryPoints', () => {
   const out = aggregateMonthly(
     [

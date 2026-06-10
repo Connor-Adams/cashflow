@@ -24,14 +24,15 @@
  *
  * Income classification mirrors explainMonth.tallyByCurrency: positive
  * amounts are income, negative amounts are spend (recorded as absolute
- * value). Pure money-movement rows — transfers, brokerage buys, dividends,
- * investment-account activity — are excluded via the shared
- * `isNonCategorical` filter so the trend reflects consumption, not
- * portfolio churn.
+ * value). Pure money-movement rows are excluded so the trend reflects
+ * consumption, not portfolio churn or statement payments: negative rows go
+ * through the shared `isNonSpend` filter (transfers, brokerage buys, the
+ * checking-side leg of a card payment), and positive rows drop
+ * `isNonCategorical` flows plus the card-side payment leg.
  */
 
 import { num } from '../util/numbers';
-import { isNonCategorical } from './classifyTransactionFlow';
+import { isNonCategorical, isNonSpend } from './classifyTransactionFlow';
 
 /** Transaction row consumed by the aggregator. Mirrors the columns the
  *  route requests from Sequelize. */
@@ -362,11 +363,22 @@ export function lifestyleInflation(
 
   for (const txn of input.transactions) {
     if (currencyFilter && txn.currency !== currencyFilter) continue;
-    if (isNonCategorical(txn.txnType, txn.accountType)) continue;
     const month = ymOf(txn.date);
     if (!monthSet.has(month)) continue;
     const amount = num(txn.amount);
     if (amount == null) continue;
+    if (amount < 0) {
+      // Spend side: same rule as the dashboard's isNonSpend — transfers,
+      // brokerage flows, AND the checking-side leg of a statement payment
+      // (txnType='payment') are money movement, not consumption. Without the
+      // payment skip a paid-off card month double counts (purchases + payment
+      // leg).
+      if (isNonSpend(txn.txnType, txn.accountType)) continue;
+    } else if (isNonCategorical(txn.txnType, txn.accountType) || txn.txnType === 'payment') {
+      // Income side: the card-side payment leg and money-movement inflows
+      // are not income.
+      continue;
+    }
 
     let months_ = byCurrency.get(txn.currency);
     if (!months_) {
