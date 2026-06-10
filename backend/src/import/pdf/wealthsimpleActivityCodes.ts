@@ -22,7 +22,10 @@ const MAP: Record<string, ActivityType> = {
   INT: 'interest',
   FPLINT: 'interest',
   FEE: 'fee',
-  DCTFEE: 'fee',
+  // DCTFEE (debit-card transaction fee) is deliberately NOT here: it is a
+  // cash-account code (CASH_TXN_CODES / CASH_CODE_TXN_TYPE below) and a MAP
+  // entry would intercept it before the brokerage parser's cash-Transaction
+  // routing, dropping the fee from the cash ledger.
   DSCFEE: 'fee',
   CONT: 'transfer',
   DEP: 'cash_movement',

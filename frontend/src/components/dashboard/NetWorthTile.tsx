@@ -6,6 +6,11 @@ import {
   useNetWorthCurrent,
   useNetWorthSeries,
 } from '@/hooks/useNetWorth'
+import {
+  fromDateInputValue,
+  toDateInputValue,
+  todayDateInputValue,
+} from '@/lib/dateInput'
 import { formatMoney } from '@/lib/formatMoney'
 
 /**
@@ -40,13 +45,12 @@ function CreditUtilizationLine() {
 }
 
 function oneYearAgo(): { from: string; to: string } {
-  const today = new Date()
-  const from = new Date(today)
+  // Anchor at UTC midnight of the user's local calendar day (issue #280) so
+  // the series ends on the day the user's clock shows, not UTC's.
+  const to = fromDateInputValue(todayDateInputValue())!
+  const from = new Date(to)
   from.setUTCFullYear(from.getUTCFullYear() - 1)
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: today.toISOString().slice(0, 10),
-  }
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 export function NetWorthTile() {

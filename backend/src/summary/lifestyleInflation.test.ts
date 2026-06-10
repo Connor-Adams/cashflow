@@ -124,6 +124,27 @@ test('excludes investment-account rows regardless of txnType', () => {
   assert.equal(feb.spend, 40);
 });
 
+test('credit-card bill payments are excluded from both income and spend', () => {
+  const months = buildMonthWindow('2026-02', 2);
+  const res = lifestyleInflation({
+    months,
+    currency: 'CAD',
+    transactions: [
+      // $3,000 of card purchases, paid off in full the same month.
+      row({ date: '2026-02-05', amount: -3000, finalCategory: 'Shopping', accountType: 'credit_card' }),
+      // Card-side payment leg (positive on the card) — not income.
+      row({ date: '2026-02-20', amount: 3000, txnType: 'payment', accountType: 'credit_card', finalCategory: null }),
+      // Checking-side payment leg (negative) — not spend (the purchases already are).
+      row({ date: '2026-02-20', amount: -3000, txnType: 'payment', accountType: 'checking', finalCategory: null }),
+      // Genuine income.
+      row({ date: '2026-02-28', amount: 5000, txnType: 'income', accountType: 'checking', finalCategory: null }),
+    ],
+  });
+  const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
+  assert.equal(feb.spend, 3000, 'only the card purchases are spend — not the payment leg too');
+  assert.equal(feb.income, 5000, 'the card-side payment leg is not income');
+});
+
 // ---------------- growth + outpacing insight ----------------
 
 test('flags spending outpacing income with a warning insight', () => {

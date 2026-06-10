@@ -38,6 +38,37 @@ test('parseAmexReserveHeader — extracts account, period, holder', () => {
   assert.equal(hdr.accountHolder, 'CONNOR ADAMS');
 });
 
+test('parse — row whose amount line never matches becomes a parse error, not a $0.00 transaction', () => {
+  const lines = [
+    ...headerLines(),
+    mkLine('New Transactions for CONNOR ADAMS', 2, 560),
+    mkLine('Apr 27   Apr 27   SOME MERCHANT   CITY', 2, 512),
+    // Amount span at x ≤ 400 fails isAmountLine (layout drift) — the row's
+    // amount is never attached.
+    mkLine('38.26', 2, 510, 300),
+    mkLine('Total of New Transactions for                                        38.26', 2, 400),
+  ];
+  const result = amexReserveParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.transactions.length, 0, `expected no $0 txn, got ${JSON.stringify(result.transactions)}`);
+  assert.equal(result.parseErrors.length, 1);
+  assert.ok(result.parseErrors[0].message.includes('SOME MERCHANT'));
+});
+
+test('parse — genuine 0.00 amount is kept and a later stray amount line does not attach to it', () => {
+  const lines = [
+    ...headerLines(),
+    mkLine('New Transactions for CONNOR ADAMS', 2, 560),
+    mkLine('Apr 27   Apr 27   ZERO DOLLAR AUTH   CITY', 2, 512),
+    mkAmountLine('0.00', 510),
+    mkAmountLine('50.00', 508),
+    mkLine('Total of New Transactions for                                        0.00', 2, 400),
+  ];
+  const result = amexReserveParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.transactions.length, 1);
+  assert.equal(result.transactions[0].amount, 0);
+  assert.deepEqual(result.warnings, []);
+});
+
 test('parse — basic charge', () => {
   const lines = [
     ...headerLines(),

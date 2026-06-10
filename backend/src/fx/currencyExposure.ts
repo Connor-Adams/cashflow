@@ -36,8 +36,9 @@ export interface CurrencyExposureRow {
   absSumNative: number;
   /** Native amount converted to the reporting currency, or null on FX gap. */
   cadEquivalent: number | null;
-  /** Share of the absolute reporting-currency total (0..1). NaN-safe → 0 when
-   * the total is 0. */
+  /** Share of total converted volume — abs amounts, so offsetting flows in a
+   * currency don't cancel its share (0..1). NaN-safe → 0 when the total is 0
+   * or the currency has no rate. */
   shareOfTotal: number;
   /** The FX rate used for this currency → reporting currency. 1 for identity,
    * null when no rate could be resolved. */
@@ -119,7 +120,7 @@ export async function computeCurrencyExposure(
         fxRate: 1,
         ratedDate: asOf,
       });
-      totalReportingAbs += Math.abs(bucket.sumNative);
+      totalReportingAbs += bucket.absSumNative;
       continue;
     }
 
@@ -150,18 +151,19 @@ export async function computeCurrencyExposure(
       fxRate: fx.rate,
       ratedDate: fx.ratedDate,
     });
-    totalReportingAbs += Math.abs(converted);
+    totalReportingAbs += round4(bucket.absSumNative * fx.rate);
   }
 
-  // Second pass: compute shareOfTotal once we know the total. Use absolute
-  // values so a credit + a debit in the same currency don't cancel into 0%.
+  // Second pass: compute shareOfTotal once we know the total. Shares are
+  // built from converted VOLUME (absSumNative, sum of |amount|), not the net,
+  // so a credit + a debit in the same currency don't cancel into 0%.
   for (const row of rows) {
-    if (row.cadEquivalent == null) {
+    if (row.cadEquivalent == null || row.fxRate == null) {
       row.shareOfTotal = 0;
       continue;
     }
-    row.shareOfTotal =
-      totalReportingAbs > 0 ? Math.abs(row.cadEquivalent) / totalReportingAbs : 0;
+    const absVolume = round4(row.absSumNative * row.fxRate);
+    row.shareOfTotal = totalReportingAbs > 0 ? absVolume / totalReportingAbs : 0;
   }
 
   // Stable ordering: largest absolute share first (so the dashboard shows the

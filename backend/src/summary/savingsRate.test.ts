@@ -135,6 +135,28 @@ test('negative spend on a credit_card account is spending, not debt principal', 
 
 // ---------------- no double counting ----------------
 
+test('a card bill payment is not double counted: checking leg skipped, card leg is principal', () => {
+  const res = savingsRate({
+    months: WINDOW,
+    transactions: [
+      // $3,000 of purchases on the card — spending (intended).
+      row({ amount: -3000, txnType: 'purchase', accountType: 'credit_card' }),
+      // Checking-side leg of the bill payment — money movement, NOT spending
+      // again ("amex bill pymt" rows are typed 'payment', not 'transfer').
+      row({ amount: -3000, txnType: 'payment', accountType: 'checking' }),
+      // Card-side leg — the principal paid down.
+      row({ amount: 3000, txnType: 'payment', accountType: 'credit_card' }),
+      // Genuine income so the rate is computable.
+      row({ amount: 10000, txnType: 'income', accountType: 'checking' }),
+    ],
+    currency: null,
+  });
+  const feb = res.byCurrency[0].series.find((m) => m.month === '2026-02')!;
+  assert.equal(feb.spending, 3000, 'payment leg on checking must not double count card purchases');
+  assert.equal(feb.debtPrincipal, 3000);
+  assert.equal(feb.income, 10000);
+});
+
 test('an internal transfer checking->savings is not double counted', () => {
   const res = savingsRate({
     months: WINDOW,

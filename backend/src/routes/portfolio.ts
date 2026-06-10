@@ -773,12 +773,13 @@ router.get('/by-security', async (req, res, next) => {
         activityType: a.activityType,
         tradeDate: a.tradeDate,
         quantity: n(a.quantity),
-        price: n(a.price),
         amount: n(a.amount),
         fees: n(a.fees),
         currency: a.currency,
+        splitRatio: n(a.splitRatio),
       }));
-      const acb = computeAcb(acbInput);
+      const { normalized } = await normalizeActivitiesToCad(acbInput);
+      const acb = computeAcb(normalized);
       metricsCtx.realizedBySec.set(row.securityId, acb.realizedTotal);
     }
 
@@ -1645,7 +1646,9 @@ router.get('/security/:id', async (req, res, next) => {
       where: { securityId, exDividendDate: { [Op.gte]: cutoff30 } },
     });
     const divPerUnit30 = divs30.reduce((s, d) => s + Number(d.amount), 0);
-    const price30Val = price30 ? Number(price30.adjClose) : null;
+    // Base must be the raw close: adjClose is already deflated by the window's
+    // dividends, and divPerUnit30 adds them explicitly (double count otherwise).
+    const price30Val = price30 ? Number(price30.close) : null;
     const todayForReturn = todayPriceQuote ?? (dailyForToday[0] ? Number(dailyForToday[0].adjClose) : null);
     const thirtyDayReturnPct =
       price30Val != null && price30Val !== 0 && todayForReturn != null
@@ -2169,7 +2172,25 @@ router.get('/forward-income', async (req, res, next) => {
     for (const r of rows) {
       if (r.currency !== 'CAD' && !fxByCurrency.has(r.currency)) {
         const fx = await ensureFxRate(r.currency, 'CAD', asOfDate);
-        fxByCurrency.set(r.currency, fx ? Number(fx.rate) : 1);
+        let rate = fx ? Number(fx.rate) : null;
+        if (rate == null) {
+          // BoC unreachable + nothing in the recency window: a stale cached
+          // rate still beats silently valuing the currency at parity (1.0).
+          const nearest = await FxRate.findOne({
+            where: { fromCurrency: r.currency, toCurrency: 'CAD' },
+            order: [['ratedDate', 'DESC']],
+          });
+          rate = nearest ? Number(nearest.rate) : null;
+        }
+        if (rate == null) {
+          logger.warn(
+            { fromCurrency: r.currency, toCurrency: 'CAD', asOfDate, module: 'portfolio' },
+            'portfolio_forward_income_missing_fx_rate',
+          );
+          res.status(502).json({ error: `FX rate unavailable for ${r.currency}→CAD` });
+          return;
+        }
+        fxByCurrency.set(r.currency, rate);
       }
     }
 

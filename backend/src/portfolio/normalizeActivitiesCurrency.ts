@@ -26,7 +26,9 @@
  * behaviour of the engine itself).
  */
 
+import { Op } from 'sequelize';
 import { ensureFxRate } from '../fx/bankOfCanada';
+import { FxRate } from '../models/FxRate';
 import type { AcbActivity } from './acb';
 
 type FetchRate = (
@@ -39,6 +41,18 @@ const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 const defaultFetchRate: FetchRate = async (from, to, date) => {
   const result = await ensureFxRate(from, to, date);
+  // ensureFxRate's recency window has no upper date bound, so for a
+  // historical trade date it can return a newer (even today's) cached
+  // rate. Accept only rates published at-or-before the activity date;
+  // otherwise fall back to the nearest historical row (mirrors the
+  // guard in fx/toCad.ts).
+  if (result && result.ratedDate <= date) return { rate: result.rate };
+  const nearest = await FxRate.findOne({
+    where: { fromCurrency: from, toCurrency: to, ratedDate: { [Op.lte]: date } },
+    order: [['ratedDate', 'DESC']],
+  });
+  if (nearest) return { rate: Number(nearest.rate) };
+  // Last resort: a future-dated rate beats failing the conversion.
   return result ? { rate: result.rate } : null;
 };
 

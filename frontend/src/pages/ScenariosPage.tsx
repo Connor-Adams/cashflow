@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
+import { todayDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   AssumptionRecurrence,
@@ -132,7 +133,7 @@ function emptyAssumption(): ScenarioAssumption {
     label: '',
     type: 'expense',
     amount: 0,
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: todayDateInputValue(),
     endDate: null,
     recurrence: null,
     direction: 'out',

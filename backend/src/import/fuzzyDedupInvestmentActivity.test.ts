@@ -194,6 +194,49 @@ test('Incoming has quantity, candidate has null quantity: NO match (would mask d
   assert.equal(out.kind, 'no-match');
 });
 
+test('excludeIds: an already-consumed candidate is invisible to later rows', () => {
+  const pool = [
+    candidate({
+      id: 1,
+      quantity: '0.50000000',
+      amount: '-20.0000',
+      security: { symbol: 'XEQT' },
+    }),
+  ];
+  const input = { symbol: 'XEQT', quantity: 0.5, amount: -20 };
+  // First row of the commit consumes candidate 1…
+  assert.equal(pickFuzzyMatch(pool, input).kind, 'single-match');
+  // …so the second identical row must NOT match it again.
+  const out = pickFuzzyMatch(pool, { ...input, excludeIds: new Set([1]) });
+  assert.equal(out.kind, 'no-match');
+});
+
+test('excludeIds: exclusion can demote a multi-match to a single-match', () => {
+  const pool = [
+    candidate({
+      id: 1,
+      quantity: '0.50000000',
+      amount: '-20.0000',
+      security: { symbol: 'XEQT' },
+    }),
+    candidate({
+      id: 2,
+      quantity: '0.50000000',
+      amount: '-20.0000',
+      security: { symbol: 'XEQT' },
+    }),
+  ];
+  const out = pickFuzzyMatch(pool, {
+    symbol: 'XEQT',
+    quantity: 0.5,
+    amount: -20,
+    excludeIds: new Set([1]),
+  });
+  assert.equal(out.kind, 'single-match');
+  if (out.kind !== 'single-match') return;
+  assert.equal(out.existing.id, 2);
+});
+
 test('Incoming null quantity, candidate has quantity: NO match', () => {
   // CSV's quantity column populated only for trades/staking. Old parser may
   // have stored qty for some flavours but not others. Asymmetric null → reject.

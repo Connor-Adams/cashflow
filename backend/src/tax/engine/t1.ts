@@ -229,11 +229,12 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const netIncome = maxZero(totalIncome.minus(rrsp).minus(fhsa).minus(seCppDeductible));
   push('L23600', 'Net income', netIncome);
 
-  // OAS clawback / social benefits repayment L23500 — computed on net income before adjustments
-  const oasRepayment = oasClawback(netIncome, r);
+  // OAS clawback / social benefits repayment L23500 — computed on net income
+  // before adjustments, capped at the OAS benefits actually received.
+  const oasRepayment = oasClawback(netIncome, oasBenefits, r);
   if (oasRepayment.greaterThan(0)) {
     push('L23500', 'Social benefits repayment (OAS clawback)', oasRepayment, [],
-      `15% × max(0, netIncome − ${r.oasClawbackThreshold.toFixed(2)})`);
+      `min(OAS received, 15% × max(0, netIncome − ${r.oasClawbackThreshold.toFixed(2)}))`);
   }
 
   // Taxable income L26000 (apply non-cap loss carryforward)
@@ -344,19 +345,23 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
   const onMedicalCredit = medicalCreditOntario(totalMedical, netIncome, r);
   const onDtcEligible = dtcOntario(eligibleGrossed, 'eligible', r);
   const onDtcNonEligible = dtcOntario(nonElGrossed, 'non_eligible', r);
-  const onTax = maxZero(
+  // ON428 ordering (since 2014): the surtax is computed on Ontario tax net of
+  // non-refundable credits but BEFORE the Ontario dividend tax credit; the ON
+  // DTC is deducted after the surtax lines.
+  const onTaxAfterCredits = maxZero(
     onTaxBeforeCredits
       .minus(onCreditTotal)
       .minus(onDonationsCredit)
       .minus(onPensionCredit)
-      .minus(onMedicalCredit)
-      .minus(onDtcEligible)
-      .minus(onDtcNonEligible),
+      .minus(onMedicalCredit),
+  );
+  const onSurtax = computeOnSurtax(onTaxAfterCredits, r);
+  const onTax = maxZero(
+    onTaxAfterCredits.plus(onSurtax).minus(onDtcEligible).minus(onDtcNonEligible),
   );
   push('L42800', 'Net Ontario tax', onTax);
 
-  // ON surtax + Ontario Health Premium (use rate table arrays)
-  const onSurtax = computeOnSurtax(onTax, r);
+  // Ontario Health Premium (uses rate table arrays)
   const ohp = computeOhp(taxableIncome, r);
   push('L42801', 'ON surtax', onSurtax);
   push('L42802', 'Ontario Health Premium', ohp);
@@ -367,8 +372,8 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       '2 × computeCppEmployee(seNet)');
   }
 
-  // Totals
-  const totalPayable = sumD([federalTaxWithAmt, onTax, onSurtax, ohp, oasRepayment, seCppContrib]);
+  // Totals — onTax already includes the surtax (added before the DTC above)
+  const totalPayable = sumD([federalTaxWithAmt, onTax, ohp, oasRepayment, seCppContrib]);
   push('L43500', 'Total payable', totalPayable);
 
   // Tax deducted at source: sum T4 box 22 across all T4 slips.
@@ -392,7 +397,7 @@ export function buildT1(facts: TaxYearFacts, r: RateTable): TaxReturn {
       netIncome,
       taxableIncome,
       federalTax: federalTaxWithAmt,
-      provincialTax: onTax.plus(onSurtax).plus(ohp),
+      provincialTax: onTax.plus(ohp),
       cppContrib: cppEmployee.plus(seCppContrib),
       eiPremium: eiEmployee,
       totalPayable,

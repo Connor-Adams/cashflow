@@ -85,13 +85,16 @@ export async function detectSubscriptionPriceChanges(): Promise<{
   for (const sub of activeSubscriptions) {
     const merchantPattern = sub.merchantName.replace(/[%_\\]/g, '\\$&');
 
-    // Fetch matching transactions in the last 90 days
+    // Fetch matching CHARGES in the last 90 days. Spend is stored negative;
+    // refunds/credits arrive positive and must be excluded — the math below
+    // takes Math.abs, so a refund row would read as a fake price increase.
     const txns = await Transaction.findAll({
       where: {
         householdId: sub.householdId,
         currency: sub.currency,
         merchantClean: { [Op.iLike]: `%${merchantPattern}%` },
         date: { [Op.gte]: since },
+        amount: { [Op.lt]: 0 },
       },
       order: [['date', 'DESC']],
       attributes: ['id', 'amount', 'currency', 'date'],

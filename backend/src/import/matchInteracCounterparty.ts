@@ -12,6 +12,8 @@ export interface NamelessTxnLite {
   id: number;
   amountCents: number; // absolute value
   date: string; // YYYY-MM-DD
+  /** Money direction from the txn sign: negative amount = 'sent', positive = 'received'. */
+  direction: 'sent' | 'received';
 }
 export interface InteracMatch {
   txnId: number;
@@ -46,10 +48,22 @@ export function matchInteracCounterparty(
     isSelf: normalizeContactName(e.name) === ownerKey,
   });
 
+  // A 'sent' email belongs to an outgoing (negative) txn and a 'received' email
+  // to an incoming (positive) one — otherwise a same-amount 'received $X from
+  // Bob' email auto-attaches Bob to money the household SENT. Exception:
+  // self-named emails, because one self e-transfer 'sent' email legitimately
+  // describes both legs (the negative sending-account txn AND the positive
+  // receiving-account txn).
+  const directionCompatible = (e: InteracEmailLite, txnDirection: 'sent' | 'received') =>
+    e.direction === txnDirection || normalizeContactName(e.name) === ownerKey;
+
   for (const t of txns) {
-    // candidate emails: same amount, within the date window of THIS txn
+    // candidate emails: same amount, compatible direction, within the date window of THIS txn
     const cands = emails.filter(
-      (e) => e.amountCents === t.amountCents && daysBetween(e.emailDate, t.date) <= WINDOW_DAYS,
+      (e) =>
+        e.amountCents === t.amountCents &&
+        directionCompatible(e, t.direction) &&
+        daysBetween(e.emailDate, t.date) <= WINDOW_DAYS,
     );
     if (cands.length === 0) continue;
 
@@ -58,9 +72,13 @@ export function matchInteracCounterparty(
       daysBetween(a.emailDate, t.date) <= daysBetween(b.emailDate, t.date) ? a : b,
     );
 
-    // mutual uniqueness: how many txns does `best` plausibly match (same amount, within window)?
+    // mutual uniqueness: how many txns does `best` plausibly match (same amount,
+    // compatible direction, within window)?
     const bestTxns = txns.filter(
-      (tt) => tt.amountCents === best.amountCents && daysBetween(best.emailDate, tt.date) <= WINDOW_DAYS,
+      (tt) =>
+        tt.amountCents === best.amountCents &&
+        directionCompatible(best, tt.direction) &&
+        daysBetween(best.emailDate, tt.date) <= WINDOW_DAYS,
     );
 
     if (cands.length === 1 && bestTxns.length === 1) {

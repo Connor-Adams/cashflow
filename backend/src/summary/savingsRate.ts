@@ -33,7 +33,8 @@
  *   - debtPrincipal— a positive amount (a payment) landing on a liability
  *                     account (loan / mortgage / credit card). This is the
  *                     principal you paid down; the matching outflow leg lives on
- *                     your checking account and is skipped as a transfer.
+ *                     your checking account and is skipped as money movement
+ *                     (txnType 'transfer' or 'payment', via isNonSpend).
  *
  * A transfer from checking to savings therefore contributes nothing on the
  * checking side (the outflow leg is money-movement, skipped) and a `savings`
@@ -47,7 +48,7 @@
  */
 
 import { num } from '../util/numbers';
-import { classifyPositiveAmount, isNonCategorical } from './classifyTransactionFlow';
+import { classifyPositiveAmount, isNonSpend } from './classifyTransactionFlow';
 
 /** Account types treated as cash savings vehicles. */
 const SAVINGS_ACCOUNT_TYPES: ReadonlySet<string> = new Set(['savings']);
@@ -189,12 +190,13 @@ export function classifySavingsRow(row: SavingsRateTxnRow): Bucket {
   }
 
   // --- negative amounts: an outflow ---
-  // Money-movement outflows (the source leg of a transfer, brokerage sells,
-  // dividend sweeps, investment-account activity) are not spending — they net
-  // against the inflow leg we already classified above.
-  if (isNonCategorical(row.txnType, accountType)) return 'skip';
-  // A negative on an investment account is portfolio churn, never spend.
-  if (isInvestmentAccount(accountType)) return 'skip';
+  // Money-movement outflows are not spending: the source leg of a transfer,
+  // brokerage sells, dividend sweeps, investment-account activity, AND the
+  // checking-side leg of a statement payment (txnType='payment' — its
+  // matching positive leg is the debtPrincipal classified above, and the
+  // card purchases it pays off are already counted as spending). Same rule
+  // as the dashboard's isNonSpend so the two reconcile.
+  if (isNonSpend(row.txnType, accountType)) return 'skip';
   // Everything else negative is real consumption.
   return 'spending';
 }

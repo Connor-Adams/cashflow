@@ -502,6 +502,47 @@ test('GET /api/forecast does NOT project internal transfers as income', async ()
   assert.equal(events.filter((e) => e.direction === 'in').length, 0);
 });
 
+test('GET /api/forecast projects detected monthly recurring charges on calendar months', async () => {
+  const h = await seed('CalMonth', { openingBalance: 1000 });
+  const agent = request.agent(app);
+  agent.jar.setCookie(`cashflow_session=${h.token}; Path=/`);
+
+  // Three monthly Netflix charges before the window (gaps 31/30 days → the
+  // detector classifies the stream as monthly, nextExpected 2026-06-08).
+  for (const date of ['2026-03-09', '2026-04-09', '2026-05-09']) {
+    await seedTxn({
+      accountId: h.accountId,
+      householdId: h.householdId,
+      date,
+      amount: -15,
+      merchant: 'Netflix',
+    });
+  }
+
+  // 90-day window starting exactly on nextExpected. A fixed 30-day step
+  // would emit FOUR charges (Jun 8, Jul 8, Aug 7, Sep 6 — the last landing
+  // exactly on dateTo); a true calendar-month schedule emits THREE
+  // (Jun 8, Jul 8, Aug 8).
+  const res = await agent
+    .get('/api/forecast')
+    .query({ dateFrom: '2026-06-08', dateTo: '2026-09-06', currency: 'CAD' });
+  assert.equal(res.status, 200);
+  const events = res.body.events as Array<{
+    sourceType: string;
+    sourceName: string;
+    direction: string;
+    date: string;
+  }>;
+  const netflix = events.filter(
+    (e) => e.sourceType === 'recurring_detection' && e.sourceName === 'Netflix',
+  );
+  assert.deepEqual(
+    netflix.map((e) => e.date),
+    ['2026-06-08', '2026-07-08', '2026-08-08'],
+  );
+  for (const e of netflix) assert.equal(e.direction, 'out');
+});
+
 test('GET /api/forecast projects a subscription-kind expectation as an outflow', async () => {
   const h = await seed('Subs', { openingBalance: 1000 });
   const agent = request.agent(app);

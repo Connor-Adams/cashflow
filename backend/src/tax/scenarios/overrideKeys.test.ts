@@ -166,5 +166,8 @@ test('apply: income.oasRetirement stamps facts.oasBenefits (not employment incom
   assert.equal(facts.pensionIncome, undefined);
   assert.equal(facts.employmentIncome.length, 1);
   assert.equal(facts.employmentIncome[0].source, 'slip:T4');
+  // oasBenefits feeds both L11300 and the L23500 clawback cap (OAS received)
   assert.equal(facts.oasBenefits!.toFixed(2), '8500.00');
+  const again = entry.apply(facts, 500);
+  assert.equal(again.oasBenefits!.toFixed(2), '9000.00', 'repeated applies accumulate');
 });

@@ -171,7 +171,13 @@ export async function runBackfill(
   let signalsWritten = 0;
   let skipped = 0;
   let aiEnhanced = 0;
+  // Rows fetched so far — kept for the trace attribute only. Pagination is
+  // keyset-based (cursor below): the loop itself shrinks offset-based pages
+  // when flags.reviewOnly (clearing review_flag drops rows from the predicate)
+  // or flags.merchantPattern (rewriting merchant_clean does the same), which
+  // silently skipped rows that shifted left across batches.
   let offset = 0;
+  let cursor: { date: string; id: number } | null = null;
   let batchIndex = 0;
 
   // Stage 8 runs AFTER all per-row DB transactions (exactly like import), so
@@ -194,16 +200,32 @@ export async function runBackfill(
     const remainingBudget = flags.limit != null ? flags.limit - processed : Infinity;
     const take = Math.min(flags.batchSize, remainingBudget);
 
+    // Keyset condition wrapped in Op.and so it never collides with the
+    // merchantPattern Op.or already present on the base `where`.
+    const pageWhere: Record<string, unknown> = cursor == null
+      ? where
+      : {
+          [Op.and as unknown as string]: [
+            where,
+            {
+              [Op.or as unknown as string]: [
+                { date: { [Op.gt]: cursor.date } },
+                { date: cursor.date, id: { [Op.gt]: cursor.id } },
+              ],
+            },
+          ],
+        };
     const txns = await Transaction.findAll({
-      where,
+      where: pageWhere,
       order: [
         ['date', 'ASC'],
         ['id', 'ASC'],
       ],
       limit: take,
-      offset,
     });
     if (txns.length === 0) break;
+    const lastRow = txns[txns.length - 1];
+    cursor = { date: lastRow.date, id: lastRow.id };
 
     batchIndex++;
     const batchProcessedStart = processed;

@@ -114,6 +114,11 @@ export function scoreDividendCandidate(
   // Hard gate: dividends are credits (positive inflow).
   if (!(candidate.amount > 0)) return null;
 
+  // Hard gate: same currency. Amount closeness across currencies is unit
+  // confusion — a CAD credit numerically equal to a USD expectation is not
+  // the payout (the converted deposit would differ by the FX factor).
+  if (candidate.currency !== expected.currency) return null;
+
   // Hard gate: within the date window.
   const days = daysBetween(expected.paymentDate, candidate.date);
   if (days > tol.dateToleranceDays) return null;

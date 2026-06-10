@@ -110,7 +110,8 @@ export async function fetchBoCRate(
 
 /**
  * Return a cached FxRate from the DB if one exists with ratedDate within the
- * last 7 days; otherwise fetch from BoC, persist the row, and return it.
+ * 7 days at or before asOfDate; otherwise fetch from BoC, persist the row,
+ * and return it.
  *
  * CAD→CAD still short-circuits (no DB hit, no HTTP call).
  *
@@ -123,13 +124,15 @@ export async function ensureFxRate(
 ): Promise<{ rate: number; ratedDate: string } | null> {
   if (from === to) return { rate: 1, ratedDate: asOfDate };
 
-  // Check DB for a recent cached row.
+  // Check DB for a cached row inside the window ending at asOfDate. The
+  // upper bound matters: without it a current-day row (daily backfill job)
+  // would satisfy every historical lookup with today's rate.
   const sevenDaysAgo = subtractDays(asOfDate, ENSURE_FX_CACHE_WINDOW_DAYS);
   const cached = await FxRate.findOne({
     where: {
       fromCurrency: from,
       toCurrency: to,
-      ratedDate: { [Op.gte]: sevenDaysAgo },
+      ratedDate: { [Op.gte]: sevenDaysAgo, [Op.lte]: asOfDate },
     },
     order: [['ratedDate', 'DESC']],
   });

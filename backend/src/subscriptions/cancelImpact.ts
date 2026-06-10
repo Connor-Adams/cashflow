@@ -60,7 +60,11 @@ export interface CancelImpactInput {
 export interface CancelImpactResult {
   /** Projected total spend over the horizon, rounded to two decimals. */
   amount: number;
-  /** Number of expected occurrences inside the horizon. */
+  /**
+   * Number of expected occurrences inside the horizon. Fractional when a
+   * cadence period only partially fits the horizon (annual over 6 months →
+   * 0.5 expected renewals).
+   */
   count: number;
   /** Echoes the horizon used, for client convenience. */
   horizonMonths: number;
@@ -69,14 +73,17 @@ export interface CancelImpactResult {
 /**
  * Project the total spend (== potential savings) of a subscription over a
  * horizon. The occurrence count is `periodsPerYear * horizonMonths / 12`,
- * rounded to the nearest whole occurrence (weekly is the only cadence that
- * does not divide a 6/12/24-month horizon evenly). The amount is the absolute
- * per-period charge times that count, rounded to two decimals.
+ * kept exact rather than rounded: every cadence/horizon combination in
+ * {6, 12, 24} divides evenly except annual over 6 months (0.5), and rounding
+ * that up would claim a full year's charge saved inside six months. With no
+ * renewal date to consult, the expectation is the honest figure. The amount
+ * is the absolute per-period charge times that count, rounded to two
+ * decimals.
  */
 export function computeCancelImpact(input: CancelImpactInput): CancelImpactResult {
   const perPeriod = Math.abs(input.perPeriodAmount);
   const periods = periodsPerYear(input.cadence);
-  const count = Math.round((periods * input.horizonMonths) / MONTHS_PER_YEAR);
+  const count = (periods * input.horizonMonths) / MONTHS_PER_YEAR;
   const amount = Math.round(perPeriod * count * 100) / 100;
   return { amount, count, horizonMonths: input.horizonMonths };
 }

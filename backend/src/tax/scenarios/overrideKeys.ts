@@ -154,7 +154,8 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
     validate: (v) => assertNumber(v, 'income.oasRetirement'),
     apply: (facts, value) => {
       assertNumber(value, 'income.oasRetirement');
-      // L11300 — see income.cppRetirement note.
+      // L11300 — see income.cppRetirement note. The same field is read by the
+      // L23500 clawback: repayment caps at OAS actually received.
       const d = D(String(value));
       return {
         ...facts,

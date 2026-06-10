@@ -46,6 +46,33 @@ test('inferYearForMonthDay throws when date does not fit period', () => {
   assert.throws(() => inferYearForMonthDay('Jul 4', { start: '2025-11-03', end: '2025-12-02' }));
 });
 
+// Amex resolves TRANSACTION dates (not post dates) through this helper, and a
+// trans date can precede the statement opening by weeks — including crossing
+// into the prior calendar year, which the [startYear, endYear] candidate list
+// can never produce.
+
+test('inferYearForMonthDay resolves a prior-year trans date on a same-year period (Dec 31 on Jan 15-Feb 14)', () => {
+  const y = inferYearForMonthDay('Dec 31', { start: '2026-01-15', end: '2026-02-14' });
+  assert.equal(y, 2025);
+});
+
+test('inferYearForMonthDay resolves startYear-1 when the early window crosses Jan 1 (Dec 31 on Jan 5-Feb 4)', () => {
+  const y = inferYearForMonthDay('Dec 31', { start: '2025-01-05', end: '2025-02-04' });
+  assert.equal(y, 2024);
+});
+
+test('inferYearForMonthDay resolves a trans date more than 5 days before a rollover period start (Dec 8 on Dec 15-Jan 14)', () => {
+  const y = inferYearForMonthDay('Dec 8', { start: '2025-12-15', end: '2026-01-14' });
+  assert.equal(y, 2025);
+});
+
+test('monthDayToIso resolves prior-year trans dates to full ISO', () => {
+  assert.equal(
+    monthDayToIso('Dec 31', { start: '2026-01-15', end: '2026-02-14' }),
+    '2025-12-31',
+  );
+});
+
 test('monthDayToIso converts "Mon DD" to ISO using the period', () => {
   assert.equal(
     monthDayToIso('Nov 4', { start: '2025-11-03', end: '2025-12-02' }),

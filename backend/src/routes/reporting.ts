@@ -5,6 +5,7 @@ import { DEFAULT_TAX_RESERVE_PERCENT } from '../models/TaxReserveSetting';
 import { serializeSubscription } from '../expectations/subscriptionMapper';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import { buildSeries, monthEndDatesInRange, daysInRange } from '../networth/aggregate';
+import { portfolioMarketValueAt } from '../networth/portfolioMarketValueAt';
 import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
@@ -49,12 +50,21 @@ router.get('/summary', async (req, res, next) => {
     const balEntries: BalEntry[] = [];
     await Promise.all(
       accounts.map(async (acc) => {
+        // Investment accounts are portfolio-driven: their txn stream (buys,
+        // transfers, dividends) doesn't sum to a meaningful balance. Holdings
+        // market value is added below instead — mirrors networth/aggregate's
+        // PORTFOLIO_DRIVEN_TYPES skip so this netWorth agrees with /net-worth.
+        if (INVESTMENT_ACCOUNT_TYPES.has(acc.accountType ?? '')) return;
         const bals = await balanceAtDate(acc, today);
         for (const { currency, amount } of bals) {
           balEntries.push({ accountType: acc.accountType ?? 'checking', currency, amount });
         }
       }),
     );
+    const portfolio = await portfolioMarketValueAt(today, accounts.map((a) => a.id));
+    for (const row of portfolio.rows) {
+      balEntries.push({ accountType: 'investment', currency: row.currency, amount: row.marketValue });
+    }
 
     const availableCurrencies = new Set(balEntries.map((e) => e.currency));
     const currency = requestedCurrency ?? 'CAD';
@@ -247,6 +257,7 @@ router.get('/cashflow/monthly', async (req, res, next) => {
         date: { [Op.gte]: start, [Op.lte]: end },
       },
       attributes: ['date', 'amount', 'txnType', 'isRecurring'],
+      include: [{ association: 'account', attributes: ['accountType'] }],
       raw: true,
     });
 
@@ -257,7 +268,7 @@ router.get('/cashflow/monthly', async (req, res, next) => {
     };
     const byMonth = new Map<string, MonthBucket>();
 
-    for (const t of txns as unknown as { date: string; amount: unknown; txnType: string | null; isRecurring: boolean }[]) {
+    for (const t of txns as unknown as { date: string; amount: unknown; txnType: string | null; isRecurring: boolean; 'account.accountType': string | null }[]) {
       const amount = num(t.amount);
       if (amount == null) continue;
       const month = t.date.slice(0, 7);
@@ -265,9 +276,10 @@ router.get('/cashflow/monthly', async (req, res, next) => {
       const bucket = byMonth.get(month)!;
       if (amount < 0) {
         // Exclude money-movement (transfers, investment buys, statement
-        // payments, refunds-reversals) from expenses — same rule as the
-        // dashboard's isNonSpend, so monthly burn reconciles.
-        if (isNonSpend(t.txnType, null)) continue;
+        // payments, refunds-reversals, anything on an investment account)
+        // from expenses — same rule as the dashboard's isNonSpend, so
+        // monthly burn reconciles.
+        if (isNonSpend(t.txnType, t['account.accountType'] ?? null)) continue;
         const abs = Math.abs(amount);
         bucket.expenses += abs;
         if (t.isRecurring) bucket.recurringExpenses += abs;
@@ -421,16 +433,22 @@ router.get('/projections', async (req, res, next) => {
     let liabilities = 0;
     await Promise.all(
       accounts.map(async (acc) => {
+        const type = acc.accountType ?? 'checking';
+        // Investment accounts contribute holdings market value (below) —
+        // their txn-stream balance is a meaningless buy/transfer residual.
+        if (INVESTMENT_ACCOUNT_TYPES.has(type)) return;
         const bals = await balanceAtDate(acc, today);
         for (const { currency: c, amount } of bals) {
           if (c !== currency) continue;
-          const type = acc.accountType ?? 'checking';
           if (LIQUID_ACCOUNT_TYPES.has(type)) liquidCash += amount;
-          else if (INVESTMENT_ACCOUNT_TYPES.has(type)) investmentValue += Math.max(0, amount);
           else if (amount < 0) liabilities += Math.abs(amount);
         }
       }),
     );
+    const projPortfolio = await portfolioMarketValueAt(today, accounts.map((a) => a.id));
+    for (const row of projPortfolio.rows) {
+      if (row.currency === currency) investmentValue += row.marketValue;
+    }
 
     const netMonthlyCashflow = monthlyIncome - monthlyExpenses;
     const projectedInvestments = round2(investmentValue);
@@ -569,6 +587,7 @@ router.get('/spending/by-category', async (req, res, next) => {
           amount: { [Op.lt]: 0 },
         },
         attributes: ['amount', 'finalCategory', 'txnType'],
+        include: [{ association: 'account', attributes: ['accountType'] }],
         raw: true,
       }),
       Transaction.findAll({
@@ -579,14 +598,17 @@ router.get('/spending/by-category', async (req, res, next) => {
           amount: { [Op.lt]: 0 },
         },
         attributes: ['amount', 'finalCategory', 'txnType'],
+        include: [{ association: 'account', attributes: ['accountType'] }],
         raw: true,
       }),
     ]);
 
-    type Row = { amount: unknown; finalCategory: string | null; txnType: string | null };
+    // accountType rides along so isNonSpend can drop unrecognized brokerage
+    // debits (txnType defaults to 'purchase') — same rule as the dashboard.
+    type Row = { amount: unknown; finalCategory: string | null; txnType: string | null; 'account.accountType': string | null };
     const currMap = new Map<string, { amount: number; count: number }>();
     for (const t of currTxns as unknown as Row[]) {
-      if (isNonSpend(t.txnType, null)) continue;
+      if (isNonSpend(t.txnType, t['account.accountType'] ?? null)) continue;
       const a = num(t.amount);
       if (a == null) continue;
       const cat = t.finalCategory ?? 'Uncategorized';
@@ -598,7 +620,7 @@ router.get('/spending/by-category', async (req, res, next) => {
 
     const prevMap = new Map<string, number>();
     for (const t of prevTxns as unknown as Row[]) {
-      if (isNonSpend(t.txnType, null)) continue;
+      if (isNonSpend(t.txnType, t['account.accountType'] ?? null)) continue;
       const a = num(t.amount);
       if (a == null) continue;
       const cat = t.finalCategory ?? 'Uncategorized';
@@ -785,14 +807,14 @@ router.get('/tax', async (req, res, next) => {
       raw: true,
     });
 
-    let grossIncome = 0;
-    for (const t of txns as unknown as { amount: unknown; txnType: string | null }[]) {
-      const a = num(t.amount);
-      if (a == null || a <= 0) continue;
-      if (t.txnType === 'payment' || t.txnType === 'transfer') continue;
-      grossIncome += a;
-    }
-    grossIncome = round2(grossIncome);
+    // Same income peel as /summary: only txnType='income' rows are income.
+    // Refunds, rewards, brokerage sells, and untyped deposits are not — they
+    // would inflate estimatedTaxOwed with pure noise.
+    const taxTxns = (txns as unknown as Array<Record<string, unknown>>).map((t) => ({
+      amount: t.amount,
+      txnType: t.txnType as string | null,
+    }));
+    const grossIncome = round2(summarizeReportingCashflow(taxTxns).totalIncome);
 
     const reserveSetting = await TaxReserveSetting.findOne({
       where: { householdId: household.id, currency },

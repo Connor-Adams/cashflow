@@ -306,14 +306,19 @@ export const cibcCostcoMastercardParser: PdfParser = {
             currency: ctx.defaultCurrency,
             sourceReference: null,
           });
-          parsedSum += Math.abs(row.amount);
+          // Accumulate in the statement's own sign convention: the printed
+          // "Total for …" is NET (charges minus CR credits), and "payments"
+          // is the only section whose rows map to positive cashflow amounts.
+          // Summing absolute values would false-alarm on any CR credit and
+          // could never catch a sign-flip bug.
+          parsedSum += sec === 'payments' ? row.amount : -row.amount;
         } catch (err) {
           parseErrors.push({ rowIndex: i + 1, message: (err as Error).message });
         }
       }
       const total = sectionTotals[sec];
       if (total !== undefined) {
-        const diff = Math.abs(Math.abs(total) - parsedSum);
+        const diff = Math.abs(total - parsedSum);
         if (diff > 0.01) {
           warnings.push(
             `Section "${sec}" sum mismatch: parsed ${parsedSum.toFixed(2)} vs printed total ${total.toFixed(2)}`,

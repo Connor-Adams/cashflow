@@ -317,20 +317,25 @@ function parseSavingsDeposit(
 ): PdfParseResult['transactions'] {
   void periodEnd;
   const txns: PdfParseResult['transactions'] = [];
-  for (const { line: l, text } of iterSection(
+  for (const { text } of iterSection(
     lines,
     /Your savings deposit activity/i,
     /Your investment activity|Information about your account/i,
   )) {
     if (/^Opening Balance|^Closing Balance|^RBC Savings Deposit|^Transaction\b/i.test(text)) continue;
-    // Real txn rows would look like "Dec 23 2025  Description  100.00  …" — none in our samples.
+    // Real txn rows look like "Dec 23 2025  Description  100.00  …".
     const dateMatch = ISO_DATE_RE.exec(text);
     if (!dateMatch) continue;
     const date = parseShortDate(text);
     if (!date) continue;
-    const moneyTokens = (l.items ?? [])
-      .filter((it) => MONEY_TOKEN_RE.test(it.str))
-      .map((it) => parseMoney(it.str));
+    // Split the LINE TEXT, not per-column `items` spans: pdfjs v5 glues a
+    // whole row into one positioned span (see parseInvestmentDetails), so a
+    // span-level filter never matches and rows vanish silently.
+    const moneyTokens = text
+      .replace(ISO_DATE_RE, '')
+      .split(/\s+/)
+      .filter((t) => MONEY_TOKEN_RE.test(t))
+      .map(parseMoney);
     if (moneyTokens.length === 0) continue;
     const desc = text.replace(ISO_DATE_RE, '').trim().split(/\s{2,}/)[0]?.trim() ?? 'Savings deposit activity';
     const amount = moneyTokens[0];

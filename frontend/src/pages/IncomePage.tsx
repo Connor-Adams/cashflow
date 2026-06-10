@@ -28,6 +28,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
+import { todayDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 
 export type IncomeSource =
@@ -105,7 +106,7 @@ interface FormState {
 
 function emptyForm(): FormState {
   return {
-    occurredOn: new Date().toISOString().slice(0, 10),
+    occurredOn: todayDateInputValue(),
     grossAmountDollars: '',
     currency: DEFAULT_CURRENCY,
     taxWithheldDollars: '',

@@ -195,7 +195,9 @@ export type CancelImpact = {
   /** Projected total spend over the horizon (== potential savings). */
   amount: number
   currency: string
-  /** Number of expected occurrences inside the horizon. */
+  /** Number of expected occurrences inside the horizon. Fractional when a
+   *  cadence period only partially fits the horizon (annual over 6 months
+   *  → 0.5 expected renewals). */
   count: number
   horizonMonths: number
 }

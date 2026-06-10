@@ -20,7 +20,12 @@ export type DailyRow = { close: number; adjClose: number; date: string };
 export type MetricsContext = {
   latestDaily: Map<number, DailyRow>
   prevDaily: Map<number, DailyRow>
-  daily30dAgo: Map<number, { adjClose: number }>
+  /**
+   * Unadjusted close ~30 days ago. The 30-day return adds the window's
+   * dividends explicitly (divPerUnit30d), so the base must be the raw close —
+   * adjClose is already deflated by those dividends and would double-count.
+   */
+  daily30dAgo: Map<number, { close: number }>
   latestQuotes: Map<number, { price: number; currency: string }>
   divPerUnit30d: Map<number, number>
   divPerUnit365d: Map<number, number>
@@ -56,8 +61,8 @@ export function computeRowMetrics(args: {
       : null;
 
   const thirtyDayReturnPct =
-    latestForReturn != null && today30 != null && today30.adjClose !== 0
-      ? ((latestForReturn + div30 - today30.adjClose) / today30.adjClose) * 100
+    latestForReturn != null && today30 != null && today30.close !== 0
+      ? ((latestForReturn + div30 - today30.close) / today30.close) * 100
       : null;
 
   const yieldOnCostPct =
@@ -179,7 +184,7 @@ export async function loadMetricsContext(args: {
     }
     // closest >=30d-old row
     if (!ctx.daily30dAgo.has(sid) && row.date <= cutoff30) {
-      ctx.daily30dAgo.set(sid, { adjClose: Number(row.adjClose) });
+      ctx.daily30dAgo.set(sid, { close: Number(row.close) });
     }
   }
 

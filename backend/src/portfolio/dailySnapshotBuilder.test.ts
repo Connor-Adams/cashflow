@@ -65,14 +65,15 @@ async function seedSecurity(args: { id?: number; symbol?: string; currency?: str
   });
 }
 
-async function seedDailyPrice(args: { securityId: number; date: string; adjClose: number }) {
+async function seedDailyPrice(args: { securityId: number; date: string; adjClose: number; close?: number }) {
+  const close = args.close ?? args.adjClose;
   return models.SecurityDailyPrice.create({
     securityId: args.securityId,
     date: args.date,
-    open: String(args.adjClose),
-    high: String(args.adjClose),
-    low: String(args.adjClose),
-    close: String(args.adjClose),
+    open: String(close),
+    high: String(close),
+    low: String(close),
+    close: String(close),
     adjClose: String(args.adjClose),
     volume: '0',
     source: 'test',
@@ -136,6 +137,33 @@ async function seedReinvestment(args: { accountId: number; securityId: number; t
     currency: 'CAD',
     description: 'Reinvest',
     sourceRowFingerprint: `reinv-${args.tradeDate}-${args.securityId}`,
+    importBatch: 'test',
+  });
+}
+
+let activitySeq = 0;
+async function seedActivity(args: {
+  accountId: number;
+  securityId: number | null;
+  tradeDate: string;
+  activityType: string;
+  quantity?: string | null;
+  amount?: string | null;
+  splitRatio?: string | null;
+  currency?: string;
+}) {
+  return models.InvestmentActivity.create({
+    accountId: args.accountId,
+    householdId: 1,
+    securityId: args.securityId,
+    activityType: args.activityType,
+    tradeDate: args.tradeDate,
+    quantity: args.quantity ?? null,
+    amount: args.amount ?? null,
+    splitRatio: args.splitRatio ?? null,
+    currency: args.currency ?? 'CAD',
+    description: args.activityType,
+    sourceRowFingerprint: `act-${args.activityType}-${args.tradeDate}-${activitySeq++}`,
     importBatch: 'test',
   });
 }
@@ -391,4 +419,131 @@ test('reinvestment increments running qty (priced day uses price × reinvested u
   // 5 reinvested units × price 20 = 100.
   assert.equal(Number(row!.marketValueNative), 100);
   assert.equal(row!.isPartial, false);
+});
+
+test('split: 2-for-1 doubles tracked qty so MV stays continuous across the split date', async () => {
+  const hh = await seedHousehold();
+  const acct = await seedAccount({ householdId: hh.id });
+  const sec = await seedSecurity({ symbol: 'SPLT' });
+  await seedBuyActivity({ accountId: acct.id, securityId: sec.id, tradeDate: '2026-01-01', quantity: '100' });
+  await seedActivity({
+    accountId: acct.id, securityId: sec.id, tradeDate: '2026-01-02',
+    activityType: 'split', splitRatio: '2',
+  });
+  await seedDailyPrice({ securityId: sec.id, date: '2026-01-01', adjClose: 100 });
+  // Post-split price halves.
+  await seedDailyPrice({ securityId: sec.id, date: '2026-01-02', adjClose: 50 });
+
+  await builder.buildDailySnapshotsForHousehold({
+    householdId: hh.id, fromDate: '2026-01-01', toDate: '2026-01-02',
+  });
+  const rows = await models.PortfolioDailySnapshot.findAll({
+    where: { householdId: hh.id }, order: [['date', 'ASC']],
+  });
+  assert.equal(Number(rows[0].marketValueNative), 10000); // 100 × 100
+  assert.equal(Number(rows[1].marketValueNative), 10000); // 200 × 50, not 100 × 50
+});
+
+test('in-kind transfer_in increments qty and transfer_out decrements it', async () => {
+  const hh = await seedHousehold();
+  const acct = await seedAccount({ householdId: hh.id });
+  const sec = await seedSecurity({ symbol: 'XFER' });
+  await seedActivity({
+    accountId: acct.id, securityId: sec.id, tradeDate: '2026-01-01',
+    activityType: 'transfer_in', quantity: '10', amount: '900',
+  });
+  await seedActivity({
+    accountId: acct.id, securityId: sec.id, tradeDate: '2026-01-02',
+    activityType: 'transfer_out', quantity: '4', amount: '-400',
+  });
+  await seedDailyPrice({ securityId: sec.id, date: '2026-01-01', adjClose: 100 });
+  await seedDailyPrice({ securityId: sec.id, date: '2026-01-02', adjClose: 100 });
+
+  await builder.buildDailySnapshotsForHousehold({
+    householdId: hh.id, fromDate: '2026-01-01', toDate: '2026-01-02',
+  });
+  const rows = await models.PortfolioDailySnapshot.findAll({
+    where: { householdId: hh.id }, order: [['date', 'ASC']],
+  });
+  assert.equal(Number(rows[0].marketValueNative), 1000); // 10 × 100 received
+  assert.equal(Number(rows[1].marketValueNative), 600); // 6 × 100 after out-transfer
+});
+
+test('transfer_in / transfer_out are external cash flows for TWR/XIRR', async () => {
+  const hh = await seedHousehold();
+  const acct = await seedAccount({ householdId: hh.id });
+  await seedActivity({
+    accountId: acct.id, securityId: null, tradeDate: '2026-01-01',
+    activityType: 'transfer_in', amount: '500',
+  });
+  await seedActivity({
+    accountId: acct.id, securityId: null, tradeDate: '2026-01-02',
+    activityType: 'transfer_out', amount: '-200',
+  });
+
+  await builder.buildDailySnapshotsForHousehold({
+    householdId: hh.id, fromDate: '2026-01-01', toDate: '2026-01-02',
+  });
+  const rows = await models.PortfolioDailySnapshot.findAll({
+    where: { householdId: hh.id }, order: [['date', 'ASC']],
+  });
+  assert.equal(Number(rows[0].cashFlowNative), 500);
+  assert.equal(Number(rows[1].cashFlowNative), -200);
+});
+
+test('weekend FX gap: carries the last published rate forward instead of valuing at parity', async () => {
+  const hh = await seedHousehold();
+  const acct = await seedAccount({ householdId: hh.id, currency: 'USD' });
+  const sec = await seedSecurity({ currency: 'USD' });
+  await seedBuyActivity({ accountId: acct.id, securityId: sec.id, tradeDate: '2026-01-02', quantity: '10' });
+  // Saturday price exists, but BoC publishes business days only (Friday).
+  await seedDailyPrice({ securityId: sec.id, date: '2026-01-03', adjClose: 100 });
+  await seedFx({ fromCurrency: 'USD', ratedDate: '2026-01-02', rate: 1.37 });
+
+  await builder.buildDailySnapshotsForHousehold({
+    householdId: hh.id, fromDate: '2026-01-03', toDate: '2026-01-03',
+  });
+  const row = await models.PortfolioDailySnapshot.findOne({ where: { householdId: hh.id, date: '2026-01-03' } });
+  assert.ok(row);
+  assert.equal(Number(row!.fxRateToCad), 1.37);
+  assert.equal(Number(row!.marketValueCad), 1370);
+  assert.equal(row!.isPartial, false);
+});
+
+test('FX older than the carry-forward window is still applied but flags stale_fx', async () => {
+  const hh = await seedHousehold();
+  const acct = await seedAccount({ householdId: hh.id, currency: 'USD' });
+  const sec = await seedSecurity({ currency: 'USD' });
+  await seedBuyActivity({ accountId: acct.id, securityId: sec.id, tradeDate: '2026-01-01', quantity: '10' });
+  await seedDailyPrice({ securityId: sec.id, date: '2026-02-01', adjClose: 100 });
+  // Last FX rate 31 days before the valued day — beyond the 10-day window.
+  await seedFx({ fromCurrency: 'USD', ratedDate: '2026-01-01', rate: 1.37 });
+
+  await builder.buildDailySnapshotsForHousehold({
+    householdId: hh.id, fromDate: '2026-02-01', toDate: '2026-02-01',
+  });
+  const row = await models.PortfolioDailySnapshot.findOne({ where: { householdId: hh.id, date: '2026-02-01' } });
+  assert.ok(row);
+  assert.equal(Number(row!.marketValueCad), 1370); // stale rate beats parity
+  assert.equal(row!.isPartial, true);
+  assert.ok(
+    (row!.missingDataReasons ?? []).some((r: string) => r.includes('stale_fx:USD')),
+    `expected stale_fx reason, got ${JSON.stringify(row!.missingDataReasons)}`,
+  );
+});
+
+test('valuation uses unadjusted close, not dividend-deflated adjClose', async () => {
+  const hh = await seedHousehold();
+  const acct = await seedAccount({ householdId: hh.id });
+  const sec = await seedSecurity({ symbol: 'DIVD' });
+  await seedBuyActivity({ accountId: acct.id, securityId: sec.id, tradeDate: '2026-01-01', quantity: '10' });
+  // Stock traded at $100; adjClose deflated to $90 by later distributions.
+  await seedDailyPrice({ securityId: sec.id, date: '2026-01-01', close: 100, adjClose: 90 });
+
+  await builder.buildDailySnapshotsForHousehold({
+    householdId: hh.id, fromDate: '2026-01-01', toDate: '2026-01-01',
+  });
+  const row = await models.PortfolioDailySnapshot.findOne({ where: { householdId: hh.id, date: '2026-01-01' } });
+  assert.ok(row);
+  assert.equal(Number(row!.marketValueNative), 1000); // 10 × close(100)
 });

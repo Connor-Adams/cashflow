@@ -129,7 +129,11 @@ export type TaxYearFacts = {
   employmentIncomeAdditions?: IncomeItem[];
   /** CPP/QPP retirement benefits (L11400). Not pensionable/insurable earnings. */
   cppBenefits?: Decimal;
-  /** OAS pension (L11300). Not pensionable/insurable earnings. */
+  /**
+   * OAS pension (L11300). Not pensionable/insurable earnings. Also caps the
+   * L23500 social-benefits repayment: the recovery tax cannot exceed OAS
+   * actually received (absent/zero → no clawback).
+   */
   oasBenefits?: Decimal;
   selfEmploymentIncome: IncomeItem[];
   selfEmploymentExpenses: IncomeItem[];

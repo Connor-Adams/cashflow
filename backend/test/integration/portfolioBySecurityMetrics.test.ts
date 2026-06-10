@@ -91,3 +91,49 @@ test('by-security response includes unifiedTotal block', async () => {
   assert.equal(res.status, 200);
   assert.ok('unifiedTotal' in res.body);
 });
+
+test('totalReturnPct applies splitRatio in the realized-gain enrichment', async () => {
+  // Buy 100 @ $10 (cost 1000) → 2:1 split (200 sh, ACB $5) → sell 100 @ $6
+  // (proceeds 600, cost removed 500) → realized +100. Without the splitRatio
+  // the engine sells at ACB $10 and books −400 instead.
+  const models = await import('../../src/models');
+  const { seedAccount, seedSecurity, seedHolding, seedActivity } = await import(
+    './portfolioFixtures.js'
+  );
+
+  const acct = await seedAccount(models, householdId, userId, 'Margin', 'SPLITACCT1');
+  const splt = await seedSecurity(models, householdId, 'SPLT', 'Split Corp', 'stock');
+
+  await seedActivity(models, {
+    accountId: acct.id, householdId, securityId: splt.id,
+    activityType: 'buy', tradeDate: '2026-01-05', quantity: 100, amount: 1000,
+  });
+  await seedActivity(models, {
+    accountId: acct.id, householdId, securityId: splt.id,
+    activityType: 'split', tradeDate: '2026-02-02', splitRatio: 2,
+  });
+  await seedActivity(models, {
+    accountId: acct.id, householdId, securityId: splt.id,
+    activityType: 'sell', tradeDate: '2026-03-02', quantity: 100, amount: 600,
+  });
+  // Remaining 100 post-split shares worth $600, ACB $500.
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId,
+    securityId: splt.id,
+    statementDate: '2026-03-31',
+    quantity: 100,
+    marketValue: 600,
+    costBasis: 500,
+  });
+
+  const res = await authed.get('/api/portfolio/by-security');
+  assert.equal(res.status, 200);
+  const row = res.body.rows.find((r: { securityId: number }) => r.securityId === splt.id);
+  assert.ok(row, 'SPLT row present');
+  // (MV 600 + realized 100 + income 0 − cost 500) / 500 = +40%.
+  assert.ok(
+    row.totalReturnPct != null && Math.abs(row.totalReturnPct - 40) < 0.01,
+    `expected totalReturnPct ≈ 40, got ${row.totalReturnPct}`,
+  );
+});

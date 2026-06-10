@@ -392,6 +392,71 @@ test('tallyByCurrency excludes non-spend txnTypes (transfer, investment, payment
   assert.equal(cad!.currentIncome, 0);
 });
 
+test('tallyByCurrency counts typed income (txnType=income) toward income totals', () => {
+  const result = explainMonth({
+    month: '2026-05',
+    currentTxns: [
+      txn({ id: 1, amount: '10000', finalCategory: null, txnType: 'income' }),
+      txn({ id: 2, amount: '-2500', finalCategory: 'Groceries', txnType: 'purchase' }),
+    ],
+    previousTxns: [],
+    subscriptions: [],
+    currency: null,
+  });
+  const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
+  assert.ok(cad);
+  assert.equal(cad!.currentIncome, 10000, 'a paycheck typed income must count as income');
+  assert.equal(cad!.currentSpend, 2500);
+  assert.equal(cad!.netCurrent, 7500);
+  // Income is not category data (matches /summary/monthly's income peel) —
+  // it must not inflate the (uncategorized) bucket or spend_change findings.
+  const uncat = cad!.byCategory.find((c) => c.category === '(uncategorized)');
+  assert.equal(uncat, undefined);
+});
+
+test('tallyByCurrency counts positive refunds/rewards as income and nets them by category', () => {
+  const result = explainMonth({
+    month: '2026-05',
+    currentTxns: [
+      txn({ id: 1, amount: '-100', finalCategory: 'Dining', txnType: 'purchase' }),
+      txn({ id: 2, amount: '40', finalCategory: 'Dining', txnType: 'refund' }),
+      txn({ id: 3, amount: '10', finalCategory: 'Coffee', txnType: 'reward' }),
+    ],
+    previousTxns: [],
+    subscriptions: [],
+    currency: null,
+  });
+  const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
+  assert.ok(cad);
+  assert.equal(cad!.currentIncome, 50, 'refunds/rewards count toward income per the docstring');
+  assert.equal(cad!.currentSpend, 100);
+  const dining = cad!.byCategory.find((c) => c.category === 'Dining');
+  assert.ok(dining);
+  assert.equal(dining!.current, -60, 'refund nets against the category spend');
+});
+
+test('tallyByCurrency excludes positive money-movement legs from income', () => {
+  const result = explainMonth({
+    month: '2026-05',
+    currentTxns: [
+      // Card-side leg of a statement payment, transfer-in, brokerage flows —
+      // none of these are income.
+      txn({ id: 1, amount: '3000', finalCategory: null, txnType: 'payment' }),
+      txn({ id: 2, amount: '685000', finalCategory: null, txnType: 'transfer' }),
+      txn({ id: 3, amount: '300', finalCategory: null, txnType: 'dividend' }),
+      txn({ id: 4, amount: '97000', finalCategory: null, txnType: 'investment' }),
+      txn({ id: 5, amount: '-20', finalCategory: 'Coffee', txnType: 'purchase' }),
+    ],
+    previousTxns: [],
+    subscriptions: [],
+    currency: null,
+  });
+  const cad = result.monthOverMonth.find((m) => m.currency === 'CAD');
+  assert.ok(cad);
+  assert.equal(cad!.currentIncome, 0);
+  assert.equal(cad!.currentSpend, 20);
+});
+
 test('explainMonth: missing_receipt sorts by amount desc', () => {
   const result = explainMonth({
     month: '2026-05',
