@@ -561,10 +561,15 @@ function MoneyMovementTable({
   onUnlink: (id: number) => void | Promise<void>
   onSetPurpose: (id: number, purpose: TransferPurpose | null) => void | Promise<void>
 }) {
-  const totalSource = useMemo(
-    () => flows.reduce((acc, f) => acc + f.totalSourceAmount, 0),
-    [flows],
-  )
+  // Totals are partitioned by source currency — summing USD and CAD amounts
+  // into one figure would yield a number that exists in no currency.
+  const sourceTotalsByCurrency = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const f of flows) {
+      m.set(f.sourceCurrency, (m.get(f.sourceCurrency) ?? 0) + f.totalSourceAmount)
+    }
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [flows])
 
   // Unlink/setPurpose are wired through to the table action panel below.
   void onUnlink
@@ -622,7 +627,10 @@ function MoneyMovementTable({
       </Table>
       {flows.length > 0 && (
         <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-          Total source movement: {formatMoney(totalSource, flows[0].sourceCurrency)}{' '}
+          Total source movement:{' '}
+          {sourceTotalsByCurrency
+            .map(([cur, amount]) => formatMoney(amount, cur))
+            .join(' + ')}{' '}
           (mixed currencies shown at native; FX not converted).
           Click <Unlink2 size={10} aria-hidden="true" /> in the source transaction
           row on the Transactions page to break a specific pair.

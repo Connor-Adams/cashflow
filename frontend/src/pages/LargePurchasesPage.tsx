@@ -31,6 +31,7 @@ import {
 import { Tabs, TabPanel, type TabItem } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson } from '../lib/api'
+import { todayDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import type {
   LargePurchaseReviewStatus,
@@ -172,7 +173,7 @@ export function LargePurchasesPage() {
       if (!reviewing) return
       setSaving(true)
       try {
-        const today = new Date().toISOString().slice(0, 10)
+        const today = todayDateInputValue()
         const res = await patchJson<LargePurchaseReviewPatchResponse>(
           `/api/transactions/${reviewing.id}/large-purchase-review`,
           {

@@ -41,13 +41,19 @@ export function HeroTile({
     [sparklineData]
   )
 
+  // Every delta in this tile is a money delta. An empty deltaCurrency means
+  // the page summed raw amounts across currencies ("All currencies" view) —
+  // that difference is not a number in any currency, so the badges are
+  // suppressed, matching how the headline labels degrade to "N currencies".
+  const showDeltas = deltaCurrency !== ''
+
   return (
     <div className="heroTile">
       <p className="heroTile__label">Net spend · {moneyHint}</p>
       <p className="heroTile__value" title={netSpendLabel}>
         {netSpendLabel}
       </p>
-      {netSpendDelta != null && (
+      {showDeltas && netSpendDelta != null && (
         <p className="heroTile__delta">
           <DeltaBadge
             delta={netSpendDelta}
@@ -87,7 +93,7 @@ export function HeroTile({
             <dt>{m.label}</dt>
             <dd>
               <span className="heroTile__subMetricValue">{m.value}</span>
-              {m.delta != null && (
+              {showDeltas && m.delta != null && (
                 <DeltaBadge
                   delta={m.delta}
                   metricKind={m.metricKind}
