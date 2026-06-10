@@ -154,42 +154,66 @@ test('Scenario F: T4 box 22 ($14,000 withheld) reduces L48500 dollar-for-dollar'
   assert.equal(ret.totals.refundOrOwing.toFixed(2), expected.toFixed(2));
 });
 
-test('Scenario G: OAS clawback — net income $100k triggers L23500 and increases total payable', () => {
+test('Scenario G: OAS clawback — only applies to OAS actually received, capped at benefits', () => {
   const r = ratesFor(2024);
-  // $100k income: net income > $90,997 threshold → OAS clawback = ($100k - $90,997) × 15% = $1,350.45
+
+  // High income but NO OAS received (e.g. age 40) → no repayment, no L23500.
   const factsNoOas: TaxYearFacts = {
-    ...baseFacts(),
-    employmentIncome: [{ source: 'T4', amount: D('90000'), cadAmount: D('90000') }],
-  };
-  const factsWithOas: TaxYearFacts = {
     ...baseFacts(),
     employmentIncome: [{ source: 'T4', amount: D('100000'), cadAmount: D('100000') }],
   };
   const retNoOas = buildT1(factsNoOas, r);
-  const retWithOas = buildT1(factsWithOas, r);
+  assert.equal(
+    retNoOas.lines.find((l) => l.code === 'L23500'),
+    undefined,
+    'L23500 must not appear for a taxpayer who received no OAS',
+  );
 
-  // L23500 (OAS clawback) should appear in the $100k scenario
+  // Senior receiving $8,500 OAS with $108,500 net income:
+  // clawback = min($8,500, ($108,500 - $90,997) × 15%) = min(8500, 2625.45) = $2,625.45
+  const factsWithOas: TaxYearFacts = {
+    ...baseFacts(),
+    ageAtYearEnd: 72,
+    employmentIncome: [
+      { source: 'pension draw', amount: D('100000'), cadAmount: D('100000') },
+      { source: 'OAS', amount: D('8500'), cadAmount: D('8500') },
+    ],
+    oasIncome: D('8500'),
+  };
+  const retWithOas = buildT1(factsWithOas, r);
   const oasLine = retWithOas.lines.find((l) => l.code === 'L23500');
   assert.ok(oasLine, 'L23500 OAS clawback line should be present when net income > threshold');
-  assert.equal(oasLine!.amount.toFixed(2), '1350.45');
-
-  // The OAS clawback must be included in total payable
-  const clawbackAmount = D('1350.45');
-  // Total payable in the $100k case must be higher than $90k case by at least the clawback
-  // (it will be higher also due to higher marginal tax, so just check clawback adds to payable)
+  assert.equal(oasLine!.amount.toFixed(2), '2625.45');
   assert.ok(
     retWithOas.totals.totalPayable.greaterThan(retNoOas.totals.totalPayable),
     'Total payable must increase when OAS clawback applies',
   );
 
-  // In the baseline $90k case (net income < threshold), no L23500 line
-  const noOasLine = retNoOas.lines.find((l) => l.code === 'L23500');
-  assert.equal(noOasLine, undefined, 'L23500 should not appear when net income <= threshold');
+  // Repayment is capped at the OAS received: $208,500 net income → 15% of
+  // excess is $17,625.45 but only $8,500 of OAS was received.
+  const factsCapped: TaxYearFacts = {
+    ...baseFacts(),
+    ageAtYearEnd: 72,
+    employmentIncome: [
+      { source: 'pension draw', amount: D('200000'), cadAmount: D('200000') },
+      { source: 'OAS', amount: D('8500'), cadAmount: D('8500') },
+    ],
+    oasIncome: D('8500'),
+  };
+  const retCapped = buildT1(factsCapped, r);
+  const cappedLine = retCapped.lines.find((l) => l.code === 'L23500');
+  assert.ok(cappedLine, 'L23500 should be present');
+  assert.equal(cappedLine!.amount.toFixed(2), '8500.00');
 
-  // FHSA deduction reduces net income below threshold so clawback is 0
+  // FHSA deduction reduces net income, shrinking the clawback.
   const factsWithFhsa: TaxYearFacts = {
     ...baseFacts(),
-    employmentIncome: [{ source: 'T4', amount: D('100000'), cadAmount: D('100000') }],
+    ageAtYearEnd: 72,
+    employmentIncome: [
+      { source: 'pension draw', amount: D('91500'), cadAmount: D('91500') },
+      { source: 'OAS', amount: D('8500'), cadAmount: D('8500') },
+    ],
+    oasIncome: D('8500'),
     fhsaContribs: [{ source: 'FHSA', amount: D('8000'), date: '2024-02-01' }],
     carryforwards: { netCapitalLoss: D('0'), rrspRoom: D('100000'), nonCapLoss: D('0'), instalmentsPaid: D('0'), fhsaLifetimeContributions: D('0') },
   };
@@ -199,4 +223,30 @@ test('Scenario G: OAS clawback — net income $100k triggers L23500 and increase
   assert.ok(oasLineFhsa, 'OAS clawback should still exist at net income $92k');
   // ($100k - $8k FHSA) - $90,997 = $1,003 × 15% = $150.45
   assert.equal(oasLineFhsa!.amount.toFixed(2), '150.45');
+});
+
+test('Scenario H: ON surtax computed before the Ontario dividend tax credit (ON428 ordering)', () => {
+  const r = ratesFor(2024);
+  // $200,000 actual eligible dividends, nothing else → grossed-up $276,000.
+  // ON tax before credits on $276,000 (2024 ON brackets) = $28,444.1446
+  // − ON BPA credit $12,399 × 0.0505 = $626.1495 → $27,817.9951 pre-DTC.
+  // Surtax (on the PRE-DTC amount, per ON428 since 2014):
+  //   0.20 × (27,817.9951 − 5,554) + 0.36 × (27,817.9951 − 7,108) = $11,908.397256
+  // ON DTC = $276,000 × 0.10 = $27,600, applied AFTER surtax:
+  //   net ON tax = 27,817.9951 + 11,908.397256 − 27,600 = $12,126.39
+  // The buggy ordering (DTC before surtax) leaves only $217.9951 of ON tax and
+  // zero surtax.
+  const facts: TaxYearFacts = {
+    ...baseFacts(),
+    eligibleDividends: [{ source: 'T5 holdco', amount: D('200000'), cadAmount: D('200000') }],
+  };
+  const ret = buildT1(facts, r);
+
+  const surtaxLine = ret.lines.find((l) => l.code === 'L42801');
+  assert.ok(surtaxLine, 'L42801 ON surtax line should be present');
+  assert.equal(surtaxLine!.amount.toFixed(2), '11908.40');
+
+  // provincialTax = net ON tax (incl. surtax, net of DTC) + OHP ($900 at this income)
+  const expectedProvincial = D('12126.392356').plus(D('900'));
+  assert.equal(ret.totals.provincialTax.toFixed(2), expectedProvincial.toFixed(2));
 });

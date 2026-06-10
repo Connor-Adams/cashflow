@@ -109,7 +109,7 @@ export const RATES_2025: RateTable = {
   amtExemption: D('177882'),
   amtCapGainsInclusion: D('1'),
   amtNonRefCreditFraction: D('0.5'),
-  amtDtcFraction: D('0.5'),
+  amtDtcFraction: D('0'), // dividend tax credit fully denied under AMT (gross-up excluded from ATI)
   sources: [
     { name: 'CRA T1-2025 Federal rate schedule', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/tax-packages-years/general-income-tax-benefit-package.html' },
     { name: 'ON Min of Finance 2025 personal income tax rates', url: 'https://www.fin.gov.on.ca/en/tax/pit/rates.html' },

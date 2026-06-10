@@ -161,6 +161,8 @@ export const overrideKeyRegistry: OverrideKeyDef[] = [
           ...facts.employmentIncome,
           { source: 'override:income.oasRetirement', amount: d, cadAmount: d },
         ],
+        // Annotation read by the L23500 clawback: repayment caps at OAS received.
+        oasIncome: (facts.oasIncome ?? D('0')).plus(d),
       };
     },
   },

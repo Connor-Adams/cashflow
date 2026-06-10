@@ -6,6 +6,11 @@ export type IntegrationResult = {
   cdaAddition: Decimal;
   erdtohAddition: Decimal;
   nerdtohAddition: Decimal;
+  /** Portion of the refund triggered by ELIGIBLE dividends paid (draws on ERDTOH). */
+  refundForEligible: Decimal;
+  /** Portion of the refund triggered by NON-ELIGIBLE dividends paid (draws on NERDTOH). */
+  refundForNonEligible: Decimal;
+  /** Total = refundForEligible + refundForNonEligible. */
   dividendRefund: Decimal;
 };
 
@@ -30,11 +35,14 @@ function portfolioSum(items: IncomeItem[]): Decimal {
  * - GRIP addition: general-rate income retained (post-tax) ≈ general taxable income × (1 - general rate)
  *   Simplified: gripAddition = generalRateIncome × 0.72 (federal+ON net of 26.5%).
  * - CDA addition: non-taxable half of capital gains
- * - ERDTOH addition: 38.33% of eligible portion of investment income (interest + foreign + non-CCPC dividends)
- *   Simplified Phase 3: erdtohAddition = (interest + rentNet) × refundable rate
- * - NERDTOH addition: 30.67% of investment income from CCPC sources
- *   Simplified Phase 3: nerdtohAddition = nonEligibleDividends received × 0.3067
- * - Dividend refund: lesser of (dividends paid × 38.33%, RDTOH balance), eligible vs non split by GRIP
+ * - ERDTOH addition: Part IV tax (38.33%) on portfolio ELIGIBLE dividends received (ITA s.129(4))
+ * - NERDTOH addition: refundable Part I tax — 30.67% of aggregate investment income
+ *   (interest + rent + taxable capital gains net of capital-loss carryforwards applied),
+ *   plus the addition on portfolio non-eligible dividends received
+ *   (Simplified Phase 3: nonEligibleDividends received × 0.3067 — real Part IV is 38.33%)
+ * - Dividend refund: per pool — eligible dividends paid draw on ERDTOH, non-eligible on
+ *   NERDTOH, each capped at 38.33% of the dividends paid (no ERDTOH overflow for
+ *   non-eligible payouts — simplification)
  *
  * P11b T5 — Connected vs portfolio Part IV distinction (v1 SIMPLIFICATION):
  *   When an IncomeItem on `investmentIncome.{eligibleDividends, nonEligibleDividends}`
@@ -72,8 +80,17 @@ export function computeIntegration(
   const portfolioElDivReceived = portfolioSum(facts.investmentIncome.eligibleDividends);
   const portfolioNonElDivReceived = portfolioSum(facts.investmentIncome.nonEligibleDividends);
 
-  const erdtohAddition = interest.plus(rent).plus(portfolioElDivReceived).times(D('0.3833'));
-  const nerdtohAddition = portfolioNonElDivReceived.times(D('0.3067'));
+  // ERDTOH only accrues Part IV tax on portfolio eligible dividends (38.33%).
+  const erdtohAddition = portfolioElDivReceived.times(D('0.3833'));
+  // NERDTOH accrues the refundable Part I tax on aggregate investment income
+  // (30.67% of interest + rent + taxable capital gains, the latter net of
+  // capital-loss carryforwards which are only deductible against gains).
+  const includableGains = maxZero(grossGains.times(corpInclusionRate));
+  const gainsNetOfLosses = includableGains.minus(
+    Decimal.min(facts.carryforwards.netCapitalLoss, includableGains),
+  );
+  const nerdtohAddition = interest.plus(rent).plus(gainsNetOfLosses).times(D('0.3067'))
+    .plus(portfolioNonElDivReceived.times(D('0.3067')));
 
   const dividendsPaidEligible = sumD(facts.dividendsPaid.filter(d => d.kind === 'eligible').map(d => d.amount));
   const dividendsPaidNonEligible = sumD(facts.dividendsPaid.filter(d => d.kind === 'non_eligible').map(d => d.amount));
@@ -92,6 +109,8 @@ export function computeIntegration(
     cdaAddition,
     erdtohAddition,
     nerdtohAddition,
+    refundForEligible,
+    refundForNonEligible,
     dividendRefund: refundForEligible.plus(refundForNonEligible),
   };
 }
