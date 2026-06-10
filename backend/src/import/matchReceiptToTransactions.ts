@@ -112,6 +112,11 @@ function scoreDateComponent(txnDate: string, orderDate: string | null): Componen
 }
 
 function scoreVendorComponent(order: ExternalOrder, txn: Transaction): Component {
+  // No pattern for this vendor (e.g. email-scanned receipts defaulting to
+  // 'other') = no merchant evidence. txnMatchesVendor passes those through as
+  // candidates, but the +15 bonus must not be free — it is exactly the margin
+  // that separates 'suggested' (75) from auto-accept (90) on amount+date alone.
+  if (!VENDOR_MERCHANT_PATTERNS[order.vendor]) return { points: 0, reason: null };
   return txnMatchesVendor(order.vendor, txn)
     ? { points: 15, reason: `merchant matches ${order.vendor}` }
     : { points: 0, reason: null };

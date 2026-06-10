@@ -1,4 +1,4 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, type Transaction as SequelizeTransaction } from 'sequelize';
 import { sequelize } from '../models';
 import { groupConcat } from '../util/dialectSql';
 
@@ -44,6 +44,7 @@ async function queryMemory(opts: {
   merchantCleanLower: string;
   /** Optional sign + amount-window filter. */
   amountFilter: { sign: 1 | -1; minAbs: number; maxAbs: number } | null;
+  transaction?: SequelizeTransaction;
 }): Promise<MemoryRow | null> {
   const replacements: unknown[] = [
     opts.householdId ?? null,
@@ -73,7 +74,7 @@ async function queryMemory(opts: {
      GROUP BY merchant_clean, final_category, final_business, final_split_type, final_pct_me, final_pct_partner
      ORDER BY COUNT(*) DESC, MAX(reviewed_at) DESC
      LIMIT 1`,
-    { replacements, type: QueryTypes.SELECT },
+    { replacements, type: QueryTypes.SELECT, transaction: opts.transaction },
   );
   return rows[0] ?? null;
 }
@@ -108,6 +109,8 @@ export async function findMerchantMemory(
   householdId: number | null | undefined,
   merchantClean: string,
   amount?: number | null,
+  /** Thread the import transaction when calling from inside one so reads stay on the same connection. */
+  options?: { transaction?: SequelizeTransaction },
 ): Promise<MerchantMemoryMatch | null> {
   const key = normalizeMerchantKey(merchantClean);
   if (!key) return null;
@@ -125,6 +128,7 @@ export async function findMerchantMemory(
         minAbs: Math.max(0, absAmount - tolerance),
         maxAbs: absAmount + tolerance,
       },
+      transaction: options?.transaction,
     });
     if (bucketed && Number(bucketed.supportCount) >= 2) {
       return rowToMatch(bucketed, true);
@@ -136,6 +140,7 @@ export async function findMerchantMemory(
     householdId,
     merchantCleanLower,
     amountFilter: null,
+    transaction: options?.transaction,
   });
   return general ? rowToMatch(general, false) : null;
 }

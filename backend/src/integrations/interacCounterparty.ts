@@ -217,6 +217,7 @@ export async function runInteracCounterpartySync(
           id: t.id,
           amountCents: Math.round(Math.abs(Number(t.amount)) * 100),
           date: String(t.date).slice(0, 10),
+          direction: Number(t.amount) < 0 ? 'sent' : 'received',
         }));
 
         const { auto, review } = matchInteracCounterparty(emails, txnLites, ownerName);

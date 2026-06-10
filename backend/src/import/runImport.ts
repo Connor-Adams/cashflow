@@ -53,6 +53,7 @@ import {
 import {
   loadAmazonOrdersCache,
   loadHouseholdAccountIds,
+  loadHouseholdOwnerNames,
   loadRecurringHistory,
   loadRelationshipCandidates,
 } from './enrichment/loaders';
@@ -375,6 +376,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     account.defaultCurrency || env.defaultCurrency || 'CAD';
 
   const householdAccountIds = await loadHouseholdAccountIds(account.id, opts.householdId ?? account.householdId ?? null);
+  const ownerNames = await loadHouseholdOwnerNames(opts.householdId ?? account.householdId ?? null);
 
   let inserted = 0;
   let skippedDup = 0;
@@ -431,16 +433,22 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         continue;
       }
 
+      // All three reads thread `t`: on Postgres an un-threaded raw query runs
+      // on a separate pooled connection and cannot see rows inserted earlier
+      // in this same import (READ COMMITTED), so same-statement refund or
+      // transfer pairs would link on SQLite tests but not in prod.
       const memory = await findMerchantMemory(
         opts.householdId ?? account.householdId ?? null,
         v.merchantClean,
         v.amount,
+        { transaction: t },
       );
 
       const recurringHistory = await loadRecurringHistory(
         opts.householdId ?? account.householdId ?? null,
         v.merchantClean,
         v.date,
+        t,
       );
       const relationshipCandidates = await loadRelationshipCandidates(
         opts.householdId ?? account.householdId ?? null,
@@ -448,6 +456,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         v.merchantClean,
         v.date,
         enrichmentRefundWindowDays,
+        t,
       );
 
       const enriched = await enrichTransaction({
@@ -461,6 +470,7 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
         accountId: account.id,
         householdId: opts.householdId ?? account.householdId ?? null,
         householdAccountIds,
+        ownerNames,
         rules,
         amazonOrders: amazonOrdersCache,
         memory,

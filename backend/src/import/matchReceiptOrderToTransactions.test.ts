@@ -67,6 +67,29 @@ test('single exact-amount match → link created accepted', async () => {
   assert.equal(links[0].status, 'accepted');
 });
 
+test('unknown-vendor order (vendor "other") never auto-accepts on amount+date alone', async () => {
+  // Regression: txnMatchesVendor passes every txn through for unknown vendors,
+  // and the vendor component used to award +15 anyway — auto-accepting any
+  // same-amount transaction (50+25+15=90 ≥ 85) for email receipts whose vendor
+  // defaulted to 'other'.
+  await mkTxn({ amount: '-52.00', date: '2025-12-13', merchant: 'SHELL GAS STATION' });
+  const order = await ExternalOrder.create({
+    vendor: 'other',
+    householdId: HH,
+    dedupeKey: 'dk-other-1',
+    orderDate: '2025-12-13',
+    total: '52.00',
+    paymentLast4: null,
+    currency: 'CAD',
+    source: 'test',
+  } as never);
+
+  await matchReceiptOrderToTransactions({ externalOrderId: order.id, householdId: HH });
+  const links = await TransactionOrderLink.findAll({ where: { externalOrderId: order.id } });
+  assert.equal(links.length, 1, 'still surfaced as a suggestion');
+  assert.equal(links[0].status, 'suggested', 'no vendor evidence → must not auto-accept');
+});
+
 test('two same-amount candidates in window → ambiguous, stays suggested', async () => {
   await mkTxn({ amount: '-947.04', date: '2025-12-14' });
   await mkTxn({ amount: '-947.04', date: '2025-12-15' });
