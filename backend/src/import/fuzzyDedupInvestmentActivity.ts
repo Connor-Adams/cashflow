@@ -12,6 +12,15 @@ export type FuzzyMatchInput = {
   csvDate: string;
   /** Match window in calendar days around csvDate. Defaults to 5. */
   windowDays?: number;
+  /**
+   * Existing-row ids already consumed by earlier rows of the same commit
+   * (matched as duplicates, or inserted by this commit and therefore visible
+   * to this query inside the same SQL transaction). Each existing row may
+   * absorb at most ONE incoming row — without this, two legitimate identical
+   * activities within the window (recurring buys, equal staking rewards)
+   * both match the same candidate and the second one is silently dropped.
+   */
+  excludeIds?: ReadonlySet<number>;
   t?: SequelizeTransaction;
 };
 
@@ -45,9 +54,11 @@ export type PureFuzzyOutcome<T extends DedupCandidate> =
 
 /**
  * Normalize a numeric value to a fixed decimal string for comparison.
- * Returns null if input is null. The fractional precision must match the
- * column scale used by the DB (8 for quantity, 4 for amount) so that
- * round-trip-through-DB does not change the comparison.
+ * Returns null if input is null. Quantity is compared at 8 decimals even
+ * though the column is now DECIMAL(28, 10): legacy rows inserted before the
+ * widening migration (20260527130000) were truncated to 8dp by Postgres and
+ * are never back-expanded, so 8dp remains the safe comparison floor across
+ * the historical/new boundary. Amount stays at the column scale (4).
  */
 function toFixedOrNull(v: number | null, scale: number): string | null {
   if (v == null) return null;
@@ -60,13 +71,14 @@ function toFixedOrNull(v: number | null, scale: number): string | null {
  */
 export function pickFuzzyMatch<T extends DedupCandidate>(
   candidates: T[],
-  input: Pick<FuzzyMatchInput, 'symbol' | 'quantity' | 'amount'>,
+  input: Pick<FuzzyMatchInput, 'symbol' | 'quantity' | 'amount' | 'excludeIds'>,
 ): PureFuzzyOutcome<T> {
   const wantQty = toFixedOrNull(input.quantity, 8);
   const wantAmt = toFixedOrNull(input.amount, 4);
   const wantSym = input.symbol == null ? null : input.symbol.toUpperCase();
 
   const filtered = candidates.filter((c) => {
+    if (input.excludeIds?.has(c.id)) return false;
     if (wantQty != null) {
       const got = c.quantity == null ? null : Number(c.quantity).toFixed(8);
       if (got !== wantQty) return false;
@@ -157,5 +169,6 @@ export async function findExistingInvestmentByFuzzyMatch(
     symbol: args.symbol,
     quantity: args.quantity,
     amount: args.amount,
+    excludeIds: args.excludeIds,
   });
 }
