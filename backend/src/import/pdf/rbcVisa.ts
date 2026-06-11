@@ -27,6 +27,11 @@ import { MONTHS_SHORT, parseLongDate, parseMoney, toIso, type Period } from './d
 const ACCOUNT_RE = /(45\d{2})\s+15\*{2}\s+\*{4}\s+(\d{4})/;
 const PERIOD_RE = /STATEMENT FROM\s+([A-Z]{3}\s+\d{1,2})\s+TO\s+([A-Z]{3}\s+\d{1,2},\s+\d{4})/i;
 const MONEY_TOKEN_RE = /-?\$[\d,]+\.\d{2}/;
+// The AMOUNT ($) column is the RIGHTMOST column, so the row amount is the
+// trailing money token. An unanchored first-match would let a $-figure inside
+// a free-form merchant descriptor (e.g. Shopify "SP * $9.99 SOCKS") steal the
+// amount — same end-anchored convention as amex.ts / cibcCostcoMastercard.ts.
+const TRAILING_MONEY_RE = /(-?\$[\d,]+\.\d{2})\s*$/;
 
 function normalizeMonth(monStr: string): string {
   return monStr.charAt(0).toUpperCase() + monStr.slice(1).toLowerCase();
@@ -183,11 +188,14 @@ export function parseRbcVisaActivity(
       flush(i);
       pending = { transDateRaw: dm[1], descParts: [], amount: null };
       let remainder = dm[3];
-      const amtMatch = MONEY_TOKEN_RE.exec(remainder);
+      const amtMatch = TRAILING_MONEY_RE.exec(remainder);
       if (amtMatch) {
-        pending.amount = parseMoney(amtMatch[0].replace('$', ''));
-        remainder = remainder.replace(amtMatch[0], '').trim();
+        pending.amount = parseMoney(amtMatch[1].replace('$', ''));
+        remainder = remainder.slice(0, amtMatch.index).trim();
       }
+      // No trailing token → leave amount null; the continuation-line /
+      // flush-error paths handle it (explicit parseError, never a silent
+      // wrong value).
       if (remainder) pending.descParts.push(remainder);
       continue;
     }
@@ -198,7 +206,13 @@ export function parseRbcVisaActivity(
     // or just the amount on its own line.
     const amtMatch = MONEY_TOKEN_RE.exec(text);
     if (amtMatch && text === amtMatch[0]) {
-      pending.amount = parseMoney(amtMatch[0].replace('$', ''));
+      // Only attach when the row is still missing its amount: a stray later
+      // amount line (e.g. from a swallowed neighbouring row) must never
+      // overwrite an amount already captured from the date line — the
+      // reconciliation gate surfaces the underlying swallow instead.
+      if (pending.amount == null) {
+        pending.amount = parseMoney(amtMatch[0].replace('$', ''));
+      }
       continue;
     }
     if (/^\d{15,}$/.test(text)) {
@@ -210,6 +224,39 @@ export function parseRbcVisaActivity(
   flush(activityLines.length);
 
   return { rows, parseErrors };
+}
+
+/** Last money-looking token on a line, or null (mirrors rbcBusinessBanking). */
+function lastMoneyToken(text: string): number | null {
+  const tokens = text.split(/\s+/);
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const v = parseMoney(tokens[i]);
+    if (Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
+/**
+ * Printed statement totals for the reconciliation gate:
+ *   previous — "PREVIOUS STATEMENT BALANCE $X" (CALCULATING YOUR BALANCE box)
+ *   total    — "TOTAL ACCOUNT BALANCE $X" / "NEW BALANCE $X" (last occurrence)
+ */
+function extractStatementTotals(lines: PdfLine[]): {
+  previous: number | null;
+  total: number | null;
+} {
+  let previous: number | null = null;
+  let total: number | null = null;
+  for (const l of lines) {
+    if (previous == null && /PREVIOUS\s+(?:STATEMENT|ACCOUNT)\s+BALANCE/i.test(l.text)) {
+      previous = lastMoneyToken(l.text);
+    }
+    if (/TOTAL ACCOUNT BALANCE|NEW BALANCE/i.test(l.text)) {
+      const v = lastMoneyToken(l.text);
+      if (v != null) total = v;
+    }
+  }
+  return { previous, total };
 }
 
 export const rbcVisaParser: PdfParser = {
@@ -234,10 +281,36 @@ export const rbcVisaParser: PdfParser = {
       sourceReference: null,
     }));
 
+    // ── Reconciliation gate ─────────────────────────────────────────────────
+    // Verify previous + Σ(statement-sign amounts) ≈ printed total, so rows
+    // silently swallowed by extraction glitches (the pdfjs glued-row class
+    // that already hit the sibling RBC parsers) surface as a parseError
+    // instead of importing a partial statement with zero signal.
+    const warnings: string[] = [];
+    const { previous, total } = extractStatementTotals(lines);
+    if (previous == null || total == null) {
+      warnings.push(
+        'reconciliation: could not extract printed statement totals; gate skipped',
+      );
+    } else {
+      // Cashflow flips signs (charge → negative), so Σ in the statement's own
+      // convention is the negated transaction sum.
+      const sumStatement = transactions.reduce((acc, t) => acc - t.amount, 0);
+      const recomputed = previous + sumStatement;
+      if (Math.abs(recomputed - total) > 0.015) {
+        parseErrors.push({
+          rowIndex: -1,
+          message:
+            `statement does not reconcile: previous ${previous} + activity ${sumStatement.toFixed(2)} = ${recomputed.toFixed(2)}, expected total ${total}`,
+        });
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────────
+
     return {
       transactions,
       header,
-      warnings: [],
+      warnings,
       parseErrors,
     };
   },
