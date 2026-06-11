@@ -69,7 +69,7 @@ test('parseCibcCostcoRow — payment row (no spend category, no Ý)', () => {
     'payments',
   );
   assert.deepEqual(row, {
-    date: '2025-12-29',
+    date: '2025-12-24',
     merchantRaw: 'PAYMENT THANK YOU/PAIEMENT MERCI',
     amount: 577.04,
   });
@@ -82,9 +82,45 @@ test('parseCibcCostcoRow — charge row with spend category', () => {
     period,
     'charges',
   );
-  assert.equal(row.date, '2025-12-15');
+  assert.equal(row.date, '2025-12-13');
   assert.equal(row.merchantRaw, 'COSTCO WHOLESALE W1168 GUELPH ON');
   assert.equal(row.amount, -947.04);
+});
+
+test('parseCibcCostcoRow — uses the TRANSACTION date, not the posting date (c4778778)', () => {
+  // Trans Dec 13, post Dec 15: dating by post-date shifts spend into the wrong
+  // day/month and flips the date-keyed dedup fingerprint, so a CSV import of
+  // the same account double-inserts (the exact failure c4778778 fixed for Amex).
+  const period = { start: '2025-12-13', end: '2026-01-12' };
+  const row = parseCibcCostcoRow(
+    'Dec 13   Dec 15   COSTCO WHOLESALE W1168 GUELPH   ON   Retail and Grocery   947.04',
+    period,
+    'charges',
+  );
+  assert.equal(row.date, '2025-12-13');
+});
+
+test('parseCibcCostcoRow — early trans date beyond the 5-day slack still resolves', () => {
+  // Trans dates can precede the period start by weeks (delayed merchant
+  // postings); the post-date always sat inside the window so this only became
+  // reachable once rows are dated by trans date.
+  const period = { start: '2025-12-13', end: '2026-01-12' };
+  const row = parseCibcCostcoRow(
+    'Dec 05   Dec 14   LATE POSTING MERCHANT GUELPH   ON   Retail and Grocery   10.00',
+    period,
+    'charges',
+  );
+  assert.equal(row.date, '2025-12-05');
+});
+
+test('parseCibcCostcoRow — year-rollover: trans Dec 30 / post Jan 02 lands in the start year', () => {
+  const period = { start: '2025-12-13', end: '2026-01-12' };
+  const row = parseCibcCostcoRow(
+    'Dec 30   Jan 02   ROLLOVER MERCHANT GUELPH   ON   Retail and Grocery   20.00',
+    period,
+    'charges',
+  );
+  assert.equal(row.date, '2025-12-30');
 });
 
 test('parseCibcCostcoRow — charge row with bonus Ý prefix is stripped', () => {
@@ -94,7 +130,7 @@ test('parseCibcCostcoRow — charge row with bonus Ý prefix is stripped', () =>
     period,
     'charges',
   );
-  assert.equal(row.date, '2025-12-09');
+  assert.equal(row.date, '2025-12-08');
   assert.ok(!row.merchantRaw.includes('Ý'), 'Ý marker should be stripped');
   assert.equal(row.merchantRaw, 'COSTCO GAS W1168 GUELPH ON');
   assert.equal(row.amount, -61.71);
@@ -120,7 +156,7 @@ test('parseCibcCostcoRow — CR suffix on a charge row flips sign to credit', ()
     period,
     'charges',
   );
-  assert.equal(row.date, '2025-12-21');
+  assert.equal(row.date, '2025-12-20');
   assert.equal(row.merchantRaw, 'COSTCO REFUND W1168 GUELPH ON');
   assert.equal(row.amount, 125);  // positive because CR flipped the default-negative
 });
@@ -142,10 +178,14 @@ test('parser end-to-end — November 2025 statement (3 sub-sections present)', {
   const out = cibcCostcoMastercardParser.parse(lines, { defaultCurrency: 'CAD' });
   assert.equal(out.transactions.length, 3);
 
-  const byDate = [...out.transactions].sort((a, b) => a.date.localeCompare(b.date));
-  assert.equal(byDate[0].date, '2025-10-24');
-  assert.equal(byDate[0].amount, -3.15);
-  assert.ok(byDate[0].merchantRaw.includes('Google One'));
+  const google = out.transactions.find((t) => t.merchantRaw.includes('Google One'));
+  assert.ok(google);
+  assert.equal(google!.amount, -3.15);
+  // Trans date (post date was 2025-10-24; trans precedes post by 0-5 days).
+  assert.ok(
+    google!.date >= '2025-10-01' && google!.date <= '2025-10-24',
+    `Google One trans date out of range: ${google!.date}`,
+  );
 
   const payment = out.transactions.find((t) => t.merchantRaw.includes('PAYMENT THANK YOU'));
   assert.ok(payment);
@@ -173,11 +213,16 @@ test('parser end-to-end — January 2026 statement (rollover period, payment + 5
   assert.equal(out.transactions.length, 6);
 
   const payment = out.transactions.find((t) => t.merchantRaw.includes('PAYMENT THANK YOU'));
-  assert.equal(payment?.date, '2025-12-29');
+  assert.equal(payment?.date, '2025-12-24'); // trans date (was post 2025-12-29)
   assert.equal(payment?.amount, 577.04);
 
   const renewal = out.transactions.find((t) => t.merchantRaw.includes('ANNUAL RENEWAL'));
-  assert.equal(renewal?.date, '2026-01-02');
+  // Trans date (post date was 2026-01-02; trans precedes post by 0-5 days).
+  assert.ok(renewal);
+  assert.ok(
+    renewal!.date >= '2025-12-13' && renewal!.date <= '2026-01-02',
+    `renewal trans date out of range: ${renewal!.date}`,
+  );
   assert.equal(renewal?.amount, -146.90);
 
   const chargeSum = out.transactions

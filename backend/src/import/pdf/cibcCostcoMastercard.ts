@@ -150,6 +150,16 @@ export function inferYearForMonthDay(monthDay: string, period: Period): number {
     const ms = Date.UTC(year, month, day);
     if (ms >= startMs - slackMs && ms <= endMs + slackMs) return year;
   }
+  // Fallback for early trans dates (mirrors dateHelpers.inferYearForMonthDay):
+  // rows are dated by their TRANSACTION date, which can precede the statement
+  // opening by weeks (delayed merchant postings), including crossing into the
+  // prior calendar year. Tried only after the tight window fails, so in-period
+  // dates are never re-resolved into the prior year.
+  const earlySlackMs = 45 * 24 * 60 * 60 * 1000;
+  for (const year of [startYear - 1, ...candidates]) {
+    const ms = Date.UTC(year, month, day);
+    if (ms >= startMs - earlySlackMs && ms <= endMs + slackMs) return year;
+  }
   throw new Error(
     `Month-day ${monthDay} does not fit statement period ${period.start}…${period.end}`,
   );
@@ -171,10 +181,10 @@ function applySectionSign(magnitude: number, isCredit: boolean, section: CibcCos
   return isCredit ? abs : -abs;
 }
 
-function rowDateFromPost(postDate: string, period: Period): string {
-  const year = inferYearForMonthDay(postDate, period);
-  const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(postDate);
-  if (!m) throw new Error(`Unparseable post date: ${postDate}`);
+function rowDateFromTrans(transDate: string, period: Period): string {
+  const year = inferYearForMonthDay(transDate, period);
+  const m = /([A-Z][a-z]{2})\s+(\d{1,2})/.exec(transDate);
+  if (!m) throw new Error(`Unparseable trans date: ${transDate}`);
   const month = MONTHS[m[1]];
   if (month === undefined) throw new Error(`Unknown month abbreviation: ${m[1]}`);
   return toIso(year, month, Number(m[2]));
@@ -206,7 +216,11 @@ export function parseCibcCostcoRow(
   if (!merchantRaw) {
     throw new Error(`CIBC Costco row: empty merchant after column extraction: ${JSON.stringify(rawLine)}`);
   }
-  const date = rowDateFromPost(cols[1], period);
+  // cols[0] is the TRANSACTION date, cols[1] the posting date. Transactions
+  // are dated by trans date (decision c4778778): post-dating shifts spend
+  // across month boundaries and flips the date-keyed dedup fingerprint, so a
+  // CSV import of the same account would double-insert every row.
+  const date = rowDateFromTrans(cols[0], period);
   const { magnitude, isCredit } = parseRowAmount(cols[cols.length - 1]);
   if (!Number.isFinite(magnitude)) {
     throw new Error(`CIBC Costco row has unparseable amount: ${JSON.stringify(cols[cols.length - 1])}`);
