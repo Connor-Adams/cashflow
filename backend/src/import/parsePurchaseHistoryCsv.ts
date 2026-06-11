@@ -8,7 +8,11 @@
  * responsible for persisting and deduping.
  */
 import { parseCsvRecords } from './csvParse';
-import { parseDateFlexible } from './parseDateFlexible';
+import {
+  inferDateOrdering,
+  parseDateFlexible,
+  type DateOrdering,
+} from './parseDateFlexible';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 
 type ColumnRole =
@@ -107,9 +111,9 @@ function num(raw: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function isoDate(raw: string | undefined): string | null {
+function isoDate(raw: string | undefined, ordering?: DateOrdering | null): string | null {
   if (!raw) return null;
-  const d = parseDateFlexible(raw);
+  const d = parseDateFlexible(raw, undefined, ordering);
   if (!d) return null;
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -164,6 +168,12 @@ export function parsePurchaseHistoryCsv(
   const orders: ExtractedReceiptOrder[] = [];
   let unparsed = 0;
 
+  // One day/month ordering for the whole file: unambiguous rows ('15/03')
+  // decide how ambiguous ones ('03/04') parse instead of per-row fallback.
+  const dateOrdering = inferDateOrdering(
+    parsed.records.map((row) => pick('date', row))
+  );
+
   for (const row of parsed.records) {
     const title = pick('title', row);
     const amountStr = pick('amount', row);
@@ -175,7 +185,7 @@ export function parsePurchaseHistoryCsv(
     const subtitle = pick('subtitle', row);
 
     const totalNum = num(amountStr);
-    const date = isoDate(dateStr);
+    const date = isoDate(dateStr, dateOrdering);
 
     if (!title && totalNum == null) {
       unparsed++;

@@ -1,5 +1,9 @@
 import { normalizeMerchant } from './normalizeMerchant';
-import { parseDateFlexible } from './parseDateFlexible';
+import {
+  inferDateOrdering,
+  parseDateFlexible,
+  type DateOrdering,
+} from './parseDateFlexible';
 import {
   profiles,
   normalizeHeaderMap,
@@ -160,8 +164,27 @@ function inferAmountDirection(
 
 function parseRawNumber(raw: unknown): number | null {
   if (raw == null || raw === '') return null;
-  let s = String(raw).replace(/,/g, '').trim();
-  if (s.startsWith('(') && s.endsWith(')')) s = `-${s.slice(1, -1)}`;
+  let s = String(raw).trim();
+  // Accounting-style negative: '($10.00)' -> '-$10.00'.
+  if (s.startsWith('(') && s.endsWith(')')) s = `-${s.slice(1, -1).trim()}`;
+  // Currency prefix ('$', 'CA$', 'C$', 'US$'), preserving a leading minus.
+  s = s.replace(/^(-?)(?:CA?|US?)?\$\s*/i, '$1');
+  // European decimal comma ('12,34', '1.234,56') — detect before stripping
+  // commas, which would otherwise read '12,34' as 1234 (100x). Mirrors
+  // parseFxAmount in pdf/amex.ts. A trailing comma group of 1-2 digits can't
+  // be a thousands group (those are exactly 3 digits).
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  const europeanDecimal =
+    lastComma !== -1 &&
+    (lastDot !== -1 ? lastComma > lastDot : /,\d{1,2}$/.test(s));
+  if (europeanDecimal) {
+    s = s.replace(/\./g, '');
+    const i = s.lastIndexOf(',');
+    s = `${s.slice(0, i)}.${s.slice(i + 1)}`;
+  } else {
+    s = s.replace(/,/g, '');
+  }
   if (s === '') return null;
   // Strict Number(), not parseFloat: partial parsing would silently drop
   // trailing text ('25.00 CR' -> 25) and corrupt the amount.
@@ -245,11 +268,30 @@ export type MappedRow =
       };
     };
 
+/**
+ * Infer one file-wide day/month ordering from the profile's date column so
+ * an ambiguous dd/MM file ('15/03' rows prove the ordering for '03/04' rows)
+ * parses consistently instead of falling back per row. Pass the result to
+ * mapCsvRow's dateOrdering parameter.
+ */
+export function inferCsvDateOrdering(
+  records: Record<string, string>[],
+  headers: string[],
+  profileId: string
+): DateOrdering | null {
+  const profile = profiles[profileId] ?? profiles.generic_simple;
+  const headerMap = normalizeHeaderMap(headers);
+  return inferDateOrdering(
+    records.map((row) => pickColumn(row, headerMap, profile.dateHeaders))
+  );
+}
+
 export function mapCsvRow(
   row: Record<string, string>,
   headers: string[],
   profileId: string,
-  defaultCurrency: string
+  defaultCurrency: string,
+  dateOrdering?: DateOrdering | null
 ): MappedRow {
   const profile = profiles[profileId] ?? profiles.generic_simple;
   const headerMap = normalizeHeaderMap(headers);
@@ -283,7 +325,7 @@ export function mapCsvRow(
     return { error: 'Missing required columns' };
   }
 
-  const parsedDate = parseDateFlexible(dateRaw, profile.dateFormat);
+  const parsedDate = parseDateFlexible(dateRaw, profile.dateFormat, dateOrdering);
   if (!parsedDate) {
     return { error: `Invalid date: ${dateRaw}` };
   }

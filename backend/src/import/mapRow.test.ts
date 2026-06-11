@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapCsvRow } from './mapRow';
+import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 
 test('mapCsvRow maps generic_simple', () => {
   const row = {
@@ -186,6 +186,134 @@ test('mapCsvRow trusts pre-signed amounts under passthrough despite payment-like
   assert.ok(!('error' in r));
   if ('error' in r) return;
   assert.equal(r.value.amount, -12.5);
+});
+
+test('mapCsvRow parses European decimal comma "12,34" as 12.34, not 1234', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'CAFE PARIS',
+    Amount: '-12,34',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, -12.34);
+});
+
+test('mapCsvRow parses European "1.234,56" as 1234.56', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: '1.234,56',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 1234.56);
+});
+
+test('mapCsvRow keeps North American "1,234.56" as 1234.56', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: '1,234.56',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r));
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 1234.56);
+});
+
+test('mapCsvRow parses comma-decimal split Débit column under national_bank', () => {
+  const row = {
+    'Date de transaction': '2025-02-01',
+    Description: 'DEPANNEUR MTL',
+    'Débit': '12,34',
+    'Crédit': '',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'national_bank', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, -12.34);
+});
+
+test('mapCsvRow parses dollar-prefixed "$1,234.56"', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: '$1,234.56',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 1234.56);
+});
+
+test('mapCsvRow parses accounting-negative "($10.00)" as -10', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: '($10.00)',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, -10);
+});
+
+test('mapCsvRow parses "-$10.00" as -10', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: '-$10.00',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, -10);
+});
+
+test('mapCsvRow parses "CA$5.00" prefix', () => {
+  const row = {
+    Date: '2025-02-01',
+    Description: 'SOME VENDOR',
+    Amount: 'CA$5.00',
+  };
+  const headers = Object.keys(row);
+  const r = mapCsvRow(row, headers, 'generic_passthrough', 'CAD');
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  assert.equal(r.value.amount, 5);
+});
+
+test('inferCsvDateOrdering detects day-first files from unambiguous rows', () => {
+  const headers = ['Date', 'Description', 'Amount'];
+  const records = [
+    { Date: '15/03/2025', Description: 'A', Amount: '-1.00' },
+    { Date: '03/04/2025', Description: 'B', Amount: '-2.00' },
+  ];
+  assert.equal(inferCsvDateOrdering(records, headers, 'generic_simple'), 'day-first');
+});
+
+test('mapCsvRow applies inferred day-first ordering to ambiguous rows', () => {
+  const headers = ['Date', 'Description', 'Amount'];
+  const records = [
+    { Date: '15/03/2025', Description: 'A', Amount: '-1.00' },
+    { Date: '03/04/2025', Description: 'B', Amount: '-2.00' },
+  ];
+  const ordering = inferCsvDateOrdering(records, headers, 'generic_simple');
+  const r = mapCsvRow(records[1], headers, 'generic_simple', 'CAD', ordering);
+  assert.ok(!('error' in r), `expected mapped row, got ${JSON.stringify(r)}`);
+  if ('error' in r) return;
+  // dd/MM file: 03/04 is April 3rd, not March 4th.
+  assert.equal(r.value.date, '2025-04-03');
 });
 
 test('mapCsvRow keeps WS cash dividend positive under wealthsimple_cash', () => {

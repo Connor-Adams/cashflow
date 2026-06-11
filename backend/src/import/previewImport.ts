@@ -2,7 +2,7 @@ import { Account } from '../models';
 import * as env from '../config/env';
 import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
-import { mapCsvRow } from './mapRow';
+import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 
 export const PREVIEW_MAX_ROWS = 25;
 
@@ -57,10 +57,13 @@ export async function previewImportCsv(opts: {
     defaultCurrency,
   );
   const rows: PreviewRow[] = [];
+  // Infer over ALL records (not just the previewed slice) so the preview
+  // resolves ambiguous dates exactly like the commit path does.
+  const dateOrdering = inferCsvDateOrdering(records, headers, profileId);
   const n = Math.min(records.length, PREVIEW_MAX_ROWS);
   for (let i = 0; i < n; i++) {
     const row = records[i];
-    const mapped = mapCsvRow(row, headers, profileId, defaultCurrency);
+    const mapped = mapCsvRow(row, headers, profileId, defaultCurrency, dateOrdering);
     if ('error' in mapped) {
       rows.push({ rowIndex: i + 1, ok: false, error: mapped.error });
     } else {

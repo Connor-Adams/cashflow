@@ -45,6 +45,21 @@ test('parses Google-style headers (Title / Amount / Date / Order Number)', () =>
   assert.equal(result.orders[1].orderId, 'GP-790');
 });
 
+test('dd/MM files parse under one inferred ordering, not per-row fallback', () => {
+  const csv = [
+    'Purchase Date,Item Description,Cost',
+    '15/03/2025,Unambiguous dd/MM row,1.00',
+    '03/04/2025,Ambiguous row,2.00',
+  ].join('\n');
+
+  const result = parsePurchaseHistoryCsv(csv, { vendor: 'other' });
+
+  assert.equal(result.orders.length, 2);
+  assert.equal(result.orders[0].orderDate, '2025-03-15');
+  // dd/MM file: 03/04 is April 3rd, not March 4th.
+  assert.equal(result.orders[1].orderDate, '2025-04-03');
+});
+
 test('skips rows missing both title and amount', () => {
   const csv = [
     'Date,Description,Amount',
