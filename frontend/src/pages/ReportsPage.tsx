@@ -33,6 +33,7 @@ import { useToast } from '@/components/ui/toast'
 import { buildCsv, downloadCsv } from '../lib/csv'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -118,13 +119,6 @@ const DEFAULT_REPORTS_CURRENCY = 'CAD'
  */
 function localTodayUtcMidnight(): Date {
   return fromDateInputValue(todayDateInputValue())!
-}
-
-function getRelativeDateRange(days: number): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDateRange(): { from: string; to: string } {

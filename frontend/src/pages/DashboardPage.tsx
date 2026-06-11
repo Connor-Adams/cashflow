@@ -43,6 +43,7 @@ import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -212,10 +213,7 @@ function localTodayUtcMidnight(): Date {
 }
 
 function getDefaultDashboardRange(): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - 30)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+  return getRelativeDateRange(30)
 }
 
 function getRollingMonthRange(months: number): { from: string; to: string } {
