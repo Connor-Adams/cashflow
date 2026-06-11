@@ -404,6 +404,117 @@ test('GET /transactions?reimbursable filters by claim presence', async () => {
   assert.ok(!notIds.includes(withClaim), 'claimed txn should not appear');
 });
 
+// ---- client-supplied `today` (local-midnight overdue boundaries) -----------
+
+test('GET endpoints accept ?today= to shift the overdue boundary', async () => {
+  const fresh = await seed('Today');
+  const agent = request.agent(app);
+  agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
+
+  const outlay = await createTransaction(fresh.householdId, fresh.accountId, '2026-08-01', -80);
+  const due = isoDaysFromNow(5);
+  await agent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ contactId: fresh.contactId, dueDate: due });
+
+  // With the server's default (UTC) today the claim is open, not overdue.
+  const def = await agent.get('/api/reimbursements/overdue');
+  assert.ok(
+    !(def.body.data as { transactionId: number }[]).some((d) => d.transactionId === outlay),
+    'future-due claim should not be overdue by default',
+  );
+
+  // A client-local `today` past the due date flips it overdue everywhere.
+  const later = isoDaysFromNow(6);
+  const list = await agent.get(`/api/reimbursements?today=${later}`);
+  assert.equal(list.status, 200);
+  assert.equal(list.body.today, later);
+  const item = (list.body.data as { transactionId: number; effectiveStatus: string; isOverdue: boolean }[])
+    .find((d) => d.transactionId === outlay);
+  assert.ok(item, 'claim should be listed');
+  assert.equal(item!.effectiveStatus, 'overdue');
+  assert.equal(item!.isOverdue, true);
+
+  const overdue = await agent.get(`/api/reimbursements/overdue?today=${later}`);
+  assert.ok(
+    (overdue.body.data as { transactionId: number }[]).some((d) => d.transactionId === outlay),
+    'claim should reach the overdue queue with the shifted today',
+  );
+
+  const sum = await agent.get(`/api/reimbursements/summary?today=${later}`);
+  assert.equal(sum.body.today, later);
+  assert.equal(sum.body.overdueCount, 1);
+
+  // Contact detail open-claims aggregate honors the same param.
+  const contact = await agent.get(`/api/contacts/${fresh.contactId}?today=${later}`);
+  assert.equal(contact.status, 200);
+  assert.equal(contact.body.today, later);
+  assert.equal(contact.body.openReimbursements.items[0]?.effectiveStatus, 'overdue');
+
+  // Invalid values fall back to the server's UTC today, not a 500.
+  const bad = await agent.get('/api/reimbursements?today=not-a-date');
+  assert.equal(bad.status, 200);
+  assert.match(bad.body.today as string, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+// ---- link-repayment eligibility + partial netting ---------------------------
+
+test('link-repayment rejects outflows and cross-currency transactions', async () => {
+  const outlay = await createTransaction(primaryHouseholdId, primaryAccountId, '2026-09-01', -100);
+  const created = await primaryAgent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ partyName: 'Guard' });
+  const claimId = created.body.data.id as number;
+
+  const outflow = await createTransaction(primaryHouseholdId, primaryAccountId, '2026-09-02', -100);
+  const badSign = await primaryAgent
+    .post(`/api/reimbursements/${claimId}/link-repayment`)
+    .send({ transactionId: outflow });
+  assert.equal(badSign.status, 400);
+  assert.match(badSign.body.error as string, /inflow/);
+
+  const usdInflow = await createTransaction(
+    primaryHouseholdId, primaryAccountId, '2026-09-03', 100, { currency: 'USD' },
+  );
+  const badCurrency = await primaryAgent
+    .post(`/api/reimbursements/${claimId}/link-repayment`)
+    .send({ transactionId: usdInflow });
+  assert.equal(badCurrency.status, 400);
+  assert.match(badCurrency.body.error as string, /currency/);
+
+  // The claim stays open after both rejections.
+  const get = await primaryAgent.get(`/api/reimbursements/${claimId}`);
+  assert.equal(get.body.data.status, 'expected');
+  assert.equal(get.body.data.repaymentTransactionId, null);
+});
+
+test('summary nets a partial repayment instead of the claim face value', async () => {
+  const fresh = await seed('Partial');
+  const agent = request.agent(app);
+  agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
+
+  const outlay = await createTransaction(fresh.householdId, fresh.accountId, '2026-10-01', -200);
+  const created = await agent
+    .post(`/api/transactions/${outlay}/reimbursable`)
+    .send({ contactId: fresh.contactId });
+  const claimId = created.body.data.id as number;
+
+  // Link a 150 repayment against the 200 claim (the matcher tolerates a 25%
+  // mismatch, so this is a normal flow).
+  const repayment = await createTransaction(fresh.householdId, fresh.accountId, '2026-10-05', 150);
+  const linked = await agent
+    .post(`/api/reimbursements/${claimId}/link-repayment`)
+    .send({ transactionId: repayment });
+  assert.equal(linked.status, 200);
+  assert.equal(linked.body.data.status, 'received');
+
+  const sum = await agent.get('/api/reimbursements/summary');
+  const group = (sum.body.groups as { contactId: number | null; received: string }[])
+    .find((g) => g.contactId === fresh.contactId);
+  assert.ok(group, 'summary group expected');
+  assert.equal(group!.received, '150.0000');
+});
+
 // ---- cross-household scope -------------------------------------------------
 
 test('reimbursement endpoints scope to the requesting household', async () => {

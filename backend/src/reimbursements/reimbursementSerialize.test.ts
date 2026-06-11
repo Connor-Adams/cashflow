@@ -14,10 +14,26 @@ import {
   summarize,
   normalizeAmount,
   daysUntilDue,
+  resolveToday,
+  todayIso,
   type ReimbursementRow,
 } from './serialize';
 
 const TODAY = '2026-03-15';
+
+// ---------- resolveToday ----------
+
+test('resolveToday accepts a valid ISO date, defaults otherwise', () => {
+  // A client-supplied local date wins so overdue boundaries fire at the
+  // user's midnight, not UTC's.
+  assert.equal(resolveToday('2026-03-15'), '2026-03-15');
+  // Missing / empty / invalid all fall back to the UTC default.
+  assert.equal(resolveToday(undefined), todayIso());
+  assert.equal(resolveToday(''), todayIso());
+  assert.equal(resolveToday('not-a-date'), todayIso());
+  assert.equal(resolveToday('2026-02-31'), todayIso());
+  assert.equal(resolveToday(['2026-03-15']), todayIso());
+});
 
 // ---------- normalizeAmount ----------
 
@@ -220,6 +236,46 @@ test('summarize groups by party + currency and totals outstanding', () => {
   assert.equal(s.outstandingByCurrency.USD, '25.0000');
   assert.equal(s.overdueCount, 1);
   assert.equal(s.totalCount, 4);
+});
+
+test('summarize credits a partial repayment, not the claim face value', () => {
+  const repayment = (amount: string, currency = 'CAD') => ({
+    id: 200,
+    date: '2026-03-01',
+    merchantClean: 'E-TRANSFER',
+    amount,
+    currency,
+  });
+  const received = (over: Partial<ReimbursementRow>): ReimbursementRow =>
+    row({
+      partyName: 'Alice',
+      amount: '100.0000',
+      currency: 'CAD',
+      status: 'received',
+      dueDate: null,
+      receivedAt: new Date(),
+      repaymentTransactionId: 200,
+      ...over,
+    });
+
+  // Partial repayment: credit the actual inflow, not the claim face value.
+  const partial = summarize([received({ repaymentTransaction: repayment('80.0000') })], TODAY);
+  assert.equal(partial.groups[0]?.received, '80.0000');
+
+  // Over-payment caps at the claim amount.
+  const over = summarize([received({ repaymentTransaction: repayment('120.0000') })], TODAY);
+  assert.equal(over.groups[0]?.received, '100.0000');
+
+  // Cross-currency repayment: no reliable netting, fall back to face value.
+  const fx = summarize([received({ repaymentTransaction: repayment('80.0000', 'USD') })], TODAY);
+  assert.equal(fx.groups[0]?.received, '100.0000');
+
+  // No hydrated repayment (manually marked received): face value.
+  const manual = summarize(
+    [received({ repaymentTransactionId: null, repaymentTransaction: null })],
+    TODAY,
+  );
+  assert.equal(manual.groups[0]?.received, '100.0000');
 });
 
 test('summarize sorts groups by outstanding desc', () => {
