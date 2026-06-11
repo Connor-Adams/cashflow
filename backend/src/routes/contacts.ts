@@ -5,7 +5,7 @@ import { householdWhere } from '../auth/scope';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   summarizeOpenForContact,
-  todayIso,
+  resolveToday,
   type ReimbursementRow,
 } from '../reimbursements/serialize';
 
@@ -49,7 +49,9 @@ router.get('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    const today = todayIso();
+    // Browser-local date override so open/overdue derivation matches the
+    // user's calendar day; falls back to UTC today.
+    const today = resolveToday(req.query.today);
     const rows = await Reimbursement.findAll({
       where: { ...householdWhere(req), contactId: id },
       include: [

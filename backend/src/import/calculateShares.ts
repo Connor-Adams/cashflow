@@ -51,10 +51,20 @@ export function splitAmount(
     pm = 0.5;
     pp = 0.5;
   }
+  // Round my share to the DECIMAL(14,4) grid the columns persist at, then
+  // derive the partner share as the complement — computing the two sides
+  // independently (a*pm, a*pp) lets Postgres round each one on its own and
+  // break the myShare + partnerShare = amount invariant by 0.0001 on ties.
+  const myShareAmount = round4(a * pm);
   return {
-    myShareAmount: a * pm,
-    partnerShareAmount: a * pp,
+    myShareAmount,
+    partnerShareAmount: round4(a - myShareAmount),
   };
+}
+
+/** Round to 4 decimal places (the resolution of the DECIMAL(14,4) columns). */
+function round4(n: number): number {
+  return Math.round(n * 10_000) / 10_000;
 }
 
 /** Business amount: full signed amount when marked business, else 0. */

@@ -52,6 +52,44 @@ test('splitAmount: both sides given renormalizes by their sum', () => {
   closeTo(r.partnerShareAmount, 50);
 });
 
+/**
+ * Simulate DECIMAL(14,4) persistence on Postgres: the driver sends the float's
+ * decimal text and Postgres rounds it half away from zero at 4 places. (SQLite
+ * stores the raw float, which is why this only bites in prod.)
+ */
+function pgDecimal4(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  const s = Math.abs(x).toString();
+  const [int, frac = ''] = s.split('.');
+  const scaled = BigInt(int + frac.slice(0, 4).padEnd(4, '0'));
+  const nextDigit = frac.length > 4 ? Number(frac[4]) : 0;
+  return (sign * Number(nextDigit >= 5 ? scaled + 1n : scaled)) / 10_000;
+}
+
+test('splitAmount: shares survive DECIMAL(14,4) persistence as exact complements', () => {
+  // Tie case: 0.50 at 0.5001/0.4999 puts both raw shares on a 5th-decimal
+  // boundary (0.25005 / 0.24995); independent half-away-from-zero rounding
+  // would persist 0.2501 + 0.2500 = 0.5001 ≠ 0.5000.
+  const cases: Array<[number, number, number]> = [
+    [0.5, 0.5001, 0.4999],
+    [-0.5, 0.5001, 0.4999],
+    [100.01, 1, 2], // thirds: repeating decimals on both sides
+    [-33.33, 0.3333, 0.6667],
+    [0.0001, 0.5, 0.5],
+  ];
+  for (const [amount, pctMe, pctPartner] of cases) {
+    const r = splitAmount(amount, 'shared', pctMe, pctPartner);
+    const my = pgDecimal4(r.myShareAmount);
+    const partner = pgDecimal4(r.partnerShareAmount);
+    assert.equal(
+      Math.round(my * 10_000) + Math.round(partner * 10_000),
+      Math.round(amount * 10_000),
+      `persisted shares must sum to amount for ${amount} @ ${pctMe}/${pctPartner}: ` +
+        `got ${my} + ${partner}`,
+    );
+  }
+});
+
 test('businessAmount respects flag', () => {
   assert.equal(businessAmount(-40, true), -40);
   assert.equal(businessAmount(-40, false), 0);

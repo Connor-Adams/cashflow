@@ -29,6 +29,7 @@ import {
 import { Tabs, TabPanel } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson, patchJson } from '../lib/api'
+import { todayDateInputValue } from '../lib/dateInput'
 import { formatMoney } from '../lib/formatMoney'
 import type { Contact } from '@cashflow/shared'
 import type {
@@ -81,16 +82,19 @@ export function ReimbursementsPage() {
   const [matching, setMatching] = useState<ReimbursementView | null>(null)
 
   const endpointForTab = useCallback((which: TabKey): string => {
+    // Pass the browser's local calendar day so overdue derivation flips at
+    // the user's midnight, not UTC's (hours early for behind-UTC users).
+    const today = todayDateInputValue()
     switch (which) {
       case 'outstanding':
         // Open claims (expected) — the derived-overdue ones surface here too.
-        return '/api/reimbursements?status=expected'
+        return `/api/reimbursements?status=expected&today=${today}`
       case 'overdue':
-        return '/api/reimbursements/overdue'
+        return `/api/reimbursements/overdue?today=${today}`
       case 'received':
-        return '/api/reimbursements?status=received'
+        return `/api/reimbursements?status=received&today=${today}`
       case 'all':
-        return '/api/reimbursements'
+        return `/api/reimbursements?today=${today}`
     }
   }, [])
 
@@ -100,7 +104,9 @@ export function ReimbursementsPage() {
     try {
       const [list, sum] = await Promise.all([
         getJson<ReimbursementListResponse>(endpointForTab(tab)),
-        getJson<ReimbursementSummaryResponse>('/api/reimbursements/summary'),
+        getJson<ReimbursementSummaryResponse>(
+          `/api/reimbursements/summary?today=${todayDateInputValue()}`,
+        ),
       ])
       setRows(list.data)
       setSummary(sum)

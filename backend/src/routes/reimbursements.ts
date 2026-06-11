@@ -41,7 +41,7 @@ import {
   serializeReimbursement,
   summarize,
   computeEffectiveStatus,
-  todayIso,
+  resolveToday,
   parseIsoOrNull,
   type ReimbursementRow,
 } from '../reimbursements/serialize';
@@ -278,7 +278,10 @@ router.post(
 router.get('/reimbursements', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    // `today` may be the browser's local date so overdue derivation flips at
+    // the user's midnight rather than UTC's (which is hours early in the
+    // Americas). Invalid/missing values fall back to UTC today.
+    const today = resolveToday(req.query.today);
     const where: WhereOptions = { ...householdWhere(req) };
     const q = req.query;
 
@@ -343,12 +346,13 @@ router.get('/reimbursements', async (req, res, next) => {
 router.get('/reimbursements/summary', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    const today = resolveToday(req.query.today);
+    // Full INCLUDE (not just contact): summarize() nets a received claim
+    // against its hydrated same-currency repayment transaction so a partial
+    // repayment doesn't credit the full claim face value.
     const rows = await Reimbursement.findAll({
       where: { ...householdWhere(req) },
-      include: [
-        { model: Contact, as: 'contact', attributes: ['id', 'name'], required: false },
-      ],
+      include: INCLUDE,
     });
     const summary = summarize(rows.map(toRow), today);
     res.json({ ...summary, today });
@@ -362,7 +366,7 @@ router.get('/reimbursements/summary', async (req, res, next) => {
 router.get('/reimbursements/overdue', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = todayIso();
+    const today = resolveToday(req.query.today);
     // Candidates: open claims with a due date strictly before today, OR claims
     // explicitly pinned to the 'overdue' status.
     const rows = await Reimbursement.findAll({
@@ -543,10 +547,23 @@ router.post('/reimbursements/:id/link-repayment', async (req, res, next) => {
     }
     const repayment = await Transaction.findOne({
       where: { id: txnId, ...visibleTransactionWhere(req) },
-      attributes: ['id'],
+      attributes: ['id', 'amount', 'currency'],
     });
     if (!repayment) {
       res.status(404).json({ error: 'Repayment transaction not found' });
+      return;
+    }
+    // Mirror the match-candidates eligibility filter: a repayment must be an
+    // inflow (positive) in the claim's currency. Without this, linking an
+    // arbitrary visible transaction silently marks the claim received.
+    if (!(Number(repayment.amount) > 0)) {
+      res.status(400).json({ error: 'Repayment must be a positive inflow' });
+      return;
+    }
+    if (repayment.currency !== r.currency) {
+      res.status(400).json({
+        error: `Repayment currency must match the claim (${r.currency})`,
+      });
       return;
     }
     r.repaymentTransactionId = repayment.id;

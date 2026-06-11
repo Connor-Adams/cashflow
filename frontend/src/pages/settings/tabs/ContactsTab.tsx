@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { deleteReq, getJson, patchJson, postJson } from '../../../lib/api'
+import { todayDateInputValue } from '../../../lib/dateInput'
 import { formatMoney } from '../../../lib/formatMoney'
 import type { Contact } from '../../../types/api'
 import type { ReimbursementView } from '../../../types/reimbursement'
@@ -273,7 +274,11 @@ function ContactCard({
     setLoading(true)
     setErr(null)
     try {
-      const d = await getJson<ContactDetail>(`/api/contacts/${contact.id}`)
+      // Local calendar day so the open/overdue aggregate flips at the user's
+      // midnight, not UTC's.
+      const d = await getJson<ContactDetail>(
+        `/api/contacts/${contact.id}?today=${todayDateInputValue()}`,
+      )
       setDetail(d)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not load reimbursements')
