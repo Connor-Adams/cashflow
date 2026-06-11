@@ -369,3 +369,99 @@ test('T2 return includes expected line codes', () => {
     assert.ok(codes.includes(code), `Missing line code ${code}`);
   }
 });
+
+// -------------------------------------------------------------------
+// s.112: intercorporate dividends are deducted from taxable income
+// -------------------------------------------------------------------
+test('s.112: connected intercorp dividends bear no Part I tax; portfolio dividends still do', () => {
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    investmentIncome: {
+      interest: [],
+      eligibleDividends: [
+        { source: 'intercorpRouter:from-corp-42:eligible', amount: D('50000'), cadAmount: D('50000') },
+        { source: 'BCE shares', amount: D('10000'), cadAmount: D('10000') },
+      ],
+      nonEligibleDividends: [
+        { source: 'intercorpRouter:from-corp-42:nonEligible', amount: D('15000'), cadAmount: D('15000') },
+      ],
+      rentNet: [],
+    },
+  };
+
+  const ret = buildT2(facts, r);
+
+  // Only the $10k portfolio dividend is taxable; the $65k connected dividends
+  // are deductible under s.112(1) (they are Part IV territory instead).
+  assert.equal(ret.totals.taxableIncome.toFixed(2), '10000.00');
+  assert.equal(ret.totals.federalTax.toFixed(2), '3870.00', '10000 × 0.387 investment rate');
+  assert.equal(ret.totals.provincialTax.toFixed(2), '1150.00', '10000 × 0.115');
+  const l320 = ret.lines.find(l => l.code === 'L320');
+  assert.ok(l320, 'expected the s.112 deduction line');
+  assert.equal(l320!.amount.toFixed(2), '65000.00');
+});
+
+test('s.112: a pure holdco receiving only intercorp dividends owes zero Part I tax', () => {
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    investmentIncome: {
+      interest: [],
+      eligibleDividends: [
+        { source: 'intercorpRouter:from-corp-7:eligible', amount: D('100000'), cadAmount: D('100000') },
+      ],
+      nonEligibleDividends: [],
+      rentNet: [],
+    },
+  };
+
+  const ret = buildT2(facts, r);
+  assert.equal(ret.totals.taxableIncome.toFixed(2), '0.00');
+  assert.equal(ret.totals.federalTax.toFixed(2), '0.00');
+  assert.equal(ret.totals.provincialTax.toFixed(2), '0.00');
+  assert.equal(ret.totals.netTaxPayable.toFixed(2), '0.00');
+});
+
+// -------------------------------------------------------------------
+// GRIP addition: statutory 0.72 factor on POST-loss general-rate income
+// -------------------------------------------------------------------
+test('GRIP addition uses post-loss general-rate income at the statutory 0.72 factor', () => {
+  // $600k ABI → $500k SBD + $100k general-rate. A $60k non-capital loss CF
+  // displaces general-rate income first (TI 540k − 500k SBD = 40k general).
+  // GRIP addition = 0.72 × 40,000 = 28,800 — NOT 0.72 × 100,000 (pre-loss),
+  // and NOT 0.735 (the old combined-rate derivation).
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    activeBusinessIncome: [{ source: 'ops', amount: D('600000'), cadAmount: D('600000') }],
+    carryforwards: {
+      ...baseFacts().carryforwards,
+      nonCapLoss: D('60000'),
+    },
+  };
+
+  const ret = buildT2(facts, r);
+  assert.equal(ret.totals.taxableIncome.toFixed(2), '540000.00');
+  assert.equal(ret.totals.gripEnding.toFixed(2), '28800.00', '0.72 × post-loss 40k general-rate income');
+});
+
+// -------------------------------------------------------------------
+// s.129(1) pool draws: ERDTOH overflow reduces ERDTOH, not NERDTOH
+// -------------------------------------------------------------------
+test('s.129(1): ERDTOH overflow for a non-eligible refund reduces the ERDTOH ending balance', () => {
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    dividendsPaid: [
+      { source: 'corp', date: '2024-11-01', amount: D('10000'), kind: 'non_eligible' },
+    ],
+    carryforwards: {
+      ...baseFacts().carryforwards,
+      erdtoh: D('10000'),
+      nerdtoh: D('1000'),
+    },
+  };
+
+  const ret = buildT2(facts, r);
+  // Gross refund 3833: 1000 from NERDTOH (exhausted), 2833 overflow from ERDTOH.
+  assert.equal(ret.totals.dividendRefund.toFixed(4), '3833.0000');
+  assert.equal(ret.totals.nerdtohEnding.toFixed(4), '0.0000');
+  assert.equal(ret.totals.erdtohEnding.toFixed(4), '7167.0000', '10000 − 2833 overflow');
+});

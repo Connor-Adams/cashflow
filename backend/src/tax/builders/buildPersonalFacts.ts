@@ -12,7 +12,7 @@ import {
   Transaction,
   User,
 } from '../../models';
-import { D, sumD } from '../util/decimal';
+import { D, Decimal, sumD } from '../util/decimal';
 import { isTaxTreatment } from '@cashflow/shared';
 import type {
   CapGainEvent,
@@ -22,9 +22,48 @@ import type {
   SlipFact,
   TaxYearFacts,
 } from '../engine/types';
-import { computeAcb } from '../../portfolio/acb';
+import { computeAcb, type AcbActivity, type AcbRealizedEvent } from '../../portfolio/acb';
 import { toCad } from '../../fx/toCad';
 import { dividendDedupDays } from '../../config/env';
+
+/**
+ * CRA superficial-loss denial for one loss disposition: 30 days BEFORE through
+ * 30 days after the disposition (61 days, same-day included), AND identical
+ * property must still be held at the end of the window. Denial is proportional
+ * per CRA's administrative formula min(S, P, B) / S × loss, where S = units
+ * sold, P = units acquired in the window, B = units held at window end.
+ * Returns undefined when the event is not a loss or no denial applies.
+ */
+function computeDeniedPortion(
+  realized: AcbRealizedEvent,
+  acts: InvestmentActivity[],
+  timeline: { asOf: string; quantity: number }[],
+): Decimal | undefined {
+  const rawGain = D(realized.proceeds).minus(D(realized.costRemoved));
+  if (!rawGain.lessThan(0) || realized.qtySold <= 0) return undefined;
+  const sellDate = new Date(`${realized.tradeDate}T00:00:00.000Z`);
+  const windowStartStr = new Date(sellDate.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const windowEndStr = new Date(sellDate.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const acquiredInWindow = acts
+    .filter(a =>
+      (a.activityType === 'buy' || a.activityType === 'reinvestment')
+      && (a.tradeDate as unknown as string) >= windowStartStr
+      && (a.tradeDate as unknown as string) <= windowEndStr)
+    .reduce((sum, a) => sum + (a.quantity != null ? Number(a.quantity) : 0), 0);
+  // Units held at window end: last ACB timeline state at-or-before the window
+  // end (timeline is chronological; the feed extends 30 days past year-end so
+  // December windows are fully covered).
+  let heldAtWindowEnd = 0;
+  for (const st of timeline) {
+    if (st.asOf > windowEndStr) break;
+    heldAtWindowEnd = st.quantity;
+  }
+  if (acquiredInWindow > 0 && heldAtWindowEnd > 0) {
+    const deniedUnits = Math.min(realized.qtySold, acquiredInWindow, heldAtWindowEnd);
+    return rawGain.negated().times(deniedUnits).dividedBy(realized.qtySold);
+  }
+  return undefined;
+}
 
 /** Whole-day difference (a − b) between two 'YYYY-MM-DD' dates at UTC midnight. */
 function daysBetween(a: string, b: string): number {
@@ -252,41 +291,46 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
         splitRatio: a.splitRatio != null ? Number(a.splitRatio) : null,
       });
     }
-    const acb = computeAcb(acbInput);
+    // s.53(1)(f): a denied superficial loss is added back to the ACB of the
+    // substituted (repurchased) shares — deferred, not extinguished. Process
+    // loss dispositions chronologically: each denial injects a synthetic
+    // acb_adjustment row at the sale date and the walk re-runs, so every
+    // subsequent disposition prices against the raised cost base (which can
+    // itself create or enlarge later losses — hence the loop). Earlier events
+    // are never disturbed: an injection sorts after its sale (huge synthetic
+    // id) and only shifts state from that date forward.
+    const injected: AcbActivity[] = [];
+    const denials = new Map<number, Decimal>();
+    const processed = new Set<number>();
+    let acb = computeAcb(acbInput);
+    for (;;) {
+      const next = acb.realizedEvents.find(
+        ev => !processed.has(ev.activityId) && ev.qtySold > 0
+          && D(ev.proceeds).minus(D(ev.costRemoved)).lessThan(0),
+      );
+      if (!next) break;
+      processed.add(next.activityId);
+      const denied = computeDeniedPortion(next, acts, acb.timeline);
+      if (denied) {
+        denials.set(next.activityId, denied);
+        injected.push({
+          id: 2_000_000_000 + injected.length,
+          activityType: 'acb_adjustment',
+          tradeDate: next.tradeDate,
+          quantity: null,
+          amount: denied.toNumber(),
+          currency: 'CAD',
+          fees: null,
+          splitRatio: null,
+        });
+        acb = computeAcb([...acbInput, ...injected]);
+      }
+    }
     for (const realized of acb.realizedEvents) {
       // Prior-year dispositions are already reported on their own year's return;
       // here they only serve to advance the ACB state. Keep just this year's.
       if (realized.tradeDate < yearStart || realized.tradeDate > yearEnd) continue;
-      const rawGain = D(realized.proceeds).minus(D(realized.costRemoved));
-      let superficialLossDenied: typeof rawGain | undefined;
-      if (rawGain.lessThan(0) && realized.qtySold > 0) {
-        // CRA superficial-loss window: 30 days BEFORE through 30 days after the
-        // disposition (61 days, same-day included), AND identical property must
-        // still be held at the end of the window. Denial is proportional per
-        // CRA's administrative formula min(S, P, B) / S × loss, where S = units
-        // sold, P = units acquired in the window, B = units held at window end.
-        const sellDate = new Date(`${realized.tradeDate}T00:00:00.000Z`);
-        const windowStartStr = new Date(sellDate.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
-        const windowEndStr = new Date(sellDate.getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
-        const acquiredInWindow = acts
-          .filter(a =>
-            (a.activityType === 'buy' || a.activityType === 'reinvestment')
-            && (a.tradeDate as unknown as string) >= windowStartStr
-            && (a.tradeDate as unknown as string) <= windowEndStr)
-          .reduce((sum, a) => sum + (a.quantity != null ? Number(a.quantity) : 0), 0);
-        // Units held at window end: last ACB timeline state at-or-before the
-        // window end (timeline is chronological; the feed extends 30 days past
-        // year-end so December windows are fully covered).
-        let heldAtWindowEnd = 0;
-        for (const st of acb.timeline) {
-          if (st.asOf > windowEndStr) break;
-          heldAtWindowEnd = st.quantity;
-        }
-        if (acquiredInWindow > 0 && heldAtWindowEnd > 0) {
-          const deniedUnits = Math.min(realized.qtySold, acquiredInWindow, heldAtWindowEnd);
-          superficialLossDenied = rawGain.negated().times(deniedUnits).dividedBy(realized.qtySold);
-        }
-      }
+      const superficialLossDenied = denials.get(realized.activityId);
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,
         securityId: sid,

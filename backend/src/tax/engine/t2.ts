@@ -2,7 +2,7 @@ import { D, Decimal, sumD, maxZero } from '../util/decimal';
 import type { CorpTaxYearFacts, CorpTaxReturn, RateTable, TaxLine } from './types';
 import { computeAaii } from './aaii';
 import { sbdEligibleIncome } from './sbd';
-import { computeIntegration } from './integration';
+import { computeIntegration, isConnectedSource } from './integration';
 
 export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const warnings: string[] = [];
@@ -35,11 +35,28 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   // Investment income — taxable
   const interest = sumD(facts.investmentIncome.interest.map(i => i.cadAmount));
   const rent = sumD(facts.investmentIncome.rentNet.map(i => i.cadAmount));
-  const nonElDivReceived = sumD(facts.investmentIncome.nonEligibleDividends.map(i => i.cadAmount));
-  // Eligible dividends received from non-connected corps are subject to Part IV but treated as taxable investment income at corp level
-  const elDivReceived = sumD(facts.investmentIncome.eligibleDividends.map(i => i.cadAmount));
+  // s.112(1): taxable dividends from connected corporations (intercorp
+  // source-tagged) are deducted in computing taxable income — they bear no
+  // Part I tax (Part IV / RDTOH is their regime, handled in computeIntegration).
+  // Portfolio dividends are KEPT in Part I investment income as a documented
+  // simplification: the engine taxes them at investment rates in lieu of
+  // levying actual Part IV tax, while the matching 38.33% accrues to RDTOH.
+  const connectedDivsReceived = sumD(
+    facts.investmentIncome.eligibleDividends.filter(isConnectedSource).map(i => i.cadAmount),
+  ).plus(sumD(
+    facts.investmentIncome.nonEligibleDividends.filter(isConnectedSource).map(i => i.cadAmount),
+  ));
+  const nonElDivReceived = sumD(
+    facts.investmentIncome.nonEligibleDividends.filter(i => !isConnectedSource(i)).map(i => i.cadAmount),
+  );
+  const elDivReceived = sumD(
+    facts.investmentIncome.eligibleDividends.filter(i => !isConnectedSource(i)).map(i => i.cadAmount),
+  );
   const investmentTaxableIncome = interest.plus(rent).plus(nonElDivReceived).plus(elDivReceived);
   push('L440', 'Investment taxable income', investmentTaxableIncome);
+  if (connectedDivsReceived.greaterThan(0)) {
+    push('L320', 'Taxable dividends deductible under s.112 (connected corps)', connectedDivsReceived);
+  }
 
   // Taxable capital gains — corps use the high rate (66.67%) on ALL gains
   const grossGains = sumD(facts.capitalGainEvents.map(e => e.proceeds.minus(e.acb).minus(e.outlays)));
@@ -88,8 +105,10 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
   const refundableTaxOnAii = aiiTaxBase.times(r.corpRefundableTaxOnAII);
   push('L450', 'Refundable Part I tax on investment income', refundableTaxOnAii);
 
-  // Integration: GRIP, CDA, RDTOH additions, dividend refund
-  const integ = computeIntegration(facts, sbd.generalRate, r);
+  // Integration: GRIP, CDA, RDTOH additions, dividend refund. GRIP is computed
+  // on the POST-loss general-rate residual (s.89(1) "adjusted taxable income"
+  // starts from Division C taxable income), not the pre-loss sbd.generalRate.
+  const integ = computeIntegration(facts, generalTaxBase, r);
   push('L500', 'GRIP addition', integ.gripAddition);
   push('L501', 'CDA addition', integ.cdaAddition);
   push('L502', 'ERDTOH addition', integ.erdtohAddition);
@@ -111,13 +130,14 @@ export function buildT2(facts: CorpTaxYearFacts, r: RateTable): CorpTaxReturn {
     .plus(openingGripBoost)
     .minus(sumD(facts.dividendsPaid.filter(d => d.kind === 'eligible').map(d => d.amount)));
   const cdaEnding = facts.carryforwards.cda.plus(integ.cdaAddition);
-  // Each refund draws only on its own pool: eligible-dividend refunds reduce
-  // ERDTOH, non-eligible refunds reduce NERDTOH.
+  // Pools roll forward by what was actually DRAWN from each (s.129(1)):
+  // ERDTOH funds the eligible refund plus any non-eligible overflow; NERDTOH
+  // funds only the non-eligible base refund.
   const erdtohEnding = maxZero(
-    facts.carryforwards.erdtoh.plus(integ.erdtohAddition).minus(integ.refundForEligible),
+    facts.carryforwards.erdtoh.plus(integ.erdtohAddition).minus(integ.erdtohConsumed),
   );
   const nerdtohEnding = maxZero(
-    facts.carryforwards.nerdtoh.plus(integ.nerdtohAddition).minus(integ.refundForNonEligible),
+    facts.carryforwards.nerdtoh.plus(integ.nerdtohAddition).minus(integ.nerdtohConsumed),
   );
 
   return {

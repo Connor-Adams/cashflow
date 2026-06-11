@@ -93,17 +93,33 @@ export async function buildCorpFacts(
     }
   }
 
-  // Capital gains via ACB (same pattern as personal)
+  // Capital gains via ACB (same pattern as personal). ACB is a weighted-average
+  // running balance (ITA s.47), so computeAcb needs the FULL per-security
+  // history up to fiscal year end — NOT just this fiscal year's rows. A
+  // fiscal-windowed feed makes prior-year buys invisible, collapsing ACB to ~0
+  // and overstating realized gains as near-$0-cost dispositions. Walk all
+  // activity through endDate, then keep only the dispositions that settled
+  // DURING the fiscal year (income items above stay fiscal-windowed: income is
+  // reported in the year received).
+  const acbActivity = accountIds.length
+    ? await InvestmentActivity.findAll({
+        where: {
+          accountId: accountIds,
+          tradeDate: { [Op.lte]: endDate },
+        },
+      })
+    : [];
+
   const capitalGainEvents: CapGainEvent[] = [];
   const securityIds = Array.from(
     new Set(
-      activity
+      acbActivity
         .map((a) => a.securityId)
         .filter((x): x is number => x != null),
     ),
   );
   for (const sid of securityIds) {
-    const acts = activity.filter((a) => a.securityId === sid);
+    const acts = acbActivity.filter((a) => a.securityId === sid);
     // CRA requires per-leg FX conversion: each buy/sell/fee leg converts at its
     // own trade-date rate, so the ACB walk — and the CapGainEvent the T2 engine
     // feeds into AAII / CDA / RDTOH math — is genuinely in CAD.
@@ -130,6 +146,9 @@ export async function buildCorpFacts(
     }
     const acb = computeAcb(acbInput);
     for (const realized of acb.realizedEvents) {
+      // Prior-fiscal-year dispositions are already reported on their own year's
+      // return; here they only serve to advance the ACB state.
+      if (realized.tradeDate < startDate || realized.tradeDate > endDate) continue;
       capitalGainEvents.push({
         source: `Security ${sid} sell ${realized.tradeDate}`,
         securityId: sid,

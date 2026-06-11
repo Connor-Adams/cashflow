@@ -654,3 +654,50 @@ test('SELL after a transfer_in uses the blended ACB', () => {
   APPROX(r.finalState.quantity, 15);
   APPROX(r.finalState.acbPerUnit, 75);
 });
+
+test('acb_adjustment adds to total cost without changing quantity', () => {
+  // s.53(1)(f): a denied superficial loss is added back to the ACB of the
+  // substituted shares. The synthetic acb_adjustment row carries that addback.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 100, 1000),
+    act('2024-03-01', 'acb_adjustment', null, 300),
+  ]);
+  assert.equal(r.finalState.quantity, 100);
+  assert.equal(r.finalState.totalCost, 1300);
+  APPROX(r.finalState.acbPerUnit, 13);
+  assert.equal(r.realizedEvents.length, 0, 'adjustment is not a disposition');
+});
+
+test('acb_adjustment raises the cost removed by a later sell', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 100, 750),
+    act('2024-02-01', 'acb_adjustment', null, 300),
+    act('2024-06-01', 'sell', 100, 900),
+  ]);
+  assert.equal(r.realizedEvents.length, 1);
+  APPROX(r.realizedEvents[0].costRemoved, 1050, 'cost includes the addback');
+  APPROX(r.realizedEvents[0].realizedGain, -150);
+});
+
+test('acb_adjustment on a closed position carries cost into the next buy', () => {
+  // Sell-all then repurchase within the superficial window: the addback is
+  // injected at the sell date (position momentarily zero) and must survive
+  // into the repurchased lot's cost base rather than being reset.
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 100, 1000),
+    act('2024-03-01', 'sell', 100, 700),
+    act('2024-03-01', 'acb_adjustment', null, 300),
+    act('2024-03-10', 'buy', 100, 750),
+  ]);
+  assert.equal(r.finalState.quantity, 100);
+  APPROX(r.finalState.totalCost, 1050, 'repurchased lot carries the denied loss');
+});
+
+test('acb_adjustment with null amount is ignored with a warning', () => {
+  const r = computeAcb([
+    act('2024-01-15', 'buy', 100, 1000),
+    act('2024-02-01', 'acb_adjustment', null, null),
+  ]);
+  assert.equal(r.finalState.totalCost, 1000);
+  assert.ok(r.warnings.some((w) => /ACB_ADJUSTMENT.*missing amount/i.test(w)));
+});
