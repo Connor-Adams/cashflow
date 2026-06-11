@@ -15,6 +15,7 @@ import {
 import { getJson, patchJson } from '../lib/api'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -48,14 +49,6 @@ const DEFAULT_PARTNER_CURRENCY = 'CAD'
  */
 function localTodayUtcMidnight(): Date {
   return fromDateInputValue(todayDateInputValue())!
-}
-
-/** Compute first/last day of a relative window for the FilterBar. */
-function getRelativeRange(days: number): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDate(): { from: string; to: string } {
@@ -146,8 +139,8 @@ export function PartnerFairnessPage() {
 
   const quickRanges = useMemo<QuickRange[]>(
     () => [
-      { key: '30d', label: '30 days', ...getRelativeRange(30) },
-      { key: '90d', label: '90 days', ...getRelativeRange(90) },
+      { key: '30d', label: '30 days', ...getRelativeDateRange(30) },
+      { key: '90d', label: '90 days', ...getRelativeDateRange(90) },
       { key: 'ytd', label: 'YTD', ...getYearToDate() },
       { key: 'all', label: 'All time', from: '', to: '' },
     ],

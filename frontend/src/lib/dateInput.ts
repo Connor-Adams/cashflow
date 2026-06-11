@@ -73,3 +73,24 @@ export function todayDateInputValue(now: Date = new Date()): string {
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+/**
+ * Compute the `{ from, to }` strings for a "last N days" quick-range ending
+ * on the user's local "today".
+ *
+ * Both endpoints are INCLUSIVE — backend date filters use gte/lte — so
+ * `from` is today minus (days − 1), giving a window of exactly `days`
+ * calendar days. Subtracting `days` would silently produce an N+1-day window
+ * ("30 days" spanning 31 days).
+ *
+ * Optional `now` argument is for tests.
+ */
+export function getRelativeDateRange(
+  days: number,
+  now: Date = new Date()
+): { from: string; to: string } {
+  const to = fromDateInputValue(todayDateInputValue(now))!
+  const from = new Date(to)
+  from.setUTCDate(from.getUTCDate() - (days - 1))
+  return { from: toDateInputValue(from), to: toDateInputValue(to) }
+}

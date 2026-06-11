@@ -23,6 +23,7 @@ import {
 import { getJson } from '../lib/api'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -64,13 +65,6 @@ function localTodayUtcMidnight(): Date {
   return value ?? new Date()
 }
 
-function getRelativeRange(days: number): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
-}
-
 function getYearToDate(): { from: string; to: string } {
   const to = localTodayUtcMidnight()
   const from = new Date(Date.UTC(to.getUTCFullYear(), 0, 1))
@@ -78,10 +72,10 @@ function getYearToDate(): { from: string; to: string } {
 }
 
 const QUICK_RANGES: QuickRange[] = [
-  { key: '30d', label: 'Last 30 days', ...getRelativeRange(30) },
-  { key: '90d', label: 'Last 90 days', ...getRelativeRange(90) },
+  { key: '30d', label: 'Last 30 days', ...getRelativeDateRange(30) },
+  { key: '90d', label: 'Last 90 days', ...getRelativeDateRange(90) },
   { key: 'ytd', label: 'Year to date', ...getYearToDate() },
-  { key: '365d', label: 'Last 12 months', ...getRelativeRange(365) },
+  { key: '365d', label: 'Last 12 months', ...getRelativeDateRange(365) },
   { key: 'all', label: 'All time', from: '', to: '' },
 ]
 

@@ -47,6 +47,7 @@ import {
 } from '../lib/api'
 import {
   fromDateInputValue,
+  getRelativeDateRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -169,13 +170,6 @@ const TRANSACTION_STATUS_FILTERS: Array<{ value: '' | TransactionStatus; label: 
  */
 function localTodayUtcMidnight(): Date {
   return fromDateInputValue(todayDateInputValue())!
-}
-
-function getRelativeDateRange(days: number): { from: string; to: string } {
-  const to = localTodayUtcMidnight()
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: toDateInputValue(from), to: toDateInputValue(to) }
 }
 
 function getYearToDateRange(): { from: string; to: string } {
