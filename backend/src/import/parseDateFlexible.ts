@@ -6,38 +6,88 @@ import { parse, isValid } from 'date-fns';
 // to the 'yy' formats, which resolve 25 -> 2025.
 const MIN_PLAUSIBLE_YEAR = 1900;
 
+/** Day/month ordering for ambiguous numeric dates ('03/04/2025'). */
+export type DateOrdering = 'month-first' | 'day-first';
+
+const MONTH_FIRST_FORMATS = [
+  'MM/dd/yyyy',
+  'M/d/yyyy',
+  'MM/d/yyyy',
+  'M/dd/yyyy',
+  'MM/dd/yy',
+  'M/d/yy',
+  'MM-dd-yyyy',
+  'M-d-yyyy',
+  'MM-dd-yy',
+];
+
+const DAY_FIRST_FORMATS = [
+  'dd/MM/yyyy',
+  'd/M/yyyy',
+  'd/MM/yyyy',
+  'dd/M/yyyy',
+  'dd/MM/yy',
+  'dd-MM-yyyy',
+  'd-M-yyyy',
+  'dd-MM-yy',
+  'dd.MM.yyyy',
+  'dd.MM.yy',
+];
+
+/** dd/MM vs MM/dd numeric date with /, - or . separators. */
+const NUMERIC_DATE_RE = /^(\d{1,2})[/\-.](\d{1,2})[/\-.]\d{2,4}$/;
+
+/**
+ * Infer a file-wide day/month ordering by scanning date cells for unambiguous
+ * tokens: a first component >12 proves day-first ('15/03'), a second
+ * component >12 proves month-first ('03/15'). Returns null when there is no
+ * evidence or the evidence conflicts (then the per-token default applies).
+ */
+export function inferDateOrdering(values: Iterable<unknown>): DateOrdering | null {
+  let dayFirst = 0;
+  let monthFirst = 0;
+  for (const raw of values) {
+    const m = NUMERIC_DATE_RE.exec(String(raw ?? '').trim());
+    if (!m) continue;
+    const first = Number(m[1]);
+    const second = Number(m[2]);
+    if (first > 12 && second <= 12) dayFirst += 1;
+    else if (second > 12 && first <= 12) monthFirst += 1;
+  }
+  if (dayFirst > 0 && monthFirst === 0) return 'day-first';
+  if (monthFirst > 0 && dayFirst === 0) return 'month-first';
+  return null;
+}
+
 /**
  * Try common bank/Amex date formats (US vs CA/UK order differs).
+ *
+ * Ambiguous numeric dates default to month-first for every separator. Pass
+ * `ordering` (see inferDateOrdering) to resolve a whole file under one
+ * day/month ordering; `preferredFormat` (profile.dateFormat) still wins.
  */
 export function parseDateFlexible(
   raw: unknown,
-  preferredFormat?: string
+  preferredFormat?: string,
+  ordering?: DateOrdering | null
 ): Date | null {
   const s = String(raw).trim();
   if (!s) return null;
 
+  const orderingFormats =
+    ordering === 'day-first'
+      ? DAY_FIRST_FORMATS
+      : ordering === 'month-first'
+        ? MONTH_FIRST_FORMATS
+        : [];
+
   const formats = [
     preferredFormat,
     'yyyy-MM-dd',
-    'MM/dd/yyyy',
-    'M/d/yyyy',
-    'MM/d/yyyy',
-    'M/dd/yyyy',
-    'MM/dd/yy',
-    'M/d/yy',
-    'dd/MM/yyyy',
-    'd/M/yyyy',
-    'd/MM/yyyy',
-    'dd/M/yyyy',
-    'dd/MM/yy',
-    'dd-MM-yyyy',
-    'd-M-yyyy',
-    'dd-MM-yy',
-    'MM-dd-yyyy',
-    'M-d-yyyy',
+    ...orderingFormats,
+    ...MONTH_FIRST_FORMATS,
+    ...DAY_FIRST_FORMATS,
     'yyyy/MM/dd',
-    'dd.MM.yyyy',
-    'dd.MM.yy',
   ].filter((x): x is string => Boolean(x));
 
   const seen = new Set<string>();

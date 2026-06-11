@@ -3,7 +3,7 @@ import { Op } from 'sequelize';
 import { Account, HoldingSnapshot, InvestmentActivity, Transaction } from '../models';
 import * as env from '../config/env';
 import { parseCsvRecords } from './csvParse';
-import { mapCsvRow } from './mapRow';
+import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { resolveProfileIdForImport } from './inferProfile';
 import { normalizeMerchant } from './normalizeMerchant';
 import { parseDateFlexible } from './parseDateFlexible';
@@ -610,6 +610,9 @@ export async function parseStatementFile(opts: {
     }
 
     const wsMonthly = isWsMonthlyHeaders(headers);
+    // One day/month ordering for the whole file: unambiguous rows ('15/03')
+    // decide how ambiguous ones ('03/04') parse instead of per-row fallback.
+    const dateOrdering = inferCsvDateOrdering(records, headers, resolved.profileId);
     const previewRows: NonNullable<StatementPreview['rows']> = [];
     let zeroValueNonCadFiltered = 0;
     records.forEach((row, index) => {
@@ -631,7 +634,7 @@ export async function parseStatementFile(opts: {
           return;
         }
       }
-      const mapped = mapCsvRow(row, headers, resolved.profileId, defaultCurrency);
+      const mapped = mapCsvRow(row, headers, resolved.profileId, defaultCurrency, dateOrdering);
       if ('error' in mapped) {
         previewRows.push({ rowIndex: index + 1, ok: false, error: mapped.error });
         base.parseErrors.push({ rowIndex: index + 1, message: mapped.error });

@@ -22,7 +22,7 @@ import { loadAllRules } from './applyRules';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { resolveProfileIdForImport } from './inferProfile';
 import { parseCsvRecords } from './csvParse';
-import { mapCsvRow } from './mapRow';
+import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import {
   parseWealthsimpleFilename,
@@ -386,10 +386,14 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   // here, then a single AI batch (or per-row fallback) enhances them after commit.
   const coldRows: ColdRow[] = [];
 
+  // One day/month ordering for the whole file: unambiguous rows ('15/03')
+  // decide how ambiguous ones ('03/04') parse instead of per-row fallback.
+  const dateOrdering = inferCsvDateOrdering(records, headers, profileId);
+
   await sequelize.transaction(async (t) => {
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
-      const mapped = mapCsvRow(row, headers, profileId, defaultCurrency);
+      const mapped = mapCsvRow(row, headers, profileId, defaultCurrency, dateOrdering);
       if ('error' in mapped) {
         rowErrors += 1;
         appendParseError(parseErrors, i + 1, mapped.error);

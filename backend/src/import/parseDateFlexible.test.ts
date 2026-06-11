@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDateFlexible } from './parseDateFlexible';
+import { inferDateOrdering, parseDateFlexible } from './parseDateFlexible';
 
 test('parses US Amex MM/dd/yyyy', () => {
   const d = parseDateFlexible('03/15/2025', 'MM/dd/yyyy');
@@ -67,4 +67,68 @@ test('offset ISO datetime keeps the literal calendar date', () => {
 
 test('returns null for unparseable input', () => {
   assert.equal(parseDateFlexible('not a date'), null);
+});
+
+test('ambiguous dash dates default month-first, consistent with slash dates', () => {
+  const slash = parseDateFlexible('12/05/2025');
+  const dash = parseDateFlexible('12-05-2025');
+  assert.ok(slash && dash);
+  // Both resolve as Dec 5, not one Dec 5 and the other May 12.
+  assert.equal(slash!.getMonth(), 11);
+  assert.equal(slash!.getDate(), 5);
+  assert.equal(dash!.getMonth(), 11);
+  assert.equal(dash!.getDate(), 5);
+});
+
+test('day-first ordering resolves ambiguous slash dates as dd/MM', () => {
+  const d = parseDateFlexible('03/04/2025', undefined, 'day-first');
+  assert.ok(d);
+  assert.equal(d!.getMonth(), 3); // April
+  assert.equal(d!.getDate(), 3);
+});
+
+test('day-first ordering resolves ambiguous dash dates as dd-MM', () => {
+  const d = parseDateFlexible('03-04-2025', undefined, 'day-first');
+  assert.ok(d);
+  assert.equal(d!.getMonth(), 3); // April
+  assert.equal(d!.getDate(), 3);
+});
+
+test('month-first ordering resolves ambiguous slash dates as MM/dd', () => {
+  const d = parseDateFlexible('03/04/2025', undefined, 'month-first');
+  assert.ok(d);
+  assert.equal(d!.getMonth(), 2); // March
+  assert.equal(d!.getDate(), 4);
+});
+
+test('preferred format outranks inferred ordering', () => {
+  const d = parseDateFlexible('03/04/2025', 'MM/dd/yyyy', 'day-first');
+  assert.ok(d);
+  assert.equal(d!.getMonth(), 2); // March
+  assert.equal(d!.getDate(), 4);
+});
+
+test('inferDateOrdering detects day-first from an unambiguous token', () => {
+  assert.equal(
+    inferDateOrdering(['03/04/2025', '15/03/2025', '']),
+    'day-first'
+  );
+});
+
+test('inferDateOrdering detects month-first from an unambiguous token', () => {
+  assert.equal(
+    inferDateOrdering(['03/15/2025', '03/04/2025']),
+    'month-first'
+  );
+});
+
+test('inferDateOrdering returns null without unambiguous tokens', () => {
+  assert.equal(
+    inferDateOrdering(['03/04/2025', '2025-01-01', null, undefined]),
+    null
+  );
+});
+
+test('inferDateOrdering returns null on conflicting evidence', () => {
+  assert.equal(inferDateOrdering(['15/03/2025', '03/15/2025']), null);
 });
