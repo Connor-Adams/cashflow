@@ -738,6 +738,76 @@ test('superficial loss: denial is proportional to min(sold, acquired, still-held
   );
 });
 
+test('superficial loss: denied amount is added back to the repurchased shares ACB (s.53(1)(f))', async () => {
+  // The denied loss is deferred, not extinguished: it must raise the ACB of
+  // the substituted shares so a later disposition recovers it.
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Superficial addback');
+  const sec = await Security.create({ symbol: 'ADDB', name: 'Addback', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-01-10', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-addb-b1', importBatch: 'seed',
+  } as never);
+  // Sell all @ $700 → $300 loss; rebuy 100 within 30 days and hold → fully denied.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-03-01', quantity: '100.0000', amount: '700.0000', currency: 'CAD', fees: null,
+    description: 'loss sale', sourceRowFingerprint: 'fp-addb-s1', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-03-10', quantity: '100.0000', amount: '750.0000', currency: 'CAD', fees: null,
+    description: 'rebuy', sourceRowFingerprint: 'fp-addb-b2', importBatch: 'seed',
+  } as never);
+  // Final sale in November, no repurchase: ACB must be 750 + 300 addback = 1050.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-11-01', quantity: '100.0000', amount: '900.0000', currency: 'CAD', fees: null,
+    description: 'final sale', sourceRowFingerprint: 'fp-addb-s2', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 2);
+  const [first, second] = facts.capitalGainEvents;
+  assert.equal(first.superficialLossDenied!.toFixed(2), '300.00', 'first sale fully denied');
+  assert.equal(second.acb.toFixed(2), '1050.00', 'rebuy cost 750 + 300 denied addback');
+  assert.equal(second.proceeds.toFixed(2), '900.00');
+  assert.equal(second.superficialLossDenied, undefined, 'no repurchase after the final sale');
+});
+
+test('superficial loss: partial denial adds back only the denied portion', async () => {
+  const { household, entity, account } = await seedPersonalInvestmentAccount('Superficial partial addback');
+  const sec = await Security.create({ symbol: 'PADD', name: 'Partial Addback', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-01-10', quantity: '100.0000', amount: '1000.0000', currency: 'CAD', fees: null,
+    description: 'buy', sourceRowFingerprint: 'fp-padd-b1', importBatch: 'seed',
+  } as never);
+  // Sell all @ $600 → $400 loss; rebuy 40 @ $240 → min(100,40,40)/100 × 400 = $160 denied.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-05-01', quantity: '100.0000', amount: '600.0000', currency: 'CAD', fees: null,
+    description: 'loss sale', sourceRowFingerprint: 'fp-padd-s1', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2025-05-15', quantity: '40.0000', amount: '240.0000', currency: 'CAD', fees: null,
+    description: 'partial rebuy', sourceRowFingerprint: 'fp-padd-b2', importBatch: 'seed',
+  } as never);
+  // Sell the 40 in November: ACB must be 240 + 160 addback = 400.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-11-20', quantity: '40.0000', amount: '300.0000', currency: 'CAD', fees: null,
+    description: 'final sale', sourceRowFingerprint: 'fp-padd-s2', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildPersonalFacts(entity.id, 2025);
+  assert.equal(facts.capitalGainEvents.length, 2);
+  const [first, second] = facts.capitalGainEvents;
+  assert.equal(first.superficialLossDenied!.toFixed(2), '160.00');
+  assert.equal(second.acb.toFixed(2), '400.00', 'rebuy cost 240 + 160 denied addback');
+});
+
 test('superficial loss: NOT denied when the position is fully closed at window end', async () => {
   // Buying 20 days before a full liquidation is inside the 61-day window, but
   // condition (b) fails: nothing identical is held 30 days after the sale.

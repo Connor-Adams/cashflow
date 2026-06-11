@@ -22,6 +22,10 @@
  *    in-kind transfer is not a disposition under CRA rules. The
  *    ambiguous bare `transfer` activityType (used for cash CONT-like
  *    rows) stays a no-op.
+ *  - `acb_adjustment` is a synthetic cost-base adjustment: amount is added
+ *    to totalCost with no quantity change. Used by the tax builders to add
+ *    a denied superficial loss back to the substituted shares' ACB
+ *    (ITA s.53(1)(f)). Never produced by brokers/imports.
  *  - Other activity types (dividend, interest, fee, transfer, etc.) are
  *    no-ops in the ACB walk.
  *
@@ -293,6 +297,27 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         quantity: state.quantity,
         totalCost: newTotalCost,
         acbPerUnit: newAcb,
+      };
+      timeline.push(state);
+    } else if (type === 'acb_adjustment') {
+      // Cost-base adjustment with no quantity change. Used for the denied
+      // superficial-loss addback (ITA s.53(1)(f)): callers inject a synthetic
+      // row whose amount is ADDED to the pool's total cost so the substituted
+      // (repurchased) shares carry the deferred loss. Works on a zero-quantity
+      // pool too — a sell-all followed by a repurchase must not lose the
+      // addback to the position-close reset.
+      if (activity.amount == null) {
+        warnings.push(
+          `ACB_ADJUSTMENT activity ${activity.id} on ${activity.tradeDate} missing amount; ignored`
+        );
+        continue;
+      }
+      const newTotalCost = state.totalCost + activity.amount;
+      state = {
+        asOf: activity.tradeDate,
+        quantity: state.quantity,
+        totalCost: newTotalCost,
+        acbPerUnit: state.quantity > EPS ? newTotalCost / state.quantity : 0,
       };
       timeline.push(state);
     } else if (type === 'transfer_in') {

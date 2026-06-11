@@ -36,8 +36,8 @@ test('Integration: pure active income — CDA and RDTOH are zero', () => {
   // $100k general-rate ABI, no investment income, no cap gains, no dividends paid
   const integ = computeIntegration(baseFacts(), D('100000'), r);
 
-  // GRIP addition: 100000 × (1 - 0.15 - 0.115) = 100000 × 0.735 = 73500
-  assert.equal(integ.gripAddition.toFixed(2), '73500.00');
+  // GRIP addition: 100000 × 0.72 (statutory general rate factor, s.89(1)) = 72000
+  assert.equal(integ.gripAddition.toFixed(2), '72000.00');
 
   // No cap gains → CDA = 0
   assert.equal(integ.cdaAddition.toFixed(2), '0.00');
@@ -80,8 +80,8 @@ test('Integration: mixed active + investment income — GRIP, CDA, RDTOH additio
   const generalRateIncome = D('50000');
   const integ = computeIntegration(facts, generalRateIncome, r);
 
-  // GRIP: 50000 × (1 - 0.15 - 0.115) = 50000 × 0.735 = 36750
-  assert.equal(integ.gripAddition.toFixed(2), '36750.00');
+  // GRIP: 50000 × 0.72 (statutory general rate factor) = 36000
+  assert.equal(integ.gripAddition.toFixed(2), '36000.00');
 
   // CDA: gross cap gain = 150000 - 100000 - 5000 = 45000; non-taxable = 45000 × (1 - 0.666667) = 14999.985
   assert.equal(integ.cdaAddition.toFixed(2), '14999.98');
@@ -92,11 +92,12 @@ test('Integration: mixed active + investment income — GRIP, CDA, RDTOH additio
 
   // NERDTOH: refundable Part I tax on AII (interest 40000 + rent 20000 +
   // taxable gains 45000 × 0.666667 = 30000.015) × 0.3067 = 27603.0046005,
-  // plus nonElDiv 10000 × 0.3067 = 3067 → 30670.0046005
-  assert.equal(integ.nerdtohAddition.toFixed(4), '30670.0046');
+  // plus Part IV on portfolio non-eligible divs 10000 × 0.3833 = 3833
+  // → 31436.0046005
+  assert.equal(integ.nerdtohAddition.toFixed(4), '31436.0046');
 
   // Dividend refund: 30000 non-eligible paid × 0.3833 = 11499;
-  // NERDTOH avail = 5000 + 30670.0046 = 35670.0046 → refund = 11499
+  // NERDTOH avail = 5000 + 31436.0046 = 36436.0046 → refund = 11499
   assert.equal(integ.dividendRefund.toFixed(4), '11499.0000');
   assert.equal(integ.refundForEligible.toFixed(4), '0.0000');
   assert.equal(integ.refundForNonEligible.toFixed(4), '11499.0000');
@@ -162,7 +163,7 @@ test('P11b T5: connected intercorp dividend (source-tagged) excluded from ERDTOH
   //   - $50,000 eligible div from Opco via intercorpRouter (CONNECTED → Part IV = 0 in v1)
   //   - $20,000 eligible div from a public-co portfolio holding (PORTFOLIO → 38.33% ERDTOH)
   //   - $15,000 non-eligible div from another holdco via intercorpRouter (CONNECTED → Part IV = 0 in v1)
-  //   - $8,000 non-eligible div from a private-co minority stake (PORTFOLIO → 30.67% NERDTOH)
+  //   - $8,000 non-eligible div from a private-co minority stake (PORTFOLIO → 38.33% Part IV → NERDTOH)
   const facts: CorpTaxYearFacts = {
     ...baseFacts(),
     investmentIncome: {
@@ -184,9 +185,10 @@ test('P11b T5: connected intercorp dividend (source-tagged) excluded from ERDTOH
   // ERDTOH: only the $20k portfolio eligible div contributes (interest=0, rent=0)
   //   20000 × 0.3833 = 7666
   assert.equal(integ.erdtohAddition.toFixed(4), '7666.0000');
-  // NERDTOH: only the $8k portfolio non-eligible div contributes
-  //   8000 × 0.3067 = 2453.60
-  assert.equal(integ.nerdtohAddition.toFixed(4), '2453.6000');
+  // NERDTOH: only the $8k portfolio non-eligible div contributes — Part IV tax
+  // is 38.33% regardless of the dividend's eligibility (s.186(1)(a))
+  //   8000 × 0.3833 = 3066.40
+  assert.equal(integ.nerdtohAddition.toFixed(4), '3066.4000');
 });
 
 test('P11b T5: connected-only divs produce zero RDTOH addition (v1 simplification)', () => {
@@ -208,4 +210,71 @@ test('P11b T5: connected-only divs produce zero RDTOH addition (v1 simplificatio
   const integ = computeIntegration(facts, D('0'), r);
   assert.equal(integ.erdtohAddition.toFixed(2), '0.00');
   assert.equal(integ.nerdtohAddition.toFixed(2), '0.00');
+});
+
+test('s.129(1): non-eligible refund overflows into ERDTOH when NERDTOH is exhausted', () => {
+  // $10,000 non-eligible paid → gross refund 3833. NERDTOH only has 1000;
+  // s.129(1)(a)(ii)(B) lets the 2833 excess draw on ERDTOH (none of which is
+  // needed for eligible refunds here).
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    dividendsPaid: [
+      { source: 'corp', date: '2024-11-01', amount: D('10000'), kind: 'non_eligible' },
+    ],
+    carryforwards: {
+      ...baseFacts().carryforwards,
+      erdtoh: D('10000'),
+      nerdtoh: D('1000'),
+    },
+  };
+
+  const integ = computeIntegration(facts, D('0'), r);
+  assert.equal(integ.refundForNonEligible.toFixed(4), '3833.0000', '1000 NERDTOH base + 2833 ERDTOH overflow');
+  assert.equal(integ.refundForEligible.toFixed(4), '0.0000');
+  assert.equal(integ.nerdtohConsumed.toFixed(4), '1000.0000', 'NERDTOH consumed first');
+  assert.equal(integ.erdtohConsumed.toFixed(4), '2833.0000', 'overflow draws ERDTOH');
+});
+
+test('s.129(1): eligible refund is charged against ERDTOH before the non-eligible overflow', () => {
+  // Eligible: 20000 × 0.3833 = 7666, fully refundable from ERDTOH 10000.
+  // Non-eligible: 10000 × 0.3833 = 3833 gross; NERDTOH base = 1000; the 2833
+  // excess is capped by ERDTOH remaining AFTER the eligible refund:
+  // 10000 − 7666 = 2334. Total refund drains both pools completely.
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    dividendsPaid: [
+      { source: 'corp', date: '2024-10-01', amount: D('20000'), kind: 'eligible' },
+      { source: 'corp', date: '2024-11-01', amount: D('10000'), kind: 'non_eligible' },
+    ],
+    carryforwards: {
+      ...baseFacts().carryforwards,
+      erdtoh: D('10000'),
+      nerdtoh: D('1000'),
+    },
+  };
+
+  const integ = computeIntegration(facts, D('0'), r);
+  assert.equal(integ.refundForEligible.toFixed(4), '7666.0000');
+  assert.equal(integ.refundForNonEligible.toFixed(4), '3334.0000', '1000 base + 2334 capped overflow');
+  assert.equal(integ.erdtohConsumed.toFixed(4), '10000.0000', 'eligible 7666 + overflow 2334');
+  assert.equal(integ.nerdtohConsumed.toFixed(4), '1000.0000');
+  assert.equal(integ.dividendRefund.toFixed(4), '11000.0000', 'never exceeds ERDTOH + NERDTOH');
+});
+
+test('s.129(1): eligible refund can NEVER draw on NERDTOH', () => {
+  const facts: CorpTaxYearFacts = {
+    ...baseFacts(),
+    dividendsPaid: [
+      { source: 'corp', date: '2024-11-01', amount: D('100000'), kind: 'eligible' },
+    ],
+    carryforwards: {
+      ...baseFacts().carryforwards,
+      erdtoh: D('2000'),
+      nerdtoh: D('50000'), // plenty of NERDTOH — must stay untouched
+    },
+  };
+
+  const integ = computeIntegration(facts, D('0'), r);
+  assert.equal(integ.refundForEligible.toFixed(4), '2000.0000', 'capped at ERDTOH despite large NERDTOH');
+  assert.equal(integ.nerdtohConsumed.toFixed(4), '0.0000');
 });

@@ -358,9 +358,12 @@ test('P11b E2E: associated group + connected eligible div + GRIP flow via househ
     Number.isFinite(opcoNetTax) && opcoNetTax > 0,
     `expected positive Opco netTaxPayable, got ${opcoResult.computed.totals.netTaxPayable}`,
   );
+  // s.112(1): the routed $50k connected eligible dividend is deductible in
+  // computing Holdco's taxable income, so Holdco owes NO Part I tax on it
+  // (previously this asserted ~50% investment-rate tax — that was the bug).
   assert.ok(
-    Number.isFinite(holdcoNetTax) && holdcoNetTax > 0,
-    `expected positive Holdco netTaxPayable (50k elig div × ~50% combined investment rate), got ${holdcoResult.computed.totals.netTaxPayable}`,
+    Number.isFinite(holdcoNetTax) && holdcoNetTax === 0,
+    `expected zero Holdco netTaxPayable (s.112 deduction on connected div), got ${holdcoResult.computed.totals.netTaxPayable}`,
   );
   const planWideCorpTax = body.corp.reduce(
     (acc: number, c: { computed: { totals: { netTaxPayable: string } } }) =>

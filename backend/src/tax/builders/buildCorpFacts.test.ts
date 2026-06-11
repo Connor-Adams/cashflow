@@ -195,6 +195,64 @@ test('corp stock split adjusts per-unit ACB for subsequent sells (splitRatio pas
   assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '600.00');
 });
 
+test('corp ACB walk sees buys from PRIOR fiscal years (full-history feed)', async () => {
+  // ACB is a weighted-average running balance (ITA s.47) — it needs the full
+  // per-security history, not just this fiscal year's rows. A fiscal-windowed
+  // feed makes a prior-year buy invisible, so the sell is clamped to a zero
+  // position and the whole proceeds are booked as gain.
+  const { household, entity, account } = await seedCorpInvestmentAccount('Corp prior-year ACB');
+  const sec = await Security.create({ symbol: 'HIST', name: 'History Corp', currency: 'CAD', householdId: household.id } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2024-06-01', quantity: '100.0000', amount: '5000.0000', currency: 'CAD', fees: null,
+    description: 'prior-FY buy', sourceRowFingerprint: 'fp-corp-buy-hist', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-08-01', quantity: '100.0000', amount: '6000.0000', currency: 'CAD', fees: null,
+    description: 'current-FY sell', sourceRowFingerprint: 'fp-corp-sell-hist', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildCorpFacts(entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+  assert.equal(facts.capitalGainEvents.length, 1);
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '5000.00', 'prior-year buy must feed the ACB');
+  assert.equal(facts.capitalGainEvents[0].proceeds.toFixed(2), '6000.00');
+});
+
+test('corp prior-fiscal-year dispositions advance ACB state but emit no event for this year', async () => {
+  const { household, entity, account } = await seedCorpInvestmentAccount('Corp prior-year sell');
+  const sec = await Security.create({ symbol: 'PRSL', name: 'Prior Sell Corp', currency: 'CAD', householdId: household.id } as never);
+  // 2024: buy 200 @ $10/unit, sell 100 — realized in FY2024, not FY2025.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'buy',
+    tradeDate: '2024-02-01', quantity: '200.0000', amount: '2000.0000', currency: 'CAD', fees: null,
+    description: 'prior buy', sourceRowFingerprint: 'fp-corp-buy-prsl', importBatch: 'seed',
+  } as never);
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2024-09-01', quantity: '100.0000', amount: '1500.0000', currency: 'CAD', fees: null,
+    description: 'prior sell', sourceRowFingerprint: 'fp-corp-sell-prsl-1', importBatch: 'seed',
+  } as never);
+  // FY2025: sell the remaining 100 — the only event this fiscal year.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'sell',
+    tradeDate: '2025-05-01', quantity: '100.0000', amount: '1800.0000', currency: 'CAD', fees: null,
+    description: 'current sell', sourceRowFingerprint: 'fp-corp-sell-prsl-2', importBatch: 'seed',
+  } as never);
+  // Prior-year dividend must NOT leak into this fiscal year's income.
+  await InvestmentActivity.create({
+    accountId: account.id, securityId: sec.id, activityType: 'dividend',
+    tradeDate: '2024-12-15', quantity: null, amount: '400.0000', currency: 'CAD', fees: null,
+    description: 'prior-FY dividend', sourceRowFingerprint: 'fp-corp-div-prsl', importBatch: 'seed',
+  } as never);
+
+  const facts = await buildCorpFacts(entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+  assert.equal(facts.capitalGainEvents.length, 1, 'only the FY2025 disposition is reported');
+  assert.equal(facts.capitalGainEvents[0].date, '2025-05-01');
+  assert.equal(facts.capitalGainEvents[0].acb.toFixed(2), '1000.00', '100 units at $10/unit weighted-average');
+  assert.equal(facts.investmentIncome.eligibleDividends.length, 0, 'prior-FY dividend stays out of FY2025 income');
+});
+
 test.skip('rejects non-corp entity', async () => {
   const household = await Household.create({ name: 'Personal HH' });
   const entity = await Entity.create({
