@@ -433,6 +433,31 @@ test('builder: excludes holdings from closed investment accounts', async () => {
   );
 });
 
+test('builder: same-date duplicate snapshots resolve to the newest id (deterministic)', async () => {
+  const hh = await makeHousehold();
+  const acct = await makeAccount(hh.id);
+  const sec = await makeSecurity(hh.id, { symbol: 'DUP' });
+
+  // Two snapshots for the SAME (account, security, statementDate) — a
+  // corrected re-import. By convention the newest row (highest id) is the
+  // authoritative correction and must win. We insert the stale '250' first
+  // (lower id) and the corrected '100' last (higher id). Without an explicit
+  // ['id','DESC'] tiebreaker the 'statementDate DESC'-only order is
+  // nondeterministic; SQLite's incidental rowid-asc ordering returns the
+  // stale '250' first, so 'first seen wins' picks the wrong row.
+  const stale = await makeHolding({ accountId: acct.id, householdId: hh.id, securityId: sec.id, statementDate: '2025-05-01', quantity: '250' });
+  const corrected = await makeHolding({ accountId: acct.id, householdId: hh.id, securityId: sec.id, statementDate: '2025-05-01', quantity: '100' });
+  assert.ok(corrected.id > stale.id, 'precondition: corrected row has the higher id');
+
+  const asOf = new Date('2026-05-01T00:00:00.000Z');
+  const result = await rebuildForwardProjectionsForHousehold(hh.id, asOf);
+  assert.equal(result.rebuilt, 1);
+
+  const row = await models.PortfolioForwardProjection.findOne({ where: { householdId: hh.id, securityId: sec.id } });
+  assert.ok(row, 'projection row should exist');
+  assert.equal(Number(row.qtyBasis), 100, `qtyBasis should be 100 (newest id wins), got ${row.qtyBasis}`);
+});
+
 test('builder: counts accounts whose closedAt is after asOf (future close)', async () => {
   const hh = await makeHousehold();
   // closedAt is AFTER asOf → account is still open as of the projection date.

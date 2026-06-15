@@ -179,19 +179,14 @@ router.get('/net-worth', async (req, res, next) => {
     } else if (interval === 'day') {
       bucketDates = daysInRange(start, end);
     } else {
-      // week: compute daily range, pick last day of each ISO week
+      // week: group days by their ISO-8601 week (Monday-start) and pick the
+      // last in-range day of each. Keying on the week's Monday date is stable
+      // across the year boundary — the old ceil-based week number put early-
+      // January days in a bogus week 0 and split weeks at Saturday.
       const allDays = daysInRange(start, end);
       const byWeek = new Map<string, string>();
       for (const d of allDays) {
-        const dt = new Date(`${d}T00:00:00Z`);
-        const year = dt.getUTCFullYear();
-        // ISO week number
-        const jan4 = new Date(Date.UTC(year, 0, 4));
-        const weekNum = Math.ceil(
-          ((dt.getTime() - jan4.getTime()) / 86400000 + jan4.getUTCDay() + 1) / 7,
-        );
-        const key = `${year}-W${String(weekNum).padStart(2, '0')}`;
-        byWeek.set(key, d);
+        byWeek.set(isoWeekStart(d), d);
       }
       bucketDates = Array.from(byWeek.values()).sort();
     }
@@ -993,6 +988,20 @@ function parseRecurrenceCadence(
   }
   if (r.includes('FREQ=YEARLY') || r.includes('FREQ=ANNUAL')) return 'annual';
   return 'monthly';
+}
+
+/**
+ * ISO-8601 week start (the Monday of the week containing `date`) as a
+ * YYYY-MM-DD key. ISO weeks run Monday–Sunday, so two dates share a week iff
+ * they map to the same Monday. Stable across the year boundary, unlike a
+ * per-year week-number that resets to a bogus 0 in early January.
+ */
+function isoWeekStart(date: string): string {
+  const dt = new Date(`${date}T00:00:00Z`);
+  const dow = dt.getUTCDay(); // 0=Sun .. 6=Sat
+  const isoDow = dow === 0 ? 7 : dow; // 1=Mon .. 7=Sun
+  const monday = new Date(dt.getTime() - (isoDow - 1) * 86400000);
+  return monday.toISOString().slice(0, 10);
 }
 
 function round2(n: number): number {

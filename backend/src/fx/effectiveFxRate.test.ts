@@ -121,6 +121,44 @@ test('skips zero-amount counterparty', () => {
   assert.equal(result, null);
 });
 
+test('heuristic pairing is rejected when implied rate is implausible vs reference', () => {
+  // A $100 USD purchase and an unrelated $5000 CAD bill posted the same day on
+  // the same account aren't a transfer — the implied rate 50 (vs a real
+  // USD→CAD ~1.35) is absurd. With a reference rate the garbage pairing is
+  // discarded instead of stored.
+  const usd = t(1, -100, 'USD');
+  const unrelated = t(2, 5000, 'CAD');
+  const result = deriveEffectiveRate(usd, [unrelated], { referenceRate: 1.35 });
+  assert.equal(result, null);
+});
+
+test('heuristic pairing is kept when implied rate is plausible vs reference', () => {
+  const usd = t(1, -100, 'USD');
+  const cad = t(2, 135, 'CAD');
+  const result = deriveEffectiveRate(usd, [cad], { referenceRate: 1.35 });
+  assert.ok(result);
+  assert.ok(Math.abs(result.rate - 1.35) < 0.0001);
+});
+
+test('explicit link is NOT subjected to the plausibility bound', () => {
+  // A recorded link is high-confidence — even an unusual rate is trusted.
+  const usd = t(1, -100, 'USD', { linkedTransactionId: 2 });
+  const cad = t(2, 5000, 'CAD');
+  const result = deriveEffectiveRate(usd, [cad], { referenceRate: 1.35 });
+  assert.ok(result);
+  assert.equal(result.source, 'linked_transaction');
+  assert.ok(Math.abs(result.rate - 50) < 0.0001);
+});
+
+test('heuristic pairing is unbounded when no reference rate is supplied', () => {
+  // Backward-compatible: callers without a reference rate get the old behavior.
+  const usd = t(1, -100, 'USD');
+  const unrelated = t(2, 5000, 'CAD');
+  const result = deriveEffectiveRate(usd, [unrelated]);
+  assert.ok(result);
+  assert.ok(Math.abs(result.rate - 50) < 0.0001);
+});
+
 test('multiple heuristic candidates: picks the closest absolute match', () => {
   // Among multiple opposite-sign same-date cross-currency txns, pick the
   // one whose CAD amount best matches a "reasonable" rate band — anchor on

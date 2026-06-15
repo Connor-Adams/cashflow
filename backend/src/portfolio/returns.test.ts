@@ -263,6 +263,28 @@ test('computeBenchmarkSeries — missing FX forward-fills', () => {
   approxEqual(series[1].valueCad, 1370); // forward-fill from 2026-01-01
 });
 
+test('computeBenchmarkSeries — first date missing FX uses nearest real rate, not parity', () => {
+  // The first benchmark price is on a weekend/holiday with no FxRate row. The
+  // FX map only has rates for surrounding business days (~1.37, never 1.0).
+  // Defaulting the first date's FX to parity (1.0) would scale the whole
+  // series ~37% too high. The first date must borrow the nearest real rate.
+  const prices = [
+    { date: '2026-01-03', adjClose: 100 }, // Saturday — no FX row
+    { date: '2026-01-05', adjClose: 100 }, // Monday — has FX
+  ];
+  const fx = new Map([
+    ['2026-01-02', 1.37], // nearest business day before the first price
+    ['2026-01-05', 1.37],
+  ]);
+  // initialCad reflects a real 1.37 conversion: 1000 USD × 1.37 = 1370 CAD.
+  const series = computeBenchmarkSeries(prices, fx, 1370);
+  // With the parity bug, firstPriceCad = 100 × 1.0, fixedShares = 13.7, and
+  // day 2 (fx 1.37) reads 13.7 × 100 × 1.37 ≈ 1877 — clearly wrong. With the
+  // fix both days hold flat at ~1370 because the USD price is unchanged.
+  approxEqual(series[0].valueCad, 1370, 0.5);
+  approxEqual(series[1].valueCad, 1370, 0.5);
+});
+
 test('computeBenchmarkSeries — empty prices returns empty array', () => {
   assert.deepEqual(computeBenchmarkSeries([], new Map(), 1000), []);
 });
