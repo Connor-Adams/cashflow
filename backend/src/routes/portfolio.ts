@@ -24,6 +24,7 @@ import { resolveHouseholdToday } from '../time/householdToday';
 import { apiReadLimiter } from './apiRateLimit';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
 import { latestActivePositions } from '../portfolio/latestHoldings';
+import { resolveHoldingMarketValue } from '../portfolio/valuation';
 import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
 import { ensureFxRate } from '../fx/bankOfCanada';
 import {
@@ -192,8 +193,12 @@ router.get('/', apiReadLimiter, async (req, res, next) => {
       const quantity = n(holding.quantity) ?? 0;
       const importedValue = n(holding.marketValue);
       const quotePrice = n(latestPrice?.price);
-      const marketValue =
-        quotePrice != null ? quantity * quotePrice : importedValue ?? 0;
+      const { marketValue } = resolveHoldingMarketValue({
+        quantity,
+        importedValue,
+        importedPrice: n(holding.price),
+        quotePrice,
+      });
       const cur = latestPrice?.currency || holding.currency;
       totals.set(cur, (totals.get(cur) ?? 0) + marketValue);
       const rowMetrics = computeRowMetrics({
@@ -346,8 +351,12 @@ function valueHolding(
   const quantity = n(holding.quantity) ?? 0;
   const quotePrice = n(latestPrice?.price);
   const importedValue = n(holding.marketValue);
-  const marketValue =
-    quotePrice != null ? quantity * quotePrice : importedValue ?? 0;
+  const { marketValue } = resolveHoldingMarketValue({
+    quantity,
+    importedValue,
+    importedPrice: n(holding.price),
+    quotePrice,
+  });
   const currency = latestPrice?.currency || holding.currency;
   return { marketValue, currency };
 }

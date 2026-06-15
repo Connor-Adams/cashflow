@@ -146,6 +146,29 @@ export async function seedActivity(
   });
 }
 
+export async function seedSecurityPrice(
+  models: Models,
+  args: {
+    securityId: number;
+    symbol: string;
+    price: number;
+    currency?: string;
+    pricedAt?: Date;
+    fetchedAt?: Date;
+    provider?: string;
+  },
+): Promise<void> {
+  await models.SecurityPrice.create({
+    securityId: args.securityId,
+    provider: args.provider ?? 'yahoo',
+    symbol: args.symbol,
+    pricedAt: args.pricedAt ?? new Date(),
+    price: String(args.price),
+    currency: args.currency ?? 'CAD',
+    fetchedAt: args.fetchedAt ?? new Date(),
+  });
+}
+
 export async function seedDailyPrice(
   models: Models,
   args: {
