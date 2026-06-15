@@ -7,16 +7,52 @@ function mk(text: string, page = 1, y = 0): PdfLine {
   return { page, y, text };
 }
 
-test('questradeParser sniff requires Questrade + order-execution markers', () => {
+test('questradeParser sniff requires Questrade + order-execution + Questrade layout marker', () => {
+  // Bare logo + order-execution is no longer enough — a WS brokerage statement
+  // can mention "Questrade" (e.g. a transfer-from-Questrade line) and carry
+  // "Order execution only account". Require the Questrade "Account #:" header.
   assert.equal(questradeParser.sniff([mk('QUESTRADE')]), false);
   assert.equal(
     questradeParser.sniff([mk('QUESTRADE'), mk('Order execution only account')]),
+    false,
+  );
+  assert.equal(
+    questradeParser.sniff([
+      mk('QUESTRADE'),
+      mk('Order execution only account'),
+      mk('Account #: 28852545   Current month: October 31, 2023'),
+    ]),
     true,
   );
   assert.equal(
     questradeParser.sniff([mk('Other Bank'), mk('Order execution only account')]),
     false,
   );
+});
+
+test('questradeParser sniff does NOT claim a Wealthsimple statement that merely mentions Questrade', () => {
+  // A WS brokerage statement: order-execution + a transfer-in-from-Questrade
+  // line, but the WS account-number layout (no "Account #:" / "Current month:").
+  const wsLines: PdfLine[] = [
+    mk('Wealthsimple Investments Inc.'),
+    mk('Order execution only account'),
+    mk('Transfer in from Questrade'),
+    mk('Account number 1234567'),
+  ];
+  assert.equal(questradeParser.sniff(wsLines), false);
+});
+
+test('registry routes a Questrade-mentioning Wealthsimple statement to the WS brokerage parser', async () => {
+  const mod = await import('./registry');
+  mod.clearPdfParsersForTest();
+  mod.registerBuiltInPdfParsers();
+  const hit = mod.findPdfParser([
+    mk('Wealthsimple Investments Inc.'),
+    mk('ORDER EXECUTION ONLY ACCOUNT'),
+    mk('Transfer in from Questrade'),
+    mk('Account number 1234567'),
+  ]);
+  assert.equal(hit?.id, 'wealthsimple_brokerage');
 });
 
 test('parseQuestradeHeader extracts Margin account', () => {
@@ -69,6 +105,7 @@ test('built-in registry includes questrade and matches on sniff', async () => {
   const hit = mod.findPdfParser([
     mk('QUESTRADE'),
     mk('Order execution only account'),
+    mk('Account #: 28852545   Current month: October 31, 2023'),
   ]);
   assert.equal(hit?.id, 'questrade');
 });

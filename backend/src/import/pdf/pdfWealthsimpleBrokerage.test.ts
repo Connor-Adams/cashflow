@@ -60,7 +60,7 @@ test('brokerage sniff requires order-execution + Wealthsimple, not Questrade', (
     ]),
     true,
   );
-  // Questrade also says "order execution only account" — must NOT match it.
+  // A genuine Questrade statement has no "Wealthsimple" marker — must NOT match.
   assert.equal(
     wealthsimpleBrokerageParser.sniff([
       mk('QUESTRADE'),
@@ -72,6 +72,17 @@ test('brokerage sniff requires order-execution + Wealthsimple, not Questrade', (
   assert.equal(
     wealthsimpleBrokerageParser.sniff([mk('ORDER EXECUTION ONLY ACCOUNT')]),
     false,
+  );
+  // A WS statement that merely *mentions* Questrade (e.g. a transfer-in line)
+  // must still match — the questrade parser's "Account #:" anchor keeps it from
+  // mis-claiming these, so WS no longer has to exclude all Questrade mentions.
+  assert.equal(
+    wealthsimpleBrokerageParser.sniff([
+      mk('ORDER EXECUTION ONLY ACCOUNT'),
+      mk('Wealthsimple Investments Inc.'),
+      mk('Transfer in from Questrade'),
+    ]),
+    true,
   );
 });
 

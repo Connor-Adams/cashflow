@@ -61,7 +61,7 @@ test('inferYearForMonthDay throws when month is outside the period', () => {
   assert.throws(() => inferYearForMonthDay('Jun 15', { start: '2025-12-13', end: '2026-01-12' }));
 });
 
-test('parseCibcCostcoRow — payment row (no spend category, no Ý)', () => {
+test('parseCibcCostcoRow — payment row dates by TRANSACTION date (col 0), not posting date', () => {
   const period = { start: '2025-12-13', end: '2026-01-12' };
   const row = parseCibcCostcoRow(
     'Dec 24           Dec 29          PAYMENT THANK YOU/PAIEMENT MERCI                                                                                                                                  577.04',
@@ -69,7 +69,7 @@ test('parseCibcCostcoRow — payment row (no spend category, no Ý)', () => {
     'payments',
   );
   assert.deepEqual(row, {
-    date: '2025-12-29',
+    date: '2025-12-24',
     merchantRaw: 'PAYMENT THANK YOU/PAIEMENT MERCI',
     amount: 577.04,
   });
@@ -82,7 +82,7 @@ test('parseCibcCostcoRow — charge row with spend category', () => {
     period,
     'charges',
   );
-  assert.equal(row.date, '2025-12-15');
+  assert.equal(row.date, '2025-12-13');
   assert.equal(row.merchantRaw, 'COSTCO WHOLESALE W1168 GUELPH ON');
   assert.equal(row.amount, -947.04);
 });
@@ -94,7 +94,7 @@ test('parseCibcCostcoRow — charge row with bonus Ý prefix is stripped', () =>
     period,
     'charges',
   );
-  assert.equal(row.date, '2025-12-09');
+  assert.equal(row.date, '2025-12-08');
   assert.ok(!row.merchantRaw.includes('Ý'), 'Ý marker should be stripped');
   assert.equal(row.merchantRaw, 'COSTCO GAS W1168 GUELPH ON');
   assert.equal(row.amount, -61.71);
@@ -120,7 +120,7 @@ test('parseCibcCostcoRow — CR suffix on a charge row flips sign to credit', ()
     period,
     'charges',
   );
-  assert.equal(row.date, '2025-12-21');
+  assert.equal(row.date, '2025-12-20');
   assert.equal(row.merchantRaw, 'COSTCO REFUND W1168 GUELPH ON');
   assert.equal(row.amount, 125);  // positive because CR flipped the default-negative
 });
@@ -173,7 +173,8 @@ test('parser end-to-end — January 2026 statement (rollover period, payment + 5
   assert.equal(out.transactions.length, 6);
 
   const payment = out.transactions.find((t) => t.merchantRaw.includes('PAYMENT THANK YOU'));
-  assert.equal(payment?.date, '2025-12-29');
+  // Dates by transaction date (col 0 = Dec 24), not posting date (Dec 29).
+  assert.equal(payment?.date, '2025-12-24');
   assert.equal(payment?.amount, 577.04);
 
   const renewal = out.transactions.find((t) => t.merchantRaw.includes('ANNUAL RENEWAL'));

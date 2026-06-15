@@ -430,12 +430,21 @@ export const questradeParser: PdfParser = {
   id: 'questrade',
   label: 'Questrade Account Statement',
   sniff: (lines) => {
+    // Require a Questrade-specific LAYOUT marker ("Account #: <digits>") in
+    // addition to the brand + order-execution markers. A Wealthsimple
+    // brokerage statement can mention "Questrade" (e.g. a transfer-in line)
+    // and carry "Order execution only account"; the WS layout uses
+    // "Account number", never "Account #:", so this header anchor keeps a WS
+    // statement from being mis-claimed (the WS brokerage parser is registered
+    // after questrade and excludes Questrade-mentioning statements itself).
     let hasQuestrade = false;
     let hasOrderExec = false;
+    let hasAccountHeader = false;
     for (const l of lines) {
       if (/Questrade/i.test(l.text)) hasQuestrade = true;
       if (/Order execution only account/i.test(l.text)) hasOrderExec = true;
-      if (hasQuestrade && hasOrderExec) return true;
+      if (ACCOUNT_RE.test(l.text)) hasAccountHeader = true;
+      if (hasQuestrade && hasOrderExec && hasAccountHeader) return true;
     }
     return false;
   },
