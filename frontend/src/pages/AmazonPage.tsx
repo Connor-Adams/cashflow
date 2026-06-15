@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/table'
 import { deleteReq, getJson, patchJson, postFormData, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { formatSyncAge } from '../lib/formatSyncAge'
 
 type AmazonItem = {
   id: number
@@ -141,16 +142,19 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [selectedOrder, setSelectedOrder] = useState<AmazonOrder | null>(null)
   const [manualOrderByTxn, setManualOrderByTxn] = useState<Record<number, string>>({})
   const [itemPriceErrors, setItemPriceErrors] = useState<Record<number, string>>({})
+  const [syncStatus, setSyncStatus] = useState<{ orderCount: number; lastCapturedAt: string | null } | null>(null)
 
   const refresh = useCallback(async () => {
-    const [orderRows, txnRows, categoryRows] = await Promise.all([
+    const [orderRows, txnRows, categoryRows, sync] = await Promise.all([
       getJson<AmazonOrder[]>('/api/amazon/orders?limit=50'),
       getJson<AmazonTransaction[]>('/api/amazon/review-transactions'),
       getJson<{ categories: string[] }>('/api/amazon/categories'),
+      getJson<{ orderCount: number; lastCapturedAt: string | null }>('/api/amazon/sync-status'),
     ])
     setOrders(orderRows)
     setTxns(txnRows)
     setCategories(categoryRows.categories)
+    setSyncStatus(sync)
   }, [])
 
   useEffect(() => {
@@ -341,6 +345,11 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         )}
         <div className="amazonActionRow">
+          {syncStatus && (
+            <span className="muted" title={syncStatus.lastCapturedAt ?? 'No Amazon orders captured yet'}>
+              {formatSyncAge(syncStatus.lastCapturedAt)} · {syncStatus.orderCount} order{syncStatus.orderCount === 1 ? '' : 's'}
+            </span>
+          )}
           <Button type="button" variant="secondary" onClick={runMatching} disabled={loading}>
             <RefreshCw aria-hidden="true" />
             Run matching
@@ -363,6 +372,13 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
 
       {message && <p className="error">{message}</p>}
+
+      {syncStatus?.orderCount === 0 && txns.length === 0 && (
+        <EmptyState
+          title="No Amazon data yet"
+          description="Install the Cashflow Amazon Capture extension, paste a capture token from Settings → Imports, then open Amazon → Your Orders. Captured orders appear here automatically and match to your card charges."
+        />
+      )}
 
       <form className="card amazonImportPanel" onSubmit={onUpload}>
         <div>
