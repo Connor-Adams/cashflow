@@ -69,20 +69,23 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // Allow the parenthesized "(LOAN)" variant — RBC/CIBC render this both as
   // "ONLINE BANKING LOAN PAYMENT" and "ONLINE BANKING (LOAN) PAYMENT", and the
   // bare-space-only regex missed the latter, leaking it to the 'purchase'
-  // default and inflating spend.
+  // default and inflating spend. Unambiguously a bank-internal loan/statement
+  // payment (#558).
   { type: 'payment', re: /\bonline banking (?:\(?loan\)? )?payment\b/i },
   { type: 'payment', re: /\bonline bill payment for\b/i },
   { type: 'payment', re: /\bamex bill pymt\b/i },
   { type: 'payment', re: /\bmisc payment\b.*\b(amex|visa|mastercard|wise|questrade|bmo)\b/i },
-  // Bare bill / statement-payment phrasings (#558). These are outbound payments
-  // OUT of an account to clear another balance (credit card, utility), never
-  // consumption — yet they fell through to the negative-default 'purchase' and
-  // were counted as spend. Each is an explicit "<X> payment" compound, so it
-  // does NOT broaden into a bare /payment/ match: a normal "INTERAC PURCHASE"
-  // has no bill/web/pre-authorized qualifier and stays a purchase. (The
-  // positive-side classifyTransactionFlow.PAYMENT_PATTERNS already treats these
-  // as payments; this aligns the authoritative negative-side classifier.)
-  { type: 'payment', re: /\b(bill payment|web payment|pre-?authorized payment)\b/i },
+  // Card-statement bill payments where a card network is named in the narrative
+  // (#558). "BILL PAYMENT CIBC VISA", "WEB PAYMENT TD MASTERCARD", "PRE-AUTHORIZED
+  // PAYMENT AMEX" are payments OUT to clear a card balance, never consumption.
+  // The card-network qualifier is the precision signal: a BARE "bill payment"
+  // (e.g. "Hydro bill payment", "pre-authorized payment ROGERS") is a UTILITY /
+  // subscription paid to a merchant = genuine spend, so we deliberately do NOT
+  // match it. Without a network token, the row stays 'purchase'.
+  {
+    type: 'payment',
+    re: /\b(?:bill payment|web payment|pre-?authorized payment)\b.*\b(amex|visa|mastercard|master ?card|discover|credit ?card)\b/i,
+  },
   // RBC → Wealthsimple investment funding: "Investment WS Investments".
   // This phrase is not a securities BUY (no "bought N shares"), so it is safe
   // to match before the negative fallback. The existing `investment` patterns
