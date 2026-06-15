@@ -485,15 +485,19 @@ export const wealthsimpleBrokerageParser: PdfParser = {
   crossSourceDedup: 'fuzzy-window-5d',
   holdingFingerprint: 'ws_holding',
   sniff: (lines) => {
+    // Require the Wealthsimple brand + order-execution markers. A genuine
+    // Questrade statement lacks the "Wealthsimple" marker, so it is excluded
+    // here; conversely a WS statement that merely *mentions* Questrade (e.g.
+    // a transfer-in line) must still match — the questrade parser now requires
+    // its own "Account #:" header anchor (which WS never has), so it no longer
+    // mis-claims these.
     let orderExec = false;
     let ws = false;
-    let questrade = false;
     for (const l of lines) {
       if (/ORDER EXECUTION ONLY ACCOUNT/i.test(l.text)) orderExec = true;
       if (/Wealthsimple/i.test(l.text)) ws = true;
-      if (/Questrade/i.test(l.text)) questrade = true;
     }
-    return orderExec && ws && !questrade;
+    return orderExec && ws;
   },
   parse: (lines): PdfParseResult => {
     const header = parseWsBrokerageHeader(lines);

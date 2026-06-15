@@ -417,3 +417,53 @@ test('reconciliation gate passes cleanly for a correct multi-txn statement', () 
   );
   assert.equal(result.transactions.length, 5, `Expected 5 transactions, got ${result.transactions.length}`);
 });
+
+// ─── Fix: multi-page activity slicer (do not truncate at the first per-page
+// "Closing balance" row) ──────────────────────────────────────────────────────
+//
+// RBC business statements that span pages print a "Closing balance" running
+// total at the foot of EACH page (extractClosingBalance already takes the LAST
+// such row). The slicer must not stop at the FIRST one, or every page-2+
+// transaction is silently dropped.
+//
+// Page 1: opening 100.00 → 10 Mar -10.00 → page-foot "Closing balance 90.00".
+// Page 2: 20 Mar +50.00 → final "Closing balance 140.00".
+// opening 100 + (-10) + 50 = 140 → reconciles cleanly only if BOTH txns parse.
+const MULTI_PAGE_LINES: PdfLine[] = [
+  mkHeaderLine(' Business Account Statement', 1, 721),
+  mkHeaderLine(' March 1, 2026 to April 1, 2026', 1, 664),
+  mkHeaderLine('RBBDA30000_4689872 E D 03592   00380', 1, 660),
+  mkHeaderLine(' CDG LABS INC.', 1, 647),
+  mkHeaderLine(' Account number:   03592   105-488-1', 1, 632),
+  mkHeaderLine(' RBC Digital Choice Business            account package', 1, 492),
+  mkHeaderLine(' Closing balance on April 1, 2026   $140.00', 1, 448),
+  // ── Page 1 activity table ──
+  mkHeaderLine(' Account Activity Details', 1, 342),
+  mkLine('Date   Description   Cheques & Debits ($)   Deposits & Credits ($)   Balance ($)', 1, 321, 45),
+  mkLine('Opening balance   100.00', 1, 307, 90),
+  mkLine('10 Mar   Monthly fee   10.00   90.00', 1, 293, 45),
+  // Per-page running total (carried forward) — must NOT terminate the slice.
+  mkLine('Closing balance   90.00', 1, 60, 90),
+  // ── Page 2 activity table (continuation) ──
+  mkLine('Date   Description   Cheques & Debits ($)   Deposits & Credits ($)   Balance ($)', 2, 760, 45),
+  mkLine('20 Mar   Misc Payment   CDG LABS INC   50.00   140.00', 2, 720, 45),
+  mkLine('Closing balance   140.00', 2, 700, 90),
+];
+
+test('multi-page slicer keeps page-2 transactions (does not stop at the first per-page closing balance)', () => {
+  const result = rbcBusinessBankingParser.parse(MULTI_PAGE_LINES, { defaultCurrency: 'CAD' });
+  assert.equal(
+    result.transactions.length,
+    2,
+    `Expected 2 txns across both pages, got ${result.transactions.length}: ${JSON.stringify(result.transactions.map(t => t.merchantRaw))}`,
+  );
+  const fee = result.transactions.find((t) => t.merchantRaw.includes('Monthly fee'));
+  const payment = result.transactions.find((t) => t.merchantRaw.includes('Misc Payment'));
+  assert.ok(fee, 'page-1 fee txn missing');
+  assert.ok(payment, 'page-2 payment txn missing');
+  assert.equal(fee!.amount, -10.0);
+  assert.equal(payment!.amount, 50.0);
+  // And the statement reconciles only when both pages parse.
+  const reconErrors = result.parseErrors.filter((e) => e.message.includes('does not reconcile'));
+  assert.deepEqual(reconErrors, [], JSON.stringify(result.parseErrors));
+});

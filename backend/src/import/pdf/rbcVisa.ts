@@ -27,6 +27,12 @@ import { MONTHS_SHORT, parseLongDate, parseMoney, toIso, type Period } from './d
 const ACCOUNT_RE = /(45\d{2})\s+15\*{2}\s+\*{4}\s+(\d{4})/;
 const PERIOD_RE = /STATEMENT FROM\s+([A-Z]{3}\s+\d{1,2})\s+TO\s+([A-Z]{3}\s+\d{1,2},\s+\d{4})/i;
 const MONEY_TOKEN_RE = /-?\$[\d,]+\.\d{2}/;
+const MONEY_TOKEN_RE_G = /-?\$[\d,]+\.\d{2}/g;
+// Statement-total reconciliation: RBC Visa prints a "purchases" subtotal near
+// the end of the activity section. Match the common label variants; the soft
+// cross-check is skipped when none is found.
+const PURCHASES_TOTAL_RE =
+  /(?:total purchases[\w,&\s]*|subtotal of (?:monthly )?(?:purchases|transactions)[\w,&\s]*)\s(-?\$[\d,]+\.\d{2})\s*$/i;
 
 function normalizeMonth(monStr: string): string {
   return monStr.charAt(0).toUpperCase() + monStr.slice(1).toLowerCase();
@@ -126,6 +132,9 @@ export function parseRbcVisaActivity(
     if (!inSection) continue;
     if (/TOTAL ACCOUNT BALANCE/i.test(l.text)) break;
     if (/INTEREST RATE CHART|Time to Pay/i.test(l.text)) break;
+    // The printed purchases subtotal marks the end of the transaction list;
+    // stop here so its label text is not appended to the last txn description.
+    if (PURCHASES_TOTAL_RE.test(l.text.trim())) break;
     activityLines.push(l);
   }
 
@@ -183,10 +192,15 @@ export function parseRbcVisaActivity(
       flush(i);
       pending = { transDateRaw: dm[1], descParts: [], amount: null };
       let remainder = dm[3];
-      const amtMatch = MONEY_TOKEN_RE.exec(remainder);
-      if (amtMatch) {
-        pending.amount = parseMoney(amtMatch[0].replace('$', ''));
-        remainder = remainder.replace(amtMatch[0], '').trim();
+      // Take the LAST money token (the amount column). A $ figure embedded in
+      // the merchant/description (e.g. a "$5.00 CREDIT" promo blurb) must not
+      // be mistaken for the amount.
+      const amtTokens = remainder.match(MONEY_TOKEN_RE_G);
+      if (amtTokens) {
+        const amt = amtTokens[amtTokens.length - 1];
+        pending.amount = parseMoney(amt.replace('$', ''));
+        const at = remainder.lastIndexOf(amt);
+        remainder = (remainder.slice(0, at) + remainder.slice(at + amt.length)).trim();
       }
       if (remainder) pending.descParts.push(remainder);
       continue;
@@ -224,6 +238,7 @@ export const rbcVisaParser: PdfParser = {
     const header = parseRbcVisaHeader(lines);
     const period: Period = { start: header.periodStart, end: header.periodEnd };
     const { rows, parseErrors } = parseRbcVisaActivity(lines, period);
+    const warnings: string[] = [];
 
     const transactions: PdfParseResult['transactions'] = rows.map((row) => ({
       date: row.date,
@@ -234,10 +249,36 @@ export const rbcVisaParser: PdfParser = {
       sourceReference: null,
     }));
 
+    // ── Soft statement-total reconciliation ─────────────────────────────────
+    // Sum parsed charges (PDF positive = charge; cashflow stores it negated)
+    // against the printed "purchases" subtotal. Skipped entirely when the
+    // statement prints no recognizable total — a missing total is not an error,
+    // but a mismatch is a parse warning so swallowed/missed rows surface.
+    let printedPurchasesTotal: number | null = null;
+    for (const l of lines) {
+      const m = PURCHASES_TOTAL_RE.exec(l.text.trim());
+      if (m) {
+        printedPurchasesTotal = parseMoney(m[1].replace('$', ''));
+        break;
+      }
+    }
+    if (printedPurchasesTotal !== null) {
+      // Charges are the negative-cashflow rows; sum their PDF-positive magnitude.
+      const parsedCharges = rows.reduce(
+        (acc, row) => (row.amount < 0 ? acc - row.amount : acc),
+        0,
+      );
+      if (Math.abs(parsedCharges - printedPurchasesTotal) > 0.02) {
+        warnings.push(
+          `Purchases total mismatch: parsed ${parsedCharges.toFixed(2)} vs printed ${printedPurchasesTotal.toFixed(2)}`,
+        );
+      }
+    }
+
     return {
       transactions,
       header,
-      warnings: [],
+      warnings,
       parseErrors,
     };
   },

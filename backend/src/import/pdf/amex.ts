@@ -102,11 +102,26 @@ function parseAmount(s: string): number {
   return Number(s.trim().replace(/,/g, ''));
 }
 
-/** Parse FX original amount — handles European comma-as-decimal (e.g. "19,00" = 19.00). */
+/**
+ * Parse FX original amount — handles both anglo ("1,234.56") and European
+ * ("19,00", "1.234,56") number formats. Detect the European decimal comma
+ * before stripping commas, which would otherwise read "19,00" as 1900 (100x)
+ * or "1.234,56" as 1.23456. Mirrors parseRawNumber in import/mapRow.ts: a
+ * trailing comma group of 1-2 digits can't be a thousands group (those are
+ * exactly 3 digits).
+ */
 function parseFxAmount(s: string): number {
-  const trimmed = s.trim();
-  if (!trimmed.includes('.') && /,\d{2}$/.test(trimmed)) {
-    return Number(trimmed.replace(',', '.'));
+  let trimmed = s.trim();
+  const lastComma = trimmed.lastIndexOf(',');
+  const lastDot = trimmed.lastIndexOf('.');
+  const europeanDecimal =
+    lastComma !== -1 &&
+    (lastDot !== -1 ? lastComma > lastDot : /,\d{1,2}$/.test(trimmed));
+  if (europeanDecimal) {
+    trimmed = trimmed.replace(/\./g, '');
+    const i = trimmed.lastIndexOf(',');
+    trimmed = `${trimmed.slice(0, i)}.${trimmed.slice(i + 1)}`;
+    return Number(trimmed);
   }
   return parseAmount(trimmed);
 }

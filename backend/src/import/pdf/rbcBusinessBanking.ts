@@ -164,6 +164,13 @@ export function parseRbcBusinessBankingActivity(
   const parseErrors: { rowIndex: number; message: string }[] = [];
 
   // Slice the activity section.
+  //
+  // The activity table can span multiple pages; RBC prints a per-page "Closing
+  // balance" running total at the foot of each page (extractClosingBalance
+  // takes the LAST such row). Do NOT terminate at the first "Closing balance" —
+  // that truncates every page-2+ transaction. The closing-balance rows are
+  // skipped as transactions in the walk below; the section ends at the real
+  // "Important information about your account" footer.
   let inSection = false;
   const activityLines: PdfLine[] = [];
   for (const l of lines) {
@@ -172,7 +179,6 @@ export function parseRbcBusinessBankingActivity(
       continue;
     }
     if (!inSection) continue;
-    if (/^[\s]*Closing balance\b/i.test(l.text)) break;
     if (/Important information about your account/i.test(l.text)) break;
     activityLines.push(l);
   }
@@ -198,10 +204,14 @@ export function parseRbcBusinessBankingActivity(
     const text = l.text.trim();
     if (!text) continue;
 
-    // Skip the column header row.
+    // Skip the column header row (repeats on each page).
     if (/^Date\s+Description/i.test(text)) continue;
     // Skip the opening balance row.
     if (/^Opening balance\b/i.test(text)) continue;
+    // Skip per-page / final "Closing balance" running-total rows — they are not
+    // transactions (they carry the balance column only). Without this they would
+    // be mis-parsed as date-less transactions inheriting the prior date.
+    if (/^Closing balance\b/i.test(text)) continue;
     // Skip "- No activity" rows.
     if (/^-\s*No activity/i.test(text)) continue;
 

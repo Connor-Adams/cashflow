@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   pickFuzzyMatch,
+  dedupEquivalentActivityTypes,
   type DedupCandidate,
 } from './fuzzyDedupInvestmentActivity';
 
@@ -235,6 +236,22 @@ test('excludeIds: exclusion can demote a multi-match to a single-match', () => {
   assert.equal(out.kind, 'single-match');
   if (out.kind !== 'single-match') return;
   assert.equal(out.existing.id, 2);
+});
+
+test('dedupEquivalentActivityTypes folds CSV transfer ↔ PDF transfer_in/transfer_out', () => {
+  // The WS activities-CSV stores SecurityTransfer as undirected 'transfer';
+  // the WS PDF stores it directionally. All three must query the same bucket
+  // so a re-import matches across sources instead of double-counting.
+  const want = ['transfer', 'transfer_in', 'transfer_out'];
+  assert.deepEqual([...dedupEquivalentActivityTypes('transfer')].sort(), [...want].sort());
+  assert.deepEqual([...dedupEquivalentActivityTypes('transfer_in')].sort(), [...want].sort());
+  assert.deepEqual([...dedupEquivalentActivityTypes('transfer_out')].sort(), [...want].sort());
+});
+
+test('dedupEquivalentActivityTypes leaves non-transfer types exact (no over-folding)', () => {
+  assert.deepEqual(dedupEquivalentActivityTypes('buy'), ['buy']);
+  assert.deepEqual(dedupEquivalentActivityTypes('dividend'), ['dividend']);
+  assert.deepEqual(dedupEquivalentActivityTypes('cash_movement'), ['cash_movement']);
 });
 
 test('Incoming null quantity, candidate has quantity: NO match', () => {

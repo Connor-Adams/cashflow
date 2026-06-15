@@ -110,6 +110,30 @@ export function pickFuzzyMatch<T extends DedupCandidate>(
   return { kind: 'multi-match', candidates: filtered };
 }
 
+/**
+ * Activity-type equivalence at the cross-source dedup boundary.
+ *
+ * The WS PDF brokerage parser stores directional transfers as `transfer_in` /
+ * `transfer_out` (the portfolio snapshot relies on that direction), while the
+ * WS activities-CSV export classifies the same `SecurityTransfer` event as the
+ * undirected `transfer`. The fuzzy matcher keys candidates on activityType, so
+ * without folding these to one bucket a CSV `transfer` re-import would never
+ * match the existing PDF `transfer_in`/`transfer_out` row → the transfer is
+ * double-counted.
+ *
+ * We normalize ONLY for matching — the stored row keeps its directional type.
+ * Returns the set of stored activityTypes that should be considered the same
+ * event as `activityType` for dedup purposes.
+ */
+const TRANSFER_EQUIVALENTS = ['transfer', 'transfer_in', 'transfer_out'];
+
+export function dedupEquivalentActivityTypes(activityType: string): string[] {
+  if (TRANSFER_EQUIVALENTS.includes(activityType)) {
+    return [...TRANSFER_EQUIVALENTS];
+  }
+  return [activityType];
+}
+
 function shiftDate(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -155,7 +179,10 @@ export async function findExistingInvestmentByFuzzyMatch(
   const candidates = await InvestmentActivity.findAll({
     where: {
       accountId: args.accountId,
-      activityType: args.activityType,
+      // Fold directional WS PDF transfers (transfer_in/transfer_out) and the
+      // undirected CSV `transfer` into one bucket so a re-import matches across
+      // sources instead of double-counting. Other types match exactly.
+      activityType: { [Op.in]: dedupEquivalentActivityTypes(args.activityType) },
       currency: wantCcy,
       tradeDate: { [Op.between]: [dateLo, dateHi] },
     },
