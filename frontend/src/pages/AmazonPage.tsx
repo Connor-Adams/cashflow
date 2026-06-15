@@ -476,7 +476,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
             </article>
           ))}
-          {txns.length === 0 && (
+          {txns.length === 0 && syncStatus?.orderCount !== 0 && (
             <EmptyState title="No Amazon-like transactions found." />
           )}
         </div>
