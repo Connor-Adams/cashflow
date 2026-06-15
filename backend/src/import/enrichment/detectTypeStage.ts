@@ -66,10 +66,26 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // which intentionally stays 'unknown'.
   { type: 'transfer', re: /\bdeposit \(executed\b/i },
   { type: 'transfer', re: /\bcash correction\b/i },
-  { type: 'payment', re: /\bonline banking (?:loan )?payment\b/i },
+  // Allow the parenthesized "(LOAN)" variant — RBC/CIBC render this both as
+  // "ONLINE BANKING LOAN PAYMENT" and "ONLINE BANKING (LOAN) PAYMENT", and the
+  // bare-space-only regex missed the latter, leaking it to the 'purchase'
+  // default and inflating spend. Unambiguously a bank-internal loan/statement
+  // payment (#558).
+  { type: 'payment', re: /\bonline banking (?:\(?loan\)? )?payment\b/i },
   { type: 'payment', re: /\bonline bill payment for\b/i },
   { type: 'payment', re: /\bamex bill pymt\b/i },
   { type: 'payment', re: /\bmisc payment\b.*\b(amex|visa|mastercard|wise|questrade|bmo)\b/i },
+  // Card-statement bill payments where a card network is named in the narrative
+  // (#558). "BILL PAYMENT CIBC VISA", "WEB PAYMENT TD MASTERCARD", "PRE-AUTHORIZED
+  // PAYMENT AMEX" are payments OUT to clear a card balance, never consumption.
+  // The card-network qualifier is the precision signal: a BARE "bill payment"
+  // (e.g. "Hydro bill payment", "pre-authorized payment ROGERS") is a UTILITY /
+  // subscription paid to a merchant = genuine spend, so we deliberately do NOT
+  // match it. Without a network token, the row stays 'purchase'.
+  {
+    type: 'payment',
+    re: /\b(?:bill payment|web payment|pre-?authorized payment)\b.*\b(amex|visa|mastercard|master ?card|discover|credit ?card)\b/i,
+  },
   // RBC → Wealthsimple investment funding: "Investment WS Investments".
   // This phrase is not a securities BUY (no "bought N shares"), so it is safe
   // to match before the negative fallback. The existing `investment` patterns

@@ -686,3 +686,86 @@ test('GUARD: "E-TRANSFER SENT STEPHEN" stays purchase (person-to-person, ambiguo
   });
   assert.equal(out[0].fields.txnType, 'purchase');
 });
+
+// === Card-statement bill payments still inflating spend (#558, 2026-06-15) ===
+// The transfer/payment PATTERNS are already sign-agnostic (a negative
+// "ONLINE BANKING TRANSFER" / "MISC PAYMENT AMEX" already classifies). Two
+// residual gaps leaked outbound statement payments into spend:
+//   1. The "(LOAN)" parenthesized variant of "online banking loan payment".
+//   2. Card-statement bill payments naming a card network ("BILL PAYMENT CIBC
+//      VISA") — payments OUT to clear a card balance, never consumption.
+// CRITICALLY, a BARE "bill payment" / "pre-authorized payment" with NO card
+// network (e.g. "Hydro bill payment", "pre-authorized payment ROGERS") is a
+// UTILITY / subscription paid to a merchant = genuine spend, and must stay
+// 'purchase'. The card-network qualifier is the precision signal.
+
+test('payment: "ONLINE BANKING (LOAN) PAYMENT" with parens is a payment', () => {
+  // The existing /online banking (?:loan )?payment/ regex expects a literal
+  // space, so the parenthesized "(LOAN)" variant fell through to purchase.
+  const out = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING (LOAN) PAYMENT - 1234',
+    merchantClean: 'ONLINE BANKING (LOAN) PAYMENT - 1234',
+    amount: -500,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: "BILL PAYMENT CIBC VISA" (card-statement) is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'BILL PAYMENT CIBC VISA',
+    merchantClean: 'BILL PAYMENT CIBC VISA',
+    amount: -1200,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: "WEB PAYMENT TD MASTERCARD" (card-statement) is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'WEB PAYMENT TD MASTERCARD',
+    merchantClean: 'WEB PAYMENT TD MASTERCARD',
+    amount: -800,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: "PRE-AUTHORIZED PAYMENT AMEX" (card-statement) is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'PRE-AUTHORIZED PAYMENT AMEX',
+    merchantClean: 'PRE-AUTHORIZED PAYMENT AMEX',
+    amount: -2959.34,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('GUARD: "Hydro bill payment" stays purchase (utility = genuine spend)', () => {
+  // A utility bill paid to a merchant is consumption, NOT an internal
+  // statement payment. No card-network token → must stay spend. Mirrors the
+  // wsSpendDashboard integration fixture row that must count as $150 spend.
+  const out = runDetectTypeStage({
+    merchantRaw: 'Hydro bill payment',
+    merchantClean: 'Hydro bill payment',
+    amount: -150,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
+
+test('GUARD: "PRE-AUTHORIZED PAYMENT ROGERS" stays purchase (subscription, no card network)', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'PRE-AUTHORIZED PAYMENT ROGERS',
+    merchantClean: 'PRE-AUTHORIZED PAYMENT ROGERS',
+    amount: -95.5,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
+
+test('GUARD: "INTERAC PURCHASE STARBUCKS" stays purchase (not a payment)', () => {
+  // The new bill-payment phrasings must NOT broaden into a bare /payment/
+  // match — a normal card purchase has no "bill/web/pre-authorized payment"
+  // phrase and must remain spend.
+  const out = runDetectTypeStage({
+    merchantRaw: 'INTERAC PURCHASE STARBUCKS #482',
+    merchantClean: 'Starbucks',
+    amount: -6.45,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});
