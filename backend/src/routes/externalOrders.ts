@@ -9,6 +9,7 @@ import {
   TransactionOrderLink,
 } from '../models';
 import { currentAuth } from '../auth/middleware';
+import { defaultCurrency } from '../config/env';
 import { logger } from '../observability/logger';
 import {
   extractReceiptFromImage,
@@ -167,7 +168,7 @@ export async function persistExtractedOrder(
         tax: extracted.tax != null ? String(extracted.tax) : null,
         shipping: null,
         total: extracted.total != null ? String(extracted.total) : null,
-        currency: extracted.currency ?? 'USD',
+        currency: extracted.currency ?? defaultCurrency,
         paymentLast4: extracted.paymentLast4,
         source: opts.source,
         rawPayload: extracted as unknown,
@@ -455,7 +456,7 @@ router.post(
       })();
 
       const text = file.buffer.toString('utf8');
-      const parsed = parsePurchaseHistoryCsv(text, { vendor, defaultCurrency: 'USD' });
+      const parsed = parsePurchaseHistoryCsv(text, { vendor, defaultCurrency });
 
       let created = 0;
       let duplicates = 0;
