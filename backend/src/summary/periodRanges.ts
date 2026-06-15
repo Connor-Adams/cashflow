@@ -86,7 +86,7 @@ export function priorPeriod(
 
 export function samePeriodLastYear(
   from: string,
-  to: string,
+  _to: string,
   kind: PeriodRangeKind,
 ): DateRange | null {
   if (kind === 'custom') return null;
@@ -103,7 +103,7 @@ export type TypicalWindows = { windows: DateRange[]; minRequired: number };
 
 export function typicalWindows(
   from: string,
-  to: string,
+  _to: string,
   kind: PeriodRangeKind,
 ): TypicalWindows {
   const a = parts(from);
