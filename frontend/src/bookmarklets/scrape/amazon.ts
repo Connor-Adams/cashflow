@@ -1,4 +1,4 @@
-import type { CapturedOrder } from './types';
+import type { CapturedItem, CapturedOrder } from './types';
 
 function parseDate(text: string): string | null {
   const months: Record<string, string> = {
@@ -18,6 +18,50 @@ function parseTotal(text: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** Map an Amazon money string's currency marker to an ISO 4217 code. Bare "$"
+ *  is ambiguous on Amazon (CA and US both render it), so default to CAD — the
+ *  household default — and let the user correct outliers on the order. */
+export function parseCurrencyCode(text: string): string {
+  const t = text.toUpperCase();
+  if (/CDN\$|CA\$|C\$|CAD/.test(t)) return 'CAD';
+  if (/US\$|USD/.test(t)) return 'USD';
+  if (/£|GBP/.test(t)) return 'GBP';
+  if (/€|EUR/.test(t)) return 'EUR';
+  return 'CAD';
+}
+
+function parseMoneyFrom(el: Element | null | undefined): number | null {
+  if (!el) return null;
+  return parseTotal(el.textContent ?? '');
+}
+
+function last4From(text: string): string | null {
+  return text.match(/ending in\s*(\d{4})/i)?.[1] ?? text.match(/\b(\d{4})\b/)?.[1] ?? null;
+}
+
+function extractItems(card: Element): CapturedItem[] {
+  const titleEls = Array.from(
+    card.querySelectorAll('.yohtmlc-product-title, a.yohtmlc-product-title, .a-link-normal.yohtmlc-product-title'),
+  );
+  return titleEls
+    .map((titleEl): CapturedItem | null => {
+      const title = (titleEl.textContent ?? '').trim();
+      if (!title) return null;
+      const row =
+        titleEl.closest('.order-card__list-item, .a-fixed-left-grid, .a-box') ?? titleEl.parentElement ?? card;
+      const priceEl = row.querySelector('.a-price .a-offscreen, .a-color-price, .yohtmlc-item-price');
+      const qtyEl = row.querySelector('.item-view-qty, .product-image__qty-label, .od-item-view-qty');
+      const qtyNum = qtyEl ? Number((qtyEl.textContent ?? '').replace(/\D+/g, '')) : NaN;
+      return {
+        title,
+        quantity: Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 1,
+        unitPrice: null,
+        totalPrice: parseMoneyFrom(priceEl),
+      };
+    })
+    .filter((it): it is CapturedItem => it != null);
+}
+
 export function extractAmazonOrdersFromDom(doc: Document): CapturedOrder[] {
   const cards = Array.from(doc.querySelectorAll('.order-card, .js-order-card'));
   const seen = new Set<Element>();
@@ -32,6 +76,7 @@ export function extractAmazonOrdersFromDom(doc: Document): CapturedOrder[] {
     let orderDate: string | null = null;
     let total: number | null = null;
     let vendorOrderId: string | null = null;
+    let currency = 'CAD';
 
     for (const col of cols) {
       const labelEl = col.querySelector('.label, .a-color-secondary.label');
@@ -43,6 +88,7 @@ export function extractAmazonOrdersFromDom(doc: Document): CapturedOrder[] {
         orderDate = parseDate(value) ?? orderDate;
       } else if (label.includes('total')) {
         total = parseTotal(value) ?? total;
+        currency = parseCurrencyCode(value);
       } else if (label.includes('order #') || label.includes('order id') || label.includes('order number')) {
         vendorOrderId = value;
       }
@@ -53,19 +99,16 @@ export function extractAmazonOrdersFromDom(doc: Document): CapturedOrder[] {
       if (bdi?.textContent) vendorOrderId = bdi.textContent.trim();
     }
 
-    const items = Array.from(card.querySelectorAll('.yohtmlc-product-title, a.yohtmlc-product-title, .a-link-normal.yohtmlc-product-title'))
-      .map((el) => (el.textContent ?? '').trim())
-      .filter((t) => t.length > 0)
-      .map((title) => ({ title }));
+    const paymentLast4 = last4From(card.textContent ?? '');
+    const items = extractItems(card);
 
     if (orderDate && total != null) {
       orders.push({
         vendorOrderId,
         orderDate,
         total,
-        // TODO: detect currency from DOM (e.g. "CDN$" vs "$" vs "USD") — hardcoded for v1
-        currency: 'CAD',
-        paymentLast4: null,
+        currency,
+        paymentLast4,
         items,
         rawSource: 'bookmarklet-amazon-v1',
       });
