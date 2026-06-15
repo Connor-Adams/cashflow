@@ -261,7 +261,7 @@ test('Fee: maps to fee', () => {
   assert.equal(r.activity.amount, -10);
 });
 
-test('SecurityTransfer: maps to transfer', () => {
+test('SecurityTransfer with positive qty: maps to transfer_in (matches monthly-PDF vocab)', () => {
   const r = parseActivitiesExportRow(
     row({
       transaction_date: '2025-06-26',
@@ -278,8 +278,31 @@ test('SecurityTransfer: maps to transfer', () => {
   );
   assert.equal(r.kind, 'investment');
   if (r.kind !== 'investment') return;
-  assert.equal(r.activity.activityType, 'transfer');
+  assert.equal(r.activity.activityType, 'transfer_in');
   assert.equal(r.activity.security?.symbol, 'BTC');
+  // Quantity stays absolute (direction now lives in activityType).
+  assert.equal(r.activity.quantity, 0.00022274);
+});
+
+test('SecurityTransfer with negative qty: maps to transfer_out', () => {
+  const r = parseActivitiesExportRow(
+    row({
+      transaction_date: '2025-06-26',
+      account_id: 'HQ6R28910CAD',
+      account_type: 'Crypto',
+      activity_type: 'SecurityTransfer',
+      symbol: 'BTC',
+      name: 'Bitcoin',
+      currency: 'USD',
+      quantity: '-0.00022274',
+      net_cash_amount: '0',
+    }),
+    'CAD',
+  );
+  assert.equal(r.kind, 'investment');
+  if (r.kind !== 'investment') return;
+  assert.equal(r.activity.activityType, 'transfer_out');
+  assert.equal(r.activity.quantity, 0.00022274);
 });
 
 test('Correction/ANOMALY: maps to other', () => {
