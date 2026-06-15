@@ -246,6 +246,22 @@ test('GET /cashflow/monthly: investment-account debits are not expenses', async 
   assert.equal(apr.income, 4000);
 });
 
+// ---- GET /net-worth (weekly bucketing) --------------------------------------
+
+test('GET /net-worth: weekly buckets use ISO weeks, no early-January W00 collapse', async () => {
+  await seedAccount('Chequing', 'checking');
+  // Range straddles the year boundary. The old ceil-based "ISO week" key put
+  // Jan 1-3 in a bogus W00 bucket and split weeks at Saturday, producing
+  // extra/duplicate buckets. With a stable Monday-start week key the four ISO
+  // weeks in range resolve to their last in-range day (Sundays), in order.
+  const res = await request(app).get('/net-worth?start=2025-12-22&end=2026-01-18&interval=week');
+  assert.equal(res.status, 200);
+  const dates = res.body.points.map((p: { date: string }) => p.date);
+  assert.deepEqual(dates, ['2025-12-28', '2026-01-04', '2026-01-11', '2026-01-18']);
+  // No bucket date may be a duplicate, and none collapses into a W00 artifact.
+  assert.equal(new Set(dates).size, dates.length);
+});
+
 // ---- GET /spending/by-category ----------------------------------------------
 
 test('GET /spending/by-category: investment-account debits are not category spend', async () => {

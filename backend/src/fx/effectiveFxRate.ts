@@ -71,9 +71,29 @@ function signsAreOpposite(a: string | number, b: string | number): boolean {
   return (an < 0 && bn > 0) || (an > 0 && bn < 0);
 }
 
+export interface DeriveEffectiveRateOptions {
+  /**
+   * Known market rate for the target→counterparty direction (e.g. from the
+   * FxRate table). When supplied, a *heuristic* pairing whose implied rate is
+   * outside a plausible multiple band of this reference is discarded — it's an
+   * unrelated same-day transaction, not a real transfer. The explicit-link
+   * path is always trusted and never bounded.
+   */
+  referenceRate?: number;
+}
+
+/**
+ * How far a heuristic implied rate may stray from the reference before it's
+ * rejected as a spurious pairing. A factor of 4 tolerates ordinary bank
+ * spreads, fee-inflated legs, and partial-amount mismatches while rejecting
+ * the order-of-magnitude nonsense an unrelated bill produces.
+ */
+const PLAUSIBLE_RATE_FACTOR = 4;
+
 export function deriveEffectiveRate(
   target: RateDerivationTxn,
-  candidates: RateDerivationTxn[]
+  candidates: RateDerivationTxn[],
+  opts: DeriveEffectiveRateOptions = {}
 ): EffectiveFxRateResult | null {
   const targetCurrency = target.currency.toUpperCase();
 
@@ -108,6 +128,17 @@ export function deriveEffectiveRate(
   heuristicMatches.sort((a, b) => magnitude(b.amount) - magnitude(a.amount));
   const best = heuristicMatches[0];
   const r = rateFromPair(target, best);
-  if (r) return { ...r, source: 'paired_transfer' };
-  return null;
+  if (!r) return null;
+
+  // Plausibility bound (heuristic path only): reject implied rates that stray
+  // beyond PLAUSIBLE_RATE_FACTOR× the known reference rate. Without it, an
+  // unrelated same-day transaction (e.g. a $5000 bill matched to a $100
+  // purchase) fabricates an absurd rate and pollutes the derived-rate list.
+  if (opts.referenceRate != null && opts.referenceRate > 0) {
+    const lo = opts.referenceRate / PLAUSIBLE_RATE_FACTOR;
+    const hi = opts.referenceRate * PLAUSIBLE_RATE_FACTOR;
+    if (r.rate < lo || r.rate > hi) return null;
+  }
+
+  return { ...r, source: 'paired_transfer' };
 }

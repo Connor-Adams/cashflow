@@ -28,7 +28,15 @@ async function latestHoldingsByHousehold(householdId: number, asOf: Date): Promi
       accountId: { [Op.in]: acctIds },
       statementDate: { [Op.lte]: asOf.toISOString().slice(0, 10) },
     },
-    order: [['statementDate', 'DESC']],
+    // id DESC tiebreaker so same-date duplicate snapshots (corrected
+    // re-imports) resolve deterministically to the newest row — matching
+    // portfolioMarketValueAt / latestActivePositions (PR #604/#607). Without
+    // it, statementDate-DESC ties are arbitrary on Postgres and the quantity
+    // is nondeterministic.
+    order: [
+      ['statementDate', 'DESC'],
+      ['id', 'DESC'],
+    ],
   });
   const latestByPair = new Map<string, HoldingSnapshot>();
   for (const s of snapshots) {

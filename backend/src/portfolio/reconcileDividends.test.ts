@@ -247,6 +247,45 @@ test('reconcile: idempotent — second run inserts no new rows', async () => {
   assert.equal(rows.length, 1);
 });
 
+test('reconcile: snapshot far older than the ex-date is too stale to fabricate a dividend', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14' });
+  const acct = await makeAccount();
+  // Only snapshot is ~14 months before the ex-date — the quantity is far too
+  // stale (the position may have been fully sold long ago). Don't fabricate a
+  // synthetic dividend from it; treat it as no usable holding.
+  await seedHolding({
+    accountId: acct.id,
+    securityId: sec.id,
+    statementDate: '2025-01-01',
+    quantity: '10',
+  });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.skippedNoHolding, 1);
+  const rows = await models.InvestmentActivity.findAll();
+  assert.equal(rows.length, 0);
+});
+
+test('reconcile: snapshot within the staleness window still fabricates a dividend', async () => {
+  const sec = await setupSecurityAndDividend({ exDate: '2026-03-14', perShare: '0.50' });
+  const acct = await makeAccount();
+  // ~2.5 months before the ex-date — a typical monthly/quarterly statement
+  // cadence — is fresh enough to trust.
+  await seedHolding({
+    accountId: acct.id,
+    securityId: sec.id,
+    statementDate: '2025-12-31',
+    quantity: '20',
+  });
+
+  const result = await reconcileDividendsForSecurity(sec.id);
+  assert.equal(result.inserted, 1);
+  const rows = await models.InvestmentActivity.findAll();
+  assert.equal(rows.length, 1);
+  assert.equal(Number(rows[0].amount), 10); // 20 * 0.50
+});
+
 test('reconcile: zero-quantity holding is skipped', async () => {
   const sec = await setupSecurityAndDividend();
   const acct = await makeAccount();

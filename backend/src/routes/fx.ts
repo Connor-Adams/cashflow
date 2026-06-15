@@ -317,7 +317,25 @@ router.get('/effective-rates', async (req, res, next) => {
         const linked = candidates.find((c) => c.id === target.linkedTransactionId);
         if (linked && !pool.includes(linked)) pool.push(linked);
       }
-      const r = deriveEffectiveRate(target, pool);
+      // Reference rate for the plausibility bound on the heuristic path:
+      // resolve target.currency → the largest opposite-sign candidate's
+      // currency on the txn date. A heuristic implied rate that strays
+      // wildly from this real market rate is an unrelated same-day txn, not a
+      // transfer, and is discarded inside deriveEffectiveRate. The
+      // explicit-link path ignores this.
+      const counterpartyCurrency = pool
+        .filter((c) => c.id !== target.id && c.currency.toUpperCase() !== target.currency.toUpperCase())
+        .sort((a, b) => Math.abs(num(b.amount) ?? 0) - Math.abs(num(a.amount) ?? 0))[0]?.currency;
+      let referenceRate: number | undefined;
+      if (counterpartyCurrency && target.linkedTransactionId == null) {
+        const ref = await reportingFxLookup(
+          target.currency.toUpperCase(),
+          counterpartyCurrency.toUpperCase(),
+          target.date,
+        );
+        if (ref) referenceRate = ref.rate;
+      }
+      const r = deriveEffectiveRate(target, pool, { referenceRate });
       if (!r) continue;
       const src = txns.find((t) => t.id === target.id);
       results.push({

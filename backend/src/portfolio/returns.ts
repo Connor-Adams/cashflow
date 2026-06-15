@@ -113,6 +113,31 @@ export function computeXirr(cashFlows: IrrCashFlow[], guess = 0.1): number | nul
   return null;
 }
 
+/**
+ * Resolve the FX rate for `date` from a sparse date→rate map, preferring the
+ * nearest rate on/before `date` (carry-forward) and falling back to the
+ * nearest rate after it. Returns null only when the map is empty. Used to seed
+ * the benchmark series' first date when it lands on a weekend/holiday with no
+ * own FxRate row — defaulting that anchor to parity (1.0) would mis-scale the
+ * whole series for a non-CAD benchmark.
+ */
+function nearestFx(fxByDate: Map<string, number>, date: string): number | null {
+  const direct = fxByDate.get(date);
+  if (direct != null) return direct;
+  let bestBefore: { d: string; rate: number } | null = null;
+  let bestAfter: { d: string; rate: number } | null = null;
+  for (const [d, rate] of fxByDate) {
+    if (d <= date) {
+      if (!bestBefore || d > bestBefore.d) bestBefore = { d, rate };
+    } else if (!bestAfter || d < bestAfter.d) {
+      bestAfter = { d, rate };
+    }
+  }
+  if (bestBefore) return bestBefore.rate;
+  if (bestAfter) return bestAfter.rate;
+  return null;
+}
+
 export function computeBenchmarkSeries(
   benchmarkDailyPrices: Array<{ date: string; adjClose: number }>,
   fxByDate: Map<string, number>,
@@ -121,7 +146,9 @@ export function computeBenchmarkSeries(
   if (benchmarkDailyPrices.length === 0) return [];
   const sorted = [...benchmarkDailyPrices].sort((a, b) => a.date.localeCompare(b.date));
 
-  let lastFx = fxByDate.get(sorted[0].date) ?? 1;
+  // Seed from the nearest real rate, not parity: an empty map (CAD benchmark)
+  // is the only case that legitimately falls back to 1.0.
+  let lastFx = nearestFx(fxByDate, sorted[0].date) ?? 1;
   const firstPriceCad = sorted[0].adjClose * lastFx;
   if (firstPriceCad === 0) {
     return sorted.map((p) => ({ date: p.date, valueCad: 0 }));
