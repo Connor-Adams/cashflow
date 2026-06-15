@@ -40,3 +40,61 @@ export function detectRangeKind(from: string, to: string): PeriodRangeKind {
   }
   return 'custom';
 }
+
+function addDays(d: string, n: number): string {
+  const p = parts(d);
+  const dt = new Date(Date.UTC(p.y, p.m - 1, p.day + n));
+  return fmt(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+}
+function dayCount(from: string, to: string): number {
+  const a = parts(from);
+  const b = parts(to);
+  const ms =
+    Date.UTC(b.y, b.m - 1, b.day) - Date.UTC(a.y, a.m - 1, a.day);
+  return Math.round(ms / 86_400_000) + 1; // inclusive
+}
+function monthRange(y: number, m: number): DateRange {
+  return { from: fmt(y, m, 1), to: fmt(y, m, lastDay(y, m)) };
+}
+
+export function priorPeriod(
+  from: string,
+  to: string,
+  kind: PeriodRangeKind,
+): DateRange {
+  const a = parts(from);
+  if (kind === 'calendar-month') {
+    const m = a.m === 1 ? 12 : a.m - 1;
+    const y = a.m === 1 ? a.y - 1 : a.y;
+    return monthRange(y, m);
+  }
+  if (kind === 'calendar-quarter') {
+    const startM = a.m - 3;
+    const y = startM < 1 ? a.y - 1 : a.y;
+    const m = startM < 1 ? startM + 12 : startM;
+    return { from: fmt(y, m, 1), to: fmt(y, m + 2, lastDay(y, m + 2)) };
+  }
+  if (kind === 'calendar-year') {
+    return { from: fmt(a.y - 1, 1, 1), to: fmt(a.y - 1, 12, 31) };
+  }
+  // custom: prior equal-length span ending the day before `from`
+  const span = dayCount(from, to);
+  const prevTo = addDays(from, -1);
+  const prevFrom = addDays(prevTo, -(span - 1));
+  return { from: prevFrom, to: prevTo };
+}
+
+export function samePeriodLastYear(
+  from: string,
+  to: string,
+  kind: PeriodRangeKind,
+): DateRange | null {
+  if (kind === 'custom') return null;
+  const a = parts(from);
+  if (kind === 'calendar-month') return monthRange(a.y - 1, a.m);
+  if (kind === 'calendar-quarter') {
+    return { from: fmt(a.y - 1, a.m, 1), to: fmt(a.y - 1, a.m + 2, lastDay(a.y - 1, a.m + 2)) };
+  }
+  // calendar-year
+  return { from: fmt(a.y - 1, 1, 1), to: fmt(a.y - 1, 12, 31) };
+}
