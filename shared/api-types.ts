@@ -1723,3 +1723,24 @@ export type CreditCardPaymentResponse = {
   plannedEvent: CardPaymentPlannedEvent
   safeToSpend: CardSafeToSpendImpact | null
 }
+
+/**
+ * Household-level settings. `timezone` is the IANA zone (e.g.
+ * 'America/Toronto') driving server-side "today" derivation; `null` means the
+ * server falls back to its default. `effectiveTimezone` is that resolved
+ * value so the client never has to know the default itself.
+ *
+ * GET /api/household/settings returns this (with `benchmarkSymbol`);
+ * PATCH /api/household/timezone returns just the `timezone` pair.
+ */
+export type HouseholdSettings = {
+  benchmarkSymbol: string
+  timezone: string | null
+  effectiveTimezone: string
+}
+
+/** Response shape of PATCH /api/household/timezone. */
+export type HouseholdTimezoneResponse = {
+  timezone: string | null
+  effectiveTimezone: string
+}

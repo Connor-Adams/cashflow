@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import { resolveHouseholdToday } from '../time/householdToday';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   summarizeOpenForContact,
@@ -50,8 +51,11 @@ router.get('/:id', async (req, res, next) => {
       return;
     }
     // Browser-local date override so open/overdue derivation matches the
-    // user's calendar day; falls back to UTC today.
-    const today = resolveToday(req.query.today);
+    // user's calendar day; falls back to the household-zone today.
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     const rows = await Reimbursement.findAll({
       where: { ...householdWhere(req), contactId: id },
       include: [

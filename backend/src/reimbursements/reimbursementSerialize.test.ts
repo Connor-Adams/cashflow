@@ -35,6 +35,20 @@ test('resolveToday accepts a valid ISO date, defaults otherwise', () => {
   assert.equal(resolveToday(['2026-03-15']), todayIso());
 });
 
+test('resolveToday: explicit fallback is used when override absent/invalid', () => {
+  // Routes pass the household-zone today as fallback (#612 override stays
+  // highest priority).
+  const tzToday = '2026-06-13';
+  // Valid override beats the fallback.
+  assert.equal(resolveToday('2026-03-15', tzToday), '2026-03-15');
+  // Missing / invalid override falls back to the household-zone date, not UTC.
+  assert.equal(resolveToday(undefined, tzToday), tzToday);
+  assert.equal(resolveToday('', tzToday), tzToday);
+  assert.equal(resolveToday('not-a-date', tzToday), tzToday);
+  assert.equal(resolveToday('2026-02-31', tzToday), tzToday);
+  assert.equal(resolveToday(['2026-03-15'], tzToday), tzToday);
+});
+
 // ---------- normalizeAmount ----------
 
 test('normalizeAmount accepts positive numbers/strings, rejects junk', () => {

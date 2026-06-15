@@ -2,16 +2,20 @@ import { Router, type Request } from 'express';
 import { Op } from 'sequelize';
 import { Account, LiabilityAccount } from '../models';
 import { visibleAccountWhere } from '../auth/scope';
+import { currentAuth } from '../auth/middleware';
 import { buildNetWorthAt, buildSeries } from '../networth/aggregate';
 import { currentOwed, utilizationPct } from '../cards/utilization';
+import { resolveHouseholdToday } from '../time/householdToday';
 
 const router = Router();
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DAILY_MAX_BUCKETS = 90;
 const MONTHLY_MAX_BUCKETS = 240;
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+/** "Today" in the caller's household zone (not UTC), so as-of defaults and the
+ *  future-date guard match the user's calendar day. */
+function todayIso(req: Request): string {
+  return resolveHouseholdToday(currentAuth(req).household);
 }
 
 async function visibleAccountIds(req: Request): Promise<number[]> {
@@ -22,12 +26,12 @@ async function visibleAccountIds(req: Request): Promise<number[]> {
 
 router.get('/current', async (req, res, next) => {
   try {
-    const asOf = (req.query.asOf as string | undefined) ?? todayIso();
+    const asOf = (req.query.asOf as string | undefined) ?? todayIso(req);
     if (!DATE_RE.test(asOf)) {
       res.status(400).json({ error: 'asOf must be YYYY-MM-DD' });
       return;
     }
-    if (asOf > todayIso()) {
+    if (asOf > todayIso(req)) {
       res.status(400).json({ error: 'asOf cannot be in the future' });
       return;
     }
@@ -56,7 +60,7 @@ router.get('/series', async (req, res, next) => {
       res.status(400).json({ error: "granularity must be 'monthly' or 'daily'" });
       return;
     }
-    const today = todayIso();
+    const today = todayIso(req);
     if (to > today) to = today;
 
     if (granularity === 'daily') {
@@ -106,7 +110,7 @@ router.get('/credit-utilization', async (req, res, next) => {
     const profileByAccount = new Map<number, InstanceType<typeof LiabilityAccount>>();
     for (const p of profiles) profileByAccount.set(p.accountId, p);
 
-    const today = todayIso();
+    const today = todayIso(req);
     type CardSummary = {
       accountId: number;
       name: string;
