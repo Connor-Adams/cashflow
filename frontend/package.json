@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "yarn build:bookmarklets && tsc -b && vite build",
+    "build": "yarn build:bookmarklets && yarn build:extension && tsc -b && vite build",
     "build:bookmarklets": "BOOKMARKLET_ENTRY=amazon vite build --config vite.bookmarklets.config.ts && BOOKMARKLET_ENTRY=apple vite build --config vite.bookmarklets.config.ts",
+    "build:extension": "EXT_ENTRY=content vite build --config vite.extension.config.ts && EXT_ENTRY=background vite build --config vite.extension.config.ts && EXT_ENTRY=options vite build --config vite.extension.config.ts && cp src/extension/manifest.json src/extension/options.html dist-extension/ && cp dist-extension-README.md dist-extension/README.md",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

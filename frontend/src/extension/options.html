@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Cashflow Amazon Capture — Options</title>
+<style>
+  body { font: 14px system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; padding: 0 1rem; }
+  label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
+  input { width: 100%; padding: 0.5rem; box-sizing: border-box; }
+  button { margin-top: 1rem; padding: 0.5rem 1rem; }
+  #status { margin-top: 1rem; }
+</style>
+<h1>Cashflow Amazon Capture</h1>
+<p>Mint a capture token in Cashflow → Settings → Imports, then paste it below with your Cashflow URL.</p>
+<label for="apiBase">Cashflow API base URL</label>
+<input id="apiBase" placeholder="https://cashflow.example.com" />
+<label for="token">Capture token</label>
+<input id="token" placeholder="cfc_..." />
+<button id="save">Save &amp; grant access</button>
+<button id="test">Test connection</button>
+<p id="status"></p>
+<script type="module" src="options.js"></script>
