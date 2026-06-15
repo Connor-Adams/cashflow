@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeOwedBack, type OwedBackRow } from './periodInsight';
+import { realCostOf, deltaPct } from './periodInsight';
 
 function row(o: Partial<OwedBackRow>): OwedBackRow {
   return { id: 1, currency: 'CAD', amount: '-100.00', partnerShareAmount: null, ...o };
@@ -46,4 +47,18 @@ test('computeOwedBack splits by currency', () => {
   );
   assert.equal(out.get('CAD')?.owedBack, 10);
   assert.equal(out.get('USD')?.owedBack, 5);
+});
+
+test('realCostOf satisfies the identity netSpend = realCost + owedBack', () => {
+  assert.equal(realCostOf(10_000, 4_000), 6_000);
+  assert.equal(realCostOf(10_000, 4_000) + 4_000, 10_000);
+});
+
+test('deltaPct computes percent change vs baseline', () => {
+  assert.equal(deltaPct(120, 100), 20);
+  assert.equal(deltaPct(80, 100), -20);
+});
+
+test('deltaPct returns null when baseline is zero', () => {
+  assert.equal(deltaPct(50, 0), null);
 });

@@ -37,3 +37,12 @@ export function computeOwedBack(
   }
   return out;
 }
+
+export function realCostOf(netSpend: number, owedBack: number): number {
+  return netSpend - owedBack;
+}
+
+export function deltaPct(current: number, baseline: number): number | null {
+  if (baseline === 0) return null;
+  return ((current - baseline) / Math.abs(baseline)) * 100;
+}
