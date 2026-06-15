@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Cashflow Amazon Capture",
+  "version": "1.0.0",
+  "description": "Captures your Amazon orders into Cashflow when you open Your Orders.",
+  "permissions": ["storage"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html",
+  "action": { "default_title": "Cashflow Amazon Capture" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.amazon.com/gp/css/order-history*",
+        "https://www.amazon.com/gp/your-account/order-history*",
+        "https://www.amazon.com/your-orders/orders*",
+        "https://www.amazon.ca/gp/css/order-history*",
+        "https://www.amazon.ca/gp/your-account/order-history*",
+        "https://www.amazon.ca/your-orders/orders*",
+        "https://www.amazon.co.uk/gp/css/order-history*",
+        "https://www.amazon.co.uk/gp/your-account/order-history*",
+        "https://www.amazon.co.uk/your-orders/orders*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
