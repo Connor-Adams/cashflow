@@ -201,9 +201,15 @@ export async function findExistingForDedup(args: {
       transaction: args.t,
     });
     const incomingText = normalizePendingMatchText(args.incomingMerchantRaw);
+    const incomingCcy =
+      args.incomingCurrency == null ? null : String(args.incomingCurrency).toUpperCase();
     const match = windowCandidates.find(
       (row) =>
         Number(row.amount) === args.incomingAmount &&
+        // Same-currency only: a posted USD charge must not promote a CAD
+        // pending hold of the same numeric amount (the drift tier below
+        // already scopes by currency; the pending-window tier must too).
+        (incomingCcy == null || String(row.currency).toUpperCase() === incomingCcy) &&
         (normalizePendingMatchText(row.merchantRaw) === incomingText ||
           normalizePendingMatchText(row.merchantClean) === incomingText),
     );

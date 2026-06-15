@@ -163,6 +163,42 @@ test('Interest with null symbol matches candidate with null symbol', () => {
   assert.equal(out.kind, 'single-match');
 });
 
+test('null-symbol incoming does NOT absorb a symbol-bearing candidate', () => {
+  // A symbol-less activities row (e.g. account-level interest) must not dedup
+  // against an existing per-security row that happens to share qty/amount.
+  const out = pickFuzzyMatch(
+    [
+      candidate({
+        id: 1,
+        quantity: '2.04000000',
+        amount: '2.0400',
+        securityId: 5,
+        security: { symbol: 'AAPL' },
+      }),
+    ],
+    { symbol: null, quantity: 2.04, amount: 2.04 },
+  );
+  assert.equal(out.kind, 'no-match');
+});
+
+test('null-symbol incoming does NOT absorb a candidate with securityId but unloaded association', () => {
+  // The DB path skips the `security` include when the incoming symbol is null,
+  // so the only signal is the securityId column.
+  const out = pickFuzzyMatch(
+    [
+      candidate({
+        id: 1,
+        quantity: '2.04000000',
+        amount: '2.0400',
+        securityId: 9,
+        security: null,
+      }),
+    ],
+    { symbol: null, quantity: 2.04, amount: 2.04 },
+  );
+  assert.equal(out.kind, 'no-match');
+});
+
 test('Dividend with null quantity matches candidate with null quantity', () => {
   // Old parser stores dividend rows with quantity=NULL (no share count in description).
   const out = pickFuzzyMatch(

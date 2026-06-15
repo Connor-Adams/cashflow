@@ -44,6 +44,13 @@ export type DedupCandidate = {
   quantity: string | null;
   amount: string | null;
   settlementDate: string | null;
+  /**
+   * Foreign key to the row's security (always loaded — it is a column, not the
+   * `security` association). Used to reject a symbol-bearing existing row when
+   * the incoming row is symbol-less, even on the query path that does not eager
+   * load the `security` association.
+   */
+  securityId?: number | null;
   security?: { symbol: string | null } | null;
 };
 
@@ -94,6 +101,11 @@ export function pickFuzzyMatch<T extends DedupCandidate>(
     if (wantSym != null) {
       const sym = c.security?.symbol;
       if (!sym || sym.toUpperCase() !== wantSym) return false;
+    } else if (c.securityId != null || c.security?.symbol) {
+      // Incoming row carries no symbol; a symbol-bearing existing row is a
+      // different event (e.g. account-level interest must not absorb a
+      // per-security interest/dividend) and must not be matched.
+      return false;
     }
     return true;
   });
