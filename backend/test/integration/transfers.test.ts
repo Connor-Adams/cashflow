@@ -673,14 +673,89 @@ test('money-movement: rejects invalid purpose with 400', async () => {
 
 // ------------------- GET /api/transfers/stats -------------------
 
-test('stats: returns matched/unmatched counts and purpose breakdown', async () => {
+test('stats: returns matched/unmatched/dangling counts and purpose breakdown', async () => {
   const res = await agentA.get('/api/transfers/stats');
   assert.equal(res.status, 200);
   assert.equal(typeof res.body.matched, 'number');
   assert.equal(typeof res.body.unmatched, 'number');
+  assert.equal(typeof res.body.dangling, 'number');
   assert.ok(typeof res.body.byPurpose === 'object');
-  // matched should be >0 because we linked pairs above.
-  assert.ok(res.body.matched >= 4, `expected matched >= 4, got ${res.body.matched}`);
-  // byPurpose includes 'internal' and 'owner_draw' from above.
-  assert.ok(res.body.byPurpose.internal >= 2, `internal should be >=2 (got ${res.body.byPurpose.internal})`);
+  // matched counts reciprocal PAIRS (not legs): we linked >= 3 pairs above.
+  assert.ok(res.body.matched >= 3, `expected matched >= 3 pairs, got ${res.body.matched}`);
+  // byPurpose counts pairs: 2 internal pairs were linked above.
+  assert.ok(res.body.byPurpose.internal >= 2, `internal should be >=2 pairs (got ${res.body.byPurpose.internal})`);
+});
+
+test('stats: a one-way link counts as dangling, not matched (issue #553)', async () => {
+  // Seed two legs where only A points at B; B has no back-link. This is the
+  // exact shape that previously inflated `matched`.
+  const a = await createTxn({
+    householdId: householdAId,
+    accountId: accountA1Id,
+    date: '2026-07-01',
+    amount: -777,
+  });
+  const b = await createTxn({
+    householdId: householdAId,
+    accountId: accountA2Id,
+    date: '2026-07-01',
+    amount: 777,
+  });
+  // Write a one-way link directly (the API would write both sides; we
+  // deliberately create the broken state).
+  const models = await import('../../src/models');
+  await models.Transaction.update(
+    { linkedTransactionId: b },
+    { where: { id: a } },
+  );
+
+  const before = await agentA.get('/api/transfers/stats');
+  const matchedBefore = before.body.matched as number;
+  const danglingBefore = before.body.dangling as number;
+
+  // Re-read to assert the dangling leg landed in `dangling`, not `matched`.
+  const res = await agentA.get('/api/transfers/stats');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.matched, matchedBefore, 'one-way link must not increase matched pairs');
+  assert.ok(res.body.dangling >= 1, `expected dangling >= 1, got ${res.body.dangling}`);
+  assert.equal(res.body.dangling, danglingBefore);
+
+  // Clean up so later assertions are not affected.
+  await models.Transaction.update({ linkedTransactionId: null }, { where: { id: a } });
+});
+
+test('money-movement: a one-way link surfaces in dangling, not silently dropped (issue #553)', async () => {
+  const a = await createTxn({
+    householdId: householdAId,
+    accountId: accountA1Id,
+    date: '2026-08-01',
+    amount: -4242,
+  });
+  const b = await createTxn({
+    householdId: householdAId,
+    accountId: accountA2Id,
+    date: '2026-08-01',
+    amount: 4242,
+  });
+  const models = await import('../../src/models');
+  await models.Transaction.update({ linkedTransactionId: b }, { where: { id: a } });
+
+  const res = await agentA
+    .get('/api/transfers/money-movement')
+    .query({ dateFrom: '2026-08-01', dateTo: '2026-08-01' });
+  assert.equal(res.status, 200);
+  assert.ok(res.body.dangling, 'response includes a dangling summary');
+  assert.equal(res.body.dangling.count, 1, 'the one-way leg is counted as dangling');
+  assert.equal(
+    res.body.dangling.totalSourceAmount,
+    4242,
+    'its value is surfaced, not dropped',
+  );
+  // It must NOT appear as a flow.
+  const leak = (res.body.flows as Array<{ totalSourceAmount: number }>).find(
+    (f) => f.totalSourceAmount === 4242,
+  );
+  assert.equal(leak, undefined, 'dangling value must not leak into flows');
+
+  await models.Transaction.update({ linkedTransactionId: null }, { where: { id: a } });
 });

@@ -71,6 +71,9 @@ type UnmatchedResponse = {
 type StatsResponse = {
   matched: number
   unmatched: number
+  // One-way / broken links (A→B but not B→A). Previously over-counted as
+  // matched; surfaced separately so the user can repair them (issue #553).
+  dangling: number
   byPurpose: Record<string, number>
 }
 
@@ -87,8 +90,16 @@ type MoneyMovementFlow = {
   count: number
 }
 
+type MoneyMovementDangling = {
+  count: number
+  totalSourceAmount: number
+}
+
 type MoneyMovementResponse = {
   flows: MoneyMovementFlow[]
+  // One-way / broken links excluded from `flows` but accounted for here so
+  // their value is not silently dropped from totals (issue #553).
+  dangling: MoneyMovementDangling
   unmatchedCount: number
 }
 
@@ -287,12 +298,19 @@ function TransferStats({
           gap: 12,
         }}
       >
-        <Stat label="Matched pairs (rows)" value={String(stats.matched)} />
+        <Stat label="Matched pairs" value={String(stats.matched)} />
         <Stat
           label="Unmatched"
           value={String(stats.unmatched)}
           tone={stats.unmatched > 0 ? 'warn' : undefined}
         />
+        {stats.dangling > 0 && (
+          <Stat
+            label="Broken links (one-way)"
+            value={String(stats.dangling)}
+            tone="warn"
+          />
+        )}
         {Object.entries(stats.byPurpose).map(([purpose, n]) => (
           <Stat
             key={`purpose-${purpose}`}

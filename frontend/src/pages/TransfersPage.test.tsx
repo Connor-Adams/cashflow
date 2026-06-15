@@ -9,7 +9,7 @@ import { formatMoney } from '../lib/formatMoney'
 vi.mock('../lib/api', () => ({
   getJson: vi.fn((path: string) => {
     if (path.startsWith('/api/transfers/stats')) {
-      return Promise.resolve({ matched: 6, unmatched: 0, byPurpose: {} })
+      return Promise.resolve({ matched: 6, unmatched: 0, dangling: 2, byPurpose: {} })
     }
     if (path.startsWith('/api/transfers/unmatched')) {
       return Promise.resolve({ data: [], page: 1, pageSize: 100, total: 0 })
@@ -42,6 +42,7 @@ vi.mock('../lib/api', () => ({
             count: 1,
           },
         ],
+        dangling: { count: 2, totalSourceAmount: 185000 },
         unmatchedCount: 0,
       })
     }
@@ -71,5 +72,17 @@ describe('TransfersPage money movement footer', () => {
     expect(footer.textContent).toContain(formatMoney(2000, 'CAD'))
     expect(footer.textContent).toContain(formatMoney(1000, 'USD'))
     expect(footer.textContent).not.toContain('3,000')
+  })
+})
+
+describe('TransfersPage stats', () => {
+  it('surfaces broken (one-way) links instead of folding them into matched', async () => {
+    renderPage()
+    // The stats summary must show the dangling/broken-link count so the user
+    // can see and repair them (issue #553).
+    const broken = await screen.findByText(/Broken links/)
+    expect(broken).toBeTruthy()
+    // label and value live in sibling divs inside the Stat container.
+    expect(broken.parentElement?.textContent).toContain('2')
   })
 })
