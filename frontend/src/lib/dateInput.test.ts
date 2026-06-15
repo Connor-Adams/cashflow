@@ -4,6 +4,9 @@ import {
   fromDateInputValue,
   todayDateInputValue,
   getRelativeDateRange,
+  getCalendarMonthRange,
+  getCalendarQuarterRange,
+  getCalendarYearRange,
 } from './dateInput'
 
 /**
@@ -161,5 +164,83 @@ describe('getRelativeDateRange', () => {
         dayMs +
       1
     expect(span).toBe(30)
+  })
+})
+
+describe('getCalendarMonthRange', () => {
+  const jun15 = new Date(Date.UTC(2026, 5, 15)) // 2026-06-15
+
+  it('offset 0 = first..last day of current month', () => {
+    expect(getCalendarMonthRange(0, jun15)).toEqual({
+      from: '2026-06-01',
+      to: '2026-06-30',
+    })
+  })
+
+  it('offset -1 = previous full month', () => {
+    expect(getCalendarMonthRange(-1, jun15)).toEqual({
+      from: '2026-05-01',
+      to: '2026-05-31',
+    })
+  })
+
+  it('offset -1 in January rolls back to previous December', () => {
+    const jan5 = new Date(Date.UTC(2026, 0, 5))
+    expect(getCalendarMonthRange(-1, jan5)).toEqual({
+      from: '2025-12-01',
+      to: '2025-12-31',
+    })
+  })
+
+  it('handles leap-year February end date', () => {
+    const feb10 = new Date(Date.UTC(2028, 1, 10)) // 2028 is a leap year
+    expect(getCalendarMonthRange(0, feb10)).toEqual({
+      from: '2028-02-01',
+      to: '2028-02-29',
+    })
+  })
+})
+
+describe('getCalendarQuarterRange', () => {
+  it('offset 0 in Q2 = Apr 1..Jun 30', () => {
+    const may20 = new Date(Date.UTC(2026, 4, 20))
+    expect(getCalendarQuarterRange(0, may20)).toEqual({
+      from: '2026-04-01',
+      to: '2026-06-30',
+    })
+  })
+
+  it('offset -1 in Q1 rolls back to prior-year Q4', () => {
+    const feb10 = new Date(Date.UTC(2026, 1, 10))
+    expect(getCalendarQuarterRange(-1, feb10)).toEqual({
+      from: '2025-10-01',
+      to: '2025-12-31',
+    })
+  })
+
+  it('offset 0 in Q4 = Oct 1..Dec 31', () => {
+    const nov3 = new Date(Date.UTC(2026, 10, 3))
+    expect(getCalendarQuarterRange(0, nov3)).toEqual({
+      from: '2026-10-01',
+      to: '2026-12-31',
+    })
+  })
+})
+
+describe('getCalendarYearRange', () => {
+  const jun15 = new Date(Date.UTC(2026, 5, 15))
+
+  it('offset 0 = Jan 1..Dec 31 of current year', () => {
+    expect(getCalendarYearRange(0, jun15)).toEqual({
+      from: '2026-01-01',
+      to: '2026-12-31',
+    })
+  })
+
+  it('offset -1 = previous full year', () => {
+    expect(getCalendarYearRange(-1, jun15)).toEqual({
+      from: '2025-01-01',
+      to: '2025-12-31',
+    })
   })
 })

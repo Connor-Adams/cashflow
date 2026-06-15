@@ -43,7 +43,9 @@ import { summaryQueryString } from '../lib/summaryQuery'
 import { getJson } from '../lib/api'
 import {
   fromDateInputValue,
-  getRelativeDateRange,
+  getCalendarMonthRange,
+  getCalendarQuarterRange,
+  getCalendarYearRange,
   toDateInputValue,
   todayDateInputValue,
 } from '../lib/dateInput'
@@ -213,7 +215,7 @@ function localTodayUtcMidnight(): Date {
 }
 
 function getDefaultDashboardRange(): { from: string; to: string } {
-  return getRelativeDateRange(30)
+  return getCalendarMonthRange(0)
 }
 
 function getRollingMonthRange(months: number): { from: string; to: string } {
@@ -627,6 +629,16 @@ export function DashboardPage() {
 
   const quickRanges = useMemo<QuickRange[]>(
     () => [
+      { key: 'month', label: 'This month', ...getCalendarMonthRange(0) },
+      { key: 'lastMonth', label: 'Last month', ...getCalendarMonthRange(-1) },
+      { key: 'quarter', label: 'This quarter', ...getCalendarQuarterRange(0) },
+      {
+        key: 'lastQuarter',
+        label: 'Last quarter',
+        ...getCalendarQuarterRange(-1),
+      },
+      { key: 'year', label: 'This year', ...getCalendarYearRange(0) },
+      { key: 'lastYear', label: 'Last year', ...getCalendarYearRange(-1) },
       { key: '3m', label: '3 months', ...getRollingMonthRange(3) },
       { key: '6m', label: '6 months', ...getRollingMonthRange(6) },
       { key: 'ytd', label: 'YTD', ...getYearToDateRange() },
