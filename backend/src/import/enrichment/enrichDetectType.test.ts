@@ -686,3 +686,61 @@ test('GUARD: "E-TRANSFER SENT STEPHEN" stays purchase (person-to-person, ambiguo
   });
   assert.equal(out[0].fields.txnType, 'purchase');
 });
+
+// === Bill-payment phrasings still inflating spend (#558, 2026-06-15) ===
+// The transfer/payment PATTERNS are already sign-agnostic (a negative
+// "ONLINE BANKING TRANSFER" / "MISC PAYMENT AMEX" already classifies). But a
+// handful of common credit-card / bill-payment narratives still fell through
+// to the negative-default 'purchase', so outbound statement payments were
+// counted as spend. Each phrase below is an unambiguous bill/statement payment
+// — a payment OUT of one account to clear another balance, never consumption.
+
+test('payment: "ONLINE BANKING (LOAN) PAYMENT" with parens is a payment', () => {
+  // The existing /online banking (?:loan )?payment/ regex expects a literal
+  // space, so the parenthesized "(LOAN)" variant fell through to purchase.
+  const out = runDetectTypeStage({
+    merchantRaw: 'ONLINE BANKING (LOAN) PAYMENT - 1234',
+    merchantClean: 'ONLINE BANKING (LOAN) PAYMENT - 1234',
+    amount: -500,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: bare "BILL PAYMENT" is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'BILL PAYMENT CIBC VISA',
+    merchantClean: 'BILL PAYMENT CIBC VISA',
+    amount: -1200,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: "WEB PAYMENT" is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'WEB PAYMENT TD VISA',
+    merchantClean: 'WEB PAYMENT TD VISA',
+    amount: -800,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('payment: "PRE-AUTHORIZED PAYMENT" is a payment', () => {
+  const out = runDetectTypeStage({
+    merchantRaw: 'PRE-AUTHORIZED PAYMENT ROGERS',
+    merchantClean: 'PRE-AUTHORIZED PAYMENT ROGERS',
+    amount: -95.5,
+  });
+  assert.equal(out[0].fields.txnType, 'payment');
+});
+
+test('GUARD: "INTERAC PURCHASE STARBUCKS" stays purchase (not a payment)', () => {
+  // The new bill-payment phrasings must NOT broaden into a bare /payment/
+  // match — a normal card purchase has no "bill/web/pre-authorized payment"
+  // phrase and must remain spend.
+  const out = runDetectTypeStage({
+    merchantRaw: 'INTERAC PURCHASE STARBUCKS #482',
+    merchantClean: 'Starbucks',
+    amount: -6.45,
+  });
+  assert.equal(out[0].fields.txnType, 'purchase');
+});

@@ -66,10 +66,23 @@ const PATTERNS: Array<{ type: TxnType; re: RegExp; requireSign?: 'positive' | 'n
   // which intentionally stays 'unknown'.
   { type: 'transfer', re: /\bdeposit \(executed\b/i },
   { type: 'transfer', re: /\bcash correction\b/i },
-  { type: 'payment', re: /\bonline banking (?:loan )?payment\b/i },
+  // Allow the parenthesized "(LOAN)" variant — RBC/CIBC render this both as
+  // "ONLINE BANKING LOAN PAYMENT" and "ONLINE BANKING (LOAN) PAYMENT", and the
+  // bare-space-only regex missed the latter, leaking it to the 'purchase'
+  // default and inflating spend.
+  { type: 'payment', re: /\bonline banking (?:\(?loan\)? )?payment\b/i },
   { type: 'payment', re: /\bonline bill payment for\b/i },
   { type: 'payment', re: /\bamex bill pymt\b/i },
   { type: 'payment', re: /\bmisc payment\b.*\b(amex|visa|mastercard|wise|questrade|bmo)\b/i },
+  // Bare bill / statement-payment phrasings (#558). These are outbound payments
+  // OUT of an account to clear another balance (credit card, utility), never
+  // consumption — yet they fell through to the negative-default 'purchase' and
+  // were counted as spend. Each is an explicit "<X> payment" compound, so it
+  // does NOT broaden into a bare /payment/ match: a normal "INTERAC PURCHASE"
+  // has no bill/web/pre-authorized qualifier and stays a purchase. (The
+  // positive-side classifyTransactionFlow.PAYMENT_PATTERNS already treats these
+  // as payments; this aligns the authoritative negative-side classifier.)
+  { type: 'payment', re: /\b(bill payment|web payment|pre-?authorized payment)\b/i },
   // RBC → Wealthsimple investment funding: "Investment WS Investments".
   // This phrase is not a securities BUY (no "bought N shares"), so it is safe
   // to match before the negative fallback. The existing `investment` patterns
