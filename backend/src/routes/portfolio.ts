@@ -580,7 +580,9 @@ router.get('/income', async (req, res, next) => {
     const totalsMap = new Map<string, { currency: string } & IncomeBucket>();
 
     for (const row of activities) {
-      const amount = Math.abs(n(row.amount) ?? 0);
+      // Preserve sign: interest *charges* (e.g. margin interest) arrive as
+      // negative amounts and must NOT be flipped into positive income (#554).
+      const amount = n(row.amount) ?? 0;
       if (amount === 0) continue;
       const security = row.get('security') as Security | undefined;
       const currency = row.currency;
@@ -1617,7 +1619,8 @@ router.get('/security/:id', async (req, res, next) => {
       combinedRealized += acb.realizedTotal;
       if (holdingCurrency) combinedCurrency = holdingCurrency;
       for (const r of acts) {
-        const amt = Math.abs(n(r.amount) ?? 0);
+        // Preserve sign so interest charges aren't counted as income (#554).
+        const amt = n(r.amount) ?? 0;
         if (r.activityType === 'dividend') combinedDividend += amt;
         else if (r.activityType === 'interest') combinedInterest += amt;
       }

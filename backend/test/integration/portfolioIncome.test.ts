@@ -88,6 +88,20 @@ before(async () => {
     quantity: 10,
     amount: 500,
   });
+
+  // USD margin account: a margin-interest *charge* is a negative-amount
+  // interest activity (regression for #554 — must NOT be counted as income).
+  const margin = await seedAccount(models, householdId, userId, 'Margin USD', 'MARGIN01');
+  await seedActivity(models, {
+    accountId: margin.id,
+    householdId,
+    securityId: null,
+    activityType: 'interest',
+    tradeDate: '2025-04-30',
+    amount: -2.43,
+    currency: 'USD',
+    description: 'Margin interest charge',
+  });
 });
 
 after(async () => {
@@ -180,6 +194,38 @@ test('?dateFrom/?dateTo filters tradeDate inclusively', async () => {
   // Only Feb in window: 35 + 50 = 85.
   assert.ok(total);
   assert.equal(Math.round(total.total), 85);
+});
+
+test('negative margin-interest charge is not counted as income (#554)', async () => {
+  const res = await authed.get('/api/portfolio/income');
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+
+  // USD totals: the only USD activity is a -2.43 interest charge. It must
+  // surface as -2.43 interest, NOT +2.43 (Math.abs sign-flip regression).
+  const usdTotal = res.body.totals.find(
+    (r: { currency: string }) => r.currency === 'USD',
+  );
+  assert.ok(usdTotal, 'USD totals row should exist');
+  assert.equal(
+    Number(usdTotal.interest.toFixed(2)),
+    -2.43,
+    'margin-interest charge must keep its negative sign',
+  );
+  assert.equal(Number(usdTotal.total.toFixed(2)), -2.43);
+
+  // It must also surface negatively in the per-account and per-month views.
+  const margin = res.body.byAccount.find(
+    (r: { accountName: string }) => r.accountName === 'Margin USD',
+  );
+  assert.ok(margin);
+  assert.equal(Number(margin.interest.toFixed(2)), -2.43);
+
+  // And the CAD income total is unaffected by the USD charge.
+  const cadTotal = res.body.totals.find(
+    (r: { currency: string }) => r.currency === 'CAD',
+  );
+  assert.ok(cadTotal);
+  assert.equal(Math.round(cadTotal.total), 175);
 });
 
 test('Malformed dateFrom is ignored (no error, returns full dataset)', async () => {
