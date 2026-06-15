@@ -15,14 +15,17 @@ const aliases: Record<string, string[]> = {
   quantity: ['quantity', 'qty', 'original quantity', 'quantity ordered', 'affected item quantity'],
   unitPrice: ['unit price', 'item price', 'price'],
   totalPrice: [
+    // Genuine per-line columns only. NOT 'shipment item subtotal' — in Amazon's
+    // Retail.OrderHistory export that column is the SHIPMENT subtotal repeated on
+    // every item row of the shipment (issue #557), so it overwrites distinct line
+    // totals with the shipment aggregate. The true per-line total is unit*qty,
+    // which normalizeAmazonOrder derives when totalPrice is absent.
     'item total',
     'item subtotal',
     'line total',
     'total price',
-    'shipment item subtotal',
-    'transaction amount',
   ],
-  subtotal: ['subtotal', 'order subtotal', 'shipment item subtotal'],
+  subtotal: ['subtotal', 'order subtotal'],
   tax: ['tax', 'sales tax', 'gst/hst', 'estimated tax', 'shipment item subtotal tax', 'unit price tax', 'price tax'],
   shipping: ['shipping', 'shipping charge', 'delivery'],
   total: ['total', 'order total', 'grand total', 'charged amount', 'amount', 'total amount', 'transaction amount'],
@@ -48,7 +51,10 @@ function canonical(header: string): string {
 // (e.g. the data export's 'Total Amount' is that row's subtotal + tax).
 const PER_ROW_AMOUNT_COLUMNS = new Set(
   [
-    'shipment item subtotal',
+    // 'shipment item subtotal' is intentionally NOT here: it is a shipment-level
+    // subtotal repeated across the shipment's item rows, so summing it
+    // over-counts (issue #557). The order subtotal is recomputed from the
+    // per-line totals instead (see deriveSubtotalFromItems).
     'shipment item subtotal tax',
     'unit price tax',
     'price tax',
@@ -86,6 +92,42 @@ function foldAmount(
     return current == null ? next : Math.round((current + next) * 100) / 100;
   }
   return current ?? next;
+}
+
+/** Sum the per-line totals of a normalized order, or null if no item priced. */
+function sumLineTotals(items: Array<{ totalPrice?: number | null }>): number | null {
+  let sum = 0;
+  let any = false;
+  for (const item of items) {
+    if (item.totalPrice == null) continue;
+    sum += item.totalPrice;
+    any = true;
+  }
+  return any ? Math.round(sum * 100) / 100 : null;
+}
+
+/**
+ * Reconcile a normalized order's header amounts with its item line totals
+ * (issue #557):
+ *  - subtotal is authoritative as Σ(line totals) when items are priced, so
+ *    Σ(items) == subtotal holds and stale first-row/shipment values can't leak.
+ *  - total falls back to Σ(line totals) when the CSV total is empty or zero
+ *    (e.g. cancelled orders with a blank "Total Amount" column).
+ */
+function reconcileOrderTotals<
+  T extends {
+    subtotal?: number | null;
+    total?: number | null;
+    items: Array<{ totalPrice?: number | null }>;
+  },
+>(order: T): T {
+  const lineSum = sumLineTotals(order.items);
+  if (lineSum == null) return order;
+  return {
+    ...order,
+    subtotal: lineSum,
+    total: order.total != null && order.total !== 0 ? order.total : lineSum,
+  };
 }
 
 function parseMoney(value: string | null): number | null {
@@ -186,7 +228,7 @@ export function parseAmazonReportCsv(text: string): ParseResult {
   });
 
   return {
-    orders: Array.from(byKey.values()).map(normalizeAmazonOrder),
+    orders: Array.from(byKey.values()).map((raw) => reconcileOrderTotals(normalizeAmazonOrder(raw))),
     failedRows,
     headers: parsed.headers,
   };
