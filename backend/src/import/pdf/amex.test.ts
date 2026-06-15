@@ -137,6 +137,23 @@ test('parse — European comma-as-decimal in FX amount', () => {
   assert.ok(result.transactions[0].merchantRaw.includes('[EUROPEAN UNION EURO 19.00 @ 1.64105]'));
 });
 
+test('parse — European dot-grouped thousands in FX amount (1.234,56 = 1234.56)', () => {
+  const lines = [
+    ...reserveHeaderLines(),
+    mkLine('New Transactions for CONNOR ADAMS', 2, 560),
+    mkLine('May 7   May 8   HOTEL ADLON   BERLIN', 2, 387),
+    mkAmountLine('2026.12', 385),
+    mkLine('EUROPEAN UNION EURO 1.234,56    @ 1.64105', 2, 378, 100),
+    mkLine('Total of New Transactions for                                        2026.12', 2, 350),
+  ];
+  const result = amexParser.parse(lines, { defaultCurrency: 'CAD' });
+  assert.equal(result.transactions.length, 1);
+  assert.ok(
+    result.transactions[0].merchantRaw.includes('[EUROPEAN UNION EURO 1234.56 @ 1.64105]'),
+    `got: ${result.transactions[0].merchantRaw}`,
+  );
+});
+
 test('parse — other account transactions (membership fee)', () => {
   const hdrLines = [
     mkLine(' American Express® Aeroplan®* Reserve Card', 1, 790),

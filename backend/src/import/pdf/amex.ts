@@ -102,11 +102,28 @@ function parseAmount(s: string): number {
   return Number(s.trim().replace(/,/g, ''));
 }
 
-/** Parse FX original amount — handles European comma-as-decimal (e.g. "19,00" = 19.00). */
+/**
+ * Parse FX original amount across locale formats. The decimal separator is
+ * whichever of `.`/`,` appears LAST; the other is a thousands grouping char.
+ *  - US/standard "1,234.56" → 1234.56 (comma groups, dot decimal)
+ *  - EU thousands "1.234,56" → 1234.56 (dot groups, comma decimal)
+ *  - EU decimal   "19,00"    → 19.00   (comma decimal, no grouping)
+ */
 function parseFxAmount(s: string): number {
   const trimmed = s.trim();
-  if (!trimmed.includes('.') && /,\d{2}$/.test(trimmed)) {
-    return Number(trimmed.replace(',', '.'));
+  const lastDot = trimmed.lastIndexOf('.');
+  const lastComma = trimmed.lastIndexOf(',');
+  if (lastDot >= 0 && lastComma >= 0) {
+    // Both present — the later one is the decimal separator, the other groups.
+    const decimalIsComma = lastComma > lastDot;
+    const grouping = decimalIsComma ? '.' : ',';
+    const decimal = decimalIsComma ? ',' : '.';
+    return Number(trimmed.split(grouping).join('').replace(decimal, '.'));
+  }
+  if (lastComma >= 0) {
+    // Only a comma. A trailing ",dd" is a decimal; otherwise it groups thousands.
+    if (/,\d{1,2}$/.test(trimmed)) return Number(trimmed.replace(',', '.'));
+    return Number(trimmed.split(',').join(''));
   }
   return parseAmount(trimmed);
 }
