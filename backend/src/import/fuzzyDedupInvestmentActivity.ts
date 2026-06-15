@@ -91,10 +91,11 @@ export function pickFuzzyMatch<T extends DedupCandidate>(
     } else if (c.amount != null) {
       return false;
     }
-    if (wantSym != null) {
-      const sym = c.security?.symbol;
-      if (!sym || sym.toUpperCase() !== wantSym) return false;
-    }
+    // Symbol must be COMPATIBLE: both null, or both populated and equal. A
+    // symbol-less incoming row (e.g. generic Interest/Fee) must not absorb a
+    // symbol-bearing candidate (a real security event), and vice versa.
+    const gotSym = c.security?.symbol == null ? null : c.security.symbol.toUpperCase();
+    if (wantSym !== gotSym) return false;
     return true;
   });
 
@@ -159,7 +160,10 @@ export async function findExistingInvestmentByFuzzyMatch(
       currency: wantCcy,
       tradeDate: { [Op.between]: [dateLo, dateHi] },
     },
-    include: args.symbol == null ? undefined : [{ association: 'security', required: false }],
+    // Always eager-load `security` so the symbol-compatibility check can see a
+    // candidate's symbol even when the incoming row has none — otherwise a
+    // symbol-bearing candidate would project as symbol-less and falsely match.
+    include: [{ association: 'security', required: false }],
     transaction: args.t,
   });
 

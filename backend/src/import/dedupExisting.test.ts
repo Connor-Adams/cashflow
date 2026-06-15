@@ -184,6 +184,50 @@ test('dedup is idempotent after promotion: a second source re-presenting the set
   assert.equal(count, 1, 'the settled charge must exist exactly once');
 });
 
+test('pending-window promotion respects currency: a posted USD row does NOT promote a pending CAD row', async () => {
+  // Currency-blind window tier bug: the pending-window tier matched on
+  // accountId + status='pending' + date window + amount + merchantText but
+  // NOT currency, so a posted row in one currency could promote/absorb a
+  // pending hold in another currency with the same numeric amount + merchant.
+  const accountId = await makeAccount();
+  // Seed a pending hold in CAD (seedPending always uses CAD).
+  await seedPending({
+    accountId,
+    date: '2026-05-01',
+    amount: -123.45,
+    merchantRaw: 'FX HOTEL HOLD',
+  });
+
+  // Incoming posted row carries the SAME amount + merchant but a DIFFERENT
+  // currency (USD). Its fingerprint differs (currency is hashed in), so the
+  // exact-fingerprint tier misses and it falls through to the window tier.
+  const postedUsdFp = stableIdentityFingerprint({
+    accountId,
+    date: '2026-05-03',
+    amount: -123.45,
+    currency: 'USD',
+    merchantRaw: 'FX HOTEL HOLD',
+  });
+  const outcome = await models.sequelize.transaction((t) =>
+    findExistingForDedup({
+      accountId,
+      sourceIdentityFingerprint: postedUsdFp,
+      sourceReference: 'usd-ref-1',
+      t,
+      incomingStatus: 'posted',
+      incomingDate: '2026-05-03',
+      incomingAmount: -123.45,
+      incomingCurrency: 'USD',
+      incomingMerchantRaw: 'FX HOTEL HOLD',
+    }),
+  );
+  assert.equal(
+    outcome.kind,
+    'no-match',
+    'a posted USD row must NOT promote a pending CAD hold of the same amount/merchant',
+  );
+});
+
 test('promotion via the exact-fingerprint tier leaves the (already-correct) date untouched', async () => {
   const accountId = await makeAccount();
   // Pending row whose fingerprint already matches the incoming posted row

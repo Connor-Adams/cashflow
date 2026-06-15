@@ -121,6 +121,37 @@ test('transfer-link via sourceReference: cross-currency FX pair links even with 
   assert.equal(link!.fields.autoCategory, 'Transfer');
 });
 
+test('transfer-link via sourceReference: Fri->Mon FX pair (3 calendar / 1 business day) links with window=2', () => {
+  // Weekend-spanning FX pair sharing a sourceReference. The sourceReference
+  // path used CALENDAR days (3, exceeds window 2) while the amount-equality
+  // path uses business days. Aligning the sourceReference path to the
+  // business-day helper lets a Fri-out / Mon-in converted pair link.
+  const signals = runDetectRelationshipsStage({
+    txnType: 'transfer',
+    merchantClean: 'Converted USD to CAD',
+    amount: -5207.6,
+    date: '2025-06-06', // Friday
+    accountId: 1,
+    householdAccountIds: [1, 2],
+    refundWindowDays: 60,
+    transferWindowDays: 2,
+    sourceReference: 'BALANCE-WEEKEND',
+    candidates: [
+      candidate({
+        id: 310,
+        amount: 7084.89,
+        date: '2025-06-09', // Monday — 3 calendar days, 1 business day
+        merchantClean: 'Converted USD to CAD',
+        accountId: 2,
+        sourceReference: 'BALANCE-WEEKEND',
+      }),
+    ],
+  });
+  const link = signals.find((s) => s.source === 'transfer-link');
+  assert.ok(link, 'Fri->Mon FX pair sharing sourceReference should link (1 business day <= window 2)');
+  assert.equal(link!.fields.linkedTransactionId, 310);
+});
+
 test('transfer-link via sourceReference: ignores candidate with non-matching sourceReference', () => {
   const signals = runDetectRelationshipsStage({
     txnType: 'transfer',
