@@ -336,6 +336,107 @@ test('POST /:id/match links own txn; cross-household txn is 403 (AC #5)', async 
   assert.equal(recon!.matchedTransactionId, null);
 });
 
+test('GET ?status=upcoming returns a future-dated dividend (AC #555-1)', async () => {
+  const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
+    './portfolioFixtures.js'
+  );
+  const hh = await makeHousehold('upcoming');
+  const acct = await seedAccount(models, hh.household.id, hh.user.id, 'Brokerage', 'UPC1');
+  const sec = await seedSecurity(models, hh.household.id, 'UPC', 'Upcoming Corp', 'stock', 'USD');
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: hh.household.id,
+    securityId: sec.id,
+    statementDate: '2026-01-01',
+    quantity: 100,
+  });
+  // Payment 7 days from now → inside the 30-day horizon.
+  const payDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  await seedDividend(models, {
+    securityId: sec.id,
+    exDividendDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10),
+    paymentDate: payDate,
+    amount: 1.0,
+    currency: 'USD',
+  });
+
+  const res = await hh.agent.get('/api/dividends?status=upcoming');
+  assert.equal(res.status, 200, res.text);
+  assert.equal(res.body.status, 'upcoming');
+  const row = res.body.data.find((d: { symbol: string }) => d.symbol === 'UPC');
+  assert.ok(row, `expected an UPC upcoming row in ${JSON.stringify(res.body.data)}`);
+  assert.equal(row.paymentDate, payDate);
+});
+
+test('GET ?status=upcoming includes NULL payment_date via ex-date fallback (AC #555-2)', async () => {
+  const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
+    './portfolioFixtures.js'
+  );
+  const hh = await makeHousehold('upcoming-null');
+  const acct = await seedAccount(models, hh.household.id, hh.user.id, 'Brokerage', 'UPC2');
+  const sec = await seedSecurity(models, hh.household.id, 'NPD', 'No Pay Date Corp', 'stock', 'USD');
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: hh.household.id,
+    securityId: sec.id,
+    statementDate: '2026-01-01',
+    quantity: 50,
+  });
+  // No payment_date (mirrors all 121 prod rows). Future ex-date → should still surface.
+  const exDate = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+  await seedDividend(models, {
+    securityId: sec.id,
+    exDividendDate: exDate,
+    paymentDate: null,
+    amount: 0.75,
+    currency: 'USD',
+  });
+
+  const res = await hh.agent.get('/api/dividends?status=upcoming');
+  assert.equal(res.status, 200, res.text);
+  const row = res.body.data.find((d: { symbol: string }) => d.symbol === 'NPD');
+  assert.ok(row, `expected an NPD upcoming row despite NULL payment_date in ${JSON.stringify(res.body.data)}`);
+  assert.equal(row.paymentDate, null);
+  assert.equal(row.exDividendDate, exDate);
+});
+
+test('GET ?status=upcoming excludes past-dated dividends (AC #555-3)', async () => {
+  const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
+    './portfolioFixtures.js'
+  );
+  const hh = await makeHousehold('upcoming-past');
+  const acct = await seedAccount(models, hh.household.id, hh.user.id, 'Brokerage', 'UPC3');
+  const sec = await seedSecurity(models, hh.household.id, 'PST', 'Past Corp', 'stock', 'USD');
+  await seedHolding(models, {
+    accountId: acct.id,
+    householdId: hh.household.id,
+    securityId: sec.id,
+    statementDate: '2026-01-01',
+    quantity: 30,
+  });
+  // Both ex-date and payment-date in the past → must not appear.
+  await seedDividend(models, {
+    securityId: sec.id,
+    exDividendDate: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10),
+    paymentDate: new Date(Date.now() - 23 * 86400000).toISOString().slice(0, 10),
+    amount: 0.5,
+    currency: 'USD',
+  });
+  // NULL payment_date with a past ex-date → must not appear via fallback either.
+  await seedDividend(models, {
+    securityId: sec.id,
+    exDividendDate: new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10),
+    paymentDate: null,
+    amount: 0.4,
+    currency: 'USD',
+  });
+
+  const res = await hh.agent.get('/api/dividends?status=upcoming');
+  assert.equal(res.status, 200, res.text);
+  const row = res.body.data.find((d: { symbol: string }) => d.symbol === 'PST');
+  assert.equal(row, undefined, `PST should be excluded but found ${JSON.stringify(row)}`);
+});
+
 test('notifyUnmatchedDividends fires once per row after grace window (AC #9)', async () => {
   const { seedAccount, seedSecurity, seedHolding, seedDividend } = await import(
     './portfolioFixtures.js'
