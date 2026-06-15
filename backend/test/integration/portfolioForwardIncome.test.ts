@@ -172,8 +172,18 @@ test('FX converts USD income to CAD using a seeded rate', async () => {
     currency: 'USD',
   });
 
-  // Quarterly dividends $0.80/share (=$3.20/year * 50 = $160 USD) — within last 12 months
-  const quarters = ['2025-06-15', '2025-09-15', '2025-12-15', '2026-03-15'];
+  // Quarterly dividends $0.80/share (=$3.20/year * 50 = $160 USD), anchored to the
+  // run date so all four stay inside the endpoint's trailing-365-day window. The
+  // old hardcoded dates rotted: the earliest ('2025-06-15') landed exactly on the
+  // asOf-365d boundary once "now" reached 2026-06-15 and dropped out, leaving 3
+  // quarters ($120) and breaking the >140 assertion. Offsets 1/4/7/10 months back
+  // keep all four comfortably in-window for any run date (matching Test 3 above).
+  const now = new Date();
+  const quarters = [1, 4, 7, 10].map((i) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 15))
+      .toISOString()
+      .slice(0, 10),
+  );
   for (const date of quarters) {
     await seedDividend(models, { securityId: vti.id, exDividendDate: date, amount: 0.80, currency: 'USD' });
   }
