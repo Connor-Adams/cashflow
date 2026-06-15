@@ -2376,14 +2376,32 @@ router.get('/performance', async (req, res, next) => {
       '1Y': { from: addDaysIso(today, -365), to: today },
       'All': { from: '1970-01-01', to: today },
     };
+    // Case-insensitive lookup so 'ALL', 'all', 'All' (etc.) all resolve to the
+    // canonical preset key. Without this, an unrecognized-casing range yielded
+    // `undefined` and the downstream `.from` access threw a 500 (issue #552).
+    const presetKeyByLower = new Map(
+      (Object.keys(presetRanges) as Array<keyof typeof presetRanges>).map((k) => [k.toLowerCase(), k]),
+    );
+
     let selectedRange = { from: '', to: '' };
-    if (range === 'custom') {
+    // The canonical range echoed back in the response (normalized casing).
+    let resolvedRange: PortfolioPerformanceRange;
+    if (typeof range === 'string' && range.toLowerCase() === 'custom') {
       const from = req.query.from as string | undefined;
       const to = req.query.to as string | undefined;
       if (!from || !to) { res.status(400).json({ error: 'from and to required for custom range' }); return; }
       selectedRange = { from, to };
+      resolvedRange = 'custom';
     } else {
-      selectedRange = presetRanges[range as keyof typeof presetRanges];
+      const matchedKey = typeof range === 'string' ? presetKeyByLower.get(range.toLowerCase()) : undefined;
+      if (!matchedKey) {
+        res.status(400).json({
+          error: `Unrecognized range '${String(range)}'. Expected one of: 1M, 3M, YTD, 1Y, All, custom.`,
+        });
+        return;
+      }
+      selectedRange = presetRanges[matchedKey];
+      resolvedRange = matchedKey;
     }
 
     const widestFrom = (['1M', '3M', 'YTD', '1Y', 'All'] as const).reduce(
@@ -2542,7 +2560,7 @@ router.get('/performance', async (req, res, next) => {
     };
 
     const response: PortfolioPerformance = {
-      range,
+      range: resolvedRange,
       stats: selectedStats,
       presetStats,
       series,
