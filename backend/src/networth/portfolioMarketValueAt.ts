@@ -1,5 +1,6 @@
 import { Op } from 'sequelize';
 import { latestActivePositions } from '../portfolio/latestHoldings';
+import { resolveHoldingMarketValue } from '../portfolio/valuation';
 
 export type PortfolioRow = {
   accountId: number;
@@ -118,11 +119,19 @@ export async function portfolioMarketValueAt(
     const importedValue = n(h.marketValue);
     const currency = price?.currency || h.currency;
 
+    // Quote-vs-broker sanity guard (issue #549): a live quote that diverges
+    // implausibly from the broker per-unit price is a symbol→ticker collision
+    // and must not override the broker-imported value. When neither a usable
+    // quote nor an imported value exists, emit a price_unavailable gap.
     let marketValue: number | null = null;
-    if (quotePrice != null) {
-      marketValue = quantity * quotePrice;
-    } else if (importedValue != null) {
-      marketValue = importedValue;
+    if (quotePrice != null || importedValue != null) {
+      const resolved = resolveHoldingMarketValue({
+        quantity,
+        importedValue,
+        importedPrice: n(h.price),
+        quotePrice,
+      });
+      marketValue = resolved.marketValue;
     }
 
     if (marketValue == null) {
