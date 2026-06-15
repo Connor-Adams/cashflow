@@ -137,6 +137,8 @@ function synthesizeDescription(row: WsActivitiesExportRow, type: ActivityType): 
         ? `${subj}: Staking reward${qty ? ` ${qty}` : ''}`
         : 'Staking reward';
     case 'transfer':
+    case 'transfer_in':
+    case 'transfer_out':
       return subj ? `${subj}: Security transfer` : 'Transfer';
     case 'other':
       return `${row.activity_type}${row.activity_sub_type ? ` (${row.activity_sub_type})` : ''}${
@@ -185,7 +187,7 @@ export function parseActivitiesExportRow(
     };
   }
 
-  const activityType = cls.type;
+  let activityType = cls.type;
   const tradeDate = row.transaction_date.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) {
     return {
@@ -218,6 +220,15 @@ export function parseActivitiesExportRow(
   // the sign so cross-source identity matches.
   const rawQty = QUANTITY_TYPES.has(activityType) ? num(row.quantity) : null;
   const quantity = rawQty == null ? null : Math.abs(rawQty);
+  // Fold SecurityTransfer to the directional vocabulary the monthly-statement
+  // PDF parser emits (transfer_in / transfer_out). The fuzzy cross-source
+  // matcher keys on activityType, so a security transfer present in BOTH the
+  // activities-export CSV and the monthly PDF would otherwise miss dedup
+  // ('transfer' vs 'transfer_in') and double-count. Direction is the sign of
+  // the share quantity: the export signs shares leaving the account negative.
+  if (activityType === 'transfer' && rawQty != null && rawQty !== 0) {
+    activityType = rawQty < 0 ? 'transfer_out' : 'transfer_in';
+  }
   const price = num(row.unit_price);
   const commission = num(row.commission);
   const amount = num(row.net_cash_amount);
