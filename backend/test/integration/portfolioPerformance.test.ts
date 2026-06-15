@@ -257,3 +257,30 @@ test('benchmark Security missing → caveats.benchmarkIsPartial=true', async () 
   assert.equal(res.body.caveats.benchmarkIsPartial, true, 'benchmarkIsPartial should be true when Security is missing');
   assert.equal(res.body.caveats.benchmarkSymbol, 'SPY');
 });
+
+// ─── Test 9: range key is case-insensitive (issue #552) ──────────────────────
+
+test('range=ALL / all / All all resolve to the all-time range (200, not 500)', async () => {
+  const { agent } = await makeHousehold('range-case');
+
+  for (const variant of ['ALL', 'all', 'All']) {
+    const res = await agent.get(`/api/portfolio/performance?range=${variant}`);
+    assert.equal(res.status, 200, `range=${variant} should return 200, got ${res.status}`);
+    // Response echoes the canonical 'All' key regardless of input casing.
+    assert.equal(res.body.range, 'All', `range=${variant} should resolve to canonical 'All'`);
+  }
+});
+
+// ─── Test 10: unknown range returns 400, not 500 (issue #552) ────────────────
+
+test('unknown range returns 400 with a descriptive message (not 500)', async () => {
+  const { agent } = await makeHousehold('range-unknown');
+
+  const res = await agent.get('/api/portfolio/performance?range=BOGUS');
+  assert.equal(res.status, 400, `Unknown range should return 400, got ${res.status}`);
+  assert.match(
+    res.body.error ?? '',
+    /Unrecognized range/i,
+    'Error message should describe the unrecognized range',
+  );
+});
