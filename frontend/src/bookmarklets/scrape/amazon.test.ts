@@ -91,4 +91,17 @@ describe('extractAmazonOrdersFromDom', () => {
     expect(orders[0].vendorOrderId).toBe('111-1111111-1111111')
     expect(orders[1].vendorOrderId).toBe('222-2222222-2222222')
   })
+
+  it('returns paymentLast4: null when a 4-digit number appears only in a product title, not as card phrasing', () => {
+    const html = `<div class="order-card">
+      <div class="order-header">
+        <div class="a-column"><span class="label">Order placed</span><span class="value">March 1, 2026</span></div>
+        <div class="a-column"><span class="label">Total</span><span class="value">US$29.99</span></div>
+      </div>
+      <div class="order-card__list-item"><a class="yohtmlc-product-title">Echo Dot 2024</a></div>
+    </div>`
+    const orders = extractAmazonOrdersFromDom(doc(html))
+    expect(orders).toHaveLength(1)
+    expect(orders[0].paymentLast4).toBeNull()
+  })
 })

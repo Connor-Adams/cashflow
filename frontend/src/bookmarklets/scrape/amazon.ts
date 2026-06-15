@@ -23,7 +23,7 @@ function parseTotal(text: string): number | null {
  *  household default — and let the user correct outliers on the order. */
 export function parseCurrencyCode(text: string): string {
   const t = text.toUpperCase();
-  if (/CDN\$|CA\$|C\$|CAD/.test(t)) return 'CAD';
+  if (/CDN\$|CA\$|CAD/.test(t)) return 'CAD';
   if (/US\$|USD/.test(t)) return 'USD';
   if (/£|GBP/.test(t)) return 'GBP';
   if (/€|EUR/.test(t)) return 'EUR';
@@ -36,12 +36,12 @@ function parseMoneyFrom(el: Element | null | undefined): number | null {
 }
 
 function last4From(text: string): string | null {
-  return text.match(/ending in\s*(\d{4})/i)?.[1] ?? text.match(/\b(\d{4})\b/)?.[1] ?? null;
+  return text.match(/ending in\s*(\d{4})/i)?.[1] ?? null;
 }
 
 function extractItems(card: Element): CapturedItem[] {
   const titleEls = Array.from(
-    card.querySelectorAll('.yohtmlc-product-title, a.yohtmlc-product-title, .a-link-normal.yohtmlc-product-title'),
+    card.querySelectorAll('.yohtmlc-product-title'),
   );
   return titleEls
     .map((titleEl): CapturedItem | null => {
