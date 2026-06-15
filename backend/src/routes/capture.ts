@@ -8,6 +8,7 @@ import { hashCaptureToken, mintCaptureTokenPlaintext } from '../auth/captureToke
 import { captureAuth } from '../auth/captureAuth';
 import { captureOrders, type CapturedOrderInput, type CaptureResult } from '../import/vendorCapture';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
+import { runAmazonMatching } from '../amazon/matcher';
 
 class CapturePayloadError extends Error {
   constructor(message: string) {
@@ -28,7 +29,7 @@ async function processCapturePayload(args: {
   householdId: number;
   userId: number;
   sourcePrefix: string;
-}): Promise<CaptureResult> {
+}): Promise<CaptureResult & { matchSuggested: number }> {
   const body = (args.body ?? {}) as Record<string, unknown>;
   const vendor = String(body.vendor ?? '').trim().toLowerCase();
   if (vendor !== 'amazon' && vendor !== 'apple') {
@@ -110,7 +111,13 @@ async function processCapturePayload(args: {
     });
   }
 
-  return result;
+  let matchSuggested = 0;
+  if (vendor === 'amazon') {
+    const match = await runAmazonMatching({ householdId: args.householdId });
+    matchSuggested = match.suggested;
+  }
+
+  return { ...result, matchSuggested };
 }
 
 const router = Router();
@@ -232,11 +239,14 @@ router.options('/orders', captureCors);
 router.post('/orders', captureCors, captureOrdersLimiter, captureAuth, async (req, res, next) => {
   try {
     const { user, household } = req.captureAuth!;
+    const client = String((req.body as { client?: unknown } | undefined)?.client ?? '')
+      .trim()
+      .toLowerCase();
     const result = await processCapturePayload({
       body: req.body,
       householdId: household.id,
       userId: user.id,
-      sourcePrefix: 'bookmarklet',
+      sourcePrefix: client === 'extension' ? 'extension' : 'bookmarklet',
     });
     res.json(result);
   } catch (e) {
