@@ -551,6 +551,75 @@ export function aggregateSpendByCategory(
   return out;
 }
 
+/** One refund's net-back: a positive amount keyed by the ORIGINAL purchase's
+ *  (currency, category) so it offsets the bucket the purchase landed in. */
+export type RefundNet = {
+  amount: unknown;
+  currency: string;
+  category: string | null;
+};
+
+/**
+ * Net refunds out of an aggregated spend map IN PLACE, subtracting only the
+ * refunded amount from the matching (currency, category) bucket — never the
+ * whole original purchase. A $100 charge with a $30 partial refund leaves $70
+ * of spend; a full $100 refund leaves $0. The old `excludeRefundedPurchases`
+ * path dropped the entire original purchase row, which understated spend for
+ * partial refunds.
+ *
+ * Each refund is keyed by the ORIGINAL purchase's category/currency (resolved
+ * via `linkedTransactionId`), so the offset hits the same bucket the purchase
+ * contributed to. Buckets are clamped at 0 so an over-refund can't push spend
+ * negative. Refunds with no matching bucket are ignored.
+ *
+ * Pure helper exported so the route + cron share one definition and it can be
+ * unit-tested without a DB.
+ */
+export function netRefundsFromSpend(
+  spendByCategory: Map<
+    string,
+    { currency: string; category: string | null; spent: number }
+  >,
+  refunds: RefundNet[],
+): void {
+  for (const refund of refunds) {
+    const refundAmount = num(refund.amount);
+    if (refundAmount == null || refundAmount <= 0) continue;
+    const key = `${refund.currency}\0${refund.category ?? ''}`;
+    const bucket = spendByCategory.get(key);
+    if (!bucket) continue;
+    bucket.spent = Math.max(0, bucket.spent - refundAmount);
+  }
+}
+
+/**
+ * Map raw refund rows (each with the original purchase id + refund amount)
+ * to `RefundNet`s keyed by the ORIGINAL purchase's (currency, category),
+ * resolved from the in-window transaction rows. Refunds whose original
+ * purchase isn't in the window (so it was never counted) are dropped — there
+ * is nothing to net. Pure + exported so route and cron share it.
+ */
+export function resolveRefundNets(
+  rows: Array<Pick<SpendRow, 'id' | 'currency' | 'finalCategory'>>,
+  refundRows: Array<{ linkedTransactionId: number; amount: unknown }>,
+): RefundNet[] {
+  const byId = new Map<number, { currency: string; category: string | null }>();
+  for (const row of rows) {
+    byId.set(row.id, { currency: row.currency, category: row.finalCategory });
+  }
+  const nets: RefundNet[] = [];
+  for (const refund of refundRows) {
+    const original = byId.get(refund.linkedTransactionId);
+    if (!original) continue;
+    nets.push({
+      amount: refund.amount,
+      currency: original.currency,
+      category: original.category,
+    });
+  }
+  return nets;
+}
+
 type BudgetForProgress = {
   id: number;
   category: string | null;
@@ -744,13 +813,13 @@ async function computeStatusForBudgets(
       });
       const explicitExcludedIds = excluded.map((row) => row.transactionId);
 
-      // Issue #215: when the budget opts in to excludeRefundedPurchases,
-      // also exclude the `linked_transaction_id` of every refund row in
-      // this household+currency+date window. The refund itself is already
-      // a positive-amount row that aggregateSpendByCategory ignores (it
-      // only counts amount<0). So zeroing out the original purchase is the
-      // only thing left to do for "this charge was refunded — don't count it".
-      let refundOriginalIds: number[] = [];
+      // Issue #215: when the budget opts in to excludeRefundedPurchases, fetch
+      // the refund rows in this household+currency+date window so we can net
+      // their amount back out below. We keep the ORIGINAL purchase counted and
+      // subtract only the refunded amount (netRefundsFromSpend) — dropping the
+      // whole original purchase understated spend on partial refunds.
+      let refundRows: Array<{ linkedTransactionId: number; amount: unknown }> =
+        [];
       if (budget.excludeRefundedPurchases) {
         const refunds = await Transaction.findAll({
           where: {
@@ -763,17 +832,21 @@ async function computeStatusForBudgets(
               [Op.lte]: bounds.periodEnd,
             },
           },
-          attributes: ['linkedTransactionId'],
+          attributes: ['linkedTransactionId', 'amount'],
           raw: true,
         });
-        refundOriginalIds = refunds
-          .map((r) => r.linkedTransactionId)
-          .filter((v): v is number => typeof v === 'number');
+        refundRows = refunds
+          .filter(
+            (r): r is typeof r & { linkedTransactionId: number } =>
+              typeof r.linkedTransactionId === 'number'
+          )
+          .map((r) => ({
+            linkedTransactionId: r.linkedTransactionId,
+            amount: r.amount,
+          }));
       }
 
-      const allExcludedIds = Array.from(
-        new Set<number>([...explicitExcludedIds, ...refundOriginalIds])
-      );
+      const allExcludedIds = Array.from(new Set<number>(explicitExcludedIds));
 
       const txWhere: WhereOptions = {
         ...householdWhere(req),
@@ -807,6 +880,11 @@ async function computeStatusForBudgets(
       const spendByCategory = aggregateSpendByCategory(
         rows as unknown as SpendRow[],
         itemContext
+      );
+      // Net the refunded amount back out of the original purchase's bucket.
+      netRefundsFromSpend(
+        spendByCategory,
+        resolveRefundNets(rows as unknown as SpendRow[], refundRows)
       );
       const [progress] = computeBudgetProgress(
         [

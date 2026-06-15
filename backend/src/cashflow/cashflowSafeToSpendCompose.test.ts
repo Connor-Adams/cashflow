@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { composeSafeToSpend } from './safeToSpend';
+import { composeSafeToSpend, proRateMonthlyToWindow } from './safeToSpend';
 
 function baseInput() {
   return {
@@ -117,6 +117,27 @@ test('composeSafeToSpend: echoes settings booleans back to caller', () => {
   assert.equal(r.settings.includeGoalContributions, true);
   assert.equal(r.settings.minimumCashBuffer, '100.0000');
   assert.equal(r.settings.safeToSpendWindowDays, 14);
+});
+
+// ---- proRateMonthlyToWindow ------------------------------------------------
+
+test('proRateMonthlyToWindow: scales a monthly amount by windowDays/30', () => {
+  // A 14-day window should reserve ~14/30 of the monthly savings target, the
+  // same way upcoming expenses only reflect the in-window occurrences.
+  assert.equal(proRateMonthlyToWindow(300, 14), 140);
+});
+
+test('proRateMonthlyToWindow: a 30-day window is the full monthly amount', () => {
+  assert.equal(proRateMonthlyToWindow(300, 30), 300);
+});
+
+test('proRateMonthlyToWindow: a 60-day window scales above one month', () => {
+  assert.equal(proRateMonthlyToWindow(300, 60), 600);
+});
+
+test('proRateMonthlyToWindow: zero/negative window clamps to 0', () => {
+  assert.equal(proRateMonthlyToWindow(300, 0), 0);
+  assert.equal(proRateMonthlyToWindow(300, -5), 0);
 });
 
 test('composeSafeToSpend: echoes window metadata back to caller', () => {

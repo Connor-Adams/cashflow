@@ -171,6 +171,35 @@ test('projection: invalid target_date treated like null', () => {
   assert.equal(p.status, 'active');
 });
 
+test('projection: projectedCompletionDate clamps to last valid day for short months', () => {
+  // today is Jan 31; one month of contribution finishes the goal. Adding a
+  // calendar month must clamp to Feb 28 (Feb has no 31st), NOT overflow into
+  // March 3 the way a raw Date(year, monthIndex, day) rollover would.
+  const p = projectGoal({
+    targetAmount: '100.0000',
+    currentAmount: '0.0000',
+    targetDate: null,
+    monthlyContribution: '100.0000',
+    today: '2026-01-31',
+  });
+  // 100/100 = 1 month => Jan 31 + 1mo, clamped to Feb 28 (2026 is not a leap year).
+  assert.equal(p.projectedCompletionDate, '2026-02-28');
+});
+
+test('projection: projectedCompletionDate clamps day-31 anchor across a multi-month span', () => {
+  // today is Jan 31; three months out lands on Apr 30 (April has 30 days),
+  // not May 1 from an overflow.
+  const p = projectGoal({
+    targetAmount: '300.0000',
+    currentAmount: '0.0000',
+    targetDate: null,
+    monthlyContribution: '100.0000',
+    today: '2026-01-31',
+  });
+  // 300/100 = 3 months => Jan 31 + 3mo, clamped to Apr 30.
+  assert.equal(p.projectedCompletionDate, '2026-04-30');
+});
+
 test('projection: negative current_amount clamped to 0 progress', () => {
   const p = projectGoal({
     targetAmount: '1000.0000',

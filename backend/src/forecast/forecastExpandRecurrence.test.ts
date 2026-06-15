@@ -242,6 +242,55 @@ test('expandRecurrence: window starts after expectedDate — emits from first in
   );
 });
 
+test('expandRecurrence: old DAILY seed still emits in-window occurrences past the MAX cap', () => {
+  // A daily charge seeded years before the window. The pre-window step count
+  // exceeds the internal MAX_OCCURRENCES cap, so a naive expander would burn
+  // the whole budget before reaching dateFrom and emit nothing. We must still
+  // see one occurrence per day inside the (short) window.
+  const event: PlannedEventLike = {
+    id: 20,
+    expectedDate: '2018-01-01',
+    recurrenceRule: 'FREQ=DAILY',
+    status: 'planned',
+  };
+  const occs = expandRecurrence(event, '2026-06-01', '2026-06-05');
+  assert.deepEqual(
+    occs.map((o) => o.date),
+    ['2026-06-01', '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05'],
+  );
+});
+
+test('expandRecurrence: old WEEKLY seed still emits in-window occurrences past the MAX cap', () => {
+  // A weekly seed ~40 years back exceeds the cap in pre-window steps. The
+  // window starts on a date that is an exact multiple of 7 days from the seed.
+  const event: PlannedEventLike = {
+    id: 21,
+    expectedDate: '1986-01-03', // a Friday
+    recurrenceRule: 'FREQ=WEEKLY',
+    status: 'planned',
+  };
+  // 1986-01-03 + 2109 weeks = 2026-06-05 (a Friday).
+  const occs = expandRecurrence(event, '2026-06-01', '2026-06-30');
+  assert.deepEqual(
+    occs.map((o) => o.date),
+    ['2026-06-05', '2026-06-12', '2026-06-19', '2026-06-26'],
+  );
+});
+
+test('expandRecurrence: COUNT still counts pre-window occurrences after fast-forward', () => {
+  // COUNT caps TOTAL occurrences including those before dateFrom. A daily seed
+  // with COUNT=3 starting before the window must not surface anything inside a
+  // later window — all three occurrences were consumed pre-window.
+  const event: PlannedEventLike = {
+    id: 22,
+    expectedDate: '2026-05-01',
+    recurrenceRule: 'FREQ=DAILY;COUNT=3',
+    status: 'planned',
+  };
+  const occs = expandRecurrence(event, '2026-06-01', '2026-06-30');
+  assert.equal(occs.length, 0);
+});
+
 test('expandRecurrence: invalid RRULE → returns no occurrences (defensive)', () => {
   // We never want to crash because of bad rule strings written by a user.
   const event: PlannedEventLike = {
