@@ -1,8 +1,8 @@
 /// <reference types="chrome" />
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const apiBaseEl = $('apiBase') as HTMLInputElement;
-const tokenEl = $('token') as HTMLInputElement;
-const statusEl = $('status') as HTMLElement;
+const apiBaseEl = $<HTMLInputElement>('apiBase');
+const tokenEl = $<HTMLInputElement>('token');
+const statusEl = $<HTMLElement>('status');
 
 function originPattern(apiBase: string): string {
   return `${new URL(apiBase).origin}/*`;
@@ -41,16 +41,33 @@ $('save').addEventListener('click', () => {
 $('test').addEventListener('click', () => {
   const apiBase = apiBaseEl.value.trim().replace(/\/$/, '');
   const token = tokenEl.value.trim();
-  void fetch(`${apiBase}/api/capture/orders`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ vendor: 'amazon', orders: [] }),
-  })
-    .then((r) => {
-      // Empty orders array is rejected with 400 by a VALID token; 401 means bad token.
-      statusEl.textContent = r.status === 401 ? 'Token rejected (401).' : 'Token accepted ✓';
+  if (!apiBase || !token) {
+    statusEl.textContent = 'Enter API base and token first.';
+    return;
+  }
+  let pattern: string;
+  try {
+    pattern = originPattern(apiBase);
+  } catch {
+    statusEl.textContent = 'API base must be a full URL (https://…).';
+    return;
+  }
+  chrome.permissions.contains({ origins: [pattern] }, (granted) => {
+    if (!granted) {
+      statusEl.textContent = 'Click "Save & grant access" first to authorize this URL.';
+      return;
+    }
+    void fetch(`${apiBase}/api/capture/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ vendor: 'amazon', orders: [] }),
     })
-    .catch((e) => {
-      statusEl.textContent = `Could not reach API: ${e instanceof Error ? e.message : String(e)}`;
-    });
+      .then((r) => {
+        // A VALID token rejects the empty orders array with 400; 401 means bad token.
+        statusEl.textContent = r.status === 401 ? 'Token rejected (401).' : 'Token accepted ✓';
+      })
+      .catch((e) => {
+        statusEl.textContent = `Could not reach API: ${e instanceof Error ? e.message : String(e)}`;
+      });
+  });
 });

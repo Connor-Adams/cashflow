@@ -5,7 +5,7 @@
   "description": "Captures your Amazon orders into Cashflow when you open Your Orders.",
   "permissions": ["storage"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
-  "background": { "service_worker": "background.js", "type": "module" },
+  "background": { "service_worker": "background.js" },
   "options_page": "options.html",
   "action": { "default_title": "Cashflow Amazon Capture" },
   "content_scripts": [
