@@ -164,6 +164,26 @@ test('Interest with null symbol matches candidate with null symbol', () => {
   assert.equal(out.kind, 'single-match');
 });
 
+test('Incoming null symbol, candidate has a symbol: NO match (would absorb a distinct security)', () => {
+  // Symbol-asymmetry bug: when the incoming row has no symbol the matcher
+  // applied no symbol constraint, so a symbol-less activity (e.g. a generic
+  // "Interest"/"Fee") could absorb a symbol-bearing candidate (a real
+  // security event) of the same qty + amount. Symbol compatibility must be
+  // both-null OR equal — a null vs a populated symbol is incompatible.
+  const out = pickFuzzyMatch(
+    [
+      candidate({
+        id: 1,
+        quantity: '2.04000000',
+        amount: '2.0400',
+        security: { symbol: 'AAPL' },
+      }),
+    ],
+    { symbol: null, quantity: 2.04, amount: 2.04 },
+  );
+  assert.equal(out.kind, 'no-match');
+});
+
 test('Dividend with null quantity matches candidate with null quantity', () => {
   // Old parser stores dividend rows with quantity=NULL (no share count in description).
   const out = pickFuzzyMatch(

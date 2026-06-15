@@ -201,9 +201,15 @@ export async function findExistingForDedup(args: {
       transaction: args.t,
     });
     const incomingText = normalizePendingMatchText(args.incomingMerchantRaw);
+    const incomingCcy =
+      args.incomingCurrency != null ? String(args.incomingCurrency).toUpperCase() : null;
     const match = windowCandidates.find(
       (row) =>
         Number(row.amount) === args.incomingAmount &&
+        // Currency must match: a posted USD row must not promote/absorb a
+        // pending CAD hold that happens to share the same numeric amount +
+        // merchant. The window SQL doesn't filter currency, so guard here.
+        (incomingCcy == null || String(row.currency).toUpperCase() === incomingCcy) &&
         (normalizePendingMatchText(row.merchantRaw) === incomingText ||
           normalizePendingMatchText(row.merchantClean) === incomingText),
     );

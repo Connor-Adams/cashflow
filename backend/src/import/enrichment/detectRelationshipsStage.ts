@@ -154,8 +154,11 @@ function findTransferSibling(input: DetectRelationshipsInput): RelationshipCandi
       .filter((c) => c.accountId !== input.accountId)
       .filter((c) => input.householdAccountIds.includes(c.accountId))
       .filter((c) => c.sourceReference != null && c.sourceReference === input.sourceReference)
-      .filter((c) => daysBetween(input.date, c.date) <= input.transferWindowDays)
-      .sort((a, b) => daysBetween(input.date, a.date) - daysBetween(input.date, b.date));
+      // Business-day window (matches the amount-equality path below) so a
+      // weekend-spanning FX pair (Fri-out / Mon-in = 1 business day, 3 calendar
+      // days) sharing a sourceReference still falls inside the default window.
+      .filter((c) => businessDaysBetween(input.date, c.date) <= input.transferWindowDays)
+      .sort((a, b) => businessDaysBetween(input.date, a.date) - businessDaysBetween(input.date, b.date));
     if (byRef[0]) return byRef[0];
   }
   // 2) Amount-equality fallback: same-currency transfers (e.g. RBC → WS) that
