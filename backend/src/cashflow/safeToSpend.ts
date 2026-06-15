@@ -126,6 +126,26 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Nominal days per month used to prorate monthly amounts to the window. */
+const DAYS_PER_MONTH = 30;
+
+/**
+ * Prorate a per-MONTH amount down to the safe-to-spend window. A 14-day
+ * window reserves ~14/30 of the monthly figure, matching how upcoming
+ * expenses only reflect their in-window occurrences — otherwise a short
+ * window would still subtract a full month of goal contributions and
+ * understate safe-to-spend. Exported for unit coverage. Non-positive
+ * windows clamp to 0.
+ */
+export function proRateMonthlyToWindow(
+  monthlyAmount: number,
+  windowDays: number,
+): number {
+  if (!Number.isFinite(monthlyAmount) || !Number.isFinite(windowDays)) return 0;
+  if (windowDays <= 0) return 0;
+  return (monthlyAmount * windowDays) / DAYS_PER_MONTH;
+}
+
 function addDaysIso(iso: string, days: number): string {
   const [y, m, d] = iso.split('-').map((p) => parseInt(p, 10));
   const ms = Date.UTC(y, m - 1, d) + days * MS_PER_DAY;
@@ -257,11 +277,16 @@ export async function getUpcomingRequiredExpenses(
  * `monthlyContribution` if the projection didn't compute one (e.g. no
  * targetDate). Goals without either are skipped — they're treated as
  * passive savings, not forced expenses.
+ *
+ * The summed monthly figure is prorated to `windowDays` so it lines up with
+ * the window-scoped upcoming-expenses total — a 14-day window only reserves
+ * ~14/30 of a month of contributions, not a whole month.
  */
 export async function getRequiredSavingsContributions(
   householdId: number,
   currency: string,
   asOfDate: string,
+  windowDays: number,
 ): Promise<number> {
   const rows = await FinancialGoal.findAll({
     where: { householdId, status: 'active', currency },
@@ -288,7 +313,7 @@ export async function getRequiredSavingsContributions(
       if (Number.isFinite(n) && n > 0) totalU += toUnits(n);
     }
   }
-  return fromUnits(totalU);
+  return proRateMonthlyToWindow(fromUnits(totalU), windowDays);
 }
 
 /**
@@ -369,6 +394,7 @@ export async function computeSafeToSpend(params: {
       params.householdId,
       currency,
       params.asOfDate,
+      windowDays,
     ),
     getExpectedCreditCardPayments(
       params.householdId,

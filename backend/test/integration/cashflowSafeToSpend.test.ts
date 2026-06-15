@@ -301,9 +301,10 @@ test('financial goal required monthly contribution is subtracted', async () => {
 
   const res = await u.agent.get('/api/forecast/safe-to-spend?asOfDate=2026-06-01');
   assert.equal(res.status, 200);
-  // 5000 - 0 - 300 goal - 0 - 0 = 4700
-  assert.equal(res.body.breakdown.requiredSavingsContributions, 300);
-  assert.equal(res.body.value, 4700);
+  // $300/mo goal contribution prorated to the default 14-day window:
+  // 300 * 14/30 = 140. Then 5000 - 0 - 140 goal - 0 - 0 = 4860.
+  assert.equal(res.body.breakdown.requiredSavingsContributions, 140);
+  assert.equal(res.body.value, 4860);
 });
 
 test('includeGoalContributions=false zeroes the goal deduction', async () => {

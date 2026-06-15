@@ -5,6 +5,7 @@ import {
   validateBudgetPatch,
   aggregateSpendByCategory,
   computeBudgetProgress,
+  netRefundsFromSpend,
   currentMonthBounds,
   currentPeriodBounds,
   periodElapsedPercent,
@@ -236,6 +237,77 @@ test('aggregateSpendByCategory: different currencies are kept separate', () => {
   assert.equal(out.size, 2);
   assert.equal(out.get('CAD\0Travel')!.spent, 100);
   assert.equal(out.get('USD\0Travel')!.spent, 50);
+});
+
+// ---- netRefundsFromSpend -----------------------------------------------
+
+test('netRefundsFromSpend: a PARTIAL refund nets only the refunded amount', () => {
+  // $100 purchase in Groceries, $30 refunded → spend should drop to $70,
+  // NOT to $0 (the old "exclude whole original purchase" behaviour).
+  const spend = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -100 },
+  ]);
+  netRefundsFromSpend(spend, [
+    { amount: 30, currency: 'CAD', category: 'Groceries' },
+  ]);
+  assert.equal(spend.get('CAD\0Groceries')!.spent, 70);
+});
+
+test('netRefundsFromSpend: a FULL refund zeroes the original spend', () => {
+  const spend = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -200 },
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -80 },
+  ]);
+  netRefundsFromSpend(spend, [
+    { amount: 200, currency: 'CAD', category: 'Groceries' },
+  ]);
+  // 280 - 200 = 80
+  assert.equal(spend.get('CAD\0Groceries')!.spent, 80);
+});
+
+test('netRefundsFromSpend: over-refund clamps the bucket at 0 (never negative)', () => {
+  const spend = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -50 },
+  ]);
+  netRefundsFromSpend(spend, [
+    { amount: 80, currency: 'CAD', category: 'Groceries' },
+  ]);
+  assert.equal(spend.get('CAD\0Groceries')!.spent, 0);
+});
+
+test('netRefundsFromSpend: refund matches on (currency, category) — others untouched', () => {
+  const spend = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -100 },
+    { currency: 'CAD', finalCategory: 'Travel', amount: -60 },
+    { currency: 'USD', finalCategory: 'Groceries', amount: -40 },
+  ]);
+  netRefundsFromSpend(spend, [
+    { amount: 25, currency: 'CAD', category: 'Groceries' },
+  ]);
+  assert.equal(spend.get('CAD\0Groceries')!.spent, 75);
+  assert.equal(spend.get('CAD\0Travel')!.spent, 60);
+  assert.equal(spend.get('USD\0Groceries')!.spent, 40);
+});
+
+test('netRefundsFromSpend: null-category refund nets the null bucket', () => {
+  const spend = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: null, amount: -40 },
+  ]);
+  netRefundsFromSpend(spend, [
+    { amount: 15, currency: 'CAD', category: null },
+  ]);
+  assert.equal(spend.get('CAD\0')!.spent, 25);
+});
+
+test('netRefundsFromSpend: refund with no matching bucket is a no-op', () => {
+  const spend = aggregateSpendByCategory([
+    { currency: 'CAD', finalCategory: 'Groceries', amount: -100 },
+  ]);
+  netRefundsFromSpend(spend, [
+    { amount: 30, currency: 'CAD', category: 'Dining' },
+  ]);
+  assert.equal(spend.get('CAD\0Groceries')!.spent, 100);
+  assert.equal(spend.has('CAD\0Dining'), false);
 });
 
 // ---- computeBudgetProgress ---------------------------------------------

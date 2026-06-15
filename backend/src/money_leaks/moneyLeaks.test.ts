@@ -79,6 +79,64 @@ test('detectMoneyLeaks surfaces small_subscription when annualized < threshold',
   assert.equal(SMALL_SUBSCRIPTION_ANNUAL_MAX, 120);
 });
 
+test('detectMoneyLeaks price_increase describes annual cadence as "per year"', () => {
+  const result = detectMoneyLeaks({
+    subscriptions: [
+      sub({
+        id: 9,
+        priceChangeDetected: true,
+        cadence: 'annual',
+        amount: 99,
+        annualizedCost: 99,
+      }),
+    ],
+    recurringGroups: [],
+    deliverySpend: [],
+    dismissals: new Set(),
+  });
+  const leak = result.items.find(
+    (i) => i.leakType === 'subscription_price_increase',
+  );
+  assert.ok(leak);
+  // Annual subs are NOT weekly — the description must say "per year".
+  assert.match(leak!.description, /per year/);
+  assert.doesNotMatch(leak!.description, /per week/);
+});
+
+test('detectMoneyLeaks small_subscription describes quarterly/semiannual cadence correctly', () => {
+  const result = detectMoneyLeaks({
+    subscriptions: [
+      sub({
+        id: 10,
+        cadence: 'quarterly',
+        amount: 25,
+        annualizedCost: 100,
+        merchantName: 'QuarterlyBox',
+        category: 'Cloud',
+      }),
+      sub({
+        id: 11,
+        cadence: 'semiannual',
+        amount: 40,
+        annualizedCost: 80,
+        merchantName: 'HalfYearly',
+        category: 'News',
+      }),
+    ],
+    recurringGroups: [],
+    deliverySpend: [],
+    dismissals: new Set(),
+  });
+  const quarterly = result.items.find((i) => i.identityKey === '10');
+  const semiannual = result.items.find((i) => i.identityKey === '11');
+  assert.ok(quarterly);
+  assert.ok(semiannual);
+  assert.match(quarterly!.description, /per quarter/);
+  assert.match(semiannual!.description, /per 6 months/);
+  assert.doesNotMatch(quarterly!.description, /per week/);
+  assert.doesNotMatch(semiannual!.description, /per week/);
+});
+
 test('detectMoneyLeaks skips small_subscription above threshold', () => {
   const result = detectMoneyLeaks({
     subscriptions: [
@@ -302,6 +360,24 @@ test('detectMoneyLeaks emits delivery_fee_high when total delivery spend > thres
   assert.equal(dlv.length, 1);
   assert.equal(dlv[0].currency, 'CAD');
   assert.equal(dlv[0].identityKey, 'CAD|delivery');
+});
+
+test('detectMoneyLeaks delivery copy reports order spend, not "delivery-fee" charges', () => {
+  // total90d/transactionCount are whole delivery-order totals (the aggregator
+  // sums each order, not a fee line). The copy must not call them
+  // "delivery-fee charges" — that misrepresents the metric.
+  const result = detectMoneyLeaks({
+    subscriptions: [],
+    recurringGroups: [],
+    deliverySpend: [{ currency: 'CAD', total90d: 200, transactionCount: 20 }],
+    dismissals: new Set(),
+  });
+  const dlv = result.items.find((i) => i.leakType === 'delivery_fee_high');
+  assert.ok(dlv);
+  assert.doesNotMatch(dlv!.description, /delivery-fee charges/);
+  // The order count and total spend are still surfaced.
+  assert.match(dlv!.description, /20 delivery orders/);
+  assert.match(dlv!.description, /200\.00 CAD/);
 });
 
 test('detectMoneyLeaks skips delivery_fee_high when below threshold', () => {

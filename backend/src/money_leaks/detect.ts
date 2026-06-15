@@ -173,6 +173,29 @@ function annualToMonthly(annual: number): number {
   return annual / 12;
 }
 
+/**
+ * Human-readable per-period phrase for a subscription cadence, used in leak
+ * copy like "$9.99 per month". Covers every SubscriptionCadence — the old
+ * `cadence === 'monthly' ? 'month' : 'week'` binarized everything else, so a
+ * yearly sub read as "per week". Falls back to "month" for any unknown value.
+ */
+function cadenceLabel(cadence: SubscriptionCadence): string {
+  switch (cadence) {
+    case 'weekly':
+      return 'week';
+    case 'monthly':
+      return 'month';
+    case 'quarterly':
+      return 'quarter';
+    case 'semiannual':
+      return '6 months';
+    case 'annual':
+      return 'year';
+    default:
+      return 'month';
+  }
+}
+
 function pushTotal(
   totals: Map<string, LeakTotals['byCurrency'][number]>,
   currency: string,
@@ -242,7 +265,7 @@ export function detectMoneyLeaks(
       leakType: 'subscription_price_increase',
       identityKey,
       title: `${sub.merchantName} price went up`,
-      description: `Your ${sub.merchantName} subscription is now ${sub.amount.toFixed(2)} ${sub.currency} per ${sub.cadence === 'monthly' ? 'month' : 'week'}.`,
+      description: `Your ${sub.merchantName} subscription is now ${sub.amount.toFixed(2)} ${sub.currency} per ${cadenceLabel(sub.cadence)}.`,
       currency: sub.currency,
       monthlyImpact: monthly,
       annualImpact: annual,
@@ -328,7 +351,7 @@ export function detectMoneyLeaks(
       leakType: 'small_subscription',
       identityKey,
       title: `${sub.merchantName} is a small recurring charge`,
-      description: `Costs ${sub.amount.toFixed(2)} ${sub.currency} per ${sub.cadence === 'monthly' ? 'month' : 'week'} (${annual.toFixed(2)} ${sub.currency}/year). Worth a look.`,
+      description: `Costs ${sub.amount.toFixed(2)} ${sub.currency} per ${cadenceLabel(sub.cadence)} (${annual.toFixed(2)} ${sub.currency}/year). Worth a look.`,
       currency: sub.currency,
       monthlyImpact: monthly,
       annualImpact: annual,
@@ -400,8 +423,12 @@ export function detectMoneyLeaks(
     items.push({
       leakType: 'delivery_fee_high',
       identityKey,
-      title: `Delivery fees adding up in ${bucket.currency}`,
-      description: `${bucket.transactionCount} delivery-fee charges in the last 90 days totalling ${bucket.total90d.toFixed(2)} ${bucket.currency} (~${annual.toFixed(0)}/year).`,
+      // total90d/transactionCount are whole delivery-ORDER totals (the route
+      // sums each matched order, not a separate fee line), so the copy
+      // describes delivery spend, not a "fee" — calling it a fee overstated
+      // what the number measures.
+      title: `Delivery spending adding up in ${bucket.currency}`,
+      description: `${bucket.transactionCount} delivery orders in the last 90 days totalling ${bucket.total90d.toFixed(2)} ${bucket.currency} (~${annual.toFixed(0)}/year).`,
       currency: bucket.currency,
       monthlyImpact: monthly,
       annualImpact: annual,

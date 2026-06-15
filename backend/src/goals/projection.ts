@@ -104,6 +104,32 @@ function formatISODate(year: number, monthIndex: number, day: number): string {
   return `${y}-${m}-${dd}`;
 }
 
+/** Last day of a (year, 0-indexed month) — handles leap years via Date. */
+function daysInMonth(year: number, monthIndex: number): number {
+  // Day 0 of the next month = last day of the requested month.
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
+/**
+ * Add `months` calendar months to (year, monthIndex0, day), clamping the
+ * day-of-month to the last valid day of the resulting month. Jan 31 + 1
+ * month is Feb 28/29, never an overflow into March. Mirrors the clamp logic
+ * the forecast recurrence expander uses, so projection dates stay
+ * calendar-correct instead of relying on Date's silent day overflow.
+ */
+function addMonthsClamped(
+  year: number,
+  monthIndex: number,
+  day: number,
+  months: number,
+): string {
+  const total = year * 12 + monthIndex + months;
+  const ny = Math.floor(total / 12);
+  const nm = ((total % 12) + 12) % 12;
+  const clampedDay = Math.min(day, daysInMonth(ny, nm));
+  return formatISODate(ny, nm, clampedDay);
+}
+
 /**
  * Calendar-month delta between two YYYY-MM-DD dates: `(b - a)` in months,
  * dropping the day-of-month for simplicity. Always >= 0; returns 0 when
@@ -177,10 +203,11 @@ export function projectGoal(input: GoalProjectionInput): GoalProjection {
   let projectedCompletion: string | null = null;
   if (safeMonthly != null && safeMonthly > 0 && today) {
     const monthsToFinish = Math.ceil(remaining / safeMonthly);
-    projectedCompletion = formatISODate(
+    projectedCompletion = addMonthsClamped(
       today.year,
-      today.month + monthsToFinish,
+      today.month,
       today.day,
+      monthsToFinish,
     );
   }
 

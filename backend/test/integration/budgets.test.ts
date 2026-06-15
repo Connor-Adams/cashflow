@@ -703,6 +703,46 @@ test('excludeRefundedPurchases: subtracts linked original from budget spend when
   assert.equal(row!.excludeRefundedPurchases, true);
 });
 
+test('excludeRefundedPurchases: a PARTIAL refund nets only the refunded amount', async () => {
+  const created = await primaryAgent.post('/api/budgets').send({
+    category: 'PartialRefund-Test',
+    currency: 'CAD',
+    amount: 500,
+    excludeRefundedPurchases: true,
+  });
+  assert.equal(created.status, 201);
+  const budgetId = created.body.id as number;
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+
+  // $200 purchase, only $50 of it refunded → $150 should still count.
+  const refundedOriginalId = await createTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-05`,
+    'PartialRefund-Test',
+    -200
+  );
+  await createRefundLinkedTransaction(
+    primaryHouseholdId,
+    primaryAccountId,
+    `${y}-${m}-10`,
+    'PartialRefund-Test',
+    50,
+    refundedOriginalId
+  );
+
+  const res = await primaryAgent.get('/api/budgets/progress');
+  assert.equal(res.status, 200);
+  const items = res.body.items as Array<{ budgetId: number; spent: number }>;
+  const row = items.find((i) => i.budgetId === budgetId);
+  assert.ok(row, 'budget should appear in /progress');
+  // 150 not 0: only the $50 refunded amount nets out, not the whole $200.
+  assert.equal(row!.spent, 150);
+});
+
 test('excludeRefundedPurchases: default false keeps refunded original in budget spend', async () => {
   const created = await primaryAgent.post('/api/budgets').send({
     category: 'RefundNoExclude-Test',
