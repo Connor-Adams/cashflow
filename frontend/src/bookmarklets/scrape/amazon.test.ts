@@ -67,4 +67,28 @@ describe('extractAmazonOrdersFromDom', () => {
     expect(orders[0].currency).toBe('CAD')
     expect(orders[0].items[0]).toEqual({ title: 'Sticker', quantity: 1, unitPrice: null, totalPrice: null })
   })
+
+  it('extracts two distinct orders from a page with multiple order-card blocks', () => {
+    const html = `
+<div class="order-card js-order-card">
+  <div class="order-header">
+    <div class="a-column"><span class="label">Order placed</span><span class="value">January 10, 2026</span></div>
+    <div class="a-column"><span class="label">Total</span><span class="value">US$20.00</span></div>
+    <div class="a-column"><span class="label">Order #</span><span class="value">111-1111111-1111111</span></div>
+  </div>
+  <div class="order-card__list-item"><a class="yohtmlc-product-title">Widget A</a><span class="a-price"><span class="a-offscreen">US$20.00</span></span></div>
+</div>
+<div class="order-card js-order-card">
+  <div class="order-header">
+    <div class="a-column"><span class="label">Order placed</span><span class="value">February 20, 2026</span></div>
+    <div class="a-column"><span class="label">Total</span><span class="value">US$35.00</span></div>
+    <div class="a-column"><span class="label">Order #</span><span class="value">222-2222222-2222222</span></div>
+  </div>
+  <div class="order-card__list-item"><a class="yohtmlc-product-title">Widget B</a><span class="a-price"><span class="a-offscreen">US$35.00</span></span></div>
+</div>`
+    const orders = extractAmazonOrdersFromDom(doc(html))
+    expect(orders).toHaveLength(2)
+    expect(orders[0].vendorOrderId).toBe('111-1111111-1111111')
+    expect(orders[1].vendorOrderId).toBe('222-2222222-2222222')
+  })
 })
