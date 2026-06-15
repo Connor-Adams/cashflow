@@ -3,6 +3,7 @@ import { Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { resolveHouseholdToday } from '../time/householdToday';
+import { apiReadLimiter } from './apiRateLimit';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   summarizeOpenForContact,
@@ -35,7 +36,7 @@ router.get('/', async (req, res, next) => {
  * `ReimbursementView` so the frontend reuses the same shape it already
  * renders on /reimbursements.
  */
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', apiReadLimiter, async (req, res, next) => {
   try {
     currentAuth(req);
     const id = Number(req.params.id);

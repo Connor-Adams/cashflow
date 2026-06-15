@@ -52,7 +52,19 @@ before(async () => {
 
   // Pre-seed an FxRate row so we don't make real HTTP calls.
   // Rate: 1 USD = 1.3654 CAD.
-  const today = new Date().toISOString().slice(0, 10);
+  //
+  // Timezone-awareness (PR #614): GET /api/portfolio resolves its FX as-of
+  // date via resolveHouseholdToday — i.e. "today" in the household's zone
+  // (DEFAULT_TIMEZONE='America/Toronto' when unset), NOT UTC. ensureFxRate's
+  // cache bound is `ratedDate <= asOf`, so a rate dated at UTC-today would be
+  // *future* relative to the Toronto as-of during the 20:00-23:59 Toronto
+  // window (= next-day UTC) and get excluded -> cache miss -> real BoC fetch
+  // -> null unifiedTotal. Seed at the SAME resolved today the endpoint uses
+  // (household has no timezone -> default Toronto) so they agree at any clock.
+  // seedHousehold creates a Household with no timezone column -> default zone,
+  // matching the endpoint's resolveHouseholdToday(household) for this household.
+  const { resolveHouseholdToday } = await import('../../src/time/householdToday.js');
+  const today = resolveHouseholdToday({ timezone: null });
   await models.FxRate.create({
     fromCurrency: 'USD',
     toCurrency: 'CAD',

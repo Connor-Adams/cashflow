@@ -21,6 +21,7 @@ import {
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { resolveHouseholdToday } from '../time/householdToday';
+import { apiReadLimiter } from './apiRateLimit';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
 import { latestActivePositions } from '../portfolio/latestHoldings';
 import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
@@ -165,7 +166,7 @@ async function loadVisibleLatestHoldings(req: Request): Promise<{
   return { accounts, latestHoldings: latestActivePositions(snapshots) };
 }
 
-router.get('/', async (req, res, next) => {
+router.get('/', apiReadLimiter, async (req, res, next) => {
   try {
     const { accounts, latestHoldings } = await loadVisibleLatestHoldings(req);
     const accountIds = accounts.map((row) => row.id);
@@ -646,7 +647,7 @@ router.get('/income', async (req, res, next) => {
  * Sums quantity, cost basis, and market value across every account
  * that currently holds the security.
  */
-router.get('/by-security', async (req, res, next) => {
+router.get('/by-security', apiReadLimiter, async (req, res, next) => {
   try {
     const { accounts, latestHoldings } = await loadVisibleLatestHoldings(req);
     const accountById = new Map(accounts.map((a) => [a.id, a]));

@@ -6,6 +6,7 @@ import { Security } from '../models/Security';
 import { User } from '../models/User';
 import { ensureDailyPrices } from '../portfolio/backfill';
 import { DEFAULT_TIMEZONE } from '../time/householdToday';
+import { apiReadLimiter, apiWriteLimiter } from './apiRateLimit';
 
 const router = Router();
 
@@ -125,7 +126,7 @@ router.patch('/benchmark', async (req, res, next) => {
 // for server-side "today" derivation (audit wave 3); null means the server
 // falls back to DEFAULT_TIMEZONE. `effectiveTimezone` surfaces that resolved
 // value so the client doesn't have to know the default.
-router.get('/settings', async (req, res, next) => {
+router.get('/settings', apiReadLimiter, async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
     res.json({
@@ -140,7 +141,7 @@ router.get('/settings', async (req, res, next) => {
 
 // PATCH the household timezone. Accepts a valid IANA zone string, or null to
 // clear it (server then falls back to DEFAULT_TIMEZONE).
-router.patch('/timezone', async (req, res, next) => {
+router.patch('/timezone', apiWriteLimiter, async (req, res, next) => {
   try {
     const auth = currentAuth(req);
     const { timezone } = req.body as { timezone?: string | null };
