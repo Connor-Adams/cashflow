@@ -144,13 +144,25 @@ router.get('/', async (req, res, next) => {
         return;
       }
       const horizon = addDaysIso(today, 30);
+      // NULL-safe upcoming filter (#555): all imported dividends currently have a
+      // NULL payment_date (Yahoo chart events only carry the ex-date), so filtering
+      // on payment_date alone makes "upcoming" structurally empty. Fall back to the
+      // ex-dividend date when payment_date is absent — a future ex-date is a strong
+      // enough signal that the payout is still upcoming.
+      const inWindow = { [Op.gt]: today, [Op.lte]: horizon };
       const divs = await SecurityDividend.findAll({
         where: {
           securityId: { [Op.in]: securityIds },
-          paymentDate: { [Op.gt]: today, [Op.lte]: horizon },
+          [Op.or]: [
+            { paymentDate: inWindow },
+            { paymentDate: null, exDividendDate: inWindow },
+          ],
         },
         include: [{ association: 'security', attributes: ['symbol', 'name'] }],
-        order: [['paymentDate', 'ASC']],
+        // Order by the effective date (payment_date when present, else ex-date).
+        order: [
+          [SecurityDividend.sequelize!.fn('coalesce', SecurityDividend.sequelize!.col('payment_date'), SecurityDividend.sequelize!.col('ex_dividend_date')), 'ASC'],
+        ],
       });
       const data = divs.map((d) => {
         const sec = (d as unknown as { security?: { symbol?: string; name?: string } }).security;
