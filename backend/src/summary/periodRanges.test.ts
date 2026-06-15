@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { detectRangeKind } from './periodRanges';
 import { priorPeriod, samePeriodLastYear } from './periodRanges';
+import { typicalWindows } from './periodRanges';
 
 test('detectRangeKind identifies a full calendar month', () => {
   assert.equal(detectRangeKind('2026-05-01', '2026-05-31'), 'calendar-month');
@@ -63,4 +64,24 @@ test('samePeriodLastYear shifts calendar periods back one year, clamping Feb', (
     to: '2023-02-28',
   });
   assert.equal(samePeriodLastYear('2026-05-10', '2026-05-19', 'custom'), null);
+});
+
+test('typicalWindows returns up to 12 trailing complete months, newest first', () => {
+  const w = typicalWindows('2026-05-01', '2026-05-31', 'calendar-month');
+  assert.equal(w.minRequired, 3);
+  assert.equal(w.windows.length, 12);
+  assert.deepEqual(w.windows[0], { from: '2026-04-01', to: '2026-04-30' });
+  assert.deepEqual(w.windows[11], { from: '2025-05-01', to: '2025-05-31' });
+});
+
+test('typicalWindows returns up to 4 trailing quarters with min 2', () => {
+  const w = typicalWindows('2026-04-01', '2026-06-30', 'calendar-quarter');
+  assert.equal(w.minRequired, 2);
+  assert.equal(w.windows.length, 4);
+  assert.deepEqual(w.windows[0], { from: '2026-01-01', to: '2026-03-31' });
+});
+
+test('typicalWindows returns none for year and custom', () => {
+  assert.deepEqual(typicalWindows('2026-01-01', '2026-12-31', 'calendar-year').windows, []);
+  assert.deepEqual(typicalWindows('2026-05-10', '2026-05-19', 'custom').windows, []);
 });

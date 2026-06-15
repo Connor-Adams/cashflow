@@ -98,3 +98,39 @@ export function samePeriodLastYear(
   // calendar-year
   return { from: fmt(a.y - 1, 1, 1), to: fmt(a.y - 1, 12, 31) };
 }
+
+export type TypicalWindows = { windows: DateRange[]; minRequired: number };
+
+export function typicalWindows(
+  from: string,
+  to: string,
+  kind: PeriodRangeKind,
+): TypicalWindows {
+  const a = parts(from);
+  if (kind === 'calendar-month') {
+    const windows: DateRange[] = [];
+    let y = a.y;
+    let m = a.m;
+    for (let i = 0; i < 12; i++) {
+      m = m === 1 ? 12 : m - 1;
+      if (m === 12) y -= 1;
+      windows.push(monthRange(y, m));
+    }
+    return { windows, minRequired: 3 };
+  }
+  if (kind === 'calendar-quarter') {
+    const windows: DateRange[] = [];
+    let y = a.y;
+    let startM = a.m;
+    for (let i = 0; i < 4; i++) {
+      startM -= 3;
+      if (startM < 1) {
+        startM += 12;
+        y -= 1;
+      }
+      windows.push({ from: fmt(y, startM, 1), to: fmt(y, startM + 2, lastDay(y, startM + 2)) });
+    }
+    return { windows, minRequired: 2 };
+  }
+  return { windows: [], minRequired: Infinity };
+}
