@@ -65,9 +65,14 @@ netSpend  =  realCost  +  owedBack
 
 **Guards:**
 - **No double-count.** A transaction that is both reimbursable *and* partner-split
-  contributes its owed portion **once** — dedup by `transactionId`. Resolution
-  rule when both exist on one txn: take the reimbursable claim amount (explicit
-  claim wins over implicit split); document the chosen txn IDs path in tests.
+  contributes its owed portion **once** — dedup by `transactionId`. Precedence:
+  the **reimbursable claim amount wins** (explicit claim over implicit split); the
+  two are never summed for a single txn. This rule is **total and deterministic
+  regardless of the data** — if both never co-occur on one txn it is a harmless
+  no-op; if they do, it prevents the double-count. So the "do both ever co-occur?"
+  question does **not** gate the design; it is a one-line implementation-time
+  confirmation against prod (a `SELECT` for txns having both a `Reimbursement` row
+  and a non-null `partnerShareAmount`), not a design open question.
 - **Flow vs stock.** `owedBack` is a **flow** (loaned out *this period*). Show one
   separate **stock** figure — **owed to you overall** — total outstanding
   receivable across all time, from `/api/reimbursements/summary` (status ∈
@@ -108,8 +113,20 @@ typical baseline.
 `vs last month −8% · vs typical +12% · vs Jun '25 +5%`.
 
 **Insufficient history → hidden, never faked.** A baseline window with no/partial
-data is omitted entirely (no "−100% vs $0"). Define a minimum-coverage threshold
-for "typical" (e.g. require ≥ N months of history; finalize N in the plan).
+data is omitted entirely (no "−100% vs $0").
+
+**"Typical" baseline thresholds (resolved).** `typical` = the simple average of the
+**trailing complete periods of the same kind**, excluding the current in-progress
+period:
+- **calendar-month** → average the trailing **complete calendar months**, require
+  **≥ 3**, cap the window at the **trailing 12** ("recent typical"). < 3 complete
+  months of history → omit the `typical` chip.
+- **calendar-quarter** → trailing complete quarters, require **≥ 2**, cap at **4**.
+- **calendar-year** → **no `typical` baseline** (insufficient multi-year history in
+  practice); year ranges use prior-period + same-period-last-year only.
+
+`prior-period` and `same-period-last-year` are shown whenever their single window
+has data; otherwise omitted by the same hidden-never-faked rule.
 
 ---
 
@@ -194,7 +211,16 @@ New component at the **top of `DashboardPage`**, range-aware: refetches on curre
 3. **Movers** — 2–3 rows with delta badges + driver text, clickable to
    `/transactions`.
 
-The current `HeroTile` sparkline folds into the band or sits beside it; the
+**`HeroTile` is superseded by the band (resolved).** The band becomes the single
+period-summary surface and `HeroTile` is retired:
+- net-spend headline → replaced by the `realCost` decomposition headline
+- its delta badges → replaced by the comparison + trend chips
+- its 12-month sparkline → **absorbed into the band, replotted on `realCost`**
+  (not gross `netSpend`) so the trendline matches the new headline
+- its secondary submetrics (income / credits / payments) → kept, as a compact
+  secondary row inside the band
+
+`KpiStack` (txns / merchants / accounts) stays as its own separate tile. The
 existing `DeltaBadge` component is reused for chips/movers. Prefer Tailwind
 utilities over raw CSS.
 
@@ -237,9 +263,16 @@ machine). No new table, no new primitive.
 
 ---
 
-## Open items for the plan
+## Resolved decisions (previously open)
 
-- Finalize minimum-history threshold N for the "typical" baseline.
-- Decide whether `HeroTile` sparkline is absorbed into the band or kept adjacent.
-- Confirm the reimbursable-vs-partnerShare precedence rule against real data
-  fixtures (whether any txn legitimately carries both).
+- **"Typical" baseline thresholds** — month: trailing complete months, min 3, cap
+  12; quarter: min 2, cap 4; year: no typical. (Section 2.)
+- **`HeroTile`** — retired; superseded by the band. Sparkline absorbed and
+  replotted on `realCost`; income/credits/payments submetrics kept as a secondary
+  row in the band. (Section 4, Frontend.)
+- **reimbursable-vs-partnerShare overlap** — precedence rule (reimbursable wins,
+  dedup per txn) is total and deterministic, so the data question does not gate the
+  design. Implementation-time confirmation only: a prod `SELECT` for txns carrying
+  both. (Section 1.)
+
+No remaining open design questions.
