@@ -109,6 +109,19 @@ test('topCategoryMovers excludes non-categorical flows and other currencies', ()
   assert.equal(movers[0].currentRealCost, 30);
 });
 
+test('topCategoryMovers accumulates fractional amounts without float drift', () => {
+  // 1000 rows of -0.01 must sum to exactly 10, not 9.999...9 from `+=` drift.
+  const current: MoverRow[] = Array.from({ length: 1000 }, () =>
+    mrow({ amount: '-0.01', finalCategory: 'Groceries', merchantClean: 'Costco' }),
+  );
+  const movers = topCategoryMovers(current, [], 'CAD', 5);
+  assert.equal(movers[0].category, 'Groceries');
+  assert.equal(movers[0].currentRealCost, 10);
+  assert.equal(movers[0].deltaAbs, 10);
+  assert.equal(movers[0].driver.topMerchant, 'Costco');
+  assert.equal(movers[0].driver.txnCount, 1000);
+});
+
 test('topCategoryMovers divides baseline totals by baselineDivisor', () => {
   const current = [
     mrow({ amount: '-300.00', finalCategory: 'Groceries', merchantClean: 'Costco' }),

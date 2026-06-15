@@ -1,6 +1,9 @@
 // backend/src/summary/periodInsight.ts
-import { num } from '../util/numbers';
+import { num, toUnits, fromUnits } from '../util/numbers';
 import { isNonCategorical } from './classifyTransactionFlow';
+
+const UNCATEGORIZED = 'Uncategorized';
+const UNKNOWN_MERCHANT = 'Unknown';
 
 export type OwedBackRow = {
   id: number;
@@ -67,14 +70,20 @@ export type CategoryMover = {
 };
 
 function categorySpend(rows: MoverRow[], currency: string): Map<string, number> {
-  const m = new Map<string, number>();
+  // Accumulate in integer units to avoid `+=`-in-a-loop float drift, then
+  // convert back to dollars at the boundary below.
+  const units = new Map<string, number>();
   for (const r of rows) {
     if (r.currency !== currency) continue;
     if (isNonCategorical(r.txnType, r.accountType)) continue;
     const amt = num(r.amount) ?? 0;
     if (amt >= 0) continue; // spend only
-    const cat = r.finalCategory ?? 'Uncategorized';
-    m.set(cat, (m.get(cat) ?? 0) + Math.abs(amt));
+    const cat = r.finalCategory ?? UNCATEGORIZED;
+    units.set(cat, (units.get(cat) ?? 0) + toUnits(Math.abs(amt)));
+  }
+  const m = new Map<string, number>();
+  for (const [cat, u] of units) {
+    m.set(cat, fromUnits(u));
   }
   return m;
 }
@@ -84,6 +93,9 @@ function driverFor(
   currency: string,
   category: string,
 ): { topMerchant: string | null; txnCount: number } {
+  // The driver describes THIS period's spend: it is computed on the current
+  // window only and is intentionally NOT divided by baselineDivisor.
+  // Accumulate per-merchant totals in integer units to avoid float drift.
   const byMerchant = new Map<string, number>();
   let count = 0;
   for (const r of rows) {
@@ -91,14 +103,15 @@ function driverFor(
     if (isNonCategorical(r.txnType, r.accountType)) continue;
     const amt = num(r.amount) ?? 0;
     if (amt >= 0) continue;
-    if ((r.finalCategory ?? 'Uncategorized') !== category) continue;
+    if ((r.finalCategory ?? UNCATEGORIZED) !== category) continue;
     count += 1;
-    const merch = r.merchantClean ?? 'Unknown';
-    byMerchant.set(merch, (byMerchant.get(merch) ?? 0) + Math.abs(amt));
+    const merch = r.merchantClean ?? UNKNOWN_MERCHANT;
+    byMerchant.set(merch, (byMerchant.get(merch) ?? 0) + toUnits(Math.abs(amt)));
   }
   let top: string | null = null;
   let best = -Infinity;
-  for (const [merch, total] of byMerchant) {
+  for (const [merch, totalUnits] of byMerchant) {
+    const total = fromUnits(totalUnits);
     if (total > best) {
       best = total;
       top = merch;
