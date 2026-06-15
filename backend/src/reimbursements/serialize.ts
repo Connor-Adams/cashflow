@@ -48,14 +48,18 @@ export function parseIsoOrNull(raw: unknown): string | null | undefined {
 /**
  * Resolve a client-supplied `today` query param (a YYYY-MM-DD string built
  * from the browser's *local* date) to the reference date for overdue
- * derivation, falling back to the server's UTC today. Without the override,
- * claims flip overdue at UTC midnight — hours early for behind-UTC users.
+ * derivation, falling back to `fallback` (default: the server's UTC today).
+ * Without the override, claims flip overdue at the fallback's midnight.
  * Non-string / invalid values fall back silently, mirroring how the list
  * route treats malformed dueDateFrom/To.
+ *
+ * Route handlers pass the household-zone today (resolveHouseholdToday) as the
+ * fallback so the server default also tracks the user's calendar day; the
+ * `?today=` override (#612) remains the highest-priority input.
  */
-export function resolveToday(raw: unknown): string {
-  if (typeof raw !== 'string') return todayIso();
-  return parseIsoOrNull(raw) ?? todayIso();
+export function resolveToday(raw: unknown, fallback: string = todayIso()): string {
+  if (typeof raw !== 'string') return fallback;
+  return parseIsoOrNull(raw) ?? fallback;
 }
 
 /** Days from `today` until `dueDate`. Negative when overdue, null when no

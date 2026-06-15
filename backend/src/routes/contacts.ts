@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import { resolveHouseholdToday } from '../time/householdToday';
+import { apiReadLimiter } from './apiRateLimit';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   summarizeOpenForContact,
@@ -34,7 +36,7 @@ router.get('/', async (req, res, next) => {
  * `ReimbursementView` so the frontend reuses the same shape it already
  * renders on /reimbursements.
  */
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', apiReadLimiter, async (req, res, next) => {
   try {
     currentAuth(req);
     const id = Number(req.params.id);
@@ -50,8 +52,11 @@ router.get('/:id', async (req, res, next) => {
       return;
     }
     // Browser-local date override so open/overdue derivation matches the
-    // user's calendar day; falls back to UTC today.
-    const today = resolveToday(req.query.today);
+    // user's calendar day; falls back to the household-zone today.
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     const rows = await Reimbursement.findAll({
       where: { ...householdWhere(req), contactId: id },
       include: [

@@ -4,6 +4,7 @@ import { PlannedEvent } from '../models/PlannedEvent';
 import { Account, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
+import { resolveHouseholdToday, type HasTimezone } from '../time/householdToday';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
   expandRecurrence,
@@ -46,8 +47,9 @@ const RECURRING_LOOKBACK_DAYS = 180;
 const RECURRING_MIN_OCCURRENCES = 3;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+/** Forecast-window origin: "today" in the household's zone (not UTC). */
+function todayIso(household: HasTimezone | null | undefined): string {
+  return resolveHouseholdToday(household);
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -65,7 +67,7 @@ function diffDays(fromIso: string, toIso: string): number {
 }
 
 function parseRange(req: Request): { dateFrom: string; dateTo: string } | { error: string } {
-  let dateFrom = todayIso();
+  let dateFrom = todayIso(currentAuth(req).household);
   let dateTo = addDaysIso(dateFrom, DEFAULT_FORECAST_DAYS);
   if (req.query.dateFrom) {
     const raw = String(req.query.dateFrom);
@@ -528,7 +530,7 @@ router.get('/safe-to-spend', async (req, res, next) => {
     const { user, household } = currentAuth(req);
     const asOfDate = req.query.asOfDate
       ? String(req.query.asOfDate)
-      : todayIso();
+      : todayIso(household);
     if (!ISO_DATE_RE.test(asOfDate)) {
       res.status(400).json({ error: 'asOfDate must be YYYY-MM-DD' });
       return;

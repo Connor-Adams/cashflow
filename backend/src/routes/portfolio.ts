@@ -20,6 +20,8 @@ import {
 } from '../portfolio/metrics';
 import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
+import { resolveHouseholdToday } from '../time/householdToday';
+import { apiReadLimiter } from './apiRateLimit';
 import { computeAcb, type AcbActivity, type AcbResult } from '../portfolio/acb';
 import { latestActivePositions } from '../portfolio/latestHoldings';
 import { normalizeActivitiesToCad } from '../portfolio/normalizeActivitiesCurrency';
@@ -142,7 +144,7 @@ async function loadVisibleLatestHoldings(req: Request): Promise<{
   accounts: Account[];
   latestHoldings: HoldingSnapshot[];
 }> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = resolveHouseholdToday(currentAuth(req).household);
   const accounts = await Account.findAll({
     where: {
       ...visibleAccountWhere(req),
@@ -164,7 +166,7 @@ async function loadVisibleLatestHoldings(req: Request): Promise<{
   return { accounts, latestHoldings: latestActivePositions(snapshots) };
 }
 
-router.get('/', async (req, res, next) => {
+router.get('/', apiReadLimiter, async (req, res, next) => {
   try {
     const { accounts, latestHoldings } = await loadVisibleLatestHoldings(req);
     const accountIds = accounts.map((row) => row.id);
@@ -258,7 +260,7 @@ router.get('/', async (req, res, next) => {
       marketValue,
     }));
 
-    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayDate = resolveHouseholdToday(currentAuth(req).household);
     const unifiedTotal = await buildUnifiedCadTotal(totalsByCurrency, todayDate);
 
     // Per-row weight pct now that unifiedTotal is known.
@@ -645,7 +647,7 @@ router.get('/income', async (req, res, next) => {
  * Sums quantity, cost basis, and market value across every account
  * that currently holds the security.
  */
-router.get('/by-security', async (req, res, next) => {
+router.get('/by-security', apiReadLimiter, async (req, res, next) => {
   try {
     const { accounts, latestHoldings } = await loadVisibleLatestHoldings(req);
     const accountById = new Map(accounts.map((a) => [a.id, a]));
@@ -789,7 +791,7 @@ router.get('/by-security', async (req, res, next) => {
       currency,
       marketValue,
     }));
-    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayDate = resolveHouseholdToday(currentAuth(req).household);
     const unifiedTotal = await buildUnifiedCadTotal(totalsByCurrency, todayDate);
 
     // Per-row metrics + weightPct + totalReturnPct
@@ -2359,7 +2361,7 @@ router.get('/performance', async (req, res, next) => {
     const benchmarkSymbol = householdRow?.benchmarkSymbol ?? 'SPY';
 
     const range = (req.query.range as PortfolioPerformanceRange) || '1Y';
-    const today = new Date().toISOString().slice(0, 10);
+    const today = resolveHouseholdToday(auth.household);
 
     function addDaysIso(iso: string, days: number): string {
       const d = new Date(iso);

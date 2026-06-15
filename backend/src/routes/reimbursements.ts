@@ -34,6 +34,7 @@ import {
 } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { visibleTransactionWhere, householdWhere } from '../auth/scope';
+import { resolveHouseholdToday } from '../time/householdToday';
 import { aiSuggestLimiter } from './aiRateLimit';
 import {
   validateMarkReimbursable,
@@ -281,7 +282,10 @@ router.get('/reimbursements', async (req, res, next) => {
     // `today` may be the browser's local date so overdue derivation flips at
     // the user's midnight rather than UTC's (which is hours early in the
     // Americas). Invalid/missing values fall back to UTC today.
-    const today = resolveToday(req.query.today);
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     const where: WhereOptions = { ...householdWhere(req) };
     const q = req.query;
 
@@ -346,7 +350,10 @@ router.get('/reimbursements', async (req, res, next) => {
 router.get('/reimbursements/summary', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = resolveToday(req.query.today);
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     // Full INCLUDE (not just contact): summarize() nets a received claim
     // against its hydrated same-currency repayment transaction so a partial
     // repayment doesn't credit the full claim face value.
@@ -366,7 +373,10 @@ router.get('/reimbursements/summary', async (req, res, next) => {
 router.get('/reimbursements/overdue', async (req, res, next) => {
   try {
     currentAuth(req);
-    const today = resolveToday(req.query.today);
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
     // Candidates: open claims with a due date strictly before today, OR claims
     // explicitly pinned to the 'overdue' status.
     const rows = await Reimbursement.findAll({
