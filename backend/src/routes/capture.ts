@@ -113,8 +113,15 @@ async function processCapturePayload(args: {
 
   let matchSuggested = 0;
   if (vendor === 'amazon') {
-    const match = await runAmazonMatching({ householdId: args.householdId });
-    matchSuggested = match.suggested;
+    try {
+      const match = await runAmazonMatching({ householdId: args.householdId });
+      matchSuggested = match.suggested;
+    } catch (err) {
+      // Matching is best-effort and the capture already committed — never let a
+      // matching failure turn a successful capture into a 500. The user can
+      // re-run matching from the UI. Log and continue.
+      console.error('[capture] runAmazonMatching failed after commit', err);
+    }
   }
 
   return { ...result, matchSuggested };
