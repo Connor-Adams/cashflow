@@ -84,6 +84,23 @@ router.get('/categories', async (req, res, next) => {
   }
 });
 
+router.get('/sync-status', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const where = { householdId: household.id, vendor: 'amazon' as const };
+    const [orderCount, latest] = await Promise.all([
+      ExternalOrder.count({ where }),
+      ExternalOrder.max('createdAt', { where }) as Promise<Date | string | null>,
+    ]);
+    res.json({
+      orderCount,
+      lastCapturedAt: latest ? new Date(latest).toISOString() : null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post(
   '/import',
   (req, res, next) => {
