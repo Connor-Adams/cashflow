@@ -7,6 +7,31 @@ export type PeriodRangeKind =
 
 export type DateRange = { from: string; to: string };
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function assertIsoDate(d: string, label = 'date'): void {
+  if (typeof d !== 'string' || !ISO_DATE.test(d)) {
+    throw new Error(`Invalid ${label}: expected YYYY-MM-DD, got ${JSON.stringify(d)}`);
+  }
+  const [y, m, day] = d.split('-').map(Number);
+  if (m < 1 || m > 12) {
+    throw new Error(`Invalid ${label}: month out of range in ${d}`);
+  }
+  if (day < 1 || day > lastDay(y, m)) {
+    throw new Error(`Invalid ${label}: day out of range in ${d}`);
+  }
+}
+
+// Validate both endpoints and reject an inverted range. Lexical compare of
+// well-formed ISO dates is equivalent to chronological compare.
+function assertRange(from: string, to: string): void {
+  assertIsoDate(from, 'from');
+  assertIsoDate(to, 'to');
+  if (to < from) {
+    throw new Error(`Inverted range: to (${to}) is before from (${from})`);
+  }
+}
+
 function parts(d: string): { y: number; m: number; day: number } {
   const [y, m, day] = d.split('-').map(Number);
   return { y, m, day };
@@ -22,6 +47,7 @@ function lastDay(y: number, m: number): number {
 }
 
 export function detectRangeKind(from: string, to: string): PeriodRangeKind {
+  assertRange(from, to);
   const a = parts(from);
   const b = parts(to);
   // calendar year
@@ -56,12 +82,17 @@ function dayCount(from: string, to: string): number {
 function monthRange(y: number, m: number): DateRange {
   return { from: fmt(y, m, 1), to: fmt(y, m, lastDay(y, m)) };
 }
+function quarterRange(y: number, startM: number): DateRange {
+  const endM = startM + 2;
+  return { from: fmt(y, startM, 1), to: fmt(y, endM, lastDay(y, endM)) };
+}
 
 export function priorPeriod(
   from: string,
   to: string,
   kind: PeriodRangeKind,
 ): DateRange {
+  assertRange(from, to);
   const a = parts(from);
   if (kind === 'calendar-month') {
     const m = a.m === 1 ? 12 : a.m - 1;
@@ -72,7 +103,7 @@ export function priorPeriod(
     const startM = a.m - 3;
     const y = startM < 1 ? a.y - 1 : a.y;
     const m = startM < 1 ? startM + 12 : startM;
-    return { from: fmt(y, m, 1), to: fmt(y, m + 2, lastDay(y, m + 2)) };
+    return quarterRange(y, m);
   }
   if (kind === 'calendar-year') {
     return { from: fmt(a.y - 1, 1, 1), to: fmt(a.y - 1, 12, 31) };
@@ -86,14 +117,15 @@ export function priorPeriod(
 
 export function samePeriodLastYear(
   from: string,
-  _to: string,
+  to: string,
   kind: PeriodRangeKind,
 ): DateRange | null {
+  assertRange(from, to);
   if (kind === 'custom') return null;
   const a = parts(from);
   if (kind === 'calendar-month') return monthRange(a.y - 1, a.m);
   if (kind === 'calendar-quarter') {
-    return { from: fmt(a.y - 1, a.m, 1), to: fmt(a.y - 1, a.m + 2, lastDay(a.y - 1, a.m + 2)) };
+    return quarterRange(a.y - 1, a.m);
   }
   // calendar-year
   return { from: fmt(a.y - 1, 1, 1), to: fmt(a.y - 1, 12, 31) };
@@ -103,9 +135,10 @@ export type TypicalWindows = { windows: DateRange[]; minRequired: number };
 
 export function typicalWindows(
   from: string,
-  _to: string,
+  to: string,
   kind: PeriodRangeKind,
 ): TypicalWindows {
+  assertRange(from, to);
   const a = parts(from);
   if (kind === 'calendar-month') {
     const windows: DateRange[] = [];
@@ -128,7 +161,7 @@ export function typicalWindows(
         startM += 12;
         y -= 1;
       }
-      windows.push({ from: fmt(y, startM, 1), to: fmt(y, startM + 2, lastDay(y, startM + 2)) });
+      windows.push(quarterRange(y, startM));
     }
     return { windows, minRequired: 2 };
   }

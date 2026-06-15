@@ -1,9 +1,12 @@
 // backend/src/summary/periodRanges.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectRangeKind } from './periodRanges';
-import { priorPeriod, samePeriodLastYear } from './periodRanges';
-import { typicalWindows } from './periodRanges';
+import {
+  detectRangeKind,
+  priorPeriod,
+  samePeriodLastYear,
+  typicalWindows,
+} from './periodRanges';
 
 test('detectRangeKind identifies a full calendar month', () => {
   assert.equal(detectRangeKind('2026-05-01', '2026-05-31'), 'calendar-month');
@@ -84,4 +87,41 @@ test('typicalWindows returns up to 4 trailing quarters with min 2', () => {
 test('typicalWindows returns none for year and custom', () => {
   assert.deepEqual(typicalWindows('2026-01-01', '2026-12-31', 'calendar-year').windows, []);
   assert.deepEqual(typicalWindows('2026-05-10', '2026-05-19', 'custom').windows, []);
+});
+
+test('samePeriodLastYear shifts a calendar quarter back one year', () => {
+  assert.deepEqual(samePeriodLastYear('2026-04-01', '2026-06-30', 'calendar-quarter'), {
+    from: '2025-04-01',
+    to: '2025-06-30',
+  });
+});
+
+test('exported functions reject malformed ISO dates', () => {
+  const invalid = /invalid/i;
+  for (const bad of ['', '2026-13-01', '2026/05/01', '2026-02-30', '2026-00-01', '2026-1-1']) {
+    assert.throws(() => detectRangeKind(bad, '2026-12-31'), invalid, `from=${bad}`);
+    assert.throws(() => detectRangeKind('2026-01-01', bad), invalid, `to=${bad}`);
+    assert.throws(() => priorPeriod(bad, '2026-05-31', 'custom'), invalid, `from=${bad}`);
+    assert.throws(() => priorPeriod('2026-05-01', bad, 'custom'), invalid, `to=${bad}`);
+    assert.throws(() => samePeriodLastYear(bad, '2026-05-31', 'calendar-month'), invalid);
+    assert.throws(() => typicalWindows(bad, '2026-05-31', 'calendar-month'), invalid);
+  }
+});
+
+test('exported functions reject an inverted range (to < from)', () => {
+  assert.throws(() => detectRangeKind('2026-05-31', '2026-05-01'), /range|before|inverted/i);
+  assert.throws(() => priorPeriod('2026-05-31', '2026-05-01', 'custom'), /range|before|inverted/i);
+  assert.throws(
+    () => samePeriodLastYear('2026-05-31', '2026-05-01', 'calendar-month'),
+    /range|before|inverted/i,
+  );
+  assert.throws(
+    () => typicalWindows('2026-05-31', '2026-05-01', 'calendar-month'),
+    /range|before|inverted/i,
+  );
+});
+
+test('detectRangeKind rejects a misaligned quarter start as custom', () => {
+  // Feb 1 is not a quarter-aligned start; spans three months but not a calendar quarter.
+  assert.equal(detectRangeKind('2026-02-01', '2026-04-30'), 'custom');
 });
