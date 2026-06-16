@@ -10,15 +10,6 @@ import {
 
 export type IncomeSource = 'paycheck' | 'invoice' | 'cash' | 'gift' | 'refund' | 'other';
 
-export const INCOME_SOURCES: readonly IncomeSource[] = [
-  'paycheck',
-  'invoice',
-  'cash',
-  'gift',
-  'refund',
-  'other',
-];
-
 export class IncomeEntry extends Model<
   InferAttributes<IncomeEntry>,
   InferCreationAttributes<IncomeEntry>

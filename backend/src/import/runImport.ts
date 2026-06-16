@@ -1125,7 +1125,11 @@ export async function resolvePdfAccountFromHeader(
  *      The productLabel determines name + accountType from `PDF_ACCOUNT_TEMPLATES`.
  *   4. Run the standard parseStatementFile → commitStatementImport pipeline so
  *      fingerprinting / dedup / enrichment matches single-file uploads.
+ *
+ * Generic multi-parser entry point currently superseded by importWsBundleFile;
+ * kept as the documented seam for re-wiring the non-Wealthsimple bundle path.
  */
+// fallow-ignore-next-line unused-export
 export async function importPdfBundleFile(opts: {
   buffer: Buffer;
   fileName: string;

@@ -11,4 +11,5 @@ function Label({ className, ...props }: React.ComponentProps<'label'>) {
   )
 }
 
+// Frontend UI <Label> component; unrelated to the backend Label model that shares the name across packages.
 export { Label }

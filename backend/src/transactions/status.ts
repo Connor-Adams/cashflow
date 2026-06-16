@@ -1,7 +1,6 @@
 import { Op } from 'sequelize';
 import { Transaction } from '../models';
 import { num } from '../util/numbers';
-export { isTransactionStatus, TRANSACTION_STATUSES, type TransactionStatus } from './types';
 
 export async function pendingTotal(args: {
   accountId: number;

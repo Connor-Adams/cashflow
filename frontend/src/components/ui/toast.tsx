@@ -214,4 +214,3 @@ function useToast() {
 }
 
 export { ToastProvider, useToast }
-export type { ToastVariant, ToastAction, ToastOptions } from './toast-context'

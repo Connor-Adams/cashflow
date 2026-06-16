@@ -1,12 +1,8 @@
 // backend/src/tax/scenarios/types.ts
 import type { TaxYearFacts } from '../engine/types';
 
-export type ScenarioKind = 'baseline' | 'fork' | 'projection_root';
-
 /** Sparse map of override key → raw JSON-serialisable value. */
 export type OverrideMap = Record<string, unknown>;
-
-export type AssumptionsMap = Record<string, unknown>;
 
 /** Mutator: receives the current facts struct, returns a new one with the override applied. */
 export type OverrideApplier = (facts: TaxYearFacts, value: unknown) => TaxYearFacts;

@@ -18,7 +18,6 @@ import {
   Contact,
   PartnerSettlement,
   Transaction,
-  sequelize,
 } from '../models/index.js';
 import { householdWhere, visibleTransactionWhere } from '../auth/scope.js';
 import { num } from '../util/numbers.js';
@@ -702,6 +701,3 @@ export async function executeIntent(
       return executePartnerBalance(req, intent);
   }
 }
-
-// Re-export for tests/consumers that want a single import.
-export { sequelize };

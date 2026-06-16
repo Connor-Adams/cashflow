@@ -14,11 +14,6 @@ import {
  * routes guard the set.
  */
 export type InsightSeverity = 'info' | 'warning' | 'critical';
-export const INSIGHT_SEVERITIES: readonly InsightSeverity[] = [
-  'info',
-  'warning',
-  'critical',
-] as const;
 
 export type InsightStatus = 'open' | 'dismissed' | 'resolved';
 export const INSIGHT_STATUSES: readonly InsightStatus[] = [

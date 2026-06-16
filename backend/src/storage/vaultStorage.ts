@@ -46,6 +46,7 @@ const VERSION_BYTE = 0x01;
 const IV_LEN = 12;
 const TAG_LEN = 16;
 
+// Same literal union also declared in models/VaultDocument.ts; intentional domain-local copy to avoid a storage->model import.
 export type VaultEncryptionAlgorithm = 'aes-256-gcm' | 'none';
 
 export interface VaultPutResult {
@@ -153,11 +154,6 @@ function loadKey(): Buffer | null {
   }
   cachedKey = Buffer.from(raw, 'hex');
   return cachedKey;
-}
-
-/** Test-only: reset cached key so process.env changes take effect. */
-export function __resetVaultKeyCacheForTests(): void {
-  cachedKey = null;
 }
 
 function encryptBuffer(plain: Buffer): Buffer {

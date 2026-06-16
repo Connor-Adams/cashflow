@@ -1108,7 +1108,11 @@ export {
   JobRun,
   PdfImportBatch,
   PdfImportItem,
+  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
+  // fallow-ignore-next-line unused-export
   PortfolioForwardProjection,
+  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
+  // fallow-ignore-next-line unused-export
   PortfolioDailySnapshot,
   Scenario,
   ScenarioReturn,
@@ -1118,6 +1122,8 @@ export {
   FinancialGoal,
   AiReviewRun,
   CfoBriefing,
+  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
+  // fallow-ignore-next-line unused-export
   MoneyLeakDismissal,
   TaxReserveSetting,
   MonthlyClosePeriod,
@@ -1145,5 +1151,7 @@ export {
   ClientErrorEvent,
   ServerErrorEvent,
   IncomeEntry,
+  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
+  // fallow-ignore-next-line unused-export
   SavedFilter,
 };

@@ -87,10 +87,6 @@ export const PLANNED_EVENT_STATUSES: readonly PlannedEventStatus[] = [
  * expectations. Stored as STRING(16); `planned` is the default.
  */
 export type ExpectationKind = 'planned' | 'subscription';
-export const EXPECTATION_KINDS: readonly ExpectationKind[] = [
-  'planned',
-  'subscription',
-] as const;
 
 /**
  * Billing cadence for subscription-kind expectations. Stored as STRING(16);

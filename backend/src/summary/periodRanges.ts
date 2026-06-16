@@ -17,6 +17,8 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * still match.
  */
 export class RangeValidationError extends Error {
+  // HTTP status carried for handlers that map this error to a client response (see the class JSDoc).
+  // fallow-ignore-next-line unused-class-member
   readonly status = 400;
   constructor(message: string) {
     super(message);

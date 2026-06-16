@@ -41,7 +41,6 @@ import {
   validateReimbursementPatch,
   serializeReimbursement,
   summarize,
-  computeEffectiveStatus,
   resolveToday,
   parseIsoOrNull,
   type ReimbursementRow,
@@ -641,7 +640,4 @@ function applyStatus(r: Reimbursement, status: ReimbursementStatus): void {
   }
 }
 
-// Re-export for tests that want to assert on the effective-status helper via
-// the route module's surface.
-export { computeEffectiveStatus };
 export default router;

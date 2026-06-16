@@ -220,7 +220,3 @@ export function recordJobRun(
     jobLastSuccessMap.set(jobName, Date.now() / 1000);
   }
 }
-
-export async function shutdownMetrics(): Promise<void> {
-  await meterProvider?.shutdown();
-}

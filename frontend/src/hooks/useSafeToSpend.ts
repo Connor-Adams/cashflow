@@ -1,9 +1,5 @@
-import { patchJson } from '@/lib/api'
 import { useFetch } from './useFetch'
-import type {
-  CashflowSettings,
-  SafeToSpendResponse,
-} from '@/types/api'
+import type { SafeToSpendResponse } from '@/types/api'
 
 /**
  * Compose the safe-to-spend query path. Currency + asOfDate are optional
@@ -30,18 +26,4 @@ export function useSafeToSpend(opts: {
     ? null
     : buildSafeToSpendPath({ currency: opts.currency, asOfDate: opts.asOfDate })
   return useFetch<SafeToSpendResponse>(path)
-}
-
-export function useCashflowSettings() {
-  return useFetch<CashflowSettings>('/api/settings/cashflow')
-}
-
-/**
- * Patch the user's cashflow settings. Returns the persisted shape so
- * callers can update local state without a separate refetch.
- */
-export async function updateCashflowSettings(
-  patch: Partial<CashflowSettings>,
-): Promise<CashflowSettings> {
-  return patchJson<CashflowSettings>('/api/settings/cashflow', patch)
 }

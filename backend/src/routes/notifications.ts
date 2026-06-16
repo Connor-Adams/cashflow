@@ -14,7 +14,6 @@ import { Router } from 'express';
 import { Op } from 'sequelize';
 import { currentAuth } from '../auth/middleware';
 import { Notification } from '../models';
-import { NOTIFICATION_SEVERITIES } from '../models/Notification';
 
 const router = Router();
 
@@ -145,10 +144,5 @@ router.post('/mark-all-read', async (req, res, next) => {
     next(e);
   }
 });
-
-/** Severity list re-exported so the frontend can mirror the same set
- *  without duplicating the literal. Mostly defensive — the route file is
- *  a natural source of truth for the wire shape. */
-export const ROUTE_SEVERITIES = NOTIFICATION_SEVERITIES;
 
 export default router;

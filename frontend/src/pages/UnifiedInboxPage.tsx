@@ -608,5 +608,3 @@ export function UnifiedInboxPage() {
     </div>
   )
 }
-
-export default UnifiedInboxPage

@@ -15,6 +15,7 @@ import {
  * 20260609000001-create-labels). Labels are cross-cutting: a transaction can
  * carry many, independent of its single mutually-exclusive category.
  */
+// Backend Label model; unrelated to the frontend UI <Label> component that shares the name across packages.
 export class Label extends Model<
   InferAttributes<Label>,
   InferCreationAttributes<Label>

@@ -17,7 +17,6 @@
  */
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../models';
-import { CashflowSettings } from '../models/CashflowSettings';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { jsonExtractText } from '../util/dialectSql';
 import { normalizeContactName } from '../contacts/normalizeContactName';
@@ -214,7 +213,3 @@ export async function findCounterpartyPromotions(
   });
   return promotions.slice(0, COUNTERPARTY_PROMOTION_LIMIT);
 }
-
-// Re-export for tests that just want the model handle without importing
-// from `../models`.
-export { CashflowSettings };

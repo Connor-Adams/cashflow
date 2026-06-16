@@ -364,6 +364,8 @@ export async function fetchQuote(
   };
 }
 
+// Consumed via `import * as` namespace access in portfolio/backfill.ts, which fallow's static resolver can't follow.
+// fallow-ignore-next-line unused-export
 export async function fetchDailyHistory(
   yahooSymbol: string,
   opts: { period1: Date | string },
@@ -874,7 +876,3 @@ export async function fetchNews(
   return out.length === 0 ? null : out;
 }
 
-/** Test seam — swaps the underlying client. Pass null to restore the singleton. */
-export function __setYahooClient(stub: YahooClient | null): void {
-  singleton = stub;
-}
