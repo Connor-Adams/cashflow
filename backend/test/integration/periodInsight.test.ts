@@ -233,6 +233,134 @@ test('missing dates return 400', async () => {
   assert.deepEqual(res.body, { error: 'dateFrom and dateTo are required' });
 });
 
+test('typical baseline omitted when fewer than minRequired populated months', async () => {
+  // NOTE: period-insight loads windows household-scoped (NOT account-scoped), so
+  // a "fresh account" does NOT isolate the trailing window — every prior fixture
+  // on household A counts. We therefore query a FAR-FUTURE month (March 2030)
+  // whose trailing-12 typical window (March 2029 … Feb 2030) is clear of all
+  // earlier fixtures (2026–2028), then seed exactly the months we control.
+  //
+  // Seed the main window (March 2030) so the per-currency loop runs at all, plus
+  // exactly TWO distinct trailing months (Feb 2030 + Jan 2030). The main window
+  // is NOT itself a typical window, so populatedCount = 2 < min 3 → `typical`
+  // must be omitted, while `prior-period` (Feb 2030) is still present.
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2030-03-10',
+    amount: -50,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Mar Grocer',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2030-02-10',
+    amount: -40,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Feb Grocer',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2030-01-15',
+    amount: -30,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Jan Grocer',
+  });
+
+  const res = await agentA
+    .get('/api/summary/period-insight')
+    .query({ currency: 'CAD', dateFrom: '2030-03-01', dateTo: '2030-03-31' });
+  assert.equal(res.status, 200);
+  const cad = (res.body.byCurrency as Array<{
+    currency: string;
+    baselines: Array<{ key: string }>;
+  }>).find((c) => c.currency === 'CAD');
+  assert.ok(cad, `expected a CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  const keys = cad.baselines.map((b) => b.key);
+  assert.ok(
+    !keys.includes('typical'),
+    `typical must be omitted with only 2 populated months (< min 3): ${JSON.stringify(keys)}`,
+  );
+  assert.ok(
+    keys.includes('prior-period'),
+    `prior-period (Feb 2030) should still be present: ${JSON.stringify(keys)}`,
+  );
+});
+
+test('typical baseline present and averaged over populated months only', async () => {
+  // Far-future again, clear of every prior fixture. Query Dec 2031; its trailing
+  // window is Dec 2030 … Nov 2031. Seed the main window (Dec 2031) so the
+  // per-currency loop runs, plus exactly THREE distinct trailing months
+  // (Nov/Oct/Sep 2031) with -60/-30/-90 realCost (no owedBack). populatedCount =
+  // 3 >= min 3, so `typical` is present and its realCost = (60+30+90)/3 = 60 —
+  // averaged over the 3 POPULATED months, NOT diluted across the 12-window span
+  // (the pre-fix bug would have divided by 12, giving 15).
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2031-12-05',
+    amount: -10,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Dec Main Grocer',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2031-11-05',
+    amount: -60,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Nov Grocer',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2031-10-05',
+    amount: -30,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Oct Grocer',
+  });
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2031-09-05',
+    amount: -90,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Sep Grocer',
+  });
+
+  const res = await agentA
+    .get('/api/summary/period-insight')
+    .query({ currency: 'CAD', dateFrom: '2031-12-01', dateTo: '2031-12-31' });
+  assert.equal(res.status, 200);
+  const cad = (res.body.byCurrency as Array<{
+    currency: string;
+    baselines: Array<{ key: string; realCost: number; owedBack: number }>;
+  }>).find((c) => c.currency === 'CAD');
+  assert.ok(cad, `expected a CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  const typical = cad.baselines.find((b) => b.key === 'typical');
+  assert.ok(
+    typical,
+    `typical must be present with 3 populated months (>= min 3): ${JSON.stringify(
+      cad.baselines.map((b) => b.key),
+    )}`,
+  );
+  assert.equal(
+    typical.realCost,
+    60,
+    'realCost = (60+30+90)/3 averaged over populated months only',
+  );
+  assert.equal(typical.owedBack, 0);
+});
+
 test('a custom (partial-month) range is detected as rangeKind custom', async () => {
   await createTxn({
     householdId: householdAId,

@@ -350,7 +350,18 @@ router.get('/period-insight', async (req, res, next) => {
       baselineReimbByKey.set(def.key, reimb);
     }
 
-    // Typical windows — load only when the kind defines them; gate on min count.
+    // Typical windows — load only when the kind defines them. The baseline gate
+    // is on POPULATED periods (windows with real transactions), NOT on window
+    // COUNT: `typicalWindows()` always returns 12 month-windows (or 4 quarter-
+    // windows), so a household with only 1–2 months of history must NOT get a
+    // `typical` chip diluted across empty windows (spec §2: "≥ N complete/
+    // populated periods", and the average is over POPULATED periods only).
+    //
+    // Populated-ness is counted PER CURRENCY: a window is populated for `cur`
+    // when it has rows in `cur`. `loadPeriodRows` already applies the currency
+    // filter when `currency` is set, so when a single currency is requested
+    // `rows.length > 0` is exactly that currency's populated-ness; when currency
+    // is null we assemble per-currency below by inspecting each window's rows.
     const tw = typicalWindows(from, to, kind);
     const typicalLoaded: PeriodRow[][] = [];
     const typicalReimb: Array<Map<number, number>> = [];
@@ -362,8 +373,6 @@ router.get('/period-insight', async (req, res, next) => {
       typicalLoaded.push(withAccountType(rowsRaw, accountById));
       typicalReimb.push(reimb);
     }
-    const typicalAvailable =
-      tw.windows.length > 0 && tw.windows.length >= tw.minRequired;
 
     // All-time outstanding reimbursements (expected | overdue) per currency.
     // Partner-balance component is intentionally DEFERRED in v1 (see PR body).
@@ -413,37 +422,46 @@ router.get('/period-insight', async (req, res, next) => {
         });
       }
 
-      // Typical baseline — average across the loaded trailing windows.
+      // Typical baseline — average across the POPULATED trailing windows only.
+      // A window counts as populated for `cur` when it has at least one row in
+      // `cur` (row presence, NOT realCost !== 0: a populated month can legitimately
+      // net near zero). Gate on populatedCount >= minRequired; if fewer, OMIT the
+      // typical baseline entirely rather than diluting it across empty windows.
+      let populatedCount = 0;
+      let sumReal = 0;
+      let sumOwed = 0;
+      for (let i = 0; i < typicalLoaded.length; i++) {
+        const rows = typicalLoaded[i];
+        const populated = rows.some((r) => r.currency === cur);
+        if (!populated) continue;
+        populatedCount += 1;
+        const wt = windowTotals(rows, typicalReimb[i], accountById, cur);
+        sumReal += wt.realCost;
+        sumOwed += wt.owedBack;
+      }
+      const typicalAvailable =
+        tw.windows.length > 0 && populatedCount >= tw.minRequired;
       if (typicalAvailable) {
-        let sumReal = 0;
-        let sumOwed = 0;
-        for (let i = 0; i < typicalLoaded.length; i++) {
-          const wt = windowTotals(typicalLoaded[i], typicalReimb[i], accountById, cur);
-          sumReal += wt.realCost;
-          sumOwed += wt.owedBack;
-        }
-        const n = typicalLoaded.length;
-        const avgReal = sumReal / n;
-        const avgOwed = sumOwed / n;
-        if (avgReal !== 0 || avgOwed !== 0) {
-          baselines.push({
-            key: 'typical',
-            label: 'typical',
-            realCost: avgReal,
-            realCostDeltaPct: deltaPct(realCost, avgReal),
-            owedBack: avgOwed,
-            owedBackDeltaPct: deltaPct(o.owedBack, avgOwed),
-          });
-        }
+        const avgReal = sumReal / populatedCount;
+        const avgOwed = sumOwed / populatedCount;
+        baselines.push({
+          key: 'typical',
+          label: 'typical',
+          realCost: avgReal,
+          realCostDeltaPct: deltaPct(realCost, avgReal),
+          owedBack: avgOwed,
+          owedBackDeltaPct: deltaPct(o.owedBack, avgOwed),
+        });
       }
 
-      // Movers — vs the typical window-set (concatenated; divide baseline by N
-      // for a per-period comparison) when available, else prior-period (N=1).
+      // Movers — vs the typical window-set (concatenated; divide baseline by the
+      // number of POPULATED typical windows actually summed for a per-period
+      // comparison) when available, else prior-period (N=1).
       const usingTypical = typicalAvailable;
       const moverBaselineRows = usingTypical
         ? typicalLoaded.flat()
         : baselineRowsByKey.get('prior-period')!;
-      const moverDivisor = usingTypical ? typicalLoaded.length : 1;
+      const moverDivisor = usingTypical ? populatedCount : 1;
       const movers = topCategoryMovers(
         mainRows as unknown as MoverRow[],
         moverBaselineRows as unknown as MoverRow[],
