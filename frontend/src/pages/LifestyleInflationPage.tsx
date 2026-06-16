@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/ui/page-header'
-import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { ReportFilterBar } from './report/ReportFilterBar'
 import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
+import { useReportData } from './report/useReportData'
 import type {
   LifestyleCategoryDriver,
   LifestyleCurrencyTrend,
@@ -56,9 +56,6 @@ export function LifestyleInflationPage() {
   const [months, setMonths] = useState<number>(12)
   const [currency, setCurrency] = useState<string>('')
   const [scope, setScope] = useState<LifestyleScope>('all')
-  const [data, setData] = useState<LifestyleInflationResponse | null>(null)
-  const [loading, setLoading] = useState<boolean>(true)
-  const [err, setErr] = useState<string | null>(null)
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -69,39 +66,11 @@ export function LifestyleInflationPage() {
     return params.toString()
   }, [month, months, scope, currency])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const res = await getJson<LifestyleInflationResponse>(
-        `/api/reports/lifestyle-inflation?${queryString}`,
-      )
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error')
-    } finally {
-      setLoading(false)
-    }
-  }, [queryString])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  // Currencies present in the loaded data drive the picker so it never
-  // collapses when a filter is applied.
-  const availableCurrencies = useMemo(() => {
-    const set = new Set<string>()
-    for (const t of data?.byCurrency ?? []) set.add(t.currency)
-    if (currency) set.add(currency)
-    return Array.from(set).sort()
-  }, [data, currency])
-
-  const windowLabel = useMemo(() => {
-    const w = data?.windowMonths ?? []
-    if (w.length === 0) return ''
-    return `${w[0]} – ${w[w.length - 1]}`
-  }, [data])
+  const { data, loading, err, reload, availableCurrencies, windowLabel } =
+    useReportData<LifestyleInflationResponse>(
+      `/api/reports/lifestyle-inflation?${queryString}`,
+      currency,
+    )
 
   return (
     <div className="page">
@@ -124,9 +93,7 @@ export function LifestyleInflationPage() {
           onCurrencyChange={setCurrency}
           availableCurrencies={availableCurrencies}
           loading={loading}
-          onRefresh={() => {
-            void load()
-          }}
+          onRefresh={reload}
         />
         {windowLabel && (
           <p className="muted" style={{ margin: '8px 0 0' }}>
