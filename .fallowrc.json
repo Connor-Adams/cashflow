@@ -30,5 +30,17 @@
   "ignoreExportsUsedInFile": true,
   "usedClassMembers": [
     { "extends": "Model", "members": ["*"] }
-  ]
+  ],
+  "rules": {
+    "unused-files": "error",
+    "unused-exports": "error",
+    "unused-types": "error",
+    "unused-enum-members": "error",
+    "unused-class-members": "error",
+    "unused-dependencies": "error",
+    "unlisted-dependencies": "error",
+    "unresolved-imports": "error",
+    "duplicate-exports": "error",
+    "circular-dependencies": "error"
+  }
 }
