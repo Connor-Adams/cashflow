@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { PiggyBank, TrendingDown, TrendingUp } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
-import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { ReportFilterBar } from './report/ReportFilterBar'
+import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
+import { useReportData } from './report/useReportData'
 import type {
   LifestyleScope,
   SavingsRateCurrencySummary,
@@ -28,21 +28,12 @@ import type {
  * backend/src/summary/savingsRate.ts.
  */
 
-const SCOPE_OPTIONS: { value: LifestyleScope; label: string }[] = [
+const SCOPE_OPTIONS: ScopeOption[] = [
   { value: 'all', label: 'All activity' },
   { value: 'personal', label: 'Personal' },
   { value: 'shared', label: 'Shared' },
   { value: 'business', label: 'Business' },
 ]
-
-const WINDOW_OPTIONS = [6, 12, 18, 24]
-
-/** Default anchor is the current calendar month in the browser's local
- *  timezone. The backend treats YYYY-MM as a pure label. */
-function defaultMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
 
 /** Format a savings-rate percentage (null when there was no income). */
 function formatRate(pct: number | null): string {
@@ -51,15 +42,12 @@ function formatRate(pct: number | null): string {
 }
 
 export function SavingsRatePage() {
-  const [month, setMonth] = useState<string>(defaultMonth())
+  const [month, setMonth] = useState<string>(defaultReportMonth())
   const [months, setMonths] = useState<number>(12)
   const [currency, setCurrency] = useState<string>('')
   const [scope, setScope] = useState<LifestyleScope>('all')
   const [includeInvestments, setIncludeInvestments] = useState<boolean>(true)
   const [includeDebtPrincipal, setIncludeDebtPrincipal] = useState<boolean>(true)
-  const [data, setData] = useState<SavingsRateResponse | null>(null)
-  const [loading, setLoading] = useState<boolean>(true)
-  const [err, setErr] = useState<string | null>(null)
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams()
@@ -72,39 +60,11 @@ export function SavingsRatePage() {
     return params.toString()
   }, [month, months, scope, currency, includeInvestments, includeDebtPrincipal])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const res = await getJson<SavingsRateResponse>(
-        `/api/reports/savings-rate?${queryString}`,
-      )
-      setData(res)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error')
-    } finally {
-      setLoading(false)
-    }
-  }, [queryString])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  // Currencies present in the loaded data drive the picker so it never
-  // collapses when a filter is applied.
-  const availableCurrencies = useMemo(() => {
-    const set = new Set<string>()
-    for (const s of data?.byCurrency ?? []) set.add(s.currency)
-    if (currency) set.add(currency)
-    return Array.from(set).sort()
-  }, [data, currency])
-
-  const windowLabel = useMemo(() => {
-    const w = data?.windowMonths ?? []
-    if (w.length === 0) return ''
-    return `${w[0]} – ${w[w.length - 1]}`
-  }, [data])
+  const { data, loading, err, reload, availableCurrencies, windowLabel } =
+    useReportData<SavingsRateResponse>(
+      `/api/reports/savings-rate?${queryString}`,
+      currency,
+    )
 
   return (
     <div className="page">
@@ -114,79 +74,21 @@ export function SavingsRatePage() {
       />
 
       <section className="card">
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'flex-end',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-month">Through month</label>
-            <input
-              id="savings-month"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="input"
-              style={{ minWidth: 160 }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-window">Window</label>
-            <NativeSelect
-              id="savings-window"
-              value={String(months)}
-              onChange={(e) => setMonths(Number(e.target.value))}
-            >
-              {WINDOW_OPTIONS.map((w) => (
-                <option key={w} value={w}>
-                  {w} months
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-scope">Scope</label>
-            <NativeSelect
-              id="savings-scope"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as LifestyleScope)}
-            >
-              {SCOPE_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="savings-currency">Currency</label>
-            <NativeSelect
-              id="savings-currency"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-            >
-              <option value="">All currencies</option>
-              {availableCurrencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void load()
-            }}
-            disabled={loading}
-          >
-            Refresh
-          </Button>
-        </div>
+        <ReportFilterBar
+          idPrefix="savings"
+          month={month}
+          onMonthChange={setMonth}
+          months={months}
+          onMonthsChange={setMonths}
+          scope={scope}
+          onScopeChange={setScope}
+          scopeOptions={SCOPE_OPTIONS}
+          currency={currency}
+          onCurrencyChange={setCurrency}
+          availableCurrencies={availableCurrencies}
+          loading={loading}
+          onRefresh={reload}
+        />
 
         <div
           style={{
