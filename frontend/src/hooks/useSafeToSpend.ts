@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getJson, patchJson } from '@/lib/api'
-import type {
-  CashflowSettings,
-  SafeToSpendResponse,
-} from '@/types/api'
+import { getJson } from '@/lib/api'
+import type { SafeToSpendResponse } from '@/types/api'
 
 type AsyncState<T> = { data: T | null; loading: boolean; error: Error | null }
 
@@ -66,18 +63,4 @@ export function useSafeToSpend(opts: {
     ? null
     : buildSafeToSpendPath({ currency: opts.currency, asOfDate: opts.asOfDate })
   return useFetch<SafeToSpendResponse>(path)
-}
-
-export function useCashflowSettings() {
-  return useFetch<CashflowSettings>('/api/settings/cashflow')
-}
-
-/**
- * Patch the user's cashflow settings. Returns the persisted shape so
- * callers can update local state without a separate refetch.
- */
-export async function updateCashflowSettings(
-  patch: Partial<CashflowSettings>,
-): Promise<CashflowSettings> {
-  return patchJson<CashflowSettings>('/api/settings/cashflow', patch)
 }

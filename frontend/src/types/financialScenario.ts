@@ -64,6 +64,3 @@ export type CreateScenarioBody = {
   overrides: ScenarioAssumption[]
   baselineDays?: 30 | 60 | 90
 }
-
-/** Body for PATCH /api/financial-scenarios/:id */
-export type PatchScenarioBody = Partial<CreateScenarioBody>
