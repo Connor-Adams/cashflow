@@ -15,17 +15,13 @@
  * inputs. Result always returns the full breakdown — the UI shows it on
  * click and we want clients to render without a follow-up request.
  */
-import { Op, type WhereOptions } from 'sequelize';
-
 import { Account, FinancialGoal, CashflowSettings } from '../models';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
-import { PlannedEvent } from '../models/PlannedEvent';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
-  expandRecurrence,
-  cadenceToRecurrenceRule,
-  type PlannedEventLike,
-} from '../forecast/expandRecurrence';
+  gatherPlannedOccurrences,
+  resolveForecastCurrency,
+} from '../forecast/gatherOccurrences';
 import { projectGoal } from '../goals/projection';
 import { toUnits, fromUnits } from '../util/numbers';
 
@@ -155,39 +151,18 @@ function addDaysIso(iso: string, days: number): string {
 /**
  * Resolve which currency to compute against when the caller omits one.
  * Picks the currency with the largest absolute cash balance across the
- * household's eligible (non-investment, non-credit-card) accounts. Falls
- * back to CAD when the household has no cash on hand yet.
+ * household's eligible (non-investment, non-credit-card, non-loan) accounts.
+ * Falls back to CAD when the household has no cash on hand yet.
+ *
+ * Delegates the largest-abs/CAD-tiebreak algorithm to the shared
+ * `resolveForecastCurrency` (#404); the only safe-to-spend-specific input is
+ * the cash exclusion set, which is wider than the forecast route's.
  */
 export async function resolveDefaultCurrency(
   householdId: number,
   asOfDate: string,
 ): Promise<string> {
-  const accounts = await Account.findAll({ where: { householdId } });
-  const eligible = accounts.filter((a) => {
-    if (CASH_EXCLUDED_TYPES.has(a.accountType)) return false;
-    if (a.closedAt && a.closedAt <= asOfDate) return false;
-    return true;
-  });
-  const totalsU = new Map<string, number>();
-  for (const acc of eligible) {
-    const bal = await balanceAtDate(acc, asOfDate);
-    for (const { currency, amount } of bal) {
-      totalsU.set(currency, (totalsU.get(currency) ?? 0) + toUnits(amount));
-    }
-  }
-  let best: { currency: string; absAmount: number } | null = null;
-  for (const [ccy, amtU] of totalsU) {
-    const abs = Math.abs(amtU);
-    // Prefer CAD on ties — Cashflow's primary currency.
-    if (
-      !best ||
-      abs > best.absAmount ||
-      (ccy === 'CAD' && abs === best.absAmount)
-    ) {
-      best = { currency: ccy, absAmount: abs };
-    }
-  }
-  return best?.currency ?? 'CAD';
+  return resolveForecastCurrency(householdId, asOfDate, CASH_EXCLUDED_TYPES);
 }
 
 /**
@@ -234,38 +209,21 @@ export async function getUpcomingRequiredExpenses(
   asOfDate: string,
   windowEndDate: string,
 ): Promise<number> {
-  const where: WhereOptions = {
+  // Shared occurrence pipeline (#404): the PlannedEvent query +
+  // subscription-RRULE synth + expandRecurrence loop lives in one place.
+  // Each expense row contributes amount × (its in-window occurrence count).
+  const occurrences = await gatherPlannedOccurrences({
     householdId,
-    kind: { [Op.in]: ['planned', 'subscription'] },
     currency,
-    status: 'planned',
-    expectedDate: { [Op.lte]: windowEndDate },
-    type: 'expense',
-  };
-  const rows = await PlannedEvent.findAll({ where });
+    from: asOfDate,
+    to: windowEndDate,
+    typeFilter: 'expense',
+  });
   let totalU = 0;
-  for (const row of rows) {
-    const hasExplicitRule =
-      row.recurrenceRule != null && row.recurrenceRule.trim() !== '';
-    const recurrenceRule = hasExplicitRule
-      ? row.recurrenceRule
-      : row.kind === 'subscription'
-        ? cadenceToRecurrenceRule(row.cadence)
-        : null;
-    const seedDate =
-      row.kind === 'subscription' && row.nextExpectedDate
-        ? row.nextExpectedDate
-        : row.expectedDate;
-    const eventLike: PlannedEventLike = {
-      id: row.id,
-      expectedDate: seedDate,
-      recurrenceRule,
-      status: row.status,
-    };
-    const occs = expandRecurrence(eventLike, asOfDate, windowEndDate);
+  for (const { row } of occurrences) {
     const amount = Number(row.amount);
     if (!Number.isFinite(amount)) continue;
-    totalU += toUnits(amount) * occs.length;
+    totalU += toUnits(amount);
   }
   return fromUnits(totalU);
 }
