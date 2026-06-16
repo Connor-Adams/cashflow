@@ -148,10 +148,13 @@ jobs:
   code-audit:
     needs: install
     runs-on: ubuntu-latest
-    # Informational for now: surfaces dead code + complexity (fallow) and
-    # duplication (jscpd) without blocking merges, and posts a whole-repo
-    # snapshot as a sticky PR comment. Flip the steps to required once the
-    # baseline is driven down. See CONTRIBUTING.md for `yarn audit:code`.
+    # Surfaces dead code + complexity (fallow) and duplication (jscpd), posts a
+    # whole-repo snapshot as a sticky PR comment, and RATCHETS the baseline: the
+    # final "Enforce audit baseline" step fails the job if any zeroable dead-code
+    # category regresses above 0 or duplication rises above the ceiling (issue
+    # #469). Complexity stays informational — it never blocks. Make this job a
+    # required check on `main` so the line holds. See CONTRIBUTING.md › Code
+    # health and scripts/audit-gate.cjs.
     permissions:
       contents: read
       pull-requests: write
@@ -231,6 +234,16 @@ jobs:
                 owner, repo, issue_number, body,
               });
             }
+
+      # The baseline ratchet. Runs LAST so the snapshot comment is always posted
+      # first (reviewers see the numbers even on failure). `if: always()` keeps
+      # it from being skipped by an earlier continue-on-error step. This is the
+      # step that decides the job's pass/fail — it reads the same reports the
+      # summary renders and fails on any zeroable-category regression or
+      # duplication above the ceiling. Complexity is never consulted here.
+      - name: Enforce audit baseline (ratchet)
+        if: always()
+        run: node scripts/audit-gate.cjs
 
   frontend-test:
     needs: install
