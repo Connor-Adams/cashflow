@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
+import { ReportFilterBar } from './report/ReportFilterBar'
+import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
 import type {
   LifestyleCategoryDriver,
   LifestyleCurrencyTrend,
@@ -37,21 +37,12 @@ const SEVERITY_BADGE: Record<
   low: 'secondary',
 }
 
-const SCOPE_OPTIONS: { value: LifestyleScope; label: string }[] = [
+const SCOPE_OPTIONS: ScopeOption[] = [
   { value: 'all', label: 'All spend' },
   { value: 'personal', label: 'Personal' },
   { value: 'shared', label: 'Shared' },
   { value: 'business', label: 'Business' },
 ]
-
-const WINDOW_OPTIONS = [6, 12, 18, 24]
-
-/** Default anchor is the current calendar month in the browser's local
- *  timezone. The backend treats YYYY-MM as a pure label. */
-function defaultMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
 
 /** Format a percentage-change value (may be null when there's no baseline). */
 function formatPct(pct: number | null): string {
@@ -61,7 +52,7 @@ function formatPct(pct: number | null): string {
 }
 
 export function LifestyleInflationPage() {
-  const [month, setMonth] = useState<string>(defaultMonth())
+  const [month, setMonth] = useState<string>(defaultReportMonth())
   const [months, setMonths] = useState<number>(12)
   const [currency, setCurrency] = useState<string>('')
   const [scope, setScope] = useState<LifestyleScope>('all')
@@ -120,79 +111,23 @@ export function LifestyleInflationPage() {
       />
 
       <section className="card">
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'flex-end',
-            flexWrap: 'wrap',
+        <ReportFilterBar
+          idPrefix="lifestyle"
+          month={month}
+          onMonthChange={setMonth}
+          months={months}
+          onMonthsChange={setMonths}
+          scope={scope}
+          onScopeChange={setScope}
+          scopeOptions={SCOPE_OPTIONS}
+          currency={currency}
+          onCurrencyChange={setCurrency}
+          availableCurrencies={availableCurrencies}
+          loading={loading}
+          onRefresh={() => {
+            void load()
           }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-month">Through month</label>
-            <input
-              id="lifestyle-month"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="input"
-              style={{ minWidth: 160 }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-window">Window</label>
-            <NativeSelect
-              id="lifestyle-window"
-              value={String(months)}
-              onChange={(e) => setMonths(Number(e.target.value))}
-            >
-              {WINDOW_OPTIONS.map((w) => (
-                <option key={w} value={w}>
-                  {w} months
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-scope">Scope</label>
-            <NativeSelect
-              id="lifestyle-scope"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as LifestyleScope)}
-            >
-              {SCOPE_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label htmlFor="lifestyle-currency">Currency</label>
-            <NativeSelect
-              id="lifestyle-currency"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-            >
-              <option value="">All currencies</option>
-              {availableCurrencies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void load()
-            }}
-            disabled={loading}
-          >
-            Refresh
-          </Button>
-        </div>
+        />
         {windowLabel && (
           <p className="muted" style={{ margin: '8px 0 0' }}>
             Showing {windowLabel}.
