@@ -1,7 +1,5 @@
 import type { Decimal } from '../util/decimal';
 
-export type Currency = 'CAD' | 'USD' | string;
-
 export type SlipBoxes = Record<string, Decimal>;
 
 export type SlipFact = {
@@ -272,44 +270,4 @@ export type RateTable = {
   corpAaiiGrindThreshold: Decimal;      // $50,000
   corpAaiiGrindRate: Decimal;           // $5 SBD lost per $1 AAII above threshold
   corpDividendRefundRate: Decimal;      // 38.33% (RDTOH refund cap per dividend $)
-};
-
-// ---------------------------------------------------------------------------
-// Phase 5 — Scenario engine (owner-comp optimizer)
-// ---------------------------------------------------------------------------
-
-export type OwnerComp = {
-  salary: Decimal;                  // gross T4 box 14 from corp to owner
-  eligibleDividends: Decimal;       // gross actual eligible dividends declared
-  nonEligibleDividends: Decimal;    // gross actual non-eligible dividends declared
-};
-
-export type ScenarioInput = {
-  year: number;
-  jurisdiction: 'CA-ON';
-  // Base personal facts (employment income from non-corp sources, investment income, etc.)
-  // OwnerComp.salary will be ADDED to facts.employmentIncome before T1 compute.
-  personalFactsBase: Omit<TaxYearFacts, 'employmentIncome' | 'eligibleDividends' | 'nonEligibleDividends'> & {
-    employmentIncomeBase: IncomeItem[];
-    eligibleDividendsBase: IncomeItem[];
-    nonEligibleDividendsBase: IncomeItem[];
-  };
-  // Base corp facts (ABI, AAII inputs).
-  // OwnerComp.salary will be ADDED to corp salaryPaid (deductible expense reducing ABI).
-  // OwnerComp.dividends* will be ADDED to corp dividendsPaid (eligible/non).
-  corpFactsBase: CorpTaxYearFacts;
-  ownerComp: OwnerComp;
-};
-
-export type ScenarioResult = {
-  ownerComp: OwnerComp;
-  corpReturn: CorpTaxReturn;
-  personalReturn: TaxReturn;
-  combinedTotals: {
-    corpNetTaxPayable: Decimal;
-    personalTotalPayable: Decimal;
-    personalAfterTaxIncome: Decimal;  // simplified: personalReturn.totals.totalIncome - personalReturn.totals.totalPayable
-    householdTotalTax: Decimal;       // corpNetTaxPayable + personalTotalPayable
-    effectiveRate: Decimal;           // householdTotalTax / (ABI + investment income before any draws)
-  };
 };

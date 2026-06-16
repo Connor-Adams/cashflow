@@ -22,12 +22,6 @@ import {
  */
 export type CfoBriefingStatus = 'pending' | 'completed' | 'failed';
 
-export const CFO_BRIEFING_STATUSES: readonly CfoBriefingStatus[] = [
-  'pending',
-  'completed',
-  'failed',
-] as const;
-
 /**
  * Categories of action items a briefing can surface. Persisted as STRING
  * inside the JSON column; runtime validation here ensures unknown types
@@ -43,18 +37,6 @@ export type CfoBriefingActionItemType =
   | 'import_issue'
   | 'anomaly'
   | 'other';
-
-export const CFO_BRIEFING_ACTION_ITEM_TYPES: readonly CfoBriefingActionItemType[] = [
-  'forecast_warning',
-  'safe_to_spend_low',
-  'missing_receipt',
-  'new_subscription',
-  'rule_suggestion',
-  'review_backlog',
-  'import_issue',
-  'anomaly',
-  'other',
-] as const;
 
 export type CfoBriefingActionItemRefType =
   | 'transaction'

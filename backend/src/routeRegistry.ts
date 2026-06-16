@@ -27,7 +27,7 @@
  * paths, middleware chains, and 410 stubs. The array index *is* the mount order;
  * the entry at index i is `app.use(paths, ...handlers)` applied i-th.
  */
-import { Router, type Express, type RequestHandler, type Request, type Response } from 'express';
+import type { Express, RequestHandler, Request, Response } from 'express';
 
 import healthRouter from './routes/health';
 import versionRouter from './routes/version';
@@ -379,8 +379,3 @@ export function mountRoutes(app: Express): void {
     mountEntry(app, entry);
   }
 }
-
-// Touch the Router import so tree-shakers/linters don't flag it; the registry
-// composes existing routers rather than constructing new ones, but keeping the
-// type available documents that entries are Router-compatible handler chains.
-export type { Router };

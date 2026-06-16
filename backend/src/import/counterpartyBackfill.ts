@@ -158,6 +158,8 @@ interface TxnRow {
 const COUNTERPARTY_BACKFILL_LOCK_HELD = 'COUNTERPARTY_BACKFILL_LOCK_HELD' as const;
 
 export class CounterpartyBackfillInFlightError extends Error {
+  // Conventional Node error-code discriminator consumed by generic error logging/serialization, not direct member access.
+  // fallow-ignore-next-line unused-class-member
   code = COUNTERPARTY_BACKFILL_LOCK_HELD;
   constructor(householdId: number) {
     super(`counterparty backfill already running for household ${householdId}`);

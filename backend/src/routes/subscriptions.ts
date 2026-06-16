@@ -22,7 +22,6 @@ import {
 import {
   annualizeCost,
   mergeDetectionWithExisting,
-  normalizeMerchantName,
   type ExistingSubscriptionRow,
 } from '../subscriptions/detect';
 import {
@@ -594,8 +593,5 @@ router.get('/:id/cancel-impact', async (req, res, next) => {
     next(e);
   }
 });
-
-// Re-export for unit tests that exercise normalization helpers.
-export { normalizeMerchantName };
 
 export default router;

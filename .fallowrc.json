@@ -29,6 +29,15 @@
   ],
   "ignoreExportsUsedInFile": true,
   "usedClassMembers": [
-    { "extends": "Model", "members": ["*"] }
+    { "extends": "Model", "members": ["*"] },
+    { "implements": "SpanProcessor", "members": ["*"] }
+  ],
+  "ignoreExports": [
+    { "file": "backend/src/fx/reportingNormalization.ts", "exports": ["FxRateUsed"] },
+    { "file": "backend/src/networth/unifyToCad.ts", "exports": ["FxRateUsed"] },
+    { "file": "backend/src/models/Label.ts", "exports": ["Label"] },
+    { "file": "frontend/src/components/ui/label.tsx", "exports": ["Label"] },
+    { "file": "backend/src/models/VaultDocument.ts", "exports": ["VaultEncryptionAlgorithm"] },
+    { "file": "backend/src/storage/vaultStorage.ts", "exports": ["VaultEncryptionAlgorithm"] }
   ]
 }

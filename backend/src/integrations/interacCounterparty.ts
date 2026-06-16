@@ -61,11 +61,6 @@ export function isInteracSyncRunning(householdId: number): boolean {
   return inFlight.has(householdId);
 }
 
-/** Test-only helper — clears any leftover in-flight markers between cases. */
-export function _resetInteracSyncInFlightForTest(): void {
-  inFlight.clear();
-}
-
 // ---------------------------------------------------------------------------
 // Result type
 // ---------------------------------------------------------------------------

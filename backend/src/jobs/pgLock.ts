@@ -12,6 +12,8 @@ function hashName(name: string): bigint {
   return view.getBigInt64(0, false);
 }
 
+// Consumed by pgLock.test.ts via dynamic import; fallow's static resolver can't follow it.
+// fallow-ignore-next-line unused-export
 export function hashJobNameForTest(name: string): bigint {
   return hashName(name);
 }

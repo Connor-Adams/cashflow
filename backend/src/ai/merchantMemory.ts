@@ -145,18 +145,3 @@ export async function findMerchantMemory(
   return general ? rowToMatch(general, false) : null;
 }
 
-export function merchantMemoryToAutoFields(match: MerchantMemoryMatch): {
-  autoCategory: string | null;
-  autoBusiness: boolean;
-  autoSplitType: string;
-  autoPctMe: string | null;
-  autoPctPartner: string | null;
-} {
-  return {
-    autoCategory: match.category,
-    autoBusiness: match.business,
-    autoSplitType: match.splitType,
-    autoPctMe: match.pctMe,
-    autoPctPartner: match.pctPartner,
-  };
-}

@@ -46,7 +46,11 @@ import {
 } from './dataQualityScore';
 
 // Re-export the score-math types and helpers so callers don't have to know
-// the split exists. Routes + frontend types both consume these.
+// the split exists. Routes + frontend types both consume these. Some callers
+// import the same symbols straight from ./dataQualityScore, so fallow sees the
+// facade re-exports as unused; they are intentional public API.
+// fallow-ignore-file unused-export
+// fallow-ignore-file unused-type
 export {
   computeDataQualityScore,
   normalizeIssueCount,
