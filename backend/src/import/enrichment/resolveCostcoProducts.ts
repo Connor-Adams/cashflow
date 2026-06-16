@@ -14,6 +14,16 @@
 import type { CostcoProductData, CostcoScraperCaller } from '../../integrations/costco/scraperClient';
 import { defaultCostcoScraperCaller } from '../../integrations/costco/scraperClient';
 import type { CostcoProductStatus } from '../../models/CostcoProduct';
+import type {
+  ItemNumberToResolve,
+  PerItemResolver,
+  ResolvedProduct,
+} from './costcoResolverShared';
+import { itemNumbersMatch } from './costcoResolverShared';
+// Re-export the shared contracts/helper so existing importers of this module
+// (tests, callers) keep their import paths unchanged after the extraction.
+export type { ItemNumberToResolve, PerItemResolver, ResolvedProduct } from './costcoResolverShared';
+export { itemNumbersMatch } from './costcoResolverShared';
 import { ExternalOrder, ExternalOrderItem, CostcoProduct } from '../../models';
 import { costcoEnrichmentEnabled, costcoEnrichmentMaxItemsPerRun } from '../../config/env';
 import { getCostcoScraperConfig, getCostcoProvider, getGoogleCseConfig } from '../../config/costco';
@@ -30,15 +40,6 @@ const MAX_CANDIDATES = 2;
 /** Error rows are retried on subsequent runs but capped here (see migration comment). */
 const MAX_ERROR_ATTEMPTS = 5;
 
-/** Digits-only equality; tolerates leading zeros and surrounding text. Null/empty never match. */
-export function itemNumbersMatch(a: string | null, b: string | null): boolean {
-  if (a == null || b == null) return false;
-  const da = a.replace(/\D/g, '').replace(/^0+/, '');
-  const db = b.replace(/\D/g, '').replace(/^0+/, '');
-  if (da === '' || db === '') return false;
-  return da === db;
-}
-
 /** First candidate whose item number matches the receipt item number, else null. PURE. */
 export function pickVerifiedProduct(
   receiptItemNumber: string,
@@ -49,18 +50,6 @@ export function pickVerifiedProduct(
   }
   return null;
 }
-
-/** The cache-row fields produced by resolving one item number. */
-export type ResolvedProduct = {
-  itemNumber: string;
-  status: CostcoProductStatus;
-  imageUrl: string | null;
-  costcoUrl: string | null;
-  officialName: string | null;
-  onlinePrice: string | null;
-  source: string;
-  verified: boolean;
-};
 
 function notFound(itemNumber: string, source: string): ResolvedProduct {
   return { itemNumber, status: 'not_found', imageUrl: null, costcoUrl: null, officialName: null, onlinePrice: null, source, verified: true };
@@ -100,10 +89,6 @@ export async function resolveOneItemNumber(
     return { itemNumber, status: 'error', imageUrl: null, costcoUrl: null, officialName: null, onlinePrice: null, source: caller.source, verified: true };
   }
 }
-
-export type ItemNumberToResolve = { itemNumber: string; name: string };
-
-export type PerItemResolver = (itemNumber: string, name: string) => Promise<ResolvedProduct>;
 
 /** Build a per-item resolver for the strict (item-number-verified) scraper path. */
 export function strictResolver(caller: CostcoScraperCaller): PerItemResolver {

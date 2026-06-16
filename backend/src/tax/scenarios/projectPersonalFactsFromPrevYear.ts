@@ -3,6 +3,7 @@ import { D } from '../util/decimal';
 import { Scenario } from '../../models';
 import { computeScenario } from './computeScenario';
 import { resolveScenario } from './resolveScenario';
+import { setPersonalProjector } from './projectionPorts';
 import { rollPersonalCarryforwards } from '../services/rollPersonalCarryforwards';
 import { ratesFor } from '../engine/brackets';
 import type { TaxYearFacts, IncomeItem, RrspContrib } from '../engine/types';
@@ -128,3 +129,8 @@ export async function projectPersonalFactsFromPrevYear(
     oasBenefits: parentFacts.oasBenefits?.times(inflationMult),
   };
 }
+
+// Register the projector so resolveScenario can dispatch projection_root roots
+// through the port without importing this module (which imports resolveScenario,
+// and importing back would re-form the cycle).
+setPersonalProjector(projectPersonalFactsFromPrevYear);

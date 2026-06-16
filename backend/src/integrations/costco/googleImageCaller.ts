@@ -1,5 +1,5 @@
-import type { PerItemResolver, ResolvedProduct } from '../../import/enrichment/resolveCostcoProducts';
-import { itemNumbersMatch } from '../../import/enrichment/resolveCostcoProducts';
+import type { PerItemResolver, ResolvedProduct } from '../../import/enrichment/costcoResolverShared';
+import { itemNumbersMatch } from '../../import/enrichment/costcoResolverShared';
 import { itemNumberFromText } from './itemNumberFromText';
 import { logger } from '../../observability/logger';
 

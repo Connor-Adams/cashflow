@@ -116,6 +116,15 @@ import searchRouter from './routes/search';
 import incomeRouter from './routes/income';
 import navStatusRouter from './routes/navStatus';
 import { requireAuth } from './auth/middleware';
+// Load the tax-scenario projection modules so they register their projectors with
+// projectionPorts at startup. resolveScenario/resolveCorpScenario reach projection
+// through those ports (to break the resolve<->project import cycle), so a
+// projection_root resolve throws if the projectors were never loaded. This module
+// is imported by app.ts and mounts every router, so it is the single production
+// point guaranteed to load before any request — wiring here covers all scenario
+// routes (tax-scenarios, tax-household-plans, …) without per-route boilerplate.
+// Acyclic: wireScenarios depends on the project modules, not on this registry.
+import './tax/scenarios/wireScenarios';
 
 /**
  * One declarative router mount. The handler chain is applied as
