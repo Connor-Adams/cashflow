@@ -96,6 +96,29 @@ export async function computeScenarioReturn<F>(
 }
 
 /**
+ * Build an uncached `ScenarioReturnResult` directly from an engine output and a
+ * sentinel `factsHash`. Used by the HouseholdPlan path, where plan-scoped
+ * facts intentionally bypass the `scenario_returns` cache — both the personal
+ * and corp integrated paths synthesize the same result shape around their
+ * engine output.
+ */
+export function synthesizeScenarioReturn(
+  scenarioId: number,
+  engineReturn: EngineReturn,
+  factsHash: string,
+): ScenarioReturnResult {
+  return {
+    scenarioId,
+    factsHash,
+    computedAt: new Date().toISOString(),
+    lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
+    totals: JSON.parse(JSON.stringify(engineReturn.totals)) as Record<string, unknown>,
+    warnings: engineReturn.warnings,
+    cached: false,
+  };
+}
+
+/**
  * Canonical hash of a facts struct. Identical inputs always produce the same
  * hash. JSON.stringify with a replacer keeps Decimal values (which serialise as
  * objects) stable.
