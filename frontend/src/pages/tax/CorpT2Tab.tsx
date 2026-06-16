@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useTaxEntities, type TaxEntity } from '../../hooks/useTaxEntities';
 import {
   useCorpScenarios,
-  type CorpScenario,
   type CorpScenarioWithComputed,
 } from '../../hooks/useCorpScenarios';
 import { useCorpScenarioDetail } from '../../hooks/useCorpScenarioDetail';
@@ -17,20 +16,14 @@ import type { Scenario } from '../../hooks/useScenarios';
 import { patchJson } from '../../lib/api';
 import { fmtCurrency } from './util/format';
 import { labelForTotal } from './util/labels';
+import { TaxLineBreakdownTable } from './components/TaxLineBreakdownTable';
+import { ScenarioCompareBar } from './components/ScenarioCompareBar';
 import { Button } from '@/components/ui/button';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { CollapsibleCard } from '@/components/ui/collapsible-card';
 import { Alert } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@/components/ui/table';
 
 const CURRENT_YEAR = new Date().getFullYear().toString();
 
@@ -407,7 +400,7 @@ function CorpT2ScenarioWorkspace({ entityId, year: yearProp, otherCorps }: Works
             />
           ) : null}
           {compareIds.length > 0 && (
-            <CompareBar
+            <ScenarioCompareBar
               ids={compareIds}
               scenarios={scenarios}
               onRemove={toggleCompare}
@@ -514,101 +507,8 @@ function ActiveCorpScenarioPanel({
       )}
 
       <CollapsibleCard title="Return detail (T2 lines)" defaultOpen={false}>
-        <CorpLineBreakdownTable lines={lines} />
+        <TaxLineBreakdownTable lines={lines} />
       </CollapsibleCard>
-    </div>
-  );
-}
-
-function CorpLineBreakdownTable({ lines }: { lines: CorpTaxLineDto[] }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  if (lines.length === 0) return <p className="muted">No lines to display.</p>;
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Line</TableHead>
-          <TableHead>Label</TableHead>
-          <TableHead className="text-right">Amount</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {lines.map((l) => (
-          <CorpLineRow
-            key={l.code}
-            line={l}
-            expanded={expanded === l.code}
-            onClick={() => setExpanded(expanded === l.code ? null : l.code)}
-          />
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-function CorpLineRow({
-  line,
-  expanded,
-  onClick,
-}: {
-  line: CorpTaxLineDto;
-  expanded: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <>
-      <TableRow onClick={onClick} className="cursor-pointer">
-        <TableCell>{line.code}</TableCell>
-        <TableCell>{line.label}</TableCell>
-        <TableCell className="text-right tabular-nums">{fmtCurrency(line.amount)}</TableCell>
-      </TableRow>
-      {expanded && (
-        <TableRow>
-          <TableCell colSpan={3}>
-            {line.formula && <p className="muted">Formula: {line.formula}</p>}
-            <ul>
-              {line.inputs.map((inp, idx) => (
-                <li key={idx}>{inp.source}: {fmtCurrency(inp.amount)}</li>
-              ))}
-            </ul>
-          </TableCell>
-        </TableRow>
-      )}
-    </>
-  );
-}
-
-interface CompareBarProps {
-  ids: number[];
-  scenarios: CorpScenario[];
-  onRemove: (id: number) => void;
-  onClear: () => void;
-}
-
-function CompareBar({ ids, scenarios, onRemove, onClear }: CompareBarProps) {
-  const byId = new Map(scenarios.map((s) => [s.id, s]));
-  return (
-    <div className="mt-4 rounded-md border border-border p-2">
-      <strong>Compare ({ids.length}):</strong>{' '}
-      {ids.map((id) => (
-        <Button
-          key={id}
-          variant="ghost"
-          size="sm"
-          onClick={() => onRemove(id)}
-          className="mr-1"
-        >
-          {byId.get(id)?.name ?? `#${id}`} ×
-        </Button>
-      ))}
-      {ids.length > 0 && (
-        <Button variant="ghost" size="sm" onClick={onClear} className="ml-2">
-          Clear
-        </Button>
-      )}
-      {ids.length < 2 && (
-        <span className="muted"> Add at least 2 to see the diff.</span>
-      )}
     </div>
   );
 }
