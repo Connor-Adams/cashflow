@@ -149,6 +149,20 @@ const taxScenariosGoneStub: RequestHandler = (_req: Request, res: Response) => {
 };
 
 /**
+ * Inline 410 Gone stub for the folded top-level statement-reconciliation path
+ * (issue #403). AccountStatement is a period-child of Account, not a parallel
+ * primitive, so the surface moved under the Account namespace at
+ * /api/accounts/statements. The old /api/statements now 410s so any stale
+ * caller fails loudly. Mirrors taxScenariosGoneStub above.
+ */
+const statementsGoneStub: RequestHandler = (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: 'gone',
+    message: 'This endpoint moved to /api/accounts/statements (issue #403).',
+  });
+};
+
+/**
  * Capture CORS allow-list, mounted on /api/capture/orders BEFORE the global
  * cors() in app.ts. The global cors uses a static `origin: env.corsOrigin`
  * (the frontend host), which rejects bookmarklet preflights from
@@ -204,10 +218,19 @@ export const gatedRoutes: RouteEntry[] = [
   { paths: '/api/nav/status', handlers: [navStatusRouter], why: 'Sidebar feature-visibility flags (Phase 1 IA cleanup). Derived read-only counts, no new primitive.' },
   { paths: '/api/jobs', handlers: [jobsRouter] },
   { paths: '/api/search', handlers: [searchRouter] },
+  {
+    paths: '/api/accounts/statements',
+    handlers: [statementsRouter],
+    why: 'Statement reconciliation folded under the Account namespace (issue #403): AccountStatement is a period-child of Account, not a parallel primitive. Mounts BEFORE accountsRouter so the specific /accounts/statements path wins against accountsRouter\'s /:id matcher.',
+  },
   { paths: '/api/accounts', handlers: [accountsRouter] },
   { paths: '/api/transactions', handlers: [transactionsRouter] },
   { paths: '/api/transfers', handlers: [transfersRouter] },
-  { paths: '/api/statements', handlers: [statementsRouter] },
+  {
+    paths: '/api/statements',
+    handlers: [statementsGoneStub],
+    why: 'Old top-level path retained only to return 410 Gone (issue #403) so any stale client surfaces loudly instead of silently breaking. The live surface is /api/accounts/statements above.',
+  },
   { paths: '/api/rules', handlers: [rulesRouter] },
   { paths: '/api/contacts', handlers: [contactsRouter] },
   { paths: '/api/categories', handlers: [categoriesRouter] },

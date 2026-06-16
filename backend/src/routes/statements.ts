@@ -7,13 +7,17 @@
  * surface in the detail response; the user can attach an explanation and
  * mark the statement reconciled when they're satisfied.
  *
- *   POST   /api/statements                 — create a statement
- *   GET    /api/statements                 — list (filterable by accountId)
- *   GET    /api/statements/:id             — detail + computed variance + txns
- *   PATCH  /api/statements/:id             — update editable fields
- *   POST   /api/statements/:id/reconcile   — mark reconciled
- *   POST   /api/statements/:id/unreconcile — clear reconciliation
- *   DELETE /api/statements/:id             — remove
+ * Mounted under the Account namespace (issue #403): AccountStatement is a
+ * period-child of Account, not a parallel primitive. The old top-level
+ * /api/statements path now returns 410 Gone (see routeRegistry.ts).
+ *
+ *   POST   /api/accounts/statements                 — create a statement
+ *   GET    /api/accounts/statements                 — list (filterable by accountId)
+ *   GET    /api/accounts/statements/:id             — detail + computed variance + txns
+ *   PATCH  /api/accounts/statements/:id             — update editable fields
+ *   POST   /api/accounts/statements/:id/reconcile   — mark reconciled
+ *   POST   /api/accounts/statements/:id/unreconcile — clear reconciliation
+ *   DELETE /api/accounts/statements/:id             — remove
  *
  * Authorization: every endpoint scopes to the caller's household via
  * {@link visibleWhere} (statements) and {@link visibleAccountWhere}
@@ -118,7 +122,7 @@ async function loadVisibleStatement(
 }
 
 /**
- * POST /api/statements
+ * POST /api/accounts/statements
  *
  * Body: `{ accountId, periodStart, periodEnd, openingBalance,
  *          closingBalance, currency?, sourceFilename?, notes?,
@@ -252,7 +256,7 @@ router.post('/', async (req, res, next) => {
 });
 
 /**
- * GET /api/statements
+ * GET /api/accounts/statements
  *
  * Query params:
  *   - accountId (optional)         filter to one account
@@ -400,7 +404,7 @@ async function getReconciliationFor(
 }
 
 /**
- * GET /api/statements/:id
+ * GET /api/accounts/statements/:id
  *
  * Detail view with reconciliation math AND the transactions that fall
  * inside the statement's window (so the UI can render "inspect period").
@@ -429,7 +433,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 /**
- * PATCH /api/statements/:id
+ * PATCH /api/accounts/statements/:id
  *
  * Editable fields (all optional):
  *   openingBalance, closingBalance, notes, sourceFilename,
@@ -531,7 +535,7 @@ router.patch('/:id', async (req, res, next) => {
 });
 
 /**
- * POST /api/statements/:id/reconcile
+ * POST /api/accounts/statements/:id/reconcile
  *
  * Marks the statement reconciled. Refuses with 400 when variance is
  * non-zero AND no `varianceExplanation` has been recorded — the user must
@@ -615,7 +619,7 @@ router.post('/:id/reconcile', async (req, res, next) => {
 });
 
 /**
- * POST /api/statements/:id/unreconcile
+ * POST /api/accounts/statements/:id/unreconcile
  *
  * Clears `reconciledAt` so the user can revisit the statement. The
  * variance explanation is preserved (useful audit trail) — the user can
@@ -660,7 +664,7 @@ router.post('/:id/unreconcile', async (req, res, next) => {
 });
 
 /**
- * DELETE /api/statements/:id
+ * DELETE /api/accounts/statements/:id
  */
 router.delete('/:id', async (req, res, next) => {
   try {

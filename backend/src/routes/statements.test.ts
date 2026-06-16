@@ -1,6 +1,6 @@
 /**
  * Colocated unit tests for the statement reconciliation math in
- * `routes/statements.ts` (`getReconciliationFor` via GET /api/statements/:id).
+ * `routes/statements.ts` (`getReconciliationFor` via GET /api/accounts/statements/:id).
  *
  * Runs against the per-process SQLite test DB (see backend/test/setup.ts) —
  * no Postgres needed. The broader CRUD/auth surface is covered by the
@@ -95,7 +95,7 @@ async function createStatement(opts: {
   openingBalance: number;
   closingBalance: number;
 }): Promise<number> {
-  const res = await agent.post('/api/statements').send(opts);
+  const res = await agent.post('/api/accounts/statements').send(opts);
   assert.equal(res.status, 201, `unexpected: ${JSON.stringify(res.body)}`);
   return res.body.data.id as number;
 }
@@ -169,7 +169,7 @@ test('pending transactions are excluded from expectedClosing', async () => {
     openingBalance: 1000,
     closingBalance: 900,
   });
-  const detail = await agent.get(`/api/statements/${id}`);
+  const detail = await agent.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.body.reconciliation.expectedClosing, 900);
   assert.equal(detail.body.reconciliation.variance, 0);
@@ -202,7 +202,7 @@ test("partner's private transactions are included in the account-level sum", asy
     openingBalance: 1000,
     closingBalance: 800,
   });
-  const detail = await agent.get(`/api/statements/${id}`);
+  const detail = await agent.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.body.reconciliation.expectedClosing, 800);
   assert.equal(detail.body.reconciliation.variance, 0);
@@ -224,7 +224,7 @@ test('only transactions in the statement currency are summed', async () => {
     openingBalance: 500,
     closingBalance: 400,
   });
-  const detail = await agent.get(`/api/statements/${id}`);
+  const detail = await agent.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.body.reconciliation.expectedClosing, 400);
   assert.equal(detail.body.reconciliation.variance, 0);
@@ -248,7 +248,7 @@ test('liability accounts reconcile bank-style positive-owed balances', async () 
     openingBalance: 500,
     closingBalance: 1200,
   });
-  const detail = await agent.get(`/api/statements/${id}`);
+  const detail = await agent.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.body.reconciliation.expectedClosing, 1200);
   assert.equal(detail.body.reconciliation.variance, 0);
@@ -258,7 +258,7 @@ test('liability accounts reconcile bank-style positive-owed balances', async () 
 test('list pagination falls back to defaults on non-numeric page/pageSize', async () => {
   // parseInt('abc') is NaN and Math.max(1, NaN) is NaN — without a finite
   // guard, NaN limit/offset reach Sequelize's query generator.
-  const res = await agent.get('/api/statements?page=abc&pageSize=xyz');
+  const res = await agent.get('/api/accounts/statements?page=abc&pageSize=xyz');
   assert.equal(res.status, 200, `unexpected: ${JSON.stringify(res.body)}`);
   assert.equal(res.body.page, 1);
   assert.equal(res.body.pageSize, 50);
@@ -278,7 +278,7 @@ test('asset accounts keep the plain opening + sum convention', async () => {
     openingBalance: 1000,
     closingBalance: 900,
   });
-  const detail = await agent.get(`/api/statements/${id}`);
+  const detail = await agent.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.body.reconciliation.expectedClosing, 900);
   assert.equal(detail.body.reconciliation.variance, 0);
