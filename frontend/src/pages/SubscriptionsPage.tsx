@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
+import { SummaryStat } from '@/components/SummaryStat'
 import {
   Dialog,
   DialogBody,
@@ -364,33 +364,6 @@ function SubscriptionSummary({
         ))}
       </div>
     </section>
-  )
-}
-
-function SummaryStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone?: 'warn'
-}) {
-  return (
-    <Card style={{ padding: 12 }}>
-      <div className="muted" style={{ fontSize: 12 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 20,
-          fontWeight: 600,
-          color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
-        }}
-      >
-        {value}
-      </div>
-    </Card>
   )
 }
 
