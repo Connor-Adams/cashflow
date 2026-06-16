@@ -2,7 +2,11 @@
 import { Scenario } from '../../models';
 import { buildPersonalFacts } from '../builders/buildPersonalFacts';
 import { applyOverrides } from './applyOverrides';
-import { projectPersonalFactsFromPrevYear } from './projectPersonalFactsFromPrevYear';
+// projectPersonalFactsFromPrevYear is reached through a port (not imported
+// directly) to break the resolve<->project import cycle: projectPersonal imports
+// resolveScenario, so resolveScenario must not import projectPersonal back. The
+// projector registers itself with the port at module load. See projectionPorts.ts.
+import { projectPersonalFactsViaPort } from './projectionPorts';
 import type { OverrideMap } from './types';
 import type { TaxYearFacts } from '../engine/types';
 
@@ -45,7 +49,7 @@ export async function resolveScenario(scenarioId: number): Promise<TaxYearFacts>
   const ancestry = await loadAncestry(scenarioId);
   const root = ancestry[0];
   const baseFacts = root.kind === 'projection_root'
-    ? await projectPersonalFactsFromPrevYear(root.id)
+    ? await projectPersonalFactsViaPort(root.id)
     : await buildPersonalFacts(root.entityId, root.year);
   const overrideChain: OverrideMap[] = ancestry.map((s) => s.overrides as OverrideMap);
   return applyOverrides(baseFacts, overrideChain, 'personal');

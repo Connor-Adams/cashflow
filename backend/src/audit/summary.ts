@@ -5,6 +5,7 @@ import { runIntegrity } from './integrity';
 import { runClientErrors } from './clientErrors';
 import { runServerErrors } from './serverErrors';
 import { runRouteProbe } from './routeProbe';
+import type { Application } from 'express';
 
 type Verdict = 'pass' | 'warn' | 'fail';
 
@@ -31,6 +32,7 @@ function worst(...verdicts: Verdict[]): Verdict {
 export async function runSummary(
   userId: number,
   householdId: number,
+  app: Application,
   opts: { windowMinutes?: number }
 ): Promise<SummaryResult> {
   const windowMinutes = Math.min(1440, Math.max(1, opts.windowMinutes ?? 60));
@@ -44,7 +46,7 @@ export async function runSummary(
       runIntegrity(householdId),
       runClientErrors(householdId, { since }),
       runServerErrors(householdId, { since }),
-      runRouteProbe(userId),
+      runRouteProbe(userId, app),
     ]);
 
   // health

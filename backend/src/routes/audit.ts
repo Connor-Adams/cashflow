@@ -84,7 +84,7 @@ router.get('/server-errors', async (req, res, next) => {
 router.get('/route-probe', async (req, res, next) => {
   try {
     const { user } = req.auditAuth!;
-    const result = await runRouteProbe(user.id);
+    const result = await runRouteProbe(user.id, req.app);
     res.json(result);
   } catch (e) {
     next(e);
@@ -97,7 +97,7 @@ router.get('/summary', async (req, res, next) => {
     const windowRaw = typeof req.query.windowMinutes === 'string'
       ? parseInt(req.query.windowMinutes, 10)
       : undefined;
-    const result = await runSummary(user.id, household.id, { windowMinutes: windowRaw });
+    const result = await runSummary(user.id, household.id, req.app, { windowMinutes: windowRaw });
     res.json(result);
   } catch (e) {
     next(e);

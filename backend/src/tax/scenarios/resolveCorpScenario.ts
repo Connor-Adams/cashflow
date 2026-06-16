@@ -2,7 +2,11 @@
 import { Entity, Scenario } from '../../models';
 import { buildCorpFacts } from '../builders/buildCorpFacts';
 import { applyOverrides } from './applyOverrides';
-import { projectCorpFactsFromPrevYear } from './projectCorpFactsFromPrevYear';
+// projectCorpFactsFromPrevYear is reached through a port (not imported directly)
+// to break the resolveCorp<->projectCorp import cycle: projectCorp imports
+// resolveCorpScenario, so this module must not import projectCorp back. The
+// corp projector registers itself with the port at module load.
+import { projectCorpFactsViaPort } from './projectionPorts';
 import type { OverrideMap } from './types';
 import type { CorpTaxYearFacts } from '../engine/types';
 
@@ -54,7 +58,7 @@ export async function resolveCorpScenario(scenarioId: number): Promise<CorpTaxYe
     throw new Error(`scenario id=${scenarioId} references entity kind=${entity.kind}, not corp`);
   }
   const baseFacts = root.kind === 'projection_root'
-    ? await projectCorpFactsFromPrevYear(root.id)
+    ? await projectCorpFactsViaPort(root.id)
     : await buildCorpFacts(root.entityId, {
       startDate: `${root.year}-01-01`,
       endDate: `${root.year}-12-31`,
