@@ -25,6 +25,7 @@
     "@aws-sdk/client-s3",
     "@cashflow/shared",
     "@radix-ui/react-slot",
+    "pino-pretty",
     "react-is"
   ],
   "ignoreExportsUsedInFile": true,
