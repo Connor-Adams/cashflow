@@ -132,6 +132,43 @@ test('410 fold: legacy /api/notification-preferences returns 410 with documented
   assert.equal(patch.status, 410);
 });
 
+test('410 fold: legacy /api/statements returns 410 with documented body (issue #403)', async () => {
+  // Statement reconciliation folded under the Account namespace
+  // (/api/accounts/statements). The old top-level /api/statements must 410 so
+  // any stale client fails loudly instead of silently 404ing.
+  const get = await request(app)
+    .get('/api/statements')
+    .set('Cookie', authCookie());
+  assert.equal(get.status, 410);
+  assert.deepEqual(get.body, {
+    error: 'gone',
+    message:
+      'This endpoint moved to /api/accounts/statements (issue #403).',
+  });
+
+  const post = await request(app)
+    .post('/api/statements')
+    .set('Cookie', authCookie())
+    .send({});
+  assert.equal(post.status, 410);
+});
+
+test('replacement /api/accounts/statements is a real route, not a 410 stub (issue #403)', async () => {
+  // The relocated statement reconciliation surface. A list GET must reach the
+  // real router (not 410, not 404) — proving the fold relocated rather than
+  // killed the endpoints, and that it out-ranks accountsRouter's /:id matcher.
+  const res = await request(app)
+    .get('/api/accounts/statements')
+    .set('Cookie', authCookie());
+  assert.notEqual(res.status, 410);
+  assert.notEqual(res.status, 404);
+  assert.equal(res.status, 200);
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(res.body, 'data'),
+    'expected the statement list shape with a data array',
+  );
+});
+
 test('the unified replacement path is a real route, not a 410 stub', async () => {
   // /api/tax/scenarios/:kind is the live router the 410s point at. It must NOT
   // be gone — proves the fold replaced the old paths rather than killing them.
@@ -298,6 +335,25 @@ test('structure: folded/gone 410 entries are present in the registry', () => {
   assert.ok(
     gatedRoutes.some((e: RouteEntry) => entryHasPath(e, '/api/notification-preferences')),
     'legacy /api/notification-preferences 410 stub must be registered',
+  );
+  assert.ok(
+    gatedRoutes.some((e: RouteEntry) => entryHasPath(e, '/api/statements')),
+    'legacy /api/statements 410 stub must be registered (issue #403)',
+  );
+});
+
+test('structure: relocated /api/accounts/statements mounts before /api/accounts (issue #403)', () => {
+  // accountsRouter mounts on /api/accounts and owns /:id routes (e.g.
+  // /:id/pending-total). The relocated statements router must mount on the more
+  // specific /api/accounts/statements BEFORE accountsRouter, or 'statements'
+  // would be swallowed as an account :id.
+  const stmtIdx = indexOf((e) => entryHasPath(e, '/api/accounts/statements'));
+  const accountsIdx = indexOf((e) => entryHasPath(e, '/api/accounts'));
+  assert.ok(stmtIdx >= 0, '/api/accounts/statements must be registered');
+  assert.ok(accountsIdx >= 0, '/api/accounts must be registered');
+  assert.ok(
+    stmtIdx < accountsIdx,
+    'statements router must mount before the broader /api/accounts so the specific path wins',
   );
 });
 
