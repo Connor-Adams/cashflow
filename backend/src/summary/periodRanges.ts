@@ -9,16 +9,33 @@ export type DateRange = { from: string; to: string };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Validation error thrown for malformed/inverted date ranges. Carries
+ * `status = 400` so an HTTP handler can map it to a clean client error
+ * (Bad Request) instead of letting it surface as a 500 server fault. The
+ * message is unchanged from a plain `Error`, so message-based test assertions
+ * still match.
+ */
+export class RangeValidationError extends Error {
+  readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = 'RangeValidationError';
+  }
+}
+
 function assertIsoDate(d: string, label = 'date'): void {
   if (typeof d !== 'string' || !ISO_DATE.test(d)) {
-    throw new Error(`Invalid ${label}: expected YYYY-MM-DD, got ${JSON.stringify(d)}`);
+    throw new RangeValidationError(
+      `Invalid ${label}: expected YYYY-MM-DD, got ${JSON.stringify(d)}`,
+    );
   }
   const [y, m, day] = d.split('-').map(Number);
   if (m < 1 || m > 12) {
-    throw new Error(`Invalid ${label}: month out of range in ${d}`);
+    throw new RangeValidationError(`Invalid ${label}: month out of range in ${d}`);
   }
   if (day < 1 || day > lastDay(y, m)) {
-    throw new Error(`Invalid ${label}: day out of range in ${d}`);
+    throw new RangeValidationError(`Invalid ${label}: day out of range in ${d}`);
   }
 }
 
@@ -28,7 +45,7 @@ function assertRange(from: string, to: string): void {
   assertIsoDate(from, 'from');
   assertIsoDate(to, 'to');
   if (to < from) {
-    throw new Error(`Inverted range: to (${to}) is before from (${from})`);
+    throw new RangeValidationError(`Inverted range: to (${to}) is before from (${from})`);
   }
 }
 

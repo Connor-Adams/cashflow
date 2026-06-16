@@ -361,6 +361,91 @@ test('typical baseline present and averaged over populated months only', async (
   assert.equal(typical.owedBack, 0);
 });
 
+test('malformed dates return 400, not 500', async () => {
+  // dateFrom is a syntactically-ISO-but-impossible date (month 13, day 99); the
+  // pure range helpers in periodRanges.ts THROW a RangeValidationError, which
+  // the handler must map to a clean 400 (a client error) — NOT propagate to a
+  // 500 (server fault). Presence is satisfied (both params present), so this
+  // exercises the SHAPE guard, not the presence guard.
+  const res = await agentA
+    .get('/api/summary/period-insight')
+    .query({ currency: 'CAD', dateFrom: '2026-13-99', dateTo: '2026-13-31' });
+  assert.equal(res.status, 400, `expected 400 for malformed dates, got ${res.status}`);
+  assert.ok(
+    typeof res.body.error === 'string' && /invalid|range/i.test(res.body.error),
+    `expected a validation error message: ${JSON.stringify(res.body)}`,
+  );
+});
+
+test('an inverted range (to < from) returns 400', async () => {
+  // Well-formed but inverted endpoints — the range guard throws, must surface 400.
+  const res = await agentA
+    .get('/api/summary/period-insight')
+    .query({ currency: 'CAD', dateFrom: '2026-05-31', dateTo: '2026-05-01' });
+  assert.equal(res.status, 400, `expected 400 for inverted range, got ${res.status}`);
+  assert.ok(
+    typeof res.body.error === 'string' && /range|before|inverted/i.test(res.body.error),
+    `expected an inverted-range error message: ${JSON.stringify(res.body)}`,
+  );
+});
+
+test('typical span-bucketing places rows in the right trailing windows', async () => {
+  // Fix 2 regression guard: the trailing-12 typical windows are now loaded with
+  // ONE span query and bucketed in memory by date. Seed FOUR populated trailing
+  // months whose realCosts are distinct (so a mis-bucket would change the mean),
+  // in a far-future window clear of every other fixture. Query Dec 2033; trailing
+  // window is Dec 2032 … Nov 2033. Seed main (Dec 2033) + Nov/Oct/Sep/Aug 2033 at
+  // -40/-20/-60/-80 → typical realCost = (40+20+60+80)/4 = 50. If the bucketer
+  // dropped or merged a window, the mean would diverge from 50.
+  await createTxn({
+    householdId: householdAId,
+    accountId: accountAId,
+    date: '2033-12-05',
+    amount: -10,
+    currency: 'CAD',
+    finalCategory: 'Groceries',
+    merchantRaw: 'Dec Main 2033',
+  });
+  for (const [date, amount] of [
+    ['2033-11-05', -40],
+    ['2033-10-05', -20],
+    ['2033-09-05', -60],
+    ['2033-08-05', -80],
+  ] as Array<[string, number]>) {
+    await createTxn({
+      householdId: householdAId,
+      accountId: accountAId,
+      date,
+      amount,
+      currency: 'CAD',
+      finalCategory: 'Groceries',
+      merchantRaw: `Bucket ${date}`,
+    });
+  }
+
+  const res = await agentA
+    .get('/api/summary/period-insight')
+    .query({ currency: 'CAD', dateFrom: '2033-12-01', dateTo: '2033-12-31' });
+  assert.equal(res.status, 200);
+  const cad = (res.body.byCurrency as Array<{
+    currency: string;
+    baselines: Array<{ key: string; realCost: number }>;
+  }>).find((c) => c.currency === 'CAD');
+  assert.ok(cad, `expected a CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  const typical = cad.baselines.find((b) => b.key === 'typical');
+  assert.ok(
+    typical,
+    `typical must be present with 4 populated months: ${JSON.stringify(
+      cad.baselines.map((b) => b.key),
+    )}`,
+  );
+  assert.equal(
+    typical.realCost,
+    50,
+    'realCost = (40+20+60+80)/4 — windows bucketed correctly from one span query',
+  );
+});
+
 test('a custom (partial-month) range is detected as rangeKind custom', async () => {
   await createTxn({
     householdId: householdAId,
