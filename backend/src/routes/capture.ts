@@ -9,6 +9,7 @@ import { captureAuth } from '../auth/captureAuth';
 import { captureOrders, type CapturedOrderInput, type CaptureResult } from '../import/vendorCapture';
 import { scheduleInternalBackfill } from '../import/backfillCoordinator';
 import { runAmazonMatching } from '../amazon/matcher';
+import { logger } from '../observability/logger';
 
 class CapturePayloadError extends Error {
   constructor(message: string) {
@@ -120,7 +121,7 @@ async function processCapturePayload(args: {
       // Matching is best-effort and the capture already committed — never let a
       // matching failure turn a successful capture into a 500. The user can
       // re-run matching from the UI. Log and continue.
-      console.error('[capture] runAmazonMatching failed after commit', err);
+      logger.error({ err }, 'capture_amazon_matching_failed_after_commit');
     }
   }
 

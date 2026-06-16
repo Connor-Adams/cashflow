@@ -128,6 +128,41 @@ async function seedCorpInvestmentAccount(name: string) {
   return { household, entity, account };
 }
 
+test('counts both salary and employment_income overrides as salaryPaid', async () => {
+  // Prod tags corp-paid remuneration as 'employment_income', the synonym of
+  // 'salary' in TAX_TREATMENTS. buildPersonalFacts already treats them as one;
+  // buildCorpFacts must too, or corp-side salary (and its deduction) vanishes.
+  const household = await Household.create({ name: 'Corp Salary HH' });
+  const entity = await Entity.create({
+    householdId: household.id, kind: 'corp', legalName: 'Salary Inc.', jurisdiction: 'CA-ON', fiscalYearEnd: null,
+  });
+  const account = await Account.create({
+    name: 'Corp Chequing', householdId: household.id, accountType: 'checking',
+    entityId: entity.id, taxStatus: 'non_registered', defaultCurrency: 'CAD',
+  } as never);
+  // Corp-paid salary tagged with the canonical 'salary' token (outflow leg).
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-03-15', amount: '-5000.0000', currency: 'CAD',
+    finalCategory: 'salary', finalBusiness: false,
+    merchantRaw: 'PAYROLL', merchantClean: 'PAYROLL',
+    importBatch: 'seed-corp-sal', sourceRowFingerprint: 'fp-corp-sal-1', sourceIdentityFingerprint: 'sif-corp-sal-1',
+    taxTreatmentOverride: 'salary',
+  } as never);
+  // Corp-paid salary tagged with the 'employment_income' synonym (what prod uses).
+  await Transaction.create({
+    accountId: account.id, householdId: household.id, entityId: entity.id,
+    date: '2025-04-15', amount: '-3000.0000', currency: 'CAD',
+    finalCategory: 'employment_income', finalBusiness: false,
+    merchantRaw: 'PAYROLL', merchantClean: 'PAYROLL',
+    importBatch: 'seed-corp-sal', sourceRowFingerprint: 'fp-corp-sal-2', sourceIdentityFingerprint: 'sif-corp-sal-2',
+    taxTreatmentOverride: 'employment_income',
+  } as never);
+
+  const facts = await buildCorpFacts(entity.id, { startDate: '2025-01-01', endDate: '2025-12-31' });
+  assert.equal(facts.salaryPaid.toFixed(2), '8000.00', 'salary + employment_income both count as corp salary paid');
+});
+
 test('corp USD dispositions convert proceeds and ACB to CAD at per-leg trade-date rates', async () => {
   // Same CRA per-leg conversion rule as the personal builder: a USD gain must
   // reach AAII / CDA / RDTOH math in CAD, not native currency.
