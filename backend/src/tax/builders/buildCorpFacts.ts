@@ -201,7 +201,16 @@ export async function buildCorpFacts(
   // leg is an outflow (negative); distributions/remuneration are positive.
   for (const t of txns) {
     const tt = t.taxTreatmentOverride;
-    if (tt !== 'eligible_dividend' && tt !== 'non_eligible_dividend' && tt !== 'salary') continue;
+    // 'employment_income' is the synonym of 'salary' in TAX_TREATMENTS; prod tags
+    // corp-paid remuneration with it. buildPersonalFacts treats them as one, so
+    // the corp side must too or the salary (and its deduction) silently vanishes.
+    if (
+      tt !== 'eligible_dividend'
+      && tt !== 'non_eligible_dividend'
+      && tt !== 'salary'
+      && tt !== 'employment_income'
+    )
+      continue;
     const { cad } = await toCad(
       D(t.amount as unknown as string),
       t.currency ?? 'CAD',
@@ -223,7 +232,7 @@ export async function buildCorpFacts(
         kind: 'non_eligible',
       });
     } else {
-      // salary
+      // salary / employment_income
       salaryPaid = salaryPaid.plus(amt);
     }
   }
