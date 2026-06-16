@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { SummaryStat } from '@/components/SummaryStat'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
@@ -323,33 +323,6 @@ function LeakTotals({
         )}
       </div>
     </section>
-  )
-}
-
-function SummaryStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone?: 'warn'
-}) {
-  return (
-    <Card style={{ padding: 12 }}>
-      <div className="muted" style={{ fontSize: 12 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 20,
-          fontWeight: 600,
-          color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
-        }}
-      >
-        {value}
-      </div>
-    </Card>
   )
 }
 

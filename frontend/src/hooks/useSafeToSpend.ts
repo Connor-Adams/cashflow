@@ -1,42 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { getJson } from '@/lib/api'
+import { useFetch } from './useFetch'
 import type { SafeToSpendResponse } from '@/types/api'
-
-type AsyncState<T> = { data: T | null; loading: boolean; error: Error | null }
-
-function useFetch<T>(path: string | null): AsyncState<T> & { refresh: () => void } {
-  const [state, setState] = useState<AsyncState<T>>({
-    data: null,
-    loading: path !== null,
-    error: null,
-  })
-  const [nonce, setNonce] = useState(0)
-
-  useEffect(() => {
-    if (path === null) return
-    let cancelled = false
-    setState((s) => ({ ...s, loading: true, error: null }))
-    getJson<T>(path)
-      .then((data) => {
-        if (!cancelled) setState({ data, loading: false, error: null })
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setState({
-            data: null,
-            loading: false,
-            error: err instanceof Error ? err : new Error(String(err)),
-          })
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [path, nonce])
-
-  const refresh = useCallback(() => setNonce((n) => n + 1), [])
-  return { ...state, refresh }
-}
 
 /**
  * Compose the safe-to-spend query path. Currency + asOfDate are optional
