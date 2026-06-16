@@ -1464,62 +1464,6 @@
     @apply flex min-h-0 flex-1 flex-col;
   }
 
-  /* ─── HeroTile ─────────────────────────────────────────────────────── */
-
-  .heroTile {
-    @apply flex h-full flex-col gap-2;
-  }
-
-  .heroTile__label {
-    @apply m-0 text-xs font-semibold uppercase tracking-wide;
-    color: var(--muted-foreground);
-  }
-
-  .heroTile__value {
-    @apply m-0 truncate font-semibold;
-    font-size: var(--text-display-sm);
-    line-height: var(--text-display-sm--line-height);
-    letter-spacing: var(--text-display-sm--letter-spacing);
-    color: var(--foreground);
-  }
-
-  .heroTile__delta {
-    @apply m-0;
-  }
-
-  .heroTile__sparkline {
-    @apply mt-1 block w-full max-w-md;
-    height: 48px;
-  }
-
-  .heroTile__subMetrics {
-    @apply mt-auto m-0 grid max-w-md gap-1.5 pt-3;
-    border-top: 1px solid var(--border);
-  }
-
-  .heroTile__subMetric {
-    @apply m-0 flex items-baseline justify-between gap-3;
-  }
-
-  .heroTile__subMetric dt {
-    @apply m-0 text-sm;
-    color: var(--muted-foreground);
-  }
-
-  .heroTile__subMetric dd {
-    @apply m-0 flex items-baseline gap-2 text-sm font-semibold;
-    color: var(--foreground);
-  }
-
-  .heroTile__subMetricValue {
-    @apply font-mono tabular-nums;
-  }
-
-  .heroTile__hint {
-    @apply m-0 text-xs;
-    color: var(--muted-foreground);
-  }
-
   /* ─── KpiStack ─────────────────────────────────────────────────────── */
 
   .kpiStack {

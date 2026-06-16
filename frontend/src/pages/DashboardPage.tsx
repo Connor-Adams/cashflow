@@ -20,7 +20,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
-import { HeroTile } from '@/components/dashboard/HeroTile'
+import { PeriodInsightBand } from '@/components/dashboard/PeriodInsightBand'
 import { KpiStack } from '@/components/dashboard/KpiStack'
 import { TopGrowersTile } from '@/components/dashboard/TopGrowersTile'
 import { NetWorthTile } from '@/components/dashboard/NetWorthTile'
@@ -61,6 +61,7 @@ import type {
   RecurringItem,
   RecurringResponse,
 } from '../types/api'
+import type { PeriodInsightResp, PeriodInsightCurrency } from '@cashflow/shared'
 
 type Row = {
   currency: string
@@ -290,6 +291,7 @@ export function DashboardPage() {
     CategoryReportRow[]
   >([])
   const [monthly, setMonthly] = useState<MonthlyResp | null>(null)
+  const [insight, setInsight] = useState<PeriodInsightResp | null>(null)
   const [budgetProgress, setBudgetProgress] = useState<BudgetProgress[]>([])
   // Recurring charges, fetched separately so a /api/recurring failure
   // never tanks the rest of the dashboard. Empty list on failure or
@@ -315,7 +317,7 @@ export function DashboardPage() {
       setLoading(true)
       setErr(null)
       try {
-        const [d, m, prev] = await Promise.all([
+        const [d, m, prev, pi] = await Promise.all([
           getJson<DashResp>(`/api/summary/dashboard${summaryQs}`),
           getJson<MonthlyResp>(`/api/summary/monthly${summaryQs}`),
           previousRange
@@ -327,12 +329,20 @@ export function DashboardPage() {
                 })}`
               )
             : Promise.resolve<DashResp | null>(null),
+          // Only fetch the period insight when both bounds are set — the band
+          // needs a bounded range to detect range-kind and baselines.
+          dateFrom && dateTo
+            ? getJson<PeriodInsightResp>(
+                `/api/summary/period-insight${summaryQs}`
+              )
+            : Promise.resolve<PeriodInsightResp | null>(null),
         ])
         if (!cancelled) {
           setData(d)
           setMonthly(m)
           setPreviousMetricsByCurrency(prev?.metricsByCurrency ?? [])
           setPreviousCategoryReports(prev?.categoryReports ?? [])
+          setInsight(pi)
         }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Error')
@@ -541,71 +551,12 @@ export function DashboardPage() {
     const prevSelected = previousMetricsByCurrency.filter(
       (r) => !currency || r.currency === currency
     )
-    const spendTotal = selected.reduce((sum, row) => sum + row.totalSpend, 0)
-    const creditTotal = selected.reduce((sum, row) => sum + row.totalCredits, 0)
-    const paymentTotal = selected.reduce((sum, row) => sum + row.totalPayments, 0)
-    const incomeTotal = selected.reduce((sum, row) => sum + (row.totalIncome ?? 0), 0)
-    const netSpendTotal = selected.reduce((sum, row) => sum + row.netSpend, 0)
     const txCount = selected.reduce((sum, row) => sum + row.transactionCount, 0)
-    const prevSpendTotal = prevSelected.reduce((sum, row) => sum + row.totalSpend, 0)
-    const prevCreditTotal = prevSelected.reduce((sum, row) => sum + row.totalCredits, 0)
-    const prevPaymentTotal = prevSelected.reduce(
-      (sum, row) => sum + row.totalPayments,
-      0
-    )
-    const prevIncomeTotal = prevSelected.reduce(
-      (sum, row) => sum + (row.totalIncome ?? 0),
-      0
-    )
-    const prevNetSpendTotal = prevSelected.reduce((sum, row) => sum + row.netSpend, 0)
     const prevTxCount = prevSelected.reduce((sum, row) => sum + row.transactionCount, 0)
-    const singleCurrency = selected.length === 1 ? selected[0].currency : null
-    // When previousRange is null the deltas are suppressed (HeroTile / KpiStack
-    // skip the badges), so the hint at the bottom needs to explain *why* there
-    // are no comparison numbers rather than read as a generic footnote under
-    // populated totals.
-    const comparisonHint =
-      previousRange == null
-        ? 'Period comparison unavailable — pick a start AND end date.'
-        : `${previousRange.from} to ${previousRange.to}`
-    const spendDelta = spendTotal - prevSpendTotal
-    const creditDelta = creditTotal - prevCreditTotal
-    const paymentDelta = paymentTotal - prevPaymentTotal
-    const incomeDelta = incomeTotal - prevIncomeTotal
-    const netSpendDelta = netSpendTotal - prevNetSpendTotal
     const txDelta = txCount - prevTxCount
     return {
-      spendLabel:
-        singleCurrency != null
-          ? formatCurrency(spendTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      creditsLabel:
-        singleCurrency != null
-          ? formatCurrency(creditTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      paymentsLabel:
-        singleCurrency != null
-          ? formatCurrency(paymentTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      incomeLabel:
-        singleCurrency != null
-          ? formatCurrency(incomeTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      netSpendLabel:
-        singleCurrency != null
-          ? formatCurrency(netSpendTotal, singleCurrency)
-          : `${selected.length} currencies`,
-      moneyHint:
-        singleCurrency != null ? `In ${singleCurrency}` : 'Across selected currencies',
       txCount,
-      spendDelta,
-      creditDelta,
-      paymentDelta,
-      incomeDelta,
-      netSpendDelta,
       txDelta,
-      deltaCurrency: singleCurrency,
-      comparisonHint,
       merchantCount: merchantReportData.length,
       accountCount: accountReportData.length,
       reviewCount: reviewQueueData.length,
@@ -613,12 +564,20 @@ export function DashboardPage() {
   }, [
     data?.metricsByCurrency,
     previousMetricsByCurrency,
-    previousRange,
     currency,
     merchantReportData.length,
     accountReportData.length,
     reviewQueueData.length,
   ])
+
+  // Resolve the period-insight entry matching the selected currency. With no
+  // currency filter, fall back to the first currency (multi-currency full
+  // breakdown is a follow-up).
+  const insightForCurrency: PeriodInsightCurrency | null = useMemo(() => {
+    if (!insight) return null
+    if (currency) return insight.byCurrency.find((c) => c.currency === currency) ?? null
+    return insight.byCurrency[0] ?? null
+  }, [insight, currency])
 
   const activeRangeLabel = useMemo(() => {
     if (!dateFrom && !dateTo) return 'All dates'
@@ -760,8 +719,8 @@ export function DashboardPage() {
     },
   ]
 
-  // Review banner pins to 8 cols so it lines up with the HeroTile beneath
-  // it instead of sprawling full-width across an empty middle.
+  // Review banner pins to 8 cols so it lines up with the period insight band
+  // beneath it instead of sprawling full-width across an empty middle.
   const showReviewBanner = summaryStats.reviewCount > 0
   const reviewBannerSpan: BentoSpan = 8
 
@@ -1027,53 +986,13 @@ export function DashboardPage() {
           aria-busy={loading}
           aria-label="This period at a glance"
         >
-          <HeroTile
-            netSpendLabel={summaryStats.netSpendLabel}
-            netSpendDelta={
-              hasComparisonPeriod ? summaryStats.netSpendDelta : undefined
-            }
-            deltaCurrency={summaryStats.deltaCurrency ?? ''}
-            subMetrics={[
-              {
-                label: 'Spend',
-                value: summaryStats.spendLabel,
-                delta: hasComparisonPeriod
-                  ? summaryStats.spendDelta
-                  : undefined,
-                metricKind: 'spend',
-              },
-              {
-                label: 'Refunds / credits',
-                value: summaryStats.creditsLabel,
-                delta: hasComparisonPeriod
-                  ? summaryStats.creditDelta
-                  : undefined,
-                metricKind: 'gain',
-              },
-              {
-                label: 'Income',
-                value: summaryStats.incomeLabel,
-                delta: hasComparisonPeriod
-                  ? summaryStats.incomeDelta
-                  : undefined,
-                metricKind: 'gain',
-              },
-              {
-                label: 'Payments / transfers',
-                value: summaryStats.paymentsLabel,
-                delta: hasComparisonPeriod
-                  ? summaryStats.paymentDelta
-                  : undefined,
-                metricKind: 'neutral',
-              },
-            ]}
-            comparisonHint={summaryStats.comparisonHint}
-            moneyHint={summaryStats.moneyHint}
-            sparklineData={monthlyBreakdownData.map((m) => ({
-              month: m.month,
-              value: m.netSpend,
-            }))}
-          />
+          {insightForCurrency ? (
+            <PeriodInsightBand data={insightForCurrency} currency={currency} />
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              Pick a start and end date to see the period breakdown.
+            </div>
+          )}
         </BentoTile>
 
         <BentoTile span={4} rows={2} aria-busy={loading} aria-label="Activity counts">
