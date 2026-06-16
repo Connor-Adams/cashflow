@@ -45,6 +45,7 @@ import {
   type ForecastOccurrence,
 } from '../forecast/buildForecast';
 import { expandRecurrence, type PlannedEventLike } from '../forecast/expandRecurrence';
+import { resolveForecastCurrency } from '../forecast/gatherOccurrences';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
@@ -422,33 +423,28 @@ async function buildBaselineInput(
 }
 
 /**
- * Resolve the best default currency for a household (largest cash balance).
- * Mirrors resolveDefaultCurrency in safeToSpend.ts but without importing it
- * to keep this route self-contained.
+ * Accounts the scenario planner treats as non-cash when picking a default
+ * currency: investments and credit cards. This is a THIRD distinct exclusion
+ * set — the forecast route excludes only `investment`, safe-to-spend also
+ * excludes `loan` — which is exactly why `resolveForecastCurrency` takes the
+ * set as a parameter instead of hard-coding one.
  */
-async function resolveHouseholdCurrency(
+const SCENARIO_CCY_EXCLUDED_TYPES: ReadonlySet<string> = new Set([
+  'investment',
+  'credit_card',
+]);
+
+/**
+ * Resolve the best default currency for a household (largest absolute cash
+ * balance, CAD on ties, CAD fallback). Delegates to the shared
+ * `resolveForecastCurrency` (the canonical largest-abs/CAD-tiebreak algorithm
+ * from #404) with the scenario planner's own exclusion set.
+ */
+export async function resolveHouseholdCurrency(
   householdId: number,
   asOfDate: string,
 ): Promise<string> {
-  const CASH_EXCLUDED = new Set(['investment', 'credit_card']);
-  const accounts = await Account.findAll({ where: { householdId } });
-  const totals = new Map<string, number>();
-  for (const acc of accounts) {
-    if (CASH_EXCLUDED.has(acc.accountType)) continue;
-    if (acc.closedAt && acc.closedAt <= asOfDate) continue;
-    const bals = await balanceAtDate(acc, asOfDate);
-    for (const { currency, amount } of bals) {
-      totals.set(currency, (totals.get(currency) ?? 0) + amount);
-    }
-  }
-  let best: { currency: string; absAmount: number } | null = null;
-  for (const [ccy, amt] of totals) {
-    const abs = Math.abs(amt);
-    if (!best || abs > best.absAmount || (ccy === 'CAD' && abs === best.absAmount)) {
-      best = { currency: ccy, absAmount: abs };
-    }
-  }
-  return best?.currency ?? 'CAD';
+  return resolveForecastCurrency(householdId, asOfDate, SCENARIO_CCY_EXCLUDED_TYPES);
 }
 
 // ---------------------------------------------------------------------------
