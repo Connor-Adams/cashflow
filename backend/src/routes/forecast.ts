@@ -6,11 +6,11 @@ import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { resolveHouseholdToday, type HasTimezone } from '../time/householdToday';
 import { balanceAtDate } from '../networth/balanceAtDate';
+import { expandRecurrence } from '../forecast/expandRecurrence';
 import {
-  expandRecurrence,
-  cadenceToRecurrenceRule,
-  type PlannedEventLike,
-} from '../forecast/expandRecurrence';
+  gatherPlannedOccurrences,
+  pickCurrencyByLargestAbsBalance,
+} from '../forecast/gatherOccurrences';
 import {
   buildForecast,
   type ForecastOccurrence,
@@ -232,81 +232,47 @@ router.get('/', async (req, res, next) => {
 
     if (currencyFilter === null) {
       // Pick the currency with the largest absolute balance (most cash on
-      // hand). Tie-breaker: prefer CAD when present.
-      let best: { currency: string; absAmount: number } | null = null;
-      for (const [ccy, amt] of summed) {
-        const abs = Math.abs(amt);
-        if (!best || abs > best.absAmount || (ccy === 'CAD' && abs === best.absAmount)) {
-          best = { currency: ccy, absAmount: abs };
-        }
-      }
-      if (best) forecastCurrency = best.currency;
+      // hand). Tie-breaker: prefer CAD when present. Shared tiebreak (#404).
+      const picked = pickCurrencyByLargestAbsBalance(summed);
+      if (picked) forecastCurrency = picked;
     }
 
     const openingBalance = summed.get(forecastCurrency) ?? 0;
 
-    // ----- 4. Gather PlannedEvent rows in the window (currency-matched) --
-    // We pull events overlapping the window: expectedDate may sit before
-    // dateFrom (recurring) but contribute future occurrences inside the
-    // window. Pull all currency-matched planned-events with expectedDate
-    // <= dateTo (so the seed for recurring events qualifies even if it
-    // started long before the window).
-    // Include both ordinary planned events and subscription-kind expectations.
-    // Subscriptions carry a `cadence` instead of a recurrenceRule (synthesized
-    // below); excluding them here was why tracked subscriptions never showed
-    // up in the forecast.
-    const eventWhere: WhereOptions = {
-      ...householdWhere(req),
-      kind: { [Op.in]: ['planned', 'subscription'] },
+    // ----- 4. Gather PlannedEvent occurrences in the window --------------
+    // Shared occurrence pipeline (#404): the currency-matched
+    // `planned`+`subscription` query, subscription-RRULE synthesis, and
+    // expandRecurrence loop all live in one place (forecast/gatherOccurrences)
+    // so safe-to-spend derives from the exact same derivation. The forecast
+    // route layers direction/sourceName onto each occurrence below; recurring
+    // DETECTION (step 5) stays forecast-only.
+    const plannedOccurrences = await gatherPlannedOccurrences({
+      householdId: currentAuth(req).household.id,
       currency: forecastCurrency,
-      status: 'planned',
-      expectedDate: { [Op.lte]: dateTo },
-    };
-    if (accountIdFilter !== null) {
-      (eventWhere as Record<string, unknown>).accountId = accountIdFilter;
-    }
-    const plannedRows = await PlannedEvent.findAll({
-      where: eventWhere,
-      order: [['expectedDate', 'ASC']],
+      from: dateFrom,
+      to: dateTo,
+      accountId: accountIdFilter,
     });
 
+    // Distinct planned rows that surfaced in this window — used to dedupe the
+    // recurring detector (step 5) against events the user already planned.
+    const plannedRows = [
+      ...new Map(plannedOccurrences.map((o) => [o.row.id, o.row])).values(),
+    ];
+
     const allOccurrences: ForecastOccurrence[] = [];
-    for (const row of plannedRows) {
-      // Subscriptions encode recurrence as a `cadence` and anchor on
-      // nextExpectedDate; synthesize an RRULE so they expand like any other
-      // recurring event. Ordinary planned events keep their stored rule.
-      const hasExplicitRule =
-        row.recurrenceRule != null && row.recurrenceRule.trim() !== '';
-      const recurrenceRule = hasExplicitRule
-        ? row.recurrenceRule
-        : row.kind === 'subscription'
-          ? cadenceToRecurrenceRule(row.cadence)
-          : null;
-      const seedDate =
-        row.kind === 'subscription' && row.nextExpectedDate
-          ? row.nextExpectedDate
-          : row.expectedDate;
-      const eventLike: PlannedEventLike = {
-        id: row.id,
-        expectedDate: seedDate,
-        recurrenceRule,
-        status: row.status,
-      };
-      const occs = expandRecurrence(eventLike, dateFrom, dateTo);
+    for (const { date, row } of plannedOccurrences) {
       const amount = Number(row.amount);
       if (!Number.isFinite(amount)) continue;
-      const direction = directionOfPlannedEvent(row.type);
-      for (const occ of occs) {
-        allOccurrences.push({
-          date: occ.date,
-          amount,
-          direction,
-          sourceType: 'planned_event',
-          sourceId: row.id,
-          sourceName: row.name,
-          accountId: row.accountId,
-        });
-      }
+      allOccurrences.push({
+        date,
+        amount,
+        direction: directionOfPlannedEvent(row.type),
+        sourceType: 'planned_event',
+        sourceId: row.id,
+        sourceName: row.name,
+        accountId: row.accountId,
+      });
     }
 
     // ----- 5. Optionally include detected recurring charges --------------
