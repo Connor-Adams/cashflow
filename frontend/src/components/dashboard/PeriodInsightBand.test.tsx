@@ -1,6 +1,7 @@
 import React from 'react'
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { PeriodInsightBand } from './PeriodInsightBand'
 import type { PeriodInsightCurrency } from '@cashflow/shared'
 
@@ -45,38 +46,56 @@ const base: PeriodInsightCurrency = {
 
 describe('PeriodInsightBand', () => {
   it('renders the realCost headline and owed-back subline', () => {
-    const { getByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    const { getByText } = render(
+      <MemoryRouter>
+        <PeriodInsightBand data={base} currency="CAD" />
+      </MemoryRouter>,
+    )
     expect(getByText(/6,000/)).toBeTruthy()
     expect(getByText(/loaned out/i)).toBeTruthy()
     expect(getByText(/4,000/)).toBeTruthy()
   })
 
   it('renders the receivables-outstanding note when owed to you overall', () => {
-    const { getByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    const { getByText } = render(
+      <MemoryRouter>
+        <PeriodInsightBand data={base} currency="CAD" />
+      </MemoryRouter>,
+    )
     expect(getByText(/owed to you overall/i)).toBeTruthy()
     expect(getByText(/1,200/)).toBeTruthy()
   })
 
   it('renders "nothing loaned out" when owedBack is zero', () => {
     const { getByText, queryByText } = render(
-      <PeriodInsightBand
-        data={{ ...base, owedBack: 0, receivablesOutstanding: 0 }}
-        currency="CAD"
-      />,
+      <MemoryRouter>
+        <PeriodInsightBand
+          data={{ ...base, owedBack: 0, receivablesOutstanding: 0 }}
+          currency="CAD"
+        />
+      </MemoryRouter>,
     )
     expect(getByText(/nothing loaned out this period/i)).toBeTruthy()
     expect(queryByText(/owed to you overall/i)).toBeNull()
   })
 
   it('renders one comparison chip per available baseline', () => {
-    const { container } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    const { container } = render(
+      <MemoryRouter>
+        <PeriodInsightBand data={base} currency="CAD" />
+      </MemoryRouter>,
+    )
     expect(
       container.querySelectorAll('[data-slot="delta-badge"]').length,
     ).toBeGreaterThanOrEqual(2)
   })
 
   it('renders an owed-back trend chip for baselines with a non-null owedBackDeltaPct', () => {
-    const { getAllByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    const { getAllByText } = render(
+      <MemoryRouter>
+        <PeriodInsightBand data={base} currency="CAD" />
+      </MemoryRouter>,
+    )
     // Both baselines carry an owedBackDeltaPct, so a "loaned vs <label>" chip
     // appears for each — distinct from the realCost "vs <label>" chips.
     const loanedChips = getAllByText(/loaned vs/i)
@@ -85,42 +104,54 @@ describe('PeriodInsightBand', () => {
 
   it('does not render owed-back trend chips when owedBackDeltaPct is null', () => {
     const { queryByText } = render(
-      <PeriodInsightBand
-        data={{
-          ...base,
-          baselines: [
-            {
-              key: 'prior-period',
-              label: 'last month',
-              realCost: 6500,
-              realCostDeltaPct: -7.7,
-              owedBack: 0,
-              owedBackDeltaPct: null,
-            },
-          ],
-        }}
-        currency="CAD"
-      />,
+      <MemoryRouter>
+        <PeriodInsightBand
+          data={{
+            ...base,
+            baselines: [
+              {
+                key: 'prior-period',
+                label: 'last month',
+                realCost: 6500,
+                realCostDeltaPct: -7.7,
+                owedBack: 0,
+                owedBackDeltaPct: null,
+              },
+            ],
+          }}
+          currency="CAD"
+        />
+      </MemoryRouter>,
     )
     expect(queryByText(/loaned vs/i)).toBeNull()
   })
 
   it('renders mover rows with driver text', () => {
-    const { getByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    const { getByText } = render(
+      <MemoryRouter>
+        <PeriodInsightBand data={base} currency="CAD" />
+      </MemoryRouter>,
+    )
     expect(getByText(/Groceries/)).toBeTruthy()
     expect(getByText(/Costco/)).toBeTruthy()
     expect(getByText(/3×/)).toBeTruthy()
   })
 
   it('links a mover category to its filtered transactions view', () => {
-    const { getByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    const { getByText } = render(
+      <MemoryRouter>
+        <PeriodInsightBand data={base} currency="CAD" />
+      </MemoryRouter>,
+    )
     const link = getByText('Groceries').closest('a')
     expect(link?.getAttribute('href')).toBe('/transactions?category=Groceries')
   })
 
   it('omits baselines that are not present', () => {
     const { queryByText } = render(
-      <PeriodInsightBand data={{ ...base, baselines: [] }} currency="CAD" />,
+      <MemoryRouter>
+        <PeriodInsightBand data={{ ...base, baselines: [] }} currency="CAD" />
+      </MemoryRouter>,
     )
     expect(queryByText(/typical/i)).toBeNull()
   })
@@ -134,7 +165,11 @@ describe('PeriodInsightBand', () => {
       baselines: [],
       movers: [],
     }
-    const { getByText } = render(<PeriodInsightBand data={empty} currency="CAD" />)
+    const { getByText } = render(
+      <MemoryRouter>
+        <PeriodInsightBand data={empty} currency="CAD" />
+      </MemoryRouter>,
+    )
     expect(getByText(/nothing loaned out this period/i)).toBeTruthy()
   })
 })

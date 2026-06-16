@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { DeltaBadge } from '@/components/ui/DeltaBadge'
 import { formatCurrency } from '@/lib/formatCurrency'
 import type { PeriodInsightCurrency } from '@cashflow/shared'
@@ -64,12 +65,12 @@ export function PeriodInsightBand({ data, currency }: Props) {
               key={m.category}
               className="flex items-center justify-between gap-2 text-sm"
             >
-              <a
-                href={`/transactions?category=${encodeURIComponent(m.category)}`}
+              <Link
+                to={`/transactions?category=${encodeURIComponent(m.category)}`}
                 className="hover:underline"
               >
                 {m.category}
-              </a>
+              </Link>
               <span className="flex items-center gap-2 text-muted-foreground">
                 {m.deltaPct != null && (
                   <DeltaBadge delta={m.deltaPct} metricKind="spend" />
