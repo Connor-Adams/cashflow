@@ -288,6 +288,11 @@
   --color-border-secondary:    var(--input);
   --color-border-ring:         var(--ring);
   --color-border-destructive:  var(--destructive);
+  --color-border-warning:      var(--warning);
+  --color-border-danger:       var(--danger);
+  --color-border-success:      var(--success);
+  --color-border-positive:     var(--positive);
+  --color-border-info:         var(--info);
   --color-border-transparent:  transparent;
   --color-border-border:       var(--border);
   --color-border-input:        var(--input);
