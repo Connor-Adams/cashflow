@@ -823,14 +823,8 @@ export function DashboardPage() {
             label={`${summaryStats.reviewCount} transaction${
               summaryStats.reviewCount === 1 ? '' : 's'
             } flagged for review`}
-            description={
-              <>
-                Waiting on category, split, or business decisions before they roll into your totals.{' '}
-                <Link to="/review" className="font-semibold underline">
-                  Open Review Inbox
-                </Link>
-              </>
-            }
+            description="Waiting on category, split, or business decisions before they roll into your totals."
+            actions={<Button asChild size="sm"><Link to="/review">Open Review Inbox</Link></Button>}
           />
         )}
         {priceChangeCount > 0 && (
@@ -841,11 +835,7 @@ export function DashboardPage() {
             role="status"
             aria-live="polite"
             label={`${priceChangeCount} subscription price change${priceChangeCount === 1 ? '' : 's'} this month`}
-            actions={
-              <Link to="/subscriptions?priceChange=unack" className="text-sm font-semibold underline">
-                Review
-              </Link>
-            }
+            actions={<Button asChild size="sm" variant="outline"><Link to="/subscriptions?priceChange=unack">Review</Link></Button>}
           />
         )}
         {budgetProgressSorted.length > 0 && (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
+import { Button } from '@/components/ui/button'
 import { getJson } from '@/lib/api'
 
 type GmailStatus = {
@@ -47,9 +48,7 @@ export function EmailedReceiptsTile() {
             Cashflow can auto-import receipts from your inbox (Apple, Amazon, Uber, and more) and match
             them to your card charges. It's set up but not connected.
           </p>
-          <Link to="/receipts" className="text-sm font-semibold text-foreground underline">
-            Connect Gmail →
-          </Link>
+          <Button asChild size="sm"><Link to="/receipts">Connect Gmail</Link></Button>
         </div>
       </BentoTile>
     )
@@ -62,9 +61,7 @@ export function EmailedReceiptsTile() {
           Connected{status.accountEmail ? ` as ${status.accountEmail}` : ''}.
           {gmailCount != null ? ` ${gmailCount} receipt${gmailCount === 1 ? '' : 's'} imported.` : ''}
         </p>
-        <Link to="/receipts" className="text-sm font-semibold text-foreground underline">
-          View receipts →
-        </Link>
+        <Button asChild size="sm" variant="outline"><Link to="/receipts">View receipts</Link></Button>
       </div>
     </BentoTile>
   )
