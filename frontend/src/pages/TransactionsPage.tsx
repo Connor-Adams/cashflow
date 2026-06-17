@@ -1169,7 +1169,7 @@ export function TransactionsPage() {
             </Button>
           ))}
         </div>
-        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
+        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
           <Label className="transactionsCheckTile">
             <span>Review only</span>
             <Input
