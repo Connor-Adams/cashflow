@@ -10,7 +10,7 @@ export function InboxSummaryTile() {
 
   return (
     <BentoTile
-      span={4}
+      span={6}
       rows={1}
       label="Review inbox"
       description="AI suggestions, reviews, and insights awaiting action."

@@ -58,7 +58,7 @@ export function NetWorthTile() {
   const series = useNetWorthSeries({ ...oneYearAgo(), granularity: 'monthly' })
 
   return (
-    <BentoTile span={4} rows={2} label="Net worth" aria-busy={current.loading}>
+    <BentoTile span={6} rows={2} label="Net worth" aria-busy={current.loading}>
       <Link to="/net-worth" className="block">
         {current.loading && !current.data ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
