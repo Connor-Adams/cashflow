@@ -52,13 +52,22 @@ No spine change. It is a data-model enrichment of an existing reference table.
 - Add `parentId` — self-referential FK to `Category.id`, **nullable** (`null` =
   top-level root). `ON DELETE RESTRICT` (delete is blocked while children exist
   anyway; see Delete behavior).
-- Change unique constraint: `(household_id, name)` → **`(household_id, parent_id, name)`**.
-  Names are unique among siblings, reusable across the tree.
-  - Note: SQLite + Postgres both treat `NULL` as distinct in a unique index, so
-    two roots named "Work" would NOT collide on a naive `(household_id, parent_id,
-    name)` index when `parent_id IS NULL`. Enforce root-name uniqueness with a
-    **partial unique index** on `(household_id, name) WHERE parent_id IS NULL` in
-    addition to the sibling index. Both dialects support partial indexes.
+- Add **`nameKey`** — a persisted normalized key, `trim(name).toLocaleLowerCase("en-CA")`,
+  set by the category service on every create/rename. `name` keeps the user's
+  display casing; `nameKey` is what uniqueness and lookups key on. This pushes
+  case-insensitive uniqueness into the **DB index** rather than trusting each write
+  path to normalize. (Persisted column, not a generated column — dual-dialect
+  generated-column support is uneven; the service owns the value.)
+- Unique constraints key on `nameKey`, not `name`:
+  - **sibling:** `(household_id, parent_id, name_key) WHERE parent_id IS NOT NULL`
+  - **root:** `(household_id, name_key) WHERE parent_id IS NULL`
+  - Both partial, because SQLite + Postgres treat `NULL` as distinct in a unique
+    index (two roots named "Work" would not collide on a naive sibling index when
+    `parent_id IS NULL`); the root index owns root uniqueness. Both dialects support
+    partial indexes.
+- **Write discipline (defense-in-depth):** all category creates/renames go through
+  the category service (which sets `nameKey`); no raw `Category.create()` / direct
+  `name` updates elsewhere. The DB index is the backstop, the service is the path.
 - Existing columns (`name`, `icon`, `taxTreatment`) unchanged.
 
 ### Identity: string → id (with mirror)
@@ -109,10 +118,10 @@ mirrors).
 
 - **No cycles.** Creating or reparenting validates the proposed parent is neither
   the node itself nor any of its descendants. Reject otherwise.
-- **Sibling-unique names**, enforced **case-insensitively at the app layer**
-  (`Internet` / `internet` / `INTERNET` are the same sibling) regardless of DB
-  collation, in addition to the DB unique index. Normalize (trim + casefold) before
-  comparison/insert; store the user's original casing in `name`.
+- **Sibling-unique names**, enforced **case-insensitively** via the persisted
+  `nameKey` (`Internet` / `internet` / `INTERNET` collapse to one sibling)
+  independent of DB collation. The unique indexes on `name_key` are the backstop;
+  the category service sets `nameKey` on write. `name` keeps display casing.
 - **Delete blocked** while the node has children OR is referenced by any of:
   `Transaction.{autoCategoryId, categoryOverrideId, finalCategoryId}`,
   `ExternalOrderItem.{inferredCategoryId, categoryOverrideId}`,
@@ -222,9 +231,10 @@ transaction** and, per segment, treats a unique-constraint violation as
 
 ```
 for each segment under `parent`:
-  node = findSibling(householdId, parentId, normalize(name))
+  key  = normalize(name)                              // trim + toLocaleLowerCase("en-CA")
+  node = findSibling(householdId, parentId, key)      // lookup by name_key
   if !node:
-    try   node = create(...)
+    try   node = create({ name, nameKey: key, parentId })
     catch UNIQUE_VIOLATION: node = findSibling(...)   // re-read winner
   parent = node
 return leaf node id
@@ -276,32 +286,38 @@ Receipt-item categorization (`import/categorizeReceiptItems.ts`,
 `backend/src/migrations/YYYYMMDD-category-tree.js`:
 
 **up()** (order matters — create constraints before relying on them):
-1. Add `Category.parentId` (nullable self-FK).
+1. Add `Category.parentId` (nullable self-FK) and `Category.nameKey`.
 2. Add the `*CategoryId` columns listed above (all nullable).
-3. **Create the new indexes** (sibling + root partial) — before backfill so
-   backfilled rows are validated.
-4. **Backfill categories:** for each household, ensure a `Category` row exists for
+3. **Backfill `nameKey`** for existing rows (`trim(name).toLocaleLowerCase("en-CA")`).
+   If two existing rows collide on `(household_id, name_key)` after normalization
+   (e.g. "Food" and "food"), the migration must surface/merge them before the unique
+   index is added — log and fail loudly rather than silently drop one.
+4. **Create the new indexes** (sibling + root partial, on `name_key`) — after
+   `nameKey` backfill so they validate cleanly.
+5. **Backfill categories:** for each household, ensure a `Category` row exists for
    each distinct non-null category string currently in use (most already exist via
    the `ensureCategory` hook). Existing flat categories all become **top-level
    roots** (`parentId` null) — the tree starts flat; the user nests via the manager.
-5. **Backfill FK columns** by matching each old string mirror to its root category
-   row (household-scoped, case-insensitive name match).
-6. **Drop the old `(household_id, name)` unique constraint** only after the
+6. **Backfill FK columns** by matching each old string mirror to its root category
+   row (household-scoped, by `name_key`).
+7. **Drop the old `(household_id, name)` unique constraint** only after the
    sibling/root indexes exist — in a transaction where the dialect supports it.
 
 **down()**
-- Drop the `*CategoryId` columns, drop `parentId`, restore the
-  `(household_id, name)` unique constraint. The string mirrors are untouched and
-  remain authoritative, so rollback to pre-tree flatness loses no data.
+- Drop the sibling/root partial indexes, the `*CategoryId` columns, `parentId`, and
+  `nameKey`; restore the `(household_id, name)` unique constraint. The string mirrors
+  are untouched and remain authoritative, so rollback to pre-tree flatness loses no
+  data.
 
 **Dual-dialect / column-name care (SQLite + Postgres):**
 - Models likely use `underscored: true` — Sequelize attribute `parentId` maps to DB
   column `parent_id`. **Partial indexes must reference the real DB column names**
   (`parent_id`, `household_id`), not the model attribute names.
-- Partial unique indexes via `where` in `addIndex` are supported on both dialects:
+- Partial unique indexes via `where` in `addIndex` are supported on both dialects,
+  keyed on `name_key` (not `name`):
   ```
-  sibling: unique (household_id, parent_id, name) WHERE parent_id IS NOT NULL
-  root:    unique (household_id, name)            WHERE parent_id IS NULL
+  sibling: unique (household_id, parent_id, name_key) WHERE parent_id IS NOT NULL
+  root:    unique (household_id, name_key)            WHERE parent_id IS NULL
   ```
   Filtering the sibling index keeps root uniqueness cleanly owned by the root index.
 
@@ -327,8 +343,8 @@ feedback ("created Work › Expenses") and debugging. The existing flat
 **Model / constraint**
 - Reparent that would create a cycle is rejected.
 - Sibling-unique violation rejected; same name under two parents allowed; two roots
-  with the same name rejected (root partial index); `Internet`/`internet` collide
-  (case-insensitive app-layer check).
+  with the same name rejected (root partial index on `name_key`);
+  `Internet`/`internet`/`INTERNET` collapse to one sibling (`nameKey`).
 - Delete blocked when node has children; blocked independently for each referencing
   table (`Transaction`, `ExternalOrderItem`, `AiSuggestion`, Rules, `BudgetTarget`);
   succeeds when fully empty.
@@ -357,7 +373,10 @@ feedback ("created Work › Expenses") and debugging. The existing flat
   stores the pending path and creates **no** nodes; accept creates the chain.
 
 **Migration**
-- Backfill repoints every txn/item/suggestion/rule/budget string to the right node id.
+- `nameKey` backfill normalizes existing rows; pre-existing case-collisions
+  (`Food`/`food`) fail loudly, not silently dropped.
+- FK backfill repoints every txn/item/suggestion/rule/budget string to the right
+  node id (matched by `name_key`).
 - down() drops cleanly and restores the old constraint.
 
 **Frontend**
