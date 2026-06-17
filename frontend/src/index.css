@@ -135,19 +135,19 @@
   --chart-line-6: var(--oxblood-300);
 
   /* Extended chart tokens — Sankey, Forecast, Scenarios, Portfolio */
-  --chart-income: #10b981;
-  --chart-income-stroke: #059669;
-  --chart-category: #3b82f6;
-  --chart-business-alt: #8b5cf6;
-  --chart-savings: #06b6d4;
-  --chart-uncategorized: #9ca3af;
-  --chart-scenario: #6366f1;
-  --chart-scenario-pos: #16a34a;
-  --chart-scenario-neg: #dc2626;
-  --chart-reference: #94a3b8;
-  --chart-portfolio: #2563eb;
-  --chart-danger-line: #ef4444;
-  --chart-link-stroke: #0f172a;
+  --chart-income:           var(--green-600);
+  --chart-income-stroke:    var(--green-700);
+  --chart-category:         var(--chart-steel);
+  --chart-business-alt:     var(--gradient-hero-to);
+  --chart-savings:          var(--gradient-hero-from);
+  --chart-uncategorized:    var(--zinc-400);
+  --chart-scenario:         var(--chart-steel);
+  --chart-scenario-pos:     var(--green-600);
+  --chart-scenario-neg:     var(--oxblood-500);
+  --chart-reference:        var(--zinc-400);
+  --chart-portfolio:        var(--chart-steel);
+  --chart-danger-line:      var(--oxblood-500);
+  --chart-link-stroke:      var(--zinc-700);
 
   /* Legacy aliases — one migration cycle, then removed.
    * App.css component classes (.navLink.isActive, .brandMark, .superadminBadge,
@@ -235,6 +235,14 @@
   --chart-line-4: var(--chart-4);
   --chart-line-5: var(--amber-w-300);
   --chart-line-6: var(--oxblood-200);
+
+  /* Extended chart token dark overrides */
+  --chart-income:        var(--green-300);
+  --chart-income-stroke: var(--green-200);
+  --chart-scenario-pos:  var(--green-300);
+  --chart-scenario-neg:  var(--oxblood-300);
+  --chart-danger-line:   var(--oxblood-300);
+  --chart-link-stroke:   var(--zinc-300);
 
   color-scheme: dark;
 }
