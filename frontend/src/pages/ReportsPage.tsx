@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Download, Plus, Trash2 } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
+import { EmptyTableRow } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatCard } from '@/components/ui/stat-card'
@@ -649,13 +650,10 @@ export function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="emptyStateCell">
-                      <p className="emptyState">
-                        No partner-split data for these filters. Import transactions or widen the date range.
-                      </p>
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableRow
+                    colSpan={5}
+                    title="No partner-split data for these filters. Import transactions or widen the date range."
+                  />
                 )}
                 {partner?.byCurrency.map((r) => {
                   let netInner
@@ -746,13 +744,10 @@ export function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {(business?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <TableRow>
-                    <TableCell colSpan={2} className="emptyStateCell">
-                      <p className="emptyState">
-                        No business-tagged amounts for these filters.
-                      </p>
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableRow
+                    colSpan={2}
+                    title="No business-tagged amounts for these filters."
+                  />
                 )}
                 {business?.byCurrency.map((r) => (
                   <TableRow key={r.currency}>
@@ -787,13 +782,10 @@ export function ReportsPage() {
             </TableHeader>
             <TableBody>
               {recentSettlements.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="emptyStateCell">
-                    <p className="emptyState">
-                      No settlements yet. Click "Record settlement" above when money changes hands.
-                    </p>
-                  </TableCell>
-                </TableRow>
+                <EmptyTableRow
+                  colSpan={6}
+                  title='No settlements yet. Click "Record settlement" above when money changes hands.'
+                />
               )}
               {recentSettlements.map((row) => (
                 <TableRow key={row.id}>
@@ -1127,11 +1119,7 @@ function RankedReportSection<R>({
           </TableHeader>
           <TableBody>
             {!loading && rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={totalColumns} className="emptyStateCell">
-                  <p className="emptyState">{emptyMessage}</p>
-                </TableCell>
-              </TableRow>
+              <EmptyTableRow colSpan={totalColumns} title={emptyMessage} />
             )}
             {rows.map((row) => (
               <TableRow key={rowKey(row)}>{renderRow(row)}</TableRow>
