@@ -5,6 +5,7 @@ type SubNavItem = { to: string; label: string }
 const SUB_NAV: SubNavItem[] = [
   { to: '/settings/display', label: 'Display' },
   { to: '/settings/palette', label: 'Palette' },
+  { to: '/settings/design-system', label: 'Design System' },
   { to: '/settings/gmail', label: 'Gmail' },
   { to: '/settings/partner-invite', label: 'Partner invite' },
 ]

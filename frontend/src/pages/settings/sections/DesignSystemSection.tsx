@@ -1,0 +1,75 @@
+import React from 'react'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Alert } from '@/components/ui/alert'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { StatCard } from '@/components/ui/stat-card'
+import { EmptyState } from '@/components/ui/empty-state'
+
+const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
+const ALERT_VARIANTS = ['error', 'warning', 'info', 'success'] as const
+
+function Group({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">{name}</h2>
+      <div className="flex flex-wrap items-start gap-3">{children}</div>
+    </section>
+  )
+}
+
+export function DesignSystemSection() {
+  return (
+    <Card className="space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold text-foreground">Design System</h1>
+        <p className="text-sm text-muted-foreground">
+          Live primitives in every variant and state. The implementation target for every page.
+        </p>
+      </div>
+
+      <Group name="Buttons">
+        {BUTTON_VARIANTS.map((v) => (
+          <Button key={v} variant={v}>{v}</Button>
+        ))}
+      </Group>
+
+      <Group name="Cards & stats">
+        <StatCard label="Transactions" value="1,284" hint="This month" />
+        <StatCard label="Net spend" value="$4,210" delta="+12%" metricKind="spend" />
+      </Group>
+
+      <Group name="Badges">
+        <Badge>Default</Badge>
+        <Badge variant="secondary">Secondary</Badge>
+        <Badge variant="outline">Outline</Badge>
+        <Badge variant="destructive">Destructive</Badge>
+      </Group>
+
+      <Group name="Alerts">
+        {ALERT_VARIANTS.map((v) => (
+          <Alert key={v} variant={v} className="w-full sm:w-72">
+            {v} alert message
+          </Alert>
+        ))}
+      </Group>
+
+      <Group name="Inputs">
+        <div className="grid gap-1.5">
+          <Label htmlFor="ds-input">Label</Label>
+          <Input id="ds-input" placeholder="Placeholder" />
+        </div>
+      </Group>
+
+      <Group name="States">
+        <EmptyState
+          className="w-full sm:w-80"
+          title="Nothing here yet"
+          description="The canonical empty state."
+        />
+      </Group>
+    </Card>
+  )
+}
