@@ -35,7 +35,7 @@ function StatCard({
         {value}
       </p>
       {hint ? (
-        <p className="m-0 text-xs text-muted-foreground">{hint}</p>
+        <p className="m-0 text-xs leading-5 text-muted-foreground">{hint}</p>
       ) : null}
       {delta ? (
         <p className="statDelta m-0">
