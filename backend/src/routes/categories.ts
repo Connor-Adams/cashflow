@@ -1,7 +1,25 @@
 import { Router } from 'express';
 import { Category } from '../models';
 import { householdWhere } from '../auth/scope';
+import { currentAuth } from '../auth/middleware';
 import { isCategoryIconName, isTaxTreatment } from '@cashflow/shared';
+import { resolveCategoryPath } from '../categories/resolvePath';
+import { reparentCategory } from '../categories/reparent';
+import { deleteCategory } from '../categories/deleteCategory';
+import { CategoryError } from '../categories/errors';
+
+type CategoryNode = {
+  id: number;
+  name: string;
+  parentId: number | null;
+  icon: string | null;
+  taxTreatment: string;
+  children: CategoryNode[];
+};
+
+function statusForCategoryError(code: CategoryError['code']): number {
+  return code === 'not_found' ? 404 : 409;
+}
 
 const router = Router();
 
@@ -13,6 +31,92 @@ router.get('/', async (req, res, next) => {
     });
     res.json(rows);
   } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/tree', async (req, res, next) => {
+  try {
+    const rows = await Category.findAll({ where: householdWhere(req), order: [['name', 'ASC']] });
+    const byId = new Map<number, CategoryNode>();
+    for (const r of rows) {
+      byId.set(r.id, {
+        id: r.id,
+        name: r.name,
+        parentId: r.parentId,
+        icon: r.icon,
+        taxTreatment: r.taxTreatment,
+        children: [],
+      });
+    }
+    const roots: CategoryNode[] = [];
+    for (const node of byId.values()) {
+      if (node.parentId != null && byId.has(node.parentId)) {
+        byId.get(node.parentId)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+    res.json(roots);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/resolve-path', async (req, res, next) => {
+  try {
+    const path = (req.body || {}).path;
+    if (typeof path !== 'string' || path.trim().length === 0) {
+      res.status(400).json({ error: 'path required' });
+      return;
+    }
+    const { household } = currentAuth(req);
+    const { leafId, createdIds } = await resolveCategoryPath(household.id, path);
+    const leaf = await Category.findByPk(leafId);
+    res.json({ id: leafId, name: leaf?.name ?? null, path, createdIds });
+  } catch (e) {
+    if (e instanceof Error && e.message === 'invalid category path') {
+      res.status(400).json({ error: e.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+router.post('/', async (req, res, next) => {
+  try {
+    const b = (req.body || {}) as { name?: unknown; parentId?: unknown };
+    if (typeof b.name !== 'string' || b.name.trim().length === 0) {
+      res.status(400).json({ error: 'name required' });
+      return;
+    }
+    const parentId = b.parentId == null ? null : Number(b.parentId);
+    const { household } = currentAuth(req);
+    const row = await Category.create({
+      householdId: household.id,
+      name: b.name.trim(),
+      parentId,
+      icon: null,
+    });
+    res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.patch('/:id/reparent', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const raw = (req.body || {}).parentId;
+    const newParentId = raw == null ? null : Number(raw);
+    const { household } = currentAuth(req);
+    const row = await reparentCategory(household.id, id, newParentId);
+    res.json(row);
+  } catch (e) {
+    if (e instanceof CategoryError) {
+      res.status(statusForCategoryError(e.code)).json({ error: e.message, code: e.code });
+      return;
+    }
     next(e);
   }
 });
@@ -52,6 +156,21 @@ router.patch('/:id', async (req, res, next) => {
     await row.save();
     res.json(row);
   } catch (e) {
+    next(e);
+  }
+});
+
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { household } = currentAuth(req);
+    await deleteCategory(household.id, id);
+    res.status(204).end();
+  } catch (e) {
+    if (e instanceof CategoryError) {
+      res.status(statusForCategoryError(e.code)).json({ error: e.message, code: e.code });
+      return;
+    }
     next(e);
   }
 });
