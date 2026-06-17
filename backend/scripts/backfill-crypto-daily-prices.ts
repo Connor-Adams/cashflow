@@ -21,11 +21,31 @@
  */
 import { Security, SecurityDailyPrice, sequelize } from '../src/models';
 import { fetchDailyHistory } from '../src/integrations/yahoo/client';
-import { databaseUrl } from '../src/config/env';
+import { strFlag, guardWriteTarget } from './lib/opsFlags';
 
-function strFlag(argv: string[], name: string): string | null {
-  const i = argv.indexOf(name);
-  return i !== -1 && i < argv.length - 1 ? argv[i + 1] : null;
+async function backfillSymbol(symbol: string, since: string, commit: boolean): Promise<void> {
+  const sec = await Security.findOne({ where: { symbol, assetType: 'cryptocurrency' } });
+  if (!sec) { console.warn(`no cryptocurrency security for ${symbol}; skipping`); return; }
+  const ticker = `${symbol}-CAD`;
+  const bars = await fetchDailyHistory(ticker, { period1: since });
+  if (!bars || bars.length === 0) { console.warn(`no bars for ${ticker}`); return; }
+  console.log(`${ticker}: ${bars.length} daily bars from ${bars[0].date} to ${bars[bars.length - 1].date}`);
+  if (!commit) return;
+  for (const b of bars) {
+    await SecurityDailyPrice.upsert({
+      securityId: (sec as unknown as { id: number }).id,
+      date: b.date,
+      open: b.open == null ? null : String(b.open),
+      high: b.high == null ? null : String(b.high),
+      low: b.low == null ? null : String(b.low),
+      close: String(b.close),
+      adjClose: String(b.adjClose),
+      volume: b.volume,
+      source: 'yahoo-cad',
+      fetchedAt: new Date(),
+    });
+  }
+  console.log(`${ticker}: upserted ${bars.length} rows`);
 }
 
 async function main(): Promise<void> {
@@ -35,43 +55,11 @@ async function main(): Promise<void> {
   const since = strFlag(argv, '--since') ?? '2024-10-01';
   const mode = commit ? 'COMMIT (writing)' : 'DRY RUN (report only)';
 
-  if (databaseUrl) {
-    console.log(`Target DB: postgres (${new URL(databaseUrl).host})`);
-  } else {
-    console.log('Target DB: LOCAL SQLITE (no DATABASE_URL set)');
-    if (commit) {
-      console.error(
-        'Refusing to --commit against local sqlite. Set DATABASE_URL to the prod Postgres URL ' +
-          '(DATABASE_PUBLIC_URL from `railway variables --service Postgres`).',
-      );
-      process.exit(1);
-    }
-  }
+  guardWriteTarget(commit);
   console.log(`mode: ${mode}`);
 
   for (const symbol of symbols) {
-    const sec = await Security.findOne({ where: { symbol, assetType: 'cryptocurrency' } });
-    if (!sec) { console.warn(`no cryptocurrency security for ${symbol}; skipping`); continue; }
-    const ticker = `${symbol}-CAD`;
-    const bars = await fetchDailyHistory(ticker, { period1: since });
-    if (!bars || bars.length === 0) { console.warn(`no bars for ${ticker}`); continue; }
-    console.log(`${ticker}: ${bars.length} daily bars from ${bars[0].date} to ${bars[bars.length - 1].date}`);
-    if (!commit) continue;
-    for (const b of bars) {
-      await SecurityDailyPrice.upsert({
-        securityId: (sec as unknown as { id: number }).id,
-        date: b.date,
-        open: b.open == null ? null : String(b.open),
-        high: b.high == null ? null : String(b.high),
-        low: b.low == null ? null : String(b.low),
-        close: String(b.close),
-        adjClose: String(b.adjClose),
-        volume: b.volume,
-        source: 'yahoo-cad',
-        fetchedAt: new Date(),
-      });
-    }
-    console.log(`${ticker}: upserted ${bars.length} rows`);
+    await backfillSymbol(symbol, since, commit);
   }
   await sequelize.close();
 }
