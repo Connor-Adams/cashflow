@@ -1,4 +1,4 @@
-import { metrics, type Attributes } from '@opentelemetry/api';
+import { metrics, type Attributes, type Meter } from '@opentelemetry/api';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import {
@@ -98,6 +98,26 @@ const jobDurationHistogram = meter.createHistogram('cashflow.job.duration', {
   description: 'Background-job tick duration',
   unit: 'ms',
 });
+
+/**
+ * Register the liveness heartbeat gauge. Emits `cashflow.up` = 1 on every
+ * collection while the process is running and exporting. Prometheus sees it as
+ * `cashflow_up`; the BackendDown alert keys on `absent(cashflow_up)`, so if the
+ * backend dies or stops pushing metrics the series goes stale/absent and the
+ * alert fires. Without this gauge BackendDown fires permanently (the metric
+ * never existed). Exported so it can be asserted with an in-memory reader.
+ */
+export function registerLivenessHeartbeat(meterArg: Meter): void {
+  meterArg
+    .createObservableGauge('cashflow.up', {
+      description: 'Liveness heartbeat — always 1 while cashflow-backend is exporting',
+    })
+    .addCallback((obs) => {
+      obs.observe(1);
+    });
+}
+
+registerLivenessHeartbeat(meter);
 
 const jobLastSuccessMap = new Map<string, number>();
 
