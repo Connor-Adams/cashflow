@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Download, Plus, Trash2 } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
+import { EmptyTableRow } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import {
   Dialog,
@@ -30,6 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { cn } from '@/lib/utils'
 import { buildCsv, downloadCsv } from '../lib/csv'
 import {
   fromDateInputValue,
@@ -503,7 +508,7 @@ export function ReportsPage() {
         title="Reports"
         description="Partner balances and business totals stay separated by currency and time window."
       />
-      <section className="card reportsFilters">
+      <Card className="mb-4">
         <FilterBar
           currency={currency}
           onCurrencyChange={setCurrency}
@@ -532,54 +537,45 @@ export function ReportsPage() {
             ) : null
           }
           caption={
-            <p className="muted" style={{ marginBottom: 0 }}>
+            <p className="mb-0 text-sm leading-6 text-muted-foreground">
               Showing <strong>{currency || 'all currencies'}</strong> for{' '}
               <strong>{activeRangeLabel}</strong>.
             </p>
           }
         />
-      </section>
-      {err && <span className="error">{err}</span>}
-      {loading && <p className="muted">Loading…</p>}
+      </Card>
+      {err && <Alert variant="error" className="mb-4">{err}</Alert>}
+      {loading && <p className="mb-4 text-sm leading-6 text-muted-foreground">Loading…</p>}
 
-      <section className="reportsStats" aria-busy={loading}>
-        <article className="card statCard">
-          <p className="statLabel">My share</p>
-          <p className="statValue">
-            {singleCurrency ? formatMoney(partnerMineTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Partner share</p>
-          <p className="statValue">
-            {singleCurrency
-              ? formatMoney(partnerShareTotal, singleCurrency)
-              : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Business total</p>
-          <p className="statValue">
-            {singleCurrency ? formatMoney(businessTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Currencies</p>
-          <p className="statValue">{reportCurrencies.length}</p>
-          <p className="muted statHint">
-            {totalPartnerRows} partner row{totalPartnerRows === 1 ? '' : 's'} and{' '}
-            {totalBusinessRows} business row{totalBusinessRows === 1 ? '' : 's'}
-          </p>
-        </article>
-      </section>
+      <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
+        <StatCard
+          label="My share"
+          value={singleCurrency ? formatMoney(partnerMineTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Partner share"
+          value={singleCurrency
+            ? formatMoney(partnerShareTotal, singleCurrency)
+            : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Business total"
+          value={singleCurrency ? formatMoney(businessTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Currencies"
+          value={reportCurrencies.length}
+          hint={`${totalPartnerRows} partner row${totalPartnerRows === 1 ? '' : 's'} and ${totalBusinessRows} business row${totalBusinessRows === 1 ? '' : 's'}`}
+        />
+      </div>
 
-      <div className="reportsGrid">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))]">
         <CollapsibleCard
           id="partner-split"
-          className="reportsTableCard"
+          className="mb-0"
           title="Partner split totals"
           description="How much of the selected spend belongs to each person."
           actions={
@@ -618,33 +614,31 @@ export function ReportsPage() {
           }
         >
           {showPartnerRollup && (
-            <ul className="partnerNetRollup" style={{ listStyle: 'none', padding: 0, margin: '0 0 0.75rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <ul className="list-none p-0 mb-3 flex flex-col gap-1">
               {partnerNetByCurrency.map(([cur, total]) => {
                 const rounded = Math.round(total * 100) / 100
                 if (rounded === 0) {
                   return (
-                    <li key={cur} className="muted" style={{ fontSize: '0.875rem' }}>
+                    <li key={cur} className="text-sm leading-6 text-muted-foreground mb-0">
                       <strong>{cur}</strong>: even
                     </li>
                   )
                 }
                 const partnerOwesMe = rounded > 0
-                const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                 const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
                 return (
-                  <li key={cur} style={{ fontSize: '0.875rem' }}>
+                  <li key={cur} className="text-sm">
                     <strong>{cur}</strong>:{' '}
-                    <span style={{ color, fontWeight: 600 }}>
+                    <span className={cn('font-semibold', partnerOwesMe ? 'text-positive' : 'text-danger')}>
                       {formatMoney(Math.abs(rounded), cur)}
                     </span>{' '}
-                    <span className="muted">({label})</span>
+                    <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
                   </li>
                 )
               })}
             </ul>
           )}
-          <div className="tableWrap" aria-busy={loading}>
-            <Table className="table">
+          <Table aria-busy={loading}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Currency</TableHead>
@@ -656,28 +650,24 @@ export function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="emptyStateCell">
-                      <p className="emptyState">
-                        No partner-split data for these filters. Import transactions or widen the date range.
-                      </p>
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableRow
+                    colSpan={5}
+                    title="No partner-split data for these filters. Import transactions or widen the date range."
+                  />
                 )}
                 {partner?.byCurrency.map((r) => {
                   let netInner
                   if (r.direction === 'even') {
-                    netInner = <span className="muted">Even</span>
+                    netInner = <span className="text-sm leading-6 text-muted-foreground mb-0">Even</span>
                   } else {
                     const partnerOwesMe = r.direction === 'partner_owes_me'
-                    const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                     const sign = partnerOwesMe ? '+' : '−'
                     const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
                     netInner = (
-                      <span style={{ color }}>
+                      <span className={partnerOwesMe ? 'text-positive' : 'text-danger'}>
                         {sign}
                         {formatMoney(Math.abs(r.net), r.currency)}{' '}
-                        <span className="muted">({label})</span>
+                        <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
                       </span>
                     )
                   }
@@ -693,7 +683,7 @@ export function ReportsPage() {
                       {hasSettlements && (
                         <>
                           <br />
-                          <span className="muted" style={{ fontSize: '0.75rem' }}>
+                          <span className="text-xs text-muted-foreground mb-0">
                             (after {r.settlementCount} settlement
                             {r.settlementCount === 1 ? '' : 's'})
                           </span>
@@ -717,12 +707,11 @@ export function ReportsPage() {
                 })}
               </TableBody>
             </Table>
-          </div>
         </CollapsibleCard>
 
         <CollapsibleCard
           id="business-expenses"
-          className="reportsTableCard"
+          className="mb-0"
           title="Business expenses"
           description="Transactions marked business, grouped by currency."
           actions={
@@ -743,8 +732,7 @@ export function ReportsPage() {
             </Button>
           }
         >
-          <div className="tableWrap" aria-busy={loading}>
-            <Table className="table">
+          <Table aria-busy={loading}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Currency</TableHead>
@@ -753,13 +741,10 @@ export function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {(business?.byCurrency.length ?? 0) === 0 && !loading && (
-                  <TableRow>
-                    <TableCell colSpan={2} className="emptyStateCell">
-                      <p className="emptyState">
-                        No business-tagged amounts for these filters.
-                      </p>
-                    </TableCell>
-                  </TableRow>
+                  <EmptyTableRow
+                    colSpan={2}
+                    title="No business-tagged amounts for these filters."
+                  />
                 )}
                 {business?.byCurrency.map((r) => (
                   <TableRow key={r.currency}>
@@ -769,19 +754,17 @@ export function ReportsPage() {
                 ))}
               </TableBody>
             </Table>
-          </div>
         </CollapsibleCard>
       </div>
 
       <CollapsibleCard
         id="settlements"
-        className="reportsTableCard"
+        className="mb-0"
         title="Recent settlements"
         description="Manual records of money paid between you and a contact. Applied to the net partner balance above."
       >
-        {settlementsErr && <span className="error">{settlementsErr}</span>}
-        <div className="tableWrap">
-          <Table className="table">
+        {settlementsErr && <Alert variant="error" className="mb-4">{settlementsErr}</Alert>}
+        <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -794,13 +777,10 @@ export function ReportsPage() {
             </TableHeader>
             <TableBody>
               {recentSettlements.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="emptyStateCell">
-                    <p className="emptyState">
-                      No settlements yet. Click "Record settlement" above when money changes hands.
-                    </p>
-                  </TableCell>
-                </TableRow>
+                <EmptyTableRow
+                  colSpan={6}
+                  title='No settlements yet. Click "Record settlement" above when money changes hands.'
+                />
               )}
               {recentSettlements.map((row) => (
                 <TableRow key={row.id}>
@@ -813,13 +793,7 @@ export function ReportsPage() {
                   </TableCell>
                   <TableCell>{formatMoney(Number(row.amount), row.currency)}</TableCell>
                   <TableCell
-                    className="muted"
-                    style={{
-                      maxWidth: '14rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+                    className="text-sm leading-6 text-muted-foreground mb-0 max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap"
                     title={row.notes ?? undefined}
                   >
                     {row.notes ?? ''}
@@ -839,7 +813,6 @@ export function ReportsPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
       </CollapsibleCard>
 
       <RankedReportSection
@@ -934,7 +907,7 @@ export function ReportsPage() {
         </DialogHeader>
         <form onSubmit={submitSettlement}>
           <DialogBody>
-            <div className="formGrid" style={{ display: 'grid', gap: '0.75rem' }}>
+            <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
               <Label htmlFor="settlement-contact">
                 Contact
                 <NativeSelect
@@ -1021,7 +994,7 @@ export function ReportsPage() {
                   aria-describedby={formAmountError ? 'settlement-amount-err' : undefined}
                 />
                 {formAmountError && (
-                  <span id="settlement-amount-err" className="error text-xs" role="alert">
+                  <span id="settlement-amount-err" className="text-danger text-xs" role="alert">
                     {formAmountError}
                   </span>
                 )}
@@ -1043,7 +1016,7 @@ export function ReportsPage() {
                   aria-describedby={formDateError ? 'settlement-date-err' : undefined}
                 />
                 {formDateError && (
-                  <span id="settlement-date-err" className="error text-xs" role="alert">
+                  <span id="settlement-date-err" className="text-danger text-xs" role="alert">
                     {formDateError}
                   </span>
                 )}
@@ -1057,7 +1030,7 @@ export function ReportsPage() {
                   onChange={(e) => setFormNotes(e.target.value)}
                 />
               </Label>
-              {formError && <span className="error">{formError}</span>}
+              {formError && <Alert variant="error" className="mb-4">{formError}</Alert>}
             </div>
           </DialogBody>
           <DialogFooter>
@@ -1122,8 +1095,7 @@ function RankedReportSection<R>({
       description={description}
       toggleLabel={title}
     >
-      <div className="tableWrap">
-        <Table className="table">
+      <Table>
           <TableHeader>
             <TableRow>
               {showCurrencyColumn && <TableHead>Currency</TableHead>}
@@ -1134,18 +1106,13 @@ function RankedReportSection<R>({
           </TableHeader>
           <TableBody>
             {!loading && rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={totalColumns} className="emptyStateCell">
-                  <p className="emptyState">{emptyMessage}</p>
-                </TableCell>
-              </TableRow>
+              <EmptyTableRow colSpan={totalColumns} title={emptyMessage} />
             )}
             {rows.map((row) => (
               <TableRow key={rowKey(row)}>{renderRow(row)}</TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
     </CollapsibleCard>
   )
 }
