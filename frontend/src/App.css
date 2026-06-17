@@ -117,12 +117,23 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+  /* Active page: faded gradient fill + a full-color gradient rail (via ::before,
+   * since box-shadow can't take a gradient). Matches the hero/hover gradient. */
   .sidebar__navLink.isActive {
     color: var(--foreground);
-    background: color-mix(in oklch, var(--primary) 14%, transparent);
-    /* Inset rail uses the brand amber as the unambiguous "current page"
-     * marker. Survives high-contrast / forced-colors modes too. */
-    box-shadow: inset 3px 0 0 0 var(--primary);
+    background:
+      linear-gradient(135deg,
+        color-mix(in oklch, var(--gradient-hero-from) 16%, transparent),
+        color-mix(in oklch, var(--gradient-hero-to) 16%, transparent));
+  }
+  .sidebar__navLink.isActive::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--gradient-hero);
+    border-top-left-radius: inherit;
+    border-bottom-left-radius: inherit;
   }
   .sidebar__navLink svg {
     @apply h-4 w-4 shrink-0;
