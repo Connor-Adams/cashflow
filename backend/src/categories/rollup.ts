@@ -14,6 +14,7 @@ export type CategoryTree = {
 
 export type RollupRow = {
   categoryId: number;
+  currency: string;
   name: string;
   path: string;
   parentId: number | null;
@@ -92,6 +93,7 @@ export function rollupByCategoryId(
 export function buildRollupRows(
   rawByCategoryId: Map<number, number>,
   tree: CategoryTree,
+  currency = '',
 ): RollupRow[] {
   const rolled = rollupByCategoryId(rawByCategoryId, tree);
   const ids = new Set<number>([...rolled.keys()]);
@@ -99,6 +101,7 @@ export function buildRollupRows(
   for (const id of ids) {
     rows.push({
       categoryId: id,
+      currency,
       name: tree.nameById.get(id) ?? '',
       path: tree.pathById.get(id) ?? '',
       parentId: tree.parentById.get(id) ?? null,
@@ -109,4 +112,22 @@ export function buildRollupRows(
   }
   rows.sort((a, b) => a.path.localeCompare(b.path));
   return rows;
+}
+
+/**
+ * Build rollup rows across multiple currencies. For each currency in the outer
+ * map, runs the single-currency rollup over that currency's per-categoryId spend
+ * and stamps `currency` on every produced row. Rows for different currencies that
+ * share the same categoryId are distinct entries in the returned flat array —
+ * no cross-currency totals are ever mixed.
+ */
+export function buildRollupRowsByCurrency(
+  rawByCurrencyCat: Map<string, Map<number, number>>,
+  tree: CategoryTree,
+): RollupRow[] {
+  const all: RollupRow[] = [];
+  for (const [currency, rawByCategoryId] of rawByCurrencyCat) {
+    all.push(...buildRollupRows(rawByCategoryId, tree, currency));
+  }
+  return all;
 }

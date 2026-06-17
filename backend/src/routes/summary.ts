@@ -35,23 +35,27 @@ import {
 } from '../summary/periodInsight';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
-import { loadCategoryTree, buildRollupRows } from '../categories/rollup';
+import { loadCategoryTree, buildRollupRowsByCurrency } from '../categories/rollup';
 import type { PeriodInsightResp, PeriodInsightCurrency } from '@cashflow/shared';
 
 /**
- * Build a raw spend map from any array of points carrying a `categoryId`
- * and `sumAmount`. Skips null ids. Uses absolute spend (Math.abs) so that
- * credit rows don't cancel out spend in the rollup.
+ * Build a per-currency raw spend map from points that each carry a `currency`,
+ * `categoryId`, and `sumAmount`. Skips null categoryIds. Uses Math.abs so that
+ * credit rows don't cancel out spend. The result is:
+ *   Map<currency, Map<categoryId, absSpend>>
+ * suitable for passing to `buildRollupRowsByCurrency`.
  */
-function rawSpendByCategoryId(
-  points: Array<{ categoryId: number | null; sumAmount: number }>,
-): Map<number, number> {
-  const map = new Map<number, number>();
+function rawSpendByCurrencyCat(
+  points: Array<{ currency: string; categoryId: number | null; sumAmount: number }>,
+): Map<string, Map<number, number>> {
+  const outer = new Map<string, Map<number, number>>();
   for (const p of points) {
     if (p.categoryId == null) continue;
-    map.set(p.categoryId, (map.get(p.categoryId) ?? 0) + Math.abs(p.sumAmount));
+    let inner = outer.get(p.currency);
+    if (!inner) { inner = new Map(); outer.set(p.currency, inner); }
+    inner.set(p.categoryId, (inner.get(p.categoryId) ?? 0) + Math.abs(p.sumAmount));
   }
-  return map;
+  return outer;
 }
 
 /** One window's inclusive ISO date range. */
@@ -138,8 +142,10 @@ router.get('/dashboard', async (req, res, next) => {
     );
 
     const householdId = currentAuth(req).household.id;
-    const categoryTree = buildRollupRows(
-      rawSpendByCategoryId(Array.from(aggregates.byCategory.values())),
+    // byCategory fans one category across multiple buckets (currency\0category\0business\0split);
+    // re-sum per (currency, categoryId) before rolling up so totals stay currency-scoped.
+    const categoryTree = buildRollupRowsByCurrency(
+      rawSpendByCurrencyCat(Array.from(aggregates.byCategory.values())),
       await loadCategoryTree(householdId),
     );
 
@@ -535,8 +541,8 @@ router.get('/monthly', async (req, res, next) => {
     );
 
     const householdId = currentAuth(req).household.id;
-    const categoryTree = buildRollupRows(
-      rawSpendByCategoryId(categoryPoints),
+    const categoryTree = buildRollupRowsByCurrency(
+      rawSpendByCurrencyCat(categoryPoints),
       await loadCategoryTree(householdId),
     );
 

@@ -3,7 +3,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
 import { Category, Household } from '../models';
-import { loadCategoryTree, rollupByCategoryId, buildRollupRows } from './rollup';
+import { loadCategoryTree, rollupByCategoryId, buildRollupRows, buildRollupRowsByCurrency } from './rollup';
 
 let householdId: number;
 let work: number, expenses: number, internet: number;
@@ -54,6 +54,31 @@ test('rollup ignores ids not in the tree (stale/cross-household) without throwin
   const tree = await loadCategoryTree(householdId);
   const rolled = rollupByCategoryId(new Map([[999999, 10]]), tree);
   assert.equal(rolled.get(999999), undefined);
+});
+
+test('buildRollupRows stamps the supplied currency on every row', async () => {
+  const tree = await loadCategoryTree(householdId);
+  const raw = new Map<number, number>([[work, 50]]);
+  const rows = buildRollupRows(raw, tree, 'CAD');
+  assert.ok(rows.every((r) => r.currency === 'CAD'));
+});
+
+test('buildRollupRowsByCurrency keeps currencies separate — no cross-currency mixing', async () => {
+  const tree = await loadCategoryTree(householdId);
+  // Same categoryId (internet) in two currencies — totals must not bleed.
+  const byCurrencyCat = new Map<string, Map<number, number>>([
+    ['CAD', new Map([[internet, 100]])],
+    ['USD', new Map([[internet, 40]])],
+  ]);
+  const rows = buildRollupRowsByCurrency(byCurrencyCat, tree);
+  const cadRow = rows.find((r) => r.categoryId === internet && r.currency === 'CAD');
+  const usdRow = rows.find((r) => r.categoryId === internet && r.currency === 'USD');
+  assert.ok(cadRow, 'CAD row for internet should exist');
+  assert.ok(usdRow, 'USD row for internet should exist');
+  assert.equal(cadRow!.rolledTotal, 100, 'CAD total should not include USD spend');
+  assert.equal(usdRow!.rolledTotal, 40, 'USD total should not include CAD spend');
+  // No row should mix currencies
+  assert.ok(!rows.some((r) => r.currency === ''), 'no row should have an empty currency');
 });
 
 test('rollupByCategoryId handles cycles without infinite looping', () => {

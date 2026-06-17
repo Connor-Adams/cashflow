@@ -235,7 +235,7 @@ router.get('/', async (req, res, next) => {
       }
     }
     const householdId = currentAuth(req).household.id;
-    const categoryTree = buildRollupRows(sankeyRaw, await loadCategoryTree(householdId));
+    const categoryTree = buildRollupRows(sankeyRaw, await loadCategoryTree(householdId), currency);
 
     res.json({
       currency: result.currency,

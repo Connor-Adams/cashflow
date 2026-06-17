@@ -48,6 +48,8 @@ before(async () => {
   await qi.bulkInsert('categories', [{ household_id: 1, parent_id: null, name: 'Groceries', name_key: 'groceries' }]);
   // a row that a static update left with the string set but the id null
   await qi.bulkInsert('transactions', [{ household_id: 1, auto_category: 'Groceries', auto_category_id: null, final_category: 'Groceries', final_category_id: null }]);
+  // external_order_items uses the hasHousehold=false / match-by-name_key path
+  await qi.bulkInsert('external_order_items', [{ inferred_category: 'Groceries', inferred_category_id: null }]);
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   migration = require('../20260623000001-backfill-static-write-category-ids.js');
 });
@@ -59,4 +61,15 @@ test('backfills null *_category_id where the string is set', async () => {
   const cat = (await sequelize.query('SELECT id FROM categories'))[0] as Array<{ id: number }>;
   assert.equal((rows as Array<Record<string, unknown>>)[0].auto_category_id, cat[0].id);
   assert.equal((rows as Array<Record<string, unknown>>)[0].final_category_id, cat[0].id);
+});
+
+test('backfills external_order_items inferred_category_id via name_key match (hasHousehold=false path)', async () => {
+  // migration.up was already called in the previous test; re-run is idempotent (id already set)
+  const [items] = await sequelize.query('SELECT inferred_category_id FROM external_order_items');
+  const cat = (await sequelize.query('SELECT id FROM categories'))[0] as Array<{ id: number }>;
+  assert.equal(
+    (items as Array<Record<string, unknown>>)[0].inferred_category_id,
+    cat[0].id,
+    'inferred_category_id should be backfilled to the matching root category id',
+  );
 });
