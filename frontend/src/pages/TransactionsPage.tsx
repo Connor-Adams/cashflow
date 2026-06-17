@@ -1118,7 +1118,7 @@ export function TransactionsPage() {
         <div className="transactionsPanelHeader">
           <div>
             <h2>Browse and review</h2>
-            <p className="muted">
+            <p className="mb-4 text-sm leading-6 text-muted-foreground">
               Filter the ledger, sort the current page, and jump straight into bulk
               updates when you need them.
             </p>
@@ -1399,20 +1399,20 @@ export function TransactionsPage() {
             )}
           </div>
         ) : (
-          <p className="muted transactionsHelperCopy">
+          <p className="mb-0 mt-2 text-sm leading-6 text-muted-foreground">
             Showing the default view: {DEFAULT_TRANSACTION_CURRENCY}, all categories,
             all dates.
           </p>
         )}
         {aiEnabled ? (
-          <p className="muted transactionsHelperCopy">
+          <p className="mb-0 mt-2 text-sm leading-6 text-muted-foreground">
             OpenAI is configured. Use <strong>AI</strong> on a row or{' '}
             <strong>AI fill selected</strong> when you want the page to help with
             categorization; use <strong>AI audit selected</strong> to look for
             mislabeled categories or business flags.
           </p>
         ) : (
-          <p className="muted transactionsHelperCopy">
+          <p className="mb-0 mt-2 text-sm leading-6 text-muted-foreground">
             Set <code>OPENAI_API_KEY</code> in <code>backend/.env</code> to enable
             AI suggestions and receipt vision.
           </p>
@@ -1424,7 +1424,7 @@ export function TransactionsPage() {
         <section className="card aiVisibilityPanel" aria-label="Latest bulk AI results">
           <div className="aiVisibilityHeader">
             <strong>Latest AI fill</strong>
-            <span className="muted">
+            <span className="text-xs text-muted-foreground">
               Review {bulkAiResults.length} suggestion
               {bulkAiResults.length === 1 ? '' : 's'} before applying.
             </span>
@@ -1434,24 +1434,24 @@ export function TransactionsPage() {
               <article key={result.id} className="aiVisibilityItem">
                 <div className="aiVisibilityItemHeader">
                   <strong>{result.merchant}</strong>
-                  <span className="muted">#{result.id}</span>
+                  <span className="text-sm leading-6 text-muted-foreground">#{result.id}</span>
                 </div>
                 <p>{formatAiSuggestion(result.suggestion)}</p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Fields:{' '}
                   {result.appliedFields.length
                     ? result.appliedFields.join(', ')
                     : 'nothing'}
                 </p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Confidence: {result.suggestion.confidence ?? 'medium'}
                   {result.suggestion.needsReview ? ' · needs review' : ''}
                 </p>
                 {result.suggestion.evidence?.length ? (
-                  <p className="muted">Evidence: {result.suggestion.evidence.join(', ')}</p>
+                  <p className="mb-4 text-sm leading-6 text-muted-foreground">Evidence: {result.suggestion.evidence.join(', ')}</p>
                 ) : null}
                 {result.suggestion.rationale ? (
-                  <p className="muted">{result.suggestion.rationale}</p>
+                  <p className="mb-4 text-sm leading-6 text-muted-foreground">{result.suggestion.rationale}</p>
                 ) : null}
                 <div className="row">
                   <Button
@@ -1477,7 +1477,7 @@ export function TransactionsPage() {
             ))}
           </div>
           {bulkAiResults.length > 6 ? (
-            <p className="muted aiVisibilityMore">
+            <p className="mb-0 text-xs leading-6 text-muted-foreground">
               {bulkAiResults.length - 6} more result
               {bulkAiResults.length - 6 === 1 ? '' : 's'} applied.
             </p>
@@ -1488,7 +1488,7 @@ export function TransactionsPage() {
         <section className="card aiVisibilityPanel" aria-label="Latest AI audit results">
           <div className="aiVisibilityHeader">
             <strong>AI audit findings</strong>
-            <span className="muted">
+            <span className="text-xs text-muted-foreground">
               {aiAuditResults.filter((row) => row.status === 'open').length} open ·{' '}
               {aiAuditResults.length} total
             </span>
@@ -1498,13 +1498,13 @@ export function TransactionsPage() {
               <article key={result.id} className="aiVisibilityItem">
                 <div className="aiVisibilityItemHeader">
                   <strong>{result.merchant}</strong>
-                  <span className="muted">#{result.id}</span>
+                  <span className="text-sm leading-6 text-muted-foreground">#{result.id}</span>
                 </div>
                 <p>
                   {result.issueType.replaceAll('_', ' ')} ·{' '}
                   {formatMoney(Math.abs(result.amount), result.currency)}
                 </p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Category:{' '}
                   {result.currentCategory ?? 'Uncategorized'}
                   {result.suggestedCategory &&
@@ -1512,7 +1512,7 @@ export function TransactionsPage() {
                     ? ` → ${result.suggestedCategory}`
                     : ''}
                 </p>
-                <p className="muted">
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">
                   Business:{' '}
                   {result.currentBusiness == null
                     ? 'unknown'
@@ -1524,11 +1524,11 @@ export function TransactionsPage() {
                     ? ` → ${result.suggestedBusiness ? 'yes' : 'no'}`
                     : ''}
                 </p>
-                <p className="muted">Confidence: {result.confidence}</p>
+                <p className="mb-4 text-sm leading-6 text-muted-foreground">Confidence: {result.confidence}</p>
                 {result.evidence.length ? (
-                  <p className="muted">Evidence: {result.evidence.join(', ')}</p>
+                  <p className="mb-4 text-sm leading-6 text-muted-foreground">Evidence: {result.evidence.join(', ')}</p>
                 ) : null}
-                {result.rationale ? <p className="muted">{result.rationale}</p> : null}
+                {result.rationale ? <p className="mb-4 text-sm leading-6 text-muted-foreground">{result.rationale}</p> : null}
                 <div className="row">
                   <Button
                     type="button"
@@ -1553,7 +1553,7 @@ export function TransactionsPage() {
             ))}
           </div>
           {aiAuditResults.length > 8 ? (
-            <p className="muted aiVisibilityMore">
+            <p className="mb-0 text-xs leading-6 text-muted-foreground">
               {aiAuditResults.length - 8} more finding
               {aiAuditResults.length - 8 === 1 ? '' : 's'} hidden.
             </p>
@@ -1568,7 +1568,7 @@ export function TransactionsPage() {
                 ? `${selectedIds.size} selected`
                 : `${totalCount} matching`}
             </strong>
-            <span className="muted">Apply a batch override without opening each row.</span>
+            <span className="text-xs text-muted-foreground">Apply a batch override without opening each row.</span>
           </div>
           {aiEnabled ? (
             <>
@@ -1752,7 +1752,7 @@ export function TransactionsPage() {
         <div className="transactionsPanelHeader">
           <div>
             <h2>Ledger</h2>
-            <p className="muted">
+            <p className="mb-4 text-sm leading-6 text-muted-foreground">
               Showing {pageCount} row{pageCount === 1 ? '' : 's'} on this page out of{' '}
               {totalCount} matching the current filters.
             </p>
@@ -1821,7 +1821,7 @@ export function TransactionsPage() {
                             ? 'No pending transactions.'
                             : 'No transactions yet.'}
                         </p>
-                        <p className="muted">
+                        <p className="mb-4 text-sm leading-6 text-muted-foreground">
                           Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
                           placed files in the configured upload folder. Create accounts under{' '}
                           <Link to="/accounts">Accounts</Link> if needed.
@@ -2387,15 +2387,15 @@ function TransactionRow({
             <div className="txnAiInsight" role="status">
               <strong>AI suggestion</strong>
               <span>{formatAiSuggestion(aiSuggestion)}</span>
-              <span className="muted">
+              <span className="text-sm leading-6 text-muted-foreground">
                 Confidence: {aiSuggestion.confidence ?? 'medium'}
                 {aiSuggestion.needsReview ? ' · needs review' : ''}
               </span>
               {aiSuggestion.evidence?.length ? (
-                <span className="muted">Evidence: {aiSuggestion.evidence.join(', ')}</span>
+                <span className="text-sm leading-6 text-muted-foreground">Evidence: {aiSuggestion.evidence.join(', ')}</span>
               ) : null}
               {aiSuggestion.rationale ? (
-                <span className="muted">{aiSuggestion.rationale}</span>
+                <span className="text-sm leading-6 text-muted-foreground">{aiSuggestion.rationale}</span>
               ) : null}
             </div>
           ) : null}
@@ -2563,7 +2563,7 @@ function MarkReimbursableDialog({
     >
       <Card className="w-full max-w-md p-5">
         <h2 className="mb-1 text-lg font-semibold">Mark reimbursable</h2>
-        <p className="muted text-sm mb-4">
+        <p className="mb-4 text-sm leading-6 text-muted-foreground">
           {txn.merchantClean} · {txn.date}
         </p>
         {canPromote && (
@@ -2571,7 +2571,7 @@ function MarkReimbursableDialog({
           // so the common case is a single button click; the manual flow
           // below still works for free-text or a different contact.
           <div className="mb-4 rounded-md border border-dashed border-border bg-muted/40 p-3 text-sm">
-            <p className="muted mb-2">
+            <p className="mb-2 text-sm leading-6 text-muted-foreground">
               Statement counterparty:{' '}
               <strong className="text-foreground">{promoteName}</strong>
             </p>
