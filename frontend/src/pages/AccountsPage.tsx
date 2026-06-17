@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { Grid } from '@/components/ui/grid'
 import { StatCard } from '@/components/ui/stat-card'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
@@ -286,12 +287,12 @@ export function AccountsPage() {
         }
       />
 
-      <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
+      <Grid minItemWidth={180} gap="md" responsiveFloor={false} className="mb-4" aria-busy={loading}>
         <StatCard label="Accounts" value={accountCount} hint="Cards and bank accounts configured" />
         <StatCard label="Short codes" value={shortCodeCount} hint="Ready for folder import matching" />
         <StatCard label="Joint" value={jointCount} hint="Accounts owned together" />
         <StatCard label="Currencies" value={currencyCount} hint="Default currencies in use" />
-      </div>
+      </Grid>
 
       <Card className="mb-4">
       <form onSubmit={onCreate}>
@@ -303,7 +304,7 @@ export function AccountsPage() {
             </p>
           </div>
         </div>
-        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
+        <Grid minItemWidth={180} fill gap="md" className="mb-3">
           <Label htmlFor="accounts-create-name">
             Name <span className="text-danger">*</span>
             <Input
@@ -372,7 +373,7 @@ export function AccountsPage() {
               <option value="shared">shared</option>
             </select>
           </Label>
-        </div>
+        </Grid>
         <Button type="submit" disabled={saving}>
           <Plus aria-hidden="true" />
           {saving ? 'Saving…' : 'Create account'}
