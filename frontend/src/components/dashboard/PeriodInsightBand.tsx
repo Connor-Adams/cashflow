@@ -26,6 +26,14 @@ export function PeriodInsightBand({ data, currency }: Props) {
     { label: 'Payments / transfers', value: data.totalPayments },
   ]
 
+  // Semantic tint per money-movement bucket: out=oxblood, in=green, neutral=info.
+  const TONE: Record<string, { tile: string; value: string }> = {
+    Spend: { tile: 'bg-danger-bg', value: 'text-danger' },
+    'Refunds / credits': { tile: 'bg-success-bg', value: 'text-positive' },
+    Income: { tile: 'bg-success-bg', value: 'text-positive' },
+    'Payments / transfers': { tile: 'bg-info-bg', value: 'text-info' },
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {/* Caption */}
@@ -43,7 +51,7 @@ export function PeriodInsightBand({ data, currency }: Props) {
           </p>
         </div>
         {data.owedBack > 0 && (
-          <span className="inline-flex w-fit items-center rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
+          <span className="inline-flex w-fit items-center rounded-full bg-success-bg px-2.5 py-1 text-xs font-medium text-positive">
             + {money(data.owedBack)} loaned out · comes back to you
           </span>
         )}
@@ -60,15 +68,20 @@ export function PeriodInsightBand({ data, currency }: Props) {
           className="grid gap-3"
           style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}
         >
-          {breakdown.map((m) => (
-            <div
-              key={m.label}
-              className="flex flex-col gap-1 rounded-md bg-secondary/50 p-3"
-            >
-              <span className="text-xs text-muted-foreground">{m.label}</span>
-              <span className="text-xl tabular-nums">{money(m.value)}</span>
-            </div>
-          ))}
+          {breakdown.map((m) => {
+            const tone = TONE[m.label] ?? { tile: 'bg-secondary/50', value: '' }
+            return (
+              <div
+                key={m.label}
+                className={`flex flex-col gap-1 rounded-md p-3 ${tone.tile}`}
+              >
+                <span className="text-xs text-muted-foreground">{m.label}</span>
+                <span className={`text-xl font-semibold tabular-nums ${tone.value}`}>
+                  {money(m.value)}
+                </span>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
