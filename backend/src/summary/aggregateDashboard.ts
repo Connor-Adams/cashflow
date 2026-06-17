@@ -35,6 +35,8 @@ export type SummaryTxnRow = {
    */
   linkedTransactionId?: number | null;
   businessAmount?: string;
+  /** The resolved category id for the transaction (mirrors finalCategory). */
+  finalCategoryId?: number | null;
 };
 
 /** Account row shape consumed by the aggregator for type/short-code lookups. */
@@ -57,6 +59,7 @@ export type DashboardAggregates = {
     {
       currency: string;
       category: string | null;
+      categoryId: number | null;
       finalBusiness: boolean;
       finalSplitType: string;
       sumAmount: number;
@@ -396,6 +399,7 @@ export function aggregateDashboard(
               amount: String(row.amount),
               currency: row.currency,
               finalCategory: row.finalCategory,
+              finalCategoryId: row.finalCategoryId ?? null,
               finalBusiness: row.finalBusiness,
               finalSplitType: row.finalSplitType,
               businessAmount: row.businessAmount ?? '0',
@@ -407,6 +411,7 @@ export function aggregateDashboard(
         : [
             {
               category: row.finalCategory,
+              categoryId: row.finalCategoryId ?? null,
               amount,
               businessAmount: 0,
               currency: row.currency,
@@ -428,6 +433,7 @@ export function aggregateDashboard(
           const existing = byCategory.get(key) ?? {
             currency: row.currency,
             category: alloc.category,
+            categoryId: alloc.categoryId ?? null,
             finalBusiness: row.finalBusiness,
             finalSplitType: row.finalSplitType,
             sumAmount: 0,
