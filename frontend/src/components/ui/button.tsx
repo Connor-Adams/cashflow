@@ -16,7 +16,7 @@ const buttonVariants = cva(
         ghost: "hover:bg-accent hover:text-accent-foreground",
         destructive: "bg-button-destructive border border-destructive text-destructive hover:bg-[color-mix(in_oklch,var(--destructive)_20%,transparent)]",
         danger: "bg-button-destructive border border-destructive text-destructive hover:bg-[color-mix(in_oklch,var(--destructive)_20%,transparent)]",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "text-text-link underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-4",

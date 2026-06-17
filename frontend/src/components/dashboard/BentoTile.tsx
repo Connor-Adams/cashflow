@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 export type BentoSpan = 3 | 4 | 6 | 8 | 12
 export type BentoRows = 1 | 2
-export type BentoVariant = 'default' | 'hero' | 'warning' | 'destructive'
+export type BentoVariant = 'default' | 'hero' | 'gradient' | 'warning' | 'destructive'
 
 /**
  * Responsive column-span classes per authoring span. Literal strings (no
@@ -54,7 +54,9 @@ type BentoTileProps = React.ComponentProps<'section'> & {
   /** Row span (1 = compact, 2 = standard tile height). */
   rows?: BentoRows
   /** Visual variant.
-   *  - 'hero': subtle amber gradient (anchor tile).
+   *  - 'hero': flat anchor tile (slightly emphasized chrome).
+   *  - 'gradient': full orange→pink hero gradient with white text (the one
+   *    deliberate gradient surface — e.g. positive Safe-to-spend).
    *  - 'warning' / 'destructive': alert-shaped tint (used for tiles that
    *    replaced standalone Alert/banner components).
    */
@@ -96,6 +98,7 @@ export function BentoTile({
         SPAN_CLASSES[span],
         ROW_CLASSES[rows],
         variant === 'hero' && 'bentoTile--hero',
+        variant === 'gradient' && 'bentoTile--gradient',
         className,
       )}
       style={variantStyle ? { ...variantStyle, ...style } : style}

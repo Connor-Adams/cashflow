@@ -1424,12 +1424,20 @@
     min-width: 0;
   }
 
+  /* Hero anchor tile: flat surface (chart bands stay readable). */
   .bentoTile--hero {
-    background:
-      linear-gradient(180deg,
-        color-mix(in oklch, var(--primary) 10%, transparent),
-        transparent 32%),
-      var(--card);
+    background: var(--card);
+  }
+
+  /* The one deliberate gradient surface — orange→pink with white text. */
+  .bentoTile--gradient {
+    background: var(--gradient-hero);
+    border-color: transparent;
+    color: #fff;
+  }
+  .bentoTile--gradient .bentoTile__label,
+  .bentoTile--gradient .bentoTile__description {
+    color: rgba(255, 255, 255, 0.92);
   }
 
   .bentoTile__header {

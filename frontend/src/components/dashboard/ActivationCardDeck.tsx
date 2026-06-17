@@ -115,7 +115,7 @@ export function ActivationCardDeck() {
           <p className="mb-3 text-xs text-muted-foreground">{card.description}</p>
           <Link
             to={card.href}
-            className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
+            className="inline-flex items-center rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-brand-foreground hover:opacity-90"
           >
             {card.cta}
           </Link>
