@@ -808,7 +808,7 @@ export function DashboardPage() {
       <ActivationCardDeck />
 
       <div
-        className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
+        className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
       >
         <SafeToSpendTile currency={currency || null} />
