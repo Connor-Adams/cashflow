@@ -1,5 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {
+  MeterProvider,
+  InMemoryMetricExporter,
+  PeriodicExportingMetricReader,
+  AggregationTemporality,
+} from '@opentelemetry/sdk-metrics';
 
 import {
   normalizeHttpRoute,
@@ -7,7 +13,29 @@ import {
   shouldEnableMetrics,
   createTestMetricRecorder,
   recordHttpRequestWithRecorder,
+  registerLivenessHeartbeat,
 } from './metrics';
+
+test('registerLivenessHeartbeat emits cashflow.up = 1 (the BackendDown heartbeat)', async () => {
+  // BackendDown alerts on absent(cashflow_up); the gauge must actually be
+  // emitted or that alert fires forever. Assert the real exported value.
+  const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 60000 });
+  const provider = new MeterProvider({ readers: [reader] });
+
+  registerLivenessHeartbeat(provider.getMeter('test'));
+  await reader.forceFlush();
+
+  const points = exporter
+    .getMetrics()
+    .flatMap((rm) => rm.scopeMetrics)
+    .flatMap((sm) => sm.metrics)
+    .filter((m) => m.descriptor.name === 'cashflow.up')
+    .flatMap((m) => m.dataPoints);
+
+  assert.equal(points.length, 1, 'exactly one cashflow.up data point must be emitted');
+  assert.equal(points[0].value, 1, 'cashflow.up must observe 1 while the process is alive');
+});
 
 test('normalizeHttpRoute strips query strings and numeric path ids', () => {
   assert.equal(

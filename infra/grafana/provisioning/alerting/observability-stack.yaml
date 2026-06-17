@@ -162,7 +162,11 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: 'up{job="cashflow-otel-collector"} == 0'
+              # Query the RAW up gauge — do NOT self-filter with `== 0`. With
+              # noDataState: Alerting, `up == 0` returns an empty series whenever
+              # the collector is healthy (up == 1), which Grafana reads as NoData
+              # and fires permanently. The threshold node below decides instead.
+              expr: 'up{job="cashflow-otel-collector"}'
               intervalMs: 60000
               maxDataPoints: 43200
               instant: true
@@ -175,9 +179,12 @@ groups:
                 type: __expr__
                 uid: __expr__
               conditions:
+                # Fire when up < 1 (i.e. up == 0, collector down). When up == 1
+                # the series is present and the condition is false → OK. NoData
+                # only when the target is genuinely absent from scrape config.
                 - evaluator:
-                    params: [0]
-                    type: gt
+                    params: [1]
+                    type: lt
                   operator:
                     type: and
                   query:
