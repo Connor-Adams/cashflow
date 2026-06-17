@@ -5,6 +5,7 @@ import { Alert } from '@/components/ui/alert'
 import { EmptyTableRow } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import {
@@ -507,7 +508,7 @@ export function ReportsPage() {
         title="Reports"
         description="Partner balances and business totals stay separated by currency and time window."
       />
-      <section className="card reportsFilters">
+      <Card className="mb-4">
         <FilterBar
           currency={currency}
           onCurrencyChange={setCurrency}
@@ -542,7 +543,7 @@ export function ReportsPage() {
             </p>
           }
         />
-      </section>
+      </Card>
       {err && <Alert variant="error" className="mb-4">{err}</Alert>}
       {loading && <p className="mb-4 text-sm leading-6 text-muted-foreground">Loading…</p>}
 
