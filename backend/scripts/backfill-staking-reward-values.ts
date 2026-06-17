@@ -27,14 +27,7 @@ import { Op } from 'sequelize';
 import { InvestmentActivity, SecurityDailyPrice, sequelize } from '../src/models';
 import { valueStakingReward } from '../src/portfolio/stakingValuation';
 import { ensureFxRate } from '../src/fx/bankOfCanada';
-import { databaseUrl } from '../src/config/env';
-
-function numFlag(argv: string[], name: string): number | null {
-  const i = argv.indexOf(name);
-  const v = i !== -1 && i < argv.length - 1 ? Number(argv[i + 1]) : null;
-  return Number.isFinite(v as number) ? (v as number) : null;
-}
-class DryRunRollback extends Error {}
+import { numFlag, guardWriteTarget, DryRunRollback } from './lib/opsFlags';
 
 async function closeOnOrBefore(securityId: number, date: string): Promise<{ close: number; currency: string } | null> {
   const row = await SecurityDailyPrice.findOne({
@@ -54,18 +47,7 @@ async function main(): Promise<void> {
   const accountId = numFlag(argv, '--account-id');
   const mode = commit ? 'COMMIT (writing)' : 'DRY RUN (report only)';
 
-  if (databaseUrl) {
-    console.log(`Target DB: postgres (${new URL(databaseUrl).host})`);
-  } else {
-    console.log('Target DB: LOCAL SQLITE (no DATABASE_URL set)');
-    if (commit) {
-      console.error(
-        'Refusing to --commit against local sqlite. Set DATABASE_URL to the prod Postgres URL ' +
-          '(DATABASE_PUBLIC_URL from `railway variables --service Postgres`).',
-      );
-      process.exit(1);
-    }
-  }
+  guardWriteTarget(commit);
   console.log(`mode: ${mode}`);
 
   const where: Record<string, unknown> = {
