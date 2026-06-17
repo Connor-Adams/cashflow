@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Card } from '@/components/ui/card'
 
-type Swatch = { label: string; token: string }
+type Swatch = { label: string; token: string; kind?: 'gradient' }
 type Group = { name: string; swatches: Swatch[] }
 
 const GROUPS: Group[] = [
@@ -41,8 +42,13 @@ const GROUPS: Group[] = [
       { label: 'border', token: '--border' },
     ],
   },
-  { name: 'Gradient', swatches: [{ label: 'gradient-hero', token: '--gradient-hero' }] },
+  {
+    name: 'Gradient',
+    swatches: [{ label: 'gradient-hero', token: '--gradient-hero', kind: 'gradient' }],
+  },
 ]
+
+const ALL_TOKENS = GROUPS.flatMap((g) => g.swatches.map((s) => s.token))
 
 function useTokenValues(tokens: string[]): Record<string, string> {
   const key = tokens.join(',')
@@ -64,42 +70,44 @@ function useTokenValues(tokens: string[]): Record<string, string> {
 }
 
 export function PaletteSection() {
-  const allTokens = GROUPS.flatMap((g) => g.swatches.map((s) => s.token))
-  const values = useTokenValues(allTokens)
+  const values = useTokenValues(ALL_TOKENS)
   return (
-    <section className="space-y-6">
+    <Card className="settingsDisplayCard">
       <h2 className="text-lg font-semibold text-foreground">Palette</h2>
       <p className="text-sm text-muted-foreground">
         Live design tokens, read from CSS at runtime. Reflects the active theme.
       </p>
-      {GROUPS.map((group) => (
-        <div key={group.name} className="space-y-2">
-          <h3 className="text-sm font-medium text-muted-foreground">{group.name}</h3>
-          <div className="flex flex-wrap gap-2">
-            {group.swatches.map((s) => {
-              const v = values[s.token] ?? ''
-              const isGradient = s.token === '--gradient-hero'
-              return (
-                <div key={s.token} className="flex flex-col items-center gap-1">
-                  <div
-                    className="h-12 w-16 rounded-md border border-border"
-                    style={
-                      isGradient ? { backgroundImage: v } : { backgroundColor: `var(${s.token})` }
-                    }
-                  />
-                  <span className="text-[10px] text-muted-foreground">{s.label}</span>
-                  <span
-                    data-testid="swatch-value"
-                    className="font-mono text-[9px] text-muted-foreground"
-                  >
-                    {v}
-                  </span>
-                </div>
-              )
-            })}
+      <div className="space-y-6 mt-4">
+        {GROUPS.map((group) => (
+          <div key={group.name} className="space-y-2">
+            <h3 className="text-sm font-medium text-muted-foreground">{group.name}</h3>
+            <div className="flex flex-wrap gap-2">
+              {group.swatches.map((s) => {
+                const v = values[s.token] ?? ''
+                return (
+                  <div key={s.token} className="flex flex-col items-center gap-1">
+                    <div
+                      className="h-12 w-16 rounded-md border border-border"
+                      style={
+                        s.kind === 'gradient'
+                          ? { backgroundImage: v }
+                          : { backgroundColor: `var(${s.token})` }
+                      }
+                    />
+                    <span className="text-[10px] text-muted-foreground">{s.label}</span>
+                    <span
+                      data-testid="swatch-value"
+                      className="font-mono text-[9px] text-muted-foreground"
+                    >
+                      {v}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-        </div>
-      ))}
-    </section>
+        ))}
+      </div>
+    </Card>
   )
 }
