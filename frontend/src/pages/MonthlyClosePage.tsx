@@ -453,7 +453,7 @@ export function MonthlyClosePage() {
 
           {/* Critical items panel */}
           {detail?.critical.hasCritical ? (
-            <Card className="p-4 border-amber-500/60 bg-warning-bg/30">
+            <Card className="p-4 border-warning bg-warning-bg/30">
               <h3 className="text-sm font-semibold">Unresolved critical items</h3>
               <ul className="mt-2 list-disc pl-6 text-sm">
                 {detail.critical.counts.unreviewedTransactions > 0 ? (

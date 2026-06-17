@@ -174,7 +174,7 @@ function ExposurePanel({
       {gapCurrencies.length > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-warning-bg text-warning p-3 text-sm"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
         >
           FX rate unavailable for: {gapCurrencies.join(', ')} — these
           currencies are shown in native units only.

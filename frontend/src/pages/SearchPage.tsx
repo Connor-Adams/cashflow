@@ -308,7 +308,7 @@ export function SearchPage() {
 
       {err && (
         <div
-          className="border border-red-300 bg-danger-bg dark:border-red-900 rounded-md p-3 text-sm"
+          className="border border-danger bg-danger-bg rounded-md p-3 text-sm"
           role="alert"
         >
           {err}
@@ -341,7 +341,7 @@ export function SearchPage() {
           )}
 
           {response.intent.errors.length > 0 && (
-            <ul className="border border-amber-300 bg-warning-bg dark:border-amber-900 rounded-md p-3 text-sm space-y-1">
+            <ul className="border border-warning bg-warning-bg rounded-md p-3 text-sm space-y-1">
               {response.intent.errors.map((m, i) => (
                 <li key={i}>{m}</li>
               ))}

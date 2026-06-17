@@ -222,7 +222,7 @@ export function PartnerFairnessPage() {
       </Card>
 
       {err && (
-        <Card className="mb-4 border-rose-300 bg-danger-bg dark:border-rose-700">
+        <Card className="mb-4 border-danger bg-danger-bg">
           <CardContent className="pt-6">
             <p className="text-danger">{err}</p>
           </CardContent>

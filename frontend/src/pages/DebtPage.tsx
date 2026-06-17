@@ -342,7 +342,7 @@ function PlanSummary({
 }) {
   return (
     <Card
-      className={`p-3 ${highlight ? 'border-emerald-300 dark:border-emerald-700' : ''}`}
+      className={`p-3 ${highlight ? 'border-positive' : ''}`}
     >
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="text-sm font-semibold">{title}</h3>

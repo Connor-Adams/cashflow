@@ -166,7 +166,7 @@ export function VaultPage() {
       />
 
       {!encryptionConfigured ? (
-        <Card className="border-amber-300/40 bg-warning-bg p-4">
+        <Card className="border-warning bg-warning-bg p-4">
           <div className="flex gap-3">
             <ShieldAlert className="text-warning" aria-hidden="true" />
             <div className="text-sm">

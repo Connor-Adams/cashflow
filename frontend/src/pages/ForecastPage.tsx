@@ -238,7 +238,7 @@ export function ForecastPage() {
 
       {/* Lowest-balance warning */}
       {goesBelowZero && data ? (
-        <Card className="mb-4 border-amber-300 bg-warning-bg p-4 dark:border-amber-700">
+        <Card className="mb-4 border-warning bg-warning-bg p-4">
           <div className="flex gap-3">
             <AlertTriangle
               className="mt-0.5 size-5 shrink-0 text-warning"

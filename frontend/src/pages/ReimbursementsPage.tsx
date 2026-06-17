@@ -649,7 +649,7 @@ function MatchDialog({
                 Check account selection
               </Button>
               {showAccountHint && (
-                <div className="rounded bg-warning-bg border border-amber-200 dark:border-amber-700 p-2 text-xs text-warning">
+                <div className="rounded bg-warning-bg border border-warning p-2 text-xs text-warning">
                   Matching searches all accounts visible to you in {row.currency}.
                   If the repayment came in via a different currency or account,
                   it won't appear here.{' '}
