@@ -140,6 +140,7 @@ export async function buildFinancialInsights(
       'merchantRaw',
       'amount',
       'finalCategory',
+      'finalCategoryId', // B2: finalCategoryId selected for future rollup
       'finalBusiness',
       'finalSplitType',
       'businessAmount',

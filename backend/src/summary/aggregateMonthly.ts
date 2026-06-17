@@ -17,6 +17,7 @@ export type MonthlyTxnRow = {
   merchantRaw: string | null;
   merchantClean: string | null;
   finalCategory: string | null;
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   finalSplitType: string;
   amount: unknown;
@@ -29,6 +30,7 @@ export type MonthlyCategoryPoint = {
   month: string;
   currency: string;
   category: string | null;
+  categoryId: number | null;
   sumAmount: number;
 };
 export type MonthlyResult = {
@@ -120,6 +122,7 @@ export function aggregateMonthly(
             amount: String(row.amount),
             currency: row.currency,
             finalCategory: row.finalCategory,
+            finalCategoryId: row.finalCategoryId ?? null,
             finalBusiness: row.finalBusiness,
             finalSplitType: row.finalSplitType,
             businessAmount: row.businessAmount ?? '0',
@@ -131,6 +134,7 @@ export function aggregateMonthly(
       : [
           {
             category: row.finalCategory,
+            categoryId: row.finalCategoryId ?? null,
             amount,
             businessAmount: 0,
             currency: row.currency,
@@ -143,6 +147,7 @@ export function aggregateMonthly(
         month,
         currency: row.currency,
         category: alloc.category,
+        categoryId: alloc.categoryId ?? null,
         sumAmount: 0,
       };
       catExisting.sumAmount += toUnits(alloc.amount);

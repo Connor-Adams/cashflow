@@ -484,6 +484,7 @@ type SpendRow = {
   id: number;
   currency: string;
   finalCategory: string | null;
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   finalSplitType: string;
   amount: unknown;
@@ -504,10 +505,10 @@ type SpendRow = {
 export function aggregateSpendByCategory(
   rows: SpendRow[],
   itemContext?: ItemAllocationContext,
-): Map<string, { currency: string; category: string | null; spent: number }> {
+): Map<string, { currency: string; category: string | null; categoryId: number | null; spent: number }> {
   const out = new Map<
     string,
-    { currency: string; category: string | null; spent: number }
+    { currency: string; category: string | null; categoryId: number | null; spent: number }
   >();
   for (const row of rows) {
     const amount = num(row.amount);
@@ -519,6 +520,7 @@ export function aggregateSpendByCategory(
             amount: String(row.amount),
             currency: row.currency,
             finalCategory: row.finalCategory,
+            finalCategoryId: row.finalCategoryId ?? null,
             finalBusiness: row.finalBusiness,
             finalSplitType: row.finalSplitType,
             businessAmount: row.businessAmount,
@@ -530,6 +532,7 @@ export function aggregateSpendByCategory(
       : [
           {
             category: row.finalCategory,
+            categoryId: row.finalCategoryId ?? null,
             amount,
             businessAmount: 0,
             currency: row.currency,
@@ -542,6 +545,7 @@ export function aggregateSpendByCategory(
       const existing = out.get(key) ?? {
         currency: alloc.currency,
         category: alloc.category,
+        categoryId: alloc.categoryId ?? null,
         spent: 0,
       };
       existing.spent += spend;
@@ -867,6 +871,7 @@ async function computeStatusForBudgets(
           'id',
           'currency',
           'finalCategory',
+          'finalCategoryId', // B2: finalCategoryId selected for future rollup
           'finalBusiness',
           'finalSplitType',
           'amount',

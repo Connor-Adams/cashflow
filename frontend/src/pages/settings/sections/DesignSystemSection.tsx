@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { StatCard } from '@/components/ui/stat-card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { SectionHeader } from '@/components/ui/section-header'
+import { Grid } from '@/components/ui/grid'
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
 const ALERT_VARIANTS = ['error', 'warning', 'info', 'success'] as const
@@ -79,6 +80,14 @@ export function DesignSystemSection() {
           description="Supporting description"
           actions={<Button variant="secondary">Action</Button>}
         />
+      </Group>
+      <Group name="Grid">
+        <Grid minItemWidth={160} gap="md" className="w-full">
+          <StatCard label="Revenue" value="$12,400" hint="This month" />
+          <StatCard label="Expenses" value="$8,230" delta="-5%" metricKind="spend" />
+          <StatCard label="Net" value="$4,170" delta="+8%" metricKind="gain" />
+          <StatCard label="Savings rate" value="33%" hint="Of income" />
+        </Grid>
       </Group>
     </Card>
   )

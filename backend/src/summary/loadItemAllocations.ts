@@ -70,7 +70,9 @@ export async function loadItemAllocationContext(
       unitPrice: it.unitPrice,
       quantity: it.quantity,
       inferredCategory: it.inferredCategory,
+      inferredCategoryId: it.inferredCategoryId,
       categoryOverride: it.categoryOverride,
+      categoryOverrideId: it.categoryOverrideId,
       businessUsePercent: it.businessUsePercent,
       businessUseOverride: it.businessUseOverride,
     });

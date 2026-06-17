@@ -179,6 +179,7 @@ async function fetchTransactionsWithReceipts(
       'currency',
       'amount',
       'finalCategory',
+      'finalCategoryId', // B2: finalCategoryId selected for future rollup
       'finalBusiness',
       'merchantClean',
       'merchantRaw',
@@ -410,7 +411,7 @@ async function fetchLifestyleTransactions(
   const [rows, accounts] = await Promise.all([
     Transaction.findAll({
       where,
-      attributes: ['accountId', 'date', 'currency', 'amount', 'finalCategory', 'txnType'],
+      attributes: ['accountId', 'date', 'currency', 'amount', 'finalCategory', 'finalCategoryId', 'txnType'], // B2: finalCategoryId selected for future rollup
       raw: true,
     }),
     Account.findAll({

@@ -6,6 +6,7 @@ import { EmptyTableRow } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Grid } from '@/components/ui/grid'
 import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import {
@@ -547,7 +548,7 @@ export function ReportsPage() {
       {err && <Alert variant="error" className="mb-4">{err}</Alert>}
       {loading && <p className="mb-4 text-sm leading-6 text-muted-foreground">Loading…</p>}
 
-      <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
+      <Grid minItemWidth={180} gap="md" responsiveFloor={false} className="mb-4" aria-busy={loading}>
         <StatCard
           label="My share"
           value={singleCurrency ? formatMoney(partnerMineTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
@@ -570,9 +571,9 @@ export function ReportsPage() {
           value={reportCurrencies.length}
           hint={`${totalPartnerRows} partner row${totalPartnerRows === 1 ? '' : 's'} and ${totalBusinessRows} business row${totalBusinessRows === 1 ? '' : 's'}`}
         />
-      </div>
+      </Grid>
 
-      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))]">
+      <Grid minItemWidth={320} gap="lg">
         <CollapsibleCard
           id="partner-split"
           className="mb-0"
@@ -755,7 +756,7 @@ export function ReportsPage() {
               </TableBody>
             </Table>
         </CollapsibleCard>
-      </div>
+      </Grid>
 
       <CollapsibleCard
         id="settlements"
@@ -907,7 +908,7 @@ export function ReportsPage() {
         </DialogHeader>
         <form onSubmit={submitSettlement}>
           <DialogBody>
-            <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
+            <Grid minItemWidth={180} fill gap="md" className="mb-3">
               <Label htmlFor="settlement-contact">
                 Contact
                 <NativeSelect
@@ -1031,7 +1032,7 @@ export function ReportsPage() {
                 />
               </Label>
               {formError && <Alert variant="error" className="mb-4">{formError}</Alert>}
-            </div>
+            </Grid>
           </DialogBody>
           <DialogFooter>
             <Button

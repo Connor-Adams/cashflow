@@ -21,6 +21,7 @@ import {
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import { SectionHeader } from '@/components/ui/section-header'
+import { Grid } from '@/components/ui/grid'
 import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
@@ -1107,13 +1108,13 @@ export function TransactionsPage() {
         onChange={onReceiptPicked}
       />
 
-      <section className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(160px,1fr))]">
+      <Grid minItemWidth={160} gap="md" responsiveFloor={false} className="mb-4">
         <StatCard label="Filtered rows" value={totalCount} hint={filteredSummaryLabel} />
         <StatCard label="This page" value={pageCount} hint={`Page ${page} of ${totalPages}`} />
         <StatCard label="Needs review" value={reviewCountOnPage} hint="Rows flagged on the current page" />
         <StatCard label="Selected" value={selectedIds.size} hint="Rows in the current bulk selection" />
         <StatCard label="Receipts" value={receiptCountOnPage} hint="Attachments on the current page" />
-      </section>
+      </Grid>
 
 
       <Card className="mb-4">
@@ -1167,7 +1168,7 @@ export function TransactionsPage() {
             </Button>
           ))}
         </div>
-        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
+        <Grid minItemWidth={180} fill gap="md" className="mb-3">
           <Label className="transactionsCheckTile">
             <span>Review only</span>
             <Input
@@ -1319,7 +1320,7 @@ export function TransactionsPage() {
               <NativeSelectOption value="asc">Ascending</NativeSelectOption>
             </NativeSelect>
           </Label>
-        </div>
+        </Grid>
           <div className="mb-3 flex flex-wrap items-center gap-3 mt-3">
           {activeFilters.length > 0 && (
             <Button
