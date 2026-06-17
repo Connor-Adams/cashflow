@@ -109,4 +109,10 @@ describe('Sidebar rail (PR 0)', () => {
     }
     expect(screen.getByRole('link', { name: 'Planned' })).toBeInTheDocument()
   })
+
+  it('shows Budgets under Planning and Enrichment under Insights & rules', () => {
+    renderSidebar() // use the file's existing render helper
+    expect(screen.getByRole('link', { name: /Budgets/ })).toHaveAttribute('href', '/budgets')
+    expect(screen.getByRole('link', { name: /Enrichment/ })).toHaveAttribute('href', '/enrichment')
+  })
 })
