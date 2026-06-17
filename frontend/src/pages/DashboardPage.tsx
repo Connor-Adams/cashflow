@@ -989,7 +989,15 @@ export function DashboardPage() {
           aria-label="This period at a glance"
         >
           {insightForCurrency ? (
-            <PeriodInsightBand data={insightForCurrency} currency={currency} />
+            <PeriodInsightBand
+              data={insightForCurrency}
+              currency={currency}
+              rangeLabel={
+                quickRanges.find(
+                  (q) => q.from === dateFrom && q.to === dateTo,
+                )?.label
+              }
+            />
           ) : (
             <div className="text-sm text-muted-foreground">
               Pick a start and end date to see the period breakdown.

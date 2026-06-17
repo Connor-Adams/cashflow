@@ -1,12 +1,13 @@
-# Local-first encrypted sync foundation
+# Self-hosted encrypted sync foundation
 
 > Cashflow #239 — V1 backup/restore. Future cloud-sync work plugs into the
 > extension points described below.
 
 ## Product model
 
-Cashflow is local-first: the database lives on a single Railway-hosted
-Postgres and the user trusts that one server. The "sync" surface lets a
+Cashflow is self-hosted: the database lives on a single server you control
+(Railway-hosted Postgres in the reference deploy), and the user trusts that
+one server. The "sync" surface lets a
 user (1) take an encrypted snapshot of their finance data and (2) restore
 it on a fresh install or a different household. Encryption happens
 server-side using a passphrase the user supplies on each request — the
@@ -149,7 +150,7 @@ use:
   download. We do not persist bundle bytes server-side.
 - PBKDF2-SHA256 at 200k iterations is the OWASP-2023 baseline. A future
   rotation to Argon2id would bump the envelope `version` byte.
-- The user is also the threat model on a local-first product. We refuse
+- The user is also the threat model on a self-hosted product. We refuse
   passphrases shorter than 8 chars to catch UI bugs, but we do not
   enforce stronger requirements — a determined user choosing
   "password1234" is their own problem.

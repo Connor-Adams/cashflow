@@ -2,7 +2,7 @@ import { CalendarRange } from 'lucide-react'
 import { formatCurrency } from '@/lib/formatCurrency'
 import type { PeriodInsightCurrency } from '@cashflow/shared'
 
-type Props = { data: PeriodInsightCurrency; currency: string }
+type Props = { data: PeriodInsightCurrency; currency: string; rangeLabel?: string }
 
 /**
  * Period-scoped "this period at a glance" band. Two ideas only:
@@ -13,7 +13,7 @@ type Props = { data: PeriodInsightCurrency; currency: string }
  * Everything here is scoped to the selected window — no cross-period
  * comparison, no all-time outstanding stock, no per-category drill-down.
  */
-export function PeriodInsightBand({ data, currency }: Props) {
+export function PeriodInsightBand({ data, currency, rangeLabel }: Props) {
   // `currency` is '' when no currency filter is active; format with the row's
   // own currency so values still render as money, but keep the caption clean.
   const fmtCode = currency || data.currency
@@ -39,11 +39,11 @@ export function PeriodInsightBand({ data, currency }: Props) {
       {/* Caption */}
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <CalendarRange className="h-3.5 w-3.5" aria-hidden />
-        {currency ? `this period · ${currency}` : 'this period'}
+        {[rangeLabel || 'this period', currency].filter(Boolean).join(' · ')}
       </p>
 
       {/* Real-spend headline + loaned split */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
         <div>
           <p className="text-sm text-muted-foreground">Real spend</p>
           <p className="text-[2rem] font-medium leading-tight tabular-nums">
@@ -51,8 +51,12 @@ export function PeriodInsightBand({ data, currency }: Props) {
           </p>
         </div>
         {data.owedBack > 0 && (
-          <span className="inline-flex w-fit items-center rounded-full bg-success-bg px-2.5 py-1 text-xs font-medium text-positive">
-            + {money(data.owedBack)} loaned out · comes back to you
+          <span className="mb-1 inline-flex w-fit items-center rounded-full bg-success-bg px-3 py-1 text-xs text-positive">
+            +&nbsp;
+            <span className="font-medium">
+              {money(data.owedBack)}
+            </span>
+            &nbsp;loaned out · comes back to you
           </span>
         )}
       </div>

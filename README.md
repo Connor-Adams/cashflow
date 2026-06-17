@@ -11,224 +11,195 @@
 [![typescript](https://img.shields.io/badge/typescript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 <!-- END BADGIE TIME -->
 
-Local-first personal and partner expense tracker. Import card CSVs, apply
-merchant rules, split with a partner, attach receipts, and roll spend up into
-per-currency summaries — all running on your own machine.
+A self-hosted finance tracker for one person or a couple — run it on your own
+machine or your own server. Drop in your card CSVs and PDF statements, let
+merchant rules categorize and split them, attach receipts, track investments
+and net worth, plan budgets and forecasts — and see it all roll up into
+per-currency summaries. No third-party services touch your data unless you opt
+into an integration.
 
-## Features
-
-- **Imports** — CSV upload from the UI or folder-scan import. Auto-detects
-  generic-bank vs Amex layouts; pluggable profiles for other issuers.
-  See [docs/csv-import.md](docs/csv-import.md).
-- **Rules** — merchant-pattern rules apply categories, splits, and notes to
-  matching transactions on import.
-- **Review inbox** — uncategorized or flagged transactions surface for review
-  in one place.
-- **Splits and settlements** — partner / business / personal splits per
-  transaction, with running settlement balances.
-- **Recurring** — detection and tracking of subscriptions and recurring
-  charges.
-- **Receipts** — attach JPEG/PNG/WebP receipts to a transaction.
-- **AI suggestions** (optional) — OpenAI-backed category / split / note
-  suggestions; vision-based receipt extraction.
-- **Amazon enrichment** — match Amazon order reports to card transactions for
-  item-level categories. See [docs/amazon-enrichment.md](docs/amazon-enrichment.md).
-- **Portfolio** — track investment balances alongside spending.
-- **Dashboards and reports** — per-currency summaries for self, partner, and
-  business.
+It is a real multi-currency ledger, not a spreadsheet: ~90 tables, ~80 API
+routers, an 85-page React app, and an AI layer you can turn on or leave off
+entirely.
 
 ## Quick start
 
 ```bash
 yarn setup     # install + run migrations
-yarn dev       # API + Vite together
+yarn dev       # API on :3001, UI on :5173 (proxies /api)
 ```
 
-- API: `http://localhost:3001`
-- UI: `http://localhost:5173` (proxies `/api` to the API)
+Open `http://localhost:5173` and click **Continue with demo account** — the
+backend seeds a demo household with sample data on startup, so there is
+something to look at immediately.
 
-Requires **Node 20+** and **Yarn Classic v1**. Yarn workspaces cover
-`backend`, `frontend`, and `shared` — install from the repo root, not from
-sub-directories. If old `node_modules` exist inside `backend/` or `frontend/`,
-delete them and reinstall from the root.
+Requires **Node 20+** and **Yarn Classic v1**. This is a yarn-1 workspace
+monorepo — always install and run from the **repo root**, never a sub-directory.
+If stray `node_modules` exist inside `backend/` or `frontend/`, delete them and
+reinstall at root.
 
-Optional: copy `backend/.env.example` to `backend/.env`. Defaults use
-`backend/data/cashflow.sqlite`, `backend/uploads/csv`, and
-`DEFAULT_CURRENCY=CAD`.
+Optional config lives in `backend/.env` (copy from
+[`backend/.env.example`](backend/.env.example)). Everything has a working
+default — set nothing and it just runs (`DEFAULT_CURRENCY=CAD`).
 
-For full dev setup (CI parity, git hooks, project layout) see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+## The primitives spine
+
+Cashflow is built on **13 canonical primitives** — a primitive is a distinct
+*status machine + noun*, not a data shape. The ~90 Sequelize models are the
+physical tables; they fold into these 13 concepts:
+
+> **Transaction · Expectation · Account · Holding · Principal · Counterparty ·
+> Scenario · Budget · Goal · Proposal · Observation · Document · Period**
+
+Before adding any model, route, or page, the rule is: *does this introduce a new
+status machine, or a new variant/view of an existing primitive?* A new variant
+is a `type` field on an existing primitive; a new view is a query; a genuinely
+new status machine is rare and flagged as a spine change. Full reasoning:
+[the primitives spec](docs/superpowers/specs/2026-05-30-cashflow-primitives-design.md).
+
+This is the single most important thing to understand before contributing.
+
+## What it does
+
+**Capture & categorize**
+- CSV upload (UI or folder-scan) and PDF statement parsing with reconciliation.
+  Auto-detects generic-bank vs Amex layouts; pluggable issuer profiles
+  ([docs/csv-import.md](docs/csv-import.md)).
+- Merchant-pattern rules apply categories, splits, labels, and notes on import.
+- A review inbox surfaces uncategorized or flagged transactions; data-quality
+  checks catch anomalies.
+- Attach receipts to transactions; keep statements and supporting files in a
+  document vault.
+- Match Amazon (and other) order reports to card charges for item-level detail
+  ([docs/amazon-enrichment.md](docs/amazon-enrichment.md)).
+
+**Split & settle**
+- Partner / business / personal splits per transaction, with running settlement
+  balances between contacts.
+- Recurring-charge and subscription detection, plus money-leak surfacing.
+
+**Plan & analyze**
+- Budgets, savings goals, and cash-flow forecasting with planned events and a
+  monthly-close flow.
+- Debt and credit-card tracking, opportunity-cost and what-if scenarios.
+- Personal and corporate tax scenarios, household plans, and reserve estimation.
+- Investment holdings with scheduled price quotes (Alpha Vantage) and dividend
+  reconciliation, rolled into net-worth tracking.
+- Per-currency dashboards (self / partner / business), Sankey flows, insights,
+  and an exportable reporting API.
+
+**AI (optional)**
+- OpenAI-backed category/split/note suggestions, vision-based receipt
+  extraction, and a CFO chat assistant over your own data. Set `OPENAI_API_KEY`
+  to enable it; leave it unset and everything else works unchanged.
+
+## Architecture
+
+Three workspaces, one DTO contract:
+
+- **`backend/`** — Express + Sequelize API. Feature modules are the top-level
+  dirs under `src/` (`import/`, `portfolio/`, `tax/`, `forecast/`, `budgets/`,
+  `ai/`, …), each pairing domain logic with a `routes/*.ts` router. Router
+  mounts live in a declarative, CI-locked registry
+  ([`backend/src/routeRegistry.ts`](backend/src/routeRegistry.ts)) — mount order
+  is load-bearing and `backend/test/appRouteOrder.test.ts` locks it.
+- **`frontend/`** — Vite + React 19, react-router v7, Tailwind v4 (Radix,
+  lucide, recharts). 85 pages in `pages/`, shared API client in `lib/api.ts`.
+  The build also emits Amazon/Apple capture bookmarklets.
+- **`shared/`** — a single file, `shared/api-types.ts`, the API DTO contract
+  imported by both sides as `@cashflow/shared`.
+
+The DB is **dual-dialect**: Postgres in production (set `DATABASE_URL`), with an
+embedded file DB for zero-setup local dev — all Sequelize is written to run on
+both. Multi-currency throughout, with
+an `FxRate` table. Auth is cookie-session and household-scoped behind a global
+`requireAuth` boundary. Observability is pino logs + OpenTelemetry over OTLP;
+`infra/` brings up Grafana/Loki/Tempo/Prometheus locally
+([docs/observability.md](docs/observability.md)).
+
+### API surface
+
+Everything mounts under `/api`. A few routes (health, version, config, auth,
+capture, `/api/v1` reporting, audit) sit *before* `requireAuth`; the rest need a
+session. The ~80 routers group into families:
+
+| Family | Examples | Purpose |
+|---|---|---|
+| System | `/health` `/version` `/config` `/jobs` `/search` | Health, build info, jobs, global search |
+| Auth & household | `/auth` `/household` `/invites` `/preferences` | Session auth, membership, prefs |
+| Transactions | `/transactions` `/transfers` `/accounts` `/rules` `/labels` `/review-items` | List/filter/patch, rules, review inbox |
+| Import & capture | `/import` `/capture` `/amazon` `/sync` `/v1` | CSV/PDF import, bookmarklet capture, reporting export |
+| Split & settle | `/contacts` `/settlements` `/partner` | Splits and settlement balances |
+| Summaries | `/summary` `/reports` `/insights` `/recurring` `/money-leaks` | Aggregates, Sankey, recurring/leak detection |
+| Planning | `/budgets` `/forecast` `/goals` `/debt` `/financial-scenarios` `/cfo` | Budgets, forecasts, scenarios, CFO chat |
+| Investments | `/portfolio` `/dividends` `/net-worth` `/fx` | Holdings, prices, dividends, net worth, FX |
+| Tax | `/tax` `/tax/scenarios` `/income` | Tax scenarios, household plans, reserve |
+| Receipts & docs | `/transactions/:id/receipts` `/vault` | Receipts, vision analysis, document vault |
+| AI | `/ai` `/chat` | `GET /ai/status` reports config; suggestions & chat |
+
+[`routeRegistry.ts`](backend/src/routeRegistry.ts) is the authoritative list
+(each entry carries a `why`). Folded endpoints return `410 Gone` pointing at
+their replacement.
 
 ## Configuration
 
-Key environment variables (set in `backend/.env`):
+Copy [`backend/.env.example`](backend/.env.example) to `backend/.env`. The most
+common knobs:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DEFAULT_CURRENCY` | `CAD` | Fallback currency when a transaction has none |
-| `DATABASE_URL` | _(unset)_ | Postgres connection string; SQLite is used when unset |
-| `CSV_UPLOAD_DIR` | `backend/uploads/csv` | Folder-scan import source |
-| `RECEIPTS_UPLOAD_DIR` | `backend/uploads/receipts` | Local receipt storage path (when not using S3) |
-| `OPENAI_API_KEY` | _(unset)_ | Enables AI suggestion and vision endpoints |
-| `DEMO_ACCOUNT_ENABLED` | `true` | Seed a demo account on startup |
-| `UPLOAD_RATE_LIMIT_MAX` | `30` | CSV upload requests per IP per minute |
+| `DEFAULT_CURRENCY` | `CAD` | Fallback when a transaction has no currency |
+| `DATABASE_URL` | _(unset)_ | Postgres connection; an embedded file DB is used when unset |
+| `CSV_UPLOAD_DIR` | `./uploads/csv` | Folder-scan import source |
+| `RECEIPTS_UPLOAD_DIR` | `./uploads/receipts` | Local receipt storage |
+| `OPENAI_API_KEY` | _(unset)_ | Enables AI suggestions, vision, chat |
+| `ALPHA_VANTAGE_API_KEY` | _(unset)_ | Enables stock quotes + dividends |
+| `DEMO_ACCOUNT_ENABLED` | `true` | Seed the demo household on startup |
 
-Set `OPENAI_API_KEY` to enable AI features; without it, the rest of the app
-works unchanged and the UI shows how to enable AI.
-
-## API overview
-
-All endpoints are under `/api`. Authentication uses cookie sessions; mutating
-routes require login.
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/health` | Health check |
-| `POST` | `/auth/register \| login \| demo-login \| logout` | Auth |
-| `GET` | `/auth/me` | Current user |
-| `GET\|POST\|DELETE` | `/accounts[/:id]` | Manage accounts |
-| `GET\|POST\|PATCH\|DELETE` | `/rules[/:id]` | Merchant rules |
-| `GET` | `/transactions` | List with filters (`reviewFlag`, `currency`, `dateFrom`, `dateTo`, …) |
-| `PATCH` | `/transactions/:id` | Override category / split / notes |
-| `POST` | `/transactions/bulk-patch[-filter]` | Bulk edit by ids or by filter |
-| `POST` | `/transactions/:id/ai-suggest` | Single AI suggestion (requires `OPENAI_API_KEY`) |
-| `POST` | `/transactions/bulk-ai-suggest` | Batch AI suggestions (max 15 ids) |
-| `POST` | `/import/upload` | Multipart CSV upload: `file`, `accountId`, optional `batchLabel`, `profileId` |
-| `POST` | `/import/run` | Scan `CSV_UPLOAD_DIR` for new files |
-| `GET` | `/import/profiles` | List CSV profiles |
-| `GET` | `/summary/dashboard \| partner \| business \| monthly` | Aggregates (per currency; filter with `?currency=`) |
-| `GET\|POST\|DELETE` | `/contacts[/:id]` | Partner / payee contacts |
-| `GET\|POST\|DELETE` | `/settlements[/:id]` | Settle balances between contacts |
-| `GET` | `/recurring` | Detected recurring charges |
-| `GET\|POST` | `/portfolio[/prices/refresh]` | Investment holdings + price refresh |
-| `GET\|POST\|PATCH\|DELETE` | `/amazon/...` | Order import, matching, item categorization, link review |
-| `POST` | `/transactions/:id/receipts` | Upload receipt (multipart `file`) |
-| `GET` | `/transactions/:id/receipts` | List receipts for a transaction |
-| `GET\|DELETE` | `/receipts/:id[/file]` | Download or delete a receipt |
-| `POST` | `/receipts/:id/analyze` | Vision-based extraction (requires `OPENAI_API_KEY`) |
-| `GET` | `/ai/status` | `{ "openai": true }` when configured |
+AI models (`OPENAI_MODEL`, `OPENAI_VISION_MODEL`), the quote scheduler
+(`QUOTE_*`), dividend reconciliation (`DIVIDEND_*`), Costco image enrichment
+(`COSTCO_*`), and observability (`OTEL_*`) are all documented inline in
+`.env.example`.
 
 ## Tests
 
 ```bash
 yarn test    # backend unit + integration + frontend Vitest
-yarn ci      # everything CI runs: typecheck, tests, production builds
+yarn ci      # everything CI runs: typecheck, tests, both production builds
 ```
 
 Backend unit tests are **colocated** (`foo.test.ts` beside `foo.ts` under
-`backend/src/`) and auto-discovered, so a new test runs with no glob to maintain.
-Integration tests live in `backend/test/integration/` (Postgres, run via
-`test:integration`); migration tests live in `backend/src/migrations/__tests__/`.
-
-Coverage spans split math, rule matching, CSV row mapping, env validation,
-import integration (HTTP + DB), and frontend unit tests. Sample CSV:
-`backend/test/fixtures/sample.csv`.
+`backend/src/`) and auto-discovered — a new test runs with no glob to maintain.
+Integration tests live in `backend/test/integration/` (Postgres, via
+`test:integration`); migration tests in `backend/src/migrations/__tests__/`.
+Backend uses `node:test` via `tsx`; frontend uses Vitest. Single-file and
+filter-by-name invocations are in [CLAUDE.md](CLAUDE.md).
 
 ## Demo account
 
-The backend seeds a demo account on startup (including in production) unless
-`DEMO_ACCOUNT_ENABLED=false`. Defaults:
+Seeded on startup (including in production) unless `DEMO_ACCOUNT_ENABLED=false`:
 
 - Email: `dev@cashflow.local`
 - Password: `cashflow-demo`
 
-Override with `DEMO_ACCOUNT_EMAIL`, `DEMO_ACCOUNT_PASSWORD`, and
-`DEMO_ACCOUNT_NAME`. The seed is idempotent: the demo user, household,
-account, rules, and sample transactions are ensured without duplicating on
-later deploys. The auth screen exposes a **Continue with demo account** button
-backed by `POST /api/auth/demo-login`.
-
-## Releases
-
-Cashflow uses a three-piece pipeline:
-
-1. **CI builds Docker images** on every push to `main` and pushes them to
-   GitHub Container Registry (GHCR), tagged with the commit SHA.
-2. **[Release Drafter](https://github.com/release-drafter/release-drafter)**
-   maintains a draft GitHub Release with auto-generated notes from merged
-   PR titles.
-3. **Publishing a release** re-tags the corresponding images as
-   `:vX.Y.Z` and `:production`, then triggers Railway to redeploy.
-   Railway services are configured to pull images from GHCR — they don't
-   build anything themselves.
-
-**To ship to production:**
-
-1. Open a PR with a conventional-commit title (`feat:`, `fix:`, `docs:`, etc.).
-   Release Drafter auto-labels the PR based on the title prefix.
-2. When the PR merges to `main`:
-   - The `build-images` workflow builds the backend and frontend images and
-     pushes them to GHCR (`ghcr.io/connor-adams/cashflow-{backend,frontend}:sha-<short>`).
-   - Release Drafter updates the draft GitHub Release with the new entry.
-3. When ready to ship, go to **Releases → Drafts** in GitHub. **Wait for the
-   `build-images` run on the latest `main` commit to finish** before
-   publishing — the promote workflow re-tags those images, and will fail
-   fast if they don't exist yet. Eyeball the notes and version, edit if
-   needed, click **Publish release**.
-4. Publishing fires a `release: published` event (human action, not
-   `GITHUB_TOKEN`). The `promote-to-production` workflow:
-   - Re-tags the released commit's images as `:vX.Y.Z` and `:production`.
-   - Calls Railway's deploy hooks for both services.
-   Railway pulls the new `:production` image and runs it.
-
-`main` does not auto-deploy. Only publishing a release triggers a Railway
-redeploy.
-
-**Version bumps (suggested by Drafter; override at Publish time):**
-- `feat:` → minor bump
-- `fix:` / `perf:` / `deps:` → patch bump
-- `feat!:` or any title with `!` after the type → major bump
-- `docs:`, `chore:`, `refactor:`, `test:`, `build:`, `ci:` → fall to patch
-  default; you choose whether to publish a release with only these
-
-**Required GitHub Secrets:**
-- `VITE_API_BASE` — public URL of the backend Railway service, baked into
-  the frontend image at build time
-- `RAILWAY_TOKEN` — Railway project token used by the promote workflow to
-  call `railway redeploy` against each service
-
-**Rollback:**
-
-Re-tag an older `:vX.Y.Z` image as `:production`, then trigger Railway
-redeploys. From a workstation with `docker buildx` and the Railway CLI
-linked to the project:
-
-```bash
-TAG=v0.1.4
-IMG_BE=ghcr.io/connor-adams/cashflow-backend
-IMG_FE=ghcr.io/connor-adams/cashflow-frontend
-
-docker buildx imagetools create --tag $IMG_BE:production $IMG_BE:$TAG
-docker buildx imagetools create --tag $IMG_FE:production $IMG_FE:$TAG
-
-railway redeploy --service 42977748-ab5c-4552-a206-faf86d353e5b -y
-railway redeploy --service e0dc05b7-3961-4d4f-aea9-bed3810ea2f5 -y
-```
-
-A dedicated `workflow_dispatch` rollback workflow would be cleaner but is
-not currently configured.
+Override with `DEMO_ACCOUNT_EMAIL` / `DEMO_ACCOUNT_PASSWORD` /
+`DEMO_ACCOUNT_NAME`. The seed is idempotent — the user, household, account,
+rules, and sample transactions are ensured without duplicating on later deploys.
 
 ## Deploy
 
-See [docs/deploy-railway.md](docs/deploy-railway.md) for Railway service
-configuration, environment variables, and storage setup (Postgres, volume
-mount for folder imports, Railway Buckets for receipts).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, individual workspace
-commands, CI parity, project layout, and git hooks.
-
-Design specs and implementation plans live under
-[docs/superpowers/](docs/superpowers).
-
-AI-agent audit loop (verifying a deploy is healthy): [docs/agent-audit.md](docs/agent-audit.md).
+Image-based and **not** auto-deployed from `main`: CI builds and pushes
+`backend`/`frontend` images to GHCR on merge; publishing a GitHub Release
+re-tags them `:production` and fires Railway redeploys. The full pipeline,
+version-bump rules, and rollback steps are in
+[docs/releasing.md](docs/releasing.md); Railway service config and storage in
+[docs/deploy-railway.md](docs/deploy-railway.md). Local dev setup, CI parity,
+and git hooks are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 Copyright (c) 2026 Connor Adams. All rights reserved.
 
-This repository is source-available for review and evaluation only. It is not
-open-source software. You may not copy, modify, distribute, host, offer as a
-service, or use this project commercially without explicit written permission.
-See [LICENSE](LICENSE) for details.
+Source-available for review and evaluation only — **not** open-source. You may
+not copy, modify, distribute, host, offer as a service, or use this project
+commercially without explicit written permission. See [LICENSE](LICENSE).
