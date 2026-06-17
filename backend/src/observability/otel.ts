@@ -41,6 +41,24 @@ export function buildSpanProcessors(traceExporter: SpanExporter): SpanProcessor[
   return [new AlsSpanProcessor(), new BatchSpanProcessor(traceExporter)];
 }
 
+/**
+ * Auto-instrumentation toggles. HTTP + Express + Sequelize + Undici stay on
+ * (enabled by default). The rest are noise or duplicates:
+ * - fs/dns/net: high-cardinality noise.
+ * - runtime-node: registered explicitly below to avoid double registration.
+ * - pino: the backend already ships logs to Loki via its own pino.multistream
+ *   OTLP stream (loggerOtlpTransport). Leaving this enabled emits every log a
+ *   second time through the OTel Logs SDK → 2x Loki ingestion and a split
+ *   severity casing (INFO vs info). Keep it OFF — single path via the transport.
+ */
+export const autoInstrumentationConfig = {
+  '@opentelemetry/instrumentation-fs': { enabled: false },
+  '@opentelemetry/instrumentation-dns': { enabled: false },
+  '@opentelemetry/instrumentation-net': { enabled: false },
+  '@opentelemetry/instrumentation-runtime-node': { enabled: false },
+  '@opentelemetry/instrumentation-pino': { enabled: false },
+} as const;
+
 if (otlpEnabled) {
   const sdk = new NodeSDK({
     resource: resourceFromAttributes({
@@ -54,16 +72,7 @@ if (otlpEnabled) {
       }),
     ),
     instrumentations: [
-      getNodeAutoInstrumentations({
-        // Filter noisy/unwanted auto-instrumentations.
-        '@opentelemetry/instrumentation-fs': { enabled: false },
-        '@opentelemetry/instrumentation-dns': { enabled: false },
-        '@opentelemetry/instrumentation-net': { enabled: false },
-        // Disabled here so we can register RuntimeNodeInstrumentation explicitly below
-        // (avoids duplicate registration when auto-instrumentations-node includes it).
-        '@opentelemetry/instrumentation-runtime-node': { enabled: false },
-        // HTTP + Express + Sequelize + Undici are what we care about; they're enabled by default.
-      }),
+      getNodeAutoInstrumentations(autoInstrumentationConfig),
       new RuntimeNodeInstrumentation(),
     ],
   });
