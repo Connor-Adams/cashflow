@@ -441,7 +441,7 @@ export function AccountsPage() {
                         <div>
                           {a.name}
                           {a.notes && (
-                            <p className="text-xs muted" style={{ marginTop: '0.125rem' }}>
+                            <p className="text-xs text-muted-foreground mt-0.5">
                               {a.notes.length > 100 ? `${a.notes.slice(0, 100)}…` : a.notes}
                             </p>
                           )}
@@ -537,10 +537,10 @@ export function AccountsPage() {
                             aria-label="Credit limit"
                           />
                         ) : (
-                          <span className="muted">—</span>
+                          <span className="text-muted-foreground">—</span>
                         )
                       ) : a.accountType !== 'credit_card' ? (
-                        <span className="muted">—</span>
+                        <span className="text-muted-foreground">—</span>
                       ) : a.creditLimit == null ? (
                         <Button
                           type="button"
@@ -594,7 +594,7 @@ export function AccountsPage() {
                   {editingId === a.id && (
                     <TableRow>
                       <TableCell colSpan={9}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <div className="flex flex-col gap-1">
                           <label className="text-sm font-medium" htmlFor={`notes-${a.id}`}>
                             Notes
                           </label>
@@ -605,10 +605,10 @@ export function AccountsPage() {
                             rows={3}
                             maxLength={4000}
                             placeholder="Routing number, custodian, tax ID, or any per-account reminder…"
-                            style={{ width: '100%', resize: 'vertical' }}
+                            className="w-full resize-y"
                           />
                           <span
-                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'muted'}`}
+                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'text-muted-foreground'}`}
                             aria-live="polite"
                           >
                             {editNotes.length}/4000
