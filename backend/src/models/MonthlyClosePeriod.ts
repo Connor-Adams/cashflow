@@ -21,11 +21,6 @@ import {
  */
 export type MonthlyCloseStatus = 'open' | 'closed';
 
-export const MONTHLY_CLOSE_STATUSES: readonly MonthlyCloseStatus[] = [
-  'open',
-  'closed',
-] as const;
-
 export class MonthlyClosePeriod extends Model<
   InferAttributes<MonthlyClosePeriod>,
   InferCreationAttributes<MonthlyClosePeriod>

@@ -86,5 +86,4 @@ if (isDev) {
 export { logger };
 
 // Backwards-compatible type aliases.
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogFields = Record<string, unknown>;

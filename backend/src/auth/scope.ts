@@ -13,15 +13,6 @@ export function householdWhere(req: Request): WhereOptions {
   return { householdId: household.id };
 }
 
-export function visibleWhere(req: Request): WhereOptions {
-  if (isSuperadmin(req)) return {};
-  const { household, user } = currentAuth(req);
-  return {
-    householdId: household.id,
-    [Op.or]: [{ visibility: 'shared' }, { createdByUserId: user.id }, { ownerUserId: user.id }],
-  } as WhereOptions;
-}
-
 export function visibleTransactionWhere(req: Request): WhereOptions {
   if (isSuperadmin(req)) return {};
   const { household, user } = currentAuth(req);

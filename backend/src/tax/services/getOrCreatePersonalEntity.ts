@@ -1,4 +1,10 @@
-import { Entity } from '../../models';
+// Import Entity directly from its model module (not the '../../models' barrel)
+// to avoid a circular dependency: the barrel imports Account, Account lazily
+// imports this helper, and this helper would import the barrel — a cycle that
+// fallow flags. Entity.ts depends only on sequelize, so the direct import is
+// acyclic. The class reference is identical either way (the barrel's index.ts
+// still runs initEntity + associations at startup), so behavior is unchanged.
+import { Entity } from '../../models/Entity';
 import type { Transaction as SequelizeTransaction } from 'sequelize';
 
 /**

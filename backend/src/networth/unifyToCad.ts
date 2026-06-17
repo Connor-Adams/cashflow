@@ -9,6 +9,7 @@ export type FxLookup = (
 
 export type PerCurrencyByKind = Record<string, { asset: number; liability: number }>;
 
+// Distinct domain shape from fx/reportingNormalization.ts FxRateUsed (to:'CAD' vs generic to); kept module-local.
 export type FxRateUsed = {
   from: string;
   to: 'CAD';

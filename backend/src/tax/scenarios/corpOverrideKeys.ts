@@ -1,6 +1,13 @@
 // backend/src/tax/scenarios/corpOverrideKeys.ts
+//
+// This module only DEFINES the corp override-key entries; it no longer imports
+// (and calls) `registerOverrideKeys` from ./overrideKeys. That import created a
+// cycle (overrideKeys self-registered corp keys via `require('./corpOverrideKeys')`,
+// and corpOverrideKeys imported back into overrideKeys). The dependency is now
+// one-directional: overrideKeys.ts imports `corpKeys` from here and registers
+// them at its own module load. Behavior is identical — the corp keys are still
+// registered exactly once, at overrideKeys load time.
 import { D } from '../util/decimal';
-import { registerOverrideKeys } from './overrideKeys';
 import type { OverrideKeyDef } from './types';
 import type { CorpTaxYearFacts, IncomeItem, CorpDividendPaid } from '../engine/types';
 
@@ -48,7 +55,7 @@ function appendDividendPaid(kind: 'eligible' | 'non_eligible', label: string): O
   };
 }
 
-const corpKeys: OverrideKeyDef[] = [
+export const corpKeys: OverrideKeyDef[] = [
   {
     kind: 'corp',
     key: 'corp.activeIncome',
@@ -139,5 +146,3 @@ const corpKeys: OverrideKeyDef[] = [
     },
   },
 ];
-
-registerOverrideKeys(corpKeys);

@@ -43,6 +43,7 @@ export interface NormalizedMetric {
   }>;
 }
 
+// Distinct domain shape from networth/unifyToCad.ts FxRateUsed (generic from/to vs to:'CAD'); kept module-local.
 export interface FxRateUsed {
   from: string;
   to: string;

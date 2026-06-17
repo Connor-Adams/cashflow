@@ -5,6 +5,11 @@ import {
   Account, Entity, Household, Scenario, Transaction,
 } from '../../models';
 import { resolveScenario, ensureBaselineScenario } from './resolveScenario';
+// resolveScenario dispatches projection_root roots through projectionPorts; the
+// projector registers itself when its module loads. This test exercises that path
+// ("fork on projection_root") without otherwise importing the projector, so load
+// it here for the registration side effect.
+import './projectPersonalFactsFromPrevYear';
 
 beforeEach(async () => {
   await sequelize.sync({ force: true });

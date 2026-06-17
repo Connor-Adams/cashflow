@@ -1,3 +1,8 @@
+// Intentional frontend API-type barrel: a complete mirror of @cashflow/shared (imported by 100+ files).
+// Not every re-exported type has a frontend consumer yet, and names like Label also exist as the
+// backend model / UI component, so cross-package overlap is expected for this barrel.
+// fallow-ignore-file unused-type
+// fallow-ignore-file duplicate-export
 export type {
   Account,
   AccountType,

@@ -4,6 +4,7 @@ import { D, sumD, type Decimal } from '../util/decimal';
 import { computeCorpScenario, type ComputeCorpScenarioResult } from './computeCorpScenario';
 import { computeGroupAaii } from './computeGroupAaii';
 import { computeScenario, type ComputeScenarioResult } from './computeScenario';
+import { synthesizeScenarioReturn } from './computeScenarioReturn';
 import {
   integrationRouter,
   type OwnerCompPlan,
@@ -241,16 +242,8 @@ function computeIntegratedPersonalFromFacts(
   factsPlus: TaxYearFacts,
 ): ComputeScenarioResult {
   const engineReturn = buildT1(factsPlus, ratesFor(scenario.year));
-  return {
-    scenarioId: scenario.id,
-    // Sentinel hash — integrated result is plan-scoped, not cached.
-    factsHash: 'household-integrated',
-    computedAt: new Date().toISOString(),
-    lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
-    totals: JSON.parse(JSON.stringify(engineReturn.totals)) as Record<string, unknown>,
-    warnings: engineReturn.warnings,
-    cached: false,
-  };
+  // Sentinel hash — integrated result is plan-scoped, not cached.
+  return synthesizeScenarioReturn(scenario.id, engineReturn, 'household-integrated');
 }
 
 // Inject intercorpRouter-emitted received-dividend IncomeItems and/or
@@ -318,15 +311,7 @@ function computeIntegratedCorp(
     factsPlus,
     ratesFor(Number(factsPlus.fiscalYear.startDate.slice(0, 4))),
   );
-  return {
-    scenarioId: scenario.id,
-    factsHash: 'household-intercorp',
-    computedAt: new Date().toISOString(),
-    lines: JSON.parse(JSON.stringify(engineReturn.lines)) as unknown[],
-    totals: JSON.parse(JSON.stringify(engineReturn.totals)) as Record<string, unknown>,
-    warnings: engineReturn.warnings,
-    cached: false,
-  };
+  return synthesizeScenarioReturn(scenario.id, engineReturn, 'household-intercorp');
 }
 
 /**

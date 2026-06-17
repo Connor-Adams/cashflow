@@ -8,10 +8,6 @@ import {
   type MetricKind,
 } from './delta-tone'
 
-// Re-export so existing `import type { MetricKind } from '@/components/ui/stat-card'`
-// keeps working. New callers should prefer importing from './delta-tone' directly.
-export type { MetricKind } from './delta-tone'
-
 type StatCardProps = React.ComponentProps<typeof Card> & {
   label: React.ReactNode
   value: React.ReactNode

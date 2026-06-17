@@ -2,6 +2,7 @@
 import { D, type Decimal } from '../util/decimal';
 import type { CapGainEvent, IncomeItem, RrspContrib, TaxYearFacts } from '../engine/types';
 import type { OverrideKeyDef, OverrideMap } from './types';
+import { corpKeys } from './corpOverrideKeys';
 
 function assertNumber(value: unknown, key: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -352,9 +353,9 @@ export function registerOverrideKeys(entries: OverrideKeyDef[]): void {
   }
 }
 
-// Self-register corp keys when this module loads (any consumer imports
-// overrideKeys.ts, so corp keys are always present). Use require() rather than
-// `import` so the call runs AFTER `indexByKey` is initialized — ES `import`
-// statements get hoisted to the top of the compiled file and trigger TDZ.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-require('./corpOverrideKeys');
+// Register corp keys when this module loads (any consumer imports overrideKeys.ts,
+// so corp keys are always present). `corpOverrideKeys.ts` only DEFINES `corpKeys`
+// and no longer imports back into this module, so the static import above is
+// acyclic and the registration call here runs after `indexByKey` /
+// `registerOverrideKeys` are initialized (it sits at the end of module load).
+registerOverrideKeys(corpKeys);

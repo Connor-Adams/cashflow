@@ -34,17 +34,6 @@ export type TransactionRevisionSource =
   | 'restore'
   | 'system';
 
-export const TRANSACTION_REVISION_SOURCES: readonly TransactionRevisionSource[] = [
-  'user_edit',
-  'bulk_patch',
-  'ai_suggestion',
-  'import',
-  'enrichment',
-  'refund_link',
-  'restore',
-  'system',
-] as const;
-
 export type TransactionFieldChange = {
   field: string;
   before: unknown;

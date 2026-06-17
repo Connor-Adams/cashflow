@@ -192,10 +192,10 @@ after(async () => {
   await teardownPgTestDb(testDb);
 });
 
-// ------------------- POST /api/statements -------------------
+// ------------------- POST /api/accounts/statements -------------------
 
 test('create: valid payload returns 201 with serialized row', async () => {
-  const res = await agentA.post('/api/statements').send({
+  const res = await agentA.post('/api/accounts/statements').send({
     accountId: accountA1Id,
     periodStart: '2026-01-01',
     periodEnd: '2026-01-31',
@@ -218,7 +218,7 @@ test('create: valid payload returns 201 with serialized row', async () => {
 });
 
 test('create: missing accountId returns 400', async () => {
-  const res = await agentA.post('/api/statements').send({
+  const res = await agentA.post('/api/accounts/statements').send({
     periodStart: '2026-02-01',
     periodEnd: '2026-02-28',
     openingBalance: 100,
@@ -228,7 +228,7 @@ test('create: missing accountId returns 400', async () => {
 });
 
 test('create: malformed periodStart returns 400', async () => {
-  const res = await agentA.post('/api/statements').send({
+  const res = await agentA.post('/api/accounts/statements').send({
     accountId: accountA1Id,
     periodStart: 'jan 1st',
     periodEnd: '2026-02-28',
@@ -240,7 +240,7 @@ test('create: malformed periodStart returns 400', async () => {
 });
 
 test('create: periodEnd before periodStart returns 400', async () => {
-  const res = await agentA.post('/api/statements').send({
+  const res = await agentA.post('/api/accounts/statements').send({
     accountId: accountA1Id,
     periodStart: '2026-03-31',
     periodEnd: '2026-03-01',
@@ -252,7 +252,7 @@ test('create: periodEnd before periodStart returns 400', async () => {
 });
 
 test('create: non-finite balance returns 400', async () => {
-  const res = await agentA.post('/api/statements').send({
+  const res = await agentA.post('/api/accounts/statements').send({
     accountId: accountA1Id,
     periodStart: '2026-04-01',
     periodEnd: '2026-04-30',
@@ -263,7 +263,7 @@ test('create: non-finite balance returns 400', async () => {
 });
 
 test('create: cross-household account returns 404', async () => {
-  const res = await agentA.post('/api/statements').send({
+  const res = await agentA.post('/api/accounts/statements').send({
     accountId: accountB1Id,
     periodStart: '2026-04-01',
     periodEnd: '2026-04-30',
@@ -274,7 +274,7 @@ test('create: cross-household account returns 404', async () => {
 });
 
 test('create: duplicate (account, periodStart, periodEnd) returns 409', async () => {
-  const res = await agentA.post('/api/statements').send({
+  const res = await agentA.post('/api/accounts/statements').send({
     accountId: accountA1Id,
     periodStart: '2026-01-01',
     periodEnd: '2026-01-31',
@@ -284,10 +284,10 @@ test('create: duplicate (account, periodStart, periodEnd) returns 409', async ()
   assert.equal(res.status, 409, `unexpected: ${JSON.stringify(res.body)}`);
 });
 
-// ------------------- GET /api/statements -------------------
+// ------------------- GET /api/accounts/statements -------------------
 
 test('list: includes the statement we created, scoped to household', async () => {
-  const res = await agentA.get('/api/statements?pageSize=100');
+  const res = await agentA.get('/api/accounts/statements?pageSize=100');
   assert.equal(res.status, 200);
   assert.ok(
     (res.body.data as Array<{ accountId: number }>).some(
@@ -296,7 +296,7 @@ test('list: includes the statement we created, scoped to household', async () =>
     'household A should see its own statement',
   );
   // Other household must not see any of these rows.
-  const resB = await agentB.get('/api/statements?pageSize=100');
+  const resB = await agentB.get('/api/accounts/statements?pageSize=100');
   assert.equal(resB.status, 200);
   assert.equal(
     (resB.body.data as Array<{ accountId: number }>).filter(
@@ -308,14 +308,14 @@ test('list: includes the statement we created, scoped to household', async () =>
 });
 
 test('list: accountId filter narrows to one account', async () => {
-  await agentA.post('/api/statements').send({
+  await agentA.post('/api/accounts/statements').send({
     accountId: accountA2Id,
     periodStart: '2026-01-01',
     periodEnd: '2026-01-31',
     openingBalance: 500,
     closingBalance: 500,
   });
-  const res = await agentA.get(`/api/statements?accountId=${accountA1Id}`);
+  const res = await agentA.get(`/api/accounts/statements?accountId=${accountA1Id}`);
   assert.equal(res.status, 200);
   const ids = (res.body.data as Array<{ accountId: number }>).map(
     (s) => s.accountId,
@@ -327,7 +327,7 @@ test('list: accountId filter narrows to one account', async () => {
   );
 });
 
-// ------------------- GET /api/statements/:id -------------------
+// ------------------- GET /api/accounts/statements/:id -------------------
 
 test('detail: returns expectedClosing, variance, transactions in the period', async () => {
   // Seed a fresh account + period with known math so this test isolates
@@ -364,7 +364,7 @@ test('detail: returns expectedClosing, variance, transactions in the period', as
     amount: -9999,
   });
   // Statement says closing 870 — variance 20.
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: acct.id,
     periodStart: '2026-05-01',
     periodEnd: '2026-05-31',
@@ -374,7 +374,7 @@ test('detail: returns expectedClosing, variance, transactions in the period', as
   assert.equal(create.status, 201);
   const id = create.body.data.id as number;
 
-  const detail = await agentA.get(`/api/statements/${id}`);
+  const detail = await agentA.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.body.reconciliation.expectedClosing, 850);
   assert.equal(detail.body.reconciliation.variance, 20);
@@ -387,7 +387,7 @@ test('detail: returns expectedClosing, variance, transactions in the period', as
 });
 
 test('detail: cross-household returns 404', async () => {
-  const create = await agentB.post('/api/statements').send({
+  const create = await agentB.post('/api/accounts/statements').send({
     accountId: accountB1Id,
     periodStart: '2026-05-01',
     periodEnd: '2026-05-31',
@@ -396,7 +396,7 @@ test('detail: cross-household returns 404', async () => {
   });
   assert.equal(create.status, 201);
   const id = create.body.data.id as number;
-  const res = await agentA.get(`/api/statements/${id}`);
+  const res = await agentA.get(`/api/accounts/statements/${id}`);
   assert.equal(res.status, 404);
 });
 
@@ -420,7 +420,7 @@ test('reconcile: balanced statement succeeds without explanation', async () => {
     date: '2026-06-15',
     amount: -200,
   });
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: acct.id,
     periodStart: '2026-06-01',
     periodEnd: '2026-06-30',
@@ -428,7 +428,7 @@ test('reconcile: balanced statement succeeds without explanation', async () => {
     closingBalance: 300,
   });
   const id = create.body.data.id as number;
-  const res = await agentA.post(`/api/statements/${id}/reconcile`).send({});
+  const res = await agentA.post(`/api/accounts/statements/${id}/reconcile`).send({});
   assert.equal(res.status, 200, `unexpected: ${JSON.stringify(res.body)}`);
   assert.ok(res.body.data.reconciledAt, 'reconciledAt must be set');
   assert.equal(res.body.reconciliation.variance, 0);
@@ -447,7 +447,7 @@ test('reconcile: imbalanced statement without explanation returns 400', async ()
     defaultCurrency: 'CAD',
     shortCode: 'RECIMB',
   });
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: acct.id,
     periodStart: '2026-07-01',
     periodEnd: '2026-07-31',
@@ -455,7 +455,7 @@ test('reconcile: imbalanced statement without explanation returns 400', async ()
     closingBalance: 500, // expected = 1000 (no txns), so variance = -500
   });
   const id = create.body.data.id as number;
-  const res = await agentA.post(`/api/statements/${id}/reconcile`).send({});
+  const res = await agentA.post(`/api/accounts/statements/${id}/reconcile`).send({});
   assert.equal(res.status, 400);
   assert.match(String(res.body.error), /varianceExplanation/i);
 });
@@ -472,7 +472,7 @@ test('reconcile: imbalanced statement with explanation succeeds', async () => {
     defaultCurrency: 'CAD',
     shortCode: 'RECEXP',
   });
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: acct.id,
     periodStart: '2026-08-01',
     periodEnd: '2026-08-31',
@@ -480,7 +480,7 @@ test('reconcile: imbalanced statement with explanation succeeds', async () => {
     closingBalance: 500,
   });
   const id = create.body.data.id as number;
-  const res = await agentA.post(`/api/statements/${id}/reconcile`).send({
+  const res = await agentA.post(`/api/accounts/statements/${id}/reconcile`).send({
     varianceExplanation: 'Missing cash withdrawal — recorded by hand.',
   });
   assert.equal(res.status, 200, `unexpected: ${JSON.stringify(res.body)}`);
@@ -504,7 +504,7 @@ test('unreconcile: clears reconciledAt but keeps the explanation', async () => {
     defaultCurrency: 'CAD',
     shortCode: 'UNREC',
   });
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: acct.id,
     periodStart: '2026-09-01',
     periodEnd: '2026-09-30',
@@ -512,18 +512,18 @@ test('unreconcile: clears reconciledAt but keeps the explanation', async () => {
     closingBalance: 100,
   });
   const id = create.body.data.id as number;
-  const rec = await agentA.post(`/api/statements/${id}/reconcile`).send({
+  const rec = await agentA.post(`/api/accounts/statements/${id}/reconcile`).send({
     varianceExplanation: 'No variance — just affirming.',
   });
   assert.equal(rec.status, 200);
-  const un = await agentA.post(`/api/statements/${id}/unreconcile`).send({});
+  const un = await agentA.post(`/api/accounts/statements/${id}/unreconcile`).send({});
   assert.equal(un.status, 200);
   assert.equal(un.body.data.reconciledAt, null);
   assert.equal(un.body.data.varianceExplanation, 'No variance — just affirming.');
 });
 
 test('unreconcile: already-unreconciled statement returns 400', async () => {
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: accountA2Id,
     periodStart: '2026-10-01',
     periodEnd: '2026-10-31',
@@ -531,14 +531,14 @@ test('unreconcile: already-unreconciled statement returns 400', async () => {
     closingBalance: 0,
   });
   const id = create.body.data.id as number;
-  const res = await agentA.post(`/api/statements/${id}/unreconcile`).send({});
+  const res = await agentA.post(`/api/accounts/statements/${id}/unreconcile`).send({});
   assert.equal(res.status, 400);
 });
 
-// ------------------- PATCH /api/statements/:id -------------------
+// ------------------- PATCH /api/accounts/statements/:id -------------------
 
 test('patch: updates closingBalance and recomputes variance', async () => {
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: accountA2Id,
     periodStart: '2026-11-01',
     periodEnd: '2026-11-30',
@@ -548,7 +548,7 @@ test('patch: updates closingBalance and recomputes variance', async () => {
   assert.equal(create.status, 201);
   const id = create.body.data.id as number;
   // No transactions for accountA2 in Nov → expected closing 100; variance was 100.
-  const patch = await agentA.patch(`/api/statements/${id}`).send({
+  const patch = await agentA.patch(`/api/accounts/statements/${id}`).send({
     closingBalance: 100,
     notes: 'Corrected closing.',
   });
@@ -559,7 +559,7 @@ test('patch: updates closingBalance and recomputes variance', async () => {
 });
 
 test('patch: variance explanation can be set independently', async () => {
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: accountA2Id,
     periodStart: '2026-12-01',
     periodEnd: '2026-12-31',
@@ -567,17 +567,17 @@ test('patch: variance explanation can be set independently', async () => {
     closingBalance: 200,
   });
   const id = create.body.data.id as number;
-  const patch = await agentA.patch(`/api/statements/${id}`).send({
+  const patch = await agentA.patch(`/api/accounts/statements/${id}`).send({
     varianceExplanation: 'Cash withdrawn at ATM.',
   });
   assert.equal(patch.status, 200);
   assert.equal(patch.body.data.varianceExplanation, 'Cash withdrawn at ATM.');
 });
 
-// ------------------- DELETE /api/statements/:id -------------------
+// ------------------- DELETE /api/accounts/statements/:id -------------------
 
 test('delete: removes the row and subsequent get returns 404', async () => {
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: accountA2Id,
     periodStart: '2027-01-01',
     periodEnd: '2027-01-31',
@@ -585,10 +585,10 @@ test('delete: removes the row and subsequent get returns 404', async () => {
     closingBalance: 0,
   });
   const id = create.body.data.id as number;
-  const del = await agentA.delete(`/api/statements/${id}`);
+  const del = await agentA.delete(`/api/accounts/statements/${id}`);
   assert.equal(del.status, 200);
   assert.equal(del.body.ok, true);
-  const after = await agentA.get(`/api/statements/${id}`);
+  const after = await agentA.get(`/api/accounts/statements/${id}`);
   assert.equal(after.status, 404);
 });
 
@@ -637,7 +637,7 @@ test('AC: internal transfers do not cause double counting', async () => {
   // real users have on disk.
   void outId;
   // Statement on Chequing: opening 2000, txn -500 → expected 1500.
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: acct.id,
     periodStart: '2027-02-01',
     periodEnd: '2027-02-28',
@@ -646,7 +646,7 @@ test('AC: internal transfers do not cause double counting', async () => {
   });
   assert.equal(create.status, 201);
   const id = create.body.data.id as number;
-  const detail = await agentA.get(`/api/statements/${id}`);
+  const detail = await agentA.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.status, 200);
   // Only the Chequing leg is in the txn list — not the Savings sibling.
   assert.equal(detail.body.reconciliation.transactionCount, 1);
@@ -680,7 +680,7 @@ test('AC: refunds net out without special-case handling', async () => {
     amount: 120,
     txnType: 'refund',
   });
-  const create = await agentA.post('/api/statements').send({
+  const create = await agentA.post('/api/accounts/statements').send({
     accountId: acct.id,
     periodStart: '2027-03-01',
     periodEnd: '2027-03-31',
@@ -688,7 +688,7 @@ test('AC: refunds net out without special-case handling', async () => {
     closingBalance: 0,
   });
   const id = create.body.data.id as number;
-  const detail = await agentA.get(`/api/statements/${id}`);
+  const detail = await agentA.get(`/api/accounts/statements/${id}`);
   assert.equal(detail.body.reconciliation.transactionCount, 2);
   assert.equal(detail.body.reconciliation.expectedClosing, 0);
   assert.equal(detail.body.reconciliation.variance, 0);

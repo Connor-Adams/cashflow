@@ -27,7 +27,7 @@
  * paths, middleware chains, and 410 stubs. The array index *is* the mount order;
  * the entry at index i is `app.use(paths, ...handlers)` applied i-th.
  */
-import { Router, type Express, type RequestHandler, type Request, type Response } from 'express';
+import type { Express, RequestHandler, Request, Response } from 'express';
 
 import healthRouter from './routes/health';
 import versionRouter from './routes/version';
@@ -116,6 +116,15 @@ import searchRouter from './routes/search';
 import incomeRouter from './routes/income';
 import navStatusRouter from './routes/navStatus';
 import { requireAuth } from './auth/middleware';
+// Load the tax-scenario projection modules so they register their projectors with
+// projectionPorts at startup. resolveScenario/resolveCorpScenario reach projection
+// through those ports (to break the resolve<->project import cycle), so a
+// projection_root resolve throws if the projectors were never loaded. This module
+// is imported by app.ts and mounts every router, so it is the single production
+// point guaranteed to load before any request — wiring here covers all scenario
+// routes (tax-scenarios, tax-household-plans, …) without per-route boilerplate.
+// Acyclic: wireScenarios depends on the project modules, not on this registry.
+import './tax/scenarios/wireScenarios';
 
 /**
  * One declarative router mount. The handler chain is applied as
@@ -145,6 +154,20 @@ const taxScenariosGoneStub: RequestHandler = (_req: Request, res: Response) => {
     error: 'gone',
     message:
       'This endpoint moved to /api/tax/scenarios/:kind (kind ∈ {personal, corp}).',
+  });
+};
+
+/**
+ * Inline 410 Gone stub for the folded top-level statement-reconciliation path
+ * (issue #403). AccountStatement is a period-child of Account, not a parallel
+ * primitive, so the surface moved under the Account namespace at
+ * /api/accounts/statements. The old /api/statements now 410s so any stale
+ * caller fails loudly. Mirrors taxScenariosGoneStub above.
+ */
+const statementsGoneStub: RequestHandler = (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: 'gone',
+    message: 'This endpoint moved to /api/accounts/statements (issue #403).',
   });
 };
 
@@ -204,10 +227,19 @@ export const gatedRoutes: RouteEntry[] = [
   { paths: '/api/nav/status', handlers: [navStatusRouter], why: 'Sidebar feature-visibility flags (Phase 1 IA cleanup). Derived read-only counts, no new primitive.' },
   { paths: '/api/jobs', handlers: [jobsRouter] },
   { paths: '/api/search', handlers: [searchRouter] },
+  {
+    paths: '/api/accounts/statements',
+    handlers: [statementsRouter],
+    why: 'Statement reconciliation folded under the Account namespace (issue #403): AccountStatement is a period-child of Account, not a parallel primitive. Mounts BEFORE accountsRouter so the specific /accounts/statements path wins against accountsRouter\'s /:id matcher.',
+  },
   { paths: '/api/accounts', handlers: [accountsRouter] },
   { paths: '/api/transactions', handlers: [transactionsRouter] },
   { paths: '/api/transfers', handlers: [transfersRouter] },
-  { paths: '/api/statements', handlers: [statementsRouter] },
+  {
+    paths: '/api/statements',
+    handlers: [statementsGoneStub],
+    why: 'Old top-level path retained only to return 410 Gone (issue #403) so any stale client surfaces loudly instead of silently breaking. The live surface is /api/accounts/statements above.',
+  },
   { paths: '/api/rules', handlers: [rulesRouter] },
   { paths: '/api/contacts', handlers: [contactsRouter] },
   { paths: '/api/categories', handlers: [categoriesRouter] },
@@ -356,8 +388,3 @@ export function mountRoutes(app: Express): void {
     mountEntry(app, entry);
   }
 }
-
-// Touch the Router import so tree-shakers/linters don't flag it; the registry
-// composes existing routers rather than constructing new ones, but keeping the
-// type available documents that entries are Router-compatible handler chains.
-export type { Router };

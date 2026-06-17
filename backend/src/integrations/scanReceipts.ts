@@ -85,9 +85,6 @@ export const DEFAULT_RECEIPT_SENDERS: Array<{ address: string; vendorHint: strin
   { address: 'no-reply@spotify.com', vendorHint: 'other', label: 'Spotify' },
 ];
 
-/** Backward-compat: a flat list of just the addresses. */
-export const RECEIPT_SENDER_ALLOWLIST: string[] = DEFAULT_RECEIPT_SENDERS.map((d) => d.address);
-
 /** Returns the effective allowlist for a household (defaults + DB additions),
  *  filtered to enabled entries. Addresses are normalised to lowercase. */
 export async function getEffectiveAllowlist(householdId: number): Promise<string[]> {

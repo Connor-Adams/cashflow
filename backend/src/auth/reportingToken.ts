@@ -15,8 +15,3 @@ export function hashReportingToken(plaintext: string): string {
 export function isReportingTokenFormat(value: string): boolean {
   return /^cfr_[A-Za-z0-9_-]{32}$/.test(value);
 }
-
-export function maskReportingToken(plaintext: string): string {
-  if (plaintext.length < 10) return plaintext;
-  return `${plaintext.slice(0, 7)}…${plaintext.slice(-3)}`;
-}
