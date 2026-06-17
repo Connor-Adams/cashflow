@@ -95,6 +95,18 @@ function zeroState(asOf: string): AcbLotState {
 }
 
 /**
+ * Weighted-average pool addition. Returns the new AcbLotState after
+ * adding `qty` units at `cost` to `state`. Used by transfer_in and
+ * staking_reward (both pure add-at-cost with no fee adjustment).
+ */
+function addToPool(state: AcbLotState, asOf: string, qty: number, cost: number): AcbLotState {
+  const newQuantity = state.quantity + qty;
+  const newTotalCost = state.totalCost + cost;
+  const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
+  return { asOf, quantity: newQuantity, totalCost: newTotalCost, acbPerUnit: newAcb };
+}
+
+/**
  * Stable sort the input by tradeDate ASC then id ASC. Activities not
  * sorted by the caller are accepted — engine sorts.
  */
@@ -342,15 +354,7 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
       } else {
         cost = Math.abs(activity.amount);
       }
-      const newQuantity = state.quantity + qty;
-      const newTotalCost = state.totalCost + cost;
-      const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
-      state = {
-        asOf: activity.tradeDate,
-        quantity: newQuantity,
-        totalCost: newTotalCost,
-        acbPerUnit: newAcb,
-      };
+      state = addToPool(state, activity.tradeDate, qty, cost);
       timeline.push(state);
     } else if (type === 'transfer_out') {
       // In-kind transfer out (e.g. DTC delivery to another broker).
@@ -406,15 +410,7 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
       ) {
         const qty = activity.quantity;
         const cost = Math.abs(activity.amount);
-        const newQuantity = state.quantity + qty;
-        const newTotalCost = state.totalCost + cost;
-        const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
-        state = {
-          asOf: activity.tradeDate,
-          quantity: newQuantity,
-          totalCost: newTotalCost,
-          acbPerUnit: newAcb,
-        };
+        state = addToPool(state, activity.tradeDate, qty, cost);
         timeline.push(state);
       }
     }

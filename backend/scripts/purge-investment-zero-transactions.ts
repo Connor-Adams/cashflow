@@ -28,15 +28,10 @@
  */
 import { Op } from 'sequelize';
 import { Transaction, Account, sequelize } from '../src/models';
-import { databaseUrl } from '../src/config/env';
+import { numFlag, guardWriteTarget, DryRunRollback } from './lib/opsFlags';
 
 type Flags = { commit: boolean; verbose: boolean; accountId: number | null; householdId: number | null };
 
-function numFlag(argv: string[], name: string): number | null {
-  const i = argv.indexOf(name);
-  const v = i !== -1 && i < argv.length - 1 ? Number(argv[i + 1]) : null;
-  return Number.isFinite(v as number) ? (v as number) : null;
-}
 function parseFlags(argv: string[]): Flags {
   return {
     commit: argv.includes('--commit'),
@@ -45,25 +40,13 @@ function parseFlags(argv: string[]): Flags {
     householdId: numFlag(argv, '--household-id'),
   };
 }
-class DryRunRollback extends Error {}
 
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv.slice(2));
   const commit = flags.commit;
   const mode = commit ? 'COMMIT (writing)' : 'DRY RUN (report only)';
 
-  if (databaseUrl) {
-    console.log(`Target DB: postgres (${new URL(databaseUrl).host})`);
-  } else {
-    console.log('Target DB: LOCAL SQLITE (no DATABASE_URL set)');
-    if (commit) {
-      console.error(
-        'Refusing to --commit against local sqlite. Set DATABASE_URL to the prod Postgres URL ' +
-          '(DATABASE_PUBLIC_URL from `railway variables --service Postgres`).',
-      );
-      process.exit(1);
-    }
-  }
+  guardWriteTarget(commit);
   console.log(`mode: ${mode}`);
 
   const accountWhere: Record<string, unknown> = { accountType: 'investment' };
