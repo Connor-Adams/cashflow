@@ -41,3 +41,7 @@ North-star: the Dashboard's *look*. Implementation target: the `components/ui/` 
 ## Rule gaps found during pilot
 
 None — all pilot classes mapped to covered rules.
+
+## TransactionsPage — bespoke classes deferred to component extraction (2026-06-17)
+
+TransactionsPage was partially de-drifted (generic utilities migrated: `.muted`, `.error`, `.row`, simple `.card` wrappers, simple grids). The following bespoke component classes remain by design — they encode sticky columns, AI result panels, filter pills, amount cells, bulk-action bar, and cloud-picker layouts with no current primitive. A future component-extraction project should turn these into primitives: `aiVisibility*` (AI result card), `bulkBar`/`transactionsBulkCard`/`transactionsBulkHeader` (bulk action bar), `txn*` cell classes (ledger row cells: `txnMerchantCell`, `txnAmountCell`, `txnAmount--expense`/`--credit`, `txnSplitCell`, `txnStatusCell`, `txnBadge*`, `txnActionGroup`, `txnAiInsight`, `txnReceipt*`, `txnResetButton`/`txnSaveButton`, `txnCategoryCell`, `txnPercentInput`), `transactionsFilterPill*`, `quickFilters`/`quickFilterButton`, `transactionsActionsCol` (sticky right column), `transactionsTableWrap`/`transactionsTable` (sticky + max-height scroll), `transactionsCategory*`/`transactionsBulkCategory*` cloud pickers, `transactionsPanelBadge`, `transactionsPanelHeader`, `transactionsToolbarMeta`, `transactionsCheckTile`, `narrowCol`.
