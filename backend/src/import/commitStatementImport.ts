@@ -17,6 +17,8 @@ import { findExistingInvestmentByFuzzyMatch } from './fuzzyDedupInvestmentActivi
 import { stableIdentityFingerprint } from './fingerprint';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { enrichTransaction } from './enrich';
+import { convertIncomeActivityToAccountCurrency } from './convertActivityCurrency';
+import { ensureFxRate } from '../fx/bankOfCanada';
 import {
   computeImportConfidence,
   serializeFlags,
@@ -96,6 +98,21 @@ async function createInvestmentActivity(
   const security = row.security
     ? await findOrCreateSecurity(row.security, account.householdId, t)
     : null;
+  // Re-express a foreign-currency income inflow (e.g. a WS crypto staking
+  // reward the activities-export reports in USD) in the account's currency.
+  // Trades keep their native currency — see convertActivityCurrency.ts.
+  const conv = await convertIncomeActivityToAccountCurrency(
+    {
+      activityType: row.activityType,
+      currency: row.currency,
+      amount: row.amount ?? null,
+      price: row.price ?? null,
+      fees: row.fees ?? null,
+      tradeDate: row.tradeDate,
+    },
+    account.defaultCurrency || 'CAD',
+    (from, to, date) => ensureFxRate(from, to, date),
+  );
   // SAVEPOINT around the INSERT: on Postgres, any query error inside an
   // open transaction aborts the whole transaction and every subsequent
   // query returns "current transaction is aborted". By nesting through
@@ -115,10 +132,10 @@ async function createInvestmentActivity(
           settlementDate: row.settlementDate,
           description: row.description,
           quantity: row.quantity == null ? null : String(row.quantity),
-          price: row.price == null ? null : String(row.price),
-          amount: row.amount == null ? null : String(row.amount),
-          fees: row.fees == null ? null : String(row.fees),
-          currency: row.currency,
+          price: conv.price == null ? null : String(conv.price),
+          amount: conv.amount == null ? null : String(conv.amount),
+          fees: conv.fees == null ? null : String(conv.fees),
+          currency: conv.currency ?? row.currency,
           sourceReference: row.sourceReference,
           sourceRowFingerprint: row.sourceRowFingerprint,
           importBatch: preview.importBatch,
