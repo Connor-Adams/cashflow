@@ -15,10 +15,11 @@ vi.mock('../hooks/useTheme', () => ({
 vi.mock('@/hooks/useAiInboxCount', () => ({ useAiInboxCount: () => ({ count: 0 }) }))
 vi.mock('@/hooks/useInsightsCount', () => ({ useInsightsCount: () => ({ count: 0 }) }))
 vi.mock('@/hooks/useAiStatus', () => ({ useAiStatus: () => ({ openai: true }) }))
+const mockNavVisibility = vi.fn(() => ({
+  income: true, planned: true, goals: true, scenarios: true, vault: true, budgets: true,
+}))
 vi.mock('@/hooks/useNavVisibility', () => ({
-  useNavVisibility: () => ({
-    income: true, planned: true, goals: true, scenarios: true, vault: true, budgets: true,
-  }),
+  useNavVisibility: () => mockNavVisibility(),
 }))
 vi.mock('../lib/version', () => ({
   FRONTEND_VERSION: 'test',
@@ -114,5 +115,13 @@ describe('Sidebar rail (PR 0)', () => {
     renderSidebar() // use the file's existing render helper
     expect(screen.getByRole('link', { name: /Budgets/ })).toHaveAttribute('href', '/budgets')
     expect(screen.getByRole('link', { name: /Enrichment/ })).toHaveAttribute('href', '/enrichment')
+  })
+
+  it('shows Budgets even when nav-visibility for budgets is false', () => {
+    mockNavVisibility.mockReturnValueOnce({
+      income: false, planned: false, goals: false, scenarios: false, vault: false, budgets: false,
+    })
+    renderSidebar()
+    expect(screen.getByRole('link', { name: /Budgets/ })).toHaveAttribute('href', '/budgets')
   })
 })

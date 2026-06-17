@@ -76,7 +76,7 @@ const navSections: NavSection[] = [
     id: 'planning',
     label: 'Planning',
     items: [
-      { to: '/budgets', label: 'Budgets', icon: PiggyBank, visibilityKey: 'budgets' },
+      { to: '/budgets', label: 'Budgets', icon: PiggyBank },
       { to: '/planned', label: 'Planned', icon: CalendarClock, visibilityKey: 'planned' },
       { to: '/goals', label: 'Goals', icon: Target, visibilityKey: 'goals' },
       { to: '/scenarios', label: 'Scenarios', icon: GitCompare, visibilityKey: 'scenarios' },
