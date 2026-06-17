@@ -96,6 +96,9 @@
   --danger: var(--oxblood-500);
   --danger-bg: var(--oxblood-50);
   --danger-foreground: var(--oxblood-700);
+  --info: #1B6FA8;
+  --info-bg: #E6F1FA;
+  --info-foreground: #0E456B;
   --positive: var(--green-600);
   --positive-foreground: #FFFFFF;
   --negative: var(--oxblood-500);
@@ -198,6 +201,9 @@
   --danger: var(--oxblood-300);
   --danger-bg: #2A1416;
   --danger-foreground: var(--oxblood-100);
+  --info: var(--chart-steel);
+  --info-bg: #102A3F;
+  --info-foreground: #BFDCF5;
   --positive: var(--green-300);
   --positive-foreground: #06140E;
   --negative: var(--oxblood-300);
@@ -359,6 +365,9 @@
   --color-danger:             var(--danger);
   --color-danger-bg:          var(--danger-bg);
   --color-text-link:          var(--text-link);
+  --color-info:            var(--info);
+  --color-info-bg:         var(--info-bg);
+  --color-info-foreground: var(--info-foreground);
 }
 
 /* Button color utility — auto-wires bg + text + hover/focus states */
