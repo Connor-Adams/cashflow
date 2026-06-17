@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Download, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import {
   Dialog,
@@ -542,39 +543,30 @@ export function ReportsPage() {
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading…</p>}
 
-      <section className="reportsStats" aria-busy={loading}>
-        <article className="card statCard">
-          <p className="statLabel">My share</p>
-          <p className="statValue">
-            {singleCurrency ? formatMoney(partnerMineTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Partner share</p>
-          <p className="statValue">
-            {singleCurrency
-              ? formatMoney(partnerShareTotal, singleCurrency)
-              : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Business total</p>
-          <p className="statValue">
-            {singleCurrency ? formatMoney(businessTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
-          </p>
-          <p className="muted statHint">{moneySummaryHint}</p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Currencies</p>
-          <p className="statValue">{reportCurrencies.length}</p>
-          <p className="muted statHint">
-            {totalPartnerRows} partner row{totalPartnerRows === 1 ? '' : 's'} and{' '}
-            {totalBusinessRows} business row{totalBusinessRows === 1 ? '' : 's'}
-          </p>
-        </article>
-      </section>
+      <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
+        <StatCard
+          label="My share"
+          value={singleCurrency ? formatMoney(partnerMineTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Partner share"
+          value={singleCurrency
+            ? formatMoney(partnerShareTotal, singleCurrency)
+            : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Business total"
+          value={singleCurrency ? formatMoney(businessTotal, singleCurrency) : `${reportCurrencies.length} currencies`}
+          hint={moneySummaryHint}
+        />
+        <StatCard
+          label="Currencies"
+          value={reportCurrencies.length}
+          hint={`${totalPartnerRows} partner row${totalPartnerRows === 1 ? '' : 's'} and ${totalBusinessRows} business row${totalBusinessRows === 1 ? '' : 's'}`}
+        />
+      </div>
 
       <div className="reportsGrid">
         <CollapsibleCard
