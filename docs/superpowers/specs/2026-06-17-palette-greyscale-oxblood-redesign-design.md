@@ -71,6 +71,20 @@ token tree, so this is a value swap + drift cleanup, not a structural rewrite.
 | 600 | `#0A875D` ← **light positive** |
 | 700 | `#086F4C` |
 
+### Amber — warning / caution only
+
+The greyscale+oxblood+green system has no caution hue, but the old palette used
+amber for warning states (and ~132 components hardcode `amber-*`). Promote the
+chart amber to a dedicated **warning** ramp — distinct from oxblood (danger) and
+green (positive). Not a brand color.
+
+| step | hex | role |
+|---|---|---|
+| 100 | `#FEF3C7` | warning surface (light) |
+| 300 | `#F5C451` | warning text (dark) |
+| 500 | `#D9A441` | — |
+| 700 | `#B45309` | warning text (light) |
+
 ### Gradient — hero
 
 `--gradient-hero: linear-gradient(135deg, #FF7847, #E84393)` (orange → pink). New token.
@@ -120,10 +134,13 @@ Two deliverables:
 ### 1. Token overhaul + drift cleanup
 
 - **`frontend/src/index.css`** — replace the amber/plum/jade/rust ramps and warm
-  neutrals with the ramps above; remap every semantic token for both
-  `:root[data-theme="light"]` and `:root[data-theme="dark"]`; add
-  `--gradient-hero`. Keep the existing legacy aliases (`--bg`, `--accent-warm`,
-  etc.) pointing at the new values for one migration cycle.
+  neutrals with the ramps above (zinc, oxblood, green, amber-warning); remap every
+  semantic token for both `:root[data-theme="light"]` and
+  `:root[data-theme="dark"]`; add `--gradient-hero` and a `--warning` mapping;
+  **expose semantic color utilities** in `@theme inline` (`--color-warning`,
+  `--color-positive`, `--color-danger`, …) — these don't exist today, which is why
+  components reach for raw Tailwind hues. Keep the legacy aliases (`--bg`,
+  `--accent-warm`, etc.) pointing at the new values for one migration cycle.
 - **`frontend/src/App.css`** — kill the three off-palette sites: blue glow
   (`:36`, `:789`) → oxblood `--ring`/selection; raw Tailwind amber/green
   (`:1279`, `:1284`) → tokens. Rebalance the grey-dominance so oxblood and the
@@ -142,13 +159,22 @@ Two deliverables:
 - This is a **new view**, not a new primitive — a static reference page, no model
   or route-registry/backend change beyond the frontend Settings sub-route.
 
+### 3. Hardcoded Tailwind-utility sweep (full remap — decided in)
+
+~290 components use Tailwind's built-in hue utilities (`amber-*` 132, `emerald-*`
+95, `red-*` 50, `orange/green` ~15) — a parallel color system the token swap won't
+reach. Migrate all of them to the new semantic utilities by intent: amber→warning,
+emerald→positive, red→danger/negative, brand stays. Mode-aware tokens let paired
+`dark:` color twins be dropped. Without this, ~132 amber spots survive the
+"repaint" — the exact drift being removed.
+
 ## Out of scope
 
 - No backend, model, or API change.
 - No new theme beyond the existing light/dark (no system-auto, no extra variants).
-- No component-by-component visual redesign beyond what the token swap + drift
-  cleanup produce. (Bolder application is achieved through tokens and the few
-  hero/button placements above, not a full UI overhaul.)
+- No layout/spacing/typography redesign — color only. Bolder application is
+  achieved through tokens, the hero/button placements, and the utility remap, not
+  a structural UI overhaul.
 
 ## Testing
 
