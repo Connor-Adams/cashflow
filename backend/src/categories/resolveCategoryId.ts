@@ -1,5 +1,9 @@
 import type { Transaction } from 'sequelize';
-import { Category } from '../models';
+// Import the model class directly (not the '../models' barrel): the barrel
+// re-exports Transaction/Rule/BudgetTarget/ExternalOrderItem, which dynamic-import
+// this module in their beforeSave hooks — importing the barrel here creates an
+// import cycle that the fallow audit flags. Category.ts only pulls normalizeName.
+import { Category } from '../models/Category';
 import { normalizeCategoryName } from './normalizeName';
 
 /**
