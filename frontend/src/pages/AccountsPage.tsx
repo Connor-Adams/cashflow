@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { SectionHeader } from '@/components/ui/section-header'
 import { StatCard } from '@/components/ui/stat-card'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
@@ -295,14 +296,10 @@ export function AccountsPage() {
 
       <Card className="mb-4">
       <form onSubmit={onCreate}>
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2>New account</h2>
-            <p className="text-sm text-muted-foreground">
-              Short codes are optional, but they make file naming and folder import much cleaner.
-            </p>
-          </div>
-        </div>
+        <SectionHeader
+          title="New account"
+          description="Short codes are optional, but they make file naming and folder import much cleaner."
+        />
         <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
           <Label htmlFor="accounts-create-name">
             Name <span className="text-danger">*</span>
