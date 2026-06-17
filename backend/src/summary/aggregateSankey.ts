@@ -56,6 +56,8 @@ export type SankeyTxnRow = {
   date: string;
   currency: string;
   finalCategory: string | null;
+  /** Resolved category primary key — carried through to the node for drill-down. */
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   merchantRaw: string | null;
   merchantClean: string | null;
@@ -76,6 +78,14 @@ export interface SankeyNode {
   /** Display name (also acts as the unique key inside the response). */
   name: string;
   kind: SankeyNodeKind;
+  /**
+   * The resolved category primary key for category nodes; null/undefined for
+   * income, business, and other non-category nodes. Carried through from
+   * `SankeyTxnRow.finalCategoryId` — first non-null value seen wins (bucket
+   * is keyed by label string, so in practice all rows sharing a label share
+   * the same id post-B1).
+   */
+  categoryId?: number | null;
 }
 
 export interface SankeyLink {
@@ -168,6 +178,8 @@ export function aggregateSankey(
     label: string;
     netSpend: number;
     txnIds: number[];
+    /** First non-null finalCategoryId seen for this label. null when unknown. */
+    categoryId: number | null;
   };
   // Keyed by the resolved category label (or 'Uncategorized'); negatives
   // contribute totalSpend, positive credits reduce it.
@@ -180,6 +192,7 @@ export function aggregateSankey(
     label: 'Business spending',
     netSpend: 0,
     txnIds: [],
+    categoryId: null,
   };
 
   let totalIncome = 0;
@@ -210,9 +223,14 @@ export function aggregateSankey(
           label,
           netSpend: 0,
           txnIds: [],
+          categoryId: null,
         };
         bucket.netSpend += -amtU;
         bucket.txnIds.push(row.id);
+        // Keep first non-null categoryId seen for this label.
+        if (bucket.categoryId === null && (row.finalCategoryId ?? null) !== null) {
+          bucket.categoryId = row.finalCategoryId as number;
+        }
         categoryBuckets.set(label, bucket);
       }
       continue;
@@ -257,9 +275,14 @@ export function aggregateSankey(
           label,
           netSpend: 0,
           txnIds: [],
+          categoryId: null,
         };
         cat.netSpend -= amtU;
         cat.txnIds.push(row.id);
+        // Keep first non-null categoryId seen for this label.
+        if (cat.categoryId === null && (row.finalCategoryId ?? null) !== null) {
+          cat.categoryId = row.finalCategoryId as number;
+        }
         categoryBuckets.set(label, cat);
       }
       continue;
@@ -286,6 +309,8 @@ export function aggregateSankey(
       label: OTHER_CATEGORIES_LABEL,
       netSpend: overflow.reduce((sum, c) => sum + c.netSpend, 0),
       txnIds: overflow.flatMap((c) => c.txnIds),
+      // "Other categories" aggregates multiple categories; no single id applies.
+      categoryId: null,
     };
   }
 
@@ -333,7 +358,14 @@ export function aggregateSankey(
     let kind: SankeyNodeKind = 'category';
     if (sink.label === businessBucket.label) kind = 'business';
     else if (sink.label === UNCATEGORIZED_LABEL) kind = 'uncategorized';
-    nodes.push({ name: sink.label, kind });
+    const node: SankeyNode = { name: sink.label, kind };
+    // Attach categoryId for category/uncategorized nodes so callers can
+    // correlate the node back to the Category primitive without a second
+    // label-based lookup.
+    if (kind === 'category' || kind === 'uncategorized') {
+      node.categoryId = sink.categoryId;
+    }
+    nodes.push(node);
 
     links.push({ source: 0, target: targetIdx, value: fromUnits(sink.netSpend) });
     edgeMap.set(`0-${targetIdx}`, sink.txnIds);
