@@ -71,7 +71,7 @@ yarn workspace frontend run build
 
 [**fallow**](https://github.com/fallow-rs/fallow) (`.fallowrc.json`) is the single static-analysis engine. It reports dead code (unused files/exports/types/deps, circular deps), function complexity / CRAP scores, and duplication. [**jscpd**](https://github.com/kucherenko/jscpd) (`.jscpd.json`) is kept alongside purely for its browsable HTML duplication report.
 
-The CI `code-audit` job runs both informationally (never blocks merges) and **posts a sticky pull-request comment** — a whole-repo health snapshot (dead code + complexity from fallow, duplication from jscpd) updated in place on each push. The separate `fallow.yml` workflow adds **inline review comments** on changed lines; its own summary comment is disabled (`comment: false`) in favour of the rendered one.
+The CI `code-audit` job **posts a sticky pull-request comment** — a whole-repo health snapshot (dead code + complexity from fallow, duplication from jscpd) updated in place on each push — and then **enforces a baseline ratchet** (see below). The separate `fallow.yml` workflow adds **inline review comments** on changed lines; its own summary comment is disabled (`comment: false`) in favour of the rendered one.
 
 ```bash
 yarn audit:code   # fallow audit (changed files) + jscpd
@@ -81,8 +81,21 @@ yarn dupes        # jscpd — writes reports/jscpd/html/
 ```
 
 - The PR comment is rendered by `scripts/audit-summary.cjs` from the JSON reports under `reports/`.
-- jscpd's `threshold` (5% duplicated lines) acts as a ratchet — lower it as duplication drops.
 - To keep a knowingly-"unused" symbol, add a `// fallow-ignore-*` suppression comment or extend `.fallowrc.json` rather than leaving it as noise.
+
+### The audit ratchet (this gate blocks merges)
+
+`code-audit` is a **required status check** on PRs to `main`. After posting the snapshot, its final step runs [`scripts/audit-gate.cjs`](scripts/audit-gate.cjs), which **fails the build** if either:
+
+1. **Any of the eight zeroable dead-code categories is above 0** — `unused_files`, `unused_exports`, `unused_types`, `unused_class_members`, `duplicate_exports`, `unused_dependencies`, `unlisted_dependencies`, `circular_dependencies`. The fallow-audit remediation cluster drove all eight to 0; this holds the line.
+2. **Total jscpd duplication rises above the ceiling (4.0%).** `DUP_CEILING` in `scripts/audit-gate.cjs` is the single source of truth — ratchet it **down** as duplication drops, never up.
+
+What the ratchet does **not** do:
+
+- **Complexity never blocks.** The CRAP / cyclomatic backlog is large and out of scope; complexity stays visible-but-advisory in the snapshot and in `fallow health`.
+- It does not gate the non-zeroable dead-code categories (`unused_enum_members`, `unresolved_imports`, `private_type_leaks`) — those are reported, not enforced.
+
+If a PR trips the ratchet, fix the finding (preferred), add a scoped `// fallow-ignore-*` suppression for a deliberate keep, or — only for an intentional ceiling change — adjust `DUP_CEILING` downward with justification. A complementary gate in `fallow.yml` already blocks *new* dead code / duplication introduced on the PR's changed lines (`fail-on-issues: true`, diff-scoped); the `code-audit` ratchet additionally guards against whole-repo regressions.
 
 ## Project layout
 
