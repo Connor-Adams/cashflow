@@ -11,7 +11,7 @@ const buttonVariants = cva(
       variant: {
         default: "bg-button-primary text-text-button-primary border border-transparent hover:bg-button-hover-primary",
         primary: "bg-button-primary text-text-button-primary border border-transparent hover:bg-button-hover-primary",
-        secondary: "border border-border bg-card text-foreground hover:opacity-90",
+        secondary: "border border-border bg-card text-foreground hover:bg-muted",
         outline: "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         destructive: "bg-button-destructive border border-destructive text-destructive hover:bg-[color-mix(in_oklch,var(--destructive)_20%,transparent)]",

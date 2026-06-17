@@ -14,8 +14,8 @@ function EmptyState({ title, description, actions, className, ...props }: EmptyS
       className={cn('rounded-lg border border-border bg-muted/20 p-4 text-sm', className)}
       {...props}
     >
-      <p className="emptyState mb-1 font-semibold">{title}</p>
-      {description ? <p className="muted mb-0">{description}</p> : null}
+      <p className="mb-1 font-semibold text-muted-foreground">{title}</p>
+      {description ? <p className="mb-0 text-sm leading-6 text-muted-foreground">{description}</p> : null}
       {actions ? <div className="mt-3 flex flex-wrap gap-2">{actions}</div> : null}
     </div>
   )
