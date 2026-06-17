@@ -110,8 +110,8 @@
     color: var(--muted-foreground);
   }
   .sidebar__navLink:hover {
-    color: var(--foreground);
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
+    color: #fff;
+    background: var(--gradient-hero);
   }
   .sidebar__navLink:focus-visible {
     outline: 2px solid var(--ring);
