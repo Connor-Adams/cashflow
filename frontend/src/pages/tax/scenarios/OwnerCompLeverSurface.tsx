@@ -274,7 +274,7 @@ interface ShareholderCardProps {
 function ShareholderCard({ shareholderEntityId, values, onChange }: ShareholderCardProps) {
   const total = FIELDS.reduce((sum, f) => sum + (values[f.key] ?? 0), 0);
   return (
-    <section className="rounded-md border p-4">
+    <section className="rounded-md border border-border p-4">
       <header className="mb-3 flex items-baseline justify-between">
         <h4 className="font-medium">Shareholder #{shareholderEntityId}</h4>
         <span className="text-xs text-muted-foreground">Total: {fmtCurrency(total)}</span>
@@ -346,7 +346,7 @@ function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSu
 
 function IntegratedSummaryShell({ children }: { children: React.ReactNode }) {
   return (
-    <section className="rounded-md border p-4">
+    <section className="rounded-md border border-border p-4">
       <p className="text-sm text-muted-foreground">{children}</p>
     </section>
   );
@@ -387,7 +387,7 @@ function IntegratedSummaryReady({
   const integratedRate = totalRouted > 0 ? totalTax / totalRouted : NaN;
 
   return (
-    <section className="rounded-md border p-4">
+    <section className="rounded-md border border-border p-4">
       <h4 className="mb-3 font-medium">Integrated summary</h4>
 
       <div className="mb-4">

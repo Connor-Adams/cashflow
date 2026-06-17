@@ -55,7 +55,7 @@ export function YearStripNav({
   return (
     <nav
       aria-label={`Year strip for entity ${entityId}`}
-      className="flex flex-wrap items-center gap-2 border-b border pb-2"
+      className="flex flex-wrap items-center gap-2 border-b border-border pb-2"
     >
       {chain.length === 0 ? (
         <span className="text-sm text-muted-foreground">No years yet.</span>

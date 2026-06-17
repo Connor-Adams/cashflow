@@ -247,7 +247,7 @@ export function SearchPage() {
             {saved.map((s) => (
               <li
                 key={s.id}
-                className="inline-flex items-center gap-1 border rounded-md px-2 py-1 text-sm"
+                className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1 text-sm"
               >
                 <Button
                   type="button"
@@ -391,7 +391,7 @@ export function SearchPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left">
-                    <tr className="border-b border">
+                    <tr className="border-b border-border">
                       <th className="py-2 pr-4">Date</th>
                       <th className="py-2 pr-4">Merchant</th>
                       <th className="py-2 pr-4 text-right">Amount</th>
@@ -401,7 +401,7 @@ export function SearchPage() {
                   </thead>
                   <tbody>
                     {response.results.map((r) => (
-                      <tr key={r.id} className="border-b border">
+                      <tr key={r.id} className="border-b border-border">
                         <td className="py-1 pr-4 whitespace-nowrap">{r.date}</td>
                         <td className="py-1 pr-4">{r.merchantClean}</td>
                         <td className="py-1 pr-4 text-right whitespace-nowrap">

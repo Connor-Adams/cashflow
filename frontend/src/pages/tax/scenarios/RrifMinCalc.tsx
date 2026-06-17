@@ -63,7 +63,7 @@ export function RrifMinCalc() {
   const isMandatory = age >= 71;
 
   return (
-    <div className="rounded-md border bg-card p-3">
+    <div className="rounded-md border border-border bg-card p-3">
       <p className="mb-2 text-xs text-muted-foreground">
         Reference only. Type the age you will attain in the projection year and
         the RRIF balance on Jan 1 of that year. Use the result to size your

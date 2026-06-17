@@ -64,7 +64,7 @@ export function NotificationPanel({
       aria-label="Notifications"
       className="absolute right-0 mt-2 w-96 max-h-[28rem] overflow-y-auto rounded-md border bg-card shadow-lg z-50"
     >
-      <div className="flex items-center justify-between px-4 py-2 border-b border">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
         <h2 className="text-sm font-semibold text-foreground">Notifications</h2>
         {hasUnread && (
           <Button

@@ -32,7 +32,7 @@ interface Props {
 export function HouseholdRollupCard({ planCompute }: Props) {
   if (planCompute === null) {
     return (
-      <div className="rounded-md border p-3">
+      <div className="rounded-md border border-border p-3">
         <p className="text-sm text-muted-foreground">
           Select a household plan to see joint tax rollup.
         </p>
@@ -45,7 +45,7 @@ export function HouseholdRollupCard({ planCompute }: Props) {
   const filerLabel = spouseCount === 1 ? 'single-filer' : `${spouseCount} filers`;
 
   return (
-    <div className="rounded-md border p-4">
+    <div className="rounded-md border border-border p-4">
       <header className="mb-2 flex items-baseline justify-between">
         <h3 className="text-base font-semibold">Household tax rollup</h3>
         <span className="text-xs text-muted-foreground">
