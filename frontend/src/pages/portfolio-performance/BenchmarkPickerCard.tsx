@@ -51,7 +51,7 @@ export function BenchmarkPickerCard({ currentSymbol, onChange }: BenchmarkPicker
             type="button"
             disabled={saving}
             onClick={handleSave}
-            className="px-3 py-1 text-sm rounded bg-primary text-primary-foreground disabled:opacity-50"
+            className="px-3 py-1 text-sm rounded disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
           </Button>

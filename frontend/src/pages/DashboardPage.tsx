@@ -733,7 +733,7 @@ export function DashboardPage() {
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
 
-      <Card className="dashboardFilters mt-2 w-fit max-w-full p-2 sm:p-3">
+      <Card className="dashboardFilters mt-2 mb-4 w-fit max-w-full p-2 sm:p-3">
         <CardContent className="p-0">
           <FilterBar
             className="gap-2"
@@ -811,6 +811,8 @@ export function DashboardPage() {
         className="mb-4 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
       >
+        <SafeToSpendTile currency={currency || null} />
+
         {showReviewBanner && (
           <BentoTile
             span={reviewBannerSpan}
@@ -1029,8 +1031,6 @@ export function DashboardPage() {
         </BentoTile>
 
         <NetWorthTile />
-
-        <SafeToSpendTile currency={currency || null} />
 
         <InboxSummaryTile />
 

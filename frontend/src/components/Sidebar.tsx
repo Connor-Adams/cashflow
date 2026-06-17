@@ -377,7 +377,7 @@ function ThemeToggleButton() {
   const targetLabel = isDark ? 'light' : 'dark'
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="sm"
       onClick={toggleTheme}
       title={`Switch to ${targetLabel} mode`}

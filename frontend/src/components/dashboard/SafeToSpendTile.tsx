@@ -39,6 +39,8 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
 
   const data = safeToSpend.data
   const isNegative = data?.isNegative ?? false
+  // Positive safe-to-spend is the dashboard's one deliberate gradient hero.
+  const onGradient = !!data && !isNegative
 
   const rows: BreakdownRow[] = data
     ? [
@@ -73,7 +75,7 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
     <BentoTile
       span={6}
       rows={2}
-      variant={isNegative ? 'destructive' : 'default'}
+      variant={isNegative ? 'destructive' : 'gradient'}
       aria-busy={safeToSpend.loading}
       label="Safe to spend"
       description={
@@ -84,7 +86,11 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
       actions={
         <Link
           to="/settings"
-          className="text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline"
+          className={
+            onGradient
+              ? 'text-xs font-semibold text-white/85 hover:text-white hover:underline'
+              : 'text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline'
+          }
         >
           Settings
         </Link>
@@ -106,13 +112,13 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
             <div
               className={
                 isNegative
-                  ? 'text-4xl font-semibold tabular-nums text-destructive'
-                  : 'text-4xl font-semibold tabular-nums'
+                  ? 'text-4xl font-bold tabular-nums text-destructive'
+                  : 'text-5xl font-extrabold tracking-tight tabular-nums'
               }
             >
               {formatMoney(data.value, data.currency)}
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className={onGradient ? 'text-xs text-white/85' : 'text-xs text-muted-foreground'}>
               {isNegative
                 ? 'You are committed past your cash on hand for this window. Trim a planned expense or raise more cash.'
                 : `Safe to spend in ${data.currency} over the next ${data.windowDays} days.`}
@@ -123,6 +129,7 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
             type="button"
             variant="link"
             size="sm"
+            className={onGradient ? 'text-white hover:text-white' : undefined}
             onClick={() => setShowBreakdown((s) => !s)}
             aria-expanded={showBreakdown}
           >
@@ -130,7 +137,13 @@ export function SafeToSpendTile({ currency = 'CAD' }: Props) {
           </Button>
 
           {showBreakdown ? (
-            <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2 text-sm">
+            <ul
+              className={
+                onGradient
+                  ? 'space-y-1 rounded-md border border-white/20 bg-card p-2 text-sm text-foreground'
+                  : 'space-y-1 rounded-md border border-border bg-muted/40 p-2 text-sm'
+              }
+            >
               {rows.map((row) => (
                 <li
                   key={row.label}

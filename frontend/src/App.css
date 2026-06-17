@@ -110,8 +110,8 @@
     color: var(--muted-foreground);
   }
   .sidebar__navLink:hover {
-    color: var(--foreground);
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
+    color: #fff;
+    background: var(--gradient-hero);
   }
   .sidebar__navLink:focus-visible {
     outline: 2px solid var(--ring);
@@ -136,6 +136,13 @@
   .sidebar__themeToggle,
   .sidebar__logout {
     @apply w-full justify-start gap-2;
+  }
+  /* Theme toggle + logout get the gradient on hover, matching nav links. */
+  .sidebar__themeToggle:hover,
+  .sidebar__logout:hover {
+    background-image: var(--gradient-hero);
+    border-color: transparent;
+    color: #fff;
   }
 
   .sidebar__user {
@@ -479,16 +486,10 @@
     @apply mb-0;
   }
 
-  /* Decision card gets a subtle amber gradient at the top edge, mirroring
-   * the bento hero tile pattern. Pulls the eye to the action surface
-   * without a heavy border. */
+  /* Flat decision card — emphasis comes from the oxblood border, not a wash. */
   .reviewInboxDecisionCard {
     @apply mb-0;
-    background:
-      linear-gradient(180deg,
-        color-mix(in oklch, var(--primary) 6%, transparent),
-        transparent 28%),
-      var(--card);
+    background: var(--card);
   }
 
   .reviewInboxToolbar {
@@ -1430,12 +1431,20 @@
     min-width: 0;
   }
 
+  /* Hero anchor tile: flat surface (chart bands stay readable). */
   .bentoTile--hero {
-    background:
-      linear-gradient(180deg,
-        color-mix(in oklch, var(--primary) 10%, transparent),
-        transparent 32%),
-      var(--card);
+    background: var(--card);
+  }
+
+  /* The one deliberate gradient surface — orange→pink with white text. */
+  .bentoTile--gradient {
+    background: var(--gradient-hero);
+    border-color: transparent;
+    color: #fff;
+  }
+  .bentoTile--gradient .bentoTile__label,
+  .bentoTile--gradient .bentoTile__description {
+    color: rgba(255, 255, 255, 0.92);
   }
 
   .bentoTile__header {
