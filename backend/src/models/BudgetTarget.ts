@@ -7,8 +7,6 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
-import { logger } from '../observability/logger';
-
 /**
  * Budget recurrence period. Stored as a string column (not a true PG enum) so
  * extending the set later — beyond monthly/weekly/annual — does not require
@@ -56,6 +54,7 @@ export class BudgetTarget extends Model<
    * spend in the matching currency, not a single category.
    */
   declare category: string | null;
+  declare categoryId: CreationOptional<number | null>;
   declare currency: string;
   declare amount: string;
   declare period: CreationOptional<BudgetTargetPeriod>;
@@ -106,6 +105,7 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
         allowNull: false,
       },
       category: { type: DataTypes.STRING(128), allowNull: true },
+      categoryId: { type: DataTypes.INTEGER, field: 'category_id', allowNull: true },
       currency: { type: DataTypes.STRING(3), allowNull: false },
       amount: { type: DataTypes.DECIMAL(14, 4), allowNull: false },
       period: {
@@ -145,15 +145,12 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
       timestamps: true,
     }
   );
-  BudgetTarget.addHook('afterSave', async (instance: BudgetTarget, options) => {
-    try {
-      const { ensureCategory } = await import('../util/ensureCategory');
-      await ensureCategory(instance.householdId, instance.category, {
-        transaction: options.transaction,
-      });
-    } catch (e) {
-      logger.warn({ err: e, model: 'BudgetTarget' }, 'ensure_category_hook_failed');
-    }
+  BudgetTarget.addHook('beforeSave', async (instance: BudgetTarget, options) => {
+    if (instance.householdId == null) return;
+    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
+    instance.categoryId = await resolveCategoryIdByName(
+      instance.householdId, instance.category, { transaction: options.transaction ?? undefined },
+    );
   });
   return BudgetTarget;
 }
