@@ -73,18 +73,52 @@ as a denormalized mirror** synced to the referenced node's leaf name:
 | `ExternalOrderItem` | `inferredCategory`, `categoryOverride` | `inferredCategoryId`, `categoryOverrideId` |
 | `AiSuggestion` | `category` | `categoryId` |
 | Rules | `category` | `categoryId` |
+| `BudgetTarget` | `category` (`null` = "overall") | `categoryId` (`null` = "overall") |
 
 The `ensureCategory` afterSave hook on `Transaction` is extended: it resolves the
 chosen node, sets `finalCategoryId`, and writes the node's **leaf name** into the
 `finalCategory` mirror. Reporting reads migrate to the FK incrementally; the mirror
 keeps display and any not-yet-migrated read path working.
 
+`BudgetTarget.categoryId` null continues to mean **"overall"** (covers the sum of
+all spend in the matching currency); a non-null id scopes the budget to that node's
+**rolled-up subtree** (see Budgets).
+
+### Mirror sync on rename (must-fix)
+
+Because the string columns are denormalized mirrors of a node's **leaf name**,
+renaming a category must update every mirror that references that `categoryId`:
+`Transaction.{autoCategory, categoryOverride, finalCategory}`,
+`ExternalOrderItem.{inferredCategory, categoryOverride}`, `AiSuggestion.category`,
+Rules `category`, `BudgetTarget.category`.
+
+Do **not** scatter hooks. Add a single service:
+
+```ts
+// backend/src/categories/syncMirrors.ts
+syncCategoryLeafNameMirrors(categoryId, newLeafName, tx)
+```
+
+Called from the rename mutation **inside the same DB transaction** as the
+`Category.name` update, so a rename and its mirror fan-out commit atomically.
+Reparent does **not** change a node's leaf name, so it does not trigger mirror sync
+(only its `path` changes, and `path` is computed at read time, never stored on the
+mirrors).
+
 ### Invariants
 
 - **No cycles.** Creating or reparenting validates the proposed parent is neither
   the node itself nor any of its descendants. Reject otherwise.
-- **Sibling-unique names** (constraint above).
-- **Delete blocked** while the node has children OR any row references it.
+- **Sibling-unique names**, enforced **case-insensitively at the app layer**
+  (`Internet` / `internet` / `INTERNET` are the same sibling) regardless of DB
+  collation, in addition to the DB unique index. Normalize (trim + casefold) before
+  comparison/insert; store the user's original casing in `name`.
+- **Delete blocked** while the node has children OR is referenced by any of:
+  `Transaction.{autoCategoryId, categoryOverrideId, finalCategoryId}`,
+  `ExternalOrderItem.{inferredCategoryId, categoryOverrideId}`,
+  `AiSuggestion.categoryId`, Rules `categoryId`, `BudgetTarget.categoryId`, or child
+  categories. The backend check is comprehensive across **all** of these; the
+  user-facing error may simplify the message and suggest reparent/reclassify.
 
 ## Reporting / rollup
 
@@ -106,15 +140,42 @@ Build the ancestor chain once per request from a single `Category` fetch
 (household-scoped, typically small) — resolve parents in memory, no N+1 recursion
 in SQL.
 
+**Shared rollup utility** (`backend/src/categories/rollup.ts`, new) consumed by all
+aggregators. Per currency, two maps — raw (spend on the tagged node only) and rolled
+(folded up the chain):
+
+```
+parentById: Map<categoryId, parentId|null>     // from the single Category fetch
+rawByCategoryId:    Map<categoryId, amount>     // grouped once by tagged node
+rolledByCategoryId: Map<categoryId, amount>
+
+for [categoryId, amount] of rawByCategoryId:
+  current = categoryId
+  while current != null:
+    rolledByCategoryId[current] += amount
+    current = parentById[current]
+```
+
+No double-count: raw spend is grouped exactly once by its tagged node, then folded.
+A node tagged directly **and** having children sums correctly — e.g. parent $50 +
+child $20 + grandchild $30 → parent rolled = $100. Multi-currency keeps the existing
+`Map<currency, Map<categoryId, amount>>` shape; roll up within each currency.
+
 UI: a category report row renders collapsed at the parent's rolled-up total, with
-a disclosure to expand into child rows.
+a disclosure to expand into child rows. Each row carries
+`{ categoryId, name, path, parentId, depth, directTotal, rolledTotal, children }`
+— UI may show only `rolledTotal`, but `directTotal` is kept for debugging and a
+future "direct spend only" view.
 
 ## Budgets
 
-A budget scoped to a parent node caps the **rolled-up subtree** total (direct
-consequence of rollup semantics). Leaf-scoped budgets are unchanged.
+Budget category scope lives on **`BudgetTarget.category`** (`STRING(128)`, nullable,
+`null` = "overall"; has the `ensureCategory` hook). It gains **`categoryId`** FK (+
+string mirror), exactly like the other tagging sites. A budget scoped to a parent
+node caps the **rolled-up subtree** total (direct consequence of rollup semantics);
+`categoryId == null` keeps "overall" semantics; leaf-scoped budgets are unchanged.
 `budgetBreachCheck.ts` consumes `aggregateSpendByCategory()`, so it inherits the
-rollup with no extra logic beyond pointing budget scope at a node id.
+rollup once budget scope points at a node id.
 
 ## Tree building
 
@@ -127,19 +188,64 @@ any missing segments** under their typed parent, and tags the transaction to the
 today's flat behavior). New segments inherit no icon/taxTreatment (set later in the
 manager).
 
+Because duplicate leaf names are allowed across the tree, the picker's suggestion
+list shows the **full path**, not the bare leaf, to disambiguate:
+
+```
+Internet
+Work / Expenses / Internet
+Home / Internet
+```
+
 A shared **path resolver** (`backend/src/categories/resolvePath.ts`, new) owns:
 parse path → segments, walk/create the chain household-scoped, return the leaf node
 id. Reused by the picker endpoint and the AI suggestion path.
+
+**Parsing rules:**
+- Split on `/`; **trim** each segment; **reject empty segments** (so `Work//Internet`
+  and a trailing `/` are errors).
+- Category **names may not contain `/`** (it is the path separator).
+- A path with no `/` is a single **root** segment.
+- Sibling matching is **case-insensitive** (see Invariants).
+
+```
+"Work / Expenses / Internet"  -> ["Work","Expenses","Internet"]
+" Work / Internet "           -> ["Work","Internet"]
+"Internet"                    -> root "Internet"
+"Work//Internet"             -> reject (empty segment)
+```
+
+**Concurrency safety:** path quick-create is race-prone — two requests creating
+`Work / Expenses / Internet` simultaneously. The resolver runs **inside a DB
+transaction** and, per segment, treats a unique-constraint violation as
+"someone else created it first → re-read the sibling and continue":
+
+```
+for each segment under `parent`:
+  node = findSibling(householdId, parentId, normalize(name))
+  if !node:
+    try   node = create(...)
+    catch UNIQUE_VIOLATION: node = findSibling(...)   // re-read winner
+  parent = node
+return leaf node id
+```
+
+This makes picker, AI, and import categorization safe under concurrent writes.
 
 ### Category manager page (frontend)
 
 New page: tree view of the household's categories. Capabilities:
 
 - Create node (optionally under a selected parent).
-- Rename, set icon, set tax treatment.
-- **Drag-to-reparent** — cycle-guarded; rejected reparent shows why.
-- Delete — **blocked** if the node has children or referencing transactions; the
-  error offers "reparent children / reclassify transactions first" as the path.
+- Rename, set icon, set tax treatment. (Rename fans out to mirrors — see Mirror
+  sync on rename.)
+- **Drag-to-reparent** — surfaces **two distinct errors** the user can act on
+  differently: (a) *would create a cycle* (can't drop a node into its own subtree),
+  and (b) *target parent already has a sibling with that name* (case-insensitive
+  collision). Different actions, different messages.
+- Delete — **blocked** if the node has children or any referencing row (see Delete
+  blocked invariant); the error offers "reparent children / reclassify
+  transactions first" as the path.
 
 ## AI path
 
@@ -148,9 +254,19 @@ New page: tree view of the household's categories. Capabilities:
 - `loadCategoryHints` returns **full paths** (`Work / Expenses / Internet`) instead
   of bare leaf names, so the model sees the hierarchy.
 - The suggest prompt instructs the model to return a **path**.
-- The returned path goes through the shared path resolver → node id (creating the
-  chain if absent). The suggestion stores `categoryId` (+ leaf-name mirror).
 - The model may target any node, leaf or parent.
+
+**AI does not mutate the tree before user acceptance.** A hallucinated path must not
+silently create branches. Resolution is two-phase:
+
+- On suggest: resolve the returned path to an **existing** node if possible. If it
+  resolves, store `categoryId` (+ mirror). If it does **not** fully resolve, store
+  the **pending path string** on the suggestion (no nodes created).
+- On **accept**: run the path through the shared resolver (creating any missing
+  chain) and set the transaction's `categoryOverrideId`.
+
+Picker / manual entry creates immediately (the user typed it on purpose); only the
+AI/import path defers creation to acceptance.
 
 Receipt-item categorization (`import/categorizeReceiptItems.ts`,
 `import/receiptCategories.ts`) follows the same path-based hinting + resolution.
@@ -159,52 +275,110 @@ Receipt-item categorization (`import/categorizeReceiptItems.ts`,
 
 `backend/src/migrations/YYYYMMDD-category-tree.js`:
 
-**up()**
+**up()** (order matters — create constraints before relying on them):
 1. Add `Category.parentId` (nullable self-FK).
-2. Replace the unique index with the sibling index + the root partial index.
-3. Add the `*CategoryId` columns listed above (all nullable).
-4. **Backfill:** for each household, ensure a `Category` row exists for each
-   distinct non-null category string currently in use (most already exist via the
-   `ensureCategory` hook). Set every `*CategoryId` by matching its sibling string
-   to a node. Existing flat categories all become **top-level roots** (`parentId`
-   null) — the tree starts flat and the user nests via the manager.
+2. Add the `*CategoryId` columns listed above (all nullable).
+3. **Create the new indexes** (sibling + root partial) — before backfill so
+   backfilled rows are validated.
+4. **Backfill categories:** for each household, ensure a `Category` row exists for
+   each distinct non-null category string currently in use (most already exist via
+   the `ensureCategory` hook). Existing flat categories all become **top-level
+   roots** (`parentId` null) — the tree starts flat; the user nests via the manager.
+5. **Backfill FK columns** by matching each old string mirror to its root category
+   row (household-scoped, case-insensitive name match).
+6. **Drop the old `(household_id, name)` unique constraint** only after the
+   sibling/root indexes exist — in a transaction where the dialect supports it.
 
 **down()**
 - Drop the `*CategoryId` columns, drop `parentId`, restore the
-  `(household_id, name)` unique constraint. (Down assumes pre-tree flatness; the
-  string mirrors are untouched and remain authoritative, so no data loss on
-  rollback.)
+  `(household_id, name)` unique constraint. The string mirrors are untouched and
+  remain authoritative, so rollback to pre-tree flatness loses no data.
 
-Dual-dialect (SQLite + Postgres): use Sequelize column/index helpers; partial
-indexes via `where` in `addIndex`, supported on both.
+**Dual-dialect / column-name care (SQLite + Postgres):**
+- Models likely use `underscored: true` — Sequelize attribute `parentId` maps to DB
+  column `parent_id`. **Partial indexes must reference the real DB column names**
+  (`parent_id`, `household_id`), not the model attribute names.
+- Partial unique indexes via `where` in `addIndex` are supported on both dialects:
+  ```
+  sibling: unique (household_id, parent_id, name) WHERE parent_id IS NOT NULL
+  root:    unique (household_id, name)            WHERE parent_id IS NULL
+  ```
+  Filtering the sibling index keeps root uniqueness cleanly owned by the root index.
+
+## API surface
+
+Backend additions (gated routes, household-scoped):
+
+```
+GET    /api/categories/tree          -> nested tree with directTotal/rolledTotal per node
+POST   /api/categories/resolve-path  -> { id, name, path, createdIds: string[] }
+POST   /api/categories               -> create (optional parentId)
+PATCH  /api/categories/:id           -> rename / icon / taxTreatment (fans out mirror sync)
+PATCH  /api/categories/:id/reparent  -> { newParentId } (cycle + sibling-collision guarded)
+DELETE /api/categories/:id           -> blocked if non-empty (comprehensive reference check)
+```
+
+`resolve-path`'s `createdIds` lists nodes created during the walk — useful for UI
+feedback ("created Work › Expenses") and debugging. The existing flat
+`GET /api/categories` stays for back-compat during transition.
 
 ## Testing
 
 **Model / constraint**
 - Reparent that would create a cycle is rejected.
-- Sibling-unique name violation rejected; same name under two parents allowed; two
-  roots with the same name rejected (partial index).
-- Delete blocked when node has children; blocked when transactions reference it;
-  succeeds when empty.
+- Sibling-unique violation rejected; same name under two parents allowed; two roots
+  with the same name rejected (root partial index); `Internet`/`internet` collide
+  (case-insensitive app-layer check).
+- Delete blocked when node has children; blocked independently for each referencing
+  table (`Transaction`, `ExternalOrderItem`, `AiSuggestion`, Rules, `BudgetTarget`);
+  succeeds when fully empty.
 
-**Aggregators**
+**Mirror sync**
+- Rename fans out `syncCategoryLeafNameMirrors` to every mirror column; rename +
+  fan-out commit atomically (rollback on failure leaves no partial rename).
+- Reparent does **not** alter mirrors.
+
+**Aggregators / rollup**
 - Multi-level subtree rollup: parent total = direct + all descendants.
 - Node with both direct-tagged spend and children rolls up correctly (no double
-  count).
+  count): parent $50 + child $20 + grandchild $30 → parent rolled $100.
 - Item-split categories roll up identically.
+- Multi-currency rolls up within each currency, no cross-currency leakage.
+- Budget scoped to a parent breaches on the rolled-up subtree; `null` budget = overall.
 
 **Path resolver**
-- Creates a missing chain; resolves an existing chain; resolves partial (some
-  segments exist); bare name → root.
+- Creates a missing chain; resolves an existing chain; resolves partial; bare name →
+  root; rejects empty segments / names containing `/`.
+- **Concurrency:** two simultaneous creates of the same path converge on one node
+  (unique-violation → re-read winner), no duplicate siblings.
+
+**AI path**
+- Suggestion with an existing path stores `categoryId`; with a non-existing path
+  stores the pending path and creates **no** nodes; accept creates the chain.
 
 **Migration**
-- Backfill repoints every txn/item/suggestion/rule string to the right node id.
+- Backfill repoints every txn/item/suggestion/rule/budget string to the right node id.
 - down() drops cleanly and restores the old constraint.
 
 **Frontend**
-- Picker path-syntax create + tag-to-leaf.
-- Manager reparent (success + cycle rejection) and delete-block messaging.
-- Report row collapsed total + expand to children.
+- Picker path-syntax create + tag-to-leaf; suggestion list shows full paths.
+- Manager reparent (success, cycle rejection, sibling-collision rejection — distinct
+  messages) and delete-block messaging.
+- Report row collapsed `rolledTotal` + expand to children.
+
+## Implementation order
+
+1. Migration + model associations (`parentId`, FK columns, indexes).
+2. **Category service** (`backend/src/categories/`): path resolver (+ concurrency),
+   cycle guard, reparent, comprehensive delete blockers, `syncCategoryLeafNameMirrors`.
+3. Backfill + migration tests.
+4. **Shared rollup utility**, consumed by monthly / sankey / dashboard / budgets /
+   insights.
+5. Move transaction / item / rule / suggestion / budget writes to ids (mirrors synced).
+6. Picker path entry + full-path suggestion display.
+7. Category manager page.
+8. AI full-path hints + deferred (accept-time) resolution.
+9. (Later) remove remaining read-path string dependence once all reads are id-based.
 
 ## Out of scope (YAGNI)
 
