@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
 import { FilterBar } from '@/components/ui/filter-bar'
+import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import {
@@ -79,7 +80,7 @@ export function RecurringPage() {
         description={`Merchants you spend with on a regular cadence — looking back ${windowDays} days, with at least ${minOccurrences} charges to qualify.`}
       />
 
-      <section className="card">
+      <FilterCard>
         <FilterBar
           currency={currency}
           onCurrencyChange={setCurrency}
@@ -90,7 +91,7 @@ export function RecurringPage() {
             /* date filtering for recurring is driven by windowDays server-side */
           }}
         />
-      </section>
+      </FilterCard>
 
       {err && <p className="error" role="alert">{err}</p>}
 

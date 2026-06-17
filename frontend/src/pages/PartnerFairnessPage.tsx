@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
+import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -184,8 +185,7 @@ export function PartnerFairnessPage() {
         title="Partner fairness"
         description="Shared spending, who covered what, and the next settlement."
       />
-      <Card className="mb-4">
-        <CardContent className="pt-6">
+      <FilterCard>
           <FilterBar
             currency={currency}
             onCurrencyChange={(v) => setCurrency(v || DEFAULT_PARTNER_CURRENCY)}
@@ -218,8 +218,7 @@ export function PartnerFairnessPage() {
               <span className="muted text-xs">Saving…</span>
             )}
           </label>
-        </CardContent>
-      </Card>
+      </FilterCard>
 
       {err && (
         <Card className="mb-4 border-danger bg-danger-bg">
