@@ -131,7 +131,7 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
                 <span className="truncate">{label}</span>
               </span>
               <span className="inline-flex items-center gap-2 shrink-0">
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-xs text-muted-foreground">
                   {safePct(item.percentUsed, { digits: 0 })}
                 </span>
                 {status !== null ? (

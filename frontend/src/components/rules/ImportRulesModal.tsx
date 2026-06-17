@@ -158,7 +158,7 @@ export function ImportRulesModal({ open, onOpenChange, currentRuleCount, onSucce
               className="block w-full text-sm"
             />
             {fileError && (
-              <p className="mt-1 text-sm text-rose-600 dark:text-rose-400">{fileError}</p>
+              <p className="mt-1 text-sm text-danger">{fileError}</p>
             )}
             {parsed && !fileError && (
               <p className="mt-1 text-sm text-positive">

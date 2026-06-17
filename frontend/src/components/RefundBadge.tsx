@@ -74,7 +74,7 @@ export function RefundBadge({
   }
   if (loading) {
     return (
-      <span className={`${baseClass} bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300`}>
+      <span className={`${baseClass} bg-muted text-muted-foreground`}>
         Refund · loading…
       </span>
     )
@@ -88,7 +88,7 @@ export function RefundBadge({
   }
   if (!details.linked || !details.original) {
     return (
-      <span className={`${baseClass} bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300`}>
+      <span className={`${baseClass} bg-muted text-muted-foreground`}>
         Refund of linked txn (no access)
       </span>
     )
