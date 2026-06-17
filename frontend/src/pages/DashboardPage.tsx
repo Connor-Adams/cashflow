@@ -722,7 +722,7 @@ export function DashboardPage() {
   // Review banner pins to 8 cols so it lines up with the period insight band
   // beneath it instead of sprawling full-width across an empty middle.
   const showReviewBanner = summaryStats.reviewCount > 0
-  const reviewBannerSpan: BentoSpan = 8
+  const reviewBannerSpan: BentoSpan = 12
 
   return (
     <div className="page">
@@ -972,7 +972,7 @@ export function DashboardPage() {
         <BudgetStatusCard currency={currency || 'CAD'} />
 
         <BentoTile
-          span={8}
+          span={12}
           rows={2}
           variant="hero"
           aria-busy={loading}
@@ -995,7 +995,7 @@ export function DashboardPage() {
           )}
         </BentoTile>
 
-        <BentoTile span={4} rows={2} aria-busy={loading} aria-label="Activity counts">
+        <BentoTile span={6} rows={2} aria-busy={loading} aria-label="Activity counts">
           <KpiStack
             items={[
               {
@@ -1025,7 +1025,7 @@ export function DashboardPage() {
         <InboxSummaryTile />
 
         <BentoTile
-          span={4}
+          span={6}
           rows={2}
           aria-busy={loading}
           label="Income · business vs personal"
@@ -1072,7 +1072,7 @@ export function DashboardPage() {
         </BentoTile>
 
         <BentoTile
-          span={4}
+          span={6}
           rows={2}
           aria-busy={loading}
           label="Spend · business vs personal"
@@ -1119,7 +1119,7 @@ export function DashboardPage() {
         </BentoTile>
 
         <BentoTile
-          span={8}
+          span={12}
           rows={1}
           aria-busy={loading}
           label="Net spend by category"
