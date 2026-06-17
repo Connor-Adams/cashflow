@@ -1106,7 +1106,7 @@ export function TransactionsPage() {
         onChange={onReceiptPicked}
       />
 
-      <section className="transactionsStats">
+      <section className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(160px,1fr))]">
         <StatCard label="Filtered rows" value={totalCount} hint={filteredSummaryLabel} />
         <StatCard label="This page" value={pageCount} hint={`Page ${page} of ${totalPages}`} />
         <StatCard label="Needs review" value={reviewCountOnPage} hint="Rows flagged on the current page" />
@@ -1115,7 +1115,7 @@ export function TransactionsPage() {
       </section>
 
 
-      <section className="card transactionsToolbar">
+      <Card className="mb-4">
         <div className="transactionsPanelHeader">
           <div>
             <h2>Browse and review</h2>
@@ -1169,7 +1169,7 @@ export function TransactionsPage() {
             </Button>
           ))}
         </div>
-        <div className="formGrid transactionsFilterGrid">
+        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
           <Label className="transactionsCheckTile">
             <span>Review only</span>
             <Input
@@ -1322,7 +1322,7 @@ export function TransactionsPage() {
             </NativeSelect>
           </Label>
         </div>
-          <div className="row transactionsActionRow">
+          <div className="mb-3 flex flex-wrap items-center gap-3 mt-3">
           {activeFilters.length > 0 && (
             <Button
               type="button"
@@ -1418,7 +1418,7 @@ export function TransactionsPage() {
             AI suggestions and receipt vision.
           </p>
         )}
-      </section>
+      </Card>
       {(err || attachErr) && <Alert variant="error" className="mb-4">{err || attachErr}</Alert>}
       {aiAuditMessage && <p className="uploadMsg">{aiAuditMessage}</p>}
       {bulkAiResults.length > 0 && (
@@ -1454,7 +1454,7 @@ export function TransactionsPage() {
                 {result.suggestion.rationale ? (
                   <p className="mb-4 text-sm leading-6 text-muted-foreground">{result.suggestion.rationale}</p>
                 ) : null}
-                <div className="row">
+                <div className="mb-3 flex flex-wrap items-center gap-3">
                   <Button
                     type="button"
                     variant="secondary"
@@ -1530,7 +1530,7 @@ export function TransactionsPage() {
                   <p className="mb-4 text-sm leading-6 text-muted-foreground">Evidence: {result.evidence.join(', ')}</p>
                 ) : null}
                 {result.rationale ? <p className="mb-4 text-sm leading-6 text-muted-foreground">{result.rationale}</p> : null}
-                <div className="row">
+                <div className="mb-3 flex flex-wrap items-center gap-3">
                   <Button
                     type="button"
                     variant="secondary"
@@ -1749,7 +1749,7 @@ export function TransactionsPage() {
         </div>
       )}
       {confirmAction.dialog}
-      <section className="card transactionsTableCard">
+      <Card className="mb-0">
         <div className="transactionsPanelHeader">
           <div>
             <h2>Ledger</h2>
@@ -1859,7 +1859,7 @@ export function TransactionsPage() {
             </TableBody>
           </Table>
         </div>
-        <div className="row transactionsPager">
+        <div className="mb-0 mt-4 justify-center flex flex-wrap items-center gap-3">
           <Button
             type="button"
             variant="secondary"
@@ -1880,7 +1880,7 @@ export function TransactionsPage() {
             Next
           </Button>
         </div>
-      </section>
+      </Card>
       <ReceiptItemsDrawer
         open={itemsDrawer != null}
         onClose={() => setItemsDrawer(null)}
