@@ -392,6 +392,31 @@ export function computeAcb(activities: AcbActivity[]): AcbResult {
         acbPerUnit: newAcb,
       };
       timeline.push(state);
+    } else if (type === 'staking_reward') {
+      // CRA: a staking reward is income at FMV on receipt, and that FMV
+      // becomes the ACB cost base of the newly-received coins. Treat a
+      // VALUED reward (quantity>0 AND amount>0) as a BUY at cost = FMV.
+      // Unvalued rewards (amount null/0, e.g. pre-backfill) are ignored so
+      // the engine degrades safely when a historical price is missing.
+      if (
+        activity.quantity != null &&
+        activity.quantity > EPS &&
+        activity.amount != null &&
+        Math.abs(activity.amount) > EPS
+      ) {
+        const qty = activity.quantity;
+        const cost = Math.abs(activity.amount);
+        const newQuantity = state.quantity + qty;
+        const newTotalCost = state.totalCost + cost;
+        const newAcb = newQuantity > EPS ? newTotalCost / newQuantity : 0;
+        state = {
+          asOf: activity.tradeDate,
+          quantity: newQuantity,
+          totalCost: newTotalCost,
+          acbPerUnit: newAcb,
+        };
+        timeline.push(state);
+      }
     }
     // All other activity types (dividend, interest, fee, ambiguous
     // 'transfer' for cash CONT/withdrawals, other) are intentionally
