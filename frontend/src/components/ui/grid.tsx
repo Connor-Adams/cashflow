@@ -29,7 +29,7 @@ function Grid({
     <div
       data-slot="grid"
       className={cn('grid', GAP[gap], className)}
-      style={{ gridTemplateColumns, ...style }}
+      style={{ ...style, gridTemplateColumns }}
       {...props}
     />
   )
