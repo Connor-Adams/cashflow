@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { StatCard } from '@/components/ui/stat-card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Grid } from '@/components/ui/grid'
+import { FilterCard } from '@/components/ui/filter-card'
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
 const ALERT_VARIANTS = ['error', 'warning', 'info', 'success'] as const
@@ -70,6 +71,15 @@ export function DesignSystemSection() {
           title="Nothing here yet"
           description="The canonical empty state."
         />
+      </Group>
+
+      <Group name="Filter card">
+        <FilterCard className="w-full">
+          <div className="text-sm text-muted-foreground">Comfortable filter bar</div>
+        </FilterCard>
+        <FilterCard density="compact">
+          <div className="text-sm text-muted-foreground">Compact</div>
+        </FilterCard>
       </Group>
 
       <Group name="Grid">
