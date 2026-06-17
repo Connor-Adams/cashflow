@@ -412,6 +412,24 @@ PATH=/Users/connoradams/Developer/cashflow/node_modules/.bin:$PATH git commit -m
 > | `bg-brand` / `text-brand-*` | brand | leave as-is (already token-driven via `--color-brand`) |
 >
 > Because tokens are already mode-aware, **delete paired `dark:` color twins** for these (e.g. `text-amber-800 dark:text-amber-200` → `text-warning`). Keep non-color `dark:` utilities.
+>
+> **Expanded during execution** (inventory was larger than estimated — see counts in session):
+> | hardcoded | intent | replace with |
+> |---|---|---|
+> | `rose-*` | danger / money-loss | `bg-danger-bg`/`text-danger` (or `text-negative` for a negative $ figure) |
+> | `blue-*`/`sky-*` info or in-progress | info | `bg-info-bg`/`text-info`/`bg-info` (new `info` token = steel-blue) |
+> | `focus:border-blue-500` (input focus) | focus ring | `focus:border-ring` |
+> | `violet-*` | info/accent | `text-info`/`bg-info-bg` (unless categorical — see below) |
+> | `gray/slate/zinc-900/800` text | body text | `text-foreground` |
+> | `gray/slate/zinc-700/600/500/400/300` text | secondary text | `text-muted-foreground` |
+> | `gray/slate/zinc-50/100/200` bg | subtle surface | `bg-muted` |
+> | `gray/slate/zinc-100/200/300` border | border | `border` |
+> | `bg-white`/`text-white`/`bg-black`/`text-black` | leave as-is (intentional, in-context) |
+>
+> **Categorical maps** (e.g. `api.ts` `CALENDAR_EVENT_*`, status maps): assign per category, keep JIT-literal class strings —
+> income→success, expense→danger, transfer→info, settlement→warning, debt_payment→danger, savings→success;
+> status: Running/in-progress→info, Success/ok→positive, Failure/error→danger, Skipped/Never→muted.
+> `info` token added in commit `227babf0` (light `#1B6FA8`, dark steel `#5EA8E0`, AA verified).
 
 ### Task 6: Sweep the 28 files, one commit per logical group
 
