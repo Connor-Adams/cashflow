@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { StatCard } from '@/components/ui/stat-card'
 import { EmptyState } from '@/components/ui/empty-state'
+import { SectionHeader } from '@/components/ui/section-header'
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
 const ALERT_VARIANTS = ['error', 'warning', 'info', 'success'] as const
@@ -68,6 +69,15 @@ export function DesignSystemSection() {
           className="w-full sm:w-80"
           title="Nothing here yet"
           description="The canonical empty state."
+        />
+      </Group>
+
+      <Group name="Section header">
+        <SectionHeader
+          className="w-full"
+          title="Section title"
+          description="Supporting description"
+          actions={<Button variant="secondary">Action</Button>}
         />
       </Group>
     </Card>
