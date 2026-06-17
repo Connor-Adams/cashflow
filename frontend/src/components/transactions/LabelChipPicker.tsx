@@ -149,14 +149,14 @@ export function LabelChipPicker({
         {value.map((label) => (
           <span
             key={label.id}
-            className="group inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
+            className="group inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
           >
             {label.name}
             <Button
               type="button"
               variant="ghost"
               aria-label={`Remove ${label.name}`}
-              className="text-slate-400 hover:text-slate-700"
+              className="text-muted-foreground hover:text-foreground"
               disabled={busy}
               onClick={() => void removeLabel(label.id)}
             >
@@ -171,7 +171,7 @@ export function LabelChipPicker({
             value={query}
             placeholder="Add label…"
             aria-label="Add label"
-            className="min-w-[7rem] border-none bg-transparent text-xs outline-none placeholder:text-slate-400"
+            className="min-w-[7rem] border-none bg-transparent text-xs outline-none placeholder:text-muted-foreground"
             disabled={busy}
             onChange={(e) => {
               setQuery(e.target.value)

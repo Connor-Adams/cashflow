@@ -139,7 +139,7 @@ export function ImportHistoryTable({
                       ) : (
                         <span className="flex items-center gap-1.5">
                           <span
-                            className="rounded px-1.5 py-0.5 text-green-700 dark:text-green-300"
+                            className="rounded px-1.5 py-0.5 text-positive"
                             style={{ backgroundColor: 'var(--bg2)' }}
                             title={`${clean} clean`}
                           >
@@ -147,7 +147,7 @@ export function ImportHistoryTable({
                           </span>
                           {needsReview > 0 ? (
                             <span
-                              className="rounded px-1.5 py-0.5 text-amber-700 dark:text-amber-300"
+                              className="rounded px-1.5 py-0.5 text-warning"
                               style={{ backgroundColor: 'var(--bg2)' }}
                               title={`${needsReview} need review`}
                             >

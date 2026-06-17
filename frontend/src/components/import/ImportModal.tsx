@@ -485,7 +485,7 @@ export function ImportModal({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="text-xs underline underline-offset-2 text-blue-600 dark:text-blue-400 hover:opacity-80"
+                  className="text-xs underline underline-offset-2 text-info hover:opacity-80"
                   onClick={() => { onOpenChange(false); navigate('/imports') }}
                 >
                   View progress →

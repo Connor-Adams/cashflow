@@ -100,7 +100,7 @@ function SpouseLinkSection({
   if (allEntities === null) return <p className="muted">Loading entities…</p>;
   if (personalEntities.length === 0) return null;
   return (
-    <div className="rounded-md border border-gray-200 p-3">
+    <div className="rounded-md border p-3">
       <h3 className="mb-2 text-base font-semibold">Spouse links</h3>
       <ul className="space-y-2">
         {personalEntities.map((entity) => (
@@ -236,8 +236,8 @@ function IntegratedRateCard(props: IntegratedRateCardProps) {
   const state = integratedRateState(props);
   if (state.kind === 'error') {
     return (
-      <div className="rounded-md border border-red-300 bg-red-50 p-3">
-        <p className="text-sm text-red-700">
+      <div className="rounded-md border border-danger bg-danger-bg p-3">
+        <p className="text-sm text-danger">
           Failed to load integrated household compute: {state.message}
         </p>
       </div>
@@ -245,8 +245,8 @@ function IntegratedRateCard(props: IntegratedRateCardProps) {
   }
   if (state.kind === 'loading') {
     return (
-      <div className="rounded-md border border-gray-200 p-3">
-        <p className="text-sm text-gray-500">Computing integrated household totals…</p>
+      <div className="rounded-md border p-3">
+        <p className="text-sm text-muted-foreground">Computing integrated household totals…</p>
       </div>
     );
   }
@@ -269,10 +269,10 @@ function IntegratedRateCardReady({ data, computed }: IntegratedRateCardReadyProp
     warningCount,
   } = computed;
   return (
-    <div className="rounded-md border border-gray-200 p-4">
+    <div className="rounded-md border p-4">
       <header className="mb-2 flex items-baseline justify-between">
         <h3 className="text-base font-semibold">Integrated household summary</h3>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-muted-foreground">
           {data.corp.length} corp · {data.personal.length} personal · {warningCount}{' '}
           warning{warningCount === 1 ? '' : 's'}
         </span>
@@ -306,7 +306,7 @@ function Metric({
 }) {
   return (
     <div>
-      <div className="text-xs text-gray-500">{label}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div className={strong ? 'font-semibold' : ''}>{value}</div>
     </div>
   );

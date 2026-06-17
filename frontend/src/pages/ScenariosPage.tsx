@@ -73,7 +73,7 @@ const RECURRENCE_LABELS: Record<AssumptionRecurrence, string> = {
 }
 
 // Tailwind variant lookup tables (literal class names — JIT must see them).
-const DELTA_POSITIVE_CLASS = 'text-green-600 dark:text-green-400'
+const DELTA_POSITIVE_CLASS = 'text-positive'
 const DELTA_NEGATIVE_CLASS = 'text-destructive'
 const DELTA_NEUTRAL_CLASS = 'text-muted-foreground'
 

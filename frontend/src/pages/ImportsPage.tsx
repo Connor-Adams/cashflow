@@ -122,7 +122,7 @@ export function ImportsPage() {
                   <TableCell>{b.skipped}</TableCell>
                   <TableCell>
                     {b.failed > 0 ? (
-                      <span className="text-red-600 dark:text-red-400">{b.failed}</span>
+                      <span className="text-danger">{b.failed}</span>
                     ) : (
                       b.failed
                     )}
@@ -162,9 +162,9 @@ export function ImportsPage() {
                               <span
                                 className={
                                   it.status === 'failed'
-                                    ? 'text-red-600 dark:text-red-400 w-20 shrink-0'
+                                    ? 'text-danger w-20 shrink-0'
                                     : it.status === 'skipped'
-                                    ? 'text-amber-600 dark:text-amber-400 w-20 shrink-0'
+                                    ? 'text-warning w-20 shrink-0'
                                     : 'w-20 shrink-0'
                                 }
                               >

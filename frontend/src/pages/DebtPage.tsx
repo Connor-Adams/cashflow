@@ -294,7 +294,7 @@ function ComparisonCard({ comparison, liabilities, currency }: ComparisonCardPro
   return (
     <Card className="mb-4 p-3">
       <div className="mb-3 flex items-center gap-2">
-        <TrendingDown className="size-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+        <TrendingDown className="size-4 text-positive" aria-hidden="true" />
         <h2 className="text-sm font-semibold">Avalanche vs snowball</h2>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -316,7 +316,7 @@ function ComparisonCard({ comparison, liabilities, currency }: ComparisonCardPro
       </div>
       <p className="muted mt-3 mb-0 text-sm">
         The avalanche saves{' '}
-        <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+        <span className="font-semibold text-positive">
           {formatMoney(comparison.interestSaved, currency)}
         </span>{' '}
         in interest compared with the snowball.
@@ -342,7 +342,7 @@ function PlanSummary({
 }) {
   return (
     <Card
-      className={`p-3 ${highlight ? 'border-emerald-300 dark:border-emerald-700' : ''}`}
+      className={`p-3 ${highlight ? 'border-positive' : ''}`}
     >
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="text-sm font-semibold">{title}</h3>
@@ -358,7 +358,7 @@ function PlanSummary({
         <dd className="text-right tabular-nums">{formatMoney(plan.totalPaid, currency)}</dd>
       </dl>
       {plan.stalled ? (
-        <p className="mt-2 mb-0 text-xs text-amber-700 dark:text-amber-300">
+        <p className="mt-2 mb-0 text-xs text-warning">
           Minimum payments don't cover the interest — increase the extra payment to make progress.
         </p>
       ) : (
@@ -480,7 +480,7 @@ function SummaryTile({ label, value, description, tone, loading }: SummaryTilePr
       <p className="muted mb-1 text-xs uppercase tracking-wide">{label}</p>
       <p
         className={`mb-0 text-lg font-semibold tabular-nums ${
-          tone === 'good' ? 'text-emerald-700 dark:text-emerald-300' : ''
+          tone === 'good' ? 'text-positive' : ''
         }`}
       >
         {loading ? '…' : value}

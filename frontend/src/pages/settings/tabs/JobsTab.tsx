@@ -47,31 +47,31 @@ function truncatedError(message: string): string {
 }
 
 function jobStatus(job: JobView, running: boolean) {
-  if (running) return { label: 'Running', className: 'bg-blue-100 text-blue-800' }
+  if (running) return { label: 'Running', className: 'bg-info-bg text-info' }
   switch (job.lastStatus) {
     case 'ok':
-      return { label: 'Success', className: 'bg-emerald-100 text-emerald-800' }
+      return { label: 'Success', className: 'bg-success-bg text-positive' }
     case 'error':
-      return { label: 'Failure', className: 'bg-red-100 text-red-800' }
+      return { label: 'Failure', className: 'bg-danger-bg text-danger' }
     case 'skipped_disabled':
     case 'skipped_locked':
     case 'skipped_reentrant':
-      return { label: 'Success', className: 'bg-emerald-100 text-emerald-800' }
+      return { label: 'Success', className: 'bg-success-bg text-positive' }
     default:
-      return { label: 'Never run', className: 'bg-slate-100 text-slate-700' }
+      return { label: 'Never run', className: 'bg-muted text-muted-foreground' }
   }
 }
 
 function runStatus(run: JobRunView) {
   switch (run.status) {
     case 'success':
-      return { label: 'Success', className: 'bg-emerald-100 text-emerald-800' }
+      return { label: 'Success', className: 'bg-success-bg text-positive' }
     case 'failed':
-      return { label: 'Failure', className: 'bg-red-100 text-red-800' }
+      return { label: 'Failure', className: 'bg-danger-bg text-danger' }
     case 'running':
-      return { label: 'Running', className: 'bg-blue-100 text-blue-800' }
+      return { label: 'Running', className: 'bg-info-bg text-info' }
     default:
-      return { label: 'Skipped', className: 'bg-slate-100 text-slate-700' }
+      return { label: 'Skipped', className: 'bg-muted text-muted-foreground' }
   }
 }
 
@@ -213,13 +213,13 @@ export function JobsTab() {
           aria-label="Auto-refresh"
           onClick={() => setAutoRefresh((v) => !v)}
         >
-          <span className={cn('h-2 w-2 rounded-full', autoRefresh ? 'bg-emerald-500' : 'bg-slate-400')} />
+          <span className={cn('h-2 w-2 rounded-full', autoRefresh ? 'bg-positive' : 'bg-muted-foreground/40')} />
           Auto-refresh
         </Button>
       </div>
 
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+        <div className="rounded-md border border-danger bg-danger-bg px-3 py-2 text-sm text-danger" role="alert">
           {error}
           <Button type="button" size="sm" variant="ghost" className="ml-2" onClick={() => void load()}>
             Retry
@@ -286,7 +286,7 @@ export function JobsTab() {
                           onClick={() => void toggleEnabled(j)}
                           className={cn(
                             'rounded-full px-2 py-0.5 text-xs font-medium',
-                            j.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                            j.enabled ? 'bg-success-bg text-positive' : 'bg-muted text-muted-foreground'
                           )}
                         >
                           {j.enabled ? 'on' : 'off'}

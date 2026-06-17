@@ -388,7 +388,7 @@ function DeadlineCell({
   const tone = expired
     ? 'text-destructive'
     : soon || expiringSoon
-      ? 'text-amber-600 dark:text-amber-400'
+      ? 'text-warning'
       : ''
   return (
     <div className={tone}>

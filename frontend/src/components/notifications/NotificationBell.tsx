@@ -76,7 +76,7 @@ export function NotificationBell() {
         <Bell size={18} aria-hidden="true" />
         {showBadge && (
           <span
-            className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center"
+            className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-white text-[10px] font-semibold flex items-center justify-center"
             data-testid="notification-badge"
           >
             {badgeLabel}
@@ -84,7 +84,7 @@ export function NotificationBell() {
         )}
         {countStatus === 'error' && !showBadge && (
           <span
-            className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500"
+            className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-danger"
             aria-label="Failed to load notifications"
             data-testid="notification-error-dot"
           />

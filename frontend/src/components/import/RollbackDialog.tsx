@@ -153,7 +153,7 @@ export function RollbackDialog({
       <DialogBody>
         {loading && <p className="muted">Loading preview…</p>}
         {error && (
-          <p role="alert" className="text-sm text-red-700 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
@@ -187,7 +187,7 @@ function RollbackBlockerList({ blockers }: { blockers: RollbackBlocker[] }) {
   if (blockers.length === 0) return null
   return (
     <ul
-      className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200"
+      className="rounded border border-danger bg-danger-bg p-3 text-sm text-danger"
       data-testid="rollback-blockers"
     >
       {blockers.map((blocker) => (

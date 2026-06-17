@@ -67,28 +67,28 @@ export function RefundBadge({
     'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium mt-1 w-fit'
   if (linkedTransactionId == null) {
     return (
-      <span className={`${baseClass} bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200`}>
+      <span className={`${baseClass} bg-warning-bg text-warning`}>
         Refund (unlinked)
       </span>
     )
   }
   if (loading) {
     return (
-      <span className={`${baseClass} bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300`}>
+      <span className={`${baseClass} bg-muted text-muted-foreground`}>
         Refund · loading…
       </span>
     )
   }
   if (errored || !details) {
     return (
-      <span className={`${baseClass} bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200`}>
+      <span className={`${baseClass} bg-success-bg text-positive`}>
         Refund (linked)
       </span>
     )
   }
   if (!details.linked || !details.original) {
     return (
-      <span className={`${baseClass} bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300`}>
+      <span className={`${baseClass} bg-muted text-muted-foreground`}>
         Refund of linked txn (no access)
       </span>
     )
@@ -97,7 +97,7 @@ export function RefundBadge({
   const partialMark = details.partial ? ' (partial)' : ''
   return (
     <span
-      className={`${baseClass} bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200`}
+      className={`${baseClass} bg-success-bg text-positive`}
       title={`Refund linked to transaction #${o.id}`}
     >
       Refund of {formatMoney(Math.abs(o.amount), currency)} · {o.merchantClean} · {o.date}

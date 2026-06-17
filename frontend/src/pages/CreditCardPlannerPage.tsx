@@ -376,7 +376,7 @@ function DueBadge({ label, tone }: { label: string; tone: 'warn' | 'soon' | 'ok'
   }
   if (tone === 'soon') {
     return (
-      <Badge className="gap-1 bg-amber-100 text-amber-800 text-xs dark:bg-amber-900 dark:text-amber-200">
+      <Badge className="gap-1 bg-warning-bg text-warning text-xs">
         <CalendarClock className="size-3" aria-hidden="true" />
         {label}
       </Badge>
@@ -399,7 +399,7 @@ function SummaryTile({ label, value, description, tone, loading }: SummaryTilePr
       <p className="muted mb-1 text-xs uppercase tracking-wide">{label}</p>
       <p
         className={`mb-0 text-lg font-semibold tabular-nums ${
-          tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : ''
+          tone === 'warn' ? 'text-warning' : ''
         }`}
       >
         {loading ? '…' : value}

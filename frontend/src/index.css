@@ -13,157 +13,141 @@
 :root[data-theme="light"] {
   --radius: 0.5rem;
 
-  /* Amber / Primary */
-  --amber-50: #FFF8E5;
-  --amber-100: #FCEBBC;
-  --amber-200: #F5D47A;
-  --amber-300: #EABD3D;
-  --amber-400: #E0A726;
-  --amber-500: #C78C13;
-  --amber-600: #9C6A0A;
-  --amber-700: #704B07;
-  --amber-800: #463005;
-  --amber-900: #221803;
+  /* ── NEW PALETTE RAMPS ─────────────────────────────────────────── */
+  /* Greyscale (zinc) — the workhorse */
+  --zinc-50:  #FAFAFA;
+  --zinc-100: #F4F4F5;
+  --zinc-200: #E4E4E7;
+  --zinc-300: #D4D4D8;
+  --zinc-400: #A1A1AA;
+  --zinc-500: #71717A;
+  --zinc-600: #52525B;
+  --zinc-700: #3F3F46;
+  --zinc-800: #27272A;
+  --zinc-900: #18181B;
+  --zinc-950: #09090B;
 
-  /* Plum / Accent */
-  --plum-50: #FAEEF6;
-  --plum-100: #EFCFE2;
-  --plum-200: #DFA3C7;
-  --plum-300: #C66FA4;
-  --plum-400: #9E4C7A;
-  --plum-500: #7B385E;
-  --plum-600: #5B2B46;
-  --plum-700: #421F33;
-  --plum-800: #2B1422;
-  --plum-900: #160A12;
+  /* Oxblood — signature + money-out + danger */
+  --oxblood-50:  #FBEDEE;
+  --oxblood-100: #F6D6D9;
+  --oxblood-200: #E9A8AF;
+  --oxblood-300: #DA7B85;
+  --oxblood-400: #C44E5B;
+  --oxblood-500: #9B2D3A;
+  --oxblood-600: #82252F;
+  --oxblood-700: #661C26;
+  --oxblood-800: #4A141B;
+  --oxblood-900: #2E0C10;
 
-  /* Jade / Success */
-  --jade-50: #EAF8F0;
-  --jade-100: #C9EBD8;
-  --jade-200: #98D8B5;
-  --jade-300: #67C391;
-  --jade-400: #3FA46D;
-  --jade-500: #2F8657;
-  --jade-600: #236843;
-  --jade-700: #184A30;
-  --jade-800: #0E2E1E;
-  --jade-900: #06150D;
+  /* Green — money-in / positive */
+  --green-100: #D1FAE5;
+  --green-200: #7DDCAE;
+  --green-300: #35BE83;
+  --green-500: #0FA06C;
+  --green-600: #0A875D;
+  --green-700: #086F4C;
 
-  /* Rust / Alert */
-  --rust-50: #FFF0EA;
-  --rust-100: #FFD4C5;
-  --rust-200: #F8A98D;
-  --rust-300: #EB7B56;
-  --rust-400: #C14E2A;
-  --rust-500: #A33D1F;
-  --rust-600: #7E2E17;
-  --rust-700: #5A2010;
-  --rust-800: #381309;
-  --rust-900: #1A0804;
+  /* Amber — warning / caution ONLY (not a brand color) */
+  --amber-w-100: #FEF3C7;
+  --amber-w-300: #F5C451;
+  --amber-w-500: #D9A441;
+  --amber-w-700: #B45309;
 
-  /* Neutrals */
-  --bone: #FAF7F0;
-  --sand: #E8DED0;
-  --taupe: #B9AA98;
-  --stone: #776C61;
-  --charcoal: #302D34;
-  --ink: #121118;
+  /* Hero gradient */
+  --gradient-hero: linear-gradient(135deg, #FF7847, #E84393);
+  --gradient-hero-from: #FF7847;
+  --gradient-hero-to:   #E84393;
 
-  /* Supporting colors */
-  --cream: #FFFDF7;
-  --champagne: #F3E2B8;
-  --brass: #B9852F;
-  --copper: #A95C36;
-  --fig: #3A1E32;
-  --moss: #667A4F;
-  --sage: #A9B79B;
-  --clay: #B56D4A;
-  --smoke: #D8D2C8;
-  --graphite: #24222A;
+  /* Chart categorical extras */
+  --chart-steel: #5EA8E0;
 
   /* Surfaces */
-  --background: var(--bone);
-  --card: var(--cream);
-  --popover: var(--cream);
-  --muted: var(--sand);
+  --background: var(--zinc-100);
+  --card: #FFFFFF;
+  --popover: #FFFFFF;
+  --muted: var(--zinc-100);
 
   /* Text */
-  --foreground: var(--ink);
+  --foreground: var(--zinc-900);
   --card-foreground: var(--foreground);
   --popover-foreground: var(--foreground);
-  --muted-foreground: var(--stone);
+  --muted-foreground: var(--zinc-500);
 
   /* Brand */
-  --primary: var(--amber-400);
-  --primary-hover: var(--amber-500);
-  --primary-foreground: var(--ink);
+  --primary: var(--oxblood-500);
+  --primary-hover: var(--oxblood-600);
+  --primary-foreground: #FFFFFF;
 
   /* Accent */
-  --accent: var(--plum-50);
-  --accent-foreground: var(--plum-700);
+  --accent: var(--oxblood-50);
+  --accent-foreground: var(--oxblood-700);
 
   /* Semantic text links (WCAG AA ≥ 4.5:1 on --card and --background) */
-  --text-link: var(--rust-500);
-  --text-link-hover: var(--rust-600);
+  --text-link: var(--oxblood-600);
+  --text-link-hover: var(--oxblood-700);
 
   /* Semantic signals */
-  --success: var(--jade-400);
-  --success-bg: var(--jade-50);
-  --success-foreground: var(--jade-700);
-  --warning: var(--rust-400);
-  --warning-bg: var(--rust-50);
-  --warning-foreground: var(--rust-700);
-  --danger: #B93A2E;
-  --danger-bg: #FCECEA;
-  --danger-foreground: var(--rust-700);
-  --positive: var(--jade-500);
-  --positive-foreground: var(--cream);
-  --destructive: var(--danger);
-  --destructive-foreground: var(--cream);
+  --success: var(--green-600);
+  --success-bg: var(--green-100);
+  --success-foreground: var(--green-700);
+  --warning: var(--amber-w-700);
+  --warning-bg: var(--amber-w-100);
+  --warning-foreground: var(--amber-w-700);
+  --danger: var(--oxblood-500);
+  --danger-bg: var(--oxblood-50);
+  --danger-foreground: var(--oxblood-700);
+  --info: #1B6FA8;
+  --info-bg: #E6F1FA;
+  --info-foreground: #0E456B;
+  --positive: var(--green-600);
+  --positive-foreground: #FFFFFF;
+  --negative: var(--oxblood-500);
+  --destructive: var(--oxblood-500);
+  --destructive-foreground: #FFFFFF;
 
   /* Borders / structural */
-  --secondary: var(--plum-600);
-  --secondary-hover: var(--plum-700);
-  --secondary-foreground: var(--bone);
-  --border: var(--sand);
-  --input: var(--taupe);
-  --ring: var(--amber-500);
-  --shadow: 0 8px 18px rgb(18 17 24 / 0.10);
+  --secondary: var(--zinc-100);
+  --secondary-hover: var(--zinc-200);
+  --secondary-foreground: var(--zinc-900);
+  --border: var(--zinc-200);
+  --input: var(--zinc-300);
+  --ring: var(--oxblood-500);
+  --shadow: 0 8px 18px rgb(9 9 11 / 0.08);
 
   /* Chart palette */
-  --chart-1: var(--amber-500);
-  --chart-2: var(--jade-500);
-  --chart-3: var(--plum-500);
-  --chart-4: var(--rust-500);
-  --chart-5: var(--stone);
+  --chart-1: var(--oxblood-500);
+  --chart-2: var(--green-600);
+  --chart-3: var(--gradient-hero-to);
+  --chart-4: var(--gradient-hero-from);
+  --chart-5: var(--zinc-400);
 
-  --chart-spend: var(--amber-500);
-  --chart-credit: var(--jade-500);
-  --chart-payment: var(--stone);
-  --chart-business: var(--plum-600);
+  --chart-spend: var(--oxblood-500);
+  --chart-credit: var(--green-600);
+  --chart-payment: var(--zinc-500);
+  --chart-business: var(--chart-steel);
   --chart-personal: var(--positive);
 
   --chart-line-1: var(--primary);
   --chart-line-2: var(--positive);
-  --chart-line-3: var(--chart-business);
+  --chart-line-3: var(--chart-steel);
   --chart-line-4: var(--destructive);
-  --chart-line-5: var(--moss);
-  --chart-line-6: var(--clay);
+  --chart-line-5: var(--amber-w-300);
+  --chart-line-6: var(--oxblood-300);
 
   /* Extended chart tokens — Sankey, Forecast, Scenarios, Portfolio */
-  --chart-income: #10b981;
-  --chart-income-stroke: #059669;
-  --chart-category: #3b82f6;
-  --chart-business-alt: #8b5cf6;
-  --chart-savings: #06b6d4;
-  --chart-uncategorized: #9ca3af;
-  --chart-scenario: #6366f1;
-  --chart-scenario-pos: #16a34a;
-  --chart-scenario-neg: #dc2626;
-  --chart-reference: #94a3b8;
-  --chart-portfolio: #2563eb;
-  --chart-danger-line: #ef4444;
-  --chart-link-stroke: #0f172a;
+  --chart-income:           var(--green-600);
+  --chart-income-stroke:    var(--green-700);
+  --chart-category:         var(--chart-steel);
+  --chart-business-alt:     var(--gradient-hero-to);
+  --chart-savings:          var(--gradient-hero-from);
+  --chart-uncategorized:    var(--zinc-400);
+  --chart-scenario:         var(--chart-steel);
+  --chart-scenario-pos:     var(--green-600);
+  --chart-scenario-neg:     var(--oxblood-500);
+  --chart-reference:        var(--zinc-400);
+  --chart-portfolio:        var(--chart-steel);
+  --chart-danger-line:      var(--oxblood-500);
+  --chart-link-stroke:      var(--zinc-700);
 
   /* Legacy aliases — one migration cycle, then removed.
    * App.css component classes (.navLink.isActive, .brandMark, .superadminBadge,
@@ -183,70 +167,82 @@
 
 :root[data-theme="dark"] {
   /* Surfaces */
-  --background: var(--ink);
-  --card: var(--graphite);
-  --popover: var(--charcoal);
-  --muted: var(--charcoal);
+  --background: #0A0A0B;
+  --card: #141416;
+  --popover: #1A1A1D;
+  --muted: #1F1F22;
 
   /* Text */
-  --foreground: var(--bone);
+  --foreground: #EDEDEF;
   --card-foreground: var(--foreground);
   --popover-foreground: var(--foreground);
-  --muted-foreground: var(--taupe);
+  --muted-foreground: #8B8B90;
 
   /* Brand */
-  --primary: var(--amber-300);
-  --primary-hover: var(--amber-400);
-  --primary-foreground: var(--ink);
+  --primary: var(--oxblood-500);
+  --primary-hover: var(--oxblood-400);
+  --primary-foreground: #FBEDEE;
 
   /* Accent */
-  --accent: var(--plum-700);
-  --accent-foreground: var(--bone);
+  --accent: var(--oxblood-900);
+  --accent-foreground: var(--oxblood-100);
 
-  /* Semantic text links (WCAG AA ≥ 4.5:1 on --graphite and --ink) */
-  --text-link: var(--rust-300);
-  --text-link-hover: var(--rust-200);
+  /* Links (AA >= 4.5:1 on #141416 / #0A0A0B) */
+  --text-link: var(--oxblood-300);
+  --text-link-hover: var(--oxblood-200);
 
   /* Semantic signals */
-  --success: var(--jade-300);
-  --success-bg: var(--jade-800);
-  --success-foreground: var(--jade-100);
-  --warning: var(--rust-300);
-  --warning-bg: var(--rust-800);
-  --warning-foreground: var(--rust-100);
-  --danger: var(--rust-300);
-  --danger-bg: var(--rust-800);
-  --danger-foreground: var(--rust-100);
-  --positive: var(--jade-300);
-  --positive-foreground: var(--ink);
-  --destructive: var(--rust-300);
-  --destructive-foreground: var(--ink);
+  --success: var(--green-300);
+  --success-bg: #0E2A1E;
+  --success-foreground: var(--green-200);
+  --warning: var(--amber-w-300);
+  --warning-bg: #3A2C00;
+  --warning-foreground: var(--amber-w-100);
+  --danger: var(--oxblood-300);
+  --danger-bg: #2A1416;
+  --danger-foreground: var(--oxblood-100);
+  --info: var(--chart-steel);
+  --info-bg: #102A3F;
+  --info-foreground: #BFDCF5;
+  --positive: var(--green-300);
+  --positive-foreground: #06140E;
+  --negative: var(--oxblood-300);
+  --destructive: var(--oxblood-300);
+  --destructive-foreground: #06140E;
 
   /* Borders / structural */
-  --secondary: var(--plum-600);
-  --secondary-hover: var(--plum-500);
-  --secondary-foreground: var(--bone);
-  --border: var(--charcoal);
-  --input: var(--stone);
-  --ring: var(--amber-300);
+  --secondary: #1F1F22;
+  --secondary-hover: #27272A;
+  --secondary-foreground: #EDEDEF;
+  --border: #242427;
+  --input: #3A3A3E;
+  --ring: var(--oxblood-400);
   --shadow: 0 14px 28px rgb(0 0 0 / 0.45);
 
-  /* Chart palette overrides — values that don't auto-derive from above */
-  --chart-1: var(--amber-300);
-  --chart-2: var(--jade-300);
-  --chart-3: var(--plum-300);
-  --chart-4: var(--rust-300);
-  --chart-5: var(--taupe);
-  --chart-spend: var(--amber-300);
-  --chart-credit: var(--jade-300);
-  --chart-payment: var(--taupe);
-  --chart-business: var(--plum-300);
+  /* Chart palette */
+  --chart-1: var(--oxblood-300);
+  --chart-2: var(--green-300);
+  --chart-3: var(--gradient-hero-to);
+  --chart-4: var(--gradient-hero-from);
+  --chart-5: var(--zinc-400);
+  --chart-spend: var(--oxblood-300);
+  --chart-credit: var(--green-300);
+  --chart-payment: var(--zinc-400);
+  --chart-business: var(--chart-steel);
   --chart-line-1: var(--chart-spend);
   --chart-line-2: var(--chart-credit);
   --chart-line-3: var(--chart-business);
   --chart-line-4: var(--chart-4);
-  --chart-line-5: var(--sage);
-  --chart-line-6: var(--clay);
+  --chart-line-5: var(--amber-w-300);
+  --chart-line-6: var(--oxblood-200);
+
+  /* Extended chart token dark overrides */
+  --chart-income:        var(--green-300);
+  --chart-income-stroke: var(--green-200);
+  --chart-scenario-pos:  var(--green-300);
+  --chart-scenario-neg:  var(--oxblood-300);
+  --chart-danger-line:   var(--oxblood-300);
+  --chart-link-stroke:   var(--zinc-300);
 
   color-scheme: dark;
 }
@@ -300,6 +296,11 @@
   --color-border-secondary:    var(--input);
   --color-border-ring:         var(--ring);
   --color-border-destructive:  var(--destructive);
+  --color-border-warning:      var(--warning);
+  --color-border-danger:       var(--danger);
+  --color-border-success:      var(--success);
+  --color-border-positive:     var(--positive);
+  --color-border-info:         var(--info);
   --color-border-transparent:  transparent;
   --color-border-border:       var(--border);
   --color-border-input:        var(--input);
@@ -364,6 +365,22 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
+  /* Semantic color utilities (so components stop reaching for raw Tailwind hues) */
+  --color-warning:            var(--warning);
+  --color-warning-bg:         var(--warning-bg);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success:            var(--success);
+  --color-success-bg:         var(--success-bg);
+  --color-success-foreground: var(--success-foreground);
+  --color-positive:           var(--positive);
+  --color-negative:           var(--negative);
+  --color-danger:             var(--danger);
+  --color-danger-bg:          var(--danger-bg);
+  --color-text-link:          var(--text-link);
+  --color-info:            var(--info);
+  --color-info-bg:         var(--info-bg);
+  --color-info-foreground: var(--info-foreground);
 }
 
 /* Button color utility — auto-wires bg + text + hover/focus states */

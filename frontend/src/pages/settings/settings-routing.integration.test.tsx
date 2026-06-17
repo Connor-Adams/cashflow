@@ -7,6 +7,7 @@ import { SettingsPage } from './SettingsPage'
 import { SettingsTabLayout } from './SettingsTabLayout'
 import { DisplaySection } from './sections/DisplaySection'
 import { GmailSection } from './sections/GmailSection'
+import { PaletteSection } from './sections/PaletteSection'
 import { PartnerInviteSection } from './sections/PartnerInviteSection'
 import { ImportsTab } from './tabs/ImportsTab'
 import { EnrichmentTab } from './tabs/EnrichmentTab'
@@ -48,6 +49,7 @@ function renderApp(initialPath: string) {
           <Route index element={<Navigate to="display" replace />} />
           <Route element={<SettingsTabLayout />}>
             <Route path="display" element={<DisplaySection />} />
+            <Route path="palette" element={<PaletteSection />} />
             <Route path="gmail" element={<GmailSection />} />
             <Route path="partner-invite" element={<PartnerInviteSection />} />
           </Route>

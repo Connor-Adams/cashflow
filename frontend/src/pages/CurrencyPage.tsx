@@ -174,7 +174,7 @@ function ExposurePanel({
       {gapCurrencies.length > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
         >
           FX rate unavailable for: {gapCurrencies.join(', ')} — these
           currencies are shown in native units only.
@@ -274,8 +274,8 @@ function FeesPanel({ fees }: { fees: FeesResult }) {
                     <span
                       className={
                         row.confidence === 'high'
-                          ? 'rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-900'
-                          : 'rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900'
+                          ? 'rounded bg-success-bg px-2 py-0.5 text-xs text-success-foreground'
+                          : 'rounded bg-warning-bg px-2 py-0.5 text-xs text-warning'
                       }
                     >
                       {row.confidence ?? 'low'}

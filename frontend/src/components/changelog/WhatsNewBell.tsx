@@ -44,7 +44,7 @@ export function WhatsNewBell() {
         What&apos;s new
         {unread && (
           <span
-            className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500"
+            className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-danger"
             aria-label="New release notes"
             data-testid="whats-new-badge"
           />

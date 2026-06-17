@@ -55,7 +55,7 @@ export function CancelImpactCard({
 
   return (
     <div
-      className="mt-2 rounded-md bg-emerald-50 p-3 text-emerald-900"
+      className="mt-2 rounded-md bg-success-bg p-3 text-success-foreground"
       aria-busy={loading}
     >
       <div className="flex items-center justify-between gap-3">
@@ -90,7 +90,7 @@ export function CancelImpactCard({
             the next {impact.horizonMonths} months.
           </>
         ) : (
-          <span className="text-emerald-900/70">Calculating…</span>
+          <span className="text-success-foreground/70">Calculating…</span>
         )}
       </p>
     </div>

@@ -222,7 +222,7 @@ export function SearchPage() {
 
       <form onSubmit={onSubmit} className="flex gap-2">
         <div className="relative flex-1">
-          <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
             value={query}
@@ -247,7 +247,7 @@ export function SearchPage() {
             {saved.map((s) => (
               <li
                 key={s.id}
-                className="inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-sm"
+                className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1 text-sm"
               >
                 <Button
                   type="button"
@@ -265,7 +265,7 @@ export function SearchPage() {
                   size="sm"
                   aria-label={`Rename ${s.name}`}
                   onClick={() => void renameSaved(s)}
-                  className="text-slate-400 hover:text-slate-700"
+                  className="text-muted-foreground hover:text-foreground"
                 >
                   ✎
                 </Button>
@@ -275,7 +275,7 @@ export function SearchPage() {
                   size="sm"
                   aria-label={`Delete ${s.name}`}
                   onClick={() => void deleteSaved(s)}
-                  className="text-slate-400 hover:text-red-600"
+                  className="text-muted-foreground hover:text-danger"
                 >
                   <Trash2 className="h-3 w-3" />
                 </Button>
@@ -308,7 +308,7 @@ export function SearchPage() {
 
       {err && (
         <div
-          className="border border-red-300 bg-red-50 dark:bg-red-950 dark:border-red-900 rounded-md p-3 text-sm"
+          className="border border-danger bg-danger-bg rounded-md p-3 text-sm"
           role="alert"
         >
           {err}
@@ -333,7 +333,7 @@ export function SearchPage() {
                   setQuery('')
                   setResponse(null)
                 }}
-                className="text-xs text-slate-500 hover:text-slate-900"
+                className="text-xs text-muted-foreground hover:text-foreground"
               >
                 <X className="h-3 w-3" /> Clear
               </Button>
@@ -341,7 +341,7 @@ export function SearchPage() {
           )}
 
           {response.intent.errors.length > 0 && (
-            <ul className="border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 rounded-md p-3 text-sm space-y-1">
+            <ul className="border border-warning bg-warning-bg rounded-md p-3 text-sm space-y-1">
               {response.intent.errors.map((m, i) => (
                 <li key={i}>{m}</li>
               ))}
@@ -391,7 +391,7 @@ export function SearchPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left">
-                    <tr className="border-b border-slate-200 dark:border-slate-700">
+                    <tr className="border-b border-border">
                       <th className="py-2 pr-4">Date</th>
                       <th className="py-2 pr-4">Merchant</th>
                       <th className="py-2 pr-4 text-right">Amount</th>
@@ -401,7 +401,7 @@ export function SearchPage() {
                   </thead>
                   <tbody>
                     {response.results.map((r) => (
-                      <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800">
+                      <tr key={r.id} className="border-b border-border">
                         <td className="py-1 pr-4 whitespace-nowrap">{r.date}</td>
                         <td className="py-1 pr-4">{r.merchantClean}</td>
                         <td className="py-1 pr-4 text-right whitespace-nowrap">

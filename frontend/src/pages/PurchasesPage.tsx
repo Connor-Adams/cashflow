@@ -52,16 +52,16 @@ import {
 } from '@/hooks/usePurchases'
 
 const RECEIPT_BADGE: Record<PurchaseReceiptStatus, string> = {
-  unknown: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
-  missing: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  saved: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
+  unknown: 'bg-muted text-muted-foreground',
+  missing: 'bg-warning-bg text-warning-foreground',
+  saved: 'bg-success-bg text-success-foreground',
 }
 
 const WARRANTY_BADGE: Record<PurchaseWarrantyStatus, string> = {
-  unknown: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
-  none: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
-  active: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  expired: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-100',
+  unknown: 'bg-muted text-muted-foreground',
+  none: 'bg-muted text-muted-foreground',
+  active: 'bg-success-bg text-success-foreground',
+  expired: 'bg-danger-bg text-danger',
 }
 
 const DEFAULT_LARGE_THRESHOLD = 500

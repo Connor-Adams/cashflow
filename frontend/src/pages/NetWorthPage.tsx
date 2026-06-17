@@ -163,7 +163,7 @@ export function NetWorthPage() {
       {needsOpeningCount > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm flex items-center justify-between gap-3"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm flex items-center justify-between gap-3"
         >
           <div>
             <strong>{needsOpeningCount}</strong> account
@@ -176,7 +176,7 @@ export function NetWorthPage() {
             variant="outline"
             size="sm"
             onClick={openEditorAndScroll}
-            className="border-amber-600"
+            className="border-warning"
           >
             Set opening balances
           </Button>
@@ -186,7 +186,7 @@ export function NetWorthPage() {
       {negativeAssetCount > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
         >
           <strong>{negativeAssetCount}</strong> asset account
           {negativeAssetCount === 1 ? '' : 's'} had a negative derived
@@ -198,7 +198,7 @@ export function NetWorthPage() {
       {gapCurrencies.length > 0 && (
         <div
           role="alert"
-          className="rounded border border-amber-400 bg-amber-50 text-amber-900 p-3 text-sm"
+          className="rounded border border-warning bg-warning-bg text-warning p-3 text-sm"
         >
           Missing FX rate{gapCurrencies.length === 1 ? '' : 's'} for{' '}
           <strong>{gapCurrencies.join(', ')}</strong> → CAD on {cur.asOf}.
@@ -277,21 +277,21 @@ export function NetWorthPage() {
                     {row.native != null
                       ? formatMoney(row.native, row.currency)
                       : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        ? <span className="text-xs text-warning">(unset)</span>
                         : '—'}
                   </TableCell>
                   <TableCell className="text-right">
                     {row.cadValue != null
                       ? formatMoney(row.cadValue, 'CAD')
                       : row.source === 'account' && !row.openingBalanceSet
-                        ? <span className="text-xs text-amber-700">(unset)</span>
+                        ? <span className="text-xs text-warning">(unset)</span>
                         : '—'}
                   </TableCell>
                   <TableCell>
                     {badges.length === 0 ? (
                       ''
                     ) : (
-                      <span className="text-xs text-amber-700">
+                      <span className="text-xs text-warning">
                         {badges.join(' · ')}
                       </span>
                     )}
@@ -329,7 +329,7 @@ export function NetWorthPage() {
                     >
                       {row.label}
                       {!row.openingBalanceSet && (
-                        <span className="ml-2 text-xs text-amber-700">(unset)</span>
+                        <span className="ml-2 text-xs text-warning">(unset)</span>
                       )}
                     </label>
                     <input
@@ -363,7 +363,7 @@ export function NetWorthPage() {
                   {openingErrors[row.accountId] && (
                     <span
                       id={`opening-error-${row.accountId}`}
-                      className="error text-sm text-red-600 ml-40"
+                      className="error text-sm text-danger ml-40"
                       role="alert"
                     >
                       {openingErrors[row.accountId]}

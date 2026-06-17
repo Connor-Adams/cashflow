@@ -58,7 +58,7 @@ describe('BudgetStatusCard', () => {
     )
     const pill = await screen.findByTestId('budget-status-pill-1')
     expect(pill).toHaveTextContent('On track')
-    expect(pill.className).toMatch(/emerald/)
+    expect(pill.className).toMatch(/success/)
   })
 
   it('renders an "At risk" pill in the 80–100 band', async () => {
@@ -71,7 +71,7 @@ describe('BudgetStatusCard', () => {
     )
     const pill = await screen.findByTestId('budget-status-pill-2')
     expect(pill).toHaveTextContent('At risk')
-    expect(pill.className).toMatch(/amber/)
+    expect(pill.className).toMatch(/warning/)
   })
 
   it('renders an "Over" pill past 100', async () => {
@@ -84,7 +84,7 @@ describe('BudgetStatusCard', () => {
     )
     const pill = await screen.findByTestId('budget-status-pill-3')
     expect(pill).toHaveTextContent('Over')
-    expect(pill.className).toMatch(/rose/)
+    expect(pill.className).toMatch(/danger/)
   })
 
   it('renders the percentage and a fallback "Overall" label', async () => {

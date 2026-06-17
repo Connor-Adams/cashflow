@@ -1266,7 +1266,7 @@ export function TransactionsPage() {
                   return (
                     <label
                       key={label.id}
-                      className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700"
+                      className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                     >
                       <input
                         type="checkbox"
@@ -2259,7 +2259,7 @@ function TransactionRow({
           {status === 'pending' ? (
             <Badge
               variant="secondary"
-              className="rounded-full bg-amber-100 text-amber-800"
+              className="rounded-full bg-warning-bg text-warning-foreground"
               title="Authorized but not yet posted by your bank."
             >
               Pending
@@ -2267,7 +2267,7 @@ function TransactionRow({
           ) : status === 'cleared' ? (
             <Badge
               variant="secondary"
-              className="rounded-full bg-blue-100 text-blue-800"
+              className="rounded-full bg-info-bg text-info-foreground"
               title="Reconciled against your statement."
             >
               Cleared

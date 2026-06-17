@@ -707,10 +707,10 @@ function Stat({
   negative?: boolean
 }) {
   const color = positive
-    ? 'text-emerald-600 dark:text-emerald-300'
+    ? 'text-positive'
     : negative
-      ? 'text-rose-600 dark:text-rose-300'
-      : 'text-zinc-700 dark:text-zinc-200'
+      ? 'text-negative'
+      : 'text-foreground'
   return (
     <div>
       <div className="muted text-xs">{label}</div>

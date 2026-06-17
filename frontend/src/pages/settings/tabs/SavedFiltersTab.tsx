@@ -227,7 +227,7 @@ export function SavedFiltersTab() {
                 />
               </FieldLabel>
               {renameErr && (
-                <p className="mt-1 text-sm text-red-600" role="alert">
+                <p className="mt-1 text-sm text-danger" role="alert">
                   {renameErr}
                 </p>
               )}

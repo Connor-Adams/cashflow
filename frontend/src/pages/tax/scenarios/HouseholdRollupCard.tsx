@@ -32,8 +32,8 @@ interface Props {
 export function HouseholdRollupCard({ planCompute }: Props) {
   if (planCompute === null) {
     return (
-      <div className="rounded-md border border-gray-200 p-3">
-        <p className="text-sm text-gray-500">
+      <div className="rounded-md border border-border p-3">
+        <p className="text-sm text-muted-foreground">
           Select a household plan to see joint tax rollup.
         </p>
       </div>
@@ -45,10 +45,10 @@ export function HouseholdRollupCard({ planCompute }: Props) {
   const filerLabel = spouseCount === 1 ? 'single-filer' : `${spouseCount} filers`;
 
   return (
-    <div className="rounded-md border border-gray-200 p-4">
+    <div className="rounded-md border border-border p-4">
       <header className="mb-2 flex items-baseline justify-between">
         <h3 className="text-base font-semibold">Household tax rollup</h3>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-muted-foreground">
           {filerLabel} · {planCompute.corp.length} corp
         </span>
       </header>
@@ -127,7 +127,7 @@ function PerSpouseTable({ personal, spouseByEntityId }: PerSpouseTableProps) {
               <TableCell className="text-right tabular-nums">
                 {fmtCurrency(entry.computed.totals.totalPayable)}
               </TableCell>
-              <TableCell className="text-right tabular-nums text-xs text-gray-500">
+              <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
                 {renderShift(shift)}
               </TableCell>
             </TableRow>

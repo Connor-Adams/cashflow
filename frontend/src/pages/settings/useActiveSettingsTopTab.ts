@@ -21,6 +21,7 @@ export type SettingsTopTab =
 
 export function useActiveSettingsTopTab(): SettingsTopTab {
   const isDisplay = useMatch('/settings/display')
+  const isPalette = useMatch('/settings/palette')
   const isGmail = useMatch('/settings/gmail')
   const isPartnerInvite = useMatch('/settings/partner-invite')
   const isImports = useMatch('/settings/imports')
@@ -40,7 +41,7 @@ export function useActiveSettingsTopTab(): SettingsTopTab {
   const isAuditLog = useMatch('/settings/audit-log')
   const isBackup = useMatch('/settings/backup')
 
-  if (isDisplay || isGmail || isPartnerInvite) return 'settings'
+  if (isDisplay || isPalette || isGmail || isPartnerInvite) return 'settings'
   if (isImports) return 'imports'
   if (isEnrichment) return 'enrichment'
   if (isContacts) return 'contacts'

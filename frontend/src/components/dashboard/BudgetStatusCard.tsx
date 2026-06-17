@@ -110,9 +110,9 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
           // Lookup table for JIT-safe Tailwind classes — `status` is a
           // runtime string so we can't template the class names.
           const pillClass: Record<'ok' | 'risk' | 'over', string> = {
-            ok: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
-            risk: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
-            over: 'bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200',
+            ok: 'bg-success-bg text-positive',
+            risk: 'bg-warning-bg text-warning',
+            over: 'bg-danger-bg text-danger',
           }
           const pillLabel: Record<'ok' | 'risk' | 'over', string> = {
             ok: 'On track',
@@ -131,7 +131,7 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
                 <span className="truncate">{label}</span>
               </span>
               <span className="inline-flex items-center gap-2 shrink-0">
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-xs text-muted-foreground">
                   {safePct(item.percentUsed, { digits: 0 })}
                 </span>
                 {status !== null ? (

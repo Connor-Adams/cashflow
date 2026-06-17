@@ -895,13 +895,13 @@ export function DashboardPage() {
                 // class with interpolation — Tailwind won't pick it up.
                 const pacingBadgeClass: Record<string, string> = {
                   'on-pace':
-                    'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+                    'bg-success-bg text-success-foreground',
                   ahead:
-                    'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
+                    'bg-warning-bg text-warning-foreground',
                   behind:
-                    'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200',
+                    'bg-info-bg text-info-foreground',
                   over:
-                    'bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200',
+                    'bg-danger-bg text-danger',
                 }
                 const pacingLabel: Record<string, string> = {
                   'on-pace': 'On pace',

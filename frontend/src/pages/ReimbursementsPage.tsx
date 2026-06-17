@@ -624,7 +624,7 @@ function MatchDialog({
           <div className="text-sm space-y-3">
             <p className="font-medium">No likely repayment transactions found</p>
             {!row.contactId && (
-              <p className="text-amber-700 dark:text-amber-300 text-xs">
+              <p className="text-warning text-xs">
                 Set an expected contact on this reimbursement to improve matching.
               </p>
             )}
@@ -649,7 +649,7 @@ function MatchDialog({
                 Check account selection
               </Button>
               {showAccountHint && (
-                <div className="rounded bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700 p-2 text-xs text-amber-800 dark:text-amber-200">
+                <div className="rounded bg-warning-bg border border-warning p-2 text-xs text-warning">
                   Matching searches all accounts visible to you in {row.currency}.
                   If the repayment came in via a different currency or account,
                   it won't appear here.{' '}

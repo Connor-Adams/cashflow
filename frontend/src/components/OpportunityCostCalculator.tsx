@@ -184,7 +184,7 @@ export function OpportunityCostCalculator({
               aria-invalid={!!fieldErrors.amount}
             />
             {fieldErrors.amount ? (
-              <span className="text-xs text-rose-600 dark:text-rose-400" role="alert">{fieldErrors.amount}</span>
+              <span className="text-xs text-danger" role="alert">{fieldErrors.amount}</span>
             ) : null}
           </Label>
 
@@ -217,7 +217,7 @@ export function OpportunityCostCalculator({
               aria-invalid={!!fieldErrors.returnPercent}
             />
             {fieldErrors.returnPercent ? (
-              <span className="text-xs text-rose-600 dark:text-rose-400" role="alert">{fieldErrors.returnPercent}</span>
+              <span className="text-xs text-danger" role="alert">{fieldErrors.returnPercent}</span>
             ) : null}
           </Label>
 
@@ -233,7 +233,7 @@ export function OpportunityCostCalculator({
               aria-invalid={!!fieldErrors.horizonYears}
             />
             {fieldErrors.horizonYears ? (
-              <span className="text-xs text-rose-600 dark:text-rose-400" role="alert">{fieldErrors.horizonYears}</span>
+              <span className="text-xs text-danger" role="alert">{fieldErrors.horizonYears}</span>
             ) : null}
           </Label>
         </div>
@@ -251,7 +251,7 @@ export function OpportunityCostCalculator({
       </form>
 
       {error ? (
-        <p role="alert" className="mt-3 text-sm text-rose-600 dark:text-rose-300">
+        <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -320,7 +320,7 @@ function ResultStat({
       <span
         className={
           emphasis
-            ? 'text-2xl font-semibold text-emerald-600 dark:text-emerald-300'
+            ? 'text-2xl font-semibold text-positive'
             : 'text-lg font-medium'
         }
       >

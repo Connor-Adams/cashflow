@@ -183,7 +183,7 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
             )}
 
             {!loading && loadErr && (
-              <div className="px-3 py-2 text-sm text-red-600">
+              <div className="px-3 py-2 text-sm text-danger">
                 Couldn't load filters.{' '}
                 <Button
                   type="button"
@@ -266,7 +266,7 @@ export function SavedFiltersDropdown({ currentFilter, onApply }: Props) {
               />
             </FieldLabel>
             {saveErr && (
-              <p className="mt-1 text-sm text-red-600" role="alert">
+              <p className="mt-1 text-sm text-danger" role="alert">
                 {saveErr}
               </p>
             )}

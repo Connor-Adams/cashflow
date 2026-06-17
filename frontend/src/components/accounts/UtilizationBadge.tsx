@@ -20,11 +20,11 @@ import { Badge } from '@/components/ui/badge'
 type Tier = 'low' | 'med' | 'high' | 'critical' | 'over'
 
 const TIER_CLASSES: Record<Tier, string> = {
-  low: 'border-transparent bg-emerald-100 text-emerald-900',
-  med: 'border-transparent bg-amber-100 text-amber-900',
-  high: 'border-transparent bg-orange-100 text-orange-900',
-  critical: 'border-transparent bg-red-100 text-red-900',
-  over: 'border-transparent bg-red-200 text-red-900',
+  low: 'border-transparent bg-success-bg text-positive',
+  med: 'border-transparent bg-warning-bg text-warning',
+  high: 'border-transparent bg-warning-bg text-warning',
+  critical: 'border-transparent bg-danger-bg text-danger',
+  over: 'border-transparent bg-danger-bg text-danger',
 }
 
 function tierFor(pct: number): Tier {

@@ -28,9 +28,9 @@ function CreditUtilizationLine() {
       {data.map((bucket) => {
         const tone =
           bucket.utilizationPct > 70
-            ? 'text-red-700'
+            ? 'text-danger'
             : bucket.utilizationPct > 30
-              ? 'text-amber-700'
+              ? 'text-warning'
               : 'text-muted-foreground'
         const cardLabel = bucket.cardCount === 1 ? 'card' : 'cards'
         return (
