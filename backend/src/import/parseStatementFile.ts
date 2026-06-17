@@ -659,11 +659,14 @@ export async function parseStatementFile(opts: {
         const overrideTxnType = wsMonthly
           ? wsTxCodeToTxnType(String(row['transaction'] ?? row['Transaction'] ?? ''))
           : null;
-        base.transactions.push({
-          ...v,
-          sourceRowFingerprint: fp,
-          ...(overrideTxnType ? { overrideTxnType } : {}),
-        });
+        const isInvestment = String(account.accountType) === 'investment';
+        if (!(isInvestment && v.amount === 0)) {
+          base.transactions.push({
+            ...v,
+            sourceRowFingerprint: fp,
+            ...(overrideTxnType ? { overrideTxnType } : {}),
+          });
+        }
         previewRows.push({
           rowIndex: index + 1,
           ok: true,

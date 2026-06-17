@@ -701,3 +701,29 @@ test('acb_adjustment with null amount is ignored with a warning', () => {
   assert.equal(r.finalState.totalCost, 1000);
   assert.ok(r.warnings.some((w) => /ACB_ADJUSTMENT.*missing amount/i.test(w)));
 });
+
+// ---------------------------------------------------------------------------
+// Staking reward tests (CRA: reward is income at FMV; FMV becomes cost base)
+// ---------------------------------------------------------------------------
+
+test('valued staking_reward adds quantity at FMV cost (weighted-average ACB)', () => {
+  // BUY 10 @ cost 20 (negative amount convention), then reward 2 units valued 6.
+  // Pool: qty 10 + 2 = 12, totalCost 20 + 6 = 26, acbPerUnit 26/12.
+  const r = computeAcb([
+    act('2025-01-01', 'buy', 10, -20),
+    act('2025-02-01', 'staking_reward', 2, 6),
+  ]);
+  APPROX(r.finalState.quantity, 12, 'quantity should be 12');
+  APPROX(r.finalState.totalCost, 26, 'totalCost should be 26');
+  APPROX(r.finalState.acbPerUnit, 26 / 12, 'acbPerUnit should be 26/12');
+});
+
+test('unvalued staking_reward (amount 0) is ignored by ACB', () => {
+  // BUY 10 @ cost 20, then unvalued reward — pool must stay 10 / 20.
+  const r = computeAcb([
+    act('2025-01-01', 'buy', 10, -20),
+    act('2025-02-01', 'staking_reward', 2, 0),
+  ]);
+  APPROX(r.finalState.quantity, 10, 'quantity should remain 10');
+  APPROX(r.finalState.totalCost, 20, 'totalCost should remain 20');
+});
