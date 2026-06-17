@@ -28,7 +28,7 @@ export function PeriodInsightBand({ data, currency }: Props) {
 
   // Semantic tint per money-movement bucket: out=oxblood, in=green, neutral=info.
   const TONE: Record<string, { tile: string; value: string }> = {
-    Spend: { tile: 'bg-danger-bg', value: 'text-danger' },
+    Spend: { tile: 'bg-negative-bg', value: 'text-negative' },
     'Refunds / credits': { tile: 'bg-success-bg', value: 'text-positive' },
     Income: { tile: 'bg-success-bg', value: 'text-positive' },
     'Payments / transfers': { tile: 'bg-info-bg', value: 'text-info' },

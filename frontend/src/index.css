@@ -39,6 +39,12 @@
   --oxblood-800: #4A141B;
   --oxblood-900: #2E0C10;
 
+  /* Alert red — danger / destructive ONLY (distinct from the oxblood brand) */
+  --alert-200: #FECACA;
+  --alert-400: #F87171;
+  --alert-600: #DC2626;
+  --alert-700: #C81E1E;
+
   /* Green — money-in / positive */
   --green-100: #D1FAE5;
   --green-200: #7DDCAE;
@@ -83,8 +89,9 @@
   --accent-foreground: var(--oxblood-700);
 
   /* Semantic text links (WCAG AA ≥ 4.5:1 on --card and --background) */
-  --text-link: var(--oxblood-600);
-  --text-link-hover: var(--oxblood-700);
+  /* Links are neutral (foreground + underline), not a colored hyperlink. */
+  --text-link: var(--foreground);
+  --text-link-hover: var(--foreground);
 
   /* Semantic signals */
   --success: var(--green-600);
@@ -93,16 +100,17 @@
   --warning: var(--amber-w-700);
   --warning-bg: var(--amber-w-100);
   --warning-foreground: var(--amber-w-700);
-  --danger: var(--oxblood-500);
-  --danger-bg: var(--oxblood-50);
-  --danger-foreground: var(--oxblood-700);
+  --danger: var(--alert-700);
+  --danger-bg: #FCEAEA;
+  --danger-foreground: var(--alert-700);
   --info: #1B6FA8;
   --info-bg: #E6F1FA;
   --info-foreground: #0E456B;
   --positive: var(--green-600);
   --positive-foreground: #FFFFFF;
   --negative: var(--oxblood-500);
-  --destructive: var(--oxblood-500);
+  --negative-bg: var(--oxblood-50);
+  --destructive: var(--alert-600);
   --destructive-foreground: #FFFFFF;
 
   /* Borders / structural */
@@ -188,8 +196,8 @@
   --accent-foreground: var(--oxblood-100);
 
   /* Links (AA >= 4.5:1 on #141416 / #0A0A0B) */
-  --text-link: var(--oxblood-300);
-  --text-link-hover: var(--oxblood-200);
+  --text-link: var(--foreground);
+  --text-link-hover: var(--foreground);
 
   /* Semantic signals */
   --success: var(--green-300);
@@ -198,17 +206,18 @@
   --warning: var(--amber-w-300);
   --warning-bg: #3A2C00;
   --warning-foreground: var(--amber-w-100);
-  --danger: var(--oxblood-300);
-  --danger-bg: #2A1416;
-  --danger-foreground: var(--oxblood-100);
+  --danger: var(--alert-400);
+  --danger-bg: #3A1517;
+  --danger-foreground: var(--alert-200);
   --info: var(--chart-steel);
   --info-bg: #102A3F;
   --info-foreground: #BFDCF5;
   --positive: var(--green-300);
   --positive-foreground: #06140E;
   --negative: var(--oxblood-300);
-  --destructive: var(--oxblood-300);
-  --destructive-foreground: #06140E;
+  --negative-bg: #2A1416;
+  --destructive: var(--alert-400);
+  --destructive-foreground: #1A0606;
 
   /* Borders / structural */
   --secondary: #1F1F22;
@@ -375,6 +384,7 @@
   --color-success-foreground: var(--success-foreground);
   --color-positive:           var(--positive);
   --color-negative:           var(--negative);
+  --color-negative-bg:        var(--negative-bg);
   --color-danger:             var(--danger);
   --color-danger-bg:          var(--danger-bg);
   --color-text-link:          var(--text-link);
