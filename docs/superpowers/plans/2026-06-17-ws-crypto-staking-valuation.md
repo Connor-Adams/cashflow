@@ -593,26 +593,26 @@ Expected: typecheck + all tests + both builds pass. Fix anything red before touc
 
 - [ ] **Step 2: Price backfill (prod, writes price rows only — safe)**
 
-Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/backfill-crypto-daily-prices.ts --symbols DOT,ETH --since 2024-10-01`
-Expected: upserts DOT-CAD + ETH-CAD daily bars. Re-runnable.
+Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/backfill-crypto-daily-prices.ts --symbols DOT,ETH --since 2024-10-01 --commit`
+Expected: upserts DOT-CAD + ETH-CAD daily bars. Re-runnable. (Omit `--commit` for a dry-run preview; `--commit` against local sqlite is refused.)
 
 - [ ] **Step 3: Valuation dry-run (prod) → show Connor**
 
-Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/backfill-staking-reward-values.ts --account-id 10 --dry-run --verbose`
-Expected: `would value ~673 rows; ~33 unvalued (no quantity/security)`. **Paste the summary to Connor; get explicit go before Step 4.**
+Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/backfill-staking-reward-values.ts --account-id 10 --verbose`
+Expected (default = dry-run, no write): `[DRY RUN] would value ~673 rows; ~33 unvalued (no quantity/security)`. **Paste the summary to Connor; get explicit go before Step 4.**
 
 - [ ] **Step 4: Valuation commit (prod write — only after Connor confirms)**
 
-Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/backfill-staking-reward-values.ts --account-id 10 --verbose`
+Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/backfill-staking-reward-values.ts --account-id 10 --commit --verbose`
 
 - [ ] **Step 5: Purge dry-run (prod) → show Connor exact counts**
 
-Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/purge-investment-zero-transactions.ts --dry-run`
-Expected: `Matched 358 ... Wealthsimple Crypto: 358` (verify the per-account breakdown lists only investment accounts). **Paste to Connor; get explicit go.**
+Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/purge-investment-zero-transactions.ts`
+Expected (default = dry-run): `Matched 358 ... Wealthsimple Crypto: 358` (verify the per-account breakdown lists only investment accounts). **Paste to Connor; get explicit go.**
 
 - [ ] **Step 6: Purge commit (prod delete — only after Connor confirms)**
 
-Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/purge-investment-zero-transactions.ts`
+Run: `cd backend && DATABASE_URL=<railway-public-url> npx tsx scripts/purge-investment-zero-transactions.ts --commit`
 
 - [ ] **Step 7: Post-verify**
 
