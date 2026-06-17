@@ -9,6 +9,8 @@ import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/ui/page-header'
+import { Alert } from '@/components/ui/alert'
+import { EmptyTableRow } from '@/components/ui/empty-state'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import {
   Table,
@@ -378,11 +380,7 @@ export function AccountsPage() {
       </form>
       </Card>
 
-      {err && (
-        <p className="error" id={errorId} role="alert">
-          {err}
-        </p>
-      )}
+      {err ? <Alert variant="error" className="mb-4" id={errorId}>{err}</Alert> : null}
 
       <CollapsibleCard
         id="your-accounts"
@@ -391,8 +389,7 @@ export function AccountsPage() {
         description="Edit the basics here without cramming action buttons into the currency field."
         actions={<Badge variant="secondary">{accountCount} total</Badge>}
       >
-        <div className="tableWrap">
-          <Table className="table">
+        <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
@@ -411,6 +408,8 @@ export function AccountsPage() {
                 Array.from({ length: 6 }).map((_, i) => (
                   <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
+              ) : accounts.length === 0 ? (
+                <EmptyTableRow colSpan={9} title="No accounts yet" description="Add your first account above." />
               ) : (
                 accounts.map((a) => (
                   <Fragment key={a.id}>
@@ -623,12 +622,6 @@ export function AccountsPage() {
               )}
             </TableBody>
           </Table>
-          {accounts.length === 0 && !loading && (
-            <p className="emptyState pad">
-              No accounts yet — create one using the form above, then import CSVs under Transactions.
-            </p>
-          )}
-        </div>
       </CollapsibleCard>
     </div>
     {confirm.dialog}
