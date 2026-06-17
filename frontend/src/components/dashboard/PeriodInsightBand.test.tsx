@@ -51,6 +51,13 @@ describe('PeriodInsightBand', () => {
     expect(queryByText(/loaned out/i)).toBeNull()
   })
 
+  it('shows the friendly range label and currency in the caption', () => {
+    const { getByText } = render(
+      <PeriodInsightBand data={base} currency="CAD" rangeLabel="This month" />,
+    )
+    expect(getByText('This month · CAD')).toBeTruthy()
+  })
+
   it('shows just "this period" when currency is empty', () => {
     const { getByText, queryByText } = render(
       <PeriodInsightBand data={base} currency="" />,
