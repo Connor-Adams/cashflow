@@ -11,15 +11,26 @@
  * number depends on them. The import guard (parseStatementFile) stops
  * new ones being created — run that change FIRST so these don't regrow.
  *
- * Usage:
- *   cd backend && npx tsx scripts/purge-investment-zero-transactions.ts --dry-run
- *   cd backend && npx tsx scripts/purge-investment-zero-transactions.ts            # commits
- * Flags: --dry-run (report only), --account-id N, --household-id N, --verbose
+ * Usage (PROD Postgres — NEVER local sqlite):
+ *   PUB=$(railway variables --service Postgres --json | jq -r .DATABASE_PUBLIC_URL)
+ *   cd backend
+ *   DATABASE_URL="$PUB" npx tsx scripts/purge-investment-zero-transactions.ts            # dry-run (default)
+ *   DATABASE_URL="$PUB" npx tsx scripts/purge-investment-zero-transactions.ts --commit   # apply
+ *
+ * Do NOT use `railway run` — it injects the internal-only DATABASE_URL
+ * (*.railway.internal) which is unreachable from a laptop.
+ *
+ * Flags:
+ *   --commit          Actually write. Default is dry-run (report only).
+ *   --account-id N    Restrict to one account.
+ *   --household-id N  Restrict to one household.
+ *   --verbose         List every matched transaction id.
  */
 import { Op } from 'sequelize';
 import { Transaction, Account, sequelize } from '../src/models';
+import { databaseUrl } from '../src/config/env';
 
-type Flags = { dryRun: boolean; verbose: boolean; accountId: number | null; householdId: number | null };
+type Flags = { commit: boolean; verbose: boolean; accountId: number | null; householdId: number | null };
 
 function numFlag(argv: string[], name: string): number | null {
   const i = argv.indexOf(name);
@@ -28,7 +39,7 @@ function numFlag(argv: string[], name: string): number | null {
 }
 function parseFlags(argv: string[]): Flags {
   return {
-    dryRun: argv.includes('--dry-run'),
+    commit: argv.includes('--commit'),
     verbose: argv.includes('--verbose'),
     accountId: numFlag(argv, '--account-id'),
     householdId: numFlag(argv, '--household-id'),
@@ -38,6 +49,23 @@ class DryRunRollback extends Error {}
 
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv.slice(2));
+  const commit = flags.commit;
+  const mode = commit ? 'COMMIT (writing)' : 'DRY RUN (report only)';
+
+  if (databaseUrl) {
+    console.log(`Target DB: postgres (${new URL(databaseUrl).host})`);
+  } else {
+    console.log('Target DB: LOCAL SQLITE (no DATABASE_URL set)');
+    if (commit) {
+      console.error(
+        'Refusing to --commit against local sqlite. Set DATABASE_URL to the prod Postgres URL ' +
+          '(DATABASE_PUBLIC_URL from `railway variables --service Postgres`).',
+      );
+      process.exit(1);
+    }
+  }
+  console.log(`mode: ${mode}`);
+
   const accountWhere: Record<string, unknown> = { accountType: 'investment' };
   if (flags.accountId != null) accountWhere.id = flags.accountId;
   if (flags.householdId != null) accountWhere.householdId = flags.householdId;
@@ -63,10 +91,10 @@ async function main(): Promise<void> {
     if (ids.length > 0) {
       await Transaction.destroy({ where: { id: { [Op.in]: ids } }, transaction: t });
     }
-    if (flags.dryRun) throw new DryRunRollback();
+    if (!commit) throw new DryRunRollback();
   }).catch((err) => { if (!(err instanceof DryRunRollback)) throw err; });
 
-  console.log(flags.dryRun ? 'DRY RUN — nothing deleted.' : `Deleted ${ids.length} rows.`);
+  console.log(commit ? `Deleted ${ids.length} rows.` : 'DRY RUN — nothing deleted.');
   await sequelize.close();
 }
 

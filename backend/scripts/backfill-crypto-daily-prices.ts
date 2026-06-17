@@ -5,12 +5,23 @@
  * ticker so close is already CAD (DOT/ETH both have CAD pairs); rows are
  * tagged source='yahoo-cad'. Idempotent: upsert on (security_id, date).
  *
- * Usage:
- *   cd backend && npx tsx scripts/backfill-crypto-daily-prices.ts --symbols DOT,ETH --since 2024-10-01 --dry-run
- *   cd backend && npx tsx scripts/backfill-crypto-daily-prices.ts --symbols DOT,ETH --since 2024-10-01
+ * Usage (PROD Postgres — NEVER local sqlite):
+ *   PUB=$(railway variables --service Postgres --json | jq -r .DATABASE_PUBLIC_URL)
+ *   cd backend
+ *   DATABASE_URL="$PUB" npx tsx scripts/backfill-crypto-daily-prices.ts --symbols DOT,ETH --since 2024-10-01            # dry-run (default)
+ *   DATABASE_URL="$PUB" npx tsx scripts/backfill-crypto-daily-prices.ts --symbols DOT,ETH --since 2024-10-01 --commit   # apply
+ *
+ * Do NOT use `railway run` — it injects the internal-only DATABASE_URL
+ * (*.railway.internal) which is unreachable from a laptop.
+ *
+ * Flags:
+ *   --commit          Actually write. Default is dry-run (report only).
+ *   --symbols X,Y     Comma-separated list of crypto symbols (default: DOT,ETH).
+ *   --since YYYY-MM-DD  Start date for price history (default: 2024-10-01).
  */
 import { Security, SecurityDailyPrice, sequelize } from '../src/models';
 import { fetchDailyHistory } from '../src/integrations/yahoo/client';
+import { databaseUrl } from '../src/config/env';
 
 function strFlag(argv: string[], name: string): string | null {
   const i = argv.indexOf(name);
@@ -19,9 +30,24 @@ function strFlag(argv: string[], name: string): string | null {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const dryRun = argv.includes('--dry-run');
+  const commit = argv.includes('--commit');
   const symbols = (strFlag(argv, '--symbols') ?? 'DOT,ETH').split(',').map((s) => s.trim().toUpperCase());
   const since = strFlag(argv, '--since') ?? '2024-10-01';
+  const mode = commit ? 'COMMIT (writing)' : 'DRY RUN (report only)';
+
+  if (databaseUrl) {
+    console.log(`Target DB: postgres (${new URL(databaseUrl).host})`);
+  } else {
+    console.log('Target DB: LOCAL SQLITE (no DATABASE_URL set)');
+    if (commit) {
+      console.error(
+        'Refusing to --commit against local sqlite. Set DATABASE_URL to the prod Postgres URL ' +
+          '(DATABASE_PUBLIC_URL from `railway variables --service Postgres`).',
+      );
+      process.exit(1);
+    }
+  }
+  console.log(`mode: ${mode}`);
 
   for (const symbol of symbols) {
     const sec = await Security.findOne({ where: { symbol, assetType: 'cryptocurrency' } });
@@ -30,7 +56,7 @@ async function main(): Promise<void> {
     const bars = await fetchDailyHistory(ticker, { period1: since });
     if (!bars || bars.length === 0) { console.warn(`no bars for ${ticker}`); continue; }
     console.log(`${ticker}: ${bars.length} daily bars from ${bars[0].date} to ${bars[bars.length - 1].date}`);
-    if (dryRun) continue;
+    if (!commit) continue;
     for (const b of bars) {
       await SecurityDailyPrice.upsert({
         securityId: (sec as unknown as { id: number }).id,
