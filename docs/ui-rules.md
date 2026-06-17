@@ -40,10 +40,4 @@ North-star: the Dashboard's *look*. Implementation target: the `components/ui/` 
 
 ## Rule gaps found during pilot
 
-App.css classes remaining in `AccountsPage.tsx` after the Task 4b–4e sweep that the above rules do **not** yet address. Track these before the next page sweep.
-
-| Class | Where | Proposed rule |
-|---|---|---|
-| `.page` | `<div className="page">` (outer page wrapper) | Already blessed in "Page anatomy" rule 1; keep but note it is a layout class owned by App.css, not a Tailwind utility. Will be converted when the global layout layer is hardened. |
-| `.accountsTableCard` | `<CollapsibleCard className="accountsTableCard">` | Collapsible card variant classes (page-scoped overrides) have no blessed pattern yet. Next rule: drop page-scoped variant classes and use `CollapsibleCard` props or Tailwind utilities only. |
-| `.accountsActionGroup` | `<div className="accountsActionGroup">` (row action button group) | Inline action groups have no blessed layout yet. Proposed rule: use `className="flex gap-2"` (or `items-center`) directly. |
+None — all pilot classes mapped to covered rules.

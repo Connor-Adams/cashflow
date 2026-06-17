@@ -384,7 +384,7 @@ export function AccountsPage() {
 
       <CollapsibleCard
         id="your-accounts"
-        className="accountsTableCard"
+        className="mb-4"
         title="Your accounts"
         description="Edit the basics here without cramming action buttons into the currency field."
         actions={<Badge variant="secondary">{accountCount} total</Badge>}
@@ -409,7 +409,7 @@ export function AccountsPage() {
                   <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
               ) : accounts.length === 0 ? (
-                <EmptyTableRow colSpan={9} title="No accounts yet" description="Add your first account above." />
+                <EmptyTableRow colSpan={9} title="No accounts yet" description="Create one using the form above, then import CSVs under Transactions." />
               ) : (
                 accounts.map((a) => (
                   <Fragment key={a.id}>
@@ -561,7 +561,7 @@ export function AccountsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="accountsActionGroup">
+                      <div className="flex flex-wrap gap-2">
                         {editingId === a.id ? (
                           <>
                             <Button type="button" size="sm" onClick={() => void saveCard(a.id)}>
