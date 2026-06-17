@@ -7,6 +7,7 @@ import {
 } from 'react'
 import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -1237,7 +1238,7 @@ export function TransactionsPage() {
             {dateRangeInvalid && (
               <span
                 id="transactions-date-range-error"
-                className="error"
+                className="text-danger"
                 role="alert"
               >
                 End date must be on or after start date.
@@ -1418,7 +1419,7 @@ export function TransactionsPage() {
           </p>
         )}
       </section>
-      {(err || attachErr) && <span className="error">{err || attachErr}</span>}
+      {(err || attachErr) && <Alert variant="error" className="mb-4">{err || attachErr}</Alert>}
       {aiAuditMessage && <p className="uploadMsg">{aiAuditMessage}</p>}
       {bulkAiResults.length > 0 && (
         <section className="card aiVisibilityPanel" aria-label="Latest bulk AI results">
