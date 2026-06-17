@@ -1,6 +1,6 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { sequelize, Account, ExternalOrder, ExternalOrderItem, TransactionOrderLink, Transaction, TransactionSignal } from '../models';
+import { sequelize, Account, ExternalOrder, ExternalOrderItem, TransactionOrderLink, Transaction, TransactionSignal, Household } from '../models';
 import { supersedeAcceptedOrderLinks, linkOrderToTransaction, anchorReceiptOrderToTransaction } from './receiptOrderAnchor';
 import type { ReceiptOpenAiCaller } from './categorizeReceiptItems';
 
@@ -10,6 +10,9 @@ let fp = 0;
 
 before(async () => {
   await sequelize.sync({ force: true });
+  // The ExternalOrderItem beforeSave hook calls resolveCategoryIdByName which
+  // does Category.findOrCreate — categories.household_id has a FK to households.
+  await Household.create({ name: 'H' } as never);
   const acct = await Account.create({ householdId: HH, name: 'Card', visibility: 'private' } as never);
   accountId = acct.id;
 });

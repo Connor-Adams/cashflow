@@ -1,11 +1,16 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { sequelize, ExternalOrder, ExternalOrderItem } from '../models';
+import { sequelize, ExternalOrder, ExternalOrderItem, Household } from '../models';
 import { categorizeAndApplyReceiptItems, type ReceiptOpenAiCaller } from './categorizeReceiptItems';
 
 const HH = 1;
 let seq = 0;
-before(async () => { await sequelize.sync({ force: true }); });
+before(async () => {
+  await sequelize.sync({ force: true });
+  // The ExternalOrderItem beforeSave hook calls resolveCategoryIdByName which
+  // does Category.findOrCreate — categories.household_id has a FK to households.
+  await Household.create({ name: 'H' } as never);
+});
 
 /**
  * Fake caller that mirrors the real OpenAI response contract.

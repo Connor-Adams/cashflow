@@ -1,6 +1,6 @@
 import { test, before, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { sequelize, ExternalOrder, ExternalOrderItem } from '../models'
+import { sequelize, ExternalOrder, ExternalOrderItem, Household } from '../models'
 import {
   parseReceiptItemCategorySuggestions,
   categorizeReceiptItemsWithAi,
@@ -16,8 +16,12 @@ before(async () => {
 // Each test gets a unique householdId so rows from other tests (the DB is
 // force-synced once, then accumulates) never bleed into its queries.
 let HH = 0
-beforeEach(() => {
+beforeEach(async () => {
   HH += 1
+  // The ExternalOrderItem beforeSave hook calls resolveCategoryIdByName which
+  // does Category.findOrCreate — categories.household_id has a FK to households.
+  // Create a matching Household row so the FK is satisfied.
+  await Household.create({ name: `H${HH}` } as never)
 })
 
 // Stub caller: reads the batch JSON embedded in the user message and echoes

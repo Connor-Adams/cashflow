@@ -8,7 +8,7 @@
  */
 import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { sequelize, Account, Rule, Transaction, TransactionSignal } from '../models';
+import { sequelize, Account, Rule, Transaction, TransactionSignal, Household } from '../models';
 import { runBackfill, type BackfillFlags } from './runEnrichmentBackfill';
 
 const HH = 1;
@@ -17,6 +17,9 @@ let fp = 0;
 
 before(async () => {
   await sequelize.sync({ force: true });
+  // The Transaction beforeSave hook calls resolveCategoryIdByName which
+  // does Category.findOrCreate — categories.household_id has a FK to households.
+  await Household.create({ name: 'H' } as never);
   const account = await Account.create({ name: 'Test', householdId: HH } as never);
   accountId = account.id;
 });
