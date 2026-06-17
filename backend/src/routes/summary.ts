@@ -34,7 +34,25 @@ import {
   type OwedBackRow,
 } from '../summary/periodInsight';
 import { householdWhere, visibleAccountWhere, visibleTransactionWhere } from '../auth/scope';
+import { currentAuth } from '../auth/middleware';
+import { loadCategoryTree, buildRollupRows } from '../categories/rollup';
 import type { PeriodInsightResp, PeriodInsightCurrency } from '@cashflow/shared';
+
+/**
+ * Build a raw spend map from any array of points carrying a `categoryId`
+ * and `sumAmount`. Skips null ids. Uses absolute spend (Math.abs) so that
+ * credit rows don't cancel out spend in the rollup.
+ */
+function rawSpendByCategoryId(
+  points: Array<{ categoryId: number | null; sumAmount: number }>,
+): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const p of points) {
+    if (p.categoryId == null) continue;
+    map.set(p.categoryId, (map.get(p.categoryId) ?? 0) + Math.abs(p.sumAmount));
+  }
+  return map;
+}
 
 /** One window's inclusive ISO date range. */
 type DateRange = { from: string; to: string };
@@ -87,6 +105,7 @@ router.get('/dashboard', async (req, res, next) => {
           'date',
           'currency',
           'finalCategory',
+          'finalCategoryId', // B2: finalCategoryId selected for rollup
           'finalBusiness',
           'finalSplitType',
           'merchantRaw',
@@ -116,6 +135,12 @@ router.get('/dashboard', async (req, res, next) => {
       rows as unknown as SummaryTxnRow[],
       accountById,
       itemContext,
+    );
+
+    const householdId = currentAuth(req).household.id;
+    const categoryTree = buildRollupRows(
+      rawSpendByCategoryId(Array.from(aggregates.byCategory.values())),
+      await loadCategoryTree(householdId),
     );
 
     res.json({
@@ -148,6 +173,7 @@ router.get('/dashboard', async (req, res, next) => {
           a.date === b.date ? Math.abs(b.amount) - Math.abs(a.amount) : b.date.localeCompare(a.date)
         )
         .slice(0, 12),
+      categoryTree,
     });
   } catch (e) {
     next(e);
@@ -200,6 +226,7 @@ async function loadPeriodRows(
       'date',
       'currency',
       'finalCategory',
+      'finalCategoryId', // B2: finalCategoryId selected for future rollup
       'finalBusiness',
       'finalSplitType',
       'merchantRaw',
@@ -477,6 +504,7 @@ router.get('/monthly', async (req, res, next) => {
           'merchantRaw',
           'merchantClean',
           'finalCategory',
+          'finalCategoryId', // B2: finalCategoryId selected for rollup
           'finalBusiness',
           'finalSplitType',
           'businessAmount',
@@ -505,6 +533,13 @@ router.get('/monthly', async (req, res, next) => {
       accountTypeById,
       itemContext,
     );
+
+    const householdId = currentAuth(req).household.id;
+    const categoryTree = buildRollupRows(
+      rawSpendByCategoryId(categoryPoints),
+      await loadCategoryTree(householdId),
+    );
+
     res.json({
       points: points.sort((a, b) =>
         a.month === b.month
@@ -516,6 +551,7 @@ router.get('/monthly', async (req, res, next) => {
         if (a.currency !== b.currency) return a.currency.localeCompare(b.currency);
         return (a.category ?? '').localeCompare(b.category ?? '');
       }),
+      categoryTree,
     });
   } catch (e) {
     next(e);

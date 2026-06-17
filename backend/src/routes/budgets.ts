@@ -871,6 +871,7 @@ async function computeStatusForBudgets(
           'id',
           'currency',
           'finalCategory',
+          'finalCategoryId', // B2: finalCategoryId selected for future rollup
           'finalBusiness',
           'finalSplitType',
           'amount',
