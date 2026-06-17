@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { StatCard } from '@/components/ui/stat-card'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account, AccountType } from '../types/api'
@@ -283,28 +284,12 @@ export function AccountsPage() {
         }
       />
 
-      <section className="accountsStats" aria-busy={loading}>
-        <Card className="statCard">
-          <p className="statLabel">Accounts</p>
-          <p className="statValue">{accountCount}</p>
-          <p className="muted statHint">Cards and bank accounts configured</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Short codes</p>
-          <p className="statValue">{shortCodeCount}</p>
-          <p className="muted statHint">Ready for folder import matching</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Joint</p>
-          <p className="statValue">{jointCount}</p>
-          <p className="muted statHint">Accounts owned together</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Currencies</p>
-          <p className="statValue">{currencyCount}</p>
-          <p className="muted statHint">Default currencies in use</p>
-        </Card>
-      </section>
+      <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
+        <StatCard label="Accounts" value={accountCount} hint="Cards and bank accounts configured" />
+        <StatCard label="Short codes" value={shortCodeCount} hint="Ready for folder import matching" />
+        <StatCard label="Joint" value={jointCount} hint="Accounts owned together" />
+        <StatCard label="Currencies" value={currencyCount} hint="Default currencies in use" />
+      </div>
 
       <Card className="accountsFormCard">
       <form onSubmit={onCreate}>
