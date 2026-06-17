@@ -1745,47 +1745,16 @@ export type HouseholdTimezoneResponse = {
   effectiveTimezone: string
 }
 
-export type PeriodInsightRangeKind =
-  | 'calendar-month'
-  | 'calendar-quarter'
-  | 'calendar-year'
-  | 'custom';
-
-export type PeriodInsightBaselineKey =
-  | 'prior-period'
-  | 'same-period-last-year'
-  | 'typical'
-  | 'per-day-rate';
-
-export type PeriodInsightBaseline = {
-  key: PeriodInsightBaselineKey;
-  label: string;
-  realCost: number;
-  realCostDeltaPct: number | null;
-  owedBack: number;
-  owedBackDeltaPct: number | null;
-};
-
-export type PeriodInsightMover = {
-  category: string;
-  currentRealCost: number;
-  baselineRealCost: number;
-  deltaAbs: number;
-  deltaPct: number | null;
-  driver: { topMerchant: string | null; txnCount: number };
-};
-
 export type PeriodInsightCurrency = {
   currency: string;
   netSpend: number;
-  realCost: number;
+  realCost: number; // netSpend - owedBack
   owedBack: number;
   owedBackBreakdown: { reimbursable: number; partnerShare: number };
-  collectedThisPeriod: number;
-  receivablesOutstanding: number;
-  rangeKind: PeriodInsightRangeKind;
-  baselines: PeriodInsightBaseline[];
-  movers: PeriodInsightMover[];
+  totalSpend: number;
+  totalCredits: number;
+  totalIncome: number;
+  totalPayments: number;
 };
 
 export type PeriodInsightResp = {
