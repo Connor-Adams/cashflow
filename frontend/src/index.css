@@ -13,6 +13,54 @@
 :root[data-theme="light"] {
   --radius: 0.5rem;
 
+  /* ── NEW PALETTE RAMPS ─────────────────────────────────────────── */
+  /* Greyscale (zinc) — the workhorse */
+  --zinc-50:  #FAFAFA;
+  --zinc-100: #F4F4F5;
+  --zinc-200: #E4E4E7;
+  --zinc-300: #D4D4D8;
+  --zinc-400: #A1A1AA;
+  --zinc-500: #71717A;
+  --zinc-600: #52525B;
+  --zinc-700: #3F3F46;
+  --zinc-800: #27272A;
+  --zinc-900: #18181B;
+  --zinc-950: #09090B;
+
+  /* Oxblood — signature + money-out + danger */
+  --oxblood-50:  #FBEDEE;
+  --oxblood-100: #F6D6D9;
+  --oxblood-200: #E9A8AF;
+  --oxblood-300: #DA7B85;
+  --oxblood-400: #C44E5B;
+  --oxblood-500: #9B2D3A;
+  --oxblood-600: #82252F;
+  --oxblood-700: #661C26;
+  --oxblood-800: #4A141B;
+  --oxblood-900: #2E0C10;
+
+  /* Green — money-in / positive */
+  --green-100: #D1FAE5;
+  --green-200: #7DDCAE;
+  --green-300: #35BE83;
+  --green-500: #0FA06C;
+  --green-600: #0A875D;
+  --green-700: #086F4C;
+
+  /* Amber — warning / caution ONLY (not a brand color) */
+  --amber-w-100: #FEF3C7;
+  --amber-w-300: #F5C451;
+  --amber-w-500: #D9A441;
+  --amber-w-700: #B45309;
+
+  /* Hero gradient */
+  --gradient-hero: linear-gradient(135deg, #FF7847, #E84393);
+  --gradient-hero-from: #FF7847;
+  --gradient-hero-to:   #E84393;
+
+  /* Chart categorical extras */
+  --chart-steel: #5EA8E0;
+
   /* Amber / Primary */
   --amber-50: #FFF8E5;
   --amber-100: #FCEBBC;
