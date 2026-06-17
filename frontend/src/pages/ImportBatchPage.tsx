@@ -189,7 +189,7 @@ export function ImportBatchPage() {
             {/* Rollback marker (#233). Rendered when the batch carries
                 rolled_back state — preserves audit trail on the page. */}
             {isRolledBack && row.rolledBackAt ? (
-              <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+              <p className="mt-1 text-xs text-danger">
                 Rolled back at{' '}
                 {row.rolledBackAt.slice(0, 19).replace('T', ' ')}.
                 Transactions were deleted; the row is kept for the audit
@@ -222,7 +222,7 @@ export function ImportBatchPage() {
                 ) : null}
                 {rowErrorsCount != null && rowErrorsCount > 0 ? (
                   <span
-                    className="rounded px-2 py-0.5 font-semibold text-red-700 dark:text-red-300"
+                    className="rounded px-2 py-0.5 font-semibold text-danger"
                     style={{ backgroundColor: 'var(--bg2)' }}
                   >
                     {rowErrorsCount} row error{rowErrorsCount === 1 ? '' : 's'}
@@ -235,13 +235,13 @@ export function ImportBatchPage() {
                 the batch predates the classifier. */}
             {classified > 0 || unknownCount > 0 ? (
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded px-2 py-0.5 font-semibold text-green-700 dark:text-green-300" style={{ backgroundColor: 'var(--bg2)' }}>
+                <span className="rounded px-2 py-0.5 font-semibold text-positive" style={{ backgroundColor: 'var(--bg2)' }}>
                   {cleanCount} clean
                 </span>
                 {needsReviewCount > 0 ? (
                   <Link
                     to={`/review?confidenceFlag=needs_review`}
-                    className="rounded px-2 py-0.5 font-semibold text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
+                    className="rounded px-2 py-0.5 font-semibold text-warning underline-offset-2 hover:underline"
                     style={{ backgroundColor: 'var(--bg2)' }}
                   >
                     {needsReviewCount} need review

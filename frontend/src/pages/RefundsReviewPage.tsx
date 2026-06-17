@@ -182,7 +182,7 @@ function RefundReviewItem({
   onUnlink: () => void
 }) {
   return (
-    <li className="border border-slate-200 dark:border-slate-700 rounded-md p-4">
+    <li className="border rounded-md p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <p className="font-medium">

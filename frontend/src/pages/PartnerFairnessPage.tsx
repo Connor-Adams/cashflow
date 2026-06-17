@@ -222,9 +222,9 @@ export function PartnerFairnessPage() {
       </Card>
 
       {err && (
-        <Card className="mb-4 border-rose-300 bg-rose-50 dark:border-rose-700 dark:bg-rose-950">
+        <Card className="mb-4 border-rose-300 bg-danger-bg dark:border-rose-700">
           <CardContent className="pt-6">
-            <p className="text-rose-800 dark:text-rose-200">{err}</p>
+            <p className="text-danger">{err}</p>
           </CardContent>
         </Card>
       )}
@@ -511,14 +511,14 @@ function StatCard({
 }) {
   const valueTone =
     tone === 'inflow'
-      ? 'text-emerald-700 dark:text-emerald-300'
+      ? 'text-positive'
       : tone === 'outflow'
-        ? 'text-rose-700 dark:text-rose-300'
-        : 'text-zinc-900 dark:text-zinc-100'
+        ? 'text-negative'
+        : 'text-foreground'
   return (
     <Card>
       <CardContent className="pt-6">
-        <p className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">
           {label}
         </p>
         <p className={`mt-1 text-2xl font-semibold ${valueTone}`}>{value}</p>

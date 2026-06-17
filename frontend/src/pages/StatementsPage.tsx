@@ -535,8 +535,8 @@ function StatementDetailPanel({
   const variance = reconciliation.variance
   const varianceColorClass =
     Math.abs(variance) <= 0.01
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : 'text-amber-600 dark:text-amber-400'
+      ? 'text-positive'
+      : 'text-warning'
 
   return (
     <CollapsibleCard

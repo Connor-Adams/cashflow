@@ -80,18 +80,18 @@ const GOAL_STATUS_OPTIONS: Array<{ value: FinancialGoalStatus; label: string }> 
 // Look up colour classes per status via tables instead of building strings
 // dynamically so the bundler keeps them.
 const STATUS_BADGE: Record<FinancialGoalStatus, string> = {
-  active: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-  paused: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  completed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
+  active: 'bg-info-bg text-info-foreground',
+  paused: 'bg-warning-bg text-warning-foreground',
+  completed: 'bg-success-bg text-success-foreground',
 }
 
 const PROJECTION_BADGE: Record<GoalProjectionStatus, string> = {
-  completed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  on_track: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  ahead: 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-100',
-  behind: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-100',
-  unfunded: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  active: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
+  completed: 'bg-success-bg text-success-foreground',
+  on_track: 'bg-success-bg text-success-foreground',
+  ahead: 'bg-info-bg text-info-foreground',
+  behind: 'bg-danger-bg text-danger',
+  unfunded: 'bg-warning-bg text-warning-foreground',
+  active: 'bg-muted text-muted-foreground',
 }
 
 const PROJECTION_LABEL: Record<GoalProjectionStatus, string> = {
@@ -498,7 +498,7 @@ export function GoalsPage() {
                       <TableCell>
                         <div className="flex flex-col gap-1">
                           <div
-                            className="h-2 w-32 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
+                            className="h-2 w-32 overflow-hidden rounded-full bg-muted"
                             role="progressbar"
                             aria-valuenow={Math.round(progress)}
                             aria-valuemin={0}
@@ -506,7 +506,7 @@ export function GoalsPage() {
                             aria-label={`Progress for ${row.name}`}
                           >
                             <div
-                              className="h-full bg-emerald-500 dark:bg-emerald-400"
+                              className="h-full bg-success"
                               style={{ width: `${progress}%` }}
                             />
                           </div>

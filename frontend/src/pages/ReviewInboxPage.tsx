@@ -830,7 +830,7 @@ export function ReviewInboxPage() {
                           >
                             <span>🧾 {row.itemized.itemCount} items</span>
                             {row.itemized.stragglerCount > 0 && (
-                              <span className="text-amber-600">
+                              <span className="text-warning">
                                 {' · '}
                                 {row.itemized.stragglerCount} need review
                               </span>
@@ -854,7 +854,7 @@ export function ReviewInboxPage() {
                               📷 Add receipt
                             </Button>
                             {lastAnalyzedTxnId === row.id && lastItemCount === 0 && attachErr == null && (
-                              <span className="text-xs text-amber-600">
+                              <span className="text-xs text-warning">
                                 {"Couldn't read items — try another photo."}
                               </span>
                             )}

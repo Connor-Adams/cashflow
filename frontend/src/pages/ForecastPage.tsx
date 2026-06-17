@@ -44,9 +44,9 @@ const RANGE_ORDER: ForecastRange[] = ['7d', '30d', '90d']
 // Tailwind v4 JIT needs literal classes, so we look up colours per direction
 // via a table rather than building strings dynamically.
 const DIRECTION_TONE: Record<ForecastEventDirection, string> = {
-  in: 'text-emerald-600 dark:text-emerald-300',
-  out: 'text-rose-600 dark:text-rose-300',
-  neutral: 'text-zinc-500 dark:text-zinc-400',
+  in: 'text-positive',
+  out: 'text-negative',
+  neutral: 'text-muted-foreground',
 }
 
 const DIRECTION_PREFIX: Record<ForecastEventDirection, string> = {
@@ -238,17 +238,17 @@ export function ForecastPage() {
 
       {/* Lowest-balance warning */}
       {goesBelowZero && data ? (
-        <Card className="mb-4 border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/30">
+        <Card className="mb-4 border-amber-300 bg-warning-bg p-4 dark:border-amber-700">
           <div className="flex gap-3">
             <AlertTriangle
-              className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-300"
+              className="mt-0.5 size-5 shrink-0 text-warning"
               aria-hidden="true"
             />
             <div>
-              <p className="font-semibold text-amber-900 dark:text-amber-100">
+              <p className="font-semibold text-warning-foreground">
                 Balance dips below {formatMoney(0, currency)}
               </p>
-              <p className="mb-0 text-sm text-amber-800 dark:text-amber-200">
+              <p className="mb-0 text-sm text-warning">
                 Projected to reach {formatMoney(data.lowestProjectedBalance, currency)} on{' '}
                 {data.lowestProjectedBalanceDate}. Consider shifting expenses or planning a transfer.
               </p>
@@ -338,12 +338,12 @@ export function ForecastPage() {
                     <div className="flex items-center gap-2">
                       {e.direction === 'in' ? (
                         <ArrowUpRight
-                          className="size-4 text-emerald-600 dark:text-emerald-300"
+                          className="size-4 text-positive"
                           aria-hidden="true"
                         />
                       ) : e.direction === 'out' ? (
                         <ArrowDownRight
-                          className="size-4 text-rose-600 dark:text-rose-300"
+                          className="size-4 text-negative"
                           aria-hidden="true"
                         />
                       ) : null}
@@ -432,7 +432,7 @@ function SummaryTile({ label, value, description, tone, loading }: SummaryTilePr
       <p className="muted mb-1 text-xs uppercase tracking-wide">{label}</p>
       <p
         className={`mb-0 text-lg font-semibold tabular-nums ${
-          tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : ''
+          tone === 'warn' ? 'text-warning' : ''
         }`}
       >
         {loading ? '…' : value}

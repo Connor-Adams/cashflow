@@ -166,9 +166,9 @@ export function VaultPage() {
       />
 
       {!encryptionConfigured ? (
-        <Card className="border-amber-300/40 bg-amber-50 dark:bg-amber-950/30 p-4">
+        <Card className="border-amber-300/40 bg-warning-bg p-4">
           <div className="flex gap-3">
-            <ShieldAlert className="text-amber-600" aria-hidden="true" />
+            <ShieldAlert className="text-warning" aria-hidden="true" />
             <div className="text-sm">
               <p className="font-medium">Vault encryption is not configured.</p>
               <p className="text-muted-foreground">
