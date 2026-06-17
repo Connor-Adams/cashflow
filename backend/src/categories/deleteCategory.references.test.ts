@@ -2,7 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
-import { Category, Household, Account, Transaction, Rule, BudgetTarget } from '../models';
+import { Category, Household, Account, Transaction, Rule, BudgetTarget, ExternalOrder, ExternalOrderItem } from '../models';
 import { deleteCategory } from './deleteCategory';
 import { CategoryError } from './errors';
 
@@ -31,6 +31,25 @@ test('blocks delete when a transaction references the category id', async () => 
 test('blocks delete when a rule references the category id', async () => {
   await Rule.create({ householdId, merchantPattern: 'Shell', category: 'Fuel' } as never);
   const node = await Category.findOne({ where: { householdId, name: 'Fuel' } });
+  await assert.rejects(
+    () => deleteCategory(householdId, node!.id),
+    (e: unknown) => e instanceof CategoryError && e.code === 'has_references',
+  );
+});
+
+test('blocks delete when a BudgetTarget references the category id', async () => {
+  await BudgetTarget.create({ householdId, category: 'SomeName', currency: 'CAD', amount: '100', period: 'monthly' } as never);
+  const node = await Category.findOne({ where: { householdId, name: 'SomeName' } });
+  await assert.rejects(
+    () => deleteCategory(householdId, node!.id),
+    (e: unknown) => e instanceof CategoryError && e.code === 'has_references',
+  );
+});
+
+test('blocks delete when an ExternalOrderItem references the category id', async () => {
+  const order = await ExternalOrder.create({ householdId, source: 'amazon', dedupeKey: 'dk-1' } as never);
+  await ExternalOrderItem.create({ externalOrderId: order.id, title: 'Widget', inferredCategory: 'SomeName' } as never);
+  const node = await Category.findOne({ where: { householdId, name: 'SomeName' } });
   await assert.rejects(
     () => deleteCategory(householdId, node!.id),
     (e: unknown) => e instanceof CategoryError && e.code === 'has_references',

@@ -90,5 +90,14 @@ test('backfill maps string columns to root category ids', async () => {
 test('down removes all FK columns', async () => {
   await migration.down(sequelize.getQueryInterface(), Sequelize);
   const txn = await sequelize.getQueryInterface().describeTable('transactions');
-  assert.ok(!('final_category_id' in txn));
+  assert.ok(!('auto_category_id' in txn), 'transactions.auto_category_id should be gone');
+  assert.ok(!('category_override_id' in txn), 'transactions.category_override_id should be gone');
+  assert.ok(!('final_category_id' in txn), 'transactions.final_category_id should be gone');
+  const item = await sequelize.getQueryInterface().describeTable('external_order_items');
+  assert.ok(!('inferred_category_id' in item), 'external_order_items.inferred_category_id should be gone');
+  assert.ok(!('category_override_id' in item), 'external_order_items.category_override_id should be gone');
+  const rule = await sequelize.getQueryInterface().describeTable('rules');
+  assert.ok(!('category_id' in rule), 'rules.category_id should be gone');
+  const bt = await sequelize.getQueryInterface().describeTable('budget_targets');
+  assert.ok(!('category_id' in bt), 'budget_targets.category_id should be gone');
 });
