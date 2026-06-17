@@ -9,6 +9,8 @@ import { useConfirm } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/ui/page-header'
+import { Alert } from '@/components/ui/alert'
+import { EmptyTableRow } from '@/components/ui/empty-state'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import {
   Table,
@@ -19,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { StatCard } from '@/components/ui/stat-card'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
 import type { Account, AccountType } from '../types/api'
@@ -283,42 +286,26 @@ export function AccountsPage() {
         }
       />
 
-      <section className="accountsStats" aria-busy={loading}>
-        <Card className="statCard">
-          <p className="statLabel">Accounts</p>
-          <p className="statValue">{accountCount}</p>
-          <p className="muted statHint">Cards and bank accounts configured</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Short codes</p>
-          <p className="statValue">{shortCodeCount}</p>
-          <p className="muted statHint">Ready for folder import matching</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Joint</p>
-          <p className="statValue">{jointCount}</p>
-          <p className="muted statHint">Accounts owned together</p>
-        </Card>
-        <Card className="statCard">
-          <p className="statLabel">Currencies</p>
-          <p className="statValue">{currencyCount}</p>
-          <p className="muted statHint">Default currencies in use</p>
-        </Card>
-      </section>
+      <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
+        <StatCard label="Accounts" value={accountCount} hint="Cards and bank accounts configured" />
+        <StatCard label="Short codes" value={shortCodeCount} hint="Ready for folder import matching" />
+        <StatCard label="Joint" value={jointCount} hint="Accounts owned together" />
+        <StatCard label="Currencies" value={currencyCount} hint="Default currencies in use" />
+      </div>
 
-      <Card className="accountsFormCard">
+      <Card className="mb-4">
       <form onSubmit={onCreate}>
-        <div className="accountsCardHeader">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2>New account</h2>
-            <p className="muted">
+            <p className="text-sm text-muted-foreground">
               Short codes are optional, but they make file naming and folder import much cleaner.
             </p>
           </div>
         </div>
-        <div className="formGrid">
+        <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
           <Label htmlFor="accounts-create-name">
-            Name <span className="req">*</span>
+            Name <span className="text-danger">*</span>
             <Input
               id="accounts-create-name"
               name="name"
@@ -393,21 +380,16 @@ export function AccountsPage() {
       </form>
       </Card>
 
-      {err && (
-        <p className="error" id={errorId} role="alert">
-          {err}
-        </p>
-      )}
+      {err ? <Alert variant="error" className="mb-4" id={errorId}>{err}</Alert> : null}
 
       <CollapsibleCard
         id="your-accounts"
-        className="accountsTableCard"
+        className="mb-4"
         title="Your accounts"
         description="Edit the basics here without cramming action buttons into the currency field."
         actions={<Badge variant="secondary">{accountCount} total</Badge>}
       >
-        <div className="tableWrap">
-          <Table className="table">
+        <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
@@ -426,6 +408,8 @@ export function AccountsPage() {
                 Array.from({ length: 6 }).map((_, i) => (
                   <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
+              ) : accounts.length === 0 ? (
+                <EmptyTableRow colSpan={9} title="No accounts yet" description="Create one using the form above, then import CSVs under Transactions." />
               ) : (
                 accounts.map((a) => (
                   <Fragment key={a.id}>
@@ -457,7 +441,7 @@ export function AccountsPage() {
                         <div>
                           {a.name}
                           {a.notes && (
-                            <p className="text-xs muted" style={{ marginTop: '0.125rem' }}>
+                            <p className="text-xs text-muted-foreground mt-0.5">
                               {a.notes.length > 100 ? `${a.notes.slice(0, 100)}…` : a.notes}
                             </p>
                           )}
@@ -553,10 +537,10 @@ export function AccountsPage() {
                             aria-label="Credit limit"
                           />
                         ) : (
-                          <span className="muted">—</span>
+                          <span className="text-muted-foreground">—</span>
                         )
                       ) : a.accountType !== 'credit_card' ? (
-                        <span className="muted">—</span>
+                        <span className="text-muted-foreground">—</span>
                       ) : a.creditLimit == null ? (
                         <Button
                           type="button"
@@ -577,7 +561,7 @@ export function AccountsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="accountsActionGroup">
+                      <div className="flex flex-wrap gap-2">
                         {editingId === a.id ? (
                           <>
                             <Button type="button" size="sm" onClick={() => void saveCard(a.id)}>
@@ -610,7 +594,7 @@ export function AccountsPage() {
                   {editingId === a.id && (
                     <TableRow>
                       <TableCell colSpan={9}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                        <div className="flex flex-col gap-1">
                           <label className="text-sm font-medium" htmlFor={`notes-${a.id}`}>
                             Notes
                           </label>
@@ -621,10 +605,10 @@ export function AccountsPage() {
                             rows={3}
                             maxLength={4000}
                             placeholder="Routing number, custodian, tax ID, or any per-account reminder…"
-                            style={{ width: '100%', resize: 'vertical' }}
+                            className="w-full resize-y"
                           />
                           <span
-                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'muted'}`}
+                            className={`text-xs ${editNotes.length > 3800 ? 'text-destructive' : 'text-muted-foreground'}`}
                             aria-live="polite"
                           >
                             {editNotes.length}/4000
@@ -638,12 +622,6 @@ export function AccountsPage() {
               )}
             </TableBody>
           </Table>
-          {accounts.length === 0 && !loading && (
-            <p className="emptyState pad">
-              No accounts yet — create one using the form above, then import CSVs under Transactions.
-            </p>
-          )}
-        </div>
       </CollapsibleCard>
     </div>
     {confirm.dialog}

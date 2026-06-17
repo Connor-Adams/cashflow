@@ -47,6 +47,7 @@ import { SettingsTabLayout } from './pages/settings/SettingsTabLayout'
 import { DisplaySection } from './pages/settings/sections/DisplaySection'
 import { GmailSection } from './pages/settings/sections/GmailSection'
 import { PaletteSection } from './pages/settings/sections/PaletteSection'
+import { DesignSystemSection } from './pages/settings/sections/DesignSystemSection'
 import { PartnerInviteSection } from './pages/settings/sections/PartnerInviteSection'
 import { ImportsTab } from './pages/settings/tabs/ImportsTab'
 import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
@@ -174,6 +175,7 @@ function AppRoutes() {
             <Route element={<SettingsTabLayout />}>
               <Route path="display" element={<DisplaySection />} />
               <Route path="palette" element={<PaletteSection />} />
+              <Route path="design-system" element={<DesignSystemSection />} />
               <Route path="gmail" element={<GmailSection />} />
               <Route path="partner-invite" element={<PartnerInviteSection />} />
             </Route>
