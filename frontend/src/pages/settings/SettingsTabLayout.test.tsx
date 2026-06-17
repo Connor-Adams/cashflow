@@ -19,9 +19,10 @@ function renderAt(path: string) {
 }
 
 describe('SettingsTabLayout', () => {
-  it('renders three sidebar nav links', () => {
+  it('renders four sidebar nav links', () => {
     renderAt('/settings/display')
     expect(screen.getByRole('link', { name: 'Display' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Palette' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Gmail' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Partner invite' })).toBeInTheDocument()
   })

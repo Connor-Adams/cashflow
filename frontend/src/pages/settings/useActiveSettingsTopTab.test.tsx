@@ -17,6 +17,7 @@ function wrapper(initialPath: string) {
 describe('useActiveSettingsTopTab', () => {
   it.each([
     ['/settings/display', 'settings'],
+    ['/settings/palette', 'settings'],
     ['/settings/gmail', 'settings'],
     ['/settings/partner-invite', 'settings'],
     ['/settings/imports', 'imports'],
