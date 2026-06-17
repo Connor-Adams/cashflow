@@ -23,6 +23,13 @@ function seedRepo() {
   git(dir, 'init', '-q');
   git(dir, 'config', 'user.email', 'test@example.com');
   git(dir, 'config', 'user.name', 'Test');
+  // Stop git from spawning background work (gc --auto, commit-graph,
+  // fsmonitor) that keeps writing into .git/objects after a commit returns —
+  // that write races teardown's recursive rmSync and throws ENOTEMPTY.
+  git(dir, 'config', 'gc.auto', '0');
+  git(dir, 'config', 'core.fsmonitor', 'false');
+  git(dir, 'config', 'fetch.writeCommitGraph', 'false');
+  git(dir, 'config', 'commitGraph.generationVersion', '0');
   write(dir, 'package.json', '{"name":"root"}\n');
   write(dir, 'yarn.lock', '# lock\n');
   write(dir, 'backend/index.ts', 'export const b = 1;\n');
@@ -53,7 +60,10 @@ function withRepo(fn) {
   try {
     fn(dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    // force only swallows ENOENT, not ENOTEMPTY. maxRetries makes rmSync
+    // retry (with linear backoff) when a stray git background write recreates
+    // a file under .git/objects mid-delete.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 
