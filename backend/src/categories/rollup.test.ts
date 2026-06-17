@@ -55,3 +55,18 @@ test('rollup ignores ids not in the tree (stale/cross-household) without throwin
   const rolled = rollupByCategoryId(new Map([[999999, 10]]), tree);
   assert.equal(rolled.get(999999), undefined);
 });
+
+test('rollupByCategoryId handles cycles without infinite looping', () => {
+  // Construct a cyclic parent map directly (A→B→A)
+  const tree: typeof import('./rollup').CategoryTree = {
+    parentById: new Map([[1, 2], [2, 1]]),
+    nameById: new Map([[1, 'A'], [2, 'B']]),
+    depthById: new Map(),
+    pathById: new Map(),
+  };
+  // Rollup on the cyclic tree should terminate without hanging
+  const rolled = rollupByCategoryId(new Map([[1, 10]]), tree);
+  // Should have accumulated some value without infinite loop
+  assert.ok(rolled.size > 0);
+  assert.equal(rolled.get(1), 10);
+});
