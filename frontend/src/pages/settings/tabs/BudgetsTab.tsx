@@ -95,7 +95,7 @@ function AlertThresholdChips({
 }) {
   return (
     <fieldset className="mt-1">
-      <legend className="text-sm font-medium text-gray-700 dark:text-gray-300">
+      <legend className="text-sm font-medium text-foreground">
         Alert me at
       </legend>
       <div className="flex flex-wrap gap-2 mt-1">
@@ -107,8 +107,8 @@ function AlertThresholdChips({
               htmlFor={`${idPrefix}-threshold-${threshold}`}
               className={
                 isOn
-                  ? 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 cursor-pointer'
-                  : 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 cursor-pointer'
+                  ? 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-success-bg text-positive cursor-pointer'
+                  : 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground cursor-pointer'
               }
             >
               <input

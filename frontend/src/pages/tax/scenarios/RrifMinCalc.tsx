@@ -63,15 +63,15 @@ export function RrifMinCalc() {
   const isMandatory = age >= 71;
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white p-3">
-      <p className="mb-2 text-xs text-gray-500">
+    <div className="rounded-md border bg-card p-3">
+      <p className="mb-2 text-xs text-muted-foreground">
         Reference only. Type the age you will attain in the projection year and
         the RRIF balance on Jan 1 of that year. Use the result to size your
-        <code className="mx-1 rounded bg-gray-100 px-1 text-xs">income.pensionIncome</code>
+        <code className="mx-1 rounded bg-muted px-1 text-xs">income.pensionIncome</code>
         override.
       </p>
       <div className="flex flex-col gap-2">
-        <label className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+        <label className="flex flex-wrap items-center gap-2 text-sm text-foreground">
           <span className="min-w-[10rem]">Age in year</span>
           <input
             type="number"
@@ -79,10 +79,10 @@ export function RrifMinCalc() {
             step="1"
             value={Number.isFinite(age) ? age : ''}
             onChange={(e) => setAge(Number(e.target.value))}
-            className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-24 rounded border px-2 py-1 text-sm focus:border-ring focus:outline-none"
           />
         </label>
-        <label className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+        <label className="flex flex-wrap items-center gap-2 text-sm text-foreground">
           <span className="min-w-[10rem]">RRIF balance (CAD)</span>
           <input
             type="number"
@@ -90,22 +90,22 @@ export function RrifMinCalc() {
             step="0.01"
             value={Number.isFinite(balance) ? balance : ''}
             onChange={(e) => setBalance(Number(e.target.value))}
-            className="w-32 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-32 rounded border px-2 py-1 text-sm focus:border-ring focus:outline-none"
           />
         </label>
       </div>
       <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-1 text-sm">
-        <dt className="text-gray-600">Minimum %</dt>
-        <dd className="font-medium text-gray-900">
+        <dt className="text-muted-foreground">Minimum %</dt>
+        <dd className="font-medium text-foreground">
           {(pct * 100).toFixed(2)}%
           {!isMandatory && (
-            <span className="ml-2 text-xs text-gray-500">
+            <span className="ml-2 text-xs text-muted-foreground">
               (no mandatory minimum below age 71)
             </span>
           )}
         </dd>
-        <dt className="text-gray-600">Minimum withdrawal</dt>
-        <dd className="font-medium text-gray-900">
+        <dt className="text-muted-foreground">Minimum withdrawal</dt>
+        <dd className="font-medium text-foreground">
           {fmtCurrency(withdrawal)}
         </dd>
       </dl>

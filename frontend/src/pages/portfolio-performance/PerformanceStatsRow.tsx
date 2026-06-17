@@ -31,7 +31,7 @@ export function PerformanceStatsRow({ presetStats }: PerformanceStatsRowProps) {
         return (
           <Card key={k}>
             <p className="text-sm text-muted-foreground">{k}</p>
-            <p className={`text-2xl font-semibold ${positive ? 'text-emerald-700' : 'text-rose-700'}`}>
+            <p className={`text-2xl font-semibold ${positive ? 'text-positive' : 'text-negative'}`}>
               {fmtPct(stat.twrPct)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">

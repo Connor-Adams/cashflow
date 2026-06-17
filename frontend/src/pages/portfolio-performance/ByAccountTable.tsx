@@ -54,7 +54,7 @@ export function ByAccountTable({ rows }: ByAccountTableProps) {
               <td>{r.accountName}</td>
               <td className="text-right">{formatMoney(r.endValueCad, 'CAD')}</td>
               <td className="text-right">{fmtPct(r.weightInPortfolioPct)}</td>
-              <td className={`text-right ${r.twrPct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{fmtPct(r.twrPct)}</td>
+              <td className={`text-right ${r.twrPct >= 0 ? 'text-positive' : 'text-negative'}`}>{fmtPct(r.twrPct)}</td>
             </tr>
           ))}
         </tbody>

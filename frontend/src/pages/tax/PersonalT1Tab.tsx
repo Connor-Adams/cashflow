@@ -310,8 +310,8 @@ function ActiveScenarioPanel({
         </div>
       )}
       {isProjection && (
-        <details className="mb-3 rounded-md border border-gray-200 bg-white">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-gray-800">
+        <details className="mb-3 rounded-md border bg-card">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-foreground">
             RRIF minimum withdrawal calculator
           </summary>
           <div className="px-3 pb-3">

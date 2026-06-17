@@ -97,8 +97,8 @@ export function ReportingTokensTab() {
       </div>
 
       {revealed && (
-        <Card className="p-4 space-y-2 border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-700">
-          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+        <Card className="p-4 space-y-2 border-warning bg-warning-bg">
+          <p className="text-sm font-medium text-warning">
             Save this token now — it will not be shown again.
           </p>
           <div className="flex items-center gap-2">
@@ -106,7 +106,7 @@ export function ReportingTokensTab() {
               ref={plaintextRef}
               readOnly
               value={revealed.plaintext}
-              className="flex-1 font-mono text-xs bg-white dark:bg-zinc-900 border rounded px-2 py-1 select-all"
+              className="flex-1 font-mono text-xs bg-card border rounded px-2 py-1 select-all"
               onFocus={(e) => e.target.select()}
             />
             <Button size="sm" variant="outline" onClick={copyPlaintext}>
@@ -117,7 +117,7 @@ export function ReportingTokensTab() {
           <Button
             type="button"
             variant="link"
-            className="text-xs text-amber-700 dark:text-amber-300 underline"
+            className="text-xs text-warning underline"
             onClick={() => setRevealed(null)}
           >
             I've saved it — dismiss

@@ -215,20 +215,20 @@ export function OwnerCompLeverSurface({
   );
 
   if (corpDetail.error) {
-    return <p className="text-red-600">Failed to load corp scenario: {corpDetail.error}</p>;
+    return <p className="text-danger">Failed to load corp scenario: {corpDetail.error}</p>;
   }
   if (planCompute.error) {
-    return <p className="text-red-600">Failed to load household compute: {planCompute.error}</p>;
+    return <p className="text-danger">Failed to load household compute: {planCompute.error}</p>;
   }
   if (corpDetail.loading || !corpDetail.data || !values) {
-    return <p className="text-gray-500">Loading owner comp surface…</p>;
+    return <p className="text-muted-foreground">Loading owner comp surface…</p>;
   }
 
   return (
     <div className="flex flex-col gap-6">
       <header>
         <h3 className="text-lg font-semibold">Owner compensation levers</h3>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted-foreground">
           Slide each lever to see the corp + personal + integrated household tax
           recompute live. Each edit writes an{' '}
           <code>ownerComp.&lt;id&gt;.&lt;field&gt;</code> override on the active
@@ -238,7 +238,7 @@ export function OwnerCompLeverSurface({
 
       <div className="flex flex-col gap-4">
         {shareholderEntityIds.length === 0 ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             No shareholders linked to this plan yet. Link a personal scenario to
             this household plan to enable owner comp distribution.
           </p>
@@ -274,10 +274,10 @@ interface ShareholderCardProps {
 function ShareholderCard({ shareholderEntityId, values, onChange }: ShareholderCardProps) {
   const total = FIELDS.reduce((sum, f) => sum + (values[f.key] ?? 0), 0);
   return (
-    <section className="rounded-md border border-gray-200 p-4">
+    <section className="rounded-md border p-4">
       <header className="mb-3 flex items-baseline justify-between">
         <h4 className="font-medium">Shareholder #{shareholderEntityId}</h4>
-        <span className="text-xs text-gray-500">Total: {fmtCurrency(total)}</span>
+        <span className="text-xs text-muted-foreground">Total: {fmtCurrency(total)}</span>
       </header>
       <div className="flex flex-col gap-2">
         {FIELDS.map((f) => (
@@ -321,7 +321,7 @@ function SliderRow({ label, value, onChange }: SliderRowProps) {
           const n = Number(e.target.value);
           onChange(Number.isFinite(n) ? n : 0);
         }}
-        className="rounded border border-gray-300 px-2 py-1 text-sm"
+        className="rounded border px-2 py-1 text-sm"
         aria-label={`${label} amount`}
       />
     </div>
@@ -346,8 +346,8 @@ function IntegratedSummary({ loading, data, shareholderEntityIds }: IntegratedSu
 
 function IntegratedSummaryShell({ children }: { children: React.ReactNode }) {
   return (
-    <section className="rounded-md border border-gray-200 p-4">
-      <p className="text-sm text-gray-500">{children}</p>
+    <section className="rounded-md border p-4">
+      <p className="text-sm text-muted-foreground">{children}</p>
     </section>
   );
 }
@@ -387,7 +387,7 @@ function IntegratedSummaryReady({
   const integratedRate = totalRouted > 0 ? totalTax / totalRouted : NaN;
 
   return (
-    <section className="rounded-md border border-gray-200 p-4">
+    <section className="rounded-md border p-4">
       <h4 className="mb-3 font-medium">Integrated summary</h4>
 
       <div className="mb-4">
@@ -403,7 +403,7 @@ function IntegratedSummaryReady({
       <div className="mb-4">
         <h5 className="text-sm font-semibold">Personal side</h5>
         {shareholderEntityIds.length === 0 ? (
-          <p className="text-xs text-gray-500">No shareholders.</p>
+          <p className="text-xs text-muted-foreground">No shareholders.</p>
         ) : (
           <PersonalSideTable
             data={data}
@@ -451,7 +451,7 @@ function PersonalSideTable({
   return (
     <Table className="w-full text-sm">
       <TableHeader>
-        <TableRow className="text-xs text-gray-500">
+        <TableRow className="text-xs text-muted-foreground">
           <TableHead className="py-1 pr-2">Shareholder</TableHead>
           <TableHead className="py-1 pr-2 text-right">Employment</TableHead>
           <TableHead className="py-1 pr-2 text-right">Dividends</TableHead>
@@ -513,22 +513,22 @@ interface WarningsListProps {
 function WarningsList({ warnings }: WarningsListProps) {
   if (warnings.length === 0) return null;
   return (
-    <section className="rounded-md border border-amber-300 bg-amber-50 p-4">
-      <h4 className="mb-2 font-medium text-amber-900">
+    <section className="rounded-md border border-warning bg-warning-bg p-4">
+      <h4 className="mb-2 font-medium text-warning">
         Integration warnings ({warnings.length})
       </h4>
-      <ul className="list-disc pl-5 text-sm text-amber-900">
+      <ul className="list-disc pl-5 text-sm text-warning">
         {warnings.map((w, i) => (
           <li key={i}>
             <span className="mr-1 uppercase text-xs">[{w.severity}]</span>
             {w.message}
             {w.shareholderEntityId !== null && (
-              <span className="ml-1 text-xs text-amber-700">
+              <span className="ml-1 text-xs text-warning">
                 (shareholder #{w.shareholderEntityId})
               </span>
             )}
             {w.corpScenarioId !== null && (
-              <span className="ml-1 text-xs text-amber-700">
+              <span className="ml-1 text-xs text-warning">
                 (corp #{w.corpScenarioId})
               </span>
             )}

@@ -1010,21 +1010,21 @@ export type CalendarEventsResponse = {
  * key (`emerald`); we map it to ready-to-use class strings here.
  */
 export const CALENDAR_EVENT_BG_CLASS: Record<PlannedEventType, string> = {
-  income: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  expense: 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-100',
-  transfer: 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-100',
-  settlement: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
-  debt_payment: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100',
-  savings: 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-100',
+  income: 'bg-success-bg text-success-foreground',
+  expense: 'bg-danger-bg text-danger',
+  transfer: 'bg-info-bg text-info-foreground',
+  settlement: 'bg-warning-bg text-warning-foreground',
+  debt_payment: 'bg-danger-bg text-danger',
+  savings: 'bg-success-bg text-success',
 }
 
 export const CALENDAR_EVENT_DOT_CLASS: Record<PlannedEventType, string> = {
-  income: 'bg-emerald-500',
-  expense: 'bg-rose-500',
-  transfer: 'bg-sky-500',
-  settlement: 'bg-amber-500',
-  debt_payment: 'bg-orange-500',
-  savings: 'bg-violet-500',
+  income: 'bg-positive',
+  expense: 'bg-danger',
+  transfer: 'bg-info',
+  settlement: 'bg-warning',
+  debt_payment: 'bg-danger',
+  savings: 'bg-positive',
 }
 
 /**
