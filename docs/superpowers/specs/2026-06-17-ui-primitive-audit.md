@@ -93,7 +93,7 @@ line 1395).
 {description ? <p className="muted mb-0">{description}</p> : null}
 ```
 
-### 3. `metric-stat.tsx:23,43` — undefined token + inline border
+### 3. `metric-stat.tsx:17,43` — undefined token + inline border
 
 `metric-stat.tsx` references `var(--accent-positive)` (line 17 of
 `formatDelta`, surface at lines 23 and 43), a token that **does not exist** in
