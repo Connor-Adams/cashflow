@@ -320,7 +320,7 @@ function ResultStat({
       <span
         className={
           emphasis
-            ? 'text-2xl font-semibold text-emerald-600 dark:text-emerald-300'
+            ? 'text-2xl font-semibold text-positive'
             : 'text-lg font-medium'
         }
       >

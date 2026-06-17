@@ -37,8 +37,8 @@ export const PLANNED_EVENT_STATUS_OPTIONS: Array<{ value: PlannedEventStatus; la
 // strings dynamically so the bundler keeps them.
 export const STATUS_BADGE: Record<PlannedEventStatus, string> = {
   planned: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-  posted: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100',
-  skipped: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100',
+  posted: 'bg-success-bg text-positive',
+  skipped: 'bg-warning-bg text-warning',
   ignored: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100',
 }
 
@@ -52,7 +52,7 @@ export const TYPE_TONE: Record<PlannedEventType, 'inflow' | 'outflow' | 'neutral
 }
 
 export const TYPE_TONE_CLASS: Record<'inflow' | 'outflow' | 'neutral', string> = {
-  inflow: 'text-emerald-600 dark:text-emerald-300',
+  inflow: 'text-positive',
   outflow: 'text-rose-600 dark:text-rose-300',
   neutral: 'text-zinc-600 dark:text-zinc-300',
 }

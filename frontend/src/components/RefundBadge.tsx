@@ -67,7 +67,7 @@ export function RefundBadge({
     'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium mt-1 w-fit'
   if (linkedTransactionId == null) {
     return (
-      <span className={`${baseClass} bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200`}>
+      <span className={`${baseClass} bg-warning-bg text-warning`}>
         Refund (unlinked)
       </span>
     )
@@ -81,7 +81,7 @@ export function RefundBadge({
   }
   if (errored || !details) {
     return (
-      <span className={`${baseClass} bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200`}>
+      <span className={`${baseClass} bg-success-bg text-positive`}>
         Refund (linked)
       </span>
     )
@@ -97,7 +97,7 @@ export function RefundBadge({
   const partialMark = details.partial ? ' (partial)' : ''
   return (
     <span
-      className={`${baseClass} bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200`}
+      className={`${baseClass} bg-success-bg text-positive`}
       title={`Refund linked to transaction #${o.id}`}
     >
       Refund of {formatMoney(Math.abs(o.amount), currency)} · {o.merchantClean} · {o.date}

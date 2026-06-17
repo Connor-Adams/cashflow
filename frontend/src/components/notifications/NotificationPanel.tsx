@@ -25,9 +25,9 @@ function severityIcon(severity: NotificationSeverity) {
   // and a class string per branch so JIT picks them up.
   switch (severity) {
     case 'critical':
-      return { Icon: OctagonAlert, color: 'text-red-600' }
+      return { Icon: OctagonAlert, color: 'text-danger' }
     case 'warn':
-      return { Icon: AlertTriangle, color: 'text-amber-600' }
+      return { Icon: AlertTriangle, color: 'text-warning' }
     case 'info':
     default:
       return { Icon: Info, color: 'text-blue-600' }

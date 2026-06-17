@@ -161,7 +161,7 @@ export function ImportRulesModal({ open, onOpenChange, currentRuleCount, onSucce
               <p className="mt-1 text-sm text-rose-600 dark:text-rose-400">{fileError}</p>
             )}
             {parsed && !fileError && (
-              <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400">
+              <p className="mt-1 text-sm text-positive">
                 Found {parsed.rules.length} rule{parsed.rules.length !== 1 ? 's' : ''} in this file.
               </p>
             )}
