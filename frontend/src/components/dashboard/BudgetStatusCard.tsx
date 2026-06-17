@@ -79,7 +79,7 @@ export function BudgetStatusCard({ currency = 'CAD' }: Props) {
         <div className="flex flex-col items-start gap-2" data-testid="budget-status-empty">
           <p className="text-sm text-muted-foreground">Set a budget to see pacing here.</p>
           <Button size="sm" asChild>
-            <Link to="/settings/budgets">Set a budget</Link>
+            <Link to="/budgets">Set a budget</Link>
           </Button>
         </div>
       </BentoTile>
