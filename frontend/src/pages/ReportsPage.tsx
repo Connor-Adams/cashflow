@@ -33,6 +33,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { cn } from '@/lib/utils'
 import { buildCsv, downloadCsv } from '../lib/csv'
 import {
   fromDateInputValue,
@@ -573,7 +574,7 @@ export function ReportsPage() {
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))]">
         <CollapsibleCard
           id="partner-split"
-          className="reportsTableCard"
+          className="mb-0"
           title="Partner split totals"
           description="How much of the selected spend belongs to each person."
           actions={
@@ -623,12 +624,11 @@ export function ReportsPage() {
                   )
                 }
                 const partnerOwesMe = rounded > 0
-                const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                 const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
                 return (
                   <li key={cur} className="text-sm">
                     <strong>{cur}</strong>:{' '}
-                    <span style={{ color, fontWeight: 600 }}>
+                    <span className={cn('font-semibold', partnerOwesMe ? 'text-positive' : 'text-danger')}>
                       {formatMoney(Math.abs(rounded), cur)}
                     </span>{' '}
                     <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
@@ -660,11 +660,10 @@ export function ReportsPage() {
                     netInner = <span className="text-sm leading-6 text-muted-foreground mb-0">Even</span>
                   } else {
                     const partnerOwesMe = r.direction === 'partner_owes_me'
-                    const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                     const sign = partnerOwesMe ? '+' : '−'
                     const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
                     netInner = (
-                      <span style={{ color }}>
+                      <span className={partnerOwesMe ? 'text-positive' : 'text-danger'}>
                         {sign}
                         {formatMoney(Math.abs(r.net), r.currency)}{' '}
                         <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
@@ -711,7 +710,7 @@ export function ReportsPage() {
 
         <CollapsibleCard
           id="business-expenses"
-          className="reportsTableCard"
+          className="mb-0"
           title="Business expenses"
           description="Transactions marked business, grouped by currency."
           actions={
@@ -759,7 +758,7 @@ export function ReportsPage() {
 
       <CollapsibleCard
         id="settlements"
-        className="reportsTableCard"
+        className="mb-0"
         title="Recent settlements"
         description="Manual records of money paid between you and a contact. Applied to the net partner balance above."
       >
@@ -793,13 +792,7 @@ export function ReportsPage() {
                   </TableCell>
                   <TableCell>{formatMoney(Number(row.amount), row.currency)}</TableCell>
                   <TableCell
-                    className="text-sm leading-6 text-muted-foreground mb-0"
-                    style={{
-                      maxWidth: '14rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+                    className="text-sm leading-6 text-muted-foreground mb-0 max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap"
                     title={row.notes ?? undefined}
                   >
                     {row.notes ?? ''}
