@@ -43,12 +43,10 @@ import { PurchasesPage } from './pages/PurchasesPage'
 import { ReceiptsPage } from './pages/ReceiptsPage'
 import { AuthPage } from './pages/AuthPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
-import { SettingsTabLayout } from './pages/settings/SettingsTabLayout'
 import { DisplaySection } from './pages/settings/sections/DisplaySection'
 import { GmailSection } from './pages/settings/sections/GmailSection'
-import { PaletteSection } from './pages/settings/sections/PaletteSection'
-import { DesignSystemSection } from './pages/settings/sections/DesignSystemSection'
 import { PartnerInviteSection } from './pages/settings/sections/PartnerInviteSection'
+import { AppearanceSection } from './pages/settings/sections/AppearanceSection'
 import { ImportsTab } from './pages/settings/tabs/ImportsTab'
 import { EnrichmentTab } from './pages/settings/tabs/EnrichmentTab'
 import { ContactsTab } from './pages/settings/tabs/ContactsTab'
@@ -60,8 +58,7 @@ import { SavedFiltersTab } from './pages/settings/tabs/SavedFiltersTab'
 import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
-import { AuditTokensTab } from './pages/settings/tabs/AuditTokensTab'
-import { ReportingTokensTab } from './pages/settings/tabs/ReportingTokensTab'
+import { ApiTokensTab } from './pages/settings/tabs/ApiTokensTab'
 import { IncomePage } from './pages/IncomePage'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
@@ -172,29 +169,33 @@ function AppRoutes() {
           <Route path="large-purchases" element={<Navigate to="/transactions/large" replace />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="display" replace />} />
-            <Route element={<SettingsTabLayout />}>
-              <Route path="display" element={<DisplaySection />} />
-              <Route path="palette" element={<PaletteSection />} />
-              <Route path="design-system" element={<DesignSystemSection />} />
-              <Route path="gmail" element={<GmailSection />} />
-              <Route path="partner-invite" element={<PartnerInviteSection />} />
-            </Route>
-            <Route path="imports" element={<ImportsTab />} />
-            <Route path="enrichment" element={<EnrichmentTab />} />
-            <Route path="contacts" element={<ContactsTab />} />
+            <Route path="display" element={<DisplaySection />} />
+            <Route path="appearance" element={<AppearanceSection />} />
+            <Route path="gmail" element={<GmailSection />} />
+            <Route path="partner-invite" element={<PartnerInviteSection />} />
             <Route path="members" element={<MembersTab />} />
-            <Route path="budgets" element={<BudgetsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="labels" element={<LabelsTab />} />
+            <Route path="contacts" element={<ContactsTab />} />
             <Route path="saved-filters" element={<SavedFiltersTab />} />
+            <Route path="imports" element={<ImportsTab />} />
             <Route path="jobs" element={<JobsTab />} />
-            <Route path="whatsnew" element={<WhatsNewTab />} />
-            <Route path="feedback" element={<FeedbackInboxTab />} />
-            <Route path="audit-tokens" element={<AuditTokensTab />} />
-            <Route path="reporting-tokens" element={<ReportingTokensTab />} />
+            <Route path="api-tokens" element={<ApiTokensTab />} />
             <Route path="audit-log" element={<AuditLogPage />} />
             <Route path="backup" element={<SyncPage />} />
+            <Route path="feedback" element={<FeedbackInboxTab />} />
+            <Route path="whatsnew" element={<WhatsNewTab />} />
+            {/* Folded/moved routes — redirect old deep links */}
+            <Route path="palette" element={<Navigate to="/settings/appearance" replace />} />
+            <Route path="design-system" element={<Navigate to="/settings/appearance" replace />} />
+            <Route path="audit-tokens" element={<Navigate to="/settings/api-tokens" replace />} />
+            <Route path="reporting-tokens" element={<Navigate to="/settings/api-tokens" replace />} />
+            <Route path="budgets" element={<Navigate to="/budgets" replace />} />
+            <Route path="enrichment" element={<Navigate to="/enrichment" replace />} />
           </Route>
+          {/* Relocated out of Settings (issue: settings junk-drawer) */}
+          <Route path="budgets" element={<BudgetsTab />} />
+          <Route path="enrichment" element={<EnrichmentTab />} />
           {/* Unified review-items inbox (issue #378) replaces the separate AI
               inbox / AI reviews / CFO briefings list surfaces. Old routes
               redirect, preselecting the matching saved view. */}
