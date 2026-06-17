@@ -169,6 +169,7 @@
   --accent-soft:   var(--accent);
   --accent-warm:   var(--primary);
   --accent-green:  var(--positive);
+  --accent-positive: var(--positive);
 
   color-scheme: light;
 }
