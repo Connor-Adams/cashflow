@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/components/ui/grid'
 import { StatCard } from '@/components/ui/stat-card'
 import {
@@ -1117,23 +1118,20 @@ export function TransactionsPage() {
 
 
       <Card className="mb-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Browse and review</h2>
-            <p className="mb-4 text-sm leading-6 text-muted-foreground">
-              Filter the ledger, sort the current page, and jump straight into bulk
-              updates when you need them.
-            </p>
-          </div>
-          <div className="transactionsToolbarMeta">
-            <span className="transactionsPanelBadge">
-              {reviewOnly ? 'Review queue' : 'All transactions'}
-            </span>
-            <span className="transactionsPanelBadge">
-              {currency || 'All currencies'}
-            </span>
-          </div>
-        </div>
+        <SectionHeader
+          title="Browse and review"
+          description="Filter the ledger, sort the current page, and jump straight into bulk updates when you need them."
+          actions={
+            <>
+              <span className="transactionsPanelBadge">
+                {reviewOnly ? 'Review queue' : 'All transactions'}
+              </span>
+              <span className="transactionsPanelBadge">
+                {currency || 'All currencies'}
+              </span>
+            </>
+          }
+        />
         <div className="quickFilters" aria-label="Quick transaction date ranges">
           {quickRanges.map((range) => (
             <Button
@@ -1751,21 +1749,18 @@ export function TransactionsPage() {
       )}
       {confirmAction.dialog}
       <Card className="mb-0">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Ledger</h2>
-            <p className="mb-4 text-sm leading-6 text-muted-foreground">
-              Showing {pageCount} row{pageCount === 1 ? '' : 's'} on this page out of{' '}
-              {totalCount} matching the current filters.
-            </p>
-          </div>
-          <div className="transactionsToolbarMeta">
-            <span className="transactionsPanelBadge">
-              {loading ? 'Refreshing' : 'Up to date'}
-            </span>
-            <span className="transactionsPanelBadge">Page {page}/{totalPages}</span>
-          </div>
-        </div>
+        <SectionHeader
+          title="Ledger"
+          description={<>Showing {pageCount} row{pageCount === 1 ? '' : 's'} on this page out of{' '}{totalCount} matching the current filters.</>}
+          actions={
+            <>
+              <span className="transactionsPanelBadge">
+                {loading ? 'Refreshing' : 'Up to date'}
+              </span>
+              <span className="transactionsPanelBadge">Page {page}/{totalPages}</span>
+            </>
+          }
+        />
         <div className="tableWrap transactionsTableWrap">
           <Table className="table transactionsTable">
             <TableHeader>

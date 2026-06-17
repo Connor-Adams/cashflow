@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { StatCard } from '@/components/ui/stat-card'
 import { EmptyState } from '@/components/ui/empty-state'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/components/ui/grid'
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
@@ -72,6 +73,14 @@ export function DesignSystemSection() {
         />
       </Group>
 
+      <Group name="Section header">
+        <SectionHeader
+          className="w-full"
+          title="Section title"
+          description="Supporting description"
+          actions={<Button variant="secondary">Action</Button>}
+        />
+      </Group>
       <Group name="Grid">
         <Grid minItemWidth={160} gap="md" className="w-full">
           <StatCard label="Revenue" value="$12,400" hint="This month" />
