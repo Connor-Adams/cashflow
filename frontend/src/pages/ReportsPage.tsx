@@ -637,8 +637,7 @@ export function ReportsPage() {
               })}
             </ul>
           )}
-          <div className="tableWrap" aria-busy={loading}>
-            <Table className="table">
+          <Table aria-busy={loading}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Currency</TableHead>
@@ -708,7 +707,6 @@ export function ReportsPage() {
                 })}
               </TableBody>
             </Table>
-          </div>
         </CollapsibleCard>
 
         <CollapsibleCard
@@ -734,8 +732,7 @@ export function ReportsPage() {
             </Button>
           }
         >
-          <div className="tableWrap" aria-busy={loading}>
-            <Table className="table">
+          <Table aria-busy={loading}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Currency</TableHead>
@@ -757,7 +754,6 @@ export function ReportsPage() {
                 ))}
               </TableBody>
             </Table>
-          </div>
         </CollapsibleCard>
       </div>
 
@@ -768,8 +764,7 @@ export function ReportsPage() {
         description="Manual records of money paid between you and a contact. Applied to the net partner balance above."
       >
         {settlementsErr && <Alert variant="error" className="mb-4">{settlementsErr}</Alert>}
-        <div className="tableWrap">
-          <Table className="table">
+        <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -824,7 +819,6 @@ export function ReportsPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
       </CollapsibleCard>
 
       <RankedReportSection
@@ -1107,8 +1101,7 @@ function RankedReportSection<R>({
       description={description}
       toggleLabel={title}
     >
-      <div className="tableWrap">
-        <Table className="table">
+      <Table>
           <TableHeader>
             <TableRow>
               {showCurrencyColumn && <TableHead>Currency</TableHead>}
@@ -1126,7 +1119,6 @@ function RankedReportSection<R>({
             ))}
           </TableBody>
         </Table>
-      </div>
     </CollapsibleCard>
   )
 }
