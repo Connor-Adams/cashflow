@@ -479,16 +479,10 @@
     @apply mb-0;
   }
 
-  /* Decision card gets a subtle amber gradient at the top edge, mirroring
-   * the bento hero tile pattern. Pulls the eye to the action surface
-   * without a heavy border. */
+  /* Flat decision card — emphasis comes from the oxblood border, not a wash. */
   .reviewInboxDecisionCard {
     @apply mb-0;
-    background:
-      linear-gradient(180deg,
-        color-mix(in oklch, var(--primary) 6%, transparent),
-        transparent 28%),
-      var(--card);
+    background: var(--card);
   }
 
   .reviewInboxToolbar {
