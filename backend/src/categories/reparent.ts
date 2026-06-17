@@ -13,7 +13,7 @@ export async function reparentCategory(
 
   if (newParentId != null) {
     const parent = await Category.findOne({ where: { id: newParentId, householdId } });
-    if (!parent) throw new CategoryError('not_found', `parent ${newParentId} not found`);
+    if (!parent) throw new CategoryError('parent_not_found', `parent ${newParentId} not found`);
     if (await wouldCreateCycle(householdId, id, newParentId)) {
       throw new CategoryError('cycle', 'cannot move a category into its own subtree');
     }

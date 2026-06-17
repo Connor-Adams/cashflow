@@ -69,6 +69,4 @@ test('children association resolves', async () => {
   const kids = await Category.findAll({ where: { parentId: work.id } });
   assert.equal(kids.length, 1);
   assert.equal(kids[0].name, 'Internet');
-  // silence unused import lint if Op not otherwise used
-  assert.ok(Op.ne);
 });

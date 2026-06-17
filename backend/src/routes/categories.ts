@@ -6,6 +6,7 @@ import { isCategoryIconName, isTaxTreatment } from '@cashflow/shared';
 import { resolveCategoryPath } from '../categories/resolvePath';
 import { reparentCategory } from '../categories/reparent';
 import { deleteCategory } from '../categories/deleteCategory';
+import { createCategory } from '../categories/createCategory';
 import { CategoryError } from '../categories/errors';
 
 type CategoryNode = {
@@ -18,7 +19,7 @@ type CategoryNode = {
 };
 
 function statusForCategoryError(code: CategoryError['code']): number {
-  return code === 'not_found' ? 404 : 409;
+  return code === 'not_found' || code === 'parent_not_found' ? 404 : 409;
 }
 
 const router = Router();
@@ -37,7 +38,8 @@ router.get('/', async (req, res, next) => {
 
 router.get('/tree', async (req, res, next) => {
   try {
-    const rows = await Category.findAll({ where: householdWhere(req), order: [['name', 'ASC']] });
+    // categories are managed within the caller's household (consistent with the write routes)
+    const rows = await Category.findAll({ where: { householdId: currentAuth(req).household.id }, order: [['name', 'ASC']] });
     const byId = new Map<number, CategoryNode>();
     for (const r of rows) {
       byId.set(r.id, {
@@ -92,14 +94,13 @@ router.post('/', async (req, res, next) => {
     }
     const parentId = b.parentId == null ? null : Number(b.parentId);
     const { household } = currentAuth(req);
-    const row = await Category.create({
-      householdId: household.id,
-      name: b.name.trim(),
-      parentId,
-      icon: null,
-    });
+    const row = await createCategory(household.id, b.name, parentId);
     res.status(201).json(row);
   } catch (e) {
+    if (e instanceof CategoryError) {
+      res.status(statusForCategoryError(e.code)).json({ error: e.message, code: e.code });
+      return;
+    }
     next(e);
   }
 });

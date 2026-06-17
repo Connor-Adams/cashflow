@@ -36,7 +36,7 @@ export async function resolveCategoryPath(
       if (!node) {
         try {
           node = await Category.create(
-            { householdId, parentId, name: segment.trim(), icon: null },
+            { householdId, parentId, name: segment, icon: null },
             { transaction },
           );
           createdIds.push(node.id);

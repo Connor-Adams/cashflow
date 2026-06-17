@@ -65,4 +65,6 @@ test('down removes new columns and restores old index', async () => {
   const desc = await sequelize.getQueryInterface().describeTable('categories');
   assert.ok(!('parent_id' in desc), 'parent_id should be dropped');
   assert.ok(!('name_key' in desc), 'name_key should be dropped');
+  const idx = await sequelize.getQueryInterface().showIndex('categories');
+  assert.ok(idx.some(i => i.name === 'categories_household_name_unique'), 'old unique index restored');
 });

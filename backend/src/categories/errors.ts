@@ -1,5 +1,6 @@
 export type CategoryErrorCode =
   | 'not_found'
+  | 'parent_not_found'
   | 'cycle'
   | 'sibling_conflict'
   | 'has_children'
