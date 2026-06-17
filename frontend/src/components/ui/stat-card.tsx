@@ -30,12 +30,12 @@ function StatCard({
   const valueTitle = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
   return (
     <Card data-slot="stat-card" className={cn('mb-0', className)} {...props}>
-      <p className="statLabel">{label}</p>
-      <p className={cn('statValue', 'text-xl font-bold truncate')} title={valueTitle}>
+      <p className="text-[0.72rem] font-semibold uppercase tracking-normal text-muted-foreground m-0">{label}</p>
+      <p className="m-0 whitespace-nowrap text-[1.55rem] font-bold tracking-tight truncate" title={valueTitle}>
         {value}
       </p>
       {hint ? (
-        <p className={cn('muted statHint', 'text-xs')}>{hint}</p>
+        <p className="m-0 text-xs text-muted-foreground">{hint}</p>
       ) : null}
       {delta ? (
         <p className="statDelta m-0">
