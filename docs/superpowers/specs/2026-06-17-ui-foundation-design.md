@@ -61,8 +61,10 @@ page before committing to the other 52.
 
 ### 1. Primitive audit (read-only)
 Inventory every `components/ui/*` primitive: API surface, variants, token usage,
-and consuming pages. Deliverable: a table `primitive → status (solid /
-inconsistent / gap)`. No code changes. Expected gaps to name: a true **page
+and **consumer count** (how many files import each — grounds the backlog signal:
+high-consumer primitives are the highest-leverage to bless/harden). Deliverable: a
+table `primitive → consumers → status (solid / inconsistent / gap)`. No code
+changes. Expected gaps to name: a true **page
 shell**, a **section** wrapper, **table density rules**, canonical
 **loading/empty/error** usage.
 
