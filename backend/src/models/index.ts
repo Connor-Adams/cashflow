@@ -383,6 +383,9 @@ Household.hasMany(Contact, { foreignKey: 'household_id', as: 'contacts' });
 Contact.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 Household.hasMany(Category, { foreignKey: 'household_id', as: 'categories' });
 Category.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+// Category tree (subcategories): self-referential parent/children.
+Category.belongsTo(Category, { foreignKey: 'parent_id', as: 'parent' });
+Category.hasMany(Category, { foreignKey: 'parent_id', as: 'children', onDelete: 'RESTRICT' });
 Transaction.belongsTo(Contact, { foreignKey: 'ownership_contact_id', as: 'ownershipContact' });
 Household.hasMany(PartnerSettlement, {
   foreignKey: 'household_id',
