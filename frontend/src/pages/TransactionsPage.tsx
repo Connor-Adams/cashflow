@@ -1424,7 +1424,7 @@ export function TransactionsPage() {
         <section className="card aiVisibilityPanel" aria-label="Latest bulk AI results">
           <div className="aiVisibilityHeader">
             <strong>Latest AI fill</strong>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs leading-6 text-muted-foreground">
               Review {bulkAiResults.length} suggestion
               {bulkAiResults.length === 1 ? '' : 's'} before applying.
             </span>
@@ -1488,7 +1488,7 @@ export function TransactionsPage() {
         <section className="card aiVisibilityPanel" aria-label="Latest AI audit results">
           <div className="aiVisibilityHeader">
             <strong>AI audit findings</strong>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs leading-6 text-muted-foreground">
               {aiAuditResults.filter((row) => row.status === 'open').length} open ·{' '}
               {aiAuditResults.length} total
             </span>
@@ -1568,7 +1568,7 @@ export function TransactionsPage() {
                 ? `${selectedIds.size} selected`
                 : `${totalCount} matching`}
             </strong>
-            <span className="text-xs text-muted-foreground">Apply a batch override without opening each row.</span>
+            <span className="text-xs leading-6 text-muted-foreground">Apply a batch override without opening each row.</span>
           </div>
           {aiEnabled ? (
             <>
