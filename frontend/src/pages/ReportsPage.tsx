@@ -533,7 +533,7 @@ export function ReportsPage() {
             ) : null
           }
           caption={
-            <p className="muted" style={{ marginBottom: 0 }}>
+            <p className="mb-0 text-sm leading-6 text-muted-foreground">
               Showing <strong>{currency || 'all currencies'}</strong> for{' '}
               <strong>{activeRangeLabel}</strong>.
             </p>
@@ -541,7 +541,7 @@ export function ReportsPage() {
         />
       </section>
       {err && <span className="error">{err}</span>}
-      {loading && <p className="muted">Loading…</p>}
+      {loading && <p className="mb-4 text-sm leading-6 text-muted-foreground">Loading…</p>}
 
       <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
         <StatCard
@@ -568,7 +568,7 @@ export function ReportsPage() {
         />
       </div>
 
-      <div className="reportsGrid">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))]">
         <CollapsibleCard
           id="partner-split"
           className="reportsTableCard"
@@ -610,12 +610,12 @@ export function ReportsPage() {
           }
         >
           {showPartnerRollup && (
-            <ul className="partnerNetRollup" style={{ listStyle: 'none', padding: 0, margin: '0 0 0.75rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <ul className="list-none p-0 mb-3 flex flex-col gap-1">
               {partnerNetByCurrency.map(([cur, total]) => {
                 const rounded = Math.round(total * 100) / 100
                 if (rounded === 0) {
                   return (
-                    <li key={cur} className="muted" style={{ fontSize: '0.875rem' }}>
+                    <li key={cur} className="text-sm leading-6 text-muted-foreground mb-0">
                       <strong>{cur}</strong>: even
                     </li>
                   )
@@ -624,12 +624,12 @@ export function ReportsPage() {
                 const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
                 const label = partnerOwesMe ? 'partner owes you' : 'you owe partner'
                 return (
-                  <li key={cur} style={{ fontSize: '0.875rem' }}>
+                  <li key={cur} className="text-sm">
                     <strong>{cur}</strong>:{' '}
                     <span style={{ color, fontWeight: 600 }}>
                       {formatMoney(Math.abs(rounded), cur)}
                     </span>{' '}
-                    <span className="muted">({label})</span>
+                    <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
                   </li>
                 )
               })}
@@ -659,7 +659,7 @@ export function ReportsPage() {
                 {partner?.byCurrency.map((r) => {
                   let netInner
                   if (r.direction === 'even') {
-                    netInner = <span className="muted">Even</span>
+                    netInner = <span className="text-sm leading-6 text-muted-foreground mb-0">Even</span>
                   } else {
                     const partnerOwesMe = r.direction === 'partner_owes_me'
                     const color = partnerOwesMe ? 'var(--accent-green)' : 'var(--danger)'
@@ -669,7 +669,7 @@ export function ReportsPage() {
                       <span style={{ color }}>
                         {sign}
                         {formatMoney(Math.abs(r.net), r.currency)}{' '}
-                        <span className="muted">({label})</span>
+                        <span className="text-sm leading-6 text-muted-foreground mb-0">({label})</span>
                       </span>
                     )
                   }
@@ -685,7 +685,7 @@ export function ReportsPage() {
                       {hasSettlements && (
                         <>
                           <br />
-                          <span className="muted" style={{ fontSize: '0.75rem' }}>
+                          <span className="text-xs text-muted-foreground mb-0">
                             (after {r.settlementCount} settlement
                             {r.settlementCount === 1 ? '' : 's'})
                           </span>
@@ -805,7 +805,7 @@ export function ReportsPage() {
                   </TableCell>
                   <TableCell>{formatMoney(Number(row.amount), row.currency)}</TableCell>
                   <TableCell
-                    className="muted"
+                    className="text-sm leading-6 text-muted-foreground mb-0"
                     style={{
                       maxWidth: '14rem',
                       overflow: 'hidden',
@@ -926,7 +926,7 @@ export function ReportsPage() {
         </DialogHeader>
         <form onSubmit={submitSettlement}>
           <DialogBody>
-            <div className="formGrid" style={{ display: 'grid', gap: '0.75rem' }}>
+            <div className="mb-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))]">
               <Label htmlFor="settlement-contact">
                 Contact
                 <NativeSelect
