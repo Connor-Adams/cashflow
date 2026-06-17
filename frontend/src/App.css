@@ -1250,7 +1250,7 @@
   }
 
   .statValue {
-    @apply m-0 whitespace-nowrap text-[1.55rem] font-semibold tracking-tight;
+    @apply m-0 whitespace-nowrap text-[1.55rem] font-bold tracking-tight;
   }
 
   .statHint {
