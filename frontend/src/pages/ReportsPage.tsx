@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Download, Plus, Trash2 } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatCard } from '@/components/ui/stat-card'
@@ -540,7 +541,7 @@ export function ReportsPage() {
           }
         />
       </section>
-      {err && <span className="error">{err}</span>}
+      {err && <Alert variant="error" className="mb-4">{err}</Alert>}
       {loading && <p className="mb-4 text-sm leading-6 text-muted-foreground">Loading…</p>}
 
       <div className="mb-4 grid gap-3 grid-cols-[repeat(auto-fit,minmax(180px,1fr))]" aria-busy={loading}>
@@ -771,7 +772,7 @@ export function ReportsPage() {
         title="Recent settlements"
         description="Manual records of money paid between you and a contact. Applied to the net partner balance above."
       >
-        {settlementsErr && <span className="error">{settlementsErr}</span>}
+        {settlementsErr && <Alert variant="error" className="mb-4">{settlementsErr}</Alert>}
         <div className="tableWrap">
           <Table className="table">
             <TableHeader>
@@ -1013,7 +1014,7 @@ export function ReportsPage() {
                   aria-describedby={formAmountError ? 'settlement-amount-err' : undefined}
                 />
                 {formAmountError && (
-                  <span id="settlement-amount-err" className="error text-xs" role="alert">
+                  <span id="settlement-amount-err" className="text-danger text-xs" role="alert">
                     {formAmountError}
                   </span>
                 )}
@@ -1035,7 +1036,7 @@ export function ReportsPage() {
                   aria-describedby={formDateError ? 'settlement-date-err' : undefined}
                 />
                 {formDateError && (
-                  <span id="settlement-date-err" className="error text-xs" role="alert">
+                  <span id="settlement-date-err" className="text-danger text-xs" role="alert">
                     {formDateError}
                   </span>
                 )}
@@ -1049,7 +1050,7 @@ export function ReportsPage() {
                   onChange={(e) => setFormNotes(e.target.value)}
                 />
               </Label>
-              {formError && <span className="error">{formError}</span>}
+              {formError && <Alert variant="error" className="mb-4">{formError}</Alert>}
             </div>
           </DialogBody>
           <DialogFooter>
