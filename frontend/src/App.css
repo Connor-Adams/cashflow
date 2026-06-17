@@ -137,6 +137,12 @@
   .sidebar__logout {
     @apply w-full justify-start gap-2;
   }
+  /* Theme toggle gets the gradient on hover, matching nav links. */
+  .sidebar__themeToggle:hover {
+    background-image: var(--gradient-hero);
+    border-color: transparent;
+    color: #fff;
+  }
 
   .sidebar__user {
     @apply flex flex-wrap items-center gap-2 px-2 text-sm;
