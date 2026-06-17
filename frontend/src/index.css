@@ -130,73 +130,74 @@
   --graphite: #24222A;
 
   /* Surfaces */
-  --background: var(--bone);
-  --card: var(--cream);
-  --popover: var(--cream);
-  --muted: var(--sand);
+  --background: var(--zinc-100);
+  --card: #FFFFFF;
+  --popover: #FFFFFF;
+  --muted: var(--zinc-100);
 
   /* Text */
-  --foreground: var(--ink);
+  --foreground: var(--zinc-900);
   --card-foreground: var(--foreground);
   --popover-foreground: var(--foreground);
-  --muted-foreground: var(--stone);
+  --muted-foreground: var(--zinc-500);
 
   /* Brand */
-  --primary: var(--amber-400);
-  --primary-hover: var(--amber-500);
-  --primary-foreground: var(--ink);
+  --primary: var(--oxblood-500);
+  --primary-hover: var(--oxblood-600);
+  --primary-foreground: #FFFFFF;
 
   /* Accent */
-  --accent: var(--plum-50);
-  --accent-foreground: var(--plum-700);
+  --accent: var(--oxblood-50);
+  --accent-foreground: var(--oxblood-700);
 
   /* Semantic text links (WCAG AA ≥ 4.5:1 on --card and --background) */
-  --text-link: var(--rust-500);
-  --text-link-hover: var(--rust-600);
+  --text-link: var(--oxblood-600);
+  --text-link-hover: var(--oxblood-700);
 
   /* Semantic signals */
-  --success: var(--jade-400);
-  --success-bg: var(--jade-50);
-  --success-foreground: var(--jade-700);
-  --warning: var(--rust-400);
-  --warning-bg: var(--rust-50);
-  --warning-foreground: var(--rust-700);
-  --danger: #B93A2E;
-  --danger-bg: #FCECEA;
-  --danger-foreground: var(--rust-700);
-  --positive: var(--jade-500);
-  --positive-foreground: var(--cream);
-  --destructive: var(--danger);
-  --destructive-foreground: var(--cream);
+  --success: var(--green-600);
+  --success-bg: var(--green-100);
+  --success-foreground: var(--green-700);
+  --warning: var(--amber-w-700);
+  --warning-bg: var(--amber-w-100);
+  --warning-foreground: var(--amber-w-700);
+  --danger: var(--oxblood-500);
+  --danger-bg: var(--oxblood-50);
+  --danger-foreground: var(--oxblood-700);
+  --positive: var(--green-600);
+  --positive-foreground: #FFFFFF;
+  --negative: var(--oxblood-500);
+  --destructive: var(--oxblood-500);
+  --destructive-foreground: #FFFFFF;
 
   /* Borders / structural */
-  --secondary: var(--plum-600);
-  --secondary-hover: var(--plum-700);
-  --secondary-foreground: var(--bone);
-  --border: var(--sand);
-  --input: var(--taupe);
-  --ring: var(--amber-500);
-  --shadow: 0 8px 18px rgb(18 17 24 / 0.10);
+  --secondary: var(--zinc-100);
+  --secondary-hover: var(--zinc-200);
+  --secondary-foreground: var(--zinc-900);
+  --border: var(--zinc-200);
+  --input: var(--zinc-300);
+  --ring: var(--oxblood-500);
+  --shadow: 0 8px 18px rgb(9 9 11 / 0.08);
 
   /* Chart palette */
-  --chart-1: var(--amber-500);
-  --chart-2: var(--jade-500);
-  --chart-3: var(--plum-500);
-  --chart-4: var(--rust-500);
-  --chart-5: var(--stone);
+  --chart-1: var(--oxblood-500);
+  --chart-2: var(--green-600);
+  --chart-3: var(--gradient-hero-to);
+  --chart-4: var(--gradient-hero-from);
+  --chart-5: var(--zinc-400);
 
-  --chart-spend: var(--amber-500);
-  --chart-credit: var(--jade-500);
-  --chart-payment: var(--stone);
-  --chart-business: var(--plum-600);
+  --chart-spend: var(--oxblood-500);
+  --chart-credit: var(--green-600);
+  --chart-payment: var(--zinc-500);
+  --chart-business: var(--chart-steel);
   --chart-personal: var(--positive);
 
   --chart-line-1: var(--primary);
   --chart-line-2: var(--positive);
-  --chart-line-3: var(--chart-business);
+  --chart-line-3: var(--chart-steel);
   --chart-line-4: var(--destructive);
-  --chart-line-5: var(--moss);
-  --chart-line-6: var(--clay);
+  --chart-line-5: var(--amber-w-300);
+  --chart-line-6: var(--oxblood-300);
 
   /* Extended chart tokens — Sankey, Forecast, Scenarios, Portfolio */
   --chart-income: #10b981;
