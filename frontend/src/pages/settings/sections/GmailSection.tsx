@@ -324,6 +324,19 @@ export function GmailSection() {
               <> · last scan {new Date(gmailStatus.lastScanAt).toLocaleString()}</>
             )}
           </div>
+          {gmailStatus.status === 'reconnect_needed' && (
+            <div className="error" role="alert" style={{ display: 'grid', gap: '0.5rem' }}>
+              <span>
+                {gmailStatus.statusReason ??
+                  'Gmail access was revoked or expired. Reconnect to resume scanning.'}
+              </span>
+              <div>
+                <Button type="button" onClick={() => connectGmail()}>
+                  Reconnect Gmail
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="row" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
             <Button type="button" disabled={gmailScanning} onClick={() => void runGmailScan(500)}>
               <Sparkles aria-hidden="true" />
