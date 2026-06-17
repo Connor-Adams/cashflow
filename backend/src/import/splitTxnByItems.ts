@@ -5,6 +5,7 @@ export type AllocatorTxn = {
   amount: string;
   currency: string;
   finalCategory: string | null;
+  finalCategoryId?: number | null;
   finalBusiness: boolean;
   finalSplitType: string;
   businessAmount: string;
@@ -30,7 +31,9 @@ export type AllocatorItem = {
   unitPrice: string | null;
   quantity: number;
   inferredCategory: string | null;
+  inferredCategoryId?: number | null;
   categoryOverride: string | null;
+  categoryOverrideId?: number | null;
   businessUsePercent: string | null;
   businessUseOverride: string | null;
 };
@@ -44,6 +47,7 @@ export type AllocatorInput = {
 
 export type CategoryAllocation = {
   category: string | null;
+  categoryId: number | null;
   amount: number;
   businessAmount: number;
   currency: string;
@@ -63,6 +67,10 @@ function itemBase(item: AllocatorItem): number {
 
 function effectiveCategory(item: AllocatorItem, txnCategory: string | null): string | null {
   return item.categoryOverride ?? item.inferredCategory ?? txnCategory;
+}
+
+function effectiveCategoryId(item: AllocatorItem, txnCategoryId: number | null): number | null {
+  return item.categoryOverrideId ?? item.inferredCategoryId ?? txnCategoryId;
 }
 
 /**
@@ -102,6 +110,7 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
     return [
       {
         category: txn.finalCategory,
+        categoryId: txn.finalCategoryId ?? null,
         amount: txnAmount,
         businessAmount: bizAmt,
         currency: txn.currency,
@@ -116,8 +125,9 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
     ? Math.min(Math.max(txnBizRatio, 0), 1)
     : 0;
 
+  const txnCategoryId = txn.finalCategoryId ?? null;
   const bucket = new Map<string, CategoryAllocation>();
-  const add = (cat: string | null, amount: number, businessAmount: number) => {
+  const add = (cat: string | null, catId: number | null, amount: number, businessAmount: number) => {
     const key = cat ?? '';
     const existing = bucket.get(key);
     if (existing) {
@@ -126,6 +136,7 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
     } else {
       bucket.set(key, {
         category: cat,
+        categoryId: catId,
         amount,
         businessAmount,
         currency: txn.currency,
@@ -148,8 +159,9 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
       const portion = linkAmt / items.length;
       for (const it of items) {
         const cat = effectiveCategory(it, txn.finalCategory);
+        const catId = effectiveCategoryId(it, txnCategoryId);
         const biz = effectiveBusinessFraction(it, txnBizFraction) * portion;
-        add(cat, portion * sign, biz * sign);
+        add(cat, catId, portion * sign, biz * sign);
         allocated += portion;
       }
       continue;
@@ -160,8 +172,9 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
       const weight = baseSum > 0 ? rawBase / baseSum : 0;
       const portion = rawBase * share + extras * weight;
       const cat = effectiveCategory(it, txn.finalCategory);
+      const catId = effectiveCategoryId(it, txnCategoryId);
       const biz = effectiveBusinessFraction(it, txnBizFraction) * portion;
-      add(cat, portion * sign, biz * sign);
+      add(cat, catId, portion * sign, biz * sign);
       allocated += portion;
     }
   }
@@ -174,7 +187,7 @@ export function splitTxnByItems(input: AllocatorInput): CategoryAllocation[] {
       computed: allocated,
       drift,
     }, 'split_txn_drift');
-    add(txn.finalCategory, drift * sign, drift * sign * txnBizFraction);
+    add(txn.finalCategory, txnCategoryId, drift * sign, drift * sign * txnBizFraction);
   }
 
   return Array.from(bucket.values());

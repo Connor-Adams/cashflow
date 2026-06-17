@@ -28,6 +28,7 @@ test('splitTxnByItems: returns single bucket when no links exist', () => {
       amount: -100,
       businessAmount: 0,
       currency: 'CAD',
+      categoryId: null,
     },
   ]);
 });
@@ -462,6 +463,7 @@ test('splitTxnByItems: cross-currency links are not allocated as txn-currency am
       amount: -137,
       businessAmount: 0,
       currency: 'CAD',
+      categoryId: null,
     },
   ]);
 });

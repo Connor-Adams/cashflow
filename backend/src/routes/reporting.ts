@@ -514,7 +514,7 @@ router.get('/runway', async (req, res, next) => {
         currency,
         date: { [Op.gte]: fromDate, [Op.lte]: today },
       },
-      attributes: ['amount', 'txnType', 'finalCategory'],
+      attributes: ['amount', 'txnType', 'finalCategory', 'finalCategoryId'], // B2: finalCategoryId selected for future rollup
       include: [{ association: 'account', attributes: ['accountType'] }],
       raw: true,
     });
@@ -597,7 +597,7 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: start, [Op.lte]: end },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory', 'txnType'],
+        attributes: ['amount', 'finalCategory', 'finalCategoryId', 'txnType'], // B2: finalCategoryId selected for future rollup
         include: [{ association: 'account', attributes: ['accountType'] }],
         raw: true,
       }),
@@ -608,7 +608,7 @@ router.get('/spending/by-category', async (req, res, next) => {
           date: { [Op.gte]: prevStart, [Op.lte]: prevEnd },
           amount: { [Op.lt]: 0 },
         },
-        attributes: ['amount', 'finalCategory', 'txnType'],
+        attributes: ['amount', 'finalCategory', 'finalCategoryId', 'txnType'], // B2: finalCategoryId selected for future rollup
         include: [{ association: 'account', attributes: ['accountType'] }],
         raw: true,
       }),
@@ -710,7 +710,7 @@ router.get('/recurring', async (req, res, next) => {
 
     const rawTxns = await Transaction.findAll({
       where: txnWhere,
-      attributes: ['merchantClean', 'merchantRaw', 'amount', 'currency', 'date', 'finalCategory'],
+      attributes: ['merchantClean', 'merchantRaw', 'amount', 'currency', 'date', 'finalCategory', 'finalCategoryId'], // B2: finalCategoryId selected for future rollup
       raw: true,
     });
 

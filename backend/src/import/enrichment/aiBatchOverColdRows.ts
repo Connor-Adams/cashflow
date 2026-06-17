@@ -129,7 +129,7 @@ async function persistAiEnhancement(c: ColdRow, aiSignal: Signal, householdId: n
     amount: c.amount,
   });
   try {
-    // TODO(B2): static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null on this path. Plan B2's rollup must resolve/backfill these null FKs (or switch to instance saves / individualHooks:true).
+    // NOTE: static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null momentarily. Migration 20260623000001 backfills any null FKs where the category string is set.
     await Transaction.update(
       {
         autoCategory: merged.fields.autoCategory,
