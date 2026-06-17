@@ -11,7 +11,19 @@ import {
   BasicTracerProvider,
   InMemorySpanExporter,
 } from '@opentelemetry/sdk-trace-base';
-import { buildSpanProcessors } from './otel';
+import { buildSpanProcessors, autoInstrumentationConfig } from './otel';
+
+test('autoInstrumentationConfig disables pino instrumentation (no double-logging to Loki)', () => {
+  // The backend already exports logs via its own pino.multistream OTLP stream
+  // (loggerOtlpTransport). If @opentelemetry/instrumentation-pino is also
+  // enabled, every log line ships to Loki twice (2x ingestion) with a split
+  // severity casing. Keep it disabled — the manual transport is the one path.
+  assert.equal(
+    autoInstrumentationConfig['@opentelemetry/instrumentation-pino']?.enabled,
+    false,
+    'instrumentation-pino must be disabled to avoid duplicate log emission',
+  );
+});
 
 test('buildSpanProcessors exports ended spans to the trace exporter', async () => {
   const exporter = new InMemorySpanExporter();

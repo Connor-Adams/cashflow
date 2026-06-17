@@ -33,6 +33,7 @@ import {
   listMessageIds,
   refreshAccessToken,
   revokeToken,
+  isReauthRequiredError,
   GMAIL_READONLY_SCOPE,
   OPENID_EMAIL_SCOPE,
   type OauthTokenResponse,
@@ -121,9 +122,33 @@ async function ensureFreshAccessToken(integ: UserEmailIntegration): Promise<stri
   if (!integ.refreshTokenEncrypted) {
     throw new Error('Access token expired and no refresh token available');
   }
-  const refreshed = await refreshAccessToken(decryptSecret(integ.refreshTokenEncrypted));
-  await applyTokenResponseTo(integ, refreshed, { keepRefreshIfMissing: true });
-  return refreshed.access_token;
+  try {
+    const refreshed = await refreshAccessToken(decryptSecret(integ.refreshTokenEncrypted));
+    await applyTokenResponseTo(integ, refreshed, { keepRefreshIfMissing: true });
+    return refreshed.access_token;
+  } catch (err) {
+    await markReauthIfRevoked(integ, err);
+    throw err;
+  }
+}
+
+/**
+ * If `err` means the Google grant is dead (revoked/expired refresh token),
+ * mark the integration as needing reconnection so the UI can prompt a re-link
+ * instead of silently failing every scan. Returns true if it flagged the row.
+ * Any other error is left untouched (it may be transient).
+ */
+export async function markReauthIfRevoked(
+  integ: UserEmailIntegration,
+  err: unknown,
+): Promise<boolean> {
+  if (!isReauthRequiredError(err)) return false;
+  integ.set({
+    status: 'reconnect_needed',
+    statusReason: 'Google access was revoked or expired. Reconnect Gmail to resume scanning.',
+  });
+  await integ.save();
+  return true;
 }
 
 /**
