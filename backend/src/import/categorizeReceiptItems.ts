@@ -212,6 +212,7 @@ export async function applyReceiptItemCategorySuggestions(
 ): Promise<number> {
   let updated = 0
   for (const s of suggestions) {
+    // TODO(B2): static update/bulkCreate bypasses the beforeSave category-id hook, so *_category_id stays null on this path. Plan B2's rollup must resolve/backfill these null FKs (or switch to instance saves / individualHooks:true).
     const [count] = await ExternalOrderItem.update(
       { inferredCategory: s.category, confidence: String(s.confidence) },
       { where: { id: s.itemId } },

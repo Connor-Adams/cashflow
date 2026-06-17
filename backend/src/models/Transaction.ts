@@ -48,6 +48,9 @@ export class Transaction extends Model<
   declare autoCategory: string | null;
   declare categoryOverride: string | null;
   declare finalCategory: string | null;
+  declare autoCategoryId: number | null;
+  declare categoryOverrideId: number | null;
+  declare finalCategoryId: number | null;
   declare taxTreatmentOverride: string | null;
 
   declare counterpartyRaw: string | null;
@@ -199,6 +202,21 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       finalCategory: {
         type: DataTypes.STRING(128),
         field: 'final_category',
+        allowNull: true,
+      },
+      autoCategoryId: {
+        type: DataTypes.INTEGER,
+        field: 'auto_category_id',
+        allowNull: true,
+      },
+      categoryOverrideId: {
+        type: DataTypes.INTEGER,
+        field: 'category_override_id',
+        allowNull: true,
+      },
+      finalCategoryId: {
+        type: DataTypes.INTEGER,
+        field: 'final_category_id',
         allowNull: true,
       },
       taxTreatmentOverride: {
@@ -377,16 +395,13 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
       timestamps: true,
     }
   );
-  Transaction.addHook('afterSave', async (instance: Transaction, options) => {
+  Transaction.addHook('beforeSave', async (instance: Transaction, options) => {
     if (instance.householdId == null) return;
-    try {
-      const { ensureCategory } = await import('../util/ensureCategory');
-      await ensureCategory(instance.householdId, instance.finalCategory, {
-        transaction: options.transaction,
-      });
-    } catch (e) {
-      logger.warn({ err: e, model: 'Transaction' }, 'ensure_category_hook_failed');
-    }
+    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
+    const tx = options.transaction ?? undefined;
+    instance.autoCategoryId = await resolveCategoryIdByName(instance.householdId, instance.autoCategory, { transaction: tx });
+    instance.categoryOverrideId = await resolveCategoryIdByName(instance.householdId, instance.categoryOverride, { transaction: tx });
+    instance.finalCategoryId = await resolveCategoryIdByName(instance.householdId, instance.finalCategory, { transaction: tx });
   });
 
   /**

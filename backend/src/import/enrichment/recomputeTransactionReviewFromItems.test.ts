@@ -26,6 +26,9 @@ let orderCounter = 0;
 
 before(async () => {
   await sequelize.sync({ force: true });
+  // The ExternalOrderItem beforeSave hook calls resolveCategoryIdByName which
+  // does Category.findOrCreate — categories.household_id has a FK to households.
+  await Household.create({ name: 'H' } as never);
   const acct = await Account.create({
     householdId: HH,
     name: 'Card',

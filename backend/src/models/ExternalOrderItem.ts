@@ -27,6 +27,8 @@ export class ExternalOrderItem extends Model<
   declare displayNameConfidence: string | null;
   declare itemNumber: string | null;
   declare rawPayload: unknown | null;
+  declare inferredCategoryId: number | null;
+  declare categoryOverrideId: number | null;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -81,6 +83,8 @@ export function initExternalOrderItem(sequelize: Sequelize): typeof ExternalOrde
         allowNull: true,
       },
       rawPayload: { type: DataTypes.JSON, field: 'raw_payload', allowNull: true },
+      inferredCategoryId: { type: DataTypes.INTEGER, field: 'inferred_category_id', allowNull: true },
+      categoryOverrideId: { type: DataTypes.INTEGER, field: 'category_override_id', allowNull: true },
     } as ModelAttributes<ExternalOrderItem>,
     {
       sequelize,
@@ -90,5 +94,16 @@ export function initExternalOrderItem(sequelize: Sequelize): typeof ExternalOrde
       timestamps: true,
     }
   );
+
+  ExternalOrderItem.addHook('beforeSave', async (instance: ExternalOrderItem, options) => {
+    const tx = options.transaction ?? undefined;
+    const { ExternalOrder } = await import('./ExternalOrder');
+    const order = await ExternalOrder.findByPk(instance.externalOrderId, { transaction: tx });
+    if (!order || order.householdId == null) return; // can't scope — leave ids null
+    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
+    instance.inferredCategoryId = await resolveCategoryIdByName(order.householdId, instance.inferredCategory, { transaction: tx });
+    instance.categoryOverrideId = await resolveCategoryIdByName(order.householdId, instance.categoryOverride, { transaction: tx });
+  });
+
   return ExternalOrderItem;
 }

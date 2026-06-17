@@ -7,8 +7,6 @@ import {
   InferCreationAttributes,
   CreationOptional,
 } from 'sequelize';
-import { logger } from '../observability/logger';
-
 export class Rule extends Model<
   InferAttributes<Rule>,
   InferCreationAttributes<Rule>
@@ -20,6 +18,7 @@ export class Rule extends Model<
   declare matchKind: string;
   declare priority: number;
   declare category: string | null;
+  declare categoryId: number | null;
   declare isBusiness: boolean;
   declare splitType: string;
   /** Stored as DECIMAL; may be string when read from SQLite */
@@ -64,6 +63,7 @@ export function initRule(sequelize: Sequelize): typeof Rule {
       },
       priority: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       category: { type: DataTypes.STRING(128), allowNull: true },
+      categoryId: { type: DataTypes.INTEGER, field: 'category_id', allowNull: true },
       isBusiness: {
         type: DataTypes.BOOLEAN,
         field: 'is_business',
@@ -101,16 +101,12 @@ export function initRule(sequelize: Sequelize): typeof Rule {
       timestamps: true,
     }
   );
-  Rule.addHook('afterSave', async (instance: Rule, options) => {
+  Rule.addHook('beforeSave', async (instance: Rule, options) => {
     if (instance.householdId == null) return;
-    try {
-      const { ensureCategory } = await import('../util/ensureCategory');
-      await ensureCategory(instance.householdId, instance.category, {
-        transaction: options.transaction,
-      });
-    } catch (e) {
-      logger.warn({ err: e, model: 'Rule' }, 'ensure_category_hook_failed');
-    }
+    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
+    instance.categoryId = await resolveCategoryIdByName(
+      instance.householdId, instance.category, { transaction: options.transaction ?? undefined },
+    );
   });
   return Rule;
 }
