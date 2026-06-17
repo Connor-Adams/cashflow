@@ -7,19 +7,18 @@ import { openaiJson, openaiJsonWithMeta, type OpenAiJsonResult } from './openaiJ
 import { findBestRule, loadAllRules } from '../import/applyRules';
 import type { Receipt } from '../models/Receipt';
 import { findMerchantMemory, type MerchantMemoryMatch } from './merchantMemory';
+import { loadCategoryTree } from '../categories/rollup';
 
 export const TRANSACTION_SUGGESTION_PROMPT_VERSION = 'transaction-fields-v2';
 
 export async function loadCategoryHints(householdId?: number | null): Promise<string[]> {
-  const replacements = householdId != null ? [householdId] : [];
-  const ruleWhere =
-    householdId != null
-      ? `household_id = ? AND category IS NOT NULL AND TRIM(category) != ''`
-      : `category IS NOT NULL AND TRIM(category) != ''`;
-  const txnWhere =
-    householdId != null
-      ? `household_id = ? AND final_category IS NOT NULL AND TRIM(final_category) != ''`
-      : `final_category IS NOT NULL AND TRIM(final_category) != ''`;
+  if (householdId != null) {
+    const tree = await loadCategoryTree(householdId);
+    return [...new Set(tree.pathById.values())].sort();
+  }
+  const replacements: unknown[] = [];
+  const ruleWhere = `category IS NOT NULL AND TRIM(category) != ''`;
+  const txnWhere = `final_category IS NOT NULL AND TRIM(final_category) != ''`;
   const [a, b] = await Promise.all([
     sequelize.query<{ c: string }>(
       `SELECT DISTINCT TRIM(category) AS c FROM rules WHERE ${ruleWhere}`,
