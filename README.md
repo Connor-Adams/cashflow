@@ -11,11 +11,12 @@
 [![typescript](https://img.shields.io/badge/typescript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 <!-- END BADGIE TIME -->
 
-A local-first finance tracker for one person or a couple. Drop in your card
-CSVs and PDF statements, let merchant rules categorize and split them, attach
-receipts, track investments and net worth, plan budgets and forecasts — and see
-it all roll up into per-currency summaries. Your data stays on your machine
-(SQLite by default); nothing leaves it unless you opt into an integration.
+A self-hosted finance tracker for one person or a couple — run it on your own
+machine or your own server. Drop in your card CSVs and PDF statements, let
+merchant rules categorize and split them, attach receipts, track investments
+and net worth, plan budgets and forecasts — and see it all roll up into
+per-currency summaries. No third-party services touch your data unless you opt
+into an integration.
 
 It is a real multi-currency ledger, not a spreadsheet: ~90 tables, ~80 API
 routers, an 85-page React app, and an AI layer you can turn on or leave off
@@ -39,8 +40,7 @@ reinstall at root.
 
 Optional config lives in `backend/.env` (copy from
 [`backend/.env.example`](backend/.env.example)). Everything has a working
-default; SQLite, `backend/data/cashflow.sqlite`, and `DEFAULT_CURRENCY=CAD` are
-assumed when you set nothing.
+default — set nothing and it just runs (`DEFAULT_CURRENCY=CAD`).
 
 ## The primitives spine
 
@@ -109,8 +109,9 @@ Three workspaces, one DTO contract:
 - **`shared/`** — a single file, `shared/api-types.ts`, the API DTO contract
   imported by both sides as `@cashflow/shared`.
 
-The DB is **dual-dialect**: SQLite by default, Postgres when `DATABASE_URL` is
-set — all Sequelize is written to run on both. Multi-currency throughout, with
+The DB is **dual-dialect**: Postgres in production (set `DATABASE_URL`), with an
+embedded file DB for zero-setup local dev — all Sequelize is written to run on
+both. Multi-currency throughout, with
 an `FxRate` table. Auth is cookie-session and household-scoped behind a global
 `requireAuth` boundary. Observability is pino logs + OpenTelemetry over OTLP;
 `infra/` brings up Grafana/Loki/Tempo/Prometheus locally
@@ -148,7 +149,7 @@ common knobs:
 | Variable | Default | Purpose |
 |---|---|---|
 | `DEFAULT_CURRENCY` | `CAD` | Fallback when a transaction has no currency |
-| `DATABASE_URL` | _(unset)_ | Postgres connection; SQLite when unset |
+| `DATABASE_URL` | _(unset)_ | Postgres connection; an embedded file DB is used when unset |
 | `CSV_UPLOAD_DIR` | `./uploads/csv` | Folder-scan import source |
 | `RECEIPTS_UPLOAD_DIR` | `./uploads/receipts` | Local receipt storage |
 | `OPENAI_API_KEY` | _(unset)_ | Enables AI suggestions, vision, chat |
