@@ -9,7 +9,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   preview: {
-    allowedHosts: ['.up.railway.app'],
+    // Hosts vite preview will serve. Production runs `vite preview` behind
+    // Railway, so every public hostname must be listed or vite returns
+    // "Blocked request. This host is not allowed." `.up.railway.app` covers the
+    // default Railway domains; `.connoradams.ca` covers the custom domains
+    // (cashflow.connoradams.ca UI + api.cashflow.connoradams.ca).
+    allowedHosts: ['.up.railway.app', '.connoradams.ca'],
   },
   resolve: {
     alias: {
