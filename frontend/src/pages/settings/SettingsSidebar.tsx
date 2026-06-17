@@ -45,7 +45,7 @@ const GROUPS: SettingsNavGroup[] = [
 
 const linkBase = 'flex items-center justify-between rounded-md px-3 py-1.5 text-sm transition-colors'
 
-export function SettingsSidebar(): JSX.Element {
+export function SettingsSidebar() {
   const auth = useAuth()
   const isOwner =
     auth.user?.household?.role === 'owner' || auth.user?.globalRole === 'superadmin'
