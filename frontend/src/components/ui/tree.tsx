@@ -18,7 +18,7 @@ function Tree({ className, ...props }: React.ComponentProps<'ul'>) {
 
 /** Nested child list — draws the left indent guide. */
 function TreeGroup({ className, ...props }: React.ComponentProps<'ul'>) {
-  return <ul className={cn('ml-[15px] border-l border-border/60 pl-2', className)} {...props} />
+  return <ul className={cn('treeGuide ml-[15px] pl-2', className)} {...props} />
 }
 
 type TreeRowProps = React.ComponentProps<'div'> & {
@@ -49,8 +49,8 @@ function TreeRow({
   return (
     <div
       className={cn(
-        'group flex items-center gap-1.5 rounded-md py-1 pr-1 transition-colors',
-        highlighted ? 'treeRowActive' : 'hover:bg-muted/50',
+        'group flex items-center gap-1.5 rounded-md py-0.5 pr-1 text-sm transition-colors',
+        highlighted ? 'treeRowActive' : 'treeRow',
         className,
       )}
       {...rowProps}

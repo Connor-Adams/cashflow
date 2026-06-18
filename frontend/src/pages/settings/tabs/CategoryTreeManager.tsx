@@ -83,7 +83,9 @@ function TreeNode({
             className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-muted"
             onClick={() => onEdit(node.id)}
           >
-            <CategoryIcon name={node.name} size={15} />
+            {node.icon
+              ? <CategoryIcon name={node.name} size={15} />
+              : <span className="size-1.5 rounded-full bg-muted-foreground/30 transition-colors group-hover:bg-muted-foreground/70" aria-hidden />}
           </button>
         }
         actions={

@@ -71,9 +71,10 @@ describe('Tree primitives', () => {
         <li><TreeRow>Row</TreeRow></li>
       </Tree>,
     )
+    const tokens = (el: Element) => el.className.split(/\s+/)
     const row = screen.getByText('Row').closest('div.group')!
-    expect(row.className).toContain('hover:bg-muted/50')
-    expect(row.className).not.toContain('treeRowActive')
+    expect(tokens(row)).toContain('treeRow')
+    expect(tokens(row)).not.toContain('treeRowActive')
 
     rerender(
       <Tree>
@@ -81,8 +82,8 @@ describe('Tree primitives', () => {
       </Tree>,
     )
     const hi = screen.getByText('Row').closest('div.group')!
-    expect(hi.className).toContain('treeRowActive')
-    expect(hi.className).not.toContain('hover:bg-muted/50')
+    expect(tokens(hi)).toContain('treeRowActive')
+    expect(tokens(hi)).not.toContain('treeRow')
   })
 
   it('forwards drag props onto the row element', () => {
