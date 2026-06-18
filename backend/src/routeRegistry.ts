@@ -60,6 +60,7 @@ import financialScenariosRouter from './routes/financialScenarios';
 import dataQualityRouter from './routes/dataQuality';
 import authRouter from './routes/auth';
 import contactsRouter from './routes/contacts';
+import transferLinkRouter from './routes/transferLink';
 import categoriesRouter from './routes/categories';
 import labelsRouter from './routes/labels';
 import settlementsRouter from './routes/settlements';
@@ -242,6 +243,7 @@ export const gatedRoutes: RouteEntry[] = [
   },
   { paths: '/api/rules', handlers: [rulesRouter] },
   { paths: '/api/contacts', handlers: [contactsRouter] },
+  { paths: '/api/transfer-link', handlers: [transferLinkRouter], why: 'term-based transfer→contact link pass for the per-person loan ledger' },
   { paths: '/api/categories', handlers: [categoriesRouter] },
   { paths: '/api/labels', handlers: [labelsRouter] },
   { paths: '/api/settlements', handlers: [settlementsRouter] },

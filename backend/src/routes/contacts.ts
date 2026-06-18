@@ -1,15 +1,17 @@
 import { Router } from 'express';
 import { Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere } from '../auth/scope';
+import { householdWhere, visibleTransactionWhere } from '../auth/scope';
 import { resolveHouseholdToday } from '../time/householdToday';
 import { apiReadLimiter } from './apiRateLimit';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
 import {
   summarizeOpenForContact,
+  summarize,
   resolveToday,
   type ReimbursementRow,
 } from '../reimbursements/serialize';
+import { computeTransferNet, type TransferRow } from '../contacts/transferLedger';
 
 const router = Router();
 
@@ -187,6 +189,62 @@ router.delete('/:id', async (req, res, next) => {
     }
     await row.destroy();
     res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Per-person loan ledger (per-person loan ledger feature). Two numbers side by
+ * side: raw net transfer flow (auto, over transfers linked via
+ * counterparty_contact_id) and tracked-loan outstanding (Reimbursements for
+ * this contact). Plus the linked transfer rows, each flagged whether it is
+ * already a tracked loan. Per-currency; no FX.
+ */
+router.get('/:id/ledger', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    const contact = await Contact.findOne({ where: { id, ...householdWhere(req) } });
+    if (!contact) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    const txns = await Transaction.findAll({
+      where: { ...visibleTransactionWhere(req), counterpartyContactId: id },
+      attributes: ['id', 'date', 'amount', 'currency', 'merchantClean', 'merchantRaw'],
+      order: [['date', 'ASC'], ['id', 'ASC']],
+    });
+    const reimbs = await Reimbursement.findAll({ where: { ...householdWhere(req), contactId: id } });
+
+    const loanTxnIds = new Set(reimbs.map((r) => r.transactionId));
+    const transfers = txns.map((t) => {
+      const amt = Number(t.amount);
+      return {
+        id: t.id,
+        date: t.date,
+        amount: String(t.amount),
+        currency: t.currency,
+        merchant: t.merchantClean ?? t.merchantRaw ?? null,
+        direction: amt < 0 ? ('out' as const) : ('in' as const),
+        isLoan: loanTxnIds.has(t.id),
+      };
+    });
+    const transferNet = computeTransferNet(
+      txns.map((t) => ({ amount: t.amount, currency: t.currency }) as TransferRow),
+    );
+    const summary = summarize(reimbs.map((r) => r as unknown as ReimbursementRow));
+
+    res.json({
+      contactId: contact.id,
+      name: contact.name,
+      transferNet,
+      trackedOutstandingByCurrency: summary.outstandingByCurrency,
+      transfers,
+    });
   } catch (e) {
     next(e);
   }
