@@ -246,7 +246,7 @@ export function SankeyPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="muted">Loading…</p>
+            <p className="text-sm leading-6 text-muted-foreground">Loading…</p>
           ) : showEmpty ? (
             <EmptyState
               title="No flows for this filter"
@@ -300,11 +300,16 @@ export function SankeyPage() {
           </DialogHeader>
           <DialogBody>
             {drillErr ? (
-              <p role="alert" className="muted">
+              <p
+                role="alert"
+                className="text-sm leading-6 text-muted-foreground"
+              >
                 {drillErr}
               </p>
             ) : drillLoading ? (
-              <p className="muted">Loading transactions…</p>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Loading transactions…
+              </p>
             ) : drillRows.length === 0 ? (
               <EmptyState
                 title="No source transactions"
@@ -312,7 +317,7 @@ export function SankeyPage() {
               />
             ) : (
               <>
-                <p className="muted mb-2">
+                <p className="mb-2 text-sm leading-6 text-muted-foreground">
                   {drillTotalCount.toLocaleString()} transaction
                   {drillTotalCount === 1 ? '' : 's'} contributed to this flow.
                   {drillTruncated
@@ -335,10 +340,15 @@ export function SankeyPage() {
                         <TableCell>{row.merchant}</TableCell>
                         <TableCell>
                           {row.finalCategory ?? (
-                            <span className="muted">Uncategorized</span>
+                            <span className="text-xs text-muted-foreground">
+                              Uncategorized
+                            </span>
                           )}
                           {row.finalBusiness ? (
-                            <span className="muted"> (business)</span>
+                            <span className="text-xs text-muted-foreground">
+                              {' '}
+                              (business)
+                            </span>
                           ) : null}
                         </TableCell>
                         <TableCell className="text-right">
