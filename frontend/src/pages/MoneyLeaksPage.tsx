@@ -180,7 +180,7 @@ export function MoneyLeaksPage() {
       />
 
       <section className="card">
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div className="flex gap-3 items-center">
           <label htmlFor="money-leaks-currency-filter">Currency</label>
           <NativeSelect
             id="money-leaks-currency-filter"
@@ -232,17 +232,11 @@ export function MoneyLeaksPage() {
           description="Restore one to make it visible again."
           defaultOpen={false}
         >
-          <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+          <ul className="m-0 p-0 list-none">
             {dismissed.items.map((d) => (
               <li
                 key={d.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '6px 0',
-                  borderBottom: '1px solid var(--border)',
-                }}
+                className="flex justify-between items-center py-1.5 border-b border-border"
               >
                 <span>
                   <Badge variant="outline">{TYPE_LABEL[d.leakType]}</Badge>{' '}
@@ -344,38 +338,24 @@ function LeakGroup({
       title={TYPE_LABEL[leakType]}
       description={`${items.length} ${items.length === 1 ? 'leak' : 'leaks'} • ${groupCurrencies.length === 1 ? `${groupAnnual.toFixed(2)} ${groupCurrencies[0]}/year` : `${groupCurrencies.length} currencies`}`}
     >
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      <ul className="m-0 p-0 list-none">
         {items.map((item) => (
           <li
             key={`${item.leakType}|${item.identityKey}`}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr auto',
-              gap: 12,
-              alignItems: 'start',
-              padding: '12px 0',
-              borderBottom: '1px solid var(--border)',
-            }}
+            className="grid grid-cols-[auto_1fr_auto] gap-3 items-start py-3 border-b border-border"
           >
-            <Icon aria-hidden="true" size={20} style={{ marginTop: 2 }} />
+            <Icon aria-hidden="true" size={20} className="mt-0.5" />
             <div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontWeight: 600,
-                }}
-              >
+              <div className="flex items-center gap-1.5 font-semibold">
                 {item.title}
                 <Badge variant={SEVERITY_BADGE_VARIANT[item.severity]}>
                   {item.severity}
                 </Badge>
               </div>
-              <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>
+              <div className="muted mt-1">
                 {item.description}
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              <div className="muted text-xs mt-1">
                 {formatMoney(item.monthlyImpact, item.currency)}/mo •{' '}
                 {formatMoney(item.annualImpact, item.currency)}/yr
               </div>
@@ -384,8 +364,7 @@ function LeakGroup({
                 item.leakType === 'duplicate_service') && (
                 <Link
                   to="/subscriptions"
-                  className="muted text-xs underline"
-                  style={{ marginTop: 4, display: 'inline-block' }}
+                  className="muted text-xs underline mt-1 inline-block"
                 >
                   View source →
                 </Link>
@@ -393,8 +372,7 @@ function LeakGroup({
               {item.leakType === 'recurring_fee' && (
                 <Link
                   to="/recurring"
-                  className="muted text-xs underline"
-                  style={{ marginTop: 4, display: 'inline-block' }}
+                  className="muted text-xs underline mt-1 inline-block"
                 >
                   View source →
                 </Link>
