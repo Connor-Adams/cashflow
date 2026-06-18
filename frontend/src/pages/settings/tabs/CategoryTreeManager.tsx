@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useCategoryTree } from '../../../lib/useCategoryTree';
-import { createCategory, renameCategory, deleteCategory } from '../../../lib/categoriesApi';
+import { createCategory, renameCategory, deleteCategory, reparentCategory } from '../../../lib/categoriesApi';
 import type { CategoryTreeNode } from '../../../types/api';
 
 type NodeProps = {
@@ -26,7 +26,19 @@ function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: 
 
   return (
     <li>
-      <div className="flex items-center gap-2 py-1" style={{ paddingLeft: depth * 16 }}>
+      <div
+          className="flex items-center gap-2 py-1"
+          style={{ paddingLeft: depth * 16 }}
+          draggable
+          onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(node.id)); }}
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const draggedId = Number(e.dataTransfer.getData('text/plain'));
+            if (!draggedId || draggedId === node.id) return;
+            void run(() => reparentCategory(draggedId, node.id));
+          }}
+        >
         {renaming ? (
           <input
             aria-label={`Rename ${node.name}`}
