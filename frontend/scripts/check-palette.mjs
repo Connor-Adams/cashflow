@@ -93,3 +93,53 @@ export function findViolations(source, file) {
   })
   return out
 }
+
+// ── CLI ──────────────────────────────────────────────────────────────────
+import { readdirSync, readFileSync } from 'node:fs'
+import { join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const EXCLUDED_DIRS = ['extension', 'bookmarklets']
+
+function collectFiles() {
+  const frontendRoot = fileURLToPath(new URL('..', import.meta.url)) // frontend/
+  const src = join(frontendRoot, 'src')
+  const entries = readdirSync(src, { recursive: true, withFileTypes: true })
+  return entries
+    .filter((d) => d.isFile())
+    .map((d) => join(d.parentPath ?? d.path, d.name))
+    .filter((p) => /\.(tsx?|css)$/.test(p))
+    .filter((p) => !/\.test\.(tsx?|jsx?)$/.test(p))
+    .filter((p) => p !== join(src, 'index.css'))
+    .filter((p) => {
+      const rel = relative(src, p)
+      return !EXCLUDED_DIRS.some((d) => rel === d || rel.startsWith(d + sep))
+    })
+}
+
+function main() {
+  const frontendRoot = fileURLToPath(new URL('..', import.meta.url))
+  const files = collectFiles()
+  if (files.length === 0) {
+    console.error('check-palette: matched 0 files — refusing to pass silently.')
+    process.exit(1)
+  }
+  let total = 0
+  for (const file of files) {
+    const violations = findViolations(readFileSync(file, 'utf8'), file)
+    for (const v of violations) {
+      console.error(
+        `${relative(frontendRoot, file)}:${v.line}: off-palette color "${v.value}" (${v.why}) — use a var(--token)`,
+      )
+      total++
+    }
+  }
+  if (total > 0) {
+    console.error(`\ncheck-palette: ${total} off-palette color literal(s) found.`)
+    process.exit(1)
+  }
+  console.log(`check-palette: ${files.length} files clean.`)
+}
+
+// Run only when invoked directly, not when imported by tests.
+if (process.argv[1] === fileURLToPath(import.meta.url)) main()
