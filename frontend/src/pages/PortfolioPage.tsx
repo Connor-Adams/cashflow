@@ -25,13 +25,13 @@ import { StatCard } from '@/components/ui/stat-card'
 import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
 import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { SectionHeader } from '@/components/ui/section-header'
 import { TabPanel, Tabs, type TabItem } from '@/components/ui/tabs'
 import { AllocationDonut } from '@/components/ui/allocation-donut'
 import { AccountTypePanel } from './portfolio-account-type/AccountTypePanel'
@@ -509,68 +509,59 @@ function HoldingsPanel({
         />
       )}
 
-      <Card className="transactionsTableCard">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Recent investment activity</h2>
-            <p className="muted">
-              Trades, dividends, fees, transfers, and other imported brokerage rows.
-            </p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Security</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Amount</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(summary?.recentActivities ?? []).map((activity) => (
-                <TableRow key={activity.id}>
-                  <TableCell>{activity.tradeDate}</TableCell>
-                  <TableCell>
-                    {accountsById.get(activity.accountId)?.name ?? activity.accountId}
-                  </TableCell>
-                  <TableCell>{activity.activityType}</TableCell>
-                  <TableCell>
-                    {activity.security ? (
-                      <Link
-                        to={`/portfolio/security/${activity.security.id}`}
-                        className="text-foreground underline-offset-2 hover:underline"
-                      >
-                        {activity.security.symbol}
-                      </Link>
-                    ) : (
-                      '—'
-                    )}
-                  </TableCell>
-                  <TableCell>{activity.description}</TableCell>
-                  <TableCell>{activity.quantity ?? '—'}</TableCell>
-                  <TableCell>
-                    {activity.amount != null
-                      ? formatMoney(activity.amount, activity.currency)
-                      : '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {summary && summary.recentActivities.length === 0 && (
-                <EmptyTableRow
-                  colSpan={7}
-                  title="No investment activity imported yet."
-                  description="Trades, dividends, fees, and transfers appear here after import."
-                />
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <TableCard
+        title="Recent investment activity"
+        description="Trades, dividends, fees, transfers, and other imported brokerage rows."
+      >
+        <TableHeader>
+          <TableRow>
+            <TableHead>Date</TableHead>
+            <TableHead>Account</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Security</TableHead>
+            <TableHead>Description</TableHead>
+            <TableHead>Qty</TableHead>
+            <TableHead>Amount</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {(summary?.recentActivities ?? []).map((activity) => (
+            <TableRow key={activity.id}>
+              <TableCell>{activity.tradeDate}</TableCell>
+              <TableCell>
+                {accountsById.get(activity.accountId)?.name ?? activity.accountId}
+              </TableCell>
+              <TableCell>{activity.activityType}</TableCell>
+              <TableCell>
+                {activity.security ? (
+                  <Link
+                    to={`/portfolio/security/${activity.security.id}`}
+                    className="text-foreground underline-offset-2 hover:underline"
+                  >
+                    {activity.security.symbol}
+                  </Link>
+                ) : (
+                  '—'
+                )}
+              </TableCell>
+              <TableCell>{activity.description}</TableCell>
+              <TableCell>{activity.quantity ?? '—'}</TableCell>
+              <TableCell>
+                {activity.amount != null
+                  ? formatMoney(activity.amount, activity.currency)
+                  : '—'}
+              </TableCell>
+            </TableRow>
+          ))}
+          {summary && summary.recentActivities.length === 0 && (
+            <EmptyTableRow
+              colSpan={7}
+              title="No investment activity imported yet."
+              description="Trades, dividends, fees, and transfers appear here after import."
+            />
+          )}
+        </TableBody>
+      </TableCard>
     </>
   )
 }
@@ -754,58 +745,52 @@ function AllocationPanel({ data, sort, dir, onSort }: AllocationPanelProps) {
         />
       </div>
 
-      <Card className="transactionsTableCard mt-4">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Breakdown</h2>
-            <p className="muted">All allocation buckets in numeric form. Percentages are computed per currency.</p>
-          </div>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Group</TableHead>
-                <SortableTableHead field="symbol" label="Bucket" currentSort={sort} dir={dir} onSort={onSort} />
-                <SortableTableHead field="marketValue" label="Market value" currentSort={sort} dir={dir} onSort={onSort} />
-                <SortableTableHead field="pctOfPortfolio" label="%" currentSort={sort} dir={dir} onSort={onSort} />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data!.byAssetType.map((row) => (
-                <TableRow key={`assetType|${row.assetType}|${row.currency}`}>
-                  <TableCell>Asset type</TableCell>
-                  <TableCell>
-                    {row.assetType} ({row.currency})
-                  </TableCell>
-                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{safePct(row.percentage)}</TableCell>
-                </TableRow>
-              ))}
-              {data!.bySecurity.slice(0, 20).map((row) => (
-                <TableRow key={`security|${row.securityId}|${row.currency}`}>
-                  <TableCell>Security</TableCell>
-                  <TableCell>
-                    {row.symbol} ({row.currency})
-                  </TableCell>
-                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{safePct(row.percentage)}</TableCell>
-                </TableRow>
-              ))}
-              {data!.byAccount.map((row) => (
-                <TableRow key={`account|${row.accountId}|${row.currency}`}>
-                  <TableCell>Account</TableCell>
-                  <TableCell>
-                    {row.accountName} ({row.currency})
-                  </TableCell>
-                  <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
-                  <TableCell>{safePct(row.percentage)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      <TableCard
+        className="mt-4"
+        title="Breakdown"
+        description="All allocation buckets in numeric form. Percentages are computed per currency."
+      >
+        <TableHeader>
+          <TableRow>
+            <TableHead>Group</TableHead>
+            <SortableTableHead field="symbol" label="Bucket" currentSort={sort} dir={dir} onSort={onSort} />
+            <SortableTableHead field="marketValue" label="Market value" currentSort={sort} dir={dir} onSort={onSort} />
+            <SortableTableHead field="pctOfPortfolio" label="%" currentSort={sort} dir={dir} onSort={onSort} />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {data!.byAssetType.map((row) => (
+            <TableRow key={`assetType|${row.assetType}|${row.currency}`}>
+              <TableCell>Asset type</TableCell>
+              <TableCell>
+                {row.assetType} ({row.currency})
+              </TableCell>
+              <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
+              <TableCell>{safePct(row.percentage)}</TableCell>
+            </TableRow>
+          ))}
+          {data!.bySecurity.slice(0, 20).map((row) => (
+            <TableRow key={`security|${row.securityId}|${row.currency}`}>
+              <TableCell>Security</TableCell>
+              <TableCell>
+                {row.symbol} ({row.currency})
+              </TableCell>
+              <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
+              <TableCell>{safePct(row.percentage)}</TableCell>
+            </TableRow>
+          ))}
+          {data!.byAccount.map((row) => (
+            <TableRow key={`account|${row.accountId}|${row.currency}`}>
+              <TableCell>Account</TableCell>
+              <TableCell>
+                {row.accountName} ({row.currency})
+              </TableCell>
+              <TableCell>{formatMoney(row.marketValue, row.currency)}</TableCell>
+              <TableCell>{safePct(row.percentage)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </TableCard>
     </>
   )
 }
@@ -989,42 +974,34 @@ function IncomeBySecurityTable({
 }) {
   const showEmpty = !loading && rows.length === 0
   return (
-    <Card className="transactionsTableCard mt-4">
-      <div className="transactionsPanelHeader">
-        <div>
-          <h2>By security</h2>
-          <p className="muted">
-            Top securities by total income (dividends + interest).
-          </p>
-        </div>
-      </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Currency</TableHead>
-              <TableHead>Dividend</TableHead>
-              <TableHead>Interest</TableHead>
-              <TableHead>Total</TableHead>
-              <TableHead>Events</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.slice(0, 20).map((row) => (
-              <IncomeBySecurityRow key={`${row.securityId ?? 'null'}|${row.currency}`} row={row} />
-            ))}
-            {showEmpty && (
-              <EmptyTableRow
-                colSpan={6}
-                title="No income by security."
-                description="Dividends and interest appear here once imported."
-              />
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </Card>
+    <TableCard
+      className="mt-4"
+      title="By security"
+      description="Top securities by total income (dividends + interest)."
+    >
+      <TableHeader>
+        <TableRow>
+          <TableHead>Symbol</TableHead>
+          <TableHead>Currency</TableHead>
+          <TableHead>Dividend</TableHead>
+          <TableHead>Interest</TableHead>
+          <TableHead>Total</TableHead>
+          <TableHead>Events</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.slice(0, 20).map((row) => (
+          <IncomeBySecurityRow key={`${row.securityId ?? 'null'}|${row.currency}`} row={row} />
+        ))}
+        {showEmpty && (
+          <EmptyTableRow
+            colSpan={6}
+            title="No income by security."
+            description="Dividends and interest appear here once imported."
+          />
+        )}
+      </TableBody>
+    </TableCard>
   )
 }
 
@@ -1100,25 +1077,25 @@ function IncomeMonthlyChart({ data }: { data: PortfolioIncome }) {
 
   return (
     <Card>
-      <div className="transactionsPanelHeader">
-        <div>
-          <h2 className="text-base">Income by month</h2>
-          <p className="muted">Stacked dividend + interest by month.</p>
-        </div>
-        {currencies.length > 1 && (
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="border border-border bg-card rounded-md px-2 py-1 text-sm"
-          >
-            {currencies.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+      <SectionHeader
+        title="Income by month"
+        description="Stacked dividend + interest by month."
+        actions={
+          currencies.length > 1 ? (
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="border border-border bg-card rounded-md px-2 py-1 text-sm"
+            >
+              {currencies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          ) : null
+        }
+      />
       <div style={{ width: '100%', height: 280 }}>
         <ResponsiveContainer>
           <BarChart data={rows}>
@@ -1225,97 +1202,82 @@ function RealizedTotalsSection({
 
 function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }) {
   return (
-    <Card className="transactionsTableCard mt-4">
-      <div className="transactionsPanelHeader">
-        <div>
-          <h2>By security</h2>
-          <p className="muted">Realized gain/loss aggregated per ticker.</p>
-        </div>
-      </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Currency</TableHead>
-              <TableHead>Realized gain</TableHead>
-              <TableHead>Sells</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={`${row.securityId}|${row.currency}`}>
-                <TableCell>
-                  <SymbolLink
-                    securityId={row.securityId}
-                    symbol={row.symbol}
-                    name={row.name}
-                    currency={row.currency}
-                  />
-                </TableCell>
-                <TableCell>{row.name ?? '—'}</TableCell>
-                <TableCell>{row.currency}</TableCell>
-                <TableCell>{formatMoney(row.realizedGain, row.currency)}</TableCell>
-                <TableCell>{row.eventCount}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </Card>
+    <TableCard
+      className="mt-4"
+      title="By security"
+      description="Realized gain/loss aggregated per ticker."
+    >
+      <TableHeader>
+        <TableRow>
+          <TableHead>Symbol</TableHead>
+          <TableHead>Name</TableHead>
+          <TableHead>Currency</TableHead>
+          <TableHead>Realized gain</TableHead>
+          <TableHead>Sells</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={`${row.securityId}|${row.currency}`}>
+            <TableCell>
+              <SymbolLink
+                securityId={row.securityId}
+                symbol={row.symbol}
+                name={row.name}
+                currency={row.currency}
+              />
+            </TableCell>
+            <TableCell>{row.name ?? '—'}</TableCell>
+            <TableCell>{row.currency}</TableCell>
+            <TableCell>{formatMoney(row.realizedGain, row.currency)}</TableCell>
+            <TableCell>{row.eventCount}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </TableCard>
   )
 }
 
 function RealizedEventsTable({ events }: { events: RealizedEventWithRunning[] }) {
   return (
-    <Card className="transactionsTableCard mt-4">
-      <div className="transactionsPanelHeader">
-        <div>
-          <h2>Events</h2>
-          <p className="muted">
-            Every SELL with the prevailing ACB-per-unit at the time of sale and the
-            running cumulative realized total.
-          </p>
-        </div>
-      </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Account</TableHead>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Qty sold</TableHead>
-              <TableHead>Proceeds</TableHead>
-              <TableHead>ACB / unit</TableHead>
-              <TableHead>Realized</TableHead>
-              <TableHead>Running</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {events.map((ev) => (
-              <TableRow key={ev.activityId}>
-                <TableCell>{ev.tradeDate}</TableCell>
-                <TableCell>{ev.accountName}</TableCell>
-                <TableCell>
-                  <SymbolLink
-                    securityId={ev.securityId}
-                    symbol={ev.symbol}
-                    currency={ev.currency}
-                  />
-                </TableCell>
-                <TableCell>{ev.qtySold}</TableCell>
-                <TableCell>{formatMoney(ev.proceeds, ev.currency)}</TableCell>
-                <TableCell>{formatMoney(ev.acbAtSale, ev.currency)}</TableCell>
-                <TableCell>{formatMoney(ev.realizedGain, ev.currency)}</TableCell>
-                <TableCell>{formatMoney(ev.runningTotal, ev.currency)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </Card>
+    <TableCard
+      className="mt-4"
+      title="Events"
+      description="Every SELL with the prevailing ACB-per-unit at the time of sale and the running cumulative realized total."
+    >
+      <TableHeader>
+        <TableRow>
+          <TableHead>Date</TableHead>
+          <TableHead>Account</TableHead>
+          <TableHead>Symbol</TableHead>
+          <TableHead>Qty sold</TableHead>
+          <TableHead>Proceeds</TableHead>
+          <TableHead>ACB / unit</TableHead>
+          <TableHead>Realized</TableHead>
+          <TableHead>Running</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {events.map((ev) => (
+          <TableRow key={ev.activityId}>
+            <TableCell>{ev.tradeDate}</TableCell>
+            <TableCell>{ev.accountName}</TableCell>
+            <TableCell>
+              <SymbolLink
+                securityId={ev.securityId}
+                symbol={ev.symbol}
+                currency={ev.currency}
+              />
+            </TableCell>
+            <TableCell>{ev.qtySold}</TableCell>
+            <TableCell>{formatMoney(ev.proceeds, ev.currency)}</TableCell>
+            <TableCell>{formatMoney(ev.acbAtSale, ev.currency)}</TableCell>
+            <TableCell>{formatMoney(ev.realizedGain, ev.currency)}</TableCell>
+            <TableCell>{formatMoney(ev.runningTotal, ev.currency)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </TableCard>
   )
 }
 
