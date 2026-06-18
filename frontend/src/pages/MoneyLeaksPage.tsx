@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Droplet, Repeat, Truck, Users, X } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
 import { SummaryStat } from '@/components/SummaryStat'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -179,7 +182,7 @@ export function MoneyLeaksPage() {
         loading={loading}
       />
 
-      <section className="card">
+      <Card className="mb-4">
         <div className="flex gap-3 items-center">
           <label htmlFor="money-leaks-currency-filter">Currency</label>
           <NativeSelect
@@ -195,25 +198,24 @@ export function MoneyLeaksPage() {
             ))}
           </NativeSelect>
         </div>
-      </section>
+      </Card>
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Looking for leaks…</p>
-        </section>
+        <Card className="mb-4" aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground">Looking for leaks…</p>
+        </Card>
       ) : visibleItems.length === 0 ? (
-        <section className="card">
-          <p className="muted">
-            No leaks detected. Either your spending is dialled in or there
-            isn't enough recent history to flag anything yet.
-          </p>
-        </section>
+        <EmptyState
+          className="mb-4"
+          title="No leaks detected"
+          description="Either your spending is dialled in or there isn't enough recent history to flag anything yet."
+        />
       ) : (
         TYPE_ORDER.filter((t) => grouped.has(t)).map((leakType) => (
           <LeakGroup
@@ -272,9 +274,9 @@ function LeakTotals({
 }) {
   if (loading && !data) {
     return (
-      <section className="card" aria-busy="true">
-        <p className="muted">Loading totals…</p>
-      </section>
+      <Card className="mb-4" aria-busy="true">
+        <p className="text-sm leading-6 text-muted-foreground">Loading totals…</p>
+      </Card>
     )
   }
   if (!data) return null
@@ -283,7 +285,7 @@ function LeakTotals({
   // Combined per-currency summary stats. We never collapse currencies — a
   // CAD + USD mix would be misleading if simply summed.
   return (
-    <section className="card" aria-label="Money-leak totals">
+    <Card className="mb-4" aria-label="Money-leak totals">
       <div
         style={{
           display: 'grid',
@@ -316,7 +318,7 @@ function LeakTotals({
           </>
         )}
       </div>
-    </section>
+    </Card>
   )
 }
 
@@ -352,10 +354,10 @@ function LeakGroup({
                   {item.severity}
                 </Badge>
               </div>
-              <div className="muted mt-1">
+              <div className="text-sm leading-6 text-muted-foreground mt-1">
                 {item.description}
               </div>
-              <div className="muted text-xs mt-1">
+              <div className="text-xs leading-6 text-muted-foreground mt-1">
                 {formatMoney(item.monthlyImpact, item.currency)}/mo •{' '}
                 {formatMoney(item.annualImpact, item.currency)}/yr
               </div>
@@ -364,7 +366,7 @@ function LeakGroup({
                 item.leakType === 'duplicate_service') && (
                 <Link
                   to="/subscriptions"
-                  className="muted text-xs underline mt-1 inline-block"
+                  className="text-xs leading-6 text-muted-foreground underline mt-1 inline-block"
                 >
                   View source →
                 </Link>
@@ -372,7 +374,7 @@ function LeakGroup({
               {item.leakType === 'recurring_fee' && (
                 <Link
                   to="/recurring"
-                  className="muted text-xs underline mt-1 inline-block"
+                  className="text-xs leading-6 text-muted-foreground underline mt-1 inline-block"
                 >
                   View source →
                 </Link>
