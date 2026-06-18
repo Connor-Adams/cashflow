@@ -147,10 +147,12 @@ export async function resolveForecastCurrency(
   householdId: number,
   asOfDate: string,
   excludedTypes: ReadonlySet<string>,
+  excludeEntityIds: ReadonlySet<number> = new Set(),
 ): Promise<string> {
   const accounts = await Account.findAll({ where: { householdId } });
   const eligible = accounts.filter((a) => {
     if (excludedTypes.has(a.accountType)) return false;
+    if (a.entityId != null && excludeEntityIds.has(a.entityId)) return false;
     if (a.closedAt && a.closedAt <= asOfDate) return false;
     return true;
   });

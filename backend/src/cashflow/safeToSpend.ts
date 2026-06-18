@@ -15,7 +15,7 @@
  * inputs. Result always returns the full breakdown — the UI shows it on
  * click and we want clients to render without a follow-up request.
  */
-import { Account, FinancialGoal, CashflowSettings } from '../models';
+import { Account, Entity, FinancialGoal, CashflowSettings } from '../models';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { balanceAtDate } from '../networth/balanceAtDate';
 import {
@@ -32,6 +32,31 @@ const CASH_EXCLUDED_TYPES = new Set(['investment', 'credit_card', 'loan']);
 const CREDIT_CARD_TYPES = new Set(['credit_card']);
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Safe-to-spend is a PERSONAL liquidity figure: corporate-entity accounts hold
+ * business money the user can't personally spend. Returns the set of `corp`-kind
+ * tax-entity ids for the household so the cash/CC/currency steps can drop any
+ * account tagged to one. Accounts with a null `entityId` are treated as personal
+ * (the Account create-hook defaults new accounts to the personal entity).
+ */
+export async function getCorpEntityIds(
+  householdId: number,
+): Promise<Set<number>> {
+  const corps = await Entity.findAll({
+    where: { householdId, kind: 'corp' },
+    attributes: ['id'],
+  });
+  return new Set(corps.map((e) => e.id));
+}
+
+/** True when an account belongs to a corporate tax entity (so: not personal). */
+function isCorpAccount(
+  account: Account,
+  corpEntityIds: ReadonlySet<number>,
+): boolean {
+  return account.entityId != null && corpEntityIds.has(account.entityId);
+}
 
 export type SafeToSpendBreakdown = {
   currentCash: number;
@@ -162,7 +187,13 @@ export async function resolveDefaultCurrency(
   householdId: number,
   asOfDate: string,
 ): Promise<string> {
-  return resolveForecastCurrency(householdId, asOfDate, CASH_EXCLUDED_TYPES);
+  const corpEntityIds = await getCorpEntityIds(householdId);
+  return resolveForecastCurrency(
+    householdId,
+    asOfDate,
+    CASH_EXCLUDED_TYPES,
+    corpEntityIds,
+  );
 }
 
 /**
@@ -174,11 +205,13 @@ export async function getCurrentCash(
   householdId: number,
   currency: string,
   asOfDate: string,
+  corpEntityIds: ReadonlySet<number> = new Set(),
 ): Promise<number> {
   const accounts = await Account.findAll({ where: { householdId } });
   let totalU = 0;
   for (const acc of accounts) {
     if (CASH_EXCLUDED_TYPES.has(acc.accountType)) continue;
+    if (isCorpAccount(acc, corpEntityIds)) continue;
     if (acc.closedAt && acc.closedAt <= asOfDate) continue;
     const bal = await balanceAtDate(acc, asOfDate);
     for (const { currency: ccy, amount } of bal) {
@@ -286,11 +319,13 @@ export async function getExpectedCreditCardPayments(
   householdId: number,
   currency: string,
   asOfDate: string,
+  corpEntityIds: ReadonlySet<number> = new Set(),
 ): Promise<number> {
   const accounts = await Account.findAll({ where: { householdId } });
   let totalU = 0;
   for (const acc of accounts) {
     if (!CREDIT_CARD_TYPES.has(acc.accountType)) continue;
+    if (isCorpAccount(acc, corpEntityIds)) continue;
     if (acc.closedAt && acc.closedAt <= asOfDate) continue;
     const bal = await balanceAtDate(acc, asOfDate);
     for (const { currency: ccy, amount } of bal) {
@@ -335,13 +370,17 @@ export async function computeSafeToSpend(params: {
   const windowDays = settings.safeToSpendWindowDays;
   const windowEndDate = addDaysIso(params.asOfDate, windowDays);
 
+  // Safe-to-spend is personal liquidity: drop corporate-entity accounts from
+  // the cash + credit-card legs. Computed once and shared across both.
+  const corpEntityIds = await getCorpEntityIds(params.householdId);
+
   const [
     currentCash,
     upcomingRequiredExpenses,
     requiredSavingsContributions,
     expectedCreditCardPayments,
   ] = await Promise.all([
-    getCurrentCash(params.householdId, currency, params.asOfDate),
+    getCurrentCash(params.householdId, currency, params.asOfDate, corpEntityIds),
     getUpcomingRequiredExpenses(
       params.householdId,
       currency,
@@ -358,6 +397,7 @@ export async function computeSafeToSpend(params: {
       params.householdId,
       currency,
       params.asOfDate,
+      corpEntityIds,
     ),
   ]);
 
