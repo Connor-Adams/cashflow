@@ -11,7 +11,8 @@ import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/components/ui/grid'
 import { FilterCard } from '@/components/ui/filter-card'
 import { TableCard } from '@/components/ui/table-card'
-import { TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Skeleton, SkeletonText, SkeletonRow } from '@/components/ui/skeleton'
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
 const ALERT_VARIANTS = ['error', 'warning', 'info', 'success'] as const
@@ -75,6 +76,33 @@ export function DesignSystemSection() {
           title="Nothing here yet"
           description="The canonical empty state."
         />
+      </Group>
+
+      <Group name="Skeletons (loading)">
+        <div className="w-full space-y-2 sm:w-56">
+          <Skeleton className="h-3 w-1/2" />
+          <Skeleton className="h-7 w-2/3" />
+          <Skeleton className="h-3 w-1/3" />
+        </div>
+        <div className="w-full sm:w-56">
+          <SkeletonText lines={4} />
+        </div>
+        <div className="w-full">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Account</TableHead>
+                <TableHead>Value</TableHead>
+                <TableHead>Change</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <SkeletonRow key={`ds-skeleton-${i}`} cols={3} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </Group>
 
       <Group name="Filter card">
