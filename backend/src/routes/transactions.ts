@@ -226,6 +226,20 @@ export function buildTransactionFilterWhere(
       (where as Record<string, unknown>).id = -1;
     }
   }
+  // Enrichment deep-link filters (enrichment settings tab). Each bucket value is
+  // matched exactly; the stats endpoint keys null buckets as '(none)', so that
+  // sentinel maps to IS NULL to round-trip the link.
+  for (const [param, column] of [
+    ['autoSource', 'autoSource'],
+    ['autoConfidence', 'autoConfidence'],
+    ['txnType', 'txnType'],
+    ['merchantCanonical', 'merchantCanonical'],
+  ] as const) {
+    const raw = source[param];
+    if (typeof raw === 'string' && raw.length > 0) {
+      where[column] = raw === '(none)' ? { [Op.is]: null } : raw;
+    }
+  }
   return where;
 }
 
