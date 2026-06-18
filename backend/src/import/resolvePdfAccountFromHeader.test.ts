@@ -49,6 +49,67 @@ function wiseHeader(
   };
 }
 
+/** A WS credit-card PDF header. accountSuffix = card last-4 from the statement body. */
+function wsCreditCardHeader(last4: string): import('./pdf/types').PdfStatementHeader {
+  return {
+    accountSuffix: last4,
+    productLabel: 'Wealthsimple Credit Card',
+    accountType: 'credit_card',
+    periodStart: '2026-05-15',
+    periodEnd: '2026-06-14',
+    currency: 'CAD',
+    accountHolder: 'Connor Adams',
+  };
+}
+
+test('WS credit-card PDF resolves by filename WSID, not body last-4 (no account fork)', async () => {
+  // Canonical card account already exists, keyed on the stable WSID and given a
+  // user-edited display name (so the name-fallback also misses) — exactly the
+  // prod state after the account was renamed. A new month's statement carries
+  // the same WSID in its filename but only the last-4 in its body.
+  const existing = await Account.create({
+    householdId, name: 'Wealthsimple Visa Infinite Priviledge', accountType: 'credit_card',
+    owner: 'me', visibility: 'private', defaultCurrency: 'CAD', shortCode: 'C13BRX957CAD',
+    ownerUserId: userId, entityId: null,
+  });
+
+  const r = await resolvePdfAccountFromHeader(
+    wsCreditCardHeader('3338'),
+    householdId,
+    userId,
+    'C13BRX957CAD_2026-06_CREDIT_CARD.pdf',
+  );
+
+  assert.equal(r.accountCreated, false, 'must reuse the existing card account, not fork a new one');
+  assert.equal(r.account.id, existing.id);
+  assert.equal(
+    (await Account.findAll({ where: { householdId, accountType: 'credit_card' } })).length,
+    1,
+    'no duplicate credit-card account created',
+  );
+});
+
+test('first WS credit-card PDF import keys the new account on the filename WSID', async () => {
+  const r = await resolvePdfAccountFromHeader(
+    wsCreditCardHeader('3338'),
+    householdId,
+    userId,
+    'C13BRX957CAD_2026-06_CREDIT_CARD.pdf',
+  );
+  assert.equal(r.accountCreated, true);
+  assert.equal(r.account.shortCode, 'C13BRX957CAD', 'short_code must be the stable WSID, not the last-4');
+
+  // Next month, same card: must reuse, not fork.
+  const again = await resolvePdfAccountFromHeader(
+    wsCreditCardHeader('3338'),
+    householdId,
+    userId,
+    'C13BRX957CAD_2026-07_CREDIT_CARD.pdf',
+  );
+  assert.equal(again.accountCreated, false);
+  assert.equal(again.account.id, r.account.id);
+});
+
 test('corp Wise statement does NOT merge into the same-named personal Wise account', async () => {
   // Personal Wise USD imported first (different account number → suffix 1111).
   const personal = await resolvePdfAccountFromHeader(
