@@ -56,33 +56,47 @@ export function RecurringThisMonthTile({
         </p>
       ) : (
         <>
-          <ul className="recurringList">
+          {/* formerly .recurringList */}
+          <ul className="m-0 flex flex-col gap-1.5 p-0 list-none">
             {dueThisMonth.slice(0, MAX_ROWS).map((r) => (
-              <li key={`${r.merchant}:${r.currency}`} className="recurringList__row">
+              // formerly .recurringList__row + sibling border-top
+              <li
+                key={`${r.merchant}:${r.currency}`}
+                className="grid items-baseline gap-2 py-1 [&+&]:border-t [&+&]:border-[var(--border)] [&+&]:pt-2"
+                style={{ gridTemplateColumns: 'minmax(0, 1fr) auto auto' }}
+              >
+                {/* formerly .recurringList__merchant + :hover */}
                 <Link
                   to={`/transactions?merchant=${encodeURIComponent(r.merchant)}`}
-                  className="recurringList__merchant"
+                  className="truncate text-sm font-semibold no-underline text-[var(--foreground)] hover:text-[var(--primary)] hover:underline"
                   title={r.merchant}
                 >
                   {r.merchant}
                 </Link>
-                <span className="recurringList__amount">
+                {/* formerly .recurringList__amount */}
+                <span className="text-sm tabular-nums text-[var(--foreground)]">
                   {formatMoney(r.avgAmount, r.currency)}
                 </span>
-                <span className="recurringList__date">
+                {/* formerly .recurringList__date */}
+                <span className="text-xs tabular-nums text-[var(--muted-foreground)]">
                   {formatDueDate(r.nextExpected)}
                 </span>
               </li>
             ))}
           </ul>
-          <div className="recurringList__footer">
-            <span className="recurringList__total">
+          {/* formerly .recurringList__footer */}
+          <div
+            className="mt-auto flex items-baseline justify-between gap-2 pt-2 text-xs border-t border-[var(--border)]"
+          >
+            {/* formerly .recurringList__total */}
+            <span className="truncate tabular-nums text-[var(--muted-foreground)]">
               Total:{' '}
               {totalsByCurrency
                 .map(([curr, sum]) => formatMoney(sum, curr))
                 .join(' · ')}
             </span>
-            <Link to="/recurring" className="recurringList__viewAll">
+            {/* formerly .recurringList__viewAll + :hover */}
+            <Link to="/recurring" className="shrink-0 font-semibold no-underline text-[var(--primary)] hover:underline">
               All recurring →
             </Link>
           </div>
