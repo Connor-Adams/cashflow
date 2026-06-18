@@ -16,8 +16,8 @@ import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
+import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
 import { PeriodInsightBand } from '@/components/dashboard/PeriodInsightBand'
@@ -733,8 +733,7 @@ export function DashboardPage() {
       {err && <span className="error">{err}</span>}
       {loading && <p className="muted">Loading dashboard…</p>}
 
-      <Card className="dashboardFilters mt-2 mb-4 w-fit max-w-full p-2 sm:p-3">
-        <CardContent className="p-0">
+      <FilterCard density="compact" className="mt-2">
           <FilterBar
             className="gap-2"
             currency={currency}
@@ -802,8 +801,7 @@ export function DashboardPage() {
               </p>
             }
           />
-        </CardContent>
-      </Card>
+      </FilterCard>
 
       <ActivationCardDeck />
 
