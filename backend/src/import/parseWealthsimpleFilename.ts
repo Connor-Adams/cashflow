@@ -74,6 +74,23 @@ function productHintFromDisplayName(raw: string): WsProductHint {
   return 'chequing';
 }
 
+// WS credit-card PDF statements are stored under the convention
+// `<WSID>_<YYYY-MM>_CREDIT_CARD.pdf` (e.g. `C13BRX957CAD_2026-06_CREDIT_CARD.pdf`).
+// The statement BODY only prints the card last-4, so the stable WS account id
+// (WSID) — the only key that survives across months and matches the WS CSV
+// import path — lives solely in this filename prefix.
+const CREDIT_CARD_PDF_RE = /(?:^|[\\/])([A-Za-z0-9]+)_\d{4}-\d{2}_CREDIT_CARD\.pdf$/i;
+
+/**
+ * Extract the stable WS account id (WSID) from a WS credit-card PDF filename.
+ * Returns null if the name does not follow the WS CC PDF convention — callers
+ * fall back to the body last-4 in that case.
+ */
+export function parseWsCreditCardPdfWsid(name: string): string | null {
+  const m = CREDIT_CARD_PDF_RE.exec(name);
+  return m ? m[1] : null;
+}
+
 export function parseWealthsimpleFilename(name: string): ParsedWsFilename | null {
   const cc = name.match(CREDIT_CARD_RE);
   if (cc) {

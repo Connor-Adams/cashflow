@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWealthsimpleFilename } from './parseWealthsimpleFilename';
+import { parseWealthsimpleFilename, parseWsCreditCardPdfWsid } from './parseWealthsimpleFilename';
 
 test('parses Chequing monthly statement', () => {
   const r = parseWealthsimpleFilename(
@@ -111,4 +111,20 @@ test('parses Wealthsimple credit-card statement', () => {
 
 test('rejects unrelated legacy filename', () => {
   assert.equal(parseWealthsimpleFilename('Amex_2025_01.csv'), null);
+});
+
+test('parseWsCreditCardPdfWsid extracts the WSID from a WS credit-card PDF filename', () => {
+  // The WS credit-card statement body only prints the card last-4; the stable
+  // WS account id (WSID) lives solely in the renamed PDF filename prefix.
+  assert.equal(parseWsCreditCardPdfWsid('C13BRX957CAD_2026-06_CREDIT_CARD.pdf'), 'C13BRX957CAD');
+});
+
+test('parseWsCreditCardPdfWsid tolerates path prefixes and case in the suffix', () => {
+  assert.equal(parseWsCreditCardPdfWsid('/tmp/uploads/C13BRX957CAD_2025-09_credit_card.pdf'), 'C13BRX957CAD');
+});
+
+test('parseWsCreditCardPdfWsid returns null for non-WS-CC filenames', () => {
+  assert.equal(parseWsCreditCardPdfWsid('statement.pdf'), null);
+  assert.equal(parseWsCreditCardPdfWsid('C13BRX957CAD_2026-06_CREDIT_CARD.csv'), null);
+  assert.equal(parseWsCreditCardPdfWsid('RBC_2026-06_VISA.pdf'), null);
 });

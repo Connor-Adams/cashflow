@@ -26,6 +26,7 @@ import { inferCsvDateOrdering, mapCsvRow } from './mapRow';
 import { parseStatementFilename } from './parseStatementFilename';
 import {
   parseWealthsimpleFilename,
+  parseWsCreditCardPdfWsid,
   type WsProductHint,
 } from './parseWealthsimpleFilename';
 import { parseStatementFile } from './parseStatementFile';
@@ -1073,6 +1074,7 @@ export async function resolvePdfAccountFromHeader(
   header: import('./pdf/types').PdfStatementHeader,
   householdId: number,
   userId: number,
+  fileName?: string,
 ): Promise<{ account: InstanceType<typeof Account>; accountCreated: boolean; overrideBusiness: boolean }> {
   const template =
     PDF_ACCOUNT_TEMPLATES[header.productLabel] ?? { name: header.productLabel, accountType: header.accountType };
@@ -1080,9 +1082,17 @@ export async function resolvePdfAccountFromHeader(
   const entity = await resolveEntityForHolder(header.accountHolder, householdId);
   const overrideBusiness = entity?.kind === 'corp';
 
-  // First try to find account by shortCode (exact match from PDF account number).
+  // Stable match key. WS credit-card statement bodies print only the card last-4
+  // (header.accountSuffix), which is neither unique across cards nor the key the
+  // WS CSV path uses — so it forked a new account every time the existing one was
+  // renamed or carried a different short_code. The WS account id (WSID) lives in
+  // the PDF filename (`<WSID>_YYYY-MM_CREDIT_CARD.pdf`); prefer it when present.
+  const wsCardWsid = fileName ? parseWsCreditCardPdfWsid(fileName) : null;
+  const matchKey = wsCardWsid ?? header.accountSuffix;
+
+  // First try to find account by shortCode (exact match on the stable key).
   let account = await Account.findOne({
-    where: { householdId, shortCode: header.accountSuffix },
+    where: { householdId, shortCode: matchKey },
   });
   let accountCreated = false;
 
@@ -1106,9 +1116,9 @@ export async function resolvePdfAccountFromHeader(
         const candidateEntity = candidate.get('entity') as InstanceType<typeof Entity> | null | undefined;
         return (candidateEntity?.kind === 'corp') === overrideBusiness;
       }) ?? null;
-    if (account && account.shortCode !== header.accountSuffix) {
-      // Update shortCode to reflect the PDF's account number.
-      await account.update({ shortCode: header.accountSuffix });
+    if (account && account.shortCode !== matchKey) {
+      // Update shortCode to reflect the stable account key.
+      await account.update({ shortCode: matchKey });
     }
   }
 
@@ -1117,7 +1127,7 @@ export async function resolvePdfAccountFromHeader(
     account = await Account.create({
       householdId, name: template.name, accountType: template.accountType,
       owner: 'me', visibility: 'private', defaultCurrency: headerCurrency,
-      ownerUserId: userId, shortCode: header.accountSuffix, entityId: entity?.id ?? null,
+      ownerUserId: userId, shortCode: matchKey, entityId: entity?.id ?? null,
     });
     accountCreated = true;
   }
@@ -1181,7 +1191,7 @@ export async function importPdfBundleFile(opts: {
   }
   const header = parseOut.header;
   const { account, accountCreated, overrideBusiness } = await resolvePdfAccountFromHeader(
-    header, opts.householdId, opts.userId,
+    header, opts.householdId, opts.userId, file,
   );
 
   const preview = await parseStatementFile({
