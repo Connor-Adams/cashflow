@@ -9,8 +9,10 @@ import {
   TrendingDown,
   TrendingUp,
 } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { getJson } from '../lib/api'
@@ -34,6 +36,11 @@ import type {
  * route returns aiSummary=null and we render a static "AI summary
  * unavailable" hint. The deterministic report is always present.
  */
+
+/** Card classes expanded onto <section> when the semantic element needs
+ *  aria attributes that can't be forwarded through <Card> (a plain div). */
+const CARD_CLS =
+  'rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4'
 
 /** Tailwind variant lookup for severity badges. JIT needs literal classes,
  *  so we keep the map explicit. */
@@ -152,7 +159,8 @@ export function ExplainMonthPage() {
         description="A deterministic look at what changed, what drove spend, and what needs attention. Click any finding to jump to the matching transactions."
       />
 
-      <section className="card">
+      {/* Controls card — no aria semantics needed on the container */}
+      <Card className="mb-4">
         <div className="flex gap-3 items-end flex-wrap">
           <div className="flex flex-col gap-1">
             <label htmlFor="explain-month-month">Month</label>
@@ -198,24 +206,28 @@ export function ExplainMonthPage() {
             Refresh
           </Button>
         </div>
-      </section>
+      </Card>
 
+      {/* Error: .error rule was inline-flex rounded-lg border px-3 py-2 text-sm font-semibold
+          with danger colors. Alert variant="error" provides equivalent styling + role/aria. */}
       {err && (
-        <section className="card">
-          <p className="error" role="alert">
-            {err}
-          </p>
-        </section>
+        <Alert variant="error" className="mb-4">
+          {err}
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Building the report…</p>
+        /* aria-busy on the container requires <section>; expand Card classes */
+        <section className={CARD_CLS} aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">
+            Building the report…
+          </p>
         </section>
       ) : !data ? null : (
         <>
           {data.aiSummary != null && (
-            <section className="card" aria-label="AI summary">
+            /* aria-label on container — expand Card classes onto <section> */
+            <section className={CARD_CLS} aria-label="AI summary">
               <div className="flex gap-2 items-start">
                 <Sparkles size={18} aria-hidden="true" />
                 <p className="m-0">{data.aiSummary}</p>
@@ -223,25 +235,25 @@ export function ExplainMonthPage() {
             </section>
           )}
           {aiOptIn && data.aiSummary == null && (
-            <section className="card">
-              <p className="muted">
+            <Card className="mb-4">
+              <p className="text-sm leading-6 text-muted-foreground mb-0">
                 AI summary unavailable — OPENAI_API_KEY is not configured on the
                 server. The rest of the report below is deterministic and does
                 not require AI.
               </p>
-            </section>
+            </Card>
           )}
 
           <MonthOverMonthSection data={data} />
 
           {(data.findings ?? []).length === 0 ? (
-            <section className="card">
-              <p className="muted">
+            <Card className="mb-4">
+              <p className="text-sm leading-6 text-muted-foreground mb-0">
                 Nothing notable for {data.month}. Spend levels match the
                 previous month, no subscriptions changed, and there are no
                 review-blocked transactions.
               </p>
-            </section>
+            </Card>
           ) : (
             KIND_ORDER.filter((k) => findingsByKind.has(k)).map((kind) => (
               <FindingGroup
@@ -260,7 +272,11 @@ export function ExplainMonthPage() {
 function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
   if (data.monthOverMonth.length === 0) return null
   return (
-    <section className="card" aria-label="Month over month totals">
+    /* aria-label on the section — expand Card classes */
+    <section
+      className={CARD_CLS}
+      aria-label="Month over month totals"
+    >
       <h2 className="mt-0">
         {data.month} vs {data.previousMonth}
       </h2>
@@ -287,27 +303,28 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
                 <strong>{mom.currency}</strong>
                 {trendIcon}
               </div>
+              {/* .muted has mb-4 which breaks dl grid rows; override to mb-0 per-term */}
               <dl className="mt-2 grid grid-cols-[auto_1fr] gap-y-1 gap-x-2">
-                <dt className="muted">Spend</dt>
+                <dt className="text-sm leading-6 text-muted-foreground mb-0">Spend</dt>
                 <dd className="m-0 text-right">
                   {formatMoney(mom.currentSpend, mom.currency)}{' '}
-                  <span className="muted">
+                  <span className="text-sm leading-6 text-muted-foreground">
                     ({mom.spendDelta >= 0 ? '+' : ''}
                     {formatMoney(mom.spendDelta, mom.currency)})
                   </span>
                 </dd>
-                <dt className="muted">Income</dt>
+                <dt className="text-sm leading-6 text-muted-foreground mb-0">Income</dt>
                 <dd className="m-0 text-right">
                   {formatMoney(mom.currentIncome, mom.currency)}{' '}
-                  <span className="muted">
+                  <span className="text-sm leading-6 text-muted-foreground">
                     ({mom.incomeDelta >= 0 ? '+' : ''}
                     {formatMoney(mom.incomeDelta, mom.currency)})
                   </span>
                 </dd>
-                <dt className="muted">Net</dt>
+                <dt className="text-sm leading-6 text-muted-foreground mb-0">Net</dt>
                 <dd className="m-0 text-right">
                   {formatMoney(mom.netCurrent, mom.currency)}{' '}
-                  <span className="muted">
+                  <span className="text-sm leading-6 text-muted-foreground">
                     ({mom.netDelta >= 0 ? '+' : ''}
                     {formatMoney(mom.netDelta, mom.currency)})
                   </span>
@@ -331,7 +348,8 @@ function FindingGroup({
   const Icon = KIND_ICON[kind]
   if (items.length === 0) return null
   return (
-    <section className="card" aria-label={KIND_LABEL[kind]}>
+    /* aria-label on the section — expand Card classes */
+    <section className={CARD_CLS} aria-label={KIND_LABEL[kind]}>
       <div className="flex gap-2 items-center mb-2">
         <Icon size={18} aria-hidden="true" />
         <h3 className="m-0">{KIND_LABEL[kind]}</h3>
@@ -352,9 +370,10 @@ function FindingGroup({
               </div>
               <p className="mt-1 m-0">{item.summary}</p>
             </div>
+            {/* .muted on a Link — inline context, no mb-4 needed */}
             <Link
               to={buildTransactionsHref(item.transactionFilter)}
-              className="muted"
+              className="text-sm leading-6 text-muted-foreground"
             >
               View transactions
             </Link>
