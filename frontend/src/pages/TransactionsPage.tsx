@@ -70,7 +70,7 @@ import { TAX_TREATMENTS } from '../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
 import { useCategoryPaths } from '../lib/useCategoryPaths'
-import { resolveCategoryPatch } from './transactionsCategory'
+import { resolveCategoryPatch, categoryFieldChanged } from './transactionsCategory'
 
 type CategoryHint = {
   label: string
@@ -393,6 +393,9 @@ export function TransactionsPage() {
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
     await load()
+    // FIX 2: best-effort refresh so a picker-auto-created path becomes
+    // selectable in the cloud picker without a full page reload.
+    void refreshCategoryPaths().catch(() => {})
   }
 
   async function createContact(name: string): Promise<Contact> {
@@ -499,7 +502,7 @@ export function TransactionsPage() {
         : dateTo
           ? `Up to ${dateTo}`
           : 'All dates'
-  const { paths: categoryPaths } = useCategoryPaths()
+  const { paths: categoryPaths, refresh: refreshCategoryPaths } = useCategoryPaths()
   // Use full category paths from the category tree for the row picker.
   // Fall back to the legacy hint labels while the tree is loading (first render).
   const categoryLabels = categoryPaths.length > 0
@@ -2422,7 +2425,12 @@ function TransactionRow({
                 onError('Pick a contact for contact-owned transactions.')
                 return
               }
-              void resolveCategoryPatch(cat).then((catPatch) =>
+              // FIX 1: only resolve + send categoryOverrideId when the
+              // category input actually changed from its server-side baseline.
+              // Skipping it when unchanged prevents a bare leaf name from being
+              // re-resolved to a root category on an unrelated field edit.
+              const catChanged = categoryFieldChanged(cat, t.categoryOverride ?? null)
+              void (catChanged ? resolveCategoryPatch(cat) : Promise.resolve({})).then((catPatch) =>
                 onSave(t.id, {
                   ...catPatch,
                   businessOverride: biz === '' ? null : biz === 'true',
