@@ -769,37 +769,15 @@ export function DashboardPage() {
               ) : null
             }
             caption={
-              <p
-                className="text-sm leading-6 text-muted-foreground"
-                style={{
-                  marginBottom: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '0.4rem',
-                }}
-              >
+              <p className="mb-0 flex items-center flex-wrap gap-[0.4rem] text-sm leading-6 text-muted-foreground">
                 Showing
                 {/* Pill-style active-filter chip — reads as the currently
                     applied scope rather than a low-contrast footnote. Uses
                     --muted as the surface and --border for the outline to stay
                     on the brand token palette (no hex). */}
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    padding: '0.25rem 0.65rem',
-                    borderRadius: '9999px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--muted)',
-                    color: 'var(--foreground)',
-                    fontSize: '0.8rem',
-                    lineHeight: 1.2,
-                  }}
-                >
+                <span className="inline-flex items-center gap-[0.35rem] px-[0.65rem] py-1 rounded-full border border-border bg-muted text-foreground text-[0.8rem] leading-[1.2]">
                   <strong>{currency || 'all currencies'}</strong>
-                  <span style={{ color: 'var(--muted-foreground)' }}>·</span>
+                  <span className="text-muted-foreground">·</span>
                   <strong>{activeRangeLabel}</strong>
                 </span>
               </p>
@@ -1046,10 +1024,10 @@ export function DashboardPage() {
           </div>
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Business {bizSplit.incomeShare.toFixed(0)}%
               </span>
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Personal {(100 - bizSplit.incomeShare).toFixed(0)}%
               </span>
             </div>
@@ -1093,10 +1071,10 @@ export function DashboardPage() {
           </div>
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Business {bizSplit.spendShare.toFixed(0)}%
               </span>
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Personal {(100 - bizSplit.spendShare).toFixed(0)}%
               </span>
             </div>
@@ -1134,7 +1112,7 @@ export function DashboardPage() {
                   No category totals for these filters. Your transactions may be in a
                   different currency or outside this date window.
                 </p>
-                <div className="flex flex-wrap items-center gap-3" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                <div className="mt-2 mb-0 flex flex-wrap items-center gap-3">
                   {currency ? (
                     <Button type="button" variant="secondary" onClick={() => setCurrency('')}>
                       Show all currencies
@@ -1225,7 +1203,7 @@ export function DashboardPage() {
             </ResponsiveContainer>
           )}
           {chartData.length > 0 ? (
-            <p className="leading-6 text-muted-foreground" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
+            <p className="mt-2 mb-0 text-xs leading-6 text-muted-foreground">
               Jump to:{' '}
               {chartData.slice(0, 8).map((entry, index) => (
                 <span key={entry.name}>
