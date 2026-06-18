@@ -37,6 +37,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { TxnMerchantCell, TxnMerchantName } from '@/components/ui/txn-merchant-cell'
 import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { ItemRow } from '../components/items/ItemRow'
@@ -830,8 +831,8 @@ export function ReviewInboxPage() {
                     </TableCell>
                     <TableCell>{row.date}</TableCell>
                     <TableCell>
-                      <span className="txnMerchantCell">
-                        <span className="txnMerchantName">{row.merchantClean}</span>
+                      <TxnMerchantCell>
+                        <TxnMerchantName>{row.merchantClean}</TxnMerchantName>
                         {row.appliedRuleId ? (
                           <span className="reviewInboxHint">Rule #{row.appliedRuleId}</span>
                         ) : (
@@ -888,7 +889,7 @@ export function ReviewInboxPage() {
                             )}
                           </>
                         )}
-                      </span>
+                      </TxnMerchantCell>
                     </TableCell>
                     <TableCell>{formatMoney(row.amount, row.currency)}</TableCell>
                     <TableCell>
