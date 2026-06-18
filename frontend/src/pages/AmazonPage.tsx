@@ -488,29 +488,27 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       <Card>
         <h2>Recent Imported Orders</h2>
-        <div className="tableWrap">
-          <Table className="table">
-            <TableHeader>
-              <TableRow><TableHead>Order</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Categories</TableHead><TableHead>Items</TableHead><TableHead></TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {orders.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell>{order.vendorOrderId ?? `#${order.id}`}</TableCell>
-                  <TableCell>{order.orderDate ?? order.shipmentDate ?? '—'}</TableCell>
-                  <TableCell>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</TableCell>
-                  <TableCell>{categoryPreview(order)}</TableCell>
-                  <TableCell>{itemPreview(order)}</TableCell>
-                  <TableCell>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedOrderId(order.id)}>
-                      View/Edit
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <Table>
+          <TableHeader>
+            <TableRow><TableHead>Order</TableHead><TableHead>Date</TableHead><TableHead>Total</TableHead><TableHead>Categories</TableHead><TableHead>Items</TableHead><TableHead></TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
+            {orders.map((order) => (
+              <TableRow key={order.id}>
+                <TableCell>{order.vendorOrderId ?? `#${order.id}`}</TableCell>
+                <TableCell>{order.orderDate ?? order.shipmentDate ?? '—'}</TableCell>
+                <TableCell>{order.total ? formatMoney(Number(order.total), order.currency) : '—'}</TableCell>
+                <TableCell>{categoryPreview(order)}</TableCell>
+                <TableCell>{itemPreview(order)}</TableCell>
+                <TableCell>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedOrderId(order.id)}>
+                    View/Edit
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </Card>
 
       {selectedOrder && (
@@ -537,80 +535,78 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
               {aiCategorizing ? 'Categorizing...' : 'AI categorize order'}
             </Button>
           </div>
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow><TableHead>Title</TableHead><TableHead>Category</TableHead><TableHead>Business %</TableHead><TableHead>Amount</TableHead><TableHead>Confidence</TableHead></TableRow>
-              </TableHeader>
-              <TableBody>
-                {(selectedOrder.items ?? []).map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>
-                      <Input
-                        aria-label="Item title"
-                        value={item.title}
-                        onChange={(event) => void updateItem(item, { title: event.target.value })}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <NativeSelect
-                        aria-label="Item category"
-                        value={item.inferredCategory ?? 'Uncategorized'}
-                        onChange={(event) => void updateItem(item, { inferredCategory: event.target.value })}
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead>Title</TableHead><TableHead>Category</TableHead><TableHead>Business %</TableHead><TableHead>Amount</TableHead><TableHead>Confidence</TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {(selectedOrder.items ?? []).map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <Input
+                      aria-label="Item title"
+                      value={item.title}
+                      onChange={(event) => void updateItem(item, { title: event.target.value })}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <NativeSelect
+                      aria-label="Item category"
+                      value={item.inferredCategory ?? 'Uncategorized'}
+                      onChange={(event) => void updateItem(item, { inferredCategory: event.target.value })}
+                    >
+                      {categories.map((cat) => (
+                        <NativeSelectOption key={cat} value={cat}>{cat}</NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      aria-label="Business use percent"
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={item.businessUsePercent ?? ''}
+                      onChange={(event) => void updateItem(item, { businessUsePercent: event.target.value })}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      aria-label="Item total price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.totalPrice ?? ''}
+                      aria-invalid={itemPriceErrors[item.id] ? true : undefined}
+                      aria-describedby={itemPriceErrors[item.id] ? `item-price-error-${item.id}` : undefined}
+                      onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
+                    />
+                    {itemPriceErrors[item.id] && (
+                      <span
+                        id={`item-price-error-${item.id}`}
+                        className="text-danger"
+                        role="alert"
                       >
-                        {categories.map((cat) => (
-                          <NativeSelectOption key={cat} value={cat}>{cat}</NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        aria-label="Business use percent"
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={item.businessUsePercent ?? ''}
-                        onChange={(event) => void updateItem(item, { businessUsePercent: event.target.value })}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        aria-label="Item total price"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.totalPrice ?? ''}
-                        aria-invalid={itemPriceErrors[item.id] ? true : undefined}
-                        aria-describedby={itemPriceErrors[item.id] ? `item-price-error-${item.id}` : undefined}
-                        onChange={(event) => void updateItem(item, { totalPrice: event.target.value })}
-                      />
-                      {itemPriceErrors[item.id] && (
-                        <span
-                          id={`item-price-error-${item.id}`}
-                          className="text-danger"
-                          role="alert"
-                        >
-                          {itemPriceErrors[item.id]}
+                        {itemPriceErrors[item.id]}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {(() => {
+                      if (item.confidence == null || item.confidence === '') return '—'
+                      const pct = Math.round(Number(item.confidence))
+                      if (!Number.isFinite(pct)) return '—'
+                      return (
+                        <span style={{ color: confidenceColor(pct) }}>
+                          {pct}% ({confidenceLabel(pct)})
                         </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {(() => {
-                        if (item.confidence == null || item.confidence === '') return '—'
-                        const pct = Math.round(Number(item.confidence))
-                        if (!Number.isFinite(pct)) return '—'
-                        return (
-                          <span style={{ color: confidenceColor(pct) }}>
-                            {pct}% ({confidenceLabel(pct)})
-                          </span>
-                        )
-                      })()}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                      )
+                    })()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </Card>
       )}
     </div>
