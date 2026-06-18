@@ -3,8 +3,12 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Card } from '@/components/ui/card'
+import { Grid } from '@/components/ui/grid'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -123,14 +127,11 @@ export function LifestyleInflationPage() {
           <p className="text-sm leading-6 text-muted-foreground mb-0">Building the report…</p>
         </Card>
       ) : !data ? null : data.byCurrency.length === 0 ? (
-        <Card className="mb-4">
-          <p className="text-sm leading-6 text-muted-foreground mb-0">
-            No spending data for {windowLabel || 'this window'}
-            {scope !== 'all' ? ` in the ${scope} scope` : ''}
-            {currency ? ` (${currency})` : ''}. Import transactions or widen the
-            window.
-          </p>
-        </Card>
+        <EmptyState
+          className="mb-4"
+          title={`No spending data for ${windowLabel || 'this window'}`}
+          description={`No transactions${scope !== 'all' ? ` in the ${scope} scope` : ''}${currency ? ` (${currency})` : ''}. Import transactions or widen the window.`}
+        />
       ) : (
         data.byCurrency.map((trend) => (
           <CurrencyTrendCard key={trend.currency} trend={trend} />
@@ -143,33 +144,28 @@ export function LifestyleInflationPage() {
 function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
   return (
     <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label={`Lifestyle inflation — ${trend.currency}`}>
-      <div className="flex justify-between items-center mb-2">
-        <h2 className="m-0">{trend.currency}</h2>
-        <OutpacingBadge outpacing={trend.spendOutpacingIncome} />
-      </div>
+      <SectionHeader
+        title={trend.currency}
+        actions={<OutpacingBadge outpacing={trend.spendOutpacingIncome} />}
+      />
 
       {trend.insight && (
-        <div
-          role="alert"
-          className="flex gap-2 items-start border border-border rounded-md p-3 mb-3"
+        <Alert
+          variant={trend.spendOutpacingIncome ? 'warning' : 'info'}
+          className="mb-3"
         >
-          <AlertTriangle size={18} aria-hidden="true" />
-          <div>
-            <div className="flex gap-2 items-center">
-              <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
-                {trend.insight.severity}
-              </Badge>
-              <strong>{trend.insight.title}</strong>
-            </div>
-            <p className="m-0 mt-1">{trend.insight.summary}</p>
+          <div className="flex gap-2 items-center mb-1">
+            <AlertTriangle size={18} aria-hidden="true" />
+            <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
+              {trend.insight.severity}
+            </Badge>
+            <strong>{trend.insight.title}</strong>
           </div>
-        </div>
+          <p className="m-0">{trend.insight.summary}</p>
+        </Alert>
       )}
 
-      <div
-        className="grid gap-3"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}
-      >
+      <Grid minItemWidth={180} gap="md" className="mb-3">
         <GrowthStat
           label="Avg monthly spend"
           firstHalf={trend.spendGrowth.firstHalfAvg}
@@ -193,7 +189,7 @@ function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
           pct={trend.savingsGrowthPct}
           currency={trend.currency}
         />
-      </div>
+      </Grid>
 
       <CategoryDrivers drivers={trend.categoryDrivers} currency={trend.currency} />
 
@@ -237,7 +233,12 @@ function GrowthStat({
   const rising = delta > 0
   // For spend, rising is bad (red). For income/savings, rising is good (green).
   const good = invert ? !rising : rising
-  const color =
+  // Computed delta color: --accent-green (==--positive) for good, --danger for bad,
+  // muted when flat. StatCard's metricKind chip uses the same tokens under the hood
+  // (--positive / --destructive), so the color semantics are equivalent. We preserve
+  // the raw inline color here because StatCard's delta chip applies a bordered-badge
+  // style that differs visually from the original plain inline row.
+  const deltaColor =
     delta === 0
       ? 'var(--muted-foreground, inherit)'
       : good
@@ -245,18 +246,16 @@ function GrowthStat({
         : 'var(--danger)'
   const TrendIcon = rising ? TrendingUp : TrendingDown
   return (
-    <div className="border border-border rounded-md p-3">
-      <p className="text-sm leading-6 text-muted-foreground m-0">
-        {label}
-      </p>
-      <p className="m-0 mt-1 text-xl font-semibold">
-        {formatMoney(secondHalf, currency)}
-      </p>
-      <p className="m-0 mt-0.5" style={{ color }}>
-        <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}{' '}
-        <span className="text-sm leading-6 text-muted-foreground">from {formatMoney(firstHalf, currency)}</span>
-      </p>
-    </div>
+    <StatCard
+      label={label}
+      value={formatMoney(secondHalf, currency)}
+      hint={`from ${formatMoney(firstHalf, currency)}`}
+      delta={
+        <span style={{ color: deltaColor }}>
+          <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}
+        </span>
+      }
+    />
   )
 }
 
