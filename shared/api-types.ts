@@ -460,6 +460,28 @@ export type Contact = {
    * Fairness dashboard's partner_inflows / non_partner_inflows split.
    */
   isPartner: boolean
+  /**
+   * True when this contact has been confirmed as the user's own account
+   * (e.g. "Connor Adams RBC"). Self-accounts are excluded from the
+   * per-person loan ledger and the transfer-link pass.
+   */
+  isSelf: boolean
+}
+
+/**
+ * A contact suggested as a potential self-account (the household user's own
+ * account appearing as a counterparty). Returned by GET /api/contacts/self-suggestions.
+ */
+export type SelfSuggestion = {
+  id: number
+  name: string
+  /** Human-readable explanation of why this contact looks like a self-account. */
+  reason: string
+}
+
+/** Response shape for GET /api/contacts/self-suggestions. */
+export type SelfSuggestionsResponse = {
+  suggestions: SelfSuggestion[]
 }
 
 export const TAX_TREATMENTS = [
