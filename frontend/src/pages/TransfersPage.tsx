@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
+import { Grid } from '@/components/ui/grid'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -285,61 +287,38 @@ function TransferStats({
   if (!stats) return null
 
   return (
-    <Card aria-label="Transfer totals">
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
-      >
-        <Stat label="Matched pairs" value={String(stats.matched)} />
-        <Stat
+    <div className="mb-4" aria-label="Transfer totals">
+      <Grid minItemWidth={180} gap="md">
+        <StatCard
+          label="Matched pairs"
+          value={String(stats.matched)}
+          metricKind="neutral"
+        />
+        <StatCard
           label="Unmatched"
-          value={String(stats.unmatched)}
-          tone={stats.unmatched > 0 ? 'warn' : undefined}
+          value={
+            stats.unmatched > 0
+              ? <span className="text-[var(--accent-warm)]">{String(stats.unmatched)}</span>
+              : String(stats.unmatched)
+          }
+          metricKind="neutral"
         />
         {stats.dangling > 0 && (
-          <Stat
+          <StatCard
             label="Broken links (one-way)"
-            value={String(stats.dangling)}
-            tone="warn"
+            value={<span className="text-[var(--accent-warm)]">{String(stats.dangling)}</span>}
+            metricKind="neutral"
           />
         )}
         {Object.entries(stats.byPurpose).map(([purpose, n]) => (
-          <Stat
+          <StatCard
             key={`purpose-${purpose}`}
             label={PURPOSE_LABEL.get(purpose) ?? purpose}
             value={String(n)}
+            metricKind="neutral"
           />
         ))}
-      </div>
-    </Card>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone?: 'warn'
-}) {
-  return (
-    <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
-      <div className="text-xs text-muted-foreground">
-        {label}
-      </div>
-      <div
-        className="text-xl font-semibold"
-        style={{
-          color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
-        }}
-      >
-        {value}
-      </div>
+      </Grid>
     </div>
   )
 }
