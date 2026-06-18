@@ -90,15 +90,8 @@ export function SavingsRatePage() {
           onRefresh={reload}
         />
 
-        <div
-          style={{
-            display: 'flex',
-            gap: 16,
-            flexWrap: 'wrap',
-            marginTop: 12,
-          }}
-        >
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div className="flex flex-wrap gap-4 mt-3">
+          <label className="flex items-center gap-1.5">
             <input
               type="checkbox"
               checked={includeInvestments}
@@ -106,7 +99,7 @@ export function SavingsRatePage() {
             />
             Count investment contributions as savings
           </label>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <label className="flex items-center gap-1.5">
             <input
               type="checkbox"
               checked={includeDebtPrincipal}
@@ -117,7 +110,7 @@ export function SavingsRatePage() {
         </div>
 
         {windowLabel && (
-          <p className="muted" style={{ margin: '8px 0 0' }}>
+          <p className="muted mt-2">
             Showing {windowLabel}.
           </p>
         )}
@@ -176,13 +169,13 @@ function FormulaExplainer({
   const numerator = numeratorParts.join(' + ')
   return (
     <section className="card" aria-label="How the savings rate is calculated">
-      <h2 style={{ margin: '0 0 6px', fontSize: '1rem' }}>How this is calculated</h2>
-      <p style={{ margin: '0 0 8px' }}>
+      <h2 className="m-0 mb-1.5 text-base">How this is calculated</h2>
+      <p className="mb-2">
         <code>
           savings rate = ({numerator}) ÷ income
         </code>
       </p>
-      <ul className="muted" style={{ margin: 0, paddingLeft: 18 }}>
+      <ul className="muted m-0 pl-4">
         <li>
           <strong>Income</strong> — money coming into your cash accounts
           (payroll, deposits). Statement payments and internal transfers are
@@ -205,7 +198,7 @@ function FormulaExplainer({
           {includeDebtPrincipal ? ' Counted toward your rate.' : ' Excluded from your rate (toggle above).'}
         </li>
       </ul>
-      <p className="muted" style={{ margin: '8px 0 0' }}>
+      <p className="muted mt-2">
         Internal transfers are counted exactly once — the money landing in a
         savings, investment, or loan account is what counts, not the matching
         withdrawal from checking, so nothing is double counted.
@@ -218,15 +211,8 @@ function CurrencySummaryCard({ summary }: { summary: SavingsRateCurrencySummary 
   const { totals } = summary
   return (
     <section className="card" aria-label={`Savings rate — ${summary.currency}`}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>{summary.currency}</h2>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="m-0">{summary.currency}</h2>
         <RateBadge pct={totals.savingsRatePct} />
       </div>
 
@@ -284,10 +270,10 @@ function Stat({
         padding: 12,
       }}
     >
-      <p className="muted" style={{ margin: 0 }}>
+      <p className="muted m-0">
         {label}
       </p>
-      <p style={{ margin: '4px 0 0', fontSize: '1.25rem', fontWeight: 600 }}>
+      <p className="m-0 mt-1 text-xl font-semibold">
         {formatMoney(value, currency)}
       </p>
     </div>
@@ -303,36 +289,36 @@ function MonthlySeriesTable({
 }) {
   if (series.length === 0) return null
   return (
-    <div style={{ marginTop: 12, overflowX: 'auto' }}>
-      <h3 style={{ margin: '0 0 6px' }}>Monthly detail</h3>
-      <table className="table" style={{ minWidth: 520 }}>
+    <div className="mt-3 overflow-x-auto">
+      <h3 className="mb-1.5 mt-0">Monthly detail</h3>
+      <table className="table min-w-[520px]">
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>Month</th>
-            <th style={{ textAlign: 'right' }}>Income</th>
-            <th style={{ textAlign: 'right' }}>Spending</th>
-            <th style={{ textAlign: 'right' }}>Savings</th>
-            <th style={{ textAlign: 'right' }}>Investments</th>
-            <th style={{ textAlign: 'right' }}>Debt principal</th>
-            <th style={{ textAlign: 'right' }}>Savings rate</th>
+            <th>Month</th>
+            <th className="text-right">Income</th>
+            <th className="text-right">Spending</th>
+            <th className="text-right">Savings</th>
+            <th className="text-right">Investments</th>
+            <th className="text-right">Debt principal</th>
+            <th className="text-right">Savings rate</th>
           </tr>
         </thead>
         <tbody>
           {series.map((m) => (
             <tr key={m.month}>
               <td>{m.month}</td>
-              <td style={{ textAlign: 'right' }}>{formatMoney(m.income, currency)}</td>
-              <td style={{ textAlign: 'right' }}>{formatMoney(m.spending, currency)}</td>
-              <td style={{ textAlign: 'right' }}>{formatMoney(m.savings, currency)}</td>
-              <td style={{ textAlign: 'right' }}>
+              <td className="text-right">{formatMoney(m.income, currency)}</td>
+              <td className="text-right">{formatMoney(m.spending, currency)}</td>
+              <td className="text-right">{formatMoney(m.savings, currency)}</td>
+              <td className="text-right">
                 {formatMoney(m.investments, currency)}
               </td>
-              <td style={{ textAlign: 'right' }}>
+              <td className="text-right">
                 {formatMoney(m.debtPrincipal, currency)}
               </td>
               <td
+                className="text-right"
                 style={{
-                  textAlign: 'right',
                   color:
                     m.savingsRatePct == null
                       ? 'var(--muted-foreground, inherit)'
