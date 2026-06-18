@@ -1,4 +1,6 @@
+import { Link } from 'react-router-dom'
 import { Card } from '@/components/ui/card'
+import { enrichmentFilterHref } from './enrichmentFilterHref'
 
 type Band = {
   key: 'high' | 'medium' | 'low' | '(none)'
@@ -43,11 +45,16 @@ export function EnrichmentConfidenceChart({ byConfidence }: Props) {
       </div>
       <div className="flex gap-[0.875rem] flex-wrap text-[0.74rem] text-[var(--muted-foreground)]">
         {counts.map((c) => (
-          <span key={c.key} className="inline-flex items-center gap-[0.35rem]">
+          <Link
+            key={c.key}
+            to={enrichmentFilterHref('autoConfidence', c.key)}
+            className="inline-flex items-center gap-[0.35rem] no-underline hover:opacity-80"
+            aria-label={`View ${c.label} confidence transactions`}
+          >
             <span className="inline-block w-[10px] h-[10px] rounded-[2px]" style={{ background: c.cssVar }} />
             <span className="text-[var(--foreground)] font-medium">{c.label}</span>{' '}
             <span className="tabular-nums">{c.n.toLocaleString()}</span>
-          </span>
+          </Link>
         ))}
       </div>
     </Card>
