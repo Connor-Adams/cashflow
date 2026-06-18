@@ -1,4 +1,4 @@
-import { getJson, postJson } from './api';
+import { getJson, postJson, patchJson, deleteReq } from './api';
 import type { CategoryTreeNode, ResolvedCategoryPath } from '../types/api';
 
 export const CATEGORY_PATH_SEPARATOR = ' / ';
@@ -21,4 +21,20 @@ export function flattenTreeToPaths(nodes: CategoryTreeNode[]): string[] {
   };
   for (const root of nodes) walk(root, '');
   return out.sort((a, b) => a.localeCompare(b));
+}
+
+export function createCategory(name: string, parentId: number | null): Promise<CategoryTreeNode> {
+  return postJson<CategoryTreeNode>('/api/categories', { name, parentId });
+}
+
+export function renameCategory(id: number, name: string): Promise<CategoryTreeNode> {
+  return patchJson<CategoryTreeNode>(`/api/categories/${id}`, { name });
+}
+
+export function reparentCategory(id: number, parentId: number | null): Promise<CategoryTreeNode> {
+  return patchJson<CategoryTreeNode>(`/api/categories/${id}/reparent`, { parentId });
+}
+
+export function deleteCategory(id: number): Promise<void> {
+  return deleteReq(`/api/categories/${id}`);
 }
