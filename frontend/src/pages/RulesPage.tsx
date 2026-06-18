@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
+import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { EmptyTableRow } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import {
   Table,
   TableBody,
@@ -371,21 +375,20 @@ export function RulesPage() {
           </>
         }
       />
-      {err && <span className="error">{err}</span>}
+      {err && <Alert variant="error" className="mb-4">{err}</Alert>}
       <RulesHealthSection onAfterCreate={() => void load()} />
-      <form className="card rulesFormCard" onSubmit={onCreate}>
-        <div className="rulesCardHeader">
-          <div>
-            <h2>New rule</h2>
-            <p className="muted">
-              Reuse an existing category when possible to keep reports tidy.
-            </p>
-          </div>
-          <span className="transactionsPanelBadge">
-            {categoryLabels.length} categories
-          </span>
-        </div>
-        <div className="formGrid rulesFormGrid">
+      <Card className="mb-4">
+        <form onSubmit={onCreate}>
+        <SectionHeader
+          title="New rule"
+          description="Reuse an existing category when possible to keep reports tidy."
+          actions={
+            <span className="transactionsPanelBadge">
+              {categoryLabels.length} categories
+            </span>
+          }
+        />
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr))]">
           <label>
             Pattern
             <input
@@ -404,7 +407,7 @@ export function RulesPage() {
               }}
             />
             {previewState === 'counting' && (
-              <span className="muted text-xs italic">Counting…</span>
+              <span className="text-xs italic text-muted-foreground">Counting…</span>
             )}
             {previewState !== null && previewState !== 'counting' && (
               'error' in previewState ? (
@@ -412,7 +415,7 @@ export function RulesPage() {
                   Invalid pattern: {previewState.error}
                 </span>
               ) : (
-                <span className="muted text-xs italic">
+                <span className="text-xs italic text-muted-foreground">
                   {previewState.matches >= 500
                     ? 'matches 500+ existing transactions'
                     : `matches ${previewState.matches} existing transaction${previewState.matches === 1 ? '' : 's'}`}
@@ -434,7 +437,7 @@ export function RulesPage() {
               <option value="substring">substring</option>
               <option value="regex">regex</option>
             </select>
-            <span className="muted text-xs">
+            <span className="text-xs text-muted-foreground">
               substring matches any part of the description; regex is for patterns (advanced).
             </span>
             {patternError && (
@@ -516,7 +519,7 @@ export function RulesPage() {
           )}
           {newSplitType === 'shared' && (
             <div className="col-span-full">
-              <span className="muted text-xs">Must sum to 100%</span>
+              <span className="text-xs text-muted-foreground">Must sum to 100%</span>
               {shareError && (
                 <span className="text-xs text-destructive ml-2" role="alert">
                   {shareError}
@@ -526,186 +529,171 @@ export function RulesPage() {
           )}
         </div>
         <Button type="submit" disabled={!isNewFormValid}>Add rule</Button>
-      </form>
+        </form>
+      </Card>
 
       {autoSuggestions.length > 0 && (
-        <section className="card rulesTableCard">
-          <div className="rulesCardHeader">
-            <div>
-              <h2>Auto-rule suggestions</h2>
-              <p className="muted">
-                Patterns we spotted in your recent reviews. Accept to create a
-                rule; dismiss to hide the suggestion.
-              </p>
-            </div>
-            <span className="transactionsPanelBadge">
-              {autoSuggestions.length} suggestion{autoSuggestions.length === 1 ? '' : 's'}
-            </span>
-          </div>
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Pattern</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Biz</TableHead>
-                  <TableHead>Split</TableHead>
-                  <TableHead>Confidence</TableHead>
-                  <TableHead>Why</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {autoSuggestions.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell>{s.merchantPattern}</TableCell>
-                    <TableCell>{s.category ?? '—'}</TableCell>
-                    <TableCell>{s.isBusiness ? 'yes' : ''}</TableCell>
-                    <TableCell>{s.splitType}</TableCell>
-                    <TableCell>
-                      <span className="transactionsPanelBadge">
-                        {Math.round(s.confidence * 100)}%
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="muted">{s.reasoning}</span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => void acceptAutoSuggestion(s)}
-                        >
-                          Accept
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void dismissAutoSuggestion(s)}
-                        >
-                          Dismiss
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </section>
-      )}
-
-      {proposals.length > 0 && (
-        <section className="card rulesTableCard">
-          <div className="rulesCardHeader">
-            <div>
-              <h2>AI rule proposals</h2>
-              <p className="muted">
-                Repeated reviewed merchants that look stable enough to automate.
-              </p>
-            </div>
-            <span className="transactionsPanelBadge">{proposals.length} proposals</span>
-          </div>
-          <div className="tableWrap">
-            <Table className="table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Pattern</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Biz</TableHead>
-                  <TableHead>Split</TableHead>
-                  <TableHead>Support</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {proposals.map((p) => (
-                  <TableRow key={`${p.merchantPattern}-${p.category}-${p.splitType}`}>
-                    <TableCell>{p.merchantPattern}</TableCell>
-                    <TableCell>{p.category ?? '—'}</TableCell>
-                    <TableCell>{p.isBusiness ? 'yes' : ''}</TableCell>
-                    <TableCell>{p.splitType}</TableCell>
-                    <TableCell>
-                      {p.supportCount} rows #{p.exampleTransactionIds.join(', #')}
-                    </TableCell>
-                    <TableCell>
-                      <Button type="button" variant="secondary" size="sm" onClick={() => void approveProposal(p)}>
-                        Approve
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </section>
-      )}
-
-      <section className="card rulesTableCard">
-        <div className="rulesCardHeader">
-          <div>
-            <h2>Existing rules</h2>
-            <p className="muted">
-              Higher priority wins when several patterns match the same transaction.
-            </p>
-          </div>
-          <span className="transactionsPanelBadge">{rules.length} rules</span>
-        </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
+        <Card className="mb-4">
+          <SectionHeader
+            title="Auto-rule suggestions"
+            description="Patterns we spotted in your recent reviews. Accept to create a rule; dismiss to hide the suggestion."
+            actions={
+              <span className="transactionsPanelBadge">
+                {autoSuggestions.length} suggestion{autoSuggestions.length === 1 ? '' : 's'}
+              </span>
+            }
+          />
+          <Table>
             <TableHeader>
               <TableRow>
-                <SortableTableHead field="name" label="Pattern" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
-                <SortableTableHead field="matchType" label="Match" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
-                <SortableTableHead field="priority" label="Pri" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+                <TableHead>Pattern</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Biz</TableHead>
                 <TableHead>Split</TableHead>
-                <TableHead>Usage</TableHead>
-                <SortableTableHead field="updatedAt" label="Updated" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+                <TableHead>Confidence</TableHead>
+                <TableHead>Why</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rules.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="emptyStateCell">
-                    <p>No rules yet. Add a pattern above to start automating imports.</p>
-                    <p className="muted">
-                      Rules set default category, business flag, and split for matching merchants on import.
-                    </p>
+              {autoSuggestions.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell>{s.merchantPattern}</TableCell>
+                  <TableCell>{s.category ?? '—'}</TableCell>
+                  <TableCell>{s.isBusiness ? 'yes' : ''}</TableCell>
+                  <TableCell>{s.splitType}</TableCell>
+                  <TableCell>
+                    <span className="transactionsPanelBadge">
+                      {Math.round(s.confidence * 100)}%
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm leading-6 text-muted-foreground">{s.reasoning}</span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void acceptAutoSuggestion(s)}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void dismissAutoSuggestion(s)}
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
-              ) : (
-                rules.map((r) => (
-                  <TableRow
-                    key={r.id}
-                    ref={r.id === focusedId ? focusedRowRef : undefined}
-                    className={r.id === focusedId ? 'ruleRow isFocused' : 'ruleRow'}
-                  >
-                    <TableCell>{r.merchantPattern}</TableCell>
-                    <TableCell>{r.matchKind}</TableCell>
-                    <TableCell>{r.priority}</TableCell>
-                    <TableCell>{r.category ?? '—'}</TableCell>
-                    <TableCell>{r.isBusiness ? 'yes' : ''}</TableCell>
-                    <TableCell>{r.splitType}</TableCell>
-                    <TableCell>{r.usageCount ?? 0}</TableCell>
-                    <TableCell className="text-muted-foreground">{r.updatedAt ? r.updatedAt.slice(0, 10) : '—'}</TableCell>
-                    <TableCell>
-                      <Button type="button" variant="destructive" size="sm" onClick={() => void remove(r)}>
-                        Delete
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
+              ))}
             </TableBody>
           </Table>
-        </div>
-      </section>
+        </Card>
+      )}
+
+      {proposals.length > 0 && (
+        <Card className="mb-4">
+          <SectionHeader
+            title="AI rule proposals"
+            description="Repeated reviewed merchants that look stable enough to automate."
+            actions={
+              <span className="transactionsPanelBadge">{proposals.length} proposals</span>
+            }
+          />
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pattern</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Biz</TableHead>
+                <TableHead>Split</TableHead>
+                <TableHead>Support</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {proposals.map((p) => (
+                <TableRow key={`${p.merchantPattern}-${p.category}-${p.splitType}`}>
+                  <TableCell>{p.merchantPattern}</TableCell>
+                  <TableCell>{p.category ?? '—'}</TableCell>
+                  <TableCell>{p.isBusiness ? 'yes' : ''}</TableCell>
+                  <TableCell>{p.splitType}</TableCell>
+                  <TableCell>
+                    {p.supportCount} rows #{p.exampleTransactionIds.join(', #')}
+                  </TableCell>
+                  <TableCell>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => void approveProposal(p)}>
+                      Approve
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
+      <Card className="mb-4">
+        <SectionHeader
+          title="Existing rules"
+          description="Higher priority wins when several patterns match the same transaction."
+          actions={
+            <span className="transactionsPanelBadge">{rules.length} rules</span>
+          }
+        />
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <SortableTableHead field="name" label="Pattern" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+              <SortableTableHead field="matchType" label="Match" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+              <SortableTableHead field="priority" label="Pri" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+              <TableHead>Category</TableHead>
+              <TableHead>Biz</TableHead>
+              <TableHead>Split</TableHead>
+              <TableHead>Usage</TableHead>
+              <SortableTableHead field="updatedAt" label="Updated" currentSort={rulesSort} dir={rulesDir} onSort={toggleRulesSort} />
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rules.length === 0 ? (
+              <EmptyTableRow
+                colSpan={9}
+                title="No rules yet. Add a pattern above to start automating imports."
+                description="Rules set default category, business flag, and split for matching merchants on import."
+              />
+            ) : (
+              rules.map((r) => (
+                <TableRow
+                  key={r.id}
+                  ref={r.id === focusedId ? focusedRowRef : undefined}
+                  className={r.id === focusedId ? 'ruleRow isFocused' : 'ruleRow'}
+                >
+                  <TableCell>{r.merchantPattern}</TableCell>
+                  <TableCell>{r.matchKind}</TableCell>
+                  <TableCell>{r.priority}</TableCell>
+                  <TableCell>{r.category ?? '—'}</TableCell>
+                  <TableCell>{r.isBusiness ? 'yes' : ''}</TableCell>
+                  <TableCell>{r.splitType}</TableCell>
+                  <TableCell>{r.usageCount ?? 0}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.updatedAt ? r.updatedAt.slice(0, 10) : '—'}</TableCell>
+                  <TableCell>
+                    <Button type="button" variant="destructive" size="sm" onClick={() => void remove(r)}>
+                      Delete
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
     </div>
     {confirm.dialog}
     <ImportRulesModal
