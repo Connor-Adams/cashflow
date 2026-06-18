@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRow } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -221,8 +222,10 @@ export function GoalsPage() {
   const [editForm, setEditForm] = useState<FormState>(emptyForm())
   const [editSaving, setEditSaving] = useState(false)
   const [statusFilter, setStatusFilter] = useState<FinancialGoalStatus | ''>('active')
+  const [loading, setLoading] = useState(true)
 
   const loadGoals = useCallback(async () => {
+    setLoading(true)
     try {
       const path = statusFilter
         ? `/api/goals?status=${encodeURIComponent(statusFilter)}`
@@ -249,6 +252,8 @@ export function GoalsPage() {
       setProjections(map)
     } catch {
       // Surfaced via toast in handlers
+    } finally {
+      setLoading(false)
     }
   }, [statusFilter])
 
@@ -426,7 +431,7 @@ export function GoalsPage() {
             </Label>
           </div>
         </div>
-        {goals.length === 0 ? (
+        {!loading && goals.length === 0 ? (
           <EmptyState
             title="No goals yet."
             description="Add a target below — emergency fund, sinking fund, or upcoming expense."
@@ -448,7 +453,11 @@ export function GoalsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {goals.map((row) => {
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <SkeletonRow key={`goals-skeleton-${i}`} cols={9} />
+                    ))
+                  : goals.map((row) => {
                   if (editId === row.id) {
                     return (
                       <TableRow key={row.id}>
@@ -613,7 +622,7 @@ export function GoalsPage() {
                       </TableCell>
                     </TableRow>
                   )
-                })}
+                  })}
               </TableBody>
             </Table>
           </div>

@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
+import { getJson } from '@/lib/api'
 
 // jsdom has no matchMedia; useIsNarrowViewport (via chartViewport) calls it on
 // mount. Stub a non-matching media query so the page mounts in wide-viewport
@@ -127,5 +128,21 @@ describe('DashboardPage (characterization)', () => {
     expect(
       await screen.findByText(/net spend by category/i),
     ).toBeInTheDocument()
+  })
+
+  it('renders skeletons while loading', async () => {
+    // Pin loading=true by making getJson never resolve. Set the impl just for
+    // this test and restore the route-aware default afterward so the sibling
+    // tests above still see resolved data.
+    const original = vi.mocked(getJson).getMockImplementation()
+    vi.mocked(getJson).mockImplementation(() => new Promise(() => {}))
+    try {
+      const { container } = await renderPage()
+      expect(
+        container.querySelectorAll('[data-slot="skeleton"]').length,
+      ).toBeGreaterThan(0)
+    } finally {
+      vi.mocked(getJson).mockImplementation(original!)
+    }
   })
 })

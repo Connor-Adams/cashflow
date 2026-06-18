@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import { SkeletonRow } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -208,6 +209,7 @@ export function BudgetsTab() {
   const confirm = useConfirm()
 
   const [budgets, setBudgets] = useState<Budget[]>([])
+  const [loading, setLoading] = useState(true)
   const [budgetCategoryHints, setBudgetCategoryHints] = useState<string[]>([])
   const [budgetForm, setBudgetForm] = useState<BudgetFormState>(emptyBudgetForm)
   const [budgetSubmitting, setBudgetSubmitting] = useState(false)
@@ -221,6 +223,8 @@ export function BudgetsTab() {
       setBudgets(resp.data)
     } catch {
       // Errors surfaced via toast in handlers
+    } finally {
+      setLoading(false)
     }
   }, [])
 
@@ -411,7 +415,7 @@ export function BudgetsTab() {
             </p>
           </div>
         </div>
-        {sortedBudgets.length === 0 ? (
+        {!loading && sortedBudgets.length === 0 ? (
           <EmptyState
             title="No budgets yet."
             description="Add one to track progress with pacing comparison."
@@ -430,7 +434,11 @@ export function BudgetsTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sortedBudgets.map((budget) => {
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <SkeletonRow key={`budgets-skeleton-${i}`} cols={6} />
+                    ))
+                  : sortedBudgets.map((budget) => {
                   const isEditing = budgetEditId === budget.id
                   if (isEditing) {
                     return (
@@ -614,7 +622,7 @@ export function BudgetsTab() {
                       </TableCell>
                     </TableRow>
                   )
-                })}
+                    })}
               </TableBody>
             </Table>
           </div>

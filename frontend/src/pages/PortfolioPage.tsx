@@ -22,6 +22,7 @@ import { Sparkline } from '@/components/ui/sparkline'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
+import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -231,7 +232,15 @@ export function PortfolioPage() {
       )}
 
       <section className="transactionsStats" aria-busy={loading}>
-        {summary?.unifiedTotal != null && (
+        {loading &&
+          Array.from({ length: 4 }).map((_, i) => (
+            <Card key={`portfolio-skeleton-${i}`} data-slot="stat-card" className="mb-0">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="mt-2 h-7 w-28" />
+              <Skeleton className="mt-2 h-3 w-36" />
+            </Card>
+          ))}
+        {!loading && summary?.unifiedTotal != null && (
           <MetricStat
             key="unified-cad"
             label="Total (CAD)"
@@ -240,15 +249,16 @@ export function PortfolioPage() {
             hint={`Converted from ${summary.unifiedTotal.ratesUsed.length} ${summary.unifiedTotal.ratesUsed.length === 1 ? 'currency' : 'currencies'} via BoC daily rates`}
           />
         )}
-        {(summary?.totalsByCurrency ?? []).map((total) => (
-          <StatCard
-            key={total.currency}
-            label={total.currency}
-            value={formatMoney(total.marketValue, total.currency)}
-            hint="Current portfolio value"
-          />
-        ))}
-        {summary && summary.totalsByCurrency.length === 0 && (
+        {!loading &&
+          (summary?.totalsByCurrency ?? []).map((total) => (
+            <StatCard
+              key={total.currency}
+              label={total.currency}
+              value={formatMoney(total.marketValue, total.currency)}
+              hint="Current portfolio value"
+            />
+          ))}
+        {!loading && summary && summary.totalsByCurrency.length === 0 && (
           <StatCard
             label="Holdings"
             value="0"
@@ -270,7 +280,7 @@ export function PortfolioPage() {
       </TabPanel>
 
       <TabPanel value="holdings" active={activeTab}>
-        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} />
+        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} loading={loading} />
       </TabPanel>
 
       <TabPanel value="by-security" active={activeTab}>
@@ -310,10 +320,12 @@ function HoldingsPanel({
   summary,
   accountsById,
   sparklines,
+  loading,
 }: {
   summary: PortfolioSummary | null
   accountsById: Map<number, PortfolioSummary['accounts'][number]>
   sparklines: Map<number, PortfolioSparklinePoint[]>
+  loading: boolean
 }) {
   return (
     <>
@@ -348,7 +360,12 @@ function HoldingsPanel({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(summary?.holdings ?? []).map((holding) => (
+              {loading &&
+                Array.from({ length: 6 }).map((_, i) => (
+                  <SkeletonRow key={`portfolio-skeleton-${i}`} cols={14} />
+                ))}
+              {!loading &&
+                (summary?.holdings ?? []).map((holding) => (
                 <TableRow key={holding.id}>
                   <TableCell>
                     {accountsById.get(holding.accountId)?.name ?? holding.accountId}
@@ -424,7 +441,7 @@ function HoldingsPanel({
                   <TableCell>{holding.statementDate}</TableCell>
                 </TableRow>
               ))}
-              {summary && summary.holdings.length === 0 && (
+              {!loading && summary && summary.holdings.length === 0 && (
                 <EmptyTableRow
                   colSpan={14}
                   title="No holdings imported yet."
