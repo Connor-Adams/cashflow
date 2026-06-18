@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Rectangle, ResponsiveContainer, Sankey, Tooltip } from 'recharts'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -12,6 +13,7 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -210,42 +212,32 @@ export function SankeyPage() {
       />
 
       {err ? (
-        <Card className="mt-4">
-          <CardContent>
-            <p role="alert" className="muted">
-              {err}
-            </p>
-          </CardContent>
-        </Card>
+        <Alert variant="error" className="mt-4">
+          {err}
+        </Alert>
       ) : null}
 
       <section className="mt-4 grid gap-3 sm:grid-cols-3">
-        <article className="card statCard">
-          <p className="statLabel">Total income</p>
-          <p className="statValue">
-            {data ? formatMoney(data.totalIncome, currency) : '—'}
-          </p>
-          <p className="muted statHint">
-            Money labelled <code>income</code> for this currency + date range.
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Total spend</p>
-          <p className="statValue">
-            {data ? formatMoney(data.totalSpend, currency) : '—'}
-          </p>
-          <p className="muted statHint">
-            Sum of category outflows after refund netting. Excludes
-            transfers, investments, and dividends.
-          </p>
-        </article>
-        <article className="card statCard">
-          <p className="statLabel">Transactions</p>
-          <p className="statValue">{data ? data.transactionCount : '—'}</p>
-          <p className="muted statHint">
-            Rows that contributed to the chart (post-filter).
-          </p>
-        </article>
+        <StatCard
+          label="Total income"
+          value={data ? formatMoney(data.totalIncome, currency) : '—'}
+          hint={
+            <>
+              Money labelled <code>income</code> for this currency + date
+              range.
+            </>
+          }
+        />
+        <StatCard
+          label="Total spend"
+          value={data ? formatMoney(data.totalSpend, currency) : '—'}
+          hint="Sum of category outflows after refund netting. Excludes transfers, investments, and dividends."
+        />
+        <StatCard
+          label="Transactions"
+          value={data ? data.transactionCount : '—'}
+          hint="Rows that contributed to the chart (post-filter)."
+        />
       </section>
 
       <Card className="mt-4">
