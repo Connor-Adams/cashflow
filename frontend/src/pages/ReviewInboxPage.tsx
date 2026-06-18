@@ -38,6 +38,7 @@ import { CategoryCloudPicker } from '../components/CategoryCloudPicker'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { ItemRow } from '../components/items/ItemRow'
 import { getJson, patchJson, postJson } from '../lib/api'
+import { resolveCategoryPath } from '../lib/categoriesApi'
 import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
 import { formatMoney } from '../lib/formatMoney'
 import {
@@ -45,6 +46,7 @@ import {
   getReviewInboxSummary,
   getSelectedReviewSummary,
 } from '../lib/reviewInbox'
+import { useCategoryPaths } from '../lib/useCategoryPaths'
 import { TAX_TREATMENTS } from '../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
@@ -162,6 +164,7 @@ export function ReviewInboxPage() {
   const [business, setBusiness] = useState('')
   const [splitType, setSplitType] = useState('')
   const [taxTreatment, setTaxTreatment] = useState<TaxTreatment | ''>('')
+  const { paths: categoryPaths } = useCategoryPaths()
   const [merchantFilter, setMerchantFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
   const confidenceFlag =
@@ -507,9 +510,25 @@ export function ReviewInboxPage() {
     }))
     const appliedCount = selectedIds.size
     try {
+      // Resolve the chosen category path → id so the patch uses categoryOverrideId
+      // (id-authoritative write path from C1). Fall back to null when no category set.
+      let categoryOverrideId: number | null = null
+      const trimmedCategory = category.trim()
+      if (trimmedCategory) {
+        const resolved = await resolveCategoryPath(trimmedCategory)
+        categoryOverrideId = resolved.id
+      }
+      const actualPatch = buildReviewBulkPatch({
+        category,
+        categoryOverrideId,
+        business,
+        splitType,
+        taxTreatment,
+        markReviewed: true,
+      })
       await postJson('/api/transactions/bulk-patch', {
         ids: selectedIdsList,
-        patch,
+        patch: actualPatch,
       })
       setMessage(`Reviewed ${appliedCount} transaction(s).`)
       setCategory('')
@@ -952,7 +971,7 @@ export function ReviewInboxPage() {
                 <CategoryCloudPicker
                   value={category}
                   onChange={(value) => setCategory(value)}
-                  options={categoryHints.map((hint) => hint.label)}
+                  options={categoryPaths.length > 0 ? categoryPaths : categoryHints.map((hint) => hint.label)}
                   placeholder="Dining, Transport..."
                 />
               </div>

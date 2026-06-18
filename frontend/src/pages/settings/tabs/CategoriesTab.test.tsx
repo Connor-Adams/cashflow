@@ -19,7 +19,10 @@ describe('CategoriesTab', () => {
       { id: 2, householdId: 1, name: 'Rent', icon: 'Home',
         taxTreatment: 'none', createdAt: '', updatedAt: '' },
     ]
-    vi.spyOn(api, 'getJson').mockResolvedValue(list)
+    vi.spyOn(api, 'getJson').mockImplementation((path: string) => {
+      if (path === '/api/categories/tree') return Promise.resolve([]) as never;
+      return Promise.resolve(list) as never;
+    })
     const patchSpy = vi
       .spyOn(api, 'patchJson')
       .mockResolvedValue({ ...list[0], icon: 'Coffee' })
@@ -42,7 +45,10 @@ describe('CategoriesTab', () => {
       { id: 1, householdId: 1, name: 'Coffee', icon: null,
         taxTreatment: 'none', createdAt: '', updatedAt: '' },
     ]
-    vi.spyOn(api, 'getJson').mockResolvedValue(list)
+    vi.spyOn(api, 'getJson').mockImplementation((path: string) => {
+      if (path === '/api/categories/tree') return Promise.resolve([]) as never;
+      return Promise.resolve(list) as never;
+    })
     const patchSpy = vi
       .spyOn(api, 'patchJson')
       .mockResolvedValue({ ...list[0], taxTreatment: 'donations' })
@@ -56,4 +62,16 @@ describe('CategoriesTab', () => {
       expect(patchSpy).toHaveBeenCalledWith('/api/categories/1', { taxTreatment: 'donations' })
     })
   })
+
+  it('renders the tree manager alongside icon/tax editing', async () => {
+    const list = [{ id: 1, householdId: 1, name: 'Coffee', icon: null, taxTreatment: 'none', createdAt: '', updatedAt: '' }];
+    vi.spyOn(api, 'getJson').mockImplementation((path: string) => {
+      if (path === '/api/categories/tree') return Promise.resolve([{ id: 1, name: 'Coffee', parentId: null, icon: null, taxTreatment: 'none', children: [] }]) as never;
+      return Promise.resolve(list) as never;
+    });
+    render(<CategoriesTab />);
+    // tree manager heading + the icon/tax control both present
+    await waitFor(() => screen.getByText('Organize categories'));
+    await waitFor(() => screen.getByRole('button', { name: /edit icon for Coffee/i }));
+  });
 })
