@@ -377,44 +377,28 @@ The component currently parses the hex at runtime to choose a readable text colo
 
 **Files:**
 - Modify: `frontend/src/components/ui/letter-avatar.tsx`
-- Test: `frontend/src/components/ui/letter-avatar.test.tsx` (create)
+- Test: `frontend/src/components/ui/letter-avatar.test.tsx` (MODIFY — this file already exists with 4 passing tests for uppercase/stability/size/empty-fallback; add one new test, do not overwrite the file)
 
 **Interfaces:**
 - Consumes: `--avatar-1..12`, `--avatar-on-light`, `--avatar-on-dark` from Task 3.
-- Produces: unchanged public API (`LetterAvatar({ text, size })`); `bg`/`color` style values become `var(--…)` strings.
+- Produces: unchanged public API (`LetterAvatar({ text, size })`); `bg`/`color` style values become `var(--…)` strings. The existing stability/size/text tests stay green (a `var()` bg is still stable).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add a failing assertion to the existing test file**
 
-Create `frontend/src/components/ui/letter-avatar.test.tsx`:
+The file `frontend/src/components/ui/letter-avatar.test.tsx` already exists. Append this `it` block **inside the existing `describe('LetterAvatar', …)` block** (do not recreate the file or the other tests):
 
 ```tsx
-import { describe, it, expect } from 'vitest'
-import { render } from '@testing-library/react'
-import { LetterAvatar } from './letter-avatar'
-
-describe('LetterAvatar', () => {
-  it('renders the first letter uppercased', () => {
-    const { getByText } = render(<LetterAvatar text="connor" />)
-    expect(getByText('C')).toBeTruthy()
-  })
   it('uses a var(--avatar-N) background and a var(--avatar-on-*) text color', () => {
-    const { getByRole } = render(<LetterAvatar text="connor" />)
-    const el = getByRole('img') as HTMLElement
+    const el = render(<LetterAvatar text="connor" />).container.firstChild as HTMLElement
     expect(el.style.backgroundColor).toMatch(/var\(--avatar-\d{1,2}\)/)
     expect(el.style.color).toMatch(/var\(--avatar-on-(light|dark)\)/)
   })
-  it('is deterministic for the same text', () => {
-    const a = render(<LetterAvatar text="abc" />).getByRole('img') as HTMLElement
-    const b = render(<LetterAvatar text="abc" />).getByRole('img') as HTMLElement
-    expect(a.style.backgroundColor).toBe(b.style.backgroundColor)
-  })
-})
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `yarn workspace frontend run test -- letter-avatar`
-Expected: FAIL — current code sets `backgroundColor` to a `#hex`, not `var(--avatar-N)`.
+Expected: the new assertion FAILS — current code sets `backgroundColor` to a `#hex`, not `var(--avatar-N)`. The other 4 tests still pass.
 
 - [ ] **Step 3: Rewrite the palette + remove runtime hex parsing**
 
