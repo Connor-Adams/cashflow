@@ -374,10 +374,6 @@
     @apply w-9 text-center;
   }
 
-  .chartWrap {
-    @apply mt-4;
-  }
-
   .amazonHeader,
   .amazonImportPanel,
   .amazonReviewRow,
@@ -400,24 +396,6 @@
 
   .amazonImportPanel {
     @apply justify-between;
-  }
-
-  .amazonSummaryGrid {
-    @apply grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .amazonSummaryGrid .card {
-    @apply grid gap-1;
-  }
-
-  .amazonSummaryGrid strong {
-    @apply text-2xl;
-  }
-
-  .amazonSummaryGrid span {
-    @apply text-sm;
-    color: var(--muted-foreground);
   }
 
   .amazonReviewList,
@@ -451,12 +429,6 @@
     @apply justify-end;
   }
 
-  .dashboardFilters {
-    @apply mt-3 rounded-lg border p-3 sm:p-4;
-    border-color: color-mix(in srgb, var(--border) 86%, white 4%);
-    background: color-mix(in srgb, var(--bg2) 64%, transparent);
-  }
-
   .quickFilters {
     @apply mb-3 mt-3 flex flex-wrap gap-2;
   }
@@ -472,11 +444,6 @@
     border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
     color: var(--accent-foreground);
-  }
-
-  .dashboardStats {
-    @apply mb-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
   .transactionsStats {
@@ -636,11 +603,6 @@
     @apply mt-0.5 size-4 shrink-0;
   }
 
-  .transactionsTopGrid {
-    @apply mb-4 grid gap-4;
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-  }
-
   .transactionsPanel {
     @apply mb-0;
   }
@@ -653,30 +615,17 @@
     @apply mt-0 mb-1;
   }
 
-  .transactionsToolbar {
-    @apply mb-4;
-  }
-
-  .transactionsToolbarMeta {
-    @apply flex flex-wrap gap-2;
-  }
-
-  .rulesCardHeader,
   .reportsCardHeader,
   .accountsCardHeader {
     @apply mb-4 flex flex-wrap items-start justify-between gap-3;
   }
 
-  .rulesCardHeader h2,
   .reportsCardHeader h2,
   .accountsCardHeader h2 {
     @apply mb-1 mt-0;
   }
 
-  .rulesFormCard,
-  .rulesTableCard,
   .accountsFormCard,
-  .accountsTableCard,
   .settingsDisplayCard {
     @apply mb-4;
   }
@@ -714,10 +663,6 @@
     color: var(--muted-foreground);
   }
 
-  .rulesFormGrid {
-    @apply mb-0;
-  }
-
   .rulesCategoryField {
     grid-column: span 2;
   }
@@ -733,34 +678,6 @@
 
   .rulesCategoryPickerItem {
     @apply text-xs;
-  }
-
-  .reportsFilters {
-    @apply mb-4;
-  }
-
-  .reportsStats,
-  .accountsStats {
-    @apply mb-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-
-  .reportsGrid {
-    @apply grid gap-4;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  }
-
-  .reportsTableCard {
-    @apply mb-0;
-  }
-
-  .accountsActionGroup {
-    @apply flex flex-wrap gap-2;
-  }
-
-  .transactionsFilterGrid {
-    @apply mb-0;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
   .transactionsCategoryField {
@@ -824,10 +741,6 @@
     @apply h-4 w-4;
   }
 
-  .transactionsActionRow {
-    @apply mt-3;
-  }
-
   .transactionsFilterPills {
     @apply mb-3 flex flex-wrap gap-2;
   }
@@ -866,10 +779,6 @@
     color: var(--destructive);
   }
 
-  .transactionsHelperCopy {
-    @apply mb-0 mt-2;
-  }
-
   .transactionsBulkCard {
     @apply items-center;
   }
@@ -902,8 +811,7 @@
     @apply flex flex-wrap items-baseline justify-between gap-2;
   }
 
-  .aiVisibilityHeader .muted,
-  .aiVisibilityMore {
+  .aiVisibilityHeader .muted {
     @apply mb-0 text-xs;
   }
 
@@ -926,118 +834,6 @@
     @apply mb-0 mt-1 leading-5;
   }
 
-  .aiVisibilityItem.is-unread {
-    border-left: 3px solid var(--brand, #f59e0b);
-    padding-left: 0.5rem;
-  }
-  .unreadDot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--brand, #f59e0b);
-    margin-right: 0.5rem;
-    vertical-align: middle;
-  }
-
-  /* ─── AI Inbox page ───────────────────────────────────────────────── */
-
-  .aiInboxPage {
-    padding: 1rem;
-    max-width: 56rem;
-  }
-
-  .aiInboxTabs {
-    @apply flex flex-row flex-wrap gap-2;
-    margin-bottom: 1rem;
-  }
-
-  .aiInboxTabs button {
-    @apply rounded-full px-3 py-1 text-sm font-medium;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted-foreground);
-    cursor: pointer;
-    transition: background 150ms, color 150ms;
-  }
-
-  .aiInboxTabs button:hover {
-    color: var(--foreground);
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
-  }
-
-  .aiInboxTabs button[aria-pressed="true"] {
-    background: var(--muted);
-    color: var(--foreground);
-    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
-  }
-
-  .aiInboxTabs button:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  .aiInboxList {
-    @apply flex flex-col gap-3;
-    list-style: none;
-    padding-left: 0;
-    margin: 0;
-  }
-
-  .aiInboxItem {
-    @apply rounded-md border px-4 py-3 text-sm;
-    border-color: var(--border);
-    background: color-mix(in srgb, var(--bg3) 48%, transparent);
-  }
-
-  .aiInboxItemSummary {
-    @apply w-full font-medium leading-5;
-  }
-
-  .aiInboxItemActions {
-    @apply flex flex-row flex-wrap gap-2;
-    justify-content: flex-end;
-    margin-top: 0.5rem;
-  }
-
-  .aiInboxTabCount {
-    @apply ml-1 tabular-nums text-xs;
-    color: var(--muted-foreground);
-  }
-
-  .aiInboxExpandToggle {
-    @apply ml-2 text-xs font-medium underline-offset-2;
-    background: transparent;
-    color: var(--muted-foreground);
-    border: none;
-    padding: 0;
-    cursor: pointer;
-  }
-
-  .aiInboxExpandToggle:hover {
-    color: var(--foreground);
-    text-decoration: underline;
-  }
-
-  .aiInboxItemDetails {
-    @apply flex flex-col gap-1 mt-2 pl-3;
-    list-style: none;
-    border-left: 2px solid var(--border);
-  }
-
-  .aiInboxItemDetail {
-    @apply text-sm leading-5;
-  }
-
-  .aiInboxItemDetailLink {
-    @apply ml-2 text-xs;
-    color: var(--primary);
-  }
-
-  .aiInboxItemDetailLink:hover {
-    text-decoration: underline;
-  }
-
   /* ─── Sidebar nav badge (count chip at end of NavLink) ────────────── */
 
   .sidebar__navBadge {
@@ -1047,47 +843,6 @@
     min-width: 1.25rem;
     text-align: center;
     line-height: 1.25;
-  }
-
-  /* ─── Button-like anchor (sits inline with <Button> elements) ─────── */
-
-  .buttonLikeLink {
-    @apply inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium no-underline;
-    border: 1px solid var(--border);
-    background: var(--bg2);
-    color: var(--foreground);
-    cursor: pointer;
-    transition: background 150ms;
-  }
-
-  .buttonLikeLink:hover {
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
-    color: var(--foreground);
-  }
-
-  .buttonLikeLink:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  /* ─── Dashboard insight card helpers ─────────────────────────────── */
-
-  .aiVisibilitySupportingIds {
-    display: block;
-  }
-
-  .aiVisibilityAction {
-    @apply text-xs font-medium;
-    display: inline-block;
-    padding-top: 0.375rem;
-    color: var(--primary);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    cursor: pointer;
-  }
-
-  .aiVisibilityAction:hover {
-    color: var(--text-link-hover);
   }
 
   .transactionsTableCard {
@@ -1111,10 +866,6 @@
 
   .transactionsTable tbody .transactionsActionsCol {
     background: color-mix(in srgb, var(--bg) 96%, transparent);
-  }
-
-  .transactionsPager {
-    @apply mb-0 mt-4 justify-center;
   }
 
   .txnMerchantCell {
@@ -1253,10 +1004,6 @@
     @apply m-0 text-xs leading-5;
   }
 
-  .dashboardBusinessSpotlight {
-    background: color-mix(in srgb, var(--bg2) 72%, var(--accent-green) 8%);
-  }
-
   .businessSpotlightGrid {
     @apply mt-4 grid gap-4;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1318,18 +1065,6 @@
     @apply mt-2 mb-0;
   }
 
-  .dashboardChartCard {
-    @apply mb-4;
-  }
-
-  .dashboardChartCard h2 {
-    @apply mt-0;
-  }
-
-  .dashboardChartCard .muted {
-    @apply mb-1;
-  }
-
   .bulkBar {
     @apply flex flex-wrap items-end gap-x-4 gap-y-3;
   }
@@ -1340,36 +1075,6 @@
 
   .bulkBar .checkRow {
     @apply flex-row items-center gap-2;
-  }
-
-  .uploadCard h2 {
-    @apply mb-1 mt-0 text-[1.05rem];
-  }
-
-  .uploadCard .uploadMsg {
-    @apply mt-3 text-sm whitespace-pre-wrap;
-    color: var(--muted-foreground);
-  }
-
-  .uploadCard .uploadMsg.warn {
-    color: var(--warning);
-  }
-
-  .uploadCard .parseErrorList {
-    @apply mt-2 max-h-48 overflow-y-auto pl-5 text-[0.82rem];
-    color: var(--danger);
-  }
-
-  .uploadCard .previewBlock {
-    @apply mt-4;
-  }
-
-  .uploadCard .previewBlock code {
-    @apply text-xs break-all;
-  }
-
-  .filePick input[type='file'] {
-    @apply max-w-full;
   }
 
   .req {
@@ -1754,19 +1459,6 @@
     @apply ml-1 opacity-70;
   }
 
-  /* ─── Dashboard table card (post-bento, drill-down stack) ──────────── */
-
-  .dashboardTableCard {
-    @apply mb-4;
-  }
-
-  .dashboardTableCard h2 {
-    @apply mt-0;
-  }
-
-  .dashboardTableCard .muted {
-    @apply mb-1;
-  }
 }
 
 @media (max-width: 768px) {
@@ -1807,10 +1499,6 @@
 }
 
 @media (width <= 720px) {
-  .transactionsTopGrid {
-    grid-template-columns: 1fr;
-  }
-
   .reviewInboxLayout {
     grid-template-columns: 1fr;
   }
