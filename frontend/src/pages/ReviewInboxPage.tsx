@@ -778,11 +778,11 @@ export function ReviewInboxPage() {
           {err && <Alert variant="error">{err}</Alert>}
           {message && <span className="reviewInboxMessage">{message}</span>}
 
-          <div className="reviewInboxTableWrap" ref={tableWrapRef}>
-            <Table className="reviewInboxTable">
+          <div className="overflow-auto rounded-lg border" ref={tableWrapRef} style={{ maxHeight: '70vh', borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)' }}>
+            <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--muted)_88%,transparent)]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="narrowCol">
+                  <TableHead className="w-9 text-center">
                     <input
                       type="checkbox"
                       checked={

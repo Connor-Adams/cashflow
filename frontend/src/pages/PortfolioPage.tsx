@@ -509,7 +509,7 @@ function HoldingsPanel({
         />
       )}
 
-      <Card className="transactionsTableCard">
+      <Card className="mb-0">
         <div className="transactionsPanelHeader">
           <div>
             <h2>Recent investment activity</h2>
@@ -518,8 +518,8 @@ function HoldingsPanel({
             </p>
           </div>
         </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
+        <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+          <Table stickyHeader>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -586,7 +586,7 @@ function BySecurityPanel({
 }) {
   const rows = data?.rows ?? []
   return (
-    <Card className="transactionsTableCard">
+    <Card className="mb-0">
       <div className="transactionsPanelHeader">
         <div>
           <h2>By security</h2>
@@ -596,8 +596,8 @@ function BySecurityPanel({
           </p>
         </div>
       </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
+      <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+        <Table stickyHeader>
           <TableHeader>
             <TableRow>
               <TableHead>Symbol</TableHead>
@@ -754,15 +754,15 @@ function AllocationPanel({ data, sort, dir, onSort }: AllocationPanelProps) {
         />
       </div>
 
-      <Card className="transactionsTableCard mt-4">
+      <Card className="mb-0 mt-4">
         <div className="transactionsPanelHeader">
           <div>
             <h2>Breakdown</h2>
             <p className="muted">All allocation buckets in numeric form. Percentages are computed per currency.</p>
           </div>
         </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
+        <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+          <Table stickyHeader>
             <TableHeader>
               <TableRow>
                 <TableHead>Group</TableHead>
@@ -989,7 +989,7 @@ function IncomeBySecurityTable({
 }) {
   const showEmpty = !loading && rows.length === 0
   return (
-    <Card className="transactionsTableCard mt-4">
+    <Card className="mb-0 mt-4">
       <div className="transactionsPanelHeader">
         <div>
           <h2>By security</h2>
@@ -998,8 +998,8 @@ function IncomeBySecurityTable({
           </p>
         </div>
       </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
+      <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+        <Table stickyHeader>
           <TableHeader>
             <TableRow>
               <TableHead>Symbol</TableHead>
@@ -1225,15 +1225,15 @@ function RealizedTotalsSection({
 
 function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }) {
   return (
-    <Card className="transactionsTableCard mt-4">
+    <Card className="mb-0 mt-4">
       <div className="transactionsPanelHeader">
         <div>
           <h2>By security</h2>
           <p className="muted">Realized gain/loss aggregated per ticker.</p>
         </div>
       </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
+      <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+        <Table stickyHeader>
           <TableHeader>
             <TableRow>
               <TableHead>Symbol</TableHead>
@@ -1269,7 +1269,7 @@ function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }
 
 function RealizedEventsTable({ events }: { events: RealizedEventWithRunning[] }) {
   return (
-    <Card className="transactionsTableCard mt-4">
+    <Card className="mb-0 mt-4">
       <div className="transactionsPanelHeader">
         <div>
           <h2>Events</h2>
@@ -1279,8 +1279,8 @@ function RealizedEventsTable({ events }: { events: RealizedEventWithRunning[] })
           </p>
         </div>
       </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
+      <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+        <Table stickyHeader>
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>

@@ -1773,11 +1773,11 @@ export function TransactionsPage() {
             </>
           }
         />
-        <div className="tableWrap transactionsTableWrap">
-          <Table className="table transactionsTable">
+        <div className="overflow-auto rounded-lg border" style={{ maxHeight: '72vh', borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)', background: 'color-mix(in srgb, var(--bg) 90%, transparent)' }}>
+          <Table stickyHeader>
             <TableHeader>
               <TableRow>
-                <TableHead className="narrowCol">
+                <TableHead className="w-9 text-center">
                   <input
                     type="checkbox"
                     aria-label="Select all on this page"
@@ -2113,7 +2113,7 @@ function TransactionRow({
 
   return (
     <TableRow>
-      <TableCell className="narrowCol">
+      <TableCell className="w-9 text-center">
         <input
           type="checkbox"
           checked={selected}

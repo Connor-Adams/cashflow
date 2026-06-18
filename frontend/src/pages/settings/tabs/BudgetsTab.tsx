@@ -421,8 +421,8 @@ export function BudgetsTab() {
             description="Add one to track progress with pacing comparison."
           />
         ) : (
-          <div className="tableWrap">
-            <Table className="table">
+          <div className="overflow-auto rounded-lg border" style={{ borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)', background: 'color-mix(in srgb, var(--bg) 90%, transparent)' }}>
+            <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Category</TableHead>

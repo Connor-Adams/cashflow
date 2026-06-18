@@ -142,7 +142,7 @@ export function EarningsCard({ overview }: EarningsCardProps) {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
             Recent quarters
           </h3>
-          <Table className="table">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Quarter</TableHead>

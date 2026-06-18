@@ -383,56 +383,19 @@
     box-shadow: var(--shadow);
   }
 
-  .tableWrap {
-    @apply overflow-auto rounded-lg border;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    background: color-mix(in srgb, var(--bg) 90%, transparent);
-  }
-
-  .table {
-    @apply w-full border-collapse text-sm;
-  }
-
-  .table th,
-  .table td {
-    @apply whitespace-nowrap border-b px-3 py-2.5 text-left align-middle;
-    border-color: color-mix(in srgb, var(--border) 82%, white 6%);
-  }
-
-  .table th {
-    @apply text-[0.7rem] font-bold uppercase tracking-normal;
-    color: var(--muted-foreground);
-    background: color-mix(in srgb, var(--bg3) 72%, transparent);
-  }
-
-  /* Sticky thead opt-in: when a `.table` lives inside a CollapsibleCard
-   * we drop the wrap/container overflow so `position: sticky` resolves
-   * against window scroll, and we make the th background opaque so
-   * rows scrolling underneath don't show through. */
-  [data-slot="collapsible-card"] .tableWrap,
+  /* Sticky thead opt-in: when a Table primitive lives inside a CollapsibleCard
+   * we drop the container overflow so `position: sticky` resolves against
+   * window scroll, and we make the th background opaque so rows scrolling
+   * underneath don't show through. */
   [data-slot="collapsible-card"] [data-slot="table-container"] {
     overflow: visible;
   }
 
-  [data-slot="collapsible-card"] .table th,
   [data-slot="collapsible-card"] [data-slot="table-head"] {
     @apply sticky top-0 z-[1];
     background: var(--bg2);
     box-shadow: inset 0 -1px 0 0
       color-mix(in srgb, var(--border) 70%, transparent);
-  }
-
-  .table tbody tr:hover {
-    background: color-mix(in srgb, var(--bg3) 58%, transparent);
-  }
-
-  .table input,
-  .table select {
-    @apply max-w-[140px];
-  }
-
-  .table .narrowCol {
-    @apply w-9 text-center;
   }
 
   .quickFilters {
@@ -517,17 +480,6 @@
     border-color: color-mix(in srgb, var(--positive) 45%, var(--border));
     background: color-mix(in srgb, var(--positive) 10%, transparent);
     color: var(--positive);
-  }
-
-  .reviewInboxTableWrap {
-    @apply overflow-auto rounded-lg border;
-    max-height: 70vh;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-  }
-
-  .reviewInboxTable thead th {
-    @apply sticky top-0 z-10;
-    background: color-mix(in srgb, var(--muted) 88%, transparent);
   }
 
   /* Cursor row — replaces an inline style block on the row JSX. Uses
@@ -851,26 +803,15 @@
     line-height: 1.25;
   }
 
-  .transactionsTableCard {
-    @apply mb-0;
-  }
-
-  .transactionsTableWrap {
-    @apply overflow-auto;
-    max-height: 72vh;
-  }
-
-  .transactionsTable thead th {
-    @apply sticky top-0 z-10;
-  }
-
   .transactionsActionsCol {
     @apply sticky right-0;
     background: color-mix(in srgb, var(--bg2) 92%, transparent);
     box-shadow: -8px 0 16px rgba(0, 0, 0, 0.2);
   }
 
-  .transactionsTable tbody .transactionsActionsCol {
+  /* In the table body, the actions column blends with the row background
+   * rather than the header background. */
+  [data-slot="table-body"] .transactionsActionsCol {
     background: color-mix(in srgb, var(--bg) 96%, transparent);
   }
 

@@ -203,7 +203,7 @@ export function PortfolioSecurityPage() {
         )}
       </div>
 
-      <Card className="transactionsTableCard mt-4">
+      <Card className="mb-0 mt-4">
         <div className="transactionsPanelHeader">
           <div>
             <h2>Activity timeline</h2>
@@ -212,8 +212,8 @@ export function PortfolioSecurityPage() {
             </p>
           </div>
         </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
+        <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+          <Table stickyHeader>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -245,15 +245,15 @@ export function PortfolioSecurityPage() {
         </div>
       </Card>
 
-      <Card className="transactionsTableCard mt-4">
+      <Card className="mb-0 mt-4">
         <div className="transactionsPanelHeader">
           <div>
             <h2>Historical holdings snapshots</h2>
             <p className="muted">Every imported snapshot row for this security, newest first.</p>
           </div>
         </div>
-        <div className="transactionsTableWrap">
-          <Table className="table transactionsTable">
+        <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
+          <Table stickyHeader>
             <TableHeader>
               <TableRow>
                 <TableHead>Statement date</TableHead>
