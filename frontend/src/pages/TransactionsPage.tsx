@@ -1123,12 +1123,12 @@ export function TransactionsPage() {
           description="Filter the ledger, sort the current page, and jump straight into bulk updates when you need them."
           actions={
             <>
-              <span className="transactionsPanelBadge">
+              <Badge variant="count">
                 {reviewOnly ? 'Review queue' : 'All transactions'}
-              </span>
-              <span className="transactionsPanelBadge">
+              </Badge>
+              <Badge variant="count">
                 {currency || 'All currencies'}
-              </span>
+              </Badge>
             </>
           }
         />
@@ -1754,10 +1754,10 @@ export function TransactionsPage() {
           description={<>Showing {pageCount} row{pageCount === 1 ? '' : 's'} on this page out of{' '}{totalCount} matching the current filters.</>}
           actions={
             <>
-              <span className="transactionsPanelBadge">
+              <Badge variant="count">
                 {loading ? 'Refreshing' : 'Up to date'}
-              </span>
-              <span className="transactionsPanelBadge">Page {page}/{totalPages}</span>
+              </Badge>
+              <Badge variant="count">Page {page}/{totalPages}</Badge>
             </>
           }
         />
@@ -2280,13 +2280,16 @@ function TransactionRow({
             <NativeSelectOption value="posted">Posted</NativeSelectOption>
             <NativeSelectOption value="cleared">Cleared</NativeSelectOption>
           </NativeSelect>
-          <span className={t.reviewFlag ? 'txnBadge txnBadge--review' : 'txnBadge'}>
+          <Badge
+            variant="count"
+            className={t.reviewFlag ? 'border-warning bg-warning-bg text-warning-foreground' : undefined}
+          >
             {t.reviewFlag
               ? t.autoCategory
                 ? 'Auto categorized'
                 : 'Needs review'
               : 'Reviewed'}
-          </span>
+          </Badge>
           <Button
             type="button"
             variant="secondary"
@@ -2310,9 +2313,9 @@ function TransactionRow({
             </Button>
           )}
           {t.receiptWarnings?.length ? (
-            <span className="txnBadge txnBadge--review" title={t.receiptWarnings.join(', ')}>
+            <Badge variant="count" className="border-warning bg-warning-bg text-warning-foreground" title={t.receiptWarnings.join(', ')}>
               Receipt check
-            </span>
+            </Badge>
           ) : null}
           {rowConfirmAction.dialog}
         </div>

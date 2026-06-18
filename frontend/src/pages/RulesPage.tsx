@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -383,9 +384,9 @@ export function RulesPage() {
           title="New rule"
           description="Reuse an existing category when possible to keep reports tidy."
           actions={
-            <span className="transactionsPanelBadge">
+            <Badge variant="count">
               {categoryLabels.length} categories
-            </span>
+            </Badge>
           }
         />
         <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr))]">
@@ -538,9 +539,9 @@ export function RulesPage() {
             title="Auto-rule suggestions"
             description="Patterns we spotted in your recent reviews. Accept to create a rule; dismiss to hide the suggestion."
             actions={
-              <span className="transactionsPanelBadge">
+              <Badge variant="count">
                 {autoSuggestions.length} suggestion{autoSuggestions.length === 1 ? '' : 's'}
-              </span>
+              </Badge>
             }
           />
           <Table>
@@ -563,9 +564,9 @@ export function RulesPage() {
                   <TableCell>{s.isBusiness ? 'yes' : ''}</TableCell>
                   <TableCell>{s.splitType}</TableCell>
                   <TableCell>
-                    <span className="transactionsPanelBadge">
+                    <Badge variant="count">
                       {Math.round(s.confidence * 100)}%
-                    </span>
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <span className="text-sm leading-6 text-muted-foreground">{s.reasoning}</span>
@@ -603,7 +604,7 @@ export function RulesPage() {
             title="AI rule proposals"
             description="Repeated reviewed merchants that look stable enough to automate."
             actions={
-              <span className="transactionsPanelBadge">{proposals.length} proposals</span>
+              <Badge variant="count">{proposals.length} proposals</Badge>
             }
           />
           <Table>
@@ -644,7 +645,7 @@ export function RulesPage() {
           title="Existing rules"
           description="Higher priority wins when several patterns match the same transaction."
           actions={
-            <span className="transactionsPanelBadge">{rules.length} rules</span>
+            <Badge variant="count">{rules.length} rules</Badge>
           }
         />
         <Table>
