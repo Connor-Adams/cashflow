@@ -22,6 +22,8 @@ import { Calendar as CalendarIcon, CalendarPlus, ChevronLeft, ChevronRight, Edit
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Grid } from '@/components/ui/grid'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Dialog,
   DialogBody,
@@ -660,6 +662,7 @@ type UpcomingSummary = {
 }
 
 function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
+  const netColor = summary.net >= 0 ? 'text-positive' : 'text-negative'
   return (
     <Card className="mb-4">
       <SectionHeader
@@ -674,46 +677,26 @@ function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
             ? 'Nothing planned in the next two weeks.'
             : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`
         }
-        actions={
-          <div className="flex flex-wrap gap-5">
-            <Stat label="Expected in" value={summary.inflow} positive />
-            <Stat label="Expected out" value={summary.outflow} negative />
-            <Stat
-              label="Net"
-              value={summary.net}
-              positive={summary.net >= 0}
-              negative={summary.net < 0}
-            />
-          </div>
-        }
       />
+      {/* Grid+StatCard: deliberate standardization — replaces custom Stat divs
+          with the shared primitive so all summary stats across the app are
+          uniform. MinItemWidth=120 keeps the 3-up layout on wider viewports
+          while collapsing gracefully on narrow screens. */}
+      <Grid minItemWidth={120} gap="sm">
+        <StatCard
+          label="Expected in"
+          value={<span className="text-positive">{formatMoney(summary.inflow, 'CAD')}</span>}
+        />
+        <StatCard
+          label="Expected out"
+          value={<span className="text-negative">{formatMoney(summary.outflow, 'CAD')}</span>}
+        />
+        <StatCard
+          label="Net"
+          value={<span className={netColor}>{formatMoney(summary.net, 'CAD')}</span>}
+        />
+      </Grid>
     </Card>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  positive,
-  negative,
-}: {
-  label: string
-  value: number
-  positive?: boolean
-  negative?: boolean
-}) {
-  const color = positive
-    ? 'text-positive'
-    : negative
-      ? 'text-negative'
-      : 'text-foreground'
-  return (
-    <div>
-      <div className="text-xs leading-6 text-muted-foreground">{label}</div>
-      <div className={`text-lg font-semibold ${color}`}>
-        {formatMoney(value, 'CAD')}
-      </div>
-    </div>
   )
 }
 
