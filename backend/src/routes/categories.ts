@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Op } from 'sequelize';
 import { Category } from '../models';
 import { householdWhere } from '../auth/scope';
 import { currentAuth } from '../auth/middleware';
@@ -8,6 +9,9 @@ import { reparentCategory } from '../categories/reparent';
 import { deleteCategory } from '../categories/deleteCategory';
 import { createCategory } from '../categories/createCategory';
 import { CategoryError } from '../categories/errors';
+import { normalizeCategoryName } from '../categories/normalizeName';
+import { syncCategoryLeafNameMirrors } from '../categories/syncMirrors';
+import { sequelize } from '../db';
 
 type CategoryNode = {
   id: number;
@@ -131,10 +135,11 @@ router.patch('/:id', async (req, res, next) => {
       return;
     }
     const b = (req.body || {}) as Record<string, unknown>;
+    const hasName = 'name' in b;
     const hasIcon = 'icon' in b;
     const hasTreatment = 'taxTreatment' in b;
-    if (!hasIcon && !hasTreatment) {
-      res.status(400).json({ error: 'icon or taxTreatment required' });
+    if (!hasName && !hasIcon && !hasTreatment) {
+      res.status(400).json({ error: 'name, icon, or taxTreatment required' });
       return;
     }
     if (hasIcon) {
@@ -153,6 +158,29 @@ router.patch('/:id', async (req, res, next) => {
         return;
       }
       row.set('taxTreatment', b.taxTreatment);
+    }
+    if (hasName) {
+      if (typeof b.name !== 'string' || b.name.trim().length === 0) {
+        res.status(400).json({ error: 'name required' });
+        return;
+      }
+      const newName = b.name.trim();
+      const newKey = normalizeCategoryName(newName);
+      const conflict = await Category.findOne({
+        where: { householdId: row.householdId, parentId: row.parentId, nameKey: newKey, id: { [Op.ne]: row.id } },
+      });
+      if (conflict) {
+        res.status(409).json({ error: `a sibling named "${newName}" already exists`, code: 'sibling_conflict' });
+        return;
+      }
+      row.set('name', newName);
+      row.set('nameKey', newKey);
+      await sequelize.transaction(async (tx) => {
+        await row.save({ transaction: tx });
+        await syncCategoryLeafNameMirrors(row.id, newName, tx);
+      });
+      res.json(row);
+      return;
     }
     await row.save();
     res.json(row);
