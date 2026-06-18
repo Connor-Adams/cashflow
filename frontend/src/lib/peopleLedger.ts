@@ -4,5 +4,6 @@ import type { TransferNet } from '@cashflow/shared'
 export function formatNetLabel(n: TransferNet): string {
   const v = Number(n.net)
   const abs = Math.abs(v).toFixed(2)
-  return `${n.currency} ${abs} ${v >= 0 ? 'owed to you' : 'you owe'}`
+  const label = v > 0 ? 'owed to you' : v < 0 ? 'you owe' : 'settled'
+  return `${n.currency} ${abs} ${label}`
 }

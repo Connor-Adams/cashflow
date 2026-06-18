@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
-import { householdWhere, visibleTransactionWhere } from '../auth/scope';
+import { householdWhere } from '../auth/scope';
 import { resolveHouseholdToday } from '../time/householdToday';
 import { apiReadLimiter } from './apiRateLimit';
 import { findOrCreateContactByName } from '../contacts/findOrCreateContact';
@@ -213,30 +213,39 @@ router.get('/:id/ledger', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    // Ledger is household-scoped to match the link pass and tracked-loan balance,
+    // so raw-net and tracked-outstanding are computed over the same row set.
     const txns = await Transaction.findAll({
-      where: { ...visibleTransactionWhere(req), counterpartyContactId: id },
+      where: { ...householdWhere(req), counterpartyContactId: id },
       attributes: ['id', 'date', 'amount', 'currency', 'merchantClean', 'merchantRaw'],
       order: [['date', 'ASC'], ['id', 'ASC']],
     });
     const reimbs = await Reimbursement.findAll({ where: { ...householdWhere(req), contactId: id } });
 
     const loanTxnIds = new Set(reimbs.map((r) => r.transactionId));
-    const transfers = txns.map((t) => {
-      const amt = Number(t.amount);
-      return {
-        id: t.id,
-        date: t.date,
-        amount: String(t.amount),
-        currency: t.currency,
-        merchant: t.merchantClean ?? t.merchantRaw ?? null,
-        direction: amt < 0 ? ('out' as const) : ('in' as const),
-        isLoan: loanTxnIds.has(t.id),
-      };
-    });
+    // Skip zero-amount rows to match computeTransferNet which also skips them.
+    const transfers = txns
+      .filter((t) => Number(t.amount) !== 0)
+      .map((t) => {
+        const amt = Number(t.amount);
+        return {
+          id: t.id,
+          date: t.date,
+          amount: String(t.amount),
+          currency: t.currency,
+          merchant: t.merchantClean ?? t.merchantRaw ?? null,
+          direction: amt < 0 ? ('out' as const) : ('in' as const),
+          isLoan: loanTxnIds.has(t.id),
+        };
+      });
     const transferNet = computeTransferNet(
       txns.map((t) => ({ amount: t.amount, currency: t.currency }) as TransferRow),
     );
-    const summary = summarize(reimbs.map((r) => r as unknown as ReimbursementRow));
+    const today = resolveToday(
+      req.query.today,
+      resolveHouseholdToday(currentAuth(req).household),
+    );
+    const summary = summarize(reimbs.map((r) => r as unknown as ReimbursementRow), today);
 
     res.json({
       contactId: contact.id,
