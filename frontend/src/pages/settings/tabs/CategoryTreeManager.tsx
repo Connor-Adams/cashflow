@@ -3,10 +3,15 @@ import { useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogBody, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CategoryIcon } from '../../../components/CategoryIcon';
+import { CategoryIconPicker } from '../../../components/CategoryIconPicker';
+import { TaxTreatmentSelect } from '../../../components/TaxTreatmentSelect';
 import { useCategoryTree } from '../../../lib/useCategoryTree';
 import { useCategories } from '../../../lib/useCategories';
-import { createCategory, renameCategory, deleteCategory, reparentCategory } from '../../../lib/categoriesApi';
+import { createCategory, renameCategory, deleteCategory, reparentCategory, updateCategory } from '../../../lib/categoriesApi';
+import { TAX_TREATMENTS, type TaxTreatment } from '../../../lib/taxTreatment';
+import type { CategoryIconName } from '@cashflow/shared';
 import type { CategoryTreeNode } from '../../../types/api';
 
 type NodeProps = {
@@ -17,12 +22,13 @@ type NodeProps = {
   dragOverId: number | null;
   setDragOverId: (id: number | null) => void;
   onReparent: (draggedId: number, targetId: number) => void;
+  onEdit: (id: number) => void;
   onChanged: () => Promise<void>;
   onError: (msg: string) => void;
 };
 
 function TreeNode({
-  node, depth, collapsed, toggle, dragOverId, setDragOverId, onReparent, onChanged, onError,
+  node, depth, collapsed, toggle, dragOverId, setDragOverId, onReparent, onEdit, onChanged, onError,
 }: NodeProps) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
@@ -86,7 +92,14 @@ function TreeNode({
           <span className="inline-block size-5 shrink-0" />
         )}
 
-        <CategoryIcon name={node.name} size={15} className="shrink-0 text-muted-foreground" />
+        <button
+          type="button"
+          aria-label={`Edit icon and tax for ${node.name}`}
+          className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"
+          onClick={() => onEdit(node.id)}
+        >
+          <CategoryIcon name={node.name} size={15} />
+        </button>
 
         {renaming ? (
           <Input
@@ -194,6 +207,7 @@ function TreeNode({
               dragOverId={dragOverId}
               setDragOverId={setDragOverId}
               onReparent={onReparent}
+              onEdit={onEdit}
               onChanged={onChanged}
               onError={onError}
             />
@@ -204,18 +218,20 @@ function TreeNode({
   );
 }
 
+/** Find a node by id anywhere in the tree. */
+function findNode(tree: CategoryTreeNode[], id: number): CategoryTreeNode | null {
+  for (const n of tree) {
+    if (n.id === id) return n;
+    const hit = findNode(n.children ?? [], id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** All descendant ids of `id` within the tree (excludes `id` itself). */
 function descendantIds(tree: CategoryTreeNode[], id: number): Set<number> {
   const out = new Set<number>();
-  const find = (nodes: CategoryTreeNode[]): CategoryTreeNode | null => {
-    for (const n of nodes) {
-      if (n.id === id) return n;
-      const hit = find(n.children ?? []);
-      if (hit) return hit;
-    }
-    return null;
-  };
-  const root = find(tree);
+  const root = findNode(tree, id);
   const walk = (n: CategoryTreeNode) => {
     for (const c of n.children ?? []) { out.add(c.id); walk(c); }
   };
@@ -230,6 +246,8 @@ export function CategoryTreeManager() {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [draggingRoot, setDraggingRoot] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const editing = editingId != null ? findNode(tree, editingId) : null;
 
   function toggle(id: number) {
     setCollapsed((prev) => {
@@ -257,6 +275,16 @@ export function CategoryTreeManager() {
       await onChanged();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Could not move category');
+    }
+  }
+
+  async function updateDetails(id: number, patch: { icon?: CategoryIconName | null; taxTreatment?: TaxTreatment }) {
+    setActionError(null);
+    try {
+      await updateCategory(id, patch);
+      await onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not update category');
     }
   }
 
@@ -300,11 +328,35 @@ export function CategoryTreeManager() {
               dragOverId={dragOverId}
               setDragOverId={setDragOverId}
               onReparent={(draggedId, targetId) => void doReparent(draggedId, targetId)}
+              onEdit={setEditingId}
               onChanged={onChanged}
               onError={setActionError}
             />
           ))}
         </ul>
+      )}
+
+      {editing && (
+        <Dialog open onOpenChange={(open) => { if (!open) setEditingId(null); }}>
+          <DialogHeader>
+            <DialogTitle>{`Edit "${editing.name}"`}</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <div className="mb-3 flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Tax treatment</span>
+              <TaxTreatmentSelect
+                aria-label={`Tax treatment for ${editing.name}`}
+                value={editing.taxTreatment}
+                options={[...TAX_TREATMENTS]}
+                onChange={(t) => { if (t) void updateDetails(editing.id, { taxTreatment: t }); }}
+              />
+            </div>
+            <CategoryIconPicker
+              value={(editing.icon as CategoryIconName | null) ?? null}
+              onSelect={(next) => void updateDetails(editing.id, { icon: next })}
+            />
+          </DialogBody>
+        </Dialog>
       )}
     </div>
   );
