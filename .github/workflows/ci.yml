@@ -248,6 +248,31 @@ jobs:
         if: always()
         run: node scripts/audit-gate.cjs
 
+  frontend-lint:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Download node_modules artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: node_modules
+
+      - name: Extract node_modules
+        run: tar -xf node_modules.tar
+
+      - name: ESLint
+        run: yarn workspace frontend run lint
+
+      - name: Palette check
+        run: yarn workspace frontend run lint:palette
+
   frontend-test:
     needs: install
     runs-on: ubuntu-latest
