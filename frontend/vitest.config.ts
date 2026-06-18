@@ -24,7 +24,7 @@ export default defineConfig({
       },
     },
     globals: true,
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.ts'],
     // vitest.setup.ts binds jsdom localStorage on globalThis (Node 26 workaround).
     // test-setup.ts wires @testing-library/jest-dom matchers.
     setupFiles: ['./vitest.setup.ts', './src/test-setup.ts'],
