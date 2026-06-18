@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Clock, Link2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -177,9 +178,9 @@ export function ReimbursementsPage() {
       </div>
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
       {(['outstanding', 'overdue', 'received', 'all'] as const).map((key) => (
@@ -234,7 +235,7 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
     <Card className="mb-4 p-4">
       <div className="flex flex-wrap items-center gap-6">
         <div>
-          <div className="muted text-xs uppercase tracking-wide">Outstanding</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Outstanding</div>
           {currencies.length === 0 ? (
             <div className="text-lg font-semibold">—</div>
           ) : (
@@ -248,7 +249,7 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
           )}
         </div>
         <div>
-          <div className="muted text-xs uppercase tracking-wide">Overdue</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Overdue</div>
           <div
             className={
               summary.overdueCount > 0
@@ -260,14 +261,14 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
           </div>
         </div>
         <div>
-          <div className="muted text-xs uppercase tracking-wide">Total claims</div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Total claims</div>
           <div className="text-lg font-semibold">{summary.totalCount}</div>
         </div>
       </div>
 
       {summary.groups.length > 0 && (
         <div className="mt-4">
-          <div className="muted mb-2 text-xs uppercase tracking-wide">
+          <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
             Outstanding by party
           </div>
           <div className="flex flex-col gap-1">
@@ -315,7 +316,7 @@ function ReimbursementTable({
 }) {
   return (
     <Card className="overflow-x-auto p-0">
-      <Table className="table">
+      <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Party</TableHead>
@@ -371,7 +372,7 @@ function ReimbursementRow({
     <TableRow>
       <TableCell>
         <div>{row.partyLabel}</div>
-        {row.contactId != null && <div className="muted text-xs">contact</div>}
+        {row.contactId != null && <div className="text-xs text-muted-foreground">contact</div>}
       </TableCell>
       <TableCell>{formatMoney(amountNum, row.currency)}</TableCell>
       <TableCell>
@@ -392,7 +393,7 @@ function ReimbursementRow({
             )}
           </div>
         ) : (
-          <span className="muted">—</span>
+          <span className="text-sm text-muted-foreground">—</span>
         )}
       </TableCell>
       <TableCell>
@@ -404,13 +405,13 @@ function ReimbursementRow({
         {row.transaction ? (
           <div className="text-xs">
             <div>{row.transaction.merchant ?? '—'}</div>
-            <div className="muted">{row.transaction.date}</div>
+            <div className="text-muted-foreground">{row.transaction.date}</div>
           </div>
         ) : (
-          <span className="muted">—</span>
+          <span className="text-sm text-muted-foreground">—</span>
         )}
         {row.repaymentTransaction && (
-          <div className="muted text-xs mt-1">
+          <div className="text-xs mt-1 text-muted-foreground">
             <Link2 className="inline-block size-3 align-text-bottom" /> repaid{' '}
             {row.repaymentTransaction.date}
           </div>
@@ -577,17 +578,17 @@ function MatchDialog({
     >
       <Card className="w-full max-w-lg p-5">
         <h2 className="mb-1 text-lg font-semibold">Match a repayment</h2>
-        <p className="muted text-sm mb-4">
+        <p className="text-sm mb-4 text-muted-foreground">
           {row.partyLabel} · {formatMoney(Number(row.amount) || 0, row.currency)}
           {row.dueDate ? ` · due ${row.dueDate}` : ''}
         </p>
 
         {isLoading ? (
-          <p className="muted text-sm">Searching for likely repayments…</p>
+          <p className="text-sm text-muted-foreground">Searching for likely repayments…</p>
         ) : contacts.length === 0 ? (
           <div className="text-sm space-y-2">
             <p className="font-medium">No contacts yet.</p>
-            <p className="muted">Reimbursements track who owes you. Add a contact first.</p>
+            <p className="text-muted-foreground">Reimbursements track who owes you. Add a contact first.</p>
             <Button
               type="button"
               size="sm"
@@ -628,7 +629,7 @@ function MatchDialog({
                 Set an expected contact on this reimbursement to improve matching.
               </p>
             )}
-            <p className="muted">Try one of these:</p>
+            <p className="text-muted-foreground">Try one of these:</p>
             <div className="flex flex-col gap-2">
               <Button
                 type="button"
@@ -684,7 +685,7 @@ function MatchDialog({
                     {c.merchant ?? 'Transaction'} ·{' '}
                     {formatMoney(Number(c.amount) || 0, c.currency)}
                   </div>
-                  <div className="muted text-xs">
+                  <div className="text-xs text-muted-foreground">
                     {c.date} · match {Math.round(c.score * 100)}%
                   </div>
                 </div>
