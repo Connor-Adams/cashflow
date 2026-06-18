@@ -1798,7 +1798,7 @@ export function TransactionsPage() {
             <span className="text-muted-foreground">Filtered:</span>
             {Object.entries(enrichmentFilters).map(([k, v]) => (
               <span key={k} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5">
-                {v === '(none)' ? 'none' : v} {ENRICH_FILTER_LABEL[k] ?? k}
+                {ENRICH_FILTER_LABEL[k] ?? k}: {v === '(none)' ? 'none' : v}
               </span>
             ))}
             <button

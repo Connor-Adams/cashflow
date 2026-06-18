@@ -333,8 +333,14 @@ describe('TransactionsPage enrichment deep-link filters', () => {
         }),
       ).toBe(true)
     })
-    // A chip labelled "low confidence" should be visible and clearable
-    expect(screen.getByText(/low confidence/i)).toBeInTheDocument()
+    // A chip labelled "Confidence: low" should be visible
+    expect(screen.getByText(/confidence:\s*low/i)).toBeInTheDocument()
+
+    // Clicking Clear should remove the chip
+    await userEvent.click(screen.getByRole('button', { name: /^clear$/i }))
+    await waitFor(() =>
+      expect(screen.queryByText(/confidence:\s*low/i)).not.toBeInTheDocument(),
+    )
   })
 })
 
