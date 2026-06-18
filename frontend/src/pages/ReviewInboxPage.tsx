@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
 import { EnrichmentSignalsDialog } from '@/components/EnrichmentSignalsDialog'
+import { Alert } from '@/components/ui/alert'
+import { Grid } from '@/components/ui/grid'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -23,6 +25,7 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
 import { StatCard } from '@/components/ui/stat-card'
 import {
@@ -636,7 +639,13 @@ export function ReviewInboxPage() {
         }
       />
 
-      <section className="reviewInboxStats" aria-label="Review progress">
+      <Grid
+        aria-label="Review progress"
+        role="group"
+        minItemWidth={160}
+        gap="md"
+        className="mb-4"
+      >
         <StatCard
           label="Unreviewed"
           value={summary.unreviewed}
@@ -655,7 +664,7 @@ export function ReviewInboxPage() {
             selectedSummary.currency ?? 'CAD'
           )}
         />
-      </section>
+      </Grid>
 
       <section className="reviewInboxLayout">
         <Card className="reviewInboxTableCard">
@@ -765,7 +774,7 @@ export function ReviewInboxPage() {
             <kbd>c</kbd> category · <kbd>Enter</kbd> apply · <kbd>?</kbd> help
           </p>
 
-          {err && <span className="error">{err}</span>}
+          {err && <Alert variant="error">{err}</Alert>}
           {message && <span className="reviewInboxMessage">{message}</span>}
 
           <div className="reviewInboxTableWrap" ref={tableWrapRef}>
@@ -901,17 +910,17 @@ export function ReviewInboxPage() {
                           ) : sortedItems.length === 0 ? (
                             <p className="text-xs text-muted-foreground">No items found.</p>
                           ) : (
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="text-xs text-muted-foreground">
-                                  <th className="text-left font-medium pb-1">Item</th>
-                                  <th className="text-left font-medium pb-1">Qty</th>
-                                  <th className="text-left font-medium pb-1">Total</th>
-                                  <th className="text-left font-medium pb-1">Category</th>
-                                  <th className="text-left font-medium pb-1">Business %</th>
-                                </tr>
-                              </thead>
-                              <tbody>
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="text-xs text-muted-foreground">
+                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Item</TableHead>
+                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Qty</TableHead>
+                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Total</TableHead>
+                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Category</TableHead>
+                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Business %</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
                                 {sortedItems.map((item) => (
                                   <ItemRow
                                     key={item.id}
@@ -921,8 +930,8 @@ export function ReviewInboxPage() {
                                     onSaved={() => void load()}
                                   />
                                 ))}
-                              </tbody>
-                            </table>
+                              </TableBody>
+                            </Table>
                           )}
                         </div>
                       </TableCell>
@@ -949,20 +958,20 @@ export function ReviewInboxPage() {
         </Card>
 
         <Card className="reviewInboxDecisionCard">
-          <div className="transactionsPanelHeader">
-            <div>
-              <h2>Decision</h2>
-              <p className="muted">
-                {selectedSummary.commonMerchant
-                  ? selectedSummary.commonMerchant
-                  : 'Select matching rows to create a rule.'}
-              </p>
-            </div>
-            <Badge variant={selectedSummary.count ? 'default' : 'outline'}>
-              <ListChecks aria-hidden="true" />
-              {selectedSummary.count}
-            </Badge>
-          </div>
+          <SectionHeader
+            title="Decision"
+            description={
+              selectedSummary.commonMerchant
+                ? selectedSummary.commonMerchant
+                : 'Select matching rows to create a rule.'
+            }
+            actions={
+              <Badge variant={selectedSummary.count ? 'default' : 'outline'}>
+                <ListChecks aria-hidden="true" />
+                {selectedSummary.count}
+              </Badge>
+            }
+          />
 
           <div className="reviewInboxDecisionFields">
             <Label>
