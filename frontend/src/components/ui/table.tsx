@@ -1,12 +1,25 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-function Table({ className, ...props }: React.ComponentProps<'table'>) {
+type TableProps = React.ComponentProps<'table'> & {
+  maxHeight?: string
+  stickyHeader?: boolean
+}
+
+function Table({ className, maxHeight, stickyHeader, ...props }: TableProps) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      className={cn('relative w-full', maxHeight ? 'overflow-auto' : 'overflow-x-auto')}
+      style={maxHeight ? { maxHeight } : undefined}
+    >
       <table
         data-slot="table"
-        className={cn('w-full caption-bottom text-sm', className)}
+        className={cn(
+          'w-full caption-bottom text-sm',
+          stickyHeader && '[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:bg-card',
+          className
+        )}
         {...props}
       />
     </div>
