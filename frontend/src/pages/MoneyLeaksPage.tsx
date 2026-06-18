@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
-import { SummaryStat } from '@/components/SummaryStat'
+import { Grid } from '@/components/ui/grid'
+import { StatCard } from '@/components/ui/stat-card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
@@ -285,40 +286,33 @@ function LeakTotals({
   // Combined per-currency summary stats. We never collapse currencies — a
   // CAD + USD mix would be misleading if simply summed.
   return (
-    <Card className="mb-4" aria-label="Money-leak totals">
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
-      >
-        <SummaryStat
-          label="Leaks detected"
-          value={String(data.items.length)}
-        />
-        {byCurrency.length === 0 && data.items.length === 0 ? null : (
-          <>
-            {byCurrency.map((c) => (
-              <SummaryStat
-                key={`monthly-${c.currency}`}
-                label={`Monthly (${c.currency})`}
-                value={formatMoney(c.monthlyImpact, c.currency)}
-                tone="warn"
-              />
-            ))}
-            {byCurrency.map((c) => (
-              <SummaryStat
-                key={`annual-${c.currency}`}
-                label={`Annual (${c.currency})`}
-                value={formatMoney(c.annualImpact, c.currency)}
-                tone="warn"
-              />
-            ))}
-          </>
-        )}
-      </div>
-    </Card>
+    <Grid minItemWidth={180} gap="md" className="mb-4" aria-label="Money-leak totals">
+      <StatCard
+        label="Leaks detected"
+        value={String(data.items.length)}
+        metricKind="neutral"
+      />
+      {byCurrency.length === 0 && data.items.length === 0 ? null : (
+        <>
+          {byCurrency.map((c) => (
+            <StatCard
+              key={`monthly-${c.currency}`}
+              label={`Monthly (${c.currency})`}
+              value={<span className="text-[var(--accent-warm)]">{formatMoney(c.monthlyImpact, c.currency)}</span>}
+              metricKind="neutral"
+            />
+          ))}
+          {byCurrency.map((c) => (
+            <StatCard
+              key={`annual-${c.currency}`}
+              label={`Annual (${c.currency})`}
+              value={<span className="text-[var(--accent-warm)]">{formatMoney(c.annualImpact, c.currency)}</span>}
+              metricKind="neutral"
+            />
+          ))}
+        </>
+      )}
+    </Grid>
   )
 }
 
