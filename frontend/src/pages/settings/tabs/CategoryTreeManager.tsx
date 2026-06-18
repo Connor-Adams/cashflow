@@ -78,6 +78,7 @@ function TreeNode({
         icon={
           <button
             type="button"
+            data-slot="tree-icon"
             aria-label={`Edit icon and tax for ${node.name}`}
             className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-muted"
             onClick={() => onEdit(node.id)}
@@ -137,7 +138,8 @@ function TreeNode({
         ) : (
           <button
             type="button"
-            className="flex-1 truncate text-left text-sm"
+            data-slot="tree-label"
+            className="flex-1 truncate rounded px-1 text-left text-sm hover:bg-muted/40"
             onDoubleClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
           >
             {node.name}

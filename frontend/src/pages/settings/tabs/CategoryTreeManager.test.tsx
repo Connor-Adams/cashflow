@@ -33,6 +33,17 @@ describe('CategoryTreeManager', () => {
     expect(screen.getByText('Internet')).toBeInTheDocument();
   });
 
+  it('row icon + label buttons carry data-slot (escape the global button box chrome)', async () => {
+    mockApis();
+    render(<CategoryTreeManager />);
+    await waitFor(() => screen.getByText('Work'));
+    // the clickable name and the icon-edit button must opt out of App.css's
+    // `button:not([data-slot])` safety-net, else every row renders as a box.
+    expect(screen.getByText('Work').closest('button')).toHaveAttribute('data-slot', 'tree-label');
+    expect(screen.getByRole('button', { name: /edit icon and tax for Work/i }))
+      .toHaveAttribute('data-slot', 'tree-icon');
+  });
+
   it('creating a child calls createCategory then refreshes', async () => {
     mockApis();
     const getSpy = vi.spyOn(catApi, 'getCategoryTree');
