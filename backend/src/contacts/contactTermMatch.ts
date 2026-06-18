@@ -21,7 +21,17 @@ export function contactMatchTerms(c: MatchableContact): string[] {
   return [...terms];
 }
 
-/** Contact ids whose any term is a substring of the normalized merchant text.
+/** Returns true when `term` appears in `hay` bounded by non-alphanumeric chars
+ *  (or string start/end) on both sides. Handles hyphens inside terms correctly:
+ *  e.g. `iten-mcgrath` matches when the hay contains it as a whole token. */
+function termMatchesBounded(hay: string, term: string): boolean {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`);
+  return re.test(hay);
+}
+
+/** Contact ids whose any term appears as a whole word in the normalized merchant
+ *  text (word-boundary match — not raw substring).
  *  1 id = unambiguous, >1 = ambiguous, 0 = no match. */
 export function matchContactsByTerms(
   merchantText: string,
@@ -31,7 +41,7 @@ export function matchContactsByTerms(
   if (!hay) return [];
   const out: number[] = [];
   for (const c of contacts) {
-    if (contactMatchTerms(c).some((t) => hay.includes(t))) out.push(c.id);
+    if (contactMatchTerms(c).some((t) => termMatchesBounded(hay, t))) out.push(c.id);
   }
   return out;
 }
