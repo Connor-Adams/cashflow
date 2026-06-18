@@ -75,6 +75,17 @@ type BentoTileProps = React.ComponentProps<'section'> & {
  * driven by responsive Tailwind classes from SPAN_CLASSES / ROW_CLASSES.
  * The container is a `<section>` so each tile is a landmark.
  */
+/**
+ * Inline styles for the gradient variant — values that cannot be expressed
+ * as static Tailwind utilities because they reference CSS custom properties
+ * in a way the JIT cannot statically analyze.
+ */
+const GRADIENT_STYLE: React.CSSProperties = {
+  background: 'var(--gradient-hero)',
+  borderColor: 'transparent',
+  color: '#fff',
+}
+
 export function BentoTile({
   span,
   rows = 2,
@@ -89,31 +100,81 @@ export function BentoTile({
 }: BentoTileProps) {
   const hasHeader = label != null || description != null || actions != null
   const variantStyle = VARIANT_STYLE[variant]
+
+  // Base tile styles reproduced from the former .bentoTile App.css rule.
+  // The border-color, background, and box-shadow reference CSS tokens so
+  // they are kept as inline styles (arbitrary values would be less readable
+  // and the token references are already the canonical form).
+  const baseTileStyle: React.CSSProperties = {
+    borderColor: 'color-mix(in srgb, var(--border) 88%, white 4%)',
+    background: 'var(--card)',
+    boxShadow: 'var(--shadow)',
+    minWidth: 0,
+  }
+
+  // Gradient variant overrides background + borderColor + text color.
+  const gradientOverride = variant === 'gradient' ? GRADIENT_STYLE : undefined
+
+  // Merge order: baseTileStyle < variantStyle (warning/destructive) < gradientOverride < caller style
+  const mergedStyle: React.CSSProperties = {
+    ...baseTileStyle,
+    ...variantStyle,
+    ...gradientOverride,
+    ...style,
+  }
+
   return (
     <section
       data-slot="bento-tile"
       data-variant={variant}
       className={cn(
-        'bentoTile',
+        // Base tile chrome (formerly .bentoTile)
+        'flex flex-col gap-3 rounded-lg border p-4 sm:p-5',
         SPAN_CLASSES[span],
         ROW_CLASSES[rows],
-        variant === 'hero' && 'bentoTile--hero',
-        variant === 'gradient' && 'bentoTile--gradient',
         className,
       )}
-      style={variantStyle ? { ...variantStyle, ...style } : style}
+      style={mergedStyle}
       {...props}
     >
       {hasHeader && (
-        <header className="bentoTile__header">
-          <div className="bentoTile__heading">
-            {label && <p className="bentoTile__label">{label}</p>}
-            {description && <p className="bentoTile__description">{description}</p>}
+        // formerly .bentoTile__header
+        <header className="flex items-start justify-between gap-3">
+          {/* formerly .bentoTile__heading */}
+          <div className="min-w-0 flex-1">
+            {label && (
+              // formerly .bentoTile__label
+              <p
+                className="m-0 text-sm font-semibold"
+                style={
+                  variant === 'gradient'
+                    ? { color: 'rgba(255,255,255,0.92)' }
+                    : { color: 'var(--foreground)' }
+                }
+              >
+                {label}
+              </p>
+            )}
+            {description && (
+              // formerly .bentoTile__description
+              <p
+                className="mt-1 mb-0 text-xs"
+                style={
+                  variant === 'gradient'
+                    ? { color: 'rgba(255,255,255,0.92)' }
+                    : { color: 'var(--muted-foreground)' }
+                }
+              >
+                {description}
+              </p>
+            )}
           </div>
-          {actions && <div className="bentoTile__actions">{actions}</div>}
+          {/* formerly .bentoTile__actions */}
+          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className="bentoTile__body">{children}</div>
+      {/* formerly .bentoTile__body */}
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
   )
 }

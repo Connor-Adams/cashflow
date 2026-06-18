@@ -14,21 +14,37 @@ type KpiStackProps = React.ComponentProps<'div'> & {
 
 export function KpiStack({ items, className, ...props }: KpiStackProps) {
   return (
-    <div data-slot="kpi-stack" className={cn('kpiStack', className)} {...props}>
+    // formerly .kpiStack — flex col, full height, gap:0
+    <div data-slot="kpi-stack" className={cn('flex h-full flex-col', className)} {...props}>
       {items.map((item, idx) => {
         const valueTitle =
           typeof item.value === 'string' || typeof item.value === 'number'
             ? String(item.value)
             : undefined
         return (
-          <div key={idx} className="kpiStack__row">
-            <p className="kpiStack__label">{item.label}</p>
-            <p className="kpiStack__value" title={valueTitle}>
+          // formerly .kpiStack__row + .kpiStack__row border-top
+          <div
+            key={idx}
+            className={cn(
+              'flex flex-1 flex-col justify-center gap-1 py-2',
+              idx > 0 && 'border-t border-[var(--border)]',
+            )}
+          >
+            {/* formerly .kpiStack__label */}
+            <p className="m-0 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+              {item.label}
+            </p>
+            {/* formerly .kpiStack__value */}
+            <p className="m-0 truncate text-xl font-semibold tabular-nums text-[var(--foreground)]" title={valueTitle}>
               {item.value}
             </p>
-            {item.hint && <p className="kpiStack__hint">{item.hint}</p>}
+            {/* formerly .kpiStack__hint */}
+            {item.hint && (
+              <p className="m-0 text-xs text-[var(--muted-foreground)]">{item.hint}</p>
+            )}
+            {/* formerly .kpiStack__delta */}
             {item.delta && (
-              <p className="kpiStack__delta">{item.delta}</p>
+              <p className="m-0 mt-1">{item.delta}</p>
             )}
           </div>
         )

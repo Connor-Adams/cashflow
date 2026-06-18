@@ -58,32 +58,51 @@ export function CurrencyMixTile({ metrics, loading }: CurrencyMixTileProps) {
         </p>
       ) : (
         <>
+          {/* formerly .currencyMixBar */}
           <div
-            className="currencyMixBar"
+            className="mt-1 flex h-6 w-full overflow-hidden rounded-md border border-[var(--border)]"
             role="img"
             aria-label={`Currency mix: ${shares.map((s) => `${s.currency} ${Math.round(s.pct)} percent`).join(', ')}`}
           >
-            {shares.map((s) => (
+            {shares.map((s, i) => (
+              // formerly .currencyMixBar__segment + sibling border-left
               <span
                 key={s.currency}
-                className="currencyMixBar__segment"
-                style={{ width: `${s.pct}%`, background: s.color }}
+                className="block h-full"
+                style={{
+                  width: `${s.pct}%`,
+                  background: s.color,
+                  transition: 'width 0.3s ease-out',
+                  ...(i > 0
+                    ? { borderLeft: '1px solid color-mix(in oklch, var(--card) 65%, transparent)' }
+                    : {}),
+                }}
               />
             ))}
           </div>
-          <ul className="currencyMixLegend">
+          {/* formerly .currencyMixLegend */}
+          <ul className="m-0 mt-3 flex flex-col gap-1.5 p-0 list-none">
             {shares.map((s) => (
-              <li key={s.currency} className="currencyMixLegend__row">
+              // formerly .currencyMixLegend__row
+              <li
+                key={s.currency}
+                className="grid items-center gap-2 text-xs"
+                style={{ gridTemplateColumns: '10px auto 1fr auto' }}
+              >
+                {/* formerly .currencyMixLegend__dot */}
                 <span
-                  className="currencyMixLegend__dot"
+                  className="h-2.5 w-2.5 rounded-full"
                   style={{ background: s.color }}
                   aria-hidden="true"
                 />
-                <span className="currencyMixLegend__code">{s.currency}</span>
-                <span className="currencyMixLegend__amount">
+                {/* formerly .currencyMixLegend__code */}
+                <span className="font-semibold text-[var(--foreground)]">{s.currency}</span>
+                {/* formerly .currencyMixLegend__amount */}
+                <span className="truncate text-right tabular-nums text-[var(--muted-foreground)]">
                   {formatMoney(s.value, s.currency)}
                 </span>
-                <span className="currencyMixLegend__pct">
+                {/* formerly .currencyMixLegend__pct */}
+                <span className="shrink-0 tabular-nums font-semibold text-[var(--foreground)]">
                   {Math.round(s.pct)}%
                 </span>
               </li>

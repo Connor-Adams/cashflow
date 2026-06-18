@@ -848,7 +848,8 @@ export function DashboardPage() {
             label="Budget progress + pacing"
             description="Spend so far against each budget plus how much of the period has elapsed. Tick on the bar = where you'd be if perfectly paced."
           >
-            <div className="budgetPillStrip">
+            {/* formerly .budgetPillStrip */}
+            <div className="flex h-full gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
               {budgetProgressSorted.map((item) => {
                 // Tone prefers the backend's pacingState classification
                 // when available — it already accounts for time-elapsed,
@@ -903,20 +904,40 @@ export function DashboardPage() {
                   behind: 'Under pace',
                   over: 'Over budget',
                 }
+                // Lookup table for the fill background color keyed on tone.
+                // Cannot interpolate class names — Tailwind JIT needs literals.
+                const fillBgStyle: Record<'ok' | 'warn' | 'over', string> = {
+                  ok: 'var(--positive)',
+                  warn: 'var(--primary)',
+                  over: 'var(--destructive)',
+                }
                 return (
+                  // formerly .budgetPill + .budgetPill--{tone}
+                  // color-mix background must be inline (no JIT equivalent)
                   <article
                     key={item.budgetId}
-                    className={`budgetPill budgetPill--${tone}`}
+                    className="flex shrink-0 flex-col justify-center gap-1.5 rounded-md border p-2.5"
+                    style={{
+                      borderColor: 'var(--border)',
+                      background: 'color-mix(in oklch, var(--muted) 50%, transparent)',
+                      minWidth: '200px',
+                      maxWidth: '240px',
+                    }}
                   >
-                    <header className="budgetPill__header">
-                      <strong className="budgetPill__label inline-flex items-center gap-1.5 min-w-0" title={label}>
+                    {/* formerly .budgetPill__header */}
+                    <header className="flex items-baseline justify-between gap-2">
+                      {/* formerly .budgetPill__label */}
+                      <strong className="truncate text-sm font-semibold text-[var(--foreground)] inline-flex items-center gap-1.5 min-w-0" title={label}>
                         <CategoryIcon name={item.category} />
                         <span className="truncate">{label}</span>
                       </strong>
-                      <span className="budgetPill__pct">{percentRounded}%</span>
+                      {/* formerly .budgetPill__pct */}
+                      <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--muted-foreground)]">{percentRounded}%</span>
                     </header>
+                    {/* formerly .budgetPill__bar — color-mix bg must stay inline */}
                     <div
-                      className="budgetPill__bar relative"
+                      className="relative h-1.5 w-full overflow-hidden rounded-full border border-[var(--border)]"
+                      style={{ background: 'var(--muted)' }}
                       role="img"
                       aria-label={
                         elapsedRounded !== null
@@ -924,9 +945,14 @@ export function DashboardPage() {
                           : `${label} ${percentRounded} percent of target used`
                       }
                     >
+                      {/* formerly .budgetPill__fill + .budgetPill--{tone} .budgetPill__fill */}
                       <span
-                        className="budgetPill__fill"
-                        style={{ width }}
+                        className="block h-full"
+                        style={{
+                          background: fillBgStyle[tone],
+                          transition: 'width 0.3s ease-out',
+                          width,
+                        }}
                       />
                       {elapsedTick !== null && (
                         // Vertical tick indicating where spend "should" be
@@ -940,13 +966,15 @@ export function DashboardPage() {
                         />
                       )}
                     </div>
-                    <p className="budgetPill__amount">
+                    {/* formerly .budgetPill__amount */}
+                    <p className="m-0 truncate text-xs text-[var(--muted-foreground)]">
                       {formatCurrency(item.spent, item.currency)} /{' '}
                       {formatCurrency(item.target, item.currency)}{' '}
-                      <span className="budgetPill__currency">{item.currency}</span>
+                      {/* formerly .budgetPill__currency */}
+                      <span className="ml-1 opacity-70">{item.currency}</span>
                     </p>
                     {item.pacingState && elapsedRounded !== null && (
-                      <p className="budgetPill__pacing mt-1">
+                      <p className="mt-1">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                             pacingBadgeClass[item.pacingState] ?? ''
