@@ -13,8 +13,10 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Grid } from '@/components/ui/grid'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { getJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import type {
@@ -208,8 +210,8 @@ export function ExplainMonthPage() {
         </div>
       </Card>
 
-      {/* Error: .error rule was inline-flex rounded-lg border px-3 py-2 text-sm font-semibold
-          with danger colors. Alert variant="error" provides equivalent styling + role/aria. */}
+      {/* Error: .error was inline-flex danger-colored badge. Alert variant="error"
+          provides role=alert + equivalent danger surface. */}
       {err && (
         <Alert variant="error" className="mb-4">
           {err}
@@ -277,16 +279,11 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
       className={CARD_CLS}
       aria-label="Month over month totals"
     >
-      <h2 className="mt-0">
-        {data.month} vs {data.previousMonth}
-      </h2>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 12,
-        }}
-      >
+      {/* SectionHeader: title-only shape (no actions) — fits the primitive */}
+      <SectionHeader title={`${data.month} vs ${data.previousMonth}`} className="mb-3" />
+
+      {/* Grid: replaces repeat(auto-fit, minmax(220px, 1fr)) gap:12 */}
+      <Grid minItemWidth={220} gap="md">
         {data.monthOverMonth.map((mom) => {
           const spendUp = mom.spendDelta > 0
           const trendIcon = spendUp ? (
@@ -295,6 +292,13 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
             <TrendingDown size={16} aria-hidden="true" />
           )
           return (
+            /*
+             * StatCard not used here: each tile shows THREE metrics (Spend / Income / Net)
+             * each with inline current+delta. StatCard is designed for a single
+             * label+value+delta — it cannot cleanly represent a 3-row <dl>.
+             * Decision: keep the <dl> tile with token utilities. The box is already
+             * converted to border/rounded/padding token classes in step 1.
+             */
             <div
               key={mom.currency}
               className="border border-border rounded-md p-3"
@@ -333,7 +337,7 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
             </div>
           )
         })}
-      </div>
+      </Grid>
     </section>
   )
 }
@@ -350,6 +354,14 @@ function FindingGroup({
   return (
     /* aria-label on the section — expand Card classes */
     <section className={CARD_CLS} aria-label={KIND_LABEL[kind]}>
+      {/*
+       * FindingGroup header: Icon + h3 + Badge count. SectionHeader expects
+       * title+description+actions (top-right controls). The icon and count badge
+       * live inline with the h3 title — not in the actions slot. Bespoke flex
+       * row is the right shape here; SectionHeader would require wrapping the
+       * Icon+label into the title prop and the Badge into actions, which misrepresents
+       * their semantic relationship. Keep as token utilities.
+       */}
       <div className="flex gap-2 items-center mb-2">
         <Icon size={18} aria-hidden="true" />
         <h3 className="m-0">{KIND_LABEL[kind]}</h3>
@@ -370,7 +382,7 @@ function FindingGroup({
               </div>
               <p className="mt-1 m-0">{item.summary}</p>
             </div>
-            {/* .muted on a Link — inline context, no mb-4 needed */}
+            {/* .muted on a Link — inline context, no mb-4 appropriate */}
             <Link
               to={buildTransactionsHref(item.transactionFilter)}
               className="text-sm leading-6 text-muted-foreground"
