@@ -82,6 +82,9 @@ jobs:
       - name: Extract node_modules
         run: tar -xf node_modules.tar
 
+      - name: Run shared contract tests
+        run: yarn workspace @cashflow/shared run test
+
       - name: Run backend unit tests
         run: yarn workspace cashflow-backend run test
 

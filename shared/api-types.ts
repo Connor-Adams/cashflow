@@ -162,6 +162,8 @@ export type Transaction = {
   autoCategory: string | null
   categoryOverride: string | null
   finalCategory: string | null
+  categoryOverrideId: number | null
+  finalCategoryId: number | null
   autoBusiness: boolean | null
   businessOverride: boolean | null
   finalBusiness: boolean
@@ -495,6 +497,33 @@ export type Category = {
   taxTreatment: TaxTreatment
   createdAt: string
   updatedAt: string
+}
+
+export type CategoryTreeNode = {
+  id: number
+  name: string
+  parentId: number | null
+  icon: string | null
+  taxTreatment: TaxTreatment
+  children: CategoryTreeNode[]
+}
+
+export type RollupRow = {
+  categoryId: number
+  currency: string
+  name: string
+  path: string
+  parentId: number | null
+  depth: number
+  directTotal: number
+  rolledTotal: number
+}
+
+export type ResolvedCategoryPath = {
+  id: number
+  name: string | null
+  path: string
+  createdIds: number[]
 }
 
 /**

@@ -72,6 +72,10 @@ import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
 import { TAX_TREATMENTS } from '../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
+import { useCategoryPaths } from '../lib/useCategoryPaths'
+import { useCategoryTree } from '../lib/useCategoryTree'
+import { buildPathById } from '../lib/categoryPathById'
+import { resolveCategoryPatch, categoryFieldChanged } from './transactionsCategory'
 
 type CategoryHint = {
   label: string
@@ -394,6 +398,9 @@ export function TransactionsPage() {
   async function saveRow(id: number, patch: Record<string, unknown>) {
     await patchJson<Transaction>(`/api/transactions/${id}`, patch)
     await load()
+    // FIX 2: best-effort refresh so a picker-auto-created path becomes
+    // selectable in the cloud picker without a full page reload.
+    void refreshCategoryPaths().catch(() => {})
   }
 
   async function createContact(name: string): Promise<Contact> {
@@ -500,10 +507,14 @@ export function TransactionsPage() {
         : dateTo
           ? `Up to ${dateTo}`
           : 'All dates'
-  const categoryLabels = useMemo(
-    () => categoryHints.map((hint) => hint.label),
-    [categoryHints]
-  )
+  const { paths: categoryPaths, refresh: refreshCategoryPaths } = useCategoryPaths()
+  const { tree: categoryTree } = useCategoryTree()
+  const pathById = useMemo(() => buildPathById(categoryTree), [categoryTree])
+  // Use full category paths from the category tree for the row picker.
+  // Fall back to the legacy hint labels while the tree is loading (first render).
+  const categoryLabels = categoryPaths.length > 0
+    ? categoryPaths
+    : categoryHints.map((hint) => hint.label)
   const hasCustomCurrency = currency !== DEFAULT_TRANSACTION_CURRENCY
   const activeFilters = useMemo(
     () =>
@@ -1832,6 +1843,7 @@ export function TransactionsPage() {
                 <TransactionRow
                   key={t.id}
                   t={t}
+                  pathById={pathById}
                   categoryOptions={categoryLabels}
                   contacts={contacts}
                   selected={selectedIds.has(t.id)}
@@ -1941,6 +1953,7 @@ export function TransactionsPage() {
 
 function TransactionRow({
   t,
+  pathById,
   categoryOptions,
   contacts,
   selected,
@@ -1957,6 +1970,7 @@ function TransactionRow({
   onLabelsMutated,
 }: {
   t: Transaction
+  pathById: Map<number, string>
   categoryOptions: string[]
   contacts: Contact[]
   selected: boolean
@@ -1976,7 +1990,15 @@ function TransactionRow({
   const [aiRowBusy, setAiRowBusy] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
   const [aiSuggestionId, setAiSuggestionId] = useState<number | null>(null)
-  const [cat, setCat] = useState(t.categoryOverride ?? '')
+  // Derive the category baseline from the full path (id-keyed), falling back to
+  // the bare categoryOverride string when the tree hasn't loaded yet.
+  const catBaseline = useMemo(
+    () =>
+      pathById.get(t.categoryOverrideId ?? t.finalCategoryId ?? -1) ??
+      (t.categoryOverride ?? ''),
+    [pathById, t.categoryOverrideId, t.finalCategoryId, t.categoryOverride],
+  )
+  const [cat, setCat] = useState(catBaseline)
   const [biz, setBiz] = useState<string>(
     t.businessOverride === null || t.businessOverride === undefined
       ? ''
@@ -2016,7 +2038,7 @@ function TransactionRow({
     isShareInputInvalid(pctMe, parsedPctMe) ||
     isShareInputInvalid(pctPartner, parsedPctPartner)
   const isDirty =
-    cat !== (t.categoryOverride ?? '') ||
+    cat !== catBaseline ||
     biz !==
       (t.businessOverride === null || t.businessOverride === undefined
         ? ''
@@ -2033,7 +2055,7 @@ function TransactionRow({
     || (t.counterpartyContactId ?? null) !== counterpartyContactId
 
   const resetDraft = useCallback(() => {
-    setCat(t.categoryOverride ?? '')
+    setCat(catBaseline)
     setBiz(
       t.businessOverride === null || t.businessOverride === undefined
         ? ''
@@ -2053,7 +2075,7 @@ function TransactionRow({
     setRowLabels(t.labels ?? [])
     setAiSuggestion(null)
     setAiSuggestionId(null)
-  }, [t])
+  }, [t, catBaseline])
 
   useEffect(() => {
     resetDraft()
@@ -2418,21 +2440,30 @@ function TransactionRow({
                 onError('Pick a contact for contact-owned transactions.')
                 return
               }
-              void onSave(t.id, {
-                categoryOverride: cat || null,
-                businessOverride: biz === '' ? null : biz === 'true',
-                taxTreatmentOverride: taxOverride === '' ? null : taxOverride,
-                splitOverride: split || null,
-                pctMeOverride: parsedPctMe,
-                pctPartnerOverride: parsedPctPartner,
-                visibility,
-                ownershipType,
-                ownershipContactId:
-                  ownershipType === 'contact' ? Number(ownershipContactId) : null,
-                counterpartyContactId,
-                reviewFlag: false,
-                aiSuggestionId,
-              })
+              // FIX 1: only resolve + send categoryOverrideId when the
+              // category input actually changed from its server-side baseline.
+              // Skipping it when unchanged prevents a bare leaf name from being
+              // re-resolved to a root category on an unrelated field edit.
+              // catBaseline is the full path derived from categoryOverrideId /
+              // finalCategoryId (or the raw string when the tree is absent).
+              const catChanged = categoryFieldChanged(cat, catBaseline)
+              void (catChanged ? resolveCategoryPatch(cat) : Promise.resolve({})).then((catPatch) =>
+                onSave(t.id, {
+                  ...catPatch,
+                  businessOverride: biz === '' ? null : biz === 'true',
+                  taxTreatmentOverride: taxOverride === '' ? null : taxOverride,
+                  splitOverride: split || null,
+                  pctMeOverride: parsedPctMe,
+                  pctPartnerOverride: parsedPctPartner,
+                  visibility,
+                  ownershipType,
+                  ownershipContactId:
+                    ownershipType === 'contact' ? Number(ownershipContactId) : null,
+                  counterpartyContactId,
+                  reviewFlag: false,
+                  aiSuggestionId,
+                })
+              )
             }}
           >
             {!isDirty && t.reviewFlag ? 'Mark reviewed' : isDirty ? 'Save' : 'Saved'}

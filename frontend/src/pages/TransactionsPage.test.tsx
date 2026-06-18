@@ -31,6 +31,7 @@ beforeEach(() => {
     if (path === '/api/transactions/category-hints') return { categories: [] }
     if (path === '/api/ai/status') return { openai: false }
     if (path === '/api/contacts') return []
+    if (path === '/api/categories/tree') return []
     return null
   })
 })
@@ -141,6 +142,7 @@ describe('TransactionsPage transaction status controls', () => {
       if (path === '/api/transactions/category-hints') return { categories: [] }
       if (path === '/api/ai/status') return { openai: false }
       if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
       return null
     })
     renderPage()
@@ -162,6 +164,7 @@ describe('TransactionsPage transaction status controls', () => {
       if (path === '/api/transactions/category-hints') return { categories: [] }
       if (path === '/api/ai/status') return { openai: false }
       if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
       return null
     })
     renderPage()
@@ -201,6 +204,7 @@ describe('TransactionsPage tax treatment override control', () => {
       if (path === '/api/transactions/category-hints') return { categories: [] }
       if (path === '/api/ai/status') return { openai: false }
       if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
       return null
     })
     vi.mocked(api.patchJson).mockResolvedValue({})
@@ -244,6 +248,7 @@ describe('TransactionsPage share override percent units', () => {
       if (path === '/api/transactions/category-hints') return { categories: [] }
       if (path === '/api/ai/status') return { openai: false }
       if (path === '/api/contacts') return []
+      if (path === '/api/categories/tree') return []
       return null
     })
   }
@@ -331,6 +336,8 @@ function makeTransaction(
     autoCategory: null,
     categoryOverride: null,
     finalCategory: null,
+    categoryOverrideId: null,
+    finalCategoryId: null,
     autoBusiness: null,
     businessOverride: null,
     finalBusiness: false,
