@@ -142,8 +142,6 @@ function TreeNode({ node, depth, onChanged, onError }: NodeProps) {
   );
 }
 
-export type CategoryTreeManagerProps = Record<string, never>;
-
 export function CategoryTreeManager() {
   const { tree, loading, error, refresh } = useCategoryTree();
   const { refresh: refreshGlobal } = useCategories();

@@ -17,7 +17,8 @@
     "frontend/src/**/*.test.{ts,tsx}",
     "frontend/test/**/*.test.{ts,tsx}",
     "scripts/**/*.cjs",
-    "test/**/*.test.cjs"
+    "test/**/*.test.cjs",
+    "shared/**/*.test.ts"
   ],
   "ignorePatterns": [
     "**/dist/**",
