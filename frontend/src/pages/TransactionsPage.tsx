@@ -40,6 +40,7 @@ import type { SavedFilter } from '../components/transactions/SavedFiltersDropdow
 import { EnrichmentSignalsDialog } from '../components/EnrichmentSignalsDialog'
 import { TransactionRevisionsDialog } from '../components/TransactionRevisionsDialog'
 import ReceiptItemsDrawer from '../components/ReceiptItemsDrawer'
+import { TxnMerchantCell, TxnMerchantName, TxnMerchantMeta } from '@/components/ui/txn-merchant-cell'
 import { CounterpartyCell } from '../components/CounterpartyCell'
 import { RefundBadge } from '../components/RefundBadge'
 import type { ReceiptWithItems } from '../../../shared/api-types'
@@ -2122,11 +2123,11 @@ function TransactionRow({
       </TableCell>
       <TableCell>{t.date}</TableCell>
       <TableCell title={t.merchantRaw}>
-        <div className="txnMerchantCell">
-          <span className="txnMerchantName">{t.merchantClean}</span>
-          <span className="txnMerchantMeta">
+        <TxnMerchantCell>
+          <TxnMerchantName>{t.merchantClean}</TxnMerchantName>
+          <TxnMerchantMeta>
             {t.account?.shortCode ?? t.account?.name ?? 'Account'} · {t.importBatch}
-          </span>
+          </TxnMerchantMeta>
           {(t.counterpartyContactId != null || t.counterpartyRaw) && (
             <span className="txnCounterparty text-xs text-muted-foreground">
               {Number(t.amount) >= 0 ? 'from ' : 'to '}
@@ -2161,7 +2162,7 @@ function TransactionRow({
             onChange={setRowLabels}
             onLabelsMutated={onLabelsMutated}
           />
-        </div>
+        </TxnMerchantCell>
       </TableCell>
       <TableCell>
         <div className="txnAmountCell">
