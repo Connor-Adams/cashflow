@@ -1,6 +1,9 @@
 // frontend/src/pages/settings/tabs/CategoryTreeManager.tsx
 import { useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { CategoryIcon } from '../../../components/CategoryIcon';
 import { useCategoryTree } from '../../../lib/useCategoryTree';
 import { useCategories } from '../../../lib/useCategories';
 import { createCategory, renameCategory, deleteCategory, reparentCategory } from '../../../lib/categoriesApi';
@@ -9,16 +12,28 @@ import type { CategoryTreeNode } from '../../../types/api';
 type NodeProps = {
   node: CategoryTreeNode;
   depth: number;
+  collapsed: Set<number>;
+  toggle: (id: number) => void;
+  dragOverId: number | null;
+  setDragOverId: (id: number | null) => void;
+  onReparent: (draggedId: number, targetId: number) => void;
   onChanged: () => Promise<void>;
   onError: (msg: string) => void;
 };
 
-function TreeNode({ node, depth, onChanged, onError }: NodeProps) {
+function TreeNode({
+  node, depth, collapsed, toggle, dragOverId, setDragOverId, onReparent, onChanged, onError,
+}: NodeProps) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
   const [adding, setAdding] = useState(false);
   const [childName, setChildName] = useState('');
   const savedRef = useRef(false);
+
+  const kids = node.children ?? [];
+  const hasKids = kids.length > 0;
+  const isOpen = !collapsed.has(node.id);
+  const isDropTarget = dragOverId === node.id;
 
   async function run(fn: () => Promise<unknown>) {
     try { await fn(); await onChanged(); }
@@ -28,22 +43,55 @@ function TreeNode({ node, depth, onChanged, onError }: NodeProps) {
   return (
     <li>
       <div
-          className="flex items-center gap-2 py-1"
-          style={{ paddingLeft: depth * 16 }}
-          draggable
-          onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(node.id)); }}
-          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-          onDrop={(e) => {
-            e.preventDefault();
-            const draggedId = Number(e.dataTransfer.getData('text/plain'));
-            if (!draggedId || draggedId === node.id) return;
-            void run(() => reparentCategory(draggedId, node.id));
-          }}
-        >
+        className={
+          'group flex items-center gap-1.5 rounded-md py-1 pr-1 transition-colors ' +
+          (isDropTarget ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/50')
+        }
+        draggable={!renaming}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(node.id));
+        }}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; }}
+        onDragEnter={(e) => { e.stopPropagation(); setDragOverId(node.id); }}
+        onDragLeave={(e) => {
+          // only clear when leaving the row itself, not bubbling from a child
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOverId(null);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation(); // a drop on a node must not also trigger the root (top-level) handler
+          setDragOverId(null);
+          const draggedId = Number(e.dataTransfer.getData('text/plain'));
+          if (!draggedId || draggedId === node.id) return;
+          onReparent(draggedId, node.id);
+        }}
+      >
+        <GripVertical
+          size={14}
+          aria-hidden
+          className="shrink-0 cursor-grab text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100"
+        />
+        {hasKids ? (
+          <button
+            type="button"
+            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${node.name}`}
+            aria-expanded={isOpen}
+            className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"
+            onClick={() => toggle(node.id)}
+          >
+            {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          </button>
+        ) : (
+          <span className="inline-block size-5 shrink-0" />
+        )}
+
+        <CategoryIcon name={node.name} size={15} className="shrink-0 text-muted-foreground" />
+
         {renaming ? (
-          <input
+          <Input
             aria-label={`Rename ${node.name}`}
-            className="flex-1"
+            className="h-7 flex-1"
             value={renameValue}
             autoFocus
             onChange={(e) => setRenameValue(e.target.value)}
@@ -66,52 +114,60 @@ function TreeNode({ node, depth, onChanged, onError }: NodeProps) {
         ) : (
           <button
             type="button"
-            className="flex-1 text-left"
+            className="flex-1 truncate text-left text-sm"
             onDoubleClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
           >
             {node.name}
           </button>
         )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label={`Rename ${node.name}`}
-          onClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
-        >
-          Rename
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label={`Add subcategory under ${node.name}`}
-          onClick={() => setAdding((v) => !v)}
-        >
-          + Sub
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label={`Delete ${node.name}`}
-          onClick={() => void run(() => deleteCategory(node.id))}
-        >
-          Delete
-        </Button>
+
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <Button
+            type="button" variant="ghost" size="icon" className="size-7"
+            aria-label={`Rename ${node.name}`}
+            onClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
+          >
+            <Pencil size={14} />
+          </Button>
+          <Button
+            type="button" variant="ghost" size="icon" className="size-7"
+            aria-label={`Add subcategory under ${node.name}`}
+            onClick={() => setAdding((v) => !v)}
+          >
+            <Plus size={14} />
+          </Button>
+          <Button
+            type="button" variant="ghost" size="icon" className="size-7 text-destructive hover:text-destructive"
+            aria-label={`Delete ${node.name}`}
+            onClick={() => void run(() => deleteCategory(node.id))}
+          >
+            <Trash2 size={14} />
+          </Button>
+        </div>
       </div>
+
       {adding && (
-        <div className="flex items-center gap-2 py-1" style={{ paddingLeft: (depth + 1) * 16 }}>
-          <input
+        <div className="flex items-center gap-2 py-1 pl-7">
+          <Input
             aria-label="new subcategory name"
-            className="flex-1"
+            className="h-7 flex-1"
             value={childName}
             autoFocus
+            placeholder="Subcategory name"
             onChange={(e) => setChildName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { setAdding(false); setChildName(''); }
+              if (e.key === 'Enter') {
+                const n = childName.trim();
+                if (!n) return;
+                setAdding(false);
+                setChildName('');
+                void run(() => createCategory(n, node.id));
+              }
+            }}
           />
           <Button
-            type="button"
-            size="sm"
+            type="button" size="sm"
             aria-label="create subcategory"
             onClick={() => {
               const n = childName.trim();
@@ -125,13 +181,19 @@ function TreeNode({ node, depth, onChanged, onError }: NodeProps) {
           </Button>
         </div>
       )}
-      {(node.children?.length ?? 0) > 0 && (
-        <ul>
-          {node.children.map((c) => (
+
+      {hasKids && isOpen && (
+        <ul className="ml-[15px] border-l border-border/60 pl-2">
+          {kids.map((c) => (
             <TreeNode
               key={c.id}
               node={c}
               depth={depth + 1}
+              collapsed={collapsed}
+              toggle={toggle}
+              dragOverId={dragOverId}
+              setDragOverId={setDragOverId}
+              onReparent={onReparent}
               onChanged={onChanged}
               onError={onError}
             />
@@ -142,16 +204,60 @@ function TreeNode({ node, depth, onChanged, onError }: NodeProps) {
   );
 }
 
+/** All descendant ids of `id` within the tree (excludes `id` itself). */
+function descendantIds(tree: CategoryTreeNode[], id: number): Set<number> {
+  const out = new Set<number>();
+  const find = (nodes: CategoryTreeNode[]): CategoryTreeNode | null => {
+    for (const n of nodes) {
+      if (n.id === id) return n;
+      const hit = find(n.children ?? []);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const root = find(tree);
+  const walk = (n: CategoryTreeNode) => {
+    for (const c of n.children ?? []) { out.add(c.id); walk(c); }
+  };
+  if (root) walk(root);
+  return out;
+}
+
 export function CategoryTreeManager() {
   const { tree, loading, error, refresh } = useCategoryTree();
   const { refresh: refreshGlobal } = useCategories();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [draggingRoot, setDraggingRoot] = useState(false);
+
+  function toggle(id: number) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
 
   async function onChanged() {
     setActionError(null);
     await refresh();
     // best-effort: keep the global flat cache (icon/tax list, pickers) fresh
     refreshGlobal().catch(() => { /* swallow */ });
+  }
+
+  async function doReparent(draggedId: number, targetParentId: number | null) {
+    setActionError(null);
+    if (targetParentId != null && descendantIds(tree, draggedId).has(targetParentId)) {
+      setActionError('Cannot move a category into one of its own subcategories');
+      return;
+    }
+    try {
+      await reparentCategory(draggedId, targetParentId);
+      await onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not move category');
+    }
   }
 
   return (
@@ -163,19 +269,25 @@ export function CategoryTreeManager() {
         <p className="muted">Loading…</p>
       ) : (
         <ul
-          className="flex flex-col"
+          className="flex flex-col gap-0.5"
+          onDragEnter={() => setDraggingRoot(true)}
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
           onDrop={(e) => {
             e.preventDefault();
+            setDraggingRoot(false);
+            setDragOverId(null);
             const id = Number(e.dataTransfer.getData('text/plain'));
             if (!id) return;
-            setActionError(null);
-            reparentCategory(id, null)
-              .then(() => refresh())
-              .catch((err) => setActionError(err instanceof Error ? err.message : 'Could not move to root'));
+            void doReparent(id, null);
           }}
         >
-          <li className="muted" aria-label="Move to top level">
+          <li
+            className={
+              'rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground transition-all ' +
+              (draggingRoot ? 'border-primary/50 bg-primary/5 opacity-100' : 'border-transparent opacity-0 h-0 py-0 overflow-hidden')
+            }
+            aria-label="Move to top level"
+          >
             Drop here to make a top-level category
           </li>
           {tree.map((n) => (
@@ -183,6 +295,11 @@ export function CategoryTreeManager() {
               key={n.id}
               node={n}
               depth={0}
+              collapsed={collapsed}
+              toggle={toggle}
+              dragOverId={dragOverId}
+              setDragOverId={setDragOverId}
+              onReparent={(draggedId, targetId) => void doReparent(draggedId, targetId)}
               onChanged={onChanged}
               onError={setActionError}
             />
