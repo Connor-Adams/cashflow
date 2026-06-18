@@ -190,6 +190,17 @@
     background-position: left top;
   }
 
+  /* Tree row icons wear the hero gradient. lucide icons are strokes, so we
+   * paint the stroke with an SVG <linearGradient> (id="treeIconGradient",
+   * rendered once by CategoryTreeManager) rather than a CSS background. */
+  .treeIconGradient {
+    stroke: url(#treeIconGradient);
+  }
+  /* Iconless rows show a small gradient dot instead of a flat muted one. */
+  .treeIconDot {
+    background-image: var(--gradient-hero);
+  }
+
   /* Root "make top-level" drop zone while dragging: gradient fill + a gradient
    * dashed border (no rail — it is a hint box, not a row). */
   .treeDropZoneActive {
