@@ -204,8 +204,6 @@ function TreeNode({
   );
 }
 
-export type CategoryTreeManagerProps = Record<string, never>;
-
 /** All descendant ids of `id` within the tree (excludes `id` itself). */
 function descendantIds(tree: CategoryTreeNode[], id: number): Set<number> {
   const out = new Set<number>();
