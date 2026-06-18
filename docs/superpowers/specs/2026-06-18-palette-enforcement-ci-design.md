@@ -1,0 +1,151 @@
+# Palette Enforcement CI Check — Design
+
+**Date:** 2026-06-18
+**Status:** Approved (design); implementation pending
+**Topic:** A CI check that guarantees frontend UI styling only uses sanctioned design tokens, never off-palette color literals.
+
+## Problem
+
+Cashflow has a forced color palette defined as `--*` CSS variables in
+`frontend/src/index.css` (greyscale/oxblood/green/amber ramps + semantic
+signal tokens like `--success`, `--danger`, `--primary`, plus `--chart-*`).
+Nothing currently prevents a contributor from introducing an off-palette color
+— a raw hex, `rgb()`, or named color — in component code or `App.css`. Over
+time that drifts the UI away from the single source of truth.
+
+We want CI to **guarantee no off-palette color literal enters the frontend.**
+
+### Audit (2026-06-18)
+
+A naive `grep '#[0-9a-fA-F]{3,8}'` over `.tsx` reports ~145 "hex" hits, but
+~90% are false positives — GitHub PR/issue refs in comments (`#259`, `#378`)
+and 3-digit fragments. The real surface is small:
+
+- **15** genuine 6/8-digit color hexes in non-test `.tsx`.
+- Dominated by `frontend/src/components/ui/letter-avatar.tsx` — a 12-color
+  categorical avatar palette (Tailwind-default hues, off the oxblood/zinc
+  system).
+- Charts are **already tokenized** via `--chart-*` (0 literal `fill="#..."`).
+
+So a fix-first rollout is viable — no baseline/snapshot needed.
+
+## Definition of "off-palette"
+
+The palette is the set of `--*` tokens in `frontend/src/index.css`. That file
+is the **only** sanctioned home for raw color literals. Anywhere else, a color
+must be referenced through a token (`var(--token)` or a token-backed Tailwind
+class). A **violation** is any color literal — hex, `rgb()/rgba()`,
+`hsl()/hsla()`, or a CSS named color in a color context — that appears outside
+`index.css` and is not a `var(--…)` reference.
+
+## Architecture
+
+Two complementary mechanisms plus a one-time token promotion.
+
+### 1. Authoritative check — `frontend/scripts/check-palette.mjs`
+
+A standalone Node (ESM) script. Sole authority for CI and the only mechanism
+that covers CSS (`App.css`), which ESLint cannot parse.
+
+**Structure:** a pure exported `findViolations(source, filename) ->
+Violation[]` plus a thin CLI wrapper that globs files, calls it, prints a
+report, and sets the exit code. The split keeps the detector unit-testable
+without filesystem or process concerns.
+
+**Scope:** scans `frontend/src/**/*.{tsx,ts,css}`. Excludes:
+- `frontend/src/index.css` — the sanctioned token-definition home.
+- `**/*.test.{ts,tsx}` — test fixtures legitimately contain arbitrary strings.
+
+**Detection (color-aware, false-positive-safe):**
+1. Strip `//` line comments and `/* */` block comments first. This removes
+   `// PR #259`-style refs before any matching.
+2. **Hex:** flag `#` + exactly 6 or 8 hex digits anywhere in remaining code.
+   Flag 3/4-digit hex **only inside CSS declaration values** (`.css` files,
+   right of a `:` in a declaration). This prevents numeric refs like `#259`
+   from ever matching as a 3-digit hex in `.tsx`.
+3. **Functional colors:** flag `rgb(`, `rgba(`, `hsl(`, `hsla(` literals.
+4. **Named colors:** flag a curated set of CSS named colors (`red`, `blue`,
+   `white`, `black`, …) **only in color-property position** — a CSS
+   `color:`/`background*:`/`border*:`/`fill:`/`stroke:` value, or a JSX inline
+   `style` object color key. Avoids matching the word "red" in prose/JSX text.
+5. Never flag a value that is a `var(--…)` reference.
+
+**Escape hatch:** a `// palette-allow` or `/* palette-allow */` marker on the
+same line suppresses that line. A small `PATH_ALLOWLIST` array in the script
+covers whole-file exceptions if ever needed (expected: empty at launch).
+
+**Output & exit:**
+- Clean → exit 0.
+- Violations → grouped report, one line each:
+  `frontend/src/foo.tsx:42: off-palette color "#9B2D3A" — use a var(--token)`,
+  then exit 1.
+- Zero files matched by the glob → exit 1 (guards a silent empty run, matching
+  the `backend/scripts/run-unit-tests.sh` convention).
+
+### 2. ESLint rule (editor feedback) — `frontend/eslint.config.js`
+
+Adds a `no-restricted-syntax` entry targeting string `Literal` /
+`JSXAttribute` nodes that contain:
+- a hex color literal, and
+- an **arbitrary Tailwind color bracket** (`bg-[#…]`, `text-[rgb(…)]`,
+  `border-[hsl(…)]`, `ring-/fill-/stroke-/from-/to-/via-[…]`).
+
+There are currently **0** arbitrary-bracket violations, so this is a cheap
+guardrail that keeps it that way and surfaces drift live in the editor. It
+rides the existing `yarn lint` (already in CI). It deliberately does **not**
+try to cover CSS — the script owns that. Partial overlap with the script on
+tsx hex literals is intentional: ESLint = fast in-editor feedback, script =
+authoritative + CSS coverage.
+
+### 3. Token promotion (one-time cleanup)
+
+- Add `--avatar-1 .. --avatar-12` to `index.css` holding the 12 categorical
+  hexes currently inlined in `letter-avatar.tsx`. Rewrite that file's
+  `PALETTE` to `['var(--avatar-1)', …, 'var(--avatar-12)']` (consumed as inline
+  `background` values). Palette stays the single source of truth — even
+  categorical colors live in the token file.
+- Tokenize the remaining ~3 stragglers (e.g. `NetWorthTile`,
+  `UtilizationBadge`) against existing semantic tokens, or mark with
+  `// palette-allow` only if a value is genuinely dynamic and cannot be a
+  token.
+
+After this, the check passes on a clean tree at launch.
+
+## Wiring
+
+- `frontend/package.json`: add `"lint:palette": "node scripts/check-palette.mjs"`.
+- CI (`.github/workflows/ci.yml`): add a step running
+  `yarn workspace frontend lint:palette` (exact insertion point determined in
+  the implementation plan after inspecting the current job layout).
+- Fold the same command into the local `yarn ci` aggregate so it runs before
+  push.
+
+## Testing
+
+vitest (frontend convention) exercising `findViolations` directly:
+
+| Input | Expected |
+|---|---|
+| `color: #9B2D3A` (css) | flagged |
+| `style={{ color: '#9B2D3A' }}` (tsx) | flagged |
+| `// see PR #259` | not flagged (comment stripped) |
+| `#259` numeric ref in `.tsx` code | not flagged (3-digit, not in css value) |
+| `color: var(--primary)` | not flagged |
+| `background: rgb(155, 45, 58)` | flagged |
+| `className="bg-[#fff]"` | flagged |
+| `color: #9B2D3A // palette-allow` | suppressed |
+| named color `color: red` (css) | flagged |
+| the word "red" in JSX text | not flagged |
+
+## Non-goals / YAGNI
+
+- No `--fix`/auto-rewrite — report only.
+- No baseline/snapshot file — fix-first, the surface is ~15 literals.
+- No stylelint dependency — the standalone script covers CSS.
+- Not enforcing non-color styling (spacing, layout inline styles stay allowed).
+
+## Rollout
+
+1. Promote avatar + straggler colors to tokens (tree goes clean).
+2. Land script + tests + ESLint rule + wiring in the same change so CI is green
+   on merge.
