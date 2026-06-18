@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { HouseholdSettings, HouseholdTimezoneResponse } from '@cashflow/shared';
 import { currentAuth } from '../auth/middleware';
 import { Household } from '../models/Household';
 import { HouseholdMember } from '../models/HouseholdMember';
@@ -129,11 +130,12 @@ router.patch('/benchmark', async (req, res, next) => {
 router.get('/settings', apiReadLimiter, async (req, res, next) => {
   try {
     const { household } = currentAuth(req);
-    res.json({
+    const settings: HouseholdSettings = {
       benchmarkSymbol: household.benchmarkSymbol,
       timezone: household.timezone ?? null,
       effectiveTimezone: household.timezone ?? DEFAULT_TIMEZONE,
-    });
+    };
+    res.json(settings);
   } catch (err) {
     next(err);
   }
@@ -167,10 +169,11 @@ router.patch('/timezone', apiWriteLimiter, async (req, res, next) => {
       return;
     }
     await household.update({ timezone: value });
-    res.json({
+    const body: HouseholdTimezoneResponse = {
       timezone: household.timezone ?? null,
       effectiveTimezone: household.timezone ?? DEFAULT_TIMEZONE,
-    });
+    };
+    res.json(body);
   } catch (err) {
     next(err);
   }
