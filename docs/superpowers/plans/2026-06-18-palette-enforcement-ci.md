@@ -463,34 +463,40 @@ PATH=/Users/connoradams/Developer/cashflow/node_modules/.bin:$PATH git commit -m
 
 ---
 
-### Task 5: Tokenize the `security-logo.tsx` SVG fill
+### Task 5: Tokenize remaining tsx color literals (security-logo + var() fallbacks)
+
+Three small tsx literals the detector flags. All are direct token substitutions.
 
 **Files:**
-- Modify: `frontend/src/components/ui/security-logo.tsx:45`
+- Modify: `frontend/src/components/ui/security-logo.tsx` (one `#FFFFFF`)
+- Modify: `frontend/src/pages/SubscriptionsPage.tsx:521` (`var(--color-destructive, red)`)
+- Modify: `frontend/src/pages/settings/sections/GmailSection.tsx:401` (`var(--success, green)`)
 
-**Interfaces:** none (self-contained edit).
+**Interfaces:** none (self-contained edits).
 
-- [ ] **Step 1: Inspect the literal**
+- [ ] **Step 1: Get the exact worklist**
 
-Run: `grep -n '#FFFFFF' frontend/src/components/ui/security-logo.tsx`
-Expected: one match around line 45 (an SVG `fill`).
+Run: `yarn workspace frontend run lint:palette 2>&1 | grep -E 'security-logo|SubscriptionsPage|GmailSection'`
+Expected: three lines — the `#FFFFFF` in `security-logo.tsx`, the `red` on `SubscriptionsPage.tsx:521`, the `green` on `GmailSection.tsx:401`.
 
-- [ ] **Step 2: Replace with a token**
+- [ ] **Step 2: Fix each literal**
 
-Change the `fill="#FFFFFF"` (or `fill: '#FFFFFF'`) to use `var(--zinc-50)`. For an SVG attribute that is a fixed white mark, prefer `fill="var(--zinc-50)"`. If review decides this is an immutable brand glyph that must stay pure white, instead append `{/* palette-allow */}` / `// palette-allow` on that line — but default to tokenizing.
+1. `security-logo.tsx`: change the `fill="#FFFFFF"` (or `fill: '#FFFFFF'`) to `var(--zinc-50)`. If review judges it an immutable brand glyph that must stay pure white, instead add `{/* palette-allow */}` / `// palette-allow` on that line — but default to tokenizing.
+2. `SubscriptionsPage.tsx:521`: the value is `background: 'var(--color-destructive, red)'`. The named-color fallback `red` is off-palette. Replace the raw fallback with the real token: `background: 'var(--destructive)'` (the defined token is `--destructive`; there is no `--color-destructive`). Removing the fallback is correct — the token always resolves.
+3. `GmailSection.tsx:401`: the value is `color: 'var(--success, green)'`. `--success` is a defined token, so the `green` fallback is dead and off-palette. Change to `color: 'var(--success)'`.
 
-- [ ] **Step 3: Verify the file is clean and renders**
+- [ ] **Step 3: Verify these files are clean and the app builds**
 
-Run: `yarn workspace frontend run lint:palette 2>&1 | grep security-logo || echo "security-logo clean"`
-Expected: `security-logo clean`.
+Run: `yarn workspace frontend run lint:palette 2>&1 | grep -E 'security-logo|SubscriptionsPage|GmailSection' || echo "tsx literals clean"`
+Expected: `tsx literals clean`.
 Run: `yarn workspace frontend run build`
 Expected: build succeeds.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/src/components/ui/security-logo.tsx
-PATH=/Users/connoradams/Developer/cashflow/node_modules/.bin:$PATH git commit -m "Tokenize security-logo fill"
+git add frontend/src/components/ui/security-logo.tsx frontend/src/pages/SubscriptionsPage.tsx frontend/src/pages/settings/sections/GmailSection.tsx
+PATH=/Users/connoradams/Developer/cashflow/node_modules/.bin:$PATH git commit -m "Tokenize remaining tsx color literals"
 ```
 
 ---
