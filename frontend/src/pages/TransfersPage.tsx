@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeftRight, Link2, RefreshCw, Unlink2 } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -207,9 +209,9 @@ export function TransfersPage() {
       <TransferStats stats={stats} loading={loading} />
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
       <CollapsibleCard
@@ -275,15 +277,15 @@ function TransferStats({
 }) {
   if (loading && !stats) {
     return (
-      <section className="card" aria-busy="true">
-        <p className="muted">Loading transfer stats…</p>
-      </section>
+      <Card aria-busy="true">
+        <p className="text-sm leading-6 text-muted-foreground">Loading transfer stats…</p>
+      </Card>
     )
   }
   if (!stats) return null
 
   return (
-    <section className="card" aria-label="Transfer totals">
+    <Card aria-label="Transfer totals">
       <div
         style={{
           display: 'grid',
@@ -312,7 +314,7 @@ function TransferStats({
           />
         ))}
       </div>
-    </section>
+    </Card>
   )
 }
 
@@ -356,44 +358,42 @@ function UnmatchedQueue({
   onLink: (idA: number, idB: number, purpose: TransferPurpose | null) => void | Promise<void>
 }) {
   return (
-    <div className="tableWrap" aria-busy={loading}>
-      <Table className="table">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead>Account</TableHead>
-            <TableHead>Merchant</TableHead>
-            <TableHead>Amount</TableHead>
-            <TableHead>Direction</TableHead>
-            <TableHead>Reference</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading ? (
-            Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonRow key={`unmatched-skel-${i}`} cols={UNMATCHED_COLUMN_COUNT} />
-            ))
-          ) : rows.length === 0 ? (
-            <EmptyTableRow
-              colSpan={UNMATCHED_COLUMN_COUNT}
-              title="No unmatched transfers — nice."
-              description="If you suspect a transfer is missing here, open the transactions page and set txn_type=transfer on the relevant row."
+    <Table aria-busy={loading}>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Date</TableHead>
+          <TableHead>Account</TableHead>
+          <TableHead>Merchant</TableHead>
+          <TableHead>Amount</TableHead>
+          <TableHead>Direction</TableHead>
+          <TableHead>Reference</TableHead>
+          <TableHead>Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonRow key={`unmatched-skel-${i}`} cols={UNMATCHED_COLUMN_COUNT} />
+          ))
+        ) : rows.length === 0 ? (
+          <EmptyTableRow
+            colSpan={UNMATCHED_COLUMN_COUNT}
+            title="No unmatched transfers — nice."
+            description="If you suspect a transfer is missing here, open the transactions page and set txn_type=transfer on the relevant row."
+          />
+        ) : (
+          rows.map((row) => (
+            <UnmatchedRowRender
+              key={row.id}
+              row={row}
+              expanded={expandedId === row.id}
+              onToggleExpand={() => onExpand(expandedId === row.id ? null : row.id)}
+              onLink={onLink}
             />
-          ) : (
-            rows.map((row) => (
-              <UnmatchedRowRender
-                key={row.id}
-                row={row}
-                expanded={expandedId === row.id}
-                onToggleExpand={() => onExpand(expandedId === row.id ? null : row.id)}
-                onLink={onLink}
-              />
-            ))
-          )}
-        </TableBody>
-      </Table>
-    </div>
+          ))
+        )}
+      </TableBody>
+    </Table>
   )
 }
 
@@ -480,11 +480,11 @@ function SuggestionPanel({
 
   return (
     <div className="p-2">
-      {loading && <p className="muted">Loading suggestions…</p>}
+      {loading && <p className="text-sm leading-6 text-muted-foreground">Loading suggestions…</p>}
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-3">
           {err}
-        </p>
+        </Alert>
       )}
       {!loading && !err && (
         <>
@@ -503,12 +503,12 @@ function SuggestionPanel({
             </NativeSelect>
           </div>
           {candidates.length === 0 ? (
-            <p className="muted">
+            <p className="text-sm leading-6 text-muted-foreground">
               No candidate matches in the window. Try widening the date range or
               setting <code>txn_type=transfer</code> on the sibling row.
             </p>
           ) : (
-            <Table className="table">
+            <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
@@ -579,8 +579,8 @@ function MoneyMovementTable({
   void onSetPurpose
 
   return (
-    <div className="tableWrap" aria-busy={loading}>
-      <Table className="table">
+    <>
+      <Table aria-busy={loading}>
         <TableHeader>
           <TableRow>
             <TableHead>From</TableHead>
@@ -639,6 +639,6 @@ function MoneyMovementTable({
           row on the Transactions page to break a specific pair.
         </p>
       )}
-    </div>
+    </>
   )
 }
