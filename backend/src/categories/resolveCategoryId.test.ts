@@ -29,9 +29,34 @@ test('is idempotent + case-insensitive (no duplicate root)', async () => {
   assert.equal(await Category.count({ where: { householdId } }), 1);
 });
 
-test('matches an existing nested node by name if it is the only one', async () => {
-  // existing flat root created by prior writes
-  const id = await resolveCategoryIdByName(householdId, 'Travel');
-  const again = await resolveCategoryIdByName(householdId, 'Travel');
-  assert.equal(id, again);
+test('reuses an existing nested node by name instead of forking a duplicate root', async () => {
+  // A category that was once a root and has since been nested under a parent.
+  const dining = await Category.create({ householdId, name: 'Dining', parentId: null });
+  const coffee = await Category.create({ householdId, name: 'Coffee', parentId: dining.id });
+
+  const resolved = await resolveCategoryIdByName(householdId, 'Coffee');
+  assert.equal(resolved, coffee.id, 'should reuse the nested Coffee, not create a root');
+  // no duplicate root Coffee was created
+  assert.equal(await Category.count({ where: { householdId, parentId: null, name: 'Coffee' } }), 0);
+  assert.equal(await Category.count({ where: { householdId } }), 2);
+});
+
+test('prefers an existing root over a same-named nested node', async () => {
+  const rootCoffee = await Category.create({ householdId, name: 'Coffee', parentId: null });
+  const dining = await Category.create({ householdId, name: 'Dining', parentId: null });
+  await Category.create({ householdId, name: 'Coffee', parentId: dining.id });
+
+  assert.equal(await resolveCategoryIdByName(householdId, 'Coffee'), rootCoffee.id);
+});
+
+test('creates a root when the name is ambiguous (multiple nested, no root)', async () => {
+  const a = await Category.create({ householdId, name: 'Parent A', parentId: null });
+  const b = await Category.create({ householdId, name: 'Parent B', parentId: null });
+  await Category.create({ householdId, name: 'Coffee', parentId: a.id });
+  await Category.create({ householdId, name: 'Coffee', parentId: b.id });
+
+  const resolved = await resolveCategoryIdByName(householdId, 'Coffee');
+  const node = await Category.findByPk(resolved!);
+  assert.equal(node?.parentId, null, 'ambiguous → deterministic new root');
+  assert.equal(await Category.count({ where: { householdId, name: 'Coffee' } }), 3);
 });
