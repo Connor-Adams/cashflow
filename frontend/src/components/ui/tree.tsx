@@ -65,6 +65,7 @@ function TreeRow({
       {expandable ? (
         <button
           type="button"
+          data-slot="tree-toggle"
           aria-label={`${expanded ? 'Collapse' : 'Expand'} ${toggleLabel ?? ''}`.trim()}
           aria-expanded={expanded}
           className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"

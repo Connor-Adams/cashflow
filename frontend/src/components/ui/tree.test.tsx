@@ -43,6 +43,17 @@ describe('Tree primitives', () => {
     expect(onToggle).toHaveBeenCalledOnce()
   })
 
+  it('the toggle carries data-slot so the global button safety-net skips it', () => {
+    // App.css `button:not([data-slot])` boxes raw buttons (border, min-h, centered);
+    // tree controls must opt out via data-slot or they render as outlined boxes.
+    render(
+      <Tree>
+        <li><TreeRow expandable expanded toggleLabel="Work" onToggle={() => {}}>Work</TreeRow></li>
+      </Tree>,
+    )
+    expect(screen.getByRole('button', { name: 'Collapse Work' })).toHaveAttribute('data-slot', 'tree-toggle')
+  })
+
   it('non-expandable row exposes no toggle control', () => {
     render(
       <Tree>
