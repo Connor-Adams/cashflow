@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeftRight, Link2, RefreshCw, Unlink2 } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { EmptyTableRow } from '@/components/ui/empty-state'
+import { Grid } from '@/components/ui/grid'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { SkeletonRow } from '@/components/ui/skeleton'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -207,9 +211,9 @@ export function TransfersPage() {
       <TransferStats stats={stats} loading={loading} />
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
       <CollapsibleCard
@@ -231,14 +235,7 @@ export function TransfersPage() {
         title="Money movement"
         description="Aggregate of linked transfer pairs. Use the purpose filter to see only owner draws, reimbursements, etc."
       >
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-        >
+        <div className="flex items-center gap-3 mb-3">
           <label htmlFor="transfer-purpose-filter">Purpose</label>
           <NativeSelect
             id="transfer-purpose-filter"
@@ -282,70 +279,46 @@ function TransferStats({
 }) {
   if (loading && !stats) {
     return (
-      <section className="card" aria-busy="true">
-        <p className="muted">Loading transfer stats…</p>
-      </section>
+      <Card aria-busy="true">
+        <p className="text-sm leading-6 text-muted-foreground">Loading transfer stats…</p>
+      </Card>
     )
   }
   if (!stats) return null
 
   return (
-    <section className="card" aria-label="Transfer totals">
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
-      >
-        <Stat label="Matched pairs" value={String(stats.matched)} />
-        <Stat
+    <div className="mb-4" aria-label="Transfer totals">
+      <Grid minItemWidth={180} gap="md">
+        <StatCard
+          label="Matched pairs"
+          value={String(stats.matched)}
+          metricKind="neutral"
+        />
+        <StatCard
           label="Unmatched"
-          value={String(stats.unmatched)}
-          tone={stats.unmatched > 0 ? 'warn' : undefined}
+          value={
+            stats.unmatched > 0
+              ? <span className="text-[var(--accent-warm)]">{String(stats.unmatched)}</span>
+              : String(stats.unmatched)
+          }
+          metricKind="neutral"
         />
         {stats.dangling > 0 && (
-          <Stat
+          <StatCard
             label="Broken links (one-way)"
-            value={String(stats.dangling)}
-            tone="warn"
+            value={<span className="text-[var(--accent-warm)]">{String(stats.dangling)}</span>}
+            metricKind="neutral"
           />
         )}
         {Object.entries(stats.byPurpose).map(([purpose, n]) => (
-          <Stat
+          <StatCard
             key={`purpose-${purpose}`}
             label={PURPOSE_LABEL.get(purpose) ?? purpose}
             value={String(n)}
+            metricKind="neutral"
           />
         ))}
-      </div>
-    </section>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone?: 'warn'
-}) {
-  return (
-    <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
-      <div className="muted" style={{ fontSize: 12 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 20,
-          fontWeight: 600,
-          color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
-        }}
-      >
-        {value}
-      </div>
+      </Grid>
     </div>
   )
 }
@@ -364,44 +337,42 @@ function UnmatchedQueue({
   onLink: (idA: number, idB: number, purpose: TransferPurpose | null) => void | Promise<void>
 }) {
   return (
-    <div className="tableWrap" aria-busy={loading}>
-      <Table className="table">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead>Account</TableHead>
-            <TableHead>Merchant</TableHead>
-            <TableHead>Amount</TableHead>
-            <TableHead>Direction</TableHead>
-            <TableHead>Reference</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading ? (
-            Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonRow key={`unmatched-skel-${i}`} cols={UNMATCHED_COLUMN_COUNT} />
-            ))
-          ) : rows.length === 0 ? (
-            <EmptyTableRow
-              colSpan={UNMATCHED_COLUMN_COUNT}
-              title="No unmatched transfers — nice."
-              description="If you suspect a transfer is missing here, open the transactions page and set txn_type=transfer on the relevant row."
+    <Table aria-busy={loading}>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Date</TableHead>
+          <TableHead>Account</TableHead>
+          <TableHead>Merchant</TableHead>
+          <TableHead>Amount</TableHead>
+          <TableHead>Direction</TableHead>
+          <TableHead>Reference</TableHead>
+          <TableHead>Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonRow key={`unmatched-skel-${i}`} cols={UNMATCHED_COLUMN_COUNT} />
+          ))
+        ) : rows.length === 0 ? (
+          <EmptyTableRow
+            colSpan={UNMATCHED_COLUMN_COUNT}
+            title="No unmatched transfers — nice."
+            description="If you suspect a transfer is missing here, open the transactions page and set txn_type=transfer on the relevant row."
+          />
+        ) : (
+          rows.map((row) => (
+            <UnmatchedRowRender
+              key={row.id}
+              row={row}
+              expanded={expandedId === row.id}
+              onToggleExpand={() => onExpand(expandedId === row.id ? null : row.id)}
+              onLink={onLink}
             />
-          ) : (
-            rows.map((row) => (
-              <UnmatchedRowRender
-                key={row.id}
-                row={row}
-                expanded={expandedId === row.id}
-                onToggleExpand={() => onExpand(expandedId === row.id ? null : row.id)}
-                onLink={onLink}
-              />
-            ))
-          )}
-        </TableBody>
-      </Table>
-    </div>
+          ))
+        )}
+      </TableBody>
+    </Table>
   )
 }
 
@@ -487,23 +458,16 @@ function SuggestionPanel({
   const candidates = suggestions?.candidates ?? []
 
   return (
-    <div style={{ padding: 8 }}>
-      {loading && <p className="muted">Loading suggestions…</p>}
+    <div className="p-2">
+      {loading && <p className="text-sm leading-6 text-muted-foreground">Loading suggestions…</p>}
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-3">
           {err}
-        </p>
+        </Alert>
       )}
       {!loading && !err && (
         <>
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              alignItems: 'center',
-              marginBottom: 12,
-            }}
-          >
+          <div className="flex items-center gap-3 mb-3">
             <label htmlFor={`purpose-${anchor.id}`}>Classify as</label>
             <NativeSelect
               id={`purpose-${anchor.id}`}
@@ -518,12 +482,12 @@ function SuggestionPanel({
             </NativeSelect>
           </div>
           {candidates.length === 0 ? (
-            <p className="muted">
+            <p className="text-sm leading-6 text-muted-foreground">
               No candidate matches in the window. Try widening the date range or
               setting <code>txn_type=transfer</code> on the sibling row.
             </p>
           ) : (
-            <Table className="table">
+            <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
@@ -594,8 +558,8 @@ function MoneyMovementTable({
   void onSetPurpose
 
   return (
-    <div className="tableWrap" aria-busy={loading}>
-      <Table className="table">
+    <>
+      <Table aria-busy={loading}>
         <TableHeader>
           <TableRow>
             <TableHead>From</TableHead>
@@ -644,7 +608,7 @@ function MoneyMovementTable({
         </TableBody>
       </Table>
       {flows.length > 0 && (
-        <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+        <p className="mt-2 text-xs text-muted-foreground">
           Total source movement:{' '}
           {sourceTotalsByCurrency
             .map(([cur, amount]) => formatMoney(amount, cur))
@@ -654,6 +618,6 @@ function MoneyMovementTable({
           row on the Transactions page to break a specific pair.
         </p>
       )}
-    </div>
+    </>
   )
 }
