@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Grid } from '@/components/ui/grid'
+import { StatCard } from '@/components/ui/stat-card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -405,12 +407,12 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
       </Card>
 
       {summary && (
-        <section className="amazonSummaryGrid mb-4">
-          <Card><strong>{summary.created}</strong><span>Orders created</span></Card>
-          <Card><strong>{summary.skipped}</strong><span>Skipped</span></Card>
-          <Card><strong>{summary.importedItems}</strong><span>Items imported</span></Card>
-          <Card><strong>{summary.failed}</strong><span>Failed rows</span></Card>
-        </section>
+        <Grid minItemWidth={160} className="mb-4">
+          <StatCard label="Orders created" value={summary.created} />
+          <StatCard label="Skipped" value={summary.skipped} />
+          <StatCard label="Items imported" value={summary.importedItems} />
+          <StatCard label="Failed rows" value={summary.failed} />
+        </Grid>
       )}
 
       <Card>
