@@ -89,6 +89,7 @@ router.get('/:id', apiReadLimiter, async (req, res, next) => {
       name: contact.name,
       notes: contact.notes,
       isPartner: contact.isPartner,
+      aliases: contact.aliases,
       openReimbursements: open,
       today,
     });
@@ -131,6 +132,7 @@ router.post('/', async (req, res, next) => {
     const row = await findOrCreateContactByName(household.id, name);
     let changed = false;
     if (b.notes != null) { row.set('notes', String(b.notes)); changed = true; }
+    if (b.aliases != null) { row.set('aliases', String(b.aliases).slice(0, 500)); changed = true; }
     if (isPartner) { row.set('isPartner', true); changed = true; }
     if (changed) await row.save();
     res.status(201).json(row);
@@ -157,6 +159,9 @@ router.patch('/:id', async (req, res, next) => {
       row.set('name', name);
     }
     if (b.notes !== undefined) row.set('notes', b.notes != null ? String(b.notes) : null);
+    if (b.aliases !== undefined) {
+      row.set('aliases', b.aliases != null ? String(b.aliases).slice(0, 500) : null);
+    }
     if (b.isPartner !== undefined) {
       const parsed = coerceBool(b.isPartner);
       if (parsed === null) {
