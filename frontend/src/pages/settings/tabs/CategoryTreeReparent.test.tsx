@@ -58,6 +58,25 @@ describe('CategoryTreeManager reparent', () => {
     await waitFor(() => screen.getByText(/cannot move a category into its own subtree/i));
   });
 
+  it('dropping a parent onto its own child is blocked client-side (no API call)', async () => {
+    const nested: CategoryTreeNode[] = [
+      { id: 1, name: 'Work', parentId: null, icon: null, taxTreatment: 'none', children: [
+        { id: 2, name: 'Internet', parentId: 1, icon: null, taxTreatment: 'none', children: [] },
+      ]},
+    ];
+    mockApis(nested);
+    const reparentSpy = vi.spyOn(catApi, 'reparentCategory').mockResolvedValue({ id: 1 } as never);
+    render(<CategoryTreeManager />);
+    await waitFor(() => screen.getByText('Internet'));
+    const dt = dataTransfer();
+    const workRow = screen.getByText('Work').closest('[draggable="true"]')!;
+    const internetRow = screen.getByText('Internet').closest('[draggable="true"]')!;
+    fireEvent.dragStart(workRow, { dataTransfer: dt });
+    fireEvent.drop(internetRow, { dataTransfer: dt });
+    await waitFor(() => screen.getByText(/into one of its own subcategories/i));
+    expect(reparentSpy).not.toHaveBeenCalled();
+  });
+
   it('dropping a node onto the root zone calls reparentCategory with null', async () => {
     mockApis();
     const reparentSpy = vi.spyOn(catApi, 'reparentCategory').mockResolvedValue({ id: 1 } as never);
