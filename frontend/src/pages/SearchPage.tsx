@@ -239,7 +239,7 @@ export function SearchPage() {
 
       {saved.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm font-medium muted flex items-center gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
             <Bookmark className="h-4 w-4" />
             Saved searches
           </h2>
@@ -287,7 +287,7 @@ export function SearchPage() {
 
       {!response && !err && (
         <section className="space-y-2">
-          <h2 className="text-sm font-medium muted">Try one of these</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">Try one of these</h2>
           <ul className="flex flex-wrap gap-2">
             {EXAMPLES.map((ex) => (
               <li key={ex}>
@@ -319,7 +319,7 @@ export function SearchPage() {
         <section className="space-y-3">
           {chips.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs muted">Active filters:</span>
+              <span className="text-xs text-muted-foreground">Active filters:</span>
               {chips.map((c) => (
                 <Badge key={c.key} variant="secondary">
                   {c.label}
@@ -364,7 +364,7 @@ export function SearchPage() {
 
           {response.results.length > 0 && (
             <>
-              <p className="text-sm muted">
+              <p className="text-sm leading-6 text-muted-foreground">
                 {response.total} match{response.total === 1 ? '' : 'es'} ·{' '}
                 showing {response.results.length}
               </p>
