@@ -30,8 +30,10 @@ import {
   DialogTitle,
   useConfirm,
 } from '@/components/ui/dialog'
+import { Alert } from '@/components/ui/alert'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Tabs } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
@@ -407,7 +409,7 @@ export function CalendarPage() {
         description="Upcoming income, expenses, transfers, and goal contributions. All events come from your planned events list."
       />
 
-      <div className="row mb-4 flex flex-wrap gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Tabs items={TAB_ITEMS} value={view} onValueChange={(v) => setView(v as ViewMode)} />
         <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={goPrev} aria-label="Previous month">
@@ -437,9 +439,9 @@ export function CalendarPage() {
       <UpcomingSummaryCard summary={summary} />
 
       {error ? (
-        <div role="alert" className="muted p-4">
+        <Alert variant="error" className="mb-3">
           Failed to load calendar: {error}
-        </div>
+        </Alert>
       ) : null}
 
       {view === 'month' ? (
@@ -485,7 +487,7 @@ export function CalendarPage() {
                 {dayEvents.map((ev) => (
                   <li
                     key={`${ev.id}-${ev.eventDate}`}
-                    className="row items-center justify-between gap-3 border-b border-border pb-2"
+                    className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2"
                   >
                     <div className="flex items-center gap-2">
                       <span
@@ -494,14 +496,14 @@ export function CalendarPage() {
                       />
                       <div>
                         <div className="font-medium">{ev.name}</div>
-                        <div className="muted text-xs">
+                        <div className="text-xs leading-6 text-muted-foreground">
                           {ev.kindLabel} ·{' '}
                           {formatMoney(Number(ev.amount), ev.currency)}
                           {ev.recurrenceRule ? ' · recurring' : ''}
                         </div>
                       </div>
                     </div>
-                    <div className="row gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
                       <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                         {ev.recurrenceRule ? (
                           <Repeat
@@ -614,7 +616,7 @@ export function CalendarPage() {
                 idPrefix={`calendar-edit-${editingId}`}
                 showStatus
               />
-              <p className="muted text-xs mt-3">
+              <p className="mt-3 text-xs leading-6 text-muted-foreground">
                 Need to link this event to a transaction?{' '}
                 <Button
                   type="button"
@@ -659,30 +661,32 @@ type UpcomingSummary = {
 
 function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
   return (
-    <Card className="accountsFormCard" style={{ marginBottom: '1rem' }}>
-      <div className="accountsCardHeader">
-        <div>
-          <h2 className="flex items-center gap-2">
+    <Card className="mb-4">
+      <SectionHeader
+        title={
+          <span className="flex items-center gap-2">
             <CalendarIcon aria-hidden="true" className="h-5 w-5" />
             Next 14 days
-          </h2>
-          <p className="muted">
-            {summary.count === 0
-              ? 'Nothing planned in the next two weeks.'
-              : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`}
-          </p>
-        </div>
-        <div className="row gap-5 flex-wrap">
-          <Stat label="Expected in" value={summary.inflow} positive />
-          <Stat label="Expected out" value={summary.outflow} negative />
-          <Stat
-            label="Net"
-            value={summary.net}
-            positive={summary.net >= 0}
-            negative={summary.net < 0}
-          />
-        </div>
-      </div>
+          </span>
+        }
+        description={
+          summary.count === 0
+            ? 'Nothing planned in the next two weeks.'
+            : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`
+        }
+        actions={
+          <div className="flex flex-wrap gap-5">
+            <Stat label="Expected in" value={summary.inflow} positive />
+            <Stat label="Expected out" value={summary.outflow} negative />
+            <Stat
+              label="Net"
+              value={summary.net}
+              positive={summary.net >= 0}
+              negative={summary.net < 0}
+            />
+          </div>
+        }
+      />
     </Card>
   )
 }
@@ -705,7 +709,7 @@ function Stat({
       : 'text-foreground'
   return (
     <div>
-      <div className="muted text-xs">{label}</div>
+      <div className="text-xs leading-6 text-muted-foreground">{label}</div>
       <div className={`text-lg font-semibold ${color}`}>
         {formatMoney(value, 'CAD')}
       </div>
@@ -726,7 +730,7 @@ type MonthGridViewProps = {
 function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: MonthGridViewProps) {
   const navigate = useNavigate()
   return (
-    <Card className="accountsFormCard">
+    <Card className="mb-4">
       <div
         role="grid"
         aria-label="Month calendar"
@@ -736,7 +740,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
           <div
             key={d}
             role="columnheader"
-            className="muted text-xs bg-card text-center font-semibold p-[0.4rem]"
+            className="text-xs leading-6 text-muted-foreground bg-card text-center font-semibold p-[0.4rem]"
           >
             {d}
           </div>
@@ -782,14 +786,14 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
                 </span>
               ))}
               {hidden > 0 ? (
-                <span className="muted text-xs">+{hidden} more</span>
+                <span className="text-xs leading-6 text-muted-foreground">+{hidden} more</span>
               ) : null}
             </Button>
           )
         })}
       </div>
       {loading ? (
-        <p className="muted mt-2">Loading…</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">Loading…</p>
       ) : null}
       {/* `month` prop is consumed via grid construction upstream; we accept
           it here so the parent can re-render the grid when it changes. */}
@@ -809,8 +813,8 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
   const grouped = useMemo(() => groupByDate(events), [events])
   const entries = Array.from(grouped.entries())
   return (
-    <Card className="accountsFormCard">
-      {loading ? <p className="muted">Loading…</p> : null}
+    <Card className="mb-4">
+      {loading ? <p className="text-sm leading-6 text-muted-foreground">Loading…</p> : null}
       {entries.length === 0 && !loading ? (
         <EmptyState
           title="No events in this window."
@@ -829,7 +833,7 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
             {evs.map((ev) => (
               <li
                 key={`${ev.id}-${ev.eventDate}`}
-                className="row justify-between items-center gap-3"
+                className="mb-3 flex flex-wrap items-center justify-between gap-3"
               >
                 <div className="flex items-center gap-2">
                   <span
@@ -838,14 +842,14 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                   />
                   <div>
                     <div className="font-medium">{ev.name}</div>
-                    <div className="muted text-xs">
+                    <div className="text-xs leading-6 text-muted-foreground">
                       {ev.kindLabel} ·{' '}
                       {formatMoney(Number(ev.amount), ev.currency)}
                       {ev.recurrenceRule ? ' · recurring' : ''}
                     </div>
                   </div>
                 </div>
-                <div className="row gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                     {ev.recurrenceRule ? (
                       <Repeat
