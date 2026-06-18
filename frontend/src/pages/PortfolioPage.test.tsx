@@ -239,6 +239,22 @@ describe('PortfolioPage table polish', () => {
     expect(emDashCount).toBeGreaterThanOrEqual(4)
   })
 
+  it('renders skeletons while loading', () => {
+    // never-resolving getJson pins loading=true. beforeEach restoreAllMocks
+    // tears this down for the next test.
+    vi.spyOn(api, 'getJson').mockImplementation(
+      () => new Promise(() => {}) as never,
+    )
+    const { container } = render(
+      <MemoryRouter>
+        <PortfolioPage />
+      </MemoryRouter>,
+    )
+    expect(
+      container.querySelectorAll('[data-slot="skeleton"]').length,
+    ).toBeGreaterThan(0)
+  })
+
   it('Total (CAD) stat card shows delta when present', async () => {
     mockApi({
       '/api/portfolio/sparklines': baseSparks,

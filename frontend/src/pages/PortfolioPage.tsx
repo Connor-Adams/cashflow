@@ -22,6 +22,7 @@ import { Sparkline } from '@/components/ui/sparkline'
 import { MetricStat } from '@/components/ui/metric-stat'
 import { PctDeltaCell } from '@/components/ui/pct-delta-cell'
 import { StatCard } from '@/components/ui/stat-card'
+import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
 import { TableCard, type TableColumn } from '@/components/ui/table-card'
 import {
   Table,
@@ -233,7 +234,15 @@ export function PortfolioPage() {
       )}
 
       <section className="transactionsStats" aria-busy={loading}>
-        {summary?.unifiedTotal != null && (
+        {loading &&
+          Array.from({ length: 4 }).map((_, i) => (
+            <Card key={`portfolio-skeleton-${i}`} data-slot="stat-card" className="mb-0">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="mt-2 h-7 w-28" />
+              <Skeleton className="mt-2 h-3 w-36" />
+            </Card>
+          ))}
+        {!loading && summary?.unifiedTotal != null && (
           <MetricStat
             key="unified-cad"
             label="Total (CAD)"
@@ -242,15 +251,16 @@ export function PortfolioPage() {
             hint={`Converted from ${summary.unifiedTotal.ratesUsed.length} ${summary.unifiedTotal.ratesUsed.length === 1 ? 'currency' : 'currencies'} via BoC daily rates`}
           />
         )}
-        {(summary?.totalsByCurrency ?? []).map((total) => (
-          <StatCard
-            key={total.currency}
-            label={total.currency}
-            value={formatMoney(total.marketValue, total.currency)}
-            hint="Current portfolio value"
-          />
-        ))}
-        {summary && summary.totalsByCurrency.length === 0 && (
+        {!loading &&
+          (summary?.totalsByCurrency ?? []).map((total) => (
+            <StatCard
+              key={total.currency}
+              label={total.currency}
+              value={formatMoney(total.marketValue, total.currency)}
+              hint="Current portfolio value"
+            />
+          ))}
+        {!loading && summary && summary.totalsByCurrency.length === 0 && (
           <StatCard
             label="Holdings"
             value="0"
@@ -272,7 +282,7 @@ export function PortfolioPage() {
       </TabPanel>
 
       <TabPanel value="holdings" active={activeTab}>
-        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} />
+        <HoldingsPanel summary={summary} accountsById={accountsById} sparklines={sparklines} loading={loading} />
       </TabPanel>
 
       <TabPanel value="by-security" active={activeTab}>
@@ -312,10 +322,12 @@ function HoldingsPanel({
   summary,
   accountsById,
   sparklines,
+  loading,
 }: {
   summary: PortfolioSummary | null
   accountsById: Map<number, PortfolioSummary['accounts'][number]>
   sparklines: Map<number, PortfolioSparklinePoint[]>
+  loading: boolean
 }) {
   const holdingColumns: TableColumn<HoldingSnapshot>[] = [
     {
@@ -467,15 +479,35 @@ function HoldingsPanel({
 
   return (
     <>
-      <TableCard
-        title="Holdings"
-        description="Latest imported position per account and security. Click a symbol for the per-security drill."
-        columns={holdingColumns}
-        rows={summary?.holdings ?? []}
-        defaultSort={{ key: 'marketValue', dir: 'desc' }}
-        getRowKey={(h) => h.id}
-        empty="No holdings imported yet."
-      />
+      {loading ? (
+        <TableCard
+          title="Holdings"
+          description="Latest imported position per account and security. Click a symbol for the per-security drill."
+        >
+          <TableHeader>
+            <TableRow>
+              {holdingColumns.map((column) => (
+                <TableHead key={column.key}>{column.header}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <SkeletonRow key={`portfolio-skeleton-${i}`} cols={holdingColumns.length} />
+            ))}
+          </TableBody>
+        </TableCard>
+      ) : (
+        <TableCard
+          title="Holdings"
+          description="Latest imported position per account and security. Click a symbol for the per-security drill."
+          columns={holdingColumns}
+          rows={summary?.holdings ?? []}
+          defaultSort={{ key: 'marketValue', dir: 'desc' }}
+          getRowKey={(h) => h.id}
+          empty="No holdings imported yet."
+        />
+      )}
 
       <Card className="transactionsTableCard">
         <div className="transactionsPanelHeader">

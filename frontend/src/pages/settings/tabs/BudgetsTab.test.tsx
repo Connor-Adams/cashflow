@@ -61,6 +61,26 @@ describe('BudgetsTab', () => {
     }
   })
 
+  it('renders skeletons while loading', () => {
+    // getJson (used to load budgets) ultimately calls fetch. Re-stub fetch with
+    // a never-resolving promise so the load never completes and loading stays
+    // true, then restore the route-aware stub for sibling tests.
+    const original = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    try {
+      const { container } = render(
+        <ToastProvider>
+          <BudgetsTab />
+        </ToastProvider>,
+      )
+      expect(
+        container.querySelectorAll('[data-slot="skeleton"]').length,
+      ).toBeGreaterThan(0)
+    } finally {
+      vi.stubGlobal('fetch', original)
+    }
+  })
+
   it('toggling an alert chip flips its checkbox state', async () => {
     const user = userEvent.setup()
     render(

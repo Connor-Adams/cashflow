@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
+import { Skeleton, SkeletonText } from '@/components/ui/skeleton'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
 import { PeriodInsightBand } from '@/components/dashboard/PeriodInsightBand'
 import { KpiStack } from '@/components/dashboard/KpiStack'
@@ -735,7 +736,27 @@ export function DashboardPage() {
         description="Totals stay in each currency. Filter by currency and date range."
       />
       {err && <Alert variant="error">{err}</Alert>}
-      {loading && <p className="text-sm leading-6 text-muted-foreground">Loading dashboard…</p>}
+      {loading && (
+        <div
+          className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
+          aria-busy={loading}
+          aria-label="Loading dashboard"
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={`dash-skeleton-${i}`}
+              className="col-span-1 sm:col-span-2 rounded-xl border border-border bg-card p-4"
+            >
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="mt-3 h-7 w-2/3" />
+            </div>
+          ))}
+          <Skeleton className="col-span-1 sm:col-span-6 lg:col-span-8 row-span-2 h-full min-h-[20rem] rounded-xl" />
+          <div className="col-span-1 sm:col-span-6 lg:col-span-4 row-span-2 rounded-xl border border-border bg-card p-4">
+            <SkeletonText lines={5} />
+          </div>
+        </div>
+      )}
 
       <FilterCard density="compact" className="mt-2">
           <FilterBar
@@ -787,6 +808,7 @@ export function DashboardPage() {
 
       <ActivationCardDeck />
 
+      {!loading && (
       <div
         className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
@@ -1437,6 +1459,7 @@ export function DashboardPage() {
           loading={loading}
         />
       </div>
+      )}
     </div>
   )
 }
