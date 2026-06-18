@@ -97,6 +97,44 @@ To onboard:
    - `GIT_SHA=${{RAILWAY_GIT_COMMIT_SHA}}`
    - Redeploy.
 
+## Postgres engine metrics (prod only)
+
+Postgres exists **only in prod** — local dev runs on SQLite. So PG engine metrics
+are a **prod-only overlay** on the collector, not part of the base config that
+local `docker-compose` loads. The collector's `postgresql` receiver
+(`infra/otel-collector/config.postgres.yaml`) scrapes `pg_stat_*` / `pg_settings`
+and emits the metrics through the **existing** prometheus exporter on `:9464`,
+which the `cashflow-otel-collector` Prometheus job already scrapes — so there is
+**no new scrape job**. (App-side query spans already reach Tempo via the backend's
+Sequelize auto-instrumentation; this adds the engine-health layer.) No extension
+is needed — `pg_stat_statements` is only for query-digest analytics, which this
+does not collect.
+
+Dashboard: **Cashflow Postgres Engine** (`cashflow-postgres-engine`), auto-provisioned.
+
+One-time Railway setup (on the existing `otel-collector` service):
+
+1. **Create a read-only monitoring role** on the Railway Postgres. `pg_monitor`
+   unlocks the optional metrics (deadlocks, locks); core metrics work without it.
+   ```sql
+   CREATE ROLE cashflow_metrics LOGIN PASSWORD '<strong-password>';
+   GRANT pg_monitor TO cashflow_metrics;
+   ```
+2. **Add env vars** to the `otel-collector` service:
+   - `PG_METRICS_ENDPOINT=postgres.railway.internal:5432` (the PG service's private host:port)
+   - `PG_METRICS_USERNAME=cashflow_metrics`
+   - `PG_METRICS_PASSWORD=<strong-password>`
+   - `PG_METRICS_DATABASE=<db name>` (usually `railway`)
+3. **Set the service's Custom Start Command** so the collector loads the overlay
+   on top of the base config (a single image, two `--config` flags):
+   ```
+   --config=/etc/otel-collector-config.yaml --config=/etc/otel-collector-pg-config.yaml
+   ```
+   Without this flag the overlay is dormant — the base CMD loads only the first
+   config. This is exactly why local stays quiet: it never gets the second flag.
+4. Redeploy. Verify in Grafana → Explore → Prometheus: `postgresql_backends`
+   should return a series within ~30s.
+
 ## Grafana service
 
 The cashflow stack includes a self-hosted Grafana instance for querying Loki, Tempo, and Prometheus. Grafana runs as a Railway service at `ghcr.io/connor-adams/cashflow-grafana`. Datasources auto-provision on boot from `infra/grafana/provisioning/`.
