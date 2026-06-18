@@ -9,7 +9,9 @@ import {
   Upload,
   X,
 } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
@@ -341,12 +343,12 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
         {!embedded && (
           <div>
             <h1>Amazon Enrichment</h1>
-            <p className="muted">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
+            <p className="text-sm leading-6 text-muted-foreground">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
           </div>
         )}
         <div className="amazonActionRow">
           {syncStatus && (
-            <span className="muted" title={syncStatus.lastCapturedAt ?? 'No Amazon orders captured yet'}>
+            <span className="text-sm leading-6 text-muted-foreground" title={syncStatus.lastCapturedAt ?? 'No Amazon orders captured yet'}>
               {formatSyncAge(syncStatus.lastCapturedAt)} · {syncStatus.orderCount} order{syncStatus.orderCount === 1 ? '' : 's'}
             </span>
           )}
@@ -371,7 +373,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       </div>
 
-      {message && <p className="error">{message}</p>}
+      {message && <Alert variant="error" className="mb-4">{message}</Alert>}
 
       {syncStatus?.orderCount === 0 && txns.length === 0 && (
         <EmptyState
@@ -380,43 +382,45 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
         />
       )}
 
-      <form className="card amazonImportPanel" onSubmit={onUpload}>
-        <div>
-          <h2>Amazon Import</h2>
-          <p className="muted">Upload an Amazon report CSV. Re-uploading the same rows is safe.</p>
-        </div>
-        <Label htmlFor="amazonImportFile">
-          CSV file
-          <Input
-            ref={fileRef}
-            id="amazonImportFile"
-            type="file"
-            accept=".csv,text/csv"
-          />
-        </Label>
-        <Button type="submit" disabled={loading}>
-          <Upload aria-hidden="true" />
-          Upload CSV
-        </Button>
-      </form>
+      <Card className="amazonImportPanel">
+        <form onSubmit={onUpload} className="contents">
+          <div>
+            <h2>Amazon Import</h2>
+            <p className="text-sm leading-6 text-muted-foreground">Upload an Amazon report CSV. Re-uploading the same rows is safe.</p>
+          </div>
+          <Label htmlFor="amazonImportFile">
+            CSV file
+            <Input
+              ref={fileRef}
+              id="amazonImportFile"
+              type="file"
+              accept=".csv,text/csv"
+            />
+          </Label>
+          <Button type="submit" disabled={loading}>
+            <Upload aria-hidden="true" />
+            Upload CSV
+          </Button>
+        </form>
+      </Card>
 
       {summary && (
         <section className="amazonSummaryGrid mb-4">
-          <article className="card"><strong>{summary.created}</strong><span>Orders created</span></article>
-          <article className="card"><strong>{summary.skipped}</strong><span>Skipped</span></article>
-          <article className="card"><strong>{summary.importedItems}</strong><span>Items imported</span></article>
-          <article className="card"><strong>{summary.failed}</strong><span>Failed rows</span></article>
+          <Card><strong>{summary.created}</strong><span>Orders created</span></Card>
+          <Card><strong>{summary.skipped}</strong><span>Skipped</span></Card>
+          <Card><strong>{summary.importedItems}</strong><span>Items imported</span></Card>
+          <Card><strong>{summary.failed}</strong><span>Failed rows</span></Card>
         </section>
       )}
 
-      <section className="card">
+      <Card>
         <h2>Amazon Review</h2>
         <div className="amazonReviewList">
           {txns.map((txn) => (
             <article key={txn.id} className="amazonReviewRow">
               <div>
                 <strong>{txn.merchantClean}</strong>
-                <div className="muted">{txn.date} · {formatMoney(Number(txn.amount), txn.currency)}</div>
+                <div className="text-sm leading-6 text-muted-foreground">{txn.date} · {formatMoney(Number(txn.amount), txn.currency)}</div>
               </div>
               <div className="amazonLinks">
                 {(txn.orderLinks ?? []).map((link) => (
@@ -431,9 +435,9 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                           </strong>
                         )
                       })()}
-                      <span className="muted">{link.status} · {link.matchReason}</span>
+                      <span className="text-sm leading-6 text-muted-foreground">{link.status} · {link.matchReason}</span>
                       <span>{itemPreview(link.order)}</span>
-                      <span className="muted">{categoryPreview(link.order)}</span>
+                      <span className="text-sm leading-6 text-muted-foreground">{categoryPreview(link.order)}</span>
                     </div>
                     <div className="amazonActionRow">
                       <Button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
@@ -480,9 +484,9 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
             <EmptyState title="No Amazon-like transactions found." />
           )}
         </div>
-      </section>
+      </Card>
 
-      <section className="card">
+      <Card>
         <h2>Recent Imported Orders</h2>
         <div className="tableWrap">
           <Table className="table">
@@ -507,14 +511,14 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
             </TableBody>
           </Table>
         </div>
-      </section>
+      </Card>
 
       {selectedOrder && (
-        <section className="card amazonOrderEditor">
+        <Card className="amazonOrderEditor">
           <div className="amazonHeader">
             <div>
               <h2>Order Detail/Edit</h2>
-              <p className="muted">
+              <p className="text-sm leading-6 text-muted-foreground">
                 {selectedOrder.vendorOrderId ?? `Order #${selectedOrder.id}`} · {selectedOrder.orderDate ?? selectedOrder.shipmentDate ?? 'No date'}
               </p>
             </div>
@@ -583,7 +587,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                       {itemPriceErrors[item.id] && (
                         <span
                           id={`item-price-error-${item.id}`}
-                          className="error"
+                          className="text-danger"
                           role="alert"
                         >
                           {itemPriceErrors[item.id]}
@@ -607,7 +611,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
               </TableBody>
             </Table>
           </div>
-        </section>
+        </Card>
       )}
     </div>
   )
