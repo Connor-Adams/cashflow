@@ -1087,11 +1087,25 @@ export async function resolvePdfAccountFromHeader(
   let accountCreated = false;
 
   // Fallback: if shortCode not found, try to find by name + accountType
-  // (accounts from CSV may have different shortCode but same name/type).
+  // (accounts from CSV may have different shortCode but same name/type). Scope
+  // the match by corp-vs-personal: a corp statement (corp accountHolder, e.g.
+  // "CDG Labs Inc.") and a personal statement of the same currency produce the
+  // SAME template.name ("Wise USD") but a DIFFERENT account number, so the
+  // shortCode lookup misses and this fallback fires. Keying on name alone here
+  // merged a corporate Wise statement into the same-named personal Wise account
+  // (and vice-versa). Only reuse an account whose corp-ness matches this
+  // statement — a corp account carries an entity with kind='corp'; personal
+  // accounts carry the household's personal entity (or NULL legacy).
   if (!account) {
-    account = await Account.findOne({
+    const candidates = await Account.findAll({
       where: { householdId, name: template.name, accountType: template.accountType },
+      include: [{ model: Entity, as: 'entity', required: false }],
     });
+    account =
+      candidates.find((candidate) => {
+        const candidateEntity = candidate.get('entity') as InstanceType<typeof Entity> | null | undefined;
+        return (candidateEntity?.kind === 'corp') === overrideBusiness;
+      }) ?? null;
     if (account && account.shortCode !== header.accountSuffix) {
       // Update shortCode to reflect the PDF's account number.
       await account.update({ shortCode: header.accountSuffix });
