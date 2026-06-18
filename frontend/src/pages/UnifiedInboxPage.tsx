@@ -197,13 +197,13 @@ function ActionItemCardBody({ item }: { item: ReviewItem }) {
         <strong>{title}</strong>
         {severity ? <SeverityBadge severity={severity} /> : null}
       </div>
-      {summary ? <p className="muted mb-0">{summary}</p> : null}
+      {summary ? <p className="mb-0 text-sm leading-6 text-muted-foreground">{summary}</p> : null}
       {link ? (
         <Link to={link} className="text-sm underline">
           Open
         </Link>
       ) : item.subject_type && item.subject_id ? (
-        <p className="muted mb-0 text-xs">
+        <p className="mb-0 text-xs text-muted-foreground">
           {item.subject_type} #{item.subject_id}
         </p>
       ) : null}
@@ -227,7 +227,7 @@ function CounterpartyEmailMatchCardBody({ item }: { item: ReviewItem }) {
         <Badge variant="outline">counterparty email match</Badge>
       </div>
       {item.subject_type && item.subject_id ? (
-        <p className="muted mb-0 text-xs">
+        <p className="mb-0 text-xs text-muted-foreground">
           {item.subject_type} #{item.subject_id}
         </p>
       ) : null}
@@ -254,7 +254,7 @@ function AiSuggestionCardBody({ item }: { item: ReviewItem }) {
         <Badge variant="outline">{kind}</Badge>
       </div>
       {item.subject_type && item.subject_id ? (
-        <p className="muted mb-0 text-xs">
+        <p className="mb-0 text-xs text-muted-foreground">
           {item.subject_type} #{item.subject_id}
         </p>
       ) : null}
@@ -277,7 +277,7 @@ function ChatProposalCardBody({ item }: { item: ReviewItem }) {
         <strong>Chat proposal</strong>
         <Badge variant="outline">{kind}</Badge>
       </div>
-      <p className="muted mb-0 text-xs">
+      <p className="mb-0 text-xs text-muted-foreground">
         {matched != null ? `${matched} transactions matched` : 'Open in chat to review'}
       </p>
     </div>
@@ -297,7 +297,7 @@ function CardBody({ item }: { item: ReviewItem }) {
       return (
         <div>
           <strong>{item.source}</strong>
-          <p className="muted mb-0 text-xs">{item.native_status}</p>
+          <p className="mb-0 text-xs text-muted-foreground">{item.native_status}</p>
         </div>
       )
   }
@@ -320,7 +320,7 @@ function ReviewItemCard({
         <CardBody item={item} />
         <div className="flex shrink-0 flex-col items-end gap-2">
           <Badge variant="secondary">{SOURCE_LABEL[item.source]}</Badge>
-          <span className="muted text-xs">{item.native_status}</span>
+          <span className="text-xs text-muted-foreground">{item.native_status}</span>
         </div>
       </div>
       {isPending ? (
@@ -587,14 +587,14 @@ export function UnifiedInboxPage() {
       )}
 
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="text-sm leading-6 text-muted-foreground">Loading…</p>
       ) : visible.length === 0 ? (
         <EmptyState
           title="No items"
           description="Nothing matches the current filters. Try a different source, status, or clear the search."
         />
       ) : (
-        <ul className="grid gap-2 p-0" style={{ listStyle: 'none' }}>
+        <ul className="grid list-none gap-2 p-0">
           {visible.map((item) => (
             <ReviewItemCard
               key={item.id}
