@@ -1,7 +1,17 @@
 import { useMemo, useState } from 'react'
 import { PiggyBank, TrendingDown, TrendingUp } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/ui/page-header'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { formatMoney } from '../lib/formatMoney'
 import { ReportFilterBar } from './report/ReportFilterBar'
 import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
@@ -73,7 +83,7 @@ export function SavingsRatePage() {
         description="Track your true savings rate over time — the share of income you keep as savings, investments, and debt paid down, rather than spend."
       />
 
-      <section className="card">
+      <Card className="mb-4">
         <ReportFilterBar
           idPrefix="savings"
           month={month}
@@ -110,11 +120,11 @@ export function SavingsRatePage() {
         </div>
 
         {windowLabel && (
-          <p className="muted mt-2">
+          <p className="text-sm leading-6 text-muted-foreground mt-2 mb-0">
             Showing {windowLabel}.
           </p>
         )}
-      </section>
+      </Card>
 
       <FormulaExplainer
         includeInvestments={includeInvestments}
@@ -122,26 +132,24 @@ export function SavingsRatePage() {
       />
 
       {err && (
-        <section className="card">
-          <p className="error" role="alert">
-            {err}
-          </p>
-        </section>
+        <Alert variant="error" className="mb-4">
+          {err}
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Building the report…</p>
-        </section>
+        <Card className="mb-4" aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">Building the report…</p>
+        </Card>
       ) : !data ? null : data.byCurrency.length === 0 ? (
-        <section className="card">
-          <p className="muted">
+        <Card className="mb-4">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">
             No income or savings activity for {windowLabel || 'this window'}
             {scope !== 'all' ? ` in the ${scope} scope` : ''}
             {currency ? ` (${currency})` : ''}. Import transactions or widen the
             window.
           </p>
-        </section>
+        </Card>
       ) : (
         data.byCurrency.map((summary) => (
           <CurrencySummaryCard key={summary.currency} summary={summary} />
@@ -168,14 +176,14 @@ function FormulaExplainer({
   if (includeDebtPrincipal) numeratorParts.push('debt principal')
   const numerator = numeratorParts.join(' + ')
   return (
-    <section className="card" aria-label="How the savings rate is calculated">
+    <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label="How the savings rate is calculated">
       <h2 className="m-0 mb-1.5 text-base">How this is calculated</h2>
       <p className="mb-2">
         <code>
           savings rate = ({numerator}) ÷ income
         </code>
       </p>
-      <ul className="muted m-0 pl-4">
+      <ul className="text-sm leading-6 text-muted-foreground m-0 pl-4">
         <li>
           <strong>Income</strong> — money coming into your cash accounts
           (payroll, deposits). Statement payments and internal transfers are
@@ -198,7 +206,7 @@ function FormulaExplainer({
           {includeDebtPrincipal ? ' Counted toward your rate.' : ' Excluded from your rate (toggle above).'}
         </li>
       </ul>
-      <p className="muted mt-2">
+      <p className="text-sm leading-6 text-muted-foreground mt-2 mb-0">
         Internal transfers are counted exactly once — the money landing in a
         savings, investment, or loan account is what counts, not the matching
         withdrawal from checking, so nothing is double counted.
@@ -210,7 +218,7 @@ function FormulaExplainer({
 function CurrencySummaryCard({ summary }: { summary: SavingsRateCurrencySummary }) {
   const { totals } = summary
   return (
-    <section className="card" aria-label={`Savings rate — ${summary.currency}`}>
+    <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label={`Savings rate — ${summary.currency}`}>
       <div className="flex items-center justify-between mb-2">
         <h2 className="m-0">{summary.currency}</h2>
         <RateBadge pct={totals.savingsRatePct} />
@@ -270,7 +278,7 @@ function Stat({
         padding: 12,
       }}
     >
-      <p className="muted m-0">
+      <p className="text-sm leading-6 text-muted-foreground m-0">
         {label}
       </p>
       <p className="m-0 mt-1 text-xl font-semibold">
@@ -291,32 +299,32 @@ function MonthlySeriesTable({
   return (
     <div className="mt-3 overflow-x-auto">
       <h3 className="mb-1.5 mt-0">Monthly detail</h3>
-      <table className="table min-w-[520px]">
-        <thead>
-          <tr>
-            <th>Month</th>
-            <th className="text-right">Income</th>
-            <th className="text-right">Spending</th>
-            <th className="text-right">Savings</th>
-            <th className="text-right">Investments</th>
-            <th className="text-right">Debt principal</th>
-            <th className="text-right">Savings rate</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="min-w-[520px]">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Month</TableHead>
+            <TableHead className="text-right">Income</TableHead>
+            <TableHead className="text-right">Spending</TableHead>
+            <TableHead className="text-right">Savings</TableHead>
+            <TableHead className="text-right">Investments</TableHead>
+            <TableHead className="text-right">Debt principal</TableHead>
+            <TableHead className="text-right">Savings rate</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {series.map((m) => (
-            <tr key={m.month}>
-              <td>{m.month}</td>
-              <td className="text-right">{formatMoney(m.income, currency)}</td>
-              <td className="text-right">{formatMoney(m.spending, currency)}</td>
-              <td className="text-right">{formatMoney(m.savings, currency)}</td>
-              <td className="text-right">
+            <TableRow key={m.month}>
+              <TableCell>{m.month}</TableCell>
+              <TableCell className="text-right">{formatMoney(m.income, currency)}</TableCell>
+              <TableCell className="text-right">{formatMoney(m.spending, currency)}</TableCell>
+              <TableCell className="text-right">{formatMoney(m.savings, currency)}</TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.investments, currency)}
-              </td>
-              <td className="text-right">
+              </TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.debtPrincipal, currency)}
-              </td>
-              <td
+              </TableCell>
+              <TableCell
                 className="text-right"
                 style={{
                   color:
@@ -328,11 +336,11 @@ function MonthlySeriesTable({
                 }}
               >
                 {formatRate(m.savingsRatePct)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }
