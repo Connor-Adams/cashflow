@@ -407,13 +407,13 @@ export function CalendarPage() {
         description="Upcoming income, expenses, transfers, and goal contributions. All events come from your planned events list."
       />
 
-      <div className="row" style={{ flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+      <div className="row mb-4 flex flex-wrap gap-3">
         <Tabs items={TAB_ITEMS} value={view} onValueChange={(v) => setView(v as ViewMode)} />
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={goPrev} aria-label="Previous month">
             <ChevronLeft aria-hidden="true" />
           </Button>
-          <span className="font-medium" style={{ minWidth: '8rem', textAlign: 'center' }}>
+          <span className="font-medium min-w-32 text-center">
             {formatMonthHeading(year, month)}
           </span>
           <Button variant="outline" size="sm" onClick={goNext} aria-label="Next month">
@@ -427,8 +427,7 @@ export function CalendarPage() {
           </Button>
           <Link
             to="/planned"
-            className="text-sm underline"
-            style={{ marginLeft: '0.5rem' }}
+            className="text-sm underline ml-2"
           >
             Manage events
           </Link>
@@ -438,7 +437,7 @@ export function CalendarPage() {
       <UpcomingSummaryCard summary={summary} />
 
       {error ? (
-        <div role="alert" className="muted" style={{ padding: '1rem' }}>
+        <div role="alert" className="muted p-4">
           Failed to load calendar: {error}
         </div>
       ) : null}
@@ -482,20 +481,13 @@ export function CalendarPage() {
                 description="Add one below."
               />
             ) : (
-              <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <ul className="flex flex-col gap-2">
                 {dayEvents.map((ev) => (
                   <li
                     key={`${ev.id}-${ev.eventDate}`}
-                    className="row"
-                    style={{
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '0.75rem',
-                      borderBottom: '1px solid var(--border)',
-                      paddingBottom: '0.5rem',
-                    }}
+                    className="row items-center justify-between gap-3 border-b border-border pb-2"
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="flex items-center gap-2">
                       <span
                         className={`inline-block h-3 w-3 rounded-full ${CALENDAR_EVENT_DOT_CLASS[ev.type]}`}
                         aria-hidden="true"
@@ -509,7 +501,7 @@ export function CalendarPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="row" style={{ gap: '0.25rem' }}>
+                    <div className="row gap-1">
                       <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                         {ev.recurrenceRule ? (
                           <Repeat
@@ -622,7 +614,7 @@ export function CalendarPage() {
                 idPrefix={`calendar-edit-${editingId}`}
                 showStatus
               />
-              <p className="muted text-xs" style={{ marginTop: '0.75rem' }}>
+              <p className="muted text-xs mt-3">
                 Need to link this event to a transaction?{' '}
                 <Button
                   type="button"
@@ -680,7 +672,7 @@ function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
               : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`}
           </p>
         </div>
-        <div className="row" style={{ gap: '1.25rem', flexWrap: 'wrap' }}>
+        <div className="row gap-5 flex-wrap">
           <Stat label="Expected in" value={summary.inflow} positive />
           <Stat label="Expected out" value={summary.outflow} negative />
           <Stat
@@ -744,8 +736,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
           <div
             key={d}
             role="columnheader"
-            className="muted text-xs"
-            style={{ padding: '0.4rem', background: 'var(--card)', textAlign: 'center', fontWeight: 600 }}
+            className="muted text-xs bg-card text-center font-semibold p-[0.4rem]"
           >
             {d}
           </div>
@@ -764,17 +755,9 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
               aria-label={`${cell.iso}, ${events.length} event${events.length === 1 ? '' : 's'}`}
               data-in-month={cell.inMonth}
               data-today={cell.isToday}
+              className="bg-card min-h-[5.5rem] p-[0.4rem] text-left border-0 cursor-pointer flex flex-col gap-1"
               style={{
-                background: 'var(--card)',
                 opacity: cell.inMonth ? 1 : 0.45,
-                minHeight: '5.5rem',
-                padding: '0.4rem',
-                textAlign: 'left',
-                border: 0,
-                cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.25rem',
                 outline: cell.isToday ? '2px solid var(--primary, currentColor)' : 'none',
                 outlineOffset: '-2px',
               }}
@@ -806,7 +789,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
         })}
       </div>
       {loading ? (
-        <p className="muted" style={{ marginTop: '0.5rem' }}>Loading…</p>
+        <p className="muted mt-2">Loading…</p>
       ) : null}
       {/* `month` prop is consumed via grid construction upstream; we accept
           it here so the parent can re-render the grid when it changes. */}
@@ -837,27 +820,18 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
       {entries.map(([iso, evs]) => (
         <section
           key={iso}
-          style={{
-            borderBottom: '1px solid var(--border)',
-            paddingBottom: '0.75rem',
-            marginBottom: '0.75rem',
-          }}
+          className="border-b border-border pb-3 mb-3"
         >
-          <h3 className="text-sm font-semibold" style={{ marginBottom: '0.4rem' }}>
+          <h3 className="text-sm font-semibold mb-[0.4rem]">
             {formatDateLabel(iso)}
           </h3>
-          <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <ul className="flex flex-col gap-2">
             {evs.map((ev) => (
               <li
                 key={`${ev.id}-${ev.eventDate}`}
-                className="row"
-                style={{
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                }}
+                className="row justify-between items-center gap-3"
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div className="flex items-center gap-2">
                   <span
                     className={`inline-block h-3 w-3 rounded-full ${CALENDAR_EVENT_DOT_CLASS[ev.type]}`}
                     aria-hidden="true"
@@ -871,7 +845,7 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
                     </div>
                   </div>
                 </div>
-                <div className="row" style={{ gap: '0.25rem' }}>
+                <div className="row gap-1">
                   <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                     {ev.recurrenceRule ? (
                       <Repeat
