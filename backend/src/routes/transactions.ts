@@ -138,7 +138,8 @@ export function buildTransactionFilterWhere(
     where.currency = String(source.currency).toUpperCase().slice(0, 3);
   }
   if (source.category) {
-    where.finalCategory = String(source.category);
+    const c = String(source.category);
+    where.finalCategory = c === '(none)' ? { [Op.is]: null } : c;
   }
   if (source.importBatch) {
     where.importBatch = String(source.importBatch);

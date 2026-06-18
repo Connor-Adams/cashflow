@@ -38,3 +38,8 @@ test('txnType and merchantCanonical exact match', () => {
   assert.equal((w as Record<string, unknown>).txnType, 'refund');
   assert.equal((w as Record<string, unknown>).merchantCanonical, 'Costco');
 });
+
+test('category (none) maps to IS NULL', () => {
+  const w = buildTransactionFilterWhere(reqStub(), { category: '(none)' });
+  assert.deepEqual((w as Record<string, unknown>).finalCategory, { [Op.is]: null });
+});
