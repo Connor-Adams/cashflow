@@ -11,6 +11,7 @@ import { CategoryIcon } from '../../../components/CategoryIcon'
 import { CategoryIconPicker } from '../../../components/CategoryIconPicker'
 import { useCategories } from '../../../lib/useCategories'
 import { patchJson } from '../../../lib/api'
+import { CategoryTreeManager } from './CategoryTreeManager'
 import { TAX_TREATMENTS } from '../../../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../../../components/TaxTreatmentSelect'
 import type { CategoryIconName } from '@cashflow/shared'
@@ -54,6 +55,10 @@ export function CategoriesTab() {
           </p>
         </div>
       </div>
+      <h3 className="mt-2">Organize categories</h3>
+      <p className="muted">Create subcategories, rename, drag to reparent, or delete.</p>
+      <CategoryTreeManager />
+      <h3 className="mt-4">Icons &amp; tax</h3>
       {err && <span className="error" role="alert">{err}</span>}
       <ul className="flex flex-col divide-y divide-[var(--border)]">
         {categories.map((cat) => (

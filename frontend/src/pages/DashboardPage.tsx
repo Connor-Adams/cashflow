@@ -60,8 +60,10 @@ import type {
   BudgetProgressResponse,
   RecurringItem,
   RecurringResponse,
+  RollupRow,
 } from '../types/api'
 import type { PeriodInsightResp, PeriodInsightCurrency } from '@cashflow/shared'
+import { DashboardCategorySection } from './DashboardCategorySection'
 
 type Row = {
   currency: string
@@ -152,6 +154,7 @@ type DashResp = {
   merchantSummaries: MerchantSummaryRow[]
   accountSummaries: AccountSummaryRow[]
   reviewQueue: ReviewQueueRow[]
+  categoryTree?: RollupRow[]
 }
 
 type MonthlyResp = {
@@ -1376,6 +1379,11 @@ export function DashboardPage() {
           hasComparisonPeriod={hasComparisonPeriod}
           currency={currency}
           loading={loading}
+        />
+
+        <DashboardCategorySection
+          categoryTree={data?.categoryTree ?? []}
+          currency={displayCurrency}
         />
 
         <RecurringThisMonthTile
