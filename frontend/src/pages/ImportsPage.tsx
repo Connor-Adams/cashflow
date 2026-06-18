@@ -102,7 +102,7 @@ export function ImportsPage() {
           <TableBody>
             {batches.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center muted">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   No import batches yet.
                 </TableCell>
               </TableRow>
