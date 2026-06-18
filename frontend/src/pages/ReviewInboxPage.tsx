@@ -948,11 +948,11 @@ export function ReviewInboxPage() {
                             <Table>
                               <TableHeader>
                                 <TableRow className="text-xs text-muted-foreground">
-                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Item</TableHead>
-                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Qty</TableHead>
-                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Total</TableHead>
-                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Category</TableHead>
-                                  <TableHead className="h-auto px-0 pb-1 font-medium normal-case">Business %</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Item</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Qty</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Total</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Category</TableHead>
+                                  <TableHead className="h-auto px-3 pb-1 font-medium normal-case">Business %</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>

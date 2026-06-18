@@ -1,5 +1,15 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Alert } from '@/components/ui/alert'
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import { formatMoney } from '../lib/formatMoney'
 import { ItemRow } from './items/ItemRow'
@@ -36,42 +46,38 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
 
   if (receipt.externalOrderId == null || receipt.order == null) {
     return (
-      <div style={{ marginBottom: '1rem', padding: '0.75rem', border: '1px solid var(--border)', borderRadius: '4px' }}>
-        <div style={{ marginBottom: '0.5rem' }}>
-          <strong>{receipt.originalName}</strong>
+      <Card className="mb-4 space-y-2 p-3">
+        <strong>{receipt.originalName}</strong>
+        {extractError && <Alert variant="error">{extractError}</Alert>}
+        <div>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={extracting}
+            onClick={() => void handleExtract()}
+          >
+            {extracting ? 'Extracting…' : 'Extract items'}
+          </Button>
         </div>
-        {extractError && (
-          <p role="alert" style={{ color: 'var(--destructive)', marginBottom: '0.5rem' }}>
-            {extractError}
-          </p>
-        )}
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={extracting}
-          onClick={() => void handleExtract()}
-        >
-          {extracting ? 'Extracting…' : 'Extract items'}
-        </Button>
-      </div>
+      </Card>
     )
   }
 
   const { order, items } = receipt
 
   return (
-    <div style={{ marginBottom: '1.5rem' }}>
-      <div style={{ marginBottom: '0.5rem' }}>
+    <div className="mb-6">
+      <div className="mb-2">
         <strong>{order.vendor === 'uber' ? 'Uber' : order.vendor === 'uber_eats' ? 'Uber Eats' : order.vendor}</strong>{' '}
-        <span style={{ color: 'var(--muted-foreground)' }}>{receipt.originalName}</span>
+        <span className="text-muted-foreground">{receipt.originalName}</span>
       </div>
 
       {order.trip && (
-        <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--foreground)' }}>
+        <div className="mb-2 text-sm">
           <div>
             {order.trip.pickupAddress ?? '—'} → {order.trip.dropoffAddress ?? '—'}
           </div>
-          <div style={{ color: 'var(--muted-foreground)' }}>
+          <div className="text-muted-foreground">
             {order.trip.distance != null && `${order.trip.distance} ${order.trip.distanceUnit ?? ''}`}
             {order.trip.distance != null && order.trip.durationMinutes != null && ' · '}
             {order.trip.durationMinutes != null && `${order.trip.durationMinutes} min`}
@@ -79,48 +85,48 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
         </div>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Qty</th>
-            <th>Total</th>
-            <th>Category</th>
-            <th>Business %</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Item</TableHead>
+            <TableHead>Qty</TableHead>
+            <TableHead>Total</TableHead>
+            <TableHead>Category</TableHead>
+            <TableHead>Business %</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {items.map((item) => (
             <ItemRow key={item.id} item={item} categoryHints={categoryHints} currency={order.currency} />
           ))}
-        </tbody>
+        </TableBody>
         <tfoot>
           {order.subtotal != null && (
-            <tr>
-              <td colSpan={4}>Subtotal</td>
-              <td>{formatMoney(Number(order.subtotal), order.currency)}</td>
-            </tr>
+            <TableRow>
+              <TableCell colSpan={4}>Subtotal</TableCell>
+              <TableCell>{formatMoney(Number(order.subtotal), order.currency)}</TableCell>
+            </TableRow>
           )}
           {order.tax != null && (
-            <tr>
-              <td colSpan={4}>Tax</td>
-              <td>{formatMoney(Number(order.tax), order.currency)}</td>
-            </tr>
+            <TableRow>
+              <TableCell colSpan={4}>Tax</TableCell>
+              <TableCell>{formatMoney(Number(order.tax), order.currency)}</TableCell>
+            </TableRow>
           )}
           {order.shipping != null && (
-            <tr>
-              <td colSpan={4}>Shipping</td>
-              <td>{formatMoney(Number(order.shipping), order.currency)}</td>
-            </tr>
+            <TableRow>
+              <TableCell colSpan={4}>Shipping</TableCell>
+              <TableCell>{formatMoney(Number(order.shipping), order.currency)}</TableCell>
+            </TableRow>
           )}
           {order.total != null && (
-            <tr>
-              <td colSpan={4}>Total</td>
-              <td>{formatMoney(Number(order.total), order.currency)}</td>
-            </tr>
+            <TableRow>
+              <TableCell colSpan={4}>Total</TableCell>
+              <TableCell>{formatMoney(Number(order.total), order.currency)}</TableCell>
+            </TableRow>
           )}
         </tfoot>
-      </table>
+      </Table>
     </div>
   )
 }
@@ -135,9 +141,11 @@ export default function ReceiptItemsDrawer({
   if (!open) return null
 
   return (
-    <div className="receiptItemsDrawer" role="dialog" aria-modal="true" aria-labelledby="receipt-items-drawer-title">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 id="receipt-items-drawer-title" style={{ margin: 0 }}>Receipt Items</h2>
+    <div role="dialog" aria-modal="true" aria-labelledby="receipt-items-drawer-title">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 id="receipt-items-drawer-title" className="m-0 text-lg font-semibold">
+          Receipt Items
+        </h2>
         <Button type="button" variant="secondary" onClick={onClose}>
           Close
         </Button>
