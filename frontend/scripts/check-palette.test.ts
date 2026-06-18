@@ -16,6 +16,17 @@ describe('blankComments', () => {
   it('blanks block comments across lines', () => {
     expect(blankComments('a/*\n#fff\n*/b')).toBe('a  \n    \n  b')
   })
+  it('leaves a regex literal containing // intact (not blanked as a comment)', () => {
+    expect(blankComments('const re = /a\\/\\/b/')).toBe('const re = /a\\/\\/b/')
+  })
+  it('blanks a real line comment after a division operator (not a regex)', () => {
+    // "a / b" is division; "// note" after it is a real line comment and must be blanked
+    // "// note" = 7 chars → 1 space for "//" token + 5 spaces for " note" = 6 spaces after " b "
+    // The key assertion: comment IS blanked (not copied verbatim as if a regex)
+    const out = blankComments('const x = a / b // note')
+    expect(out).toMatch(/^const x = a \/ b\s+$/)
+    expect(out).not.toContain('// note')
+  })
 })
 
 describe('findViolations — hex', () => {
@@ -55,6 +66,12 @@ describe('findViolations — functional + named', () => {
   })
   it('does not flag the word red in plain JSX text', () => {
     expect(values('<span>red alert</span>')).toEqual([])
+  })
+})
+
+describe('findViolations — regex literal', () => {
+  it('flags hex color after a regex that contains //', () => {
+    expect(findViolations("const re = /https?:\\/\\//; const c = '#abcdef'", 'x.tsx').map((v) => v.value)).toEqual(['#abcdef'])
   })
 })
 

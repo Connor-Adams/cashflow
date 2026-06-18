@@ -20,24 +20,42 @@ function inColorContext(line) {
   return COLOR_PROP_RE.test(line) || line.includes('color-mix(')
 }
 
-// Replace comment chars with spaces, preserving newlines + offsets. String and
-// template-literal contents are copied verbatim, so `//` inside a URL string
-// and `#fff` inside a string literal are NOT treated as comments.
+// Replace comment chars with spaces, preserving newlines + offsets. String,
+// template-literal, and regex-literal contents are copied verbatim, so `//`
+// inside a URL string, `//` inside a regex, and `#fff` inside a string are
+// NOT treated as comments.
 export function blankComments(source) {
   let out = ''
   let i = 0
   const n = source.length
-  let state = 'code' // code | line | block | sq | dq | tpl
+  let state = 'code' // code | line | block | sq | dq | tpl | regex
+  // Track the previous significant (non-whitespace) char emitted while in
+  // `code` state, to distinguish division `/` from regex-literal `/`.
+  let prevSig = '' // '' = start-of-input
+  // A `/` starts a regex literal when the previous significant char is one of
+  // these, or when there is no previous significant char (start of input).
+  const REGEX_STARTERS = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '*', '>', ''])
+  let regexInClass = false // inside [...] inside a regex
   while (i < n) {
     const c = source[i]
     const c2 = source[i + 1]
     if (state === 'code') {
       if (c === '/' && c2 === '/') { state = 'line'; out += ' '; i += 2; continue }
       if (c === '/' && c2 === '*') { state = 'block'; out += '  '; i += 2; continue }
-      if (c === "'") { state = 'sq'; out += c; i++; continue }
-      if (c === '"') { state = 'dq'; out += c; i++; continue }
-      if (c === '`') { state = 'tpl'; out += c; i++; continue }
-      out += c; i++; continue
+      if (c === '/') {
+        // Decide: regex start or division?
+        if (REGEX_STARTERS.has(prevSig)) {
+          state = 'regex'; regexInClass = false; out += c; i++; continue
+        }
+        // Division — copy and fall through to prevSig update below
+        out += c; prevSig = '/'; i++; continue
+      }
+      if (c === "'") { state = 'sq'; out += c; prevSig = "'"; i++; continue }
+      if (c === '"') { state = 'dq'; out += c; prevSig = '"'; i++; continue }
+      if (c === '`') { state = 'tpl'; out += c; prevSig = '`'; i++; continue }
+      out += c
+      if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') prevSig = c
+      i++; continue
     }
     if (state === 'line') {
       if (c === '\n') { state = 'code'; out += c; i++; continue }
@@ -47,10 +65,23 @@ export function blankComments(source) {
       if (c === '*' && c2 === '/') { state = 'code'; out += '  '; i += 2; continue }
       out += c === '\n' ? '\n' : ' '; i++; continue
     }
+    if (state === 'regex') {
+      if (c === '\\') { out += source.slice(i, i + 2); i += 2; continue }
+      if (c === '[') { regexInClass = true; out += c; i++; continue }
+      if (c === ']') { regexInClass = false; out += c; i++; continue }
+      if (c === '/' && !regexInClass) {
+        // Closing delimiter — consume optional flags (letters) verbatim
+        state = 'code'; out += c; i++
+        while (i < n && /[gimsuy]/.test(source[i])) { out += source[i]; i++ }
+        prevSig = '/'
+        continue
+      }
+      out += c; i++; continue
+    }
     // string / template states
     if (c === '\\') { out += source.slice(i, i + 2); i += 2; continue }
     const quote = state === 'sq' ? "'" : state === 'dq' ? '"' : '`'
-    if (c === quote) { state = 'code'; out += c; i++; continue }
+    if (c === quote) { state = 'code'; out += c; prevSig = c; i++; continue }
     out += c; i++; continue
   }
   return out
