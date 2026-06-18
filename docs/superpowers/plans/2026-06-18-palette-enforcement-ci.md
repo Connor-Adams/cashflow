@@ -585,16 +585,24 @@ Note: `no-restricted-syntax` with a regex `Literal` selector matches string/nume
 - [ ] **Step 2: Run lint**
 
 Run: `yarn workspace frontend run lint`
-Expected: PASS. If `frontend/scripts/check-palette.test.ts` or other test files trip the hex rule, add a targeted `// eslint-disable-next-line no-restricted-syntax` (or scope the rule's `files` to exclude `**/*.test.*`) — prefer excluding test files via a config block since fixtures intentionally contain literals:
+Expected: PASS — but ONLY after adding the rule-off block below. ESLint lints **all** `**/*.{ts,tsx}`, which includes (a) test fixtures and the detector script (intentional literals), and (b) `src/extension/**` + `src/bookmarklets/**`, whose hex colors are legitimately out of palette scope (foreign-page bundles — see Global Constraints). Without excluding them, `yarn lint` fails on files the palette script deliberately ignores. Add this block to the exported config array (after the main config object):
 
 ```js
   {
-    files: ['**/*.test.{ts,tsx}', 'scripts/**'],
+    // The palette/hex rule does not apply where literals are legitimate:
+    // test fixtures, the detector script itself, and the foreign-page bundles
+    // (extension/bookmarklets) which cannot use app CSS tokens.
+    files: [
+      '**/*.test.{ts,tsx}',
+      'scripts/**',
+      'src/extension/**',
+      'src/bookmarklets/**',
+    ],
     rules: { 'no-restricted-syntax': 'off' },
   },
 ```
 
-Add that block to the exported config array if test/fixture files trip the rule.
+After adding it, `yarn workspace frontend run lint` must pass. If any OTHER non-excluded file still trips the hex rule, that is a real off-palette literal the palette script should also have caught — investigate rather than blanket-disabling.
 
 - [ ] **Step 3: Quick negative check**
 
