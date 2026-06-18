@@ -2019,10 +2019,10 @@ router.get('/enrichment/stats', async (req, res, next) => {
          FROM rules r
          ${householdId == null ? '' : 'WHERE r.household_id = ?'}
          ${householdId == null ? 'WHERE' : 'AND'} r.id NOT IN (
-           SELECT applied_rule_id FROM transactions WHERE applied_rule_id IS NOT NULL
+           SELECT applied_rule_id FROM transactions WHERE applied_rule_id IS NOT NULL ${householdId == null ? '' : 'AND household_id = ?'}
          )
          ORDER BY r.id DESC LIMIT 15`,
-        { replacements: householdId == null ? [] : [householdId], type: QueryTypes.SELECT },
+        { replacements: householdId == null ? [] : [householdId, householdId], type: QueryTypes.SELECT },
       ),
     ]);
 

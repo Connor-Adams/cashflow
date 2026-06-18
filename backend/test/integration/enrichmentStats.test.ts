@@ -53,7 +53,33 @@ after(async () => {
 test('enrichment stats reports needs-attention aggregates', async () => {
   const models = await import('../../src/models');
 
-  // Seed a transaction with no final_category (uncategorized).
+  // Seed a rule that IS applied to a transaction (should NOT appear in deadRules).
+  const appliedRule = await models.Rule.create({
+    householdId: householdAId,
+    merchantPattern: 'APPLIED_RULE_MERCHANT',
+    matchKind: 'substring',
+    priority: 5,
+    category: 'Dining',
+    isBusiness: false,
+    splitType: 'me',
+    pctMe: null,
+    pctPartner: null,
+  } as never);
+
+  // Seed a rule that is NEVER applied to any transaction (should appear in deadRules).
+  const deadRule = await models.Rule.create({
+    householdId: householdAId,
+    merchantPattern: 'DEAD_RULE_NEVER_MATCHED',
+    matchKind: 'substring',
+    priority: 5,
+    category: 'Groceries',
+    isBusiness: false,
+    splitType: 'me',
+    pctMe: null,
+    pctPartner: null,
+  } as never);
+
+  // Seed a transaction with no final_category (uncategorized), and reference the applied rule.
   await models.Transaction.create({
     accountId: accountAId,
     householdId: householdAId,
@@ -71,7 +97,7 @@ test('enrichment stats reports needs-attention aggregates', async () => {
     sourceReference: null,
     sourceRowFingerprint: crypto.randomBytes(16).toString('hex'),
     sourceIdentityFingerprint: crypto.randomBytes(16).toString('hex'),
-    appliedRuleId: null,
+    appliedRuleId: appliedRule.id,
     autoCategory: null,
     categoryOverride: null,
     finalCategory: null, // uncategorized
@@ -166,5 +192,18 @@ test('enrichment stats reports needs-attention aggregates', async () => {
   assert.ok(
     res.body.merchantsMissingCanonical >= 1,
     `merchantsMissingCanonical should be >= 1, got ${res.body.merchantsMissingCanonical}`,
+  );
+
+  // The dead rule (never applied) must appear in deadRules.
+  const deadRuleIds = res.body.deadRules.map((r: { ruleId: number }) => r.ruleId);
+  assert.ok(
+    deadRuleIds.includes(deadRule.id),
+    `dead rule id ${deadRule.id} should appear in deadRules, got: ${JSON.stringify(deadRuleIds)}`,
+  );
+
+  // The applied rule must NOT appear in deadRules.
+  assert.ok(
+    !deadRuleIds.includes(appliedRule.id),
+    `applied rule id ${appliedRule.id} should NOT appear in deadRules, got: ${JSON.stringify(deadRuleIds)}`,
   );
 });
