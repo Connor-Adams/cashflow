@@ -139,16 +139,16 @@
     @apply h-4 w-4 shrink-0;
   }
 
-  /* Tree drop-target / selected row: the hero gradient, same treatment as the
-   * active nav link — a faded gradient fill + a full-color gradient rail
-   * (via ::before, since box-shadow can't take a gradient). */
+  /* Tree rows wear the hero gradient — same treatment as the active nav link:
+   * a faded gradient fill + a full-color gradient rail (via ::before, since
+   * box-shadow can't take a gradient). `.treeRow` shows it on hover; a selected
+   * / drop-target row (`.treeRowActive`) shows it persistently and a touch
+   * stronger. */
+  .treeRow,
   .treeRowActive {
     position: relative;
-    background:
-      linear-gradient(135deg,
-        color-mix(in oklch, var(--gradient-hero-from) 16%, transparent),
-        color-mix(in oklch, var(--gradient-hero-to) 16%, transparent));
   }
+  .treeRow::before,
   .treeRowActive::before {
     content: '';
     position: absolute;
@@ -157,7 +157,39 @@
     background: var(--gradient-hero);
     border-top-left-radius: inherit;
     border-bottom-left-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms;
   }
+  .treeRow:hover {
+    background-image:
+      linear-gradient(135deg,
+        color-mix(in oklch, var(--gradient-hero-from) 11%, transparent),
+        color-mix(in oklch, var(--gradient-hero-to) 11%, transparent));
+  }
+  .treeRow:hover::before {
+    opacity: 1;
+  }
+  .treeRowActive {
+    background-image:
+      linear-gradient(135deg,
+        color-mix(in oklch, var(--gradient-hero-from) 17%, transparent),
+        color-mix(in oklch, var(--gradient-hero-to) 17%, transparent));
+  }
+  .treeRowActive::before {
+    opacity: 1;
+  }
+  /* Nested-group indent guide: a thin hero-gradient thread instead of a flat
+   * border, so the hierarchy carries a little brand colour at rest. */
+  .treeGuide {
+    background-image: linear-gradient(180deg,
+      color-mix(in oklch, var(--gradient-hero-from) 45%, transparent),
+      color-mix(in oklch, var(--gradient-hero-to) 45%, transparent));
+    background-size: 1.5px 100%;
+    background-repeat: no-repeat;
+    background-position: left top;
+  }
+
   /* Root "make top-level" drop zone while dragging: gradient fill + a gradient
    * dashed border (no rail — it is a hint box, not a row). */
   .treeDropZoneActive {
