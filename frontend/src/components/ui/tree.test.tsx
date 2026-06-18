@@ -54,7 +54,7 @@ describe('Tree primitives', () => {
     expect(screen.queryByRole('button', { name: /expand|collapse/i })).not.toBeInTheDocument()
   })
 
-  it('highlighted row applies the brand-tinted treatment, not the hover tint', () => {
+  it('highlighted row applies the gradient treatment, not the hover tint', () => {
     const { rerender } = render(
       <Tree>
         <li><TreeRow>Row</TreeRow></li>
@@ -62,7 +62,7 @@ describe('Tree primitives', () => {
     )
     const row = screen.getByText('Row').closest('div.group')!
     expect(row.className).toContain('hover:bg-muted/50')
-    expect(row.className).not.toContain('var(--primary)')
+    expect(row.className).not.toContain('treeRowActive')
 
     rerender(
       <Tree>
@@ -70,7 +70,7 @@ describe('Tree primitives', () => {
       </Tree>,
     )
     const hi = screen.getByText('Row').closest('div.group')!
-    expect(hi.className).toContain('var(--primary)')
+    expect(hi.className).toContain('treeRowActive')
     expect(hi.className).not.toContain('hover:bg-muted/50')
   })
 

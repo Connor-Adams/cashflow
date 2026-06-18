@@ -30,7 +30,7 @@ type TreeRowProps = React.ComponentProps<'div'> & {
   toggleLabel?: string
   /** Show the drag-handle affordance (revealed on row hover). */
   grip?: boolean
-  /** Drop-target / cursor highlight — brand oxblood, the house convention. */
+  /** Drop-target / selected highlight — the hero gradient (sidebar-active treatment). */
   highlighted?: boolean
   /** Leading icon slot (e.g. a category icon, or a button wrapping one). */
   icon?: React.ReactNode
@@ -50,9 +50,7 @@ function TreeRow({
     <div
       className={cn(
         'group flex items-center gap-1.5 rounded-md py-1 pr-1 transition-colors',
-        highlighted
-          ? 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_0_var(--primary)]'
-          : 'hover:bg-muted/50',
+        highlighted ? 'treeRowActive' : 'hover:bg-muted/50',
         className,
       )}
       {...rowProps}
