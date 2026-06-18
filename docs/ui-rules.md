@@ -48,3 +48,6 @@ TransactionsPage was partially de-drifted (generic utilities migrated: `.muted`,
 
 ## RulesPage — deferred bespoke classes (2026-06-17)
 RulesPage + RulesHealthSection were swept (generic utilities → primitives/tokens). Kept by design: `.ruleRow`/`.isFocused` (focus-flash keyframe animation; `RulesPage.test.tsx` asserts `.isFocused`), `.rulesCategoryField`/`.rulesCategoryPicker*` (CategoryCloudPicker wrappers), and `.transactionsPanelBadge` (a count/confidence badge borrowed from TransactionsPage — candidate for a future Badge-variant consolidation). The 72vh `.transactionsTableWrap` cap was intentionally dropped (TransactionsPage-scoped, applied to the small rules table by class-name accident).
+
+## AmazonPage — deferred bespoke (2026-06-18)
+Generic-utility drift swept (.card→Card, .muted→tokens, .error→Alert, tables→Table, summary→Grid+StatCard). Kept by design: the 2 dynamic `confidenceColor(pct)` inline styles (computed), and the page-specific `amazon*` layout classes (amazonPage/amazonHeader/amazonActionRow/amazonImportPanel/amazonImportFile/amazonReviewList/amazonReviewRow/amazonSuggestedLink/amazonManualLink/amazonOrderEditor/amazonLinks) — no shared primitive applies.
