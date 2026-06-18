@@ -71,6 +71,7 @@ async function seedTxn(
   amount: number,
   txnType: string,
   category: string | null = null,
+  categoryId: number | null = null,
 ): Promise<void> {
   await models.Transaction.create({
     accountId,
@@ -93,6 +94,9 @@ async function seedTxn(
     autoCategory: null,
     categoryOverride: null,
     finalCategory: category,
+    // Only pin the id when given; otherwise let the beforeSave hook resolve the
+    // name → root id (passing an explicit null would null the category instead).
+    ...(categoryId != null ? { finalCategoryId: categoryId } : {}),
     autoBusiness: null,
     businessOverride: null,
     autoSplitType: null,
@@ -276,4 +280,27 @@ test('GET /spending/by-category: investment-account debits are not category spen
   assert.equal(res.body.categories[0].name, 'Groceries');
   assert.equal(res.body.categories[0].amount, 100);
   assert.equal(res.body.categories[0].percentage, 1);
+});
+
+test('GET /spending/by-category: a parent rolls up its child spend', async () => {
+  const dining = await models.Category.create({ householdId: household.id, name: 'Dining', parentId: null });
+  const coffee = await models.Category.create({ householdId: household.id, name: 'Coffee', parentId: dining.id });
+  const chq = await seedAccount('Chq2', 'checking');
+  await seedTxn(chq, '2026-04-05', -40, 'purchase', 'Dining', dining.id); // direct on parent
+  await seedTxn(chq, '2026-04-06', -10, 'purchase', 'Coffee', coffee.id); // on child
+
+  const res = await request(app).get('/spending/by-category?start=2026-04-01&end=2026-04-30');
+  assert.equal(res.status, 200);
+  const dRow = res.body.categories.find((c: { name: string }) => c.name === 'Dining');
+  const cRow = res.body.categories.find((c: { name: string }) => c.name === 'Coffee');
+
+  assert.equal(dRow.amount, 40);        // direct spend on Dining itself
+  assert.equal(dRow.rolledAmount, 50);  // 40 + 10 from Coffee
+  assert.equal(dRow.path, 'Dining');
+  assert.equal(typeof dRow.categoryId, 'number');
+
+  assert.equal(cRow.amount, 10);
+  assert.equal(cRow.rolledAmount, 10);
+  assert.equal(cRow.path, 'Dining / Coffee');
+  assert.equal(cRow.parentId, dining.id);
 });
