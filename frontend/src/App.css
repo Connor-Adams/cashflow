@@ -435,61 +435,6 @@
     @apply w-9 text-center;
   }
 
-  .amazonHeader,
-  .amazonImportPanel,
-  .amazonReviewRow,
-  .amazonSuggestedLink,
-  .amazonManualLink,
-  .amazonActionRow {
-    @apply flex flex-wrap items-center gap-3;
-  }
-
-  .amazonHeader,
-  .amazonReviewRow {
-    @apply justify-between;
-  }
-
-  .amazonHeader .muted,
-  .amazonImportPanel .muted,
-  .amazonSuggestedLink .muted {
-    @apply mb-0;
-  }
-
-  .amazonImportPanel {
-    @apply justify-between;
-  }
-
-  .amazonReviewList,
-  .amazonLinks,
-  .amazonSuggestedLink,
-  .amazonOrderEditor {
-    @apply grid gap-3;
-  }
-
-  .amazonReviewRow {
-    @apply rounded-lg border p-3;
-    border-color: color-mix(in srgb, var(--border) 86%, white 4%);
-    background: color-mix(in srgb, var(--bg) 74%, transparent);
-  }
-
-  .amazonLinks {
-    @apply min-w-[min(100%,34rem)] flex-1;
-  }
-
-  .amazonSuggestedLink {
-    @apply rounded-lg border p-3;
-    border-color: color-mix(in srgb, var(--border) 84%, white 4%);
-    background: color-mix(in srgb, var(--bg2) 70%, transparent);
-  }
-
-  .amazonSuggestedLink > div:first-child {
-    @apply grid gap-1;
-  }
-
-  .amazonManualLink {
-    @apply justify-end;
-  }
-
   .quickFilters {
     @apply mb-3 mt-3 flex flex-wrap gap-2;
   }

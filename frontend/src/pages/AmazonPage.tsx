@@ -341,14 +341,14 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
   return (
     <div className={embedded ? 'amazonPage' : 'page amazonPage'}>
       {confirm.dialog}
-      <div className="amazonHeader">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         {!embedded && (
           <div>
             <h1>Amazon Enrichment</h1>
             <p className="text-sm leading-6 text-muted-foreground">Import Amazon order reports, match them to card charges, and review item-level categories.</p>
           </div>
         )}
-        <div className="amazonActionRow">
+        <div className="flex flex-wrap items-center gap-3">
           {syncStatus && (
             <span className="text-sm leading-6 text-muted-foreground" title={syncStatus.lastCapturedAt ?? 'No Amazon orders captured yet'}>
               {formatSyncAge(syncStatus.lastCapturedAt)} · {syncStatus.orderCount} order{syncStatus.orderCount === 1 ? '' : 's'}
@@ -384,7 +384,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
         />
       )}
 
-      <Card className="amazonImportPanel">
+      <Card className="flex flex-wrap items-center justify-between gap-3">
         <form onSubmit={onUpload} className="contents">
           <div>
             <h2>Amazon Import</h2>
@@ -417,17 +417,17 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       <Card>
         <h2>Amazon Review</h2>
-        <div className="amazonReviewList">
+        <div className="grid gap-3">
           {txns.map((txn) => (
-            <article key={txn.id} className="amazonReviewRow">
+            <article key={txn.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 86%, white 4%)', background: 'color-mix(in srgb, var(--bg) 74%, transparent)' }}>
               <div>
                 <strong>{txn.merchantClean}</strong>
                 <div className="text-sm leading-6 text-muted-foreground">{txn.date} · {formatMoney(Number(txn.amount), txn.currency)}</div>
               </div>
-              <div className="amazonLinks">
+              <div className="grid gap-3 min-w-[min(100%,34rem)] flex-1">
                 {(txn.orderLinks ?? []).map((link) => (
-                  <div key={link.id} className="amazonSuggestedLink">
-                    <div>
+                  <div key={link.id} className="grid gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 84%, white 4%)', background: 'color-mix(in srgb, var(--bg2) 70%, transparent)' }}>
+                    <div className="grid gap-1">
                       {(() => {
                         const pct = Math.round(Number(link.confidence))
                         const valid = Number.isFinite(pct)
@@ -441,7 +441,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                       <span>{itemPreview(link.order)}</span>
                       <span className="text-sm leading-6 text-muted-foreground">{categoryPreview(link.order)}</span>
                     </div>
-                    <div className="amazonActionRow">
+                    <div className="flex flex-wrap items-center gap-3">
                       <Button type="button" onClick={() => void linkAction(`/api/amazon/links/${link.id}/accept`)} disabled={loading}>
                         <Check aria-hidden="true" />
                         Accept
@@ -461,7 +461,7 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
                     </div>
                   </div>
                 ))}
-                <div className="amazonManualLink">
+                <div className="flex flex-wrap items-center justify-end gap-3">
                   <NativeSelect
                     aria-label={`Manually link order to ${txn.merchantClean}`}
                     value={manualOrderByTxn[txn.id] ?? ''}
@@ -514,8 +514,8 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
       </Card>
 
       {selectedOrder && (
-        <Card className="amazonOrderEditor">
-          <div className="amazonHeader">
+        <Card className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2>Order Detail/Edit</h2>
               <p className="text-sm leading-6 text-muted-foreground">
