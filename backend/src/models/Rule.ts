@@ -103,10 +103,12 @@ export function initRule(sequelize: Sequelize): typeof Rule {
   );
   Rule.addHook('beforeSave', async (instance: Rule, options) => {
     if (instance.householdId == null) return;
-    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
-    instance.categoryId = await resolveCategoryIdByName(
-      instance.householdId, instance.category, { transaction: options.transaction ?? undefined },
-    );
+    const { reconcileCategoryField } = await import('../categories/reconcileCategoryField');
+    await reconcileCategoryField({
+      instance, householdId: instance.householdId,
+      strField: 'category', idField: 'categoryId',
+      transaction: options.transaction ?? undefined,
+    });
   });
   return Rule;
 }

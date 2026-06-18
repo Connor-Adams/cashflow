@@ -125,7 +125,7 @@ test('PATCH /api/categories/:id 400s when no patchable field present', async () 
     .patch(`/api/categories/${row.id}`)
     .send({});
   assert.equal(res.status, 400);
-  assert.match(res.body.error ?? '', /icon or taxTreatment required/);
+  assert.match(res.body.error ?? '', /name, icon, or taxTreatment required/);
 });
 
 test('PATCH /api/categories/:id 404s for another household', async () => {

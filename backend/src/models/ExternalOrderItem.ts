@@ -99,10 +99,10 @@ export function initExternalOrderItem(sequelize: Sequelize): typeof ExternalOrde
     const tx = options.transaction ?? undefined;
     const { ExternalOrder } = await import('./ExternalOrder');
     const order = await ExternalOrder.findByPk(instance.externalOrderId, { transaction: tx });
-    if (!order || order.householdId == null) return; // can't scope — leave ids null
-    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
-    instance.inferredCategoryId = await resolveCategoryIdByName(order.householdId, instance.inferredCategory, { transaction: tx });
-    instance.categoryOverrideId = await resolveCategoryIdByName(order.householdId, instance.categoryOverride, { transaction: tx });
+    if (!order || order.householdId == null) return; // can't scope — leave fields untouched
+    const { reconcileCategoryField } = await import('../categories/reconcileCategoryField');
+    await reconcileCategoryField({ instance, householdId: order.householdId, strField: 'inferredCategory', idField: 'inferredCategoryId', transaction: tx });
+    await reconcileCategoryField({ instance, householdId: order.householdId, strField: 'categoryOverride', idField: 'categoryOverrideId', transaction: tx });
   });
 
   return ExternalOrderItem;

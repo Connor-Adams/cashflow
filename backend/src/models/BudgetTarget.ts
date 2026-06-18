@@ -147,10 +147,12 @@ export function initBudgetTarget(sequelize: Sequelize): typeof BudgetTarget {
   );
   BudgetTarget.addHook('beforeSave', async (instance: BudgetTarget, options) => {
     if (instance.householdId == null) return;
-    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
-    instance.categoryId = await resolveCategoryIdByName(
-      instance.householdId, instance.category, { transaction: options.transaction ?? undefined },
-    );
+    const { reconcileCategoryField } = await import('../categories/reconcileCategoryField');
+    await reconcileCategoryField({
+      instance, householdId: instance.householdId,
+      strField: 'category', idField: 'categoryId',
+      transaction: options.transaction ?? undefined,
+    });
   });
   return BudgetTarget;
 }

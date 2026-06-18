@@ -397,11 +397,12 @@ export function initTransaction(sequelize: Sequelize): typeof Transaction {
   );
   Transaction.addHook('beforeSave', async (instance: Transaction, options) => {
     if (instance.householdId == null) return;
-    const { resolveCategoryIdByName } = await import('../categories/resolveCategoryId');
+    const { reconcileCategoryField } = await import('../categories/reconcileCategoryField');
     const tx = options.transaction ?? undefined;
-    instance.autoCategoryId = await resolveCategoryIdByName(instance.householdId, instance.autoCategory, { transaction: tx });
-    instance.categoryOverrideId = await resolveCategoryIdByName(instance.householdId, instance.categoryOverride, { transaction: tx });
-    instance.finalCategoryId = await resolveCategoryIdByName(instance.householdId, instance.finalCategory, { transaction: tx });
+    const hh = instance.householdId;
+    await reconcileCategoryField({ instance, householdId: hh, strField: 'autoCategory', idField: 'autoCategoryId', transaction: tx });
+    await reconcileCategoryField({ instance, householdId: hh, strField: 'categoryOverride', idField: 'categoryOverrideId', transaction: tx });
+    await reconcileCategoryField({ instance, householdId: hh, strField: 'finalCategory', idField: 'finalCategoryId', transaction: tx });
   });
 
   /**

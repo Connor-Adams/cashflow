@@ -3,6 +3,7 @@ import { Op, QueryTypes } from 'sequelize';
 import {
   Transaction,
   Account,
+  Category,
   Contact,
   TransactionRevision,
   Label,
@@ -406,6 +407,7 @@ function scheduleMemoryFanoutIfNeeded(
 
 const PATCHABLE_KEYS = [
   'categoryOverride',
+  'categoryOverrideId',
   'businessOverride',
   'taxTreatmentOverride',
   'splitOverride',
@@ -499,6 +501,29 @@ export async function applyPatchBody(
           throw err;
         }
         txn.set('status', b[k]);
+      } else if (k === 'categoryOverrideId') {
+        if (b[k] == null) {
+          txn.set('categoryOverrideId', null);
+          // finalCategoryId is maintained imperatively here (the model has no
+          // automatic override ?? auto invariant for the id columns), so fall
+          // back to autoCategoryId rather than hard-nulling the rollup key.
+          txn.set('finalCategoryId', (txn.get('autoCategoryId') as number | null) ?? null);
+        } else {
+          const catId = Number(b[k]);
+          if (!Number.isInteger(catId)) {
+            const err = new Error('categoryOverrideId must reference a household category') as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          const cat = await Category.findOne({ where: { id: catId, householdId: household.id } });
+          if (!cat) {
+            const err = new Error('categoryOverrideId must reference a household category') as Error & { status?: number };
+            err.status = 400;
+            throw err;
+          }
+          txn.set('categoryOverrideId', cat.id);
+          txn.set('finalCategoryId', cat.id); // override wins for the final reporting category
+        }
       } else if (k === 'pctMeOverride' || k === 'pctPartnerOverride') {
         // Fractions (0–1) stored as DECIMAL(5,4): percent-scale values like 50
         // overflow on Postgres but store fine on SQLite, so validate here
