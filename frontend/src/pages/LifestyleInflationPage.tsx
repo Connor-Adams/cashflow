@@ -1,8 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/ui/page-header'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { formatMoney } from '../lib/formatMoney'
 import { ReportFilterBar } from './report/ReportFilterBar'
 import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
@@ -79,7 +89,7 @@ export function LifestyleInflationPage() {
         description="Track whether your spending is creeping up faster than your income. Compares the first half of the window to the most recent half."
       />
 
-      <section className="card">
+      <Card className="mb-4">
         <ReportFilterBar
           idPrefix="lifestyle"
           month={month}
@@ -96,33 +106,31 @@ export function LifestyleInflationPage() {
           onRefresh={reload}
         />
         {windowLabel && (
-          <p className="muted mt-2">
+          <p className="text-sm leading-6 text-muted-foreground mt-2 mb-0">
             Showing {windowLabel}.
           </p>
         )}
-      </section>
+      </Card>
 
       {err && (
-        <section className="card">
-          <p className="error" role="alert">
-            {err}
-          </p>
-        </section>
+        <Alert variant="error" className="mb-4">
+          {err}
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Building the report…</p>
-        </section>
+        <Card className="mb-4" aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">Building the report…</p>
+        </Card>
       ) : !data ? null : data.byCurrency.length === 0 ? (
-        <section className="card">
-          <p className="muted">
+        <Card className="mb-4">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">
             No spending data for {windowLabel || 'this window'}
             {scope !== 'all' ? ` in the ${scope} scope` : ''}
             {currency ? ` (${currency})` : ''}. Import transactions or widen the
             window.
           </p>
-        </section>
+        </Card>
       ) : (
         data.byCurrency.map((trend) => (
           <CurrencyTrendCard key={trend.currency} trend={trend} />
@@ -134,7 +142,7 @@ export function LifestyleInflationPage() {
 
 function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
   return (
-    <section className="card" aria-label={`Lifestyle inflation — ${trend.currency}`}>
+    <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label={`Lifestyle inflation — ${trend.currency}`}>
       <div className="flex justify-between items-center mb-2">
         <h2 className="m-0">{trend.currency}</h2>
         <OutpacingBadge outpacing={trend.spendOutpacingIncome} />
@@ -238,7 +246,7 @@ function GrowthStat({
   const TrendIcon = rising ? TrendingUp : TrendingDown
   return (
     <div className="border border-border rounded-md p-3">
-      <p className="muted m-0">
+      <p className="text-sm leading-6 text-muted-foreground m-0">
         {label}
       </p>
       <p className="m-0 mt-1 text-xl font-semibold">
@@ -246,7 +254,7 @@ function GrowthStat({
       </p>
       <p className="m-0 mt-0.5" style={{ color }}>
         <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}{' '}
-        <span className="muted">from {formatMoney(firstHalf, currency)}</span>
+        <span className="text-sm leading-6 text-muted-foreground">from {formatMoney(firstHalf, currency)}</span>
       </p>
     </div>
   )
@@ -279,14 +287,14 @@ function CategoryDrivers({
           >
             <Link
               to={`/transactions?category=${encodeURIComponent(d.category)}&currency=${currency}`}
-              className="muted"
+              className="text-sm leading-6 text-muted-foreground"
             >
               {d.category}
             </Link>
             <span style={{ color: 'var(--danger)' }}>
               +{formatMoney(d.delta, currency)}/mo
             </span>
-            <span className="muted">{formatPct(d.deltaPct)}</span>
+            <span className="text-sm leading-6 text-muted-foreground">{formatPct(d.deltaPct)}</span>
           </li>
         ))}
       </ul>
@@ -305,37 +313,37 @@ function MonthlySeriesTable({
   return (
     <div className="mt-3 overflow-x-auto">
       <h3 className="m-0 mb-1.5">Monthly detail</h3>
-      <table className="table min-w-[360px]">
-        <thead>
-          <tr>
-            <th className="text-left">Month</th>
-            <th className="text-right">Income</th>
-            <th className="text-right">Spend</th>
-            <th className="text-right">Savings</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table className="min-w-[360px]">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Month</TableHead>
+            <TableHead className="text-right">Income</TableHead>
+            <TableHead className="text-right">Spend</TableHead>
+            <TableHead className="text-right">Savings</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {series.map((m) => (
-            <tr key={m.month}>
-              <td>{m.month}</td>
-              <td className="text-right">
+            <TableRow key={m.month}>
+              <TableCell>{m.month}</TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.income, currency)}
-              </td>
-              <td className="text-right">
+              </TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.spend, currency)}
-              </td>
-              <td
+              </TableCell>
+              <TableCell
                 className="text-right"
                 style={{
                   color: m.savings < 0 ? 'var(--danger)' : undefined,
                 }}
               >
                 {formatMoney(m.savings, currency)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }
