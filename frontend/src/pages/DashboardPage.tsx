@@ -15,6 +15,7 @@ import {
 import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { FilterCard } from '@/components/ui/filter-card'
@@ -733,8 +734,8 @@ export function DashboardPage() {
         title="Dashboard"
         description="Totals stay in each currency. Filter by currency and date range."
       />
-      {err && <span className="error">{err}</span>}
-      {loading && <p className="muted">Loading dashboard…</p>}
+      {err && <Alert variant="error">{err}</Alert>}
+      {loading && <p className="text-sm leading-6 text-muted-foreground">Loading dashboard…</p>}
 
       <FilterCard density="compact" className="mt-2">
           <FilterBar
@@ -769,7 +770,7 @@ export function DashboardPage() {
             }
             caption={
               <p
-                className="muted"
+                className="text-sm leading-6 text-muted-foreground"
                 style={{
                   marginBottom: 0,
                   display: 'flex',
@@ -1067,7 +1068,7 @@ export function DashboardPage() {
               />
             </div>
             {bizSplit.income.business + bizSplit.income.personal <= 0 && (
-              <p className="muted businessShareCaption">No income in current filters.</p>
+              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No income in current filters.</p>
             )}
           </div>
         </BentoTile>
@@ -1114,7 +1115,7 @@ export function DashboardPage() {
               />
             </div>
             {bizSplit.spend.business + bizSplit.spend.personal <= 0 && (
-              <p className="muted businessShareCaption">No net spend in current filters.</p>
+              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No net spend in current filters.</p>
             )}
           </div>
         </BentoTile>
@@ -1129,11 +1130,11 @@ export function DashboardPage() {
           {chartData.length === 0 ? (
             !loading ? (
               <div>
-                <p className="emptyState">
+                <p className="m-0 text-muted-foreground">
                   No category totals for these filters. Your transactions may be in a
                   different currency or outside this date window.
                 </p>
-                <div className="row" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                <div className="flex flex-wrap items-center gap-3" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
                   {currency ? (
                     <Button type="button" variant="secondary" onClick={() => setCurrency('')}>
                       Show all currencies
@@ -1224,7 +1225,7 @@ export function DashboardPage() {
             </ResponsiveContainer>
           )}
           {chartData.length > 0 ? (
-            <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
+            <p className="leading-6 text-muted-foreground" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
               Jump to:{' '}
               {chartData.slice(0, 8).map((entry, index) => (
                 <span key={entry.name}>
@@ -1256,7 +1257,7 @@ export function DashboardPage() {
         >
           {monthlyBreakdownData.length === 0 ? (
             !loading ? (
-              <p className="emptyState">No monthly breakdown data for these filters.</p>
+              <p className="m-0 text-muted-foreground">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
@@ -1314,7 +1315,7 @@ export function DashboardPage() {
           description="One line per currency using signed monthly totals, excluding payments and transfers."
         >
           {monthlyChartData.length === 0 ? (
-            !loading ? <p className="muted">No transactions in this range.</p> : null
+            !loading ? <p className="text-sm leading-6 text-muted-foreground">No transactions in this range.</p> : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
