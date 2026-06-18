@@ -3,6 +3,8 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import * as catApi from '../../../lib/categoriesApi';
+import * as api from '../../../lib/api';
+import { _resetCategoriesCacheForTest } from '../../../lib/useCategories';
 import { CategoryTreeManager } from './CategoryTreeManager';
 import type { CategoryTreeNode } from '../../../types/api';
 
@@ -17,10 +19,18 @@ function dataTransfer() {
 }
 
 describe('CategoryTreeManager reparent', () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    _resetCategoriesCacheForTest();
+    vi.restoreAllMocks();
+  });
+
+  function mockApis(treeData = tree) {
+    vi.spyOn(catApi, 'getCategoryTree').mockResolvedValue(treeData);
+    vi.spyOn(api, 'getJson').mockResolvedValue([]);
+  }
 
   it('dropping Work onto Home reparents Work under Home', async () => {
-    vi.spyOn(catApi, 'getCategoryTree').mockResolvedValue(tree);
+    mockApis();
     const reparentSpy = vi.spyOn(catApi, 'reparentCategory').mockResolvedValue({ id: 1 } as never);
     render(<CategoryTreeManager />);
     await waitFor(() => screen.getByText('Work'));
@@ -34,7 +44,7 @@ describe('CategoryTreeManager reparent', () => {
   });
 
   it('a reparent 409 surfaces the server message', async () => {
-    vi.spyOn(catApi, 'getCategoryTree').mockResolvedValue(tree);
+    mockApis();
     vi.spyOn(catApi, 'reparentCategory').mockRejectedValue(
       Object.assign(new Error('cannot move a category into its own subtree'), { status: 409 }),
     );
@@ -46,5 +56,19 @@ describe('CategoryTreeManager reparent', () => {
     fireEvent.dragStart(workRow, { dataTransfer: dt });
     fireEvent.drop(homeRow, { dataTransfer: dt });
     await waitFor(() => screen.getByText(/cannot move a category into its own subtree/i));
+  });
+
+  it('dropping a node onto the root zone calls reparentCategory with null', async () => {
+    mockApis();
+    const reparentSpy = vi.spyOn(catApi, 'reparentCategory').mockResolvedValue({ id: 1 } as never);
+    render(<CategoryTreeManager />);
+    await waitFor(() => screen.getByText('Work'));
+    const dt = dataTransfer();
+    const workRow = screen.getByText('Work').closest('[draggable="true"]')!;
+    const rootZone = screen.getByRole('list');
+    fireEvent.dragStart(workRow, { dataTransfer: dt });
+    fireEvent.dragOver(rootZone, { dataTransfer: dt });
+    fireEvent.drop(rootZone, { dataTransfer: dt });
+    await waitFor(() => expect(reparentSpy).toHaveBeenCalledWith(1, null));
   });
 });

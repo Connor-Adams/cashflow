@@ -1,7 +1,8 @@
 // frontend/src/pages/settings/tabs/CategoryTreeManager.tsx
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useCategoryTree } from '../../../lib/useCategoryTree';
+import { useCategories } from '../../../lib/useCategories';
 import { createCategory, renameCategory, deleteCategory, reparentCategory } from '../../../lib/categoriesApi';
 import type { CategoryTreeNode } from '../../../types/api';
 
@@ -10,14 +11,14 @@ type NodeProps = {
   depth: number;
   onChanged: () => Promise<void>;
   onError: (msg: string) => void;
-  onReparent?: (id: number, newParentId: number | null) => void;
 };
 
-function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: NodeProps) {
+function TreeNode({ node, depth, onChanged, onError }: NodeProps) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
   const [adding, setAdding] = useState(false);
   const [childName, setChildName] = useState('');
+  const savedRef = useRef(false);
 
   async function run(fn: () => Promise<unknown>) {
     try { await fn(); await onChanged(); }
@@ -47,10 +48,15 @@ function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: 
             autoFocus
             onChange={(e) => setRenameValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') { setRenaming(false); void run(() => renameCategory(node.id, renameValue.trim())); }
+              if (e.key === 'Enter') {
+                savedRef.current = true;
+                setRenaming(false);
+                void run(() => renameCategory(node.id, renameValue.trim()));
+              }
               if (e.key === 'Escape') { setRenaming(false); setRenameValue(node.name); }
             }}
             onBlur={() => {
+              if (savedRef.current) { savedRef.current = false; return; }
               setRenaming(false);
               if (renameValue.trim() && renameValue.trim() !== node.name) {
                 void run(() => renameCategory(node.id, renameValue.trim()));
@@ -61,7 +67,7 @@ function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: 
           <button
             type="button"
             className="flex-1 text-left"
-            onDoubleClick={() => { setRenameValue(node.name); setRenaming(true); }}
+            onDoubleClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
           >
             {node.name}
           </button>
@@ -71,7 +77,7 @@ function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: 
           variant="ghost"
           size="sm"
           aria-label={`Rename ${node.name}`}
-          onClick={() => { setRenameValue(node.name); setRenaming(true); }}
+          onClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
         >
           Rename
         </Button>
@@ -128,7 +134,6 @@ function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: 
               depth={depth + 1}
               onChanged={onChanged}
               onError={onError}
-              onReparent={_onReparent}
             />
           ))}
         </ul>
@@ -137,13 +142,19 @@ function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: 
   );
 }
 
-export type CategoryTreeManagerProps = {
-  onReparent?: (id: number, newParentId: number | null) => void;
-};
+export type CategoryTreeManagerProps = Record<string, never>;
 
-export function CategoryTreeManager({ onReparent }: CategoryTreeManagerProps = {}) {
+export function CategoryTreeManager() {
   const { tree, loading, error, refresh } = useCategoryTree();
+  const { refresh: refreshGlobal } = useCategories();
   const [actionError, setActionError] = useState<string | null>(null);
+
+  async function onChanged() {
+    setActionError(null);
+    await refresh();
+    // best-effort: keep the global flat cache (icon/tax list, pickers) fresh
+    refreshGlobal().catch(() => { /* swallow */ });
+  }
 
   return (
     <div>
@@ -153,15 +164,29 @@ export function CategoryTreeManager({ onReparent }: CategoryTreeManagerProps = {
       {loading ? (
         <p className="muted">Loading…</p>
       ) : (
-        <ul className="flex flex-col">
+        <ul
+          className="flex flex-col"
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const id = Number(e.dataTransfer.getData('text/plain'));
+            if (!id) return;
+            setActionError(null);
+            reparentCategory(id, null)
+              .then(() => refresh())
+              .catch((err) => setActionError(err instanceof Error ? err.message : 'Could not move to root'));
+          }}
+        >
+          <li className="muted" aria-label="Move to top level">
+            Drop here to make a top-level category
+          </li>
           {tree.map((n) => (
             <TreeNode
               key={n.id}
               node={n}
               depth={0}
-              onChanged={async () => { setActionError(null); await refresh(); }}
+              onChanged={onChanged}
               onError={setActionError}
-              onReparent={onReparent}
             />
           ))}
         </ul>
