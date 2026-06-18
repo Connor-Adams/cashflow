@@ -290,7 +290,7 @@ function CategoryDrivers({
             >
               {d.category}
             </Link>
-            <span style={{ color: 'var(--danger)' }}>
+            <span className="text-destructive">
               +{formatMoney(d.delta, currency)}/mo
             </span>
             <span className="text-sm leading-6 text-muted-foreground">{formatPct(d.deltaPct)}</span>
