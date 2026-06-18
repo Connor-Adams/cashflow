@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogBody,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'
 import { formatMoney } from '../../lib/formatMoney'
@@ -18,6 +27,10 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
   const [groupBy, setGroupBy] = useState<GroupBy>('purchase')
   const [groupMenuOpen, setGroupMenuOpen] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
+  const [pendingCategory, setPendingCategory] = useState('')
+  const [bulkSaving, setBulkSaving] = useState(false)
+  const [bulkError, setBulkError] = useState<string | null>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -35,6 +48,13 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
 
   const groups = useMemo(() => groupItems(items, groupBy), [items, groupBy])
 
+  // Category hints: the categories already present across the loaded items.
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const r of items) if (r.categoryEffective) set.add(r.categoryEffective)
+    return [...set].sort((a, b) => a.localeCompare(b))
+  }, [items])
+
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -46,15 +66,28 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
 
   const clearSelection = () => setSelected(new Set())
 
-  const bulkSetCategory = async () => {
-    const cat = window.prompt('Category for selected items (blank to clear):')
-    if (cat == null) return
-    await patchJson('/api/external-order-items/bulk-patch', {
-      itemIds: [...selected],
-      categoryOverride: cat === '' ? null : cat,
-    })
-    clearSelection()
-    onItemsPatched?.()
+  const openCategoryDialog = () => {
+    setPendingCategory(categoryOptions[0] ?? '')
+    setBulkError(null)
+    setCategoryDialogOpen(true)
+  }
+
+  const applyBulkCategory = async () => {
+    setBulkSaving(true)
+    setBulkError(null)
+    try {
+      await patchJson('/api/external-order-items/bulk-patch', {
+        itemIds: [...selected],
+        categoryOverride: pendingCategory === '' ? null : pendingCategory,
+      })
+      setCategoryDialogOpen(false)
+      clearSelection()
+      onItemsPatched?.()
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setBulkSaving(false)
+    }
   }
 
   return (
@@ -98,7 +131,7 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
           className="sticky top-0 z-10 flex items-center gap-2 rounded border border-border bg-card p-2"
         >
           <span className="text-sm">{selected.size} selected</span>
-          <Button size="sm" onClick={() => void bulkSetCategory()}>
+          <Button size="sm" onClick={openCategoryDialog}>
             Set category
           </Button>
           <Button size="sm" variant="ghost" onClick={clearSelection}>
@@ -148,6 +181,50 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
       ))}
 
       <div ref={sentinelRef} aria-hidden="true" />
+
+      <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+        <DialogHeader>
+          <DialogTitle>Set category</DialogTitle>
+          <DialogDescription>
+            Apply a category to {selected.size} selected item{selected.size === 1 ? '' : 's'}.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground">Category</span>
+            <NativeSelect
+              aria-label="Category"
+              value={pendingCategory}
+              onChange={(e) => setPendingCategory(e.target.value)}
+            >
+              <NativeSelectOption value="">— Clear category (uncategorized)</NativeSelectOption>
+              {categoryOptions.map((c) => (
+                <NativeSelectOption key={c} value={c}>
+                  {c}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </label>
+          {bulkError && (
+            <p role="alert" className="mt-2 text-sm text-destructive">
+              {bulkError}
+            </p>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setCategoryDialogOpen(false)}
+            disabled={bulkSaving}
+          >
+            Cancel
+          </Button>
+          <Button type="button" onClick={() => void applyBulkCategory()} disabled={bulkSaving}>
+            {bulkSaving ? 'Saving…' : 'Apply'}
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   )
 }
