@@ -14,8 +14,39 @@ import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { splitTxnByItems } from '../import/splitTxnByItems';
 import { loadItemAllocationContext, type ItemAllocationContext } from '../summary/loadItemAllocations';
+import { loadCategoryTree, type CategoryTree } from '../categories/rollup';
 
 const router = Router();
+
+/**
+ * A category's own name plus every descendant category name, used to roll a
+ * per-category budget up its subtree. Pure over a CategoryTree so it's testable
+ * without a DB.
+ */
+export function categoryAndDescendantNames(
+  tree: CategoryTree,
+  categoryId: number,
+): string[] {
+  const childrenByParent = new Map<number, number[]>();
+  for (const [id, parentId] of tree.parentById) {
+    if (parentId == null) continue;
+    const list = childrenByParent.get(parentId) ?? [];
+    list.push(id);
+    childrenByParent.set(parentId, list);
+  }
+  const names: string[] = [];
+  const seen = new Set<number>();
+  const stack = [categoryId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const name = tree.nameById.get(id);
+    if (name != null) names.push(name);
+    for (const child of childrenByParent.get(id) ?? []) stack.push(child);
+  }
+  return names;
+}
 
 type NormalizedBudgetInput = {
   category: string | null;
@@ -629,6 +660,12 @@ type BudgetForProgress = {
   category: string | null;
   currency: string;
   amount: string;
+  /**
+   * The category's own name plus every descendant category name. When present
+   * on a per-category budget, spend rolls up the subtree (a budget on a parent
+   * counts its children). Omitted → the budget matches only its own bucket.
+   */
+  categoryNames?: string[] | null;
 };
 
 type ProgressItem = {
@@ -671,6 +708,15 @@ export function computeBudgetProgress(
     let spent: number;
     if (budget.category == null) {
       spent = totalsByCurrency.get(budget.currency) ?? 0;
+    } else if (budget.categoryNames && budget.categoryNames.length > 0) {
+      // Roll the subtree up: sum this category's bucket plus every descendant's.
+      const seen = new Set<string>();
+      spent = 0;
+      for (const name of budget.categoryNames) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        spent += spendByCategory.get(`${budget.currency}\0${name}`)?.spent ?? 0;
+      }
     } else {
       const key = `${budget.currency}\0${budget.category}`;
       spent = spendByCategory.get(key)?.spent ?? 0;
@@ -804,6 +850,10 @@ async function computeStatusForBudgets(
   const now = new Date();
   if (budgets.length === 0) return [];
 
+  // Load the category tree once so a budget on a parent rolls its subtree's
+  // spend up (a budget on "Dining" counts "Dining / Coffee" too).
+  const tree = await loadCategoryTree(currentAuth(req).household.id);
+
   // For each budget compute its own period bounds + scope-filtered spend.
   const results = await Promise.all(
     budgets.map(async (budget) => {
@@ -898,6 +948,10 @@ async function computeStatusForBudgets(
             category: budget.category,
             currency: budget.currency,
             amount: String(budget.amount),
+            categoryNames:
+              budget.categoryId != null
+                ? categoryAndDescendantNames(tree, budget.categoryId)
+                : null,
           },
         ],
         spendByCategory,

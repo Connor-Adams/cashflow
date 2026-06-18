@@ -5,6 +5,7 @@ import {
   validateBudgetPatch,
   aggregateSpendByCategory,
   computeBudgetProgress,
+  categoryAndDescendantNames,
   netRefundsFromSpend,
   currentMonthBounds,
   currentPeriodBounds,
@@ -310,6 +311,26 @@ test('netRefundsFromSpend: refund with no matching bucket is a no-op', () => {
   assert.equal(spend.has('CAD\0Dining'), false);
 });
 
+// ---- categoryAndDescendantNames ----------------------------------------
+
+test('categoryAndDescendantNames: returns the category plus all descendants', () => {
+  // Dining(1) → Coffee(2), Restaurants(3); Restaurants → Fine Dining(4)
+  const tree = {
+    parentById: new Map<number, number | null>([
+      [1, null], [2, 1], [3, 1], [4, 3], [5, null],
+    ]),
+    nameById: new Map<number, string>([
+      [1, 'Dining'], [2, 'Coffee'], [3, 'Restaurants'], [4, 'Fine Dining'], [5, 'Rent'],
+    ]),
+    depthById: new Map<number, number>(),
+    pathById: new Map<number, string>(),
+  };
+  const names = categoryAndDescendantNames(tree, 1).sort();
+  assert.deepEqual(names, ['Coffee', 'Dining', 'Fine Dining', 'Restaurants']);
+  // a leaf returns only itself
+  assert.deepEqual(categoryAndDescendantNames(tree, 5), ['Rent']);
+});
+
 // ---- computeBudgetProgress ---------------------------------------------
 
 test('computeBudgetProgress: per-category budget reads its own bucket', () => {
@@ -342,6 +363,43 @@ test('computeBudgetProgress: per-category budget reads its own bucket', () => {
   assert.equal(items[0].percentUsed, (120 / 400) * 100);
   assert.equal(items[0].periodStart, '2026-05-01');
   assert.equal(items[0].periodEnd, '2026-05-31');
+});
+
+test('computeBudgetProgress: a parent budget rolls up descendant spend', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const items = computeBudgetProgress(
+    [
+      {
+        id: 1,
+        category: 'Dining',
+        currency: 'CAD',
+        amount: '300.0000',
+        categoryNames: ['Dining', 'Coffee', 'Restaurants'],
+      },
+    ],
+    new Map([
+      ['CAD\0Dining', { currency: 'CAD', category: 'Dining', spent: 50 }],
+      ['CAD\0Coffee', { currency: 'CAD', category: 'Coffee', spent: 30 }],
+      ['CAD\0Restaurants', { currency: 'CAD', category: 'Restaurants', spent: 20 }],
+      ['CAD\0Rent', { currency: 'CAD', category: 'Rent', spent: 999 }],
+    ]),
+    bounds
+  );
+  assert.equal(items[0].spent, 100); // 50 + 30 + 20, Rent excluded
+  assert.equal(items[0].remaining, 200);
+});
+
+test('computeBudgetProgress: a leaf budget (categoryNames=[self]) reads only its own bucket', () => {
+  const bounds = { periodStart: '2026-05-01', periodEnd: '2026-05-31' };
+  const items = computeBudgetProgress(
+    [{ id: 1, category: 'Coffee', currency: 'CAD', amount: '100', categoryNames: ['Coffee'] }],
+    new Map([
+      ['CAD\0Coffee', { currency: 'CAD', category: 'Coffee', spent: 30 }],
+      ['CAD\0Dining', { currency: 'CAD', category: 'Dining', spent: 50 }],
+    ]),
+    bounds
+  );
+  assert.equal(items[0].spent, 30);
 });
 
 test('computeBudgetProgress: overall budget (category=null) sums every category in that currency', () => {
