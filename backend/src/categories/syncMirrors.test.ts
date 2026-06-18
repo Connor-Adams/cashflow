@@ -2,7 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sequelize } from '../db';
-import { Category, Household, Account, Transaction, Rule, BudgetTarget } from '../models';
+import { Category, Household, Account, Transaction, Rule, BudgetTarget, ExternalOrder, ExternalOrderItem } from '../models';
 import { syncCategoryLeafNameMirrors } from './syncMirrors';
 
 let householdId: number, accountId: number, catId: number;
@@ -31,4 +31,33 @@ test('fans the new leaf name out to all string mirrors referencing the id', asyn
   assert.equal(t.finalCategory, 'WiFi');
   assert.equal(r.category, 'WiFi');
   assert.equal(b.category, 'WiFi');
+});
+
+test('fans the new leaf name out to ExternalOrderItem string mirrors referencing the id', async () => {
+  // ExternalOrderItem.beforeSave resolves household via its ExternalOrder,
+  // so create the order first with the household set.
+  const order = await ExternalOrder.create({
+    householdId,
+    vendor: 'amazon',
+    dedupeKey: 'sync-mirrors-test-order-1',
+    source: 'csv',
+  } as never);
+  // Create the item with explicit id-column mirrors so syncMirrors can flip them.
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'Test Item',
+    inferredCategory: 'Internet',
+    inferredCategoryId: catId,
+    categoryOverride: 'Internet',
+    categoryOverrideId: catId,
+  } as never);
+  assert.equal(item.inferredCategory, 'Internet');
+  assert.equal(item.categoryOverride, 'Internet');
+  await sequelize.transaction(async (tx) => {
+    await Category.update({ name: 'WiFi', nameKey: 'wifi' }, { where: { id: catId }, transaction: tx });
+    await syncCategoryLeafNameMirrors(catId, 'WiFi', tx);
+  });
+  await item.reload();
+  assert.equal(item.inferredCategory, 'WiFi');
+  assert.equal(item.categoryOverride, 'WiFi');
 });

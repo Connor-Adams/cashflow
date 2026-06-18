@@ -80,26 +80,56 @@ test('PATCH categoryOverrideId tags the txn to a child node and finalCategoryId 
   assert.equal(res.body.finalCategory, 'Internet');
 });
 
-test('PATCH categoryOverrideId null clears the override and finalCategoryId', async () => {
-  // Seed a transaction that already has a categoryOverrideId set.
-  const cat = await authed.post('/api/categories').send({ name: 'Utilities', parentId: null });
-  assert.equal(cat.status, 201);
-  const txnId = await seedTransaction();
+test('PATCH categoryOverrideId null clears the override and falls back finalCategoryId to autoCategoryId', async () => {
+  // Seed a transaction with an auto category set at the model layer.
+  const autocat = await authed.post('/api/categories').send({ name: 'Food', parentId: null });
+  assert.equal(autocat.status, 201);
+  const autoCatId = autocat.body.id as number;
 
-  // First set it.
+  const txnWithAuto = await models.Transaction.create({
+    accountId,
+    householdId,
+    visibility: 'shared',
+    ownershipType: 'me',
+    importBatch: 'cat-id-auto-test',
+    date: '2026-06-01',
+    merchantRaw: 'GROCERY',
+    merchantClean: 'GROCERY',
+    amount: '-30.00',
+    currency: 'CAD',
+    finalBusiness: false,
+    finalSplitType: 'me',
+    autoCategory: 'Food',
+    autoCategoryId: autoCatId,
+    finalCategory: 'Food',
+    finalCategoryId: autoCatId,
+    sourceRowFingerprint: require('crypto').randomBytes(16).toString('hex'),
+    sourceIdentityFingerprint: require('crypto').randomBytes(16).toString('hex'),
+  } as never);
+  const txnId = txnWithAuto.id;
+
+  // Set an override.
+  const overrideCat = await authed.post('/api/categories').send({ name: 'Utilities', parentId: null });
+  assert.equal(overrideCat.status, 201);
   const set = await authed
     .patch(`/api/transactions/${txnId}`)
-    .send({ categoryOverrideId: cat.body.id });
+    .send({ categoryOverrideId: overrideCat.body.id });
   assert.equal(set.status, 200);
-  assert.equal(set.body.categoryOverrideId, cat.body.id);
+  assert.equal(set.body.categoryOverrideId, overrideCat.body.id);
+  assert.equal(set.body.finalCategoryId, overrideCat.body.id);
 
-  // Then clear it.
+  // Clear the override — finalCategoryId must fall back to autoCategoryId, NOT null.
   const clear = await authed
     .patch(`/api/transactions/${txnId}`)
     .send({ categoryOverrideId: null });
   assert.equal(clear.status, 200, `clear failed: ${JSON.stringify(clear.body)}`);
-  assert.equal(clear.body.categoryOverrideId, null);
-  assert.equal(clear.body.finalCategoryId, null);
+  assert.equal(clear.body.categoryOverrideId, null, 'categoryOverrideId should be null after clear');
+  assert.equal(
+    clear.body.finalCategoryId,
+    autoCatId,
+    'finalCategoryId must fall back to autoCategoryId after clearing override',
+  );
+  assert.equal(clear.body.finalCategory, 'Food', 'finalCategory must reflect autoCategoryId after clear');
 });
 
 test('PATCH categoryOverrideId rejects an id from another household with 400', async () => {
