@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
@@ -203,7 +204,7 @@ export function PartnerFairnessPage() {
               so the user has visibility into the filter. */}
           <label
             htmlFor="partner-exclude-non-partner"
-            className="row mt-3"
+            className="mb-3 mt-3 flex flex-wrap items-center gap-3"
             title="When on, positive-amount shared rows whose counterparty contact is not marked Partner (or has no contact) are excluded from the fairness totals, balance, and settlement recommendation."
           >
             <input
@@ -215,23 +216,21 @@ export function PartnerFairnessPage() {
             />
             <span>Exclude non-partner inflows</span>
             {togglePersisting && (
-              <span className="muted text-xs">Saving…</span>
+              <span className="text-xs text-muted-foreground">Saving…</span>
             )}
           </label>
       </FilterCard>
 
       {err && (
-        <Card className="mb-4 border-danger bg-danger-bg">
-          <CardContent className="pt-6">
-            <p className="text-danger">{err}</p>
-          </CardContent>
-        </Card>
+        <Alert variant="error" className="mb-4">
+          {err}
+        </Alert>
       )}
 
       {loading ? (
         <Card>
           <CardContent className="pt-6">
-            <p className="muted">Loading…</p>
+            <p className="text-sm leading-6 text-muted-foreground">Loading…</p>
           </CardContent>
         </Card>
       ) : fairness.length === 0 ? (
@@ -285,7 +284,7 @@ function PartnerFairnessSection({
     <section className="grid gap-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-xl font-semibold">{cur}</h2>
-        <p className="muted mb-0 text-sm">
+        <p className="mb-0 text-sm text-muted-foreground">
           {data.sharedTransactionCount} shared transaction
           {data.sharedTransactionCount === 1 ? '' : 's'} in range
         </p>
@@ -362,7 +361,7 @@ function PartnerFairnessSection({
         </CardHeader>
         <CardContent>
           {data.categoryBreakdown.length === 0 ? (
-            <p className="muted">No categorized shared spend in range.</p>
+            <p className="text-sm leading-6 text-muted-foreground">No categorized shared spend in range.</p>
           ) : (
             <Table>
               <TableHeader>
@@ -403,7 +402,7 @@ function PartnerFairnessSection({
         </CardHeader>
         <CardContent>
           {monthly.length === 0 ? (
-            <p className="muted">No monthly shared activity in range.</p>
+            <p className="text-sm leading-6 text-muted-foreground">No monthly shared activity in range.</p>
           ) : (
             <Table>
               <TableHeader>
@@ -450,7 +449,7 @@ function PartnerFairnessSection({
         </CardHeader>
         <CardContent>
           {data.largestShared.length === 0 ? (
-            <p className="muted">No shared transactions in range.</p>
+            <p className="text-sm leading-6 text-muted-foreground">No shared transactions in range.</p>
           ) : (
             <Table>
               <TableHeader>
@@ -521,7 +520,7 @@ function StatCard({
           {label}
         </p>
         <p className={`mt-1 text-2xl font-semibold ${valueTone}`}>{value}</p>
-        <p className="muted mt-1 text-xs">{hint}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
       </CardContent>
     </Card>
   )
