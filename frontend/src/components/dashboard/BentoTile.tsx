@@ -106,7 +106,7 @@ export function BentoTile({
   // they are kept as inline styles (arbitrary values would be less readable
   // and the token references are already the canonical form).
   const baseTileStyle: React.CSSProperties = {
-    borderColor: 'color-mix(in srgb, var(--border) 88%, white 4%)',
+    borderColor: 'color-mix(in srgb, var(--border) 88%, var(--zinc-50) 4%)',
     background: 'var(--card)',
     boxShadow: 'var(--shadow)',
     minWidth: 0,
@@ -148,7 +148,7 @@ export function BentoTile({
                 className="m-0 text-sm font-semibold"
                 style={
                   variant === 'gradient'
-                    ? { color: 'rgba(255,255,255,0.92)' }
+                    ? { color: 'color-mix(in srgb, var(--zinc-50) 92%, transparent)' }
                     : { color: 'var(--foreground)' }
                 }
               >
@@ -161,7 +161,7 @@ export function BentoTile({
                 className="mt-1 mb-0 text-xs"
                 style={
                   variant === 'gradient'
-                    ? { color: 'rgba(255,255,255,0.92)' }
+                    ? { color: 'color-mix(in srgb, var(--zinc-50) 92%, transparent)' }
                     : { color: 'var(--muted-foreground)' }
                 }
               >

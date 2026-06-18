@@ -693,7 +693,7 @@ export function ReviewInboxPage() {
                 value={batchFilter}
                 onChange={(e) => setBatchFilter(e.target.value)}
                 style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
                   background: 'color-mix(in srgb, var(--card) 94%, transparent)',
                 }}
               >
@@ -805,7 +805,7 @@ export function ReviewInboxPage() {
             className="overflow-auto rounded-lg border"
             style={{
               maxHeight: '70vh',
-              borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+              borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
             }}
             ref={tableWrapRef}
           >
@@ -1025,7 +1025,7 @@ export function ReviewInboxPage() {
                 value={splitType}
                 onChange={(e) => setSplitType(e.target.value)}
                 style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
                   background: 'color-mix(in srgb, var(--card) 94%, transparent)',
                 }}
               >
@@ -1041,7 +1041,7 @@ export function ReviewInboxPage() {
                 value={business}
                 onChange={(e) => setBusiness(e.target.value)}
                 style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
                   background: 'color-mix(in srgb, var(--card) 94%, transparent)',
                 }}
               >
@@ -1059,7 +1059,7 @@ export function ReviewInboxPage() {
                 onChange={(t) => setTaxTreatment(t ?? '')}
                 className="min-h-9 rounded-md border px-3 text-sm"
                 style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
                   background: 'color-mix(in srgb, var(--card) 94%, transparent)',
                   color: 'var(--foreground)',
                 }}
@@ -1080,7 +1080,7 @@ export function ReviewInboxPage() {
                 key={label}
                 className="rounded-lg border p-3"
                 style={{
-                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%)',
                   background: 'color-mix(in srgb, var(--muted) 46%, transparent)',
                 }}
               >

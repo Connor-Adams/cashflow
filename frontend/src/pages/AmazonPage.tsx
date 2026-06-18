@@ -419,14 +419,14 @@ export function AmazonPage({ embedded = false }: { embedded?: boolean } = {}) {
         <h2>Amazon Review</h2>
         <div className="grid gap-3">
           {txns.map((txn) => (
-            <article key={txn.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 86%, white 4%)', background: 'color-mix(in srgb, var(--bg) 74%, transparent)' }}>
+            <article key={txn.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 86%, var(--zinc-50) 4%)', background: 'color-mix(in srgb, var(--bg) 74%, transparent)' }}>
               <div>
                 <strong>{txn.merchantClean}</strong>
                 <div className="text-sm leading-6 text-muted-foreground">{txn.date} · {formatMoney(Number(txn.amount), txn.currency)}</div>
               </div>
               <div className="grid gap-3 min-w-[min(100%,34rem)] flex-1">
                 {(txn.orderLinks ?? []).map((link) => (
-                  <div key={link.id} className="grid gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 84%, white 4%)', background: 'color-mix(in srgb, var(--bg2) 70%, transparent)' }}>
+                  <div key={link.id} className="grid gap-3 rounded-lg border p-3" style={{ borderColor: 'color-mix(in srgb, var(--border) 84%, var(--zinc-50) 4%)', background: 'color-mix(in srgb, var(--bg2) 70%, transparent)' }}>
                     <div className="grid gap-1">
                       {(() => {
                         const pct = Math.round(Number(link.confidence))

@@ -7,12 +7,12 @@
   button:not([data-slot]) {
     @apply inline-flex min-h-10 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition-colors duration-150;
     border-color: var(--border);
-    background: color-mix(in srgb, var(--bg2) 88%, black 4%);
+    background: color-mix(in srgb, var(--bg2) 88%, var(--zinc-950) 4%);
     color: var(--fg);
   }
 
   button:not([data-slot]):hover:enabled {
-    background: color-mix(in srgb, var(--bg3) 88%, white 4%);
+    background: color-mix(in srgb, var(--bg3) 88%, var(--zinc-50) 4%);
     border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
   }
 
@@ -25,14 +25,14 @@
   textarea:not([data-slot]) {
     @apply min-h-10 rounded-lg border px-3 py-2 text-sm transition-colors duration-150 outline-none;
     border-color: var(--border);
-    background: color-mix(in srgb, var(--bg) 90%, black 4%);
+    background: color-mix(in srgb, var(--bg) 90%, var(--zinc-950) 4%);
     color: var(--fg);
   }
 
   input:not([data-slot]):focus,
   select:not([data-slot]):focus,
   textarea:not([data-slot]):focus {
-    border-color: color-mix(in srgb, var(--primary) 62%, white 10%);
+    border-color: color-mix(in srgb, var(--primary) 62%, var(--zinc-50) 10%);
     box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 35%, transparent);
   }
 
@@ -110,7 +110,7 @@
     color: var(--muted-foreground);
   }
   .sidebar__navLink:hover {
-    color: #fff;
+    color: var(--zinc-50);
     background: var(--gradient-hero);
   }
   .sidebar__navLink:focus-visible {
@@ -225,7 +225,7 @@
   .sidebar__logout:hover {
     background-image: var(--gradient-hero);
     border-color: transparent;
-    color: #fff;
+    color: var(--zinc-50);
   }
 
   .sidebar__user {
@@ -241,7 +241,7 @@
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   }
   .sidebar__version[data-drift='true'] {
-    color: var(--destructive, #b45309);
+    color: var(--destructive, var(--amber-w-700));
   }
   .sidebar__versionRow { @apply flex items-baseline gap-2; }
   .sidebar__versionLabel { @apply uppercase tracking-wider opacity-70; min-width: 1.5rem; }
@@ -389,14 +389,14 @@
 
   .card {
     @apply mb-4 rounded-lg border p-4 sm:p-5;
-    border-color: color-mix(in srgb, var(--border) 88%, white 4%);
+    border-color: color-mix(in srgb, var(--border) 88%, var(--zinc-50) 4%);
     background: color-mix(in oklch, var(--card) 88%, transparent);
     box-shadow: var(--shadow);
   }
 
   .tableWrap {
     @apply overflow-auto rounded-lg border;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
     background: color-mix(in srgb, var(--bg) 90%, transparent);
   }
 
@@ -407,7 +407,7 @@
   .table th,
   .table td {
     @apply whitespace-nowrap border-b px-3 py-2.5 text-left align-middle;
-    border-color: color-mix(in srgb, var(--border) 82%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 82%, var(--zinc-50) 6%);
   }
 
   .table th {
@@ -452,14 +452,14 @@
 
   .quickFilterButton {
     @apply min-h-8 rounded-md px-3 py-1.5 text-xs font-bold uppercase tracking-normal;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
     background: color-mix(in srgb, var(--bg3) 62%, transparent);
     color: var(--muted-foreground);
   }
 
   .quickFilterButton[aria-pressed='true'] {
     border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
-    background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
+    background: color-mix(in srgb, var(--accent-soft) 92%, var(--zinc-50) 2%);
     color: var(--accent-foreground);
   }
 
@@ -502,7 +502,7 @@
 
   .settingsWidthOption {
     @apply flex cursor-pointer items-start gap-3 rounded-lg border p-3;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
     background: color-mix(in srgb, var(--bg3) 42%, transparent);
   }
 
@@ -555,7 +555,7 @@
 
   .categoryCloudPicker__cloud {
     @apply absolute left-0 top-full z-30 mt-2 flex max-h-[min(20rem,calc(100vh-8rem))] flex-wrap gap-2 overflow-y-auto rounded-lg border p-3;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
     background: color-mix(in srgb, var(--bg2) 96%, transparent);
     box-shadow: var(--shadow);
     overscroll-behavior: contain;
@@ -593,7 +593,7 @@
 
   .transactionsCheckTile {
     @apply justify-between rounded-lg border px-3 py-2;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
     background: color-mix(in srgb, var(--bg3) 52%, transparent);
   }
 
@@ -726,7 +726,7 @@
   .transactionsActionsCol {
     @apply sticky right-0;
     background: color-mix(in srgb, var(--bg2) 92%, transparent);
-    box-shadow: -8px 0 16px rgba(0, 0, 0, 0.2);
+    box-shadow: -8px 0 16px color-mix(in srgb, var(--zinc-950) 20%, transparent);
   }
 
   .transactionsTable tbody .transactionsActionsCol {
@@ -789,7 +789,7 @@
 
   .txnReceiptCount {
     @apply inline-flex min-w-6 items-center justify-center rounded-md border px-1.5 py-0.5 text-xs font-bold;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
     color: var(--fg);
     background: color-mix(in srgb, var(--bg3) 52%, transparent);
   }
@@ -829,7 +829,7 @@
 
   .txnReceiptAction {
     @apply inline-flex items-center justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
+    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
     background: color-mix(in srgb, var(--bg3) 40%, transparent);
     color: var(--fg);
   }
@@ -840,7 +840,7 @@
 
   .txnSaveButton {
     border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
-    background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
+    background: color-mix(in srgb, var(--accent-soft) 92%, var(--zinc-50) 2%);
     color: var(--accent-foreground);
   }
 
@@ -900,7 +900,7 @@
 
   .businessSharePanel {
     @apply mt-4 border-t pt-4;
-    border-color: color-mix(in srgb, var(--border) 80%, white 8%);
+    border-color: color-mix(in srgb, var(--border) 80%, var(--zinc-50) 8%);
   }
 
   .businessShareLabels {
@@ -910,8 +910,8 @@
 
   .businessShareBar {
     @apply flex h-3.5 w-full overflow-hidden rounded-md border;
-    background: color-mix(in srgb, var(--bg) 88%, white 4%);
-    border-color: color-mix(in srgb, var(--border) 85%, white 8%);
+    background: color-mix(in srgb, var(--bg) 88%, var(--zinc-50) 4%);
+    border-color: color-mix(in srgb, var(--border) 85%, var(--zinc-50) 8%);
   }
 
   .businessShareFill {

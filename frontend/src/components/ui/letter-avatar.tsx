@@ -9,10 +9,23 @@ const SIZE_PX: Record<LetterAvatarSize, number> = {
   xl: 64,
 }
 
-const PALETTE = [
-  '#5B8DEF', '#7C5CFF', '#10B981', '#F59E0B', '#EF4444',
-  '#06B6D4', '#EC4899', '#84CC16', '#0EA5E9', '#A855F7',
-  '#F97316', '#14B8A6',
+// Categorical avatar colors live in index.css as --avatar-1..12. The text color
+// is precomputed here per entry (original rule: luminance > 0.55 → dark text)
+// because a var(--…) string can't be parsed for luminance at runtime.
+// Dark-text entries (luminance > 0.55): indices 3, 4, 6, 8, 12.
+const PALETTE: { bg: string; fg: string }[] = [
+  { bg: 'var(--avatar-1)',  fg: 'var(--avatar-on-light)' },
+  { bg: 'var(--avatar-2)',  fg: 'var(--avatar-on-light)' },
+  { bg: 'var(--avatar-3)',  fg: 'var(--avatar-on-dark)' },
+  { bg: 'var(--avatar-4)',  fg: 'var(--avatar-on-dark)' },
+  { bg: 'var(--avatar-5)',  fg: 'var(--avatar-on-light)' },
+  { bg: 'var(--avatar-6)',  fg: 'var(--avatar-on-dark)' },
+  { bg: 'var(--avatar-7)',  fg: 'var(--avatar-on-light)' },
+  { bg: 'var(--avatar-8)',  fg: 'var(--avatar-on-dark)' },
+  { bg: 'var(--avatar-9)',  fg: 'var(--avatar-on-light)' },
+  { bg: 'var(--avatar-10)', fg: 'var(--avatar-on-light)' },
+  { bg: 'var(--avatar-11)', fg: 'var(--avatar-on-light)' },
+  { bg: 'var(--avatar-12)', fg: 'var(--avatar-on-dark)' },
 ]
 
 function hashCode(s: string): number {
@@ -21,16 +34,8 @@ function hashCode(s: string): number {
   return Math.abs(h)
 }
 
-function pickColor(text: string): string {
+function pick(text: string): { bg: string; fg: string } {
   return PALETTE[hashCode(text || '?') % PALETTE.length]
-}
-
-function readableForeground(bgHex: string): string {
-  const r = parseInt(bgHex.slice(1, 3), 16)
-  const g = parseInt(bgHex.slice(3, 5), 16)
-  const b = parseInt(bgHex.slice(5, 7), 16)
-  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-  return luminance > 0.55 ? '#111827' : '#FFFFFF'
 }
 
 export type LetterAvatarProps = {
@@ -40,8 +45,7 @@ export type LetterAvatarProps = {
 
 export function LetterAvatar({ text, size = 'md' }: LetterAvatarProps) {
   const ch = (text.trim().charAt(0) || '?').toUpperCase()
-  const bg = pickColor(text)
-  const fg = readableForeground(bg)
+  const { bg, fg } = pick(text)
   const px = SIZE_PX[size]
   const style: CSSProperties = {
     width: `${px}px`,

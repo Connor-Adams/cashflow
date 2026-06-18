@@ -26,4 +26,10 @@ describe('LetterAvatar', () => {
     const { container } = render(<LetterAvatar text="" />)
     expect(container.textContent).toBe('?')
   })
+
+  it('uses a var(--avatar-N) background and a var(--avatar-on-*) text color', () => {
+    const el = render(<LetterAvatar text="connor" />).container.firstChild as HTMLElement
+    expect(el.style.backgroundColor).toMatch(/var\(--avatar-\d{1,2}\)/)
+    expect(el.style.color).toMatch(/var\(--avatar-on-(light|dark)\)/)
+  })
 })
