@@ -15,6 +15,7 @@ import {
 import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { FilterCard } from '@/components/ui/filter-card'
@@ -733,8 +734,8 @@ export function DashboardPage() {
         title="Dashboard"
         description="Totals stay in each currency. Filter by currency and date range."
       />
-      {err && <span className="error">{err}</span>}
-      {loading && <p className="muted">Loading dashboard…</p>}
+      {err && <Alert variant="error">{err}</Alert>}
+      {loading && <p className="text-sm leading-6 text-muted-foreground">Loading dashboard…</p>}
 
       <FilterCard density="compact" className="mt-2">
           <FilterBar
@@ -768,37 +769,15 @@ export function DashboardPage() {
               ) : null
             }
             caption={
-              <p
-                className="muted"
-                style={{
-                  marginBottom: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '0.4rem',
-                }}
-              >
+              <p className="mb-0 flex items-center flex-wrap gap-[0.4rem] text-sm leading-6 text-muted-foreground">
                 Showing
                 {/* Pill-style active-filter chip — reads as the currently
                     applied scope rather than a low-contrast footnote. Uses
                     --muted as the surface and --border for the outline to stay
                     on the brand token palette (no hex). */}
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    padding: '0.25rem 0.65rem',
-                    borderRadius: '9999px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--muted)',
-                    color: 'var(--foreground)',
-                    fontSize: '0.8rem',
-                    lineHeight: 1.2,
-                  }}
-                >
+                <span className="inline-flex items-center gap-[0.35rem] px-[0.65rem] py-1 rounded-full border border-border bg-muted text-foreground text-[0.8rem] leading-[1.2]">
                   <strong>{currency || 'all currencies'}</strong>
-                  <span style={{ color: 'var(--muted-foreground)' }}>·</span>
+                  <span className="text-muted-foreground">·</span>
                   <strong>{activeRangeLabel}</strong>
                 </span>
               </p>
@@ -1045,10 +1024,10 @@ export function DashboardPage() {
           </div>
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Business {bizSplit.incomeShare.toFixed(0)}%
               </span>
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Personal {(100 - bizSplit.incomeShare).toFixed(0)}%
               </span>
             </div>
@@ -1067,7 +1046,7 @@ export function DashboardPage() {
               />
             </div>
             {bizSplit.income.business + bizSplit.income.personal <= 0 && (
-              <p className="muted businessShareCaption">No income in current filters.</p>
+              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No income in current filters.</p>
             )}
           </div>
         </BentoTile>
@@ -1092,10 +1071,10 @@ export function DashboardPage() {
           </div>
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Business {bizSplit.spendShare.toFixed(0)}%
               </span>
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Personal {(100 - bizSplit.spendShare).toFixed(0)}%
               </span>
             </div>
@@ -1114,7 +1093,7 @@ export function DashboardPage() {
               />
             </div>
             {bizSplit.spend.business + bizSplit.spend.personal <= 0 && (
-              <p className="muted businessShareCaption">No net spend in current filters.</p>
+              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No net spend in current filters.</p>
             )}
           </div>
         </BentoTile>
@@ -1129,11 +1108,11 @@ export function DashboardPage() {
           {chartData.length === 0 ? (
             !loading ? (
               <div>
-                <p className="emptyState">
+                <p className="m-0 text-muted-foreground">
                   No category totals for these filters. Your transactions may be in a
                   different currency or outside this date window.
                 </p>
-                <div className="row" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                <div className="mt-2 mb-0 flex flex-wrap items-center gap-3">
                   {currency ? (
                     <Button type="button" variant="secondary" onClick={() => setCurrency('')}>
                       Show all currencies
@@ -1224,7 +1203,7 @@ export function DashboardPage() {
             </ResponsiveContainer>
           )}
           {chartData.length > 0 ? (
-            <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
+            <p className="mt-2 mb-0 text-xs leading-6 text-muted-foreground">
               Jump to:{' '}
               {chartData.slice(0, 8).map((entry, index) => (
                 <span key={entry.name}>
@@ -1256,7 +1235,7 @@ export function DashboardPage() {
         >
           {monthlyBreakdownData.length === 0 ? (
             !loading ? (
-              <p className="emptyState">No monthly breakdown data for these filters.</p>
+              <p className="m-0 text-muted-foreground">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
@@ -1314,7 +1293,7 @@ export function DashboardPage() {
           description="One line per currency using signed monthly totals, excluding payments and transfers."
         >
           {monthlyChartData.length === 0 ? (
-            !loading ? <p className="muted">No transactions in this range.</p> : null
+            !loading ? <p className="text-sm leading-6 text-muted-foreground">No transactions in this range.</p> : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
