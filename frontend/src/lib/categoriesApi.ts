@@ -1,5 +1,7 @@
 import { getJson, postJson, patchJson, deleteReq } from './api';
+import type { CategoryIconName } from '@cashflow/shared';
 import type { CategoryTreeNode, ResolvedCategoryPath } from '../types/api';
+import type { TaxTreatment } from './taxTreatment';
 
 export const CATEGORY_PATH_SEPARATOR = ' / ';
 
@@ -29,6 +31,14 @@ export function createCategory(name: string, parentId: number | null): Promise<C
 
 export function renameCategory(id: number, name: string): Promise<CategoryTreeNode> {
   return patchJson<CategoryTreeNode>(`/api/categories/${id}`, { name });
+}
+
+/** Patch a category's display/tax details (icon and/or tax treatment). */
+export function updateCategory(
+  id: number,
+  patch: { icon?: CategoryIconName | null; taxTreatment?: TaxTreatment },
+): Promise<CategoryTreeNode> {
+  return patchJson<CategoryTreeNode>(`/api/categories/${id}`, patch);
 }
 
 export function reparentCategory(id: number, parentId: number | null): Promise<CategoryTreeNode> {
