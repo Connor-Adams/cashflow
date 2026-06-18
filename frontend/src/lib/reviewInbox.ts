@@ -17,6 +17,7 @@ export type SelectedReviewSummary = {
 
 export type ReviewBulkPatchInput = {
   category: string
+  categoryOverrideId?: number | null
   business: string
   splitType: string
   taxTreatment: TaxTreatment | ''
@@ -77,7 +78,11 @@ export function buildReviewBulkPatch(input: ReviewBulkPatchInput): Record<string
   const patch: Record<string, unknown> = {}
   const category = input.category.trim()
 
-  if (category) patch.categoryOverride = category
+  if (input.categoryOverrideId != null) {
+    patch.categoryOverrideId = input.categoryOverrideId
+  } else if (category) {
+    patch.categoryOverride = category
+  }
   if (input.business === 'true') patch.businessOverride = true
   if (input.business === 'false') patch.businessOverride = false
   if (input.splitType) patch.splitOverride = input.splitType

@@ -78,6 +78,7 @@ export type {
   RealizedTotalsRow,
   Rule,
   Paginated,
+  RollupRow,
   Security,
   SecurityPrice,
   StatementPreview,

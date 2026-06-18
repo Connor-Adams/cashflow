@@ -125,4 +125,16 @@ describe('reviewInbox helpers', () => {
       })
     ).toEqual({ categoryOverride: 'Transport' })
   })
+
+  it('emits categoryOverrideId when a resolved id is provided', () => {
+    const patch = buildReviewBulkPatch({ category: '', categoryOverrideId: 7, business: '', splitType: '', taxTreatment: '', markReviewed: true })
+    expect(patch.categoryOverrideId).toBe(7)
+    expect('categoryOverride' in patch).toBe(false)
+  })
+
+  it('omits category fields when neither string nor id set', () => {
+    const patch = buildReviewBulkPatch({ category: '', categoryOverrideId: null, business: '', splitType: '', taxTreatment: '', markReviewed: true })
+    expect('categoryOverrideId' in patch).toBe(false)
+    expect('categoryOverride' in patch).toBe(false)
+  })
 })
