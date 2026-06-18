@@ -3,6 +3,25 @@ export interface TransferRow {
   currency: string;
 }
 
+/**
+ * Final-category values whose linked transfers are NOT loans and must be
+ * excluded from the per-person loan ledger (raw net + transfer list). Rent and
+ * shared-household payments to a counterparty are recurring obligations, not
+ * money owed back. Compared case-insensitively. Extend as new non-loan
+ * categories surface.
+ */
+export const NON_LOAN_LEDGER_CATEGORIES: ReadonlySet<string> = new Set([
+  'rent',
+  'household',
+]);
+
+/** True when a transfer's final category marks it as a non-loan flow (e.g.
+ *  Rent) that the loan ledger must ignore. Null/empty categories are loans. */
+export function isNonLoanCategory(finalCategory: string | null | undefined): boolean {
+  if (!finalCategory) return false;
+  return NON_LOAN_LEDGER_CATEGORIES.has(finalCategory.trim().toLowerCase());
+}
+
 export interface TransferNet {
   currency: string;
   sent: string;

@@ -11,7 +11,7 @@ import {
   resolveToday,
   type ReimbursementRow,
 } from '../reimbursements/serialize';
-import { computeTransferNet, type TransferRow } from '../contacts/transferLedger';
+import { computeTransferNet, isNonLoanCategory, type TransferRow } from '../contacts/transferLedger';
 import { tokenize, suggestSelfContacts } from '../contacts/selfAccountSuggest';
 
 const router = Router();
@@ -283,11 +283,15 @@ router.get('/:id/ledger', async (req, res, next) => {
     }
     // Ledger is household-scoped to match the link pass and tracked-loan balance,
     // so raw-net and tracked-outstanding are computed over the same row set.
-    const txns = await Transaction.findAll({
+    const txnsRaw = await Transaction.findAll({
       where: { ...householdWhere(req), counterpartyContactId: id },
-      attributes: ['id', 'date', 'amount', 'currency', 'merchantClean', 'merchantRaw'],
+      attributes: ['id', 'date', 'amount', 'currency', 'merchantClean', 'merchantRaw', 'finalCategory'],
       order: [['date', 'ASC'], ['id', 'ASC']],
     });
+    // Drop non-loan flows (e.g. Rent paid to this counterparty) from BOTH the
+    // raw-net and the transfer list — rent is a recurring obligation, not money
+    // owed back. Tagging a transfer's category Rent is how the user excludes it.
+    const txns = txnsRaw.filter((t) => !isNonLoanCategory(t.finalCategory));
     const reimbs = await Reimbursement.findAll({ where: { ...householdWhere(req), contactId: id } });
 
     const loanTxnIds = new Set(reimbs.map((r) => r.transactionId));
