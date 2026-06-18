@@ -2061,6 +2061,67 @@ router.get('/enrichment/stats', async (req, res, next) => {
 });
 
 /**
+ * GET /api/transactions/enrichment/coverage?bucket=month|week
+ *
+ * Enrichment coverage bucketed by SPEND DATE (transactions.date). There is no
+ * enrichment-event timestamp, so this answers "is recent spend better enriched
+ * than old spend?" — not "when did enrichment run". Newest 12 buckets, ascending.
+ */
+router.get('/enrichment/coverage', async (req, res, next) => {
+  try {
+    const bucket: 'month' | 'week' = req.query.bucket === 'week' ? 'week' : 'month';
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const hhClause = householdId == null ? '' : 'WHERE t.household_id = ?';
+    const reps = householdId == null ? [] : [householdId];
+
+    const isPg = sequelize.getDialect() === 'postgres';
+    const periodExpr = isPg
+      ? bucket === 'week'
+        ? `to_char(t.date, 'IYYY-"W"IW')`
+        : `to_char(t.date, 'YYYY-MM')`
+      : bucket === 'week'
+        ? `strftime('%Y-W%W', t.date)`
+        : `strftime('%Y-%m', t.date)`;
+
+    const clearedExpr = isPg
+      ? 'SUM(CASE WHEN NOT t.review_flag THEN 1 ELSE 0 END)'
+      : 'SUM(CASE WHEN t.review_flag = 0 THEN 1 ELSE 0 END)';
+
+    const rows = await sequelize.query<{
+      period: string;
+      total: number;
+      cleared: number;
+      withCanonical: number;
+    }>(
+      `SELECT ${periodExpr} AS period,
+              COUNT(*) AS total,
+              ${clearedExpr} AS cleared,
+              SUM(CASE WHEN t.merchant_canonical IS NOT NULL THEN 1 ELSE 0 END) AS "withCanonical"
+       FROM transactions t
+       ${hhClause}
+       GROUP BY period
+       ORDER BY period DESC
+       LIMIT 12`,
+      { replacements: reps, type: QueryTypes.SELECT },
+    );
+
+    res.json({
+      bucket,
+      series: rows
+        .map((r) => ({
+          period: r.period,
+          total: Number(r.total),
+          cleared: Number(r.cleared),
+          withCanonical: Number(r.withCanonical),
+        }))
+        .reverse(), // ascending for the chart x-axis
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/transactions/enrichment/backfill
  *
  * Re-runs the enrichment pipeline against the caller's household's existing

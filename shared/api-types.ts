@@ -394,6 +394,16 @@ export type EnrichmentStats = {
   deadRules: Array<{ ruleId: number; pattern: string; category: string | null }>
 }
 
+export type EnrichmentCoverage = {
+  bucket: 'month' | 'week'
+  series: Array<{
+    period: string
+    total: number
+    cleared: number
+    withCanonical: number
+  }>
+}
+
 export type EnrichmentBackfillProgress =
   | {
       kind: 'progress'
