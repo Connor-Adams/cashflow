@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-type SectionHeaderProps = React.ComponentProps<'div'> & {
+type SectionHeaderProps = Omit<React.ComponentProps<'div'>, 'title'> & {
   title: React.ReactNode
   description?: React.ReactNode
   actions?: React.ReactNode

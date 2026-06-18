@@ -22,6 +22,8 @@ import { Calendar as CalendarIcon, CalendarPlus, ChevronLeft, ChevronRight, Edit
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Grid } from '@/components/ui/grid'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Dialog,
   DialogBody,
@@ -30,8 +32,10 @@ import {
   DialogTitle,
   useConfirm,
 } from '@/components/ui/dialog'
+import { Alert } from '@/components/ui/alert'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Tabs } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/toast'
 import { deleteReq, getJson, postJson } from '../lib/api'
@@ -407,13 +411,13 @@ export function CalendarPage() {
         description="Upcoming income, expenses, transfers, and goal contributions. All events come from your planned events list."
       />
 
-      <div className="row" style={{ flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Tabs items={TAB_ITEMS} value={view} onValueChange={(v) => setView(v as ViewMode)} />
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={goPrev} aria-label="Previous month">
             <ChevronLeft aria-hidden="true" />
           </Button>
-          <span className="font-medium" style={{ minWidth: '8rem', textAlign: 'center' }}>
+          <span className="font-medium min-w-32 text-center">
             {formatMonthHeading(year, month)}
           </span>
           <Button variant="outline" size="sm" onClick={goNext} aria-label="Next month">
@@ -427,8 +431,7 @@ export function CalendarPage() {
           </Button>
           <Link
             to="/planned"
-            className="text-sm underline"
-            style={{ marginLeft: '0.5rem' }}
+            className="text-sm underline ml-2"
           >
             Manage events
           </Link>
@@ -438,9 +441,9 @@ export function CalendarPage() {
       <UpcomingSummaryCard summary={summary} />
 
       {error ? (
-        <div role="alert" className="muted" style={{ padding: '1rem' }}>
+        <Alert variant="error" className="mb-3">
           Failed to load calendar: {error}
-        </div>
+        </Alert>
       ) : null}
 
       {view === 'month' ? (
@@ -482,34 +485,27 @@ export function CalendarPage() {
                 description="Add one below."
               />
             ) : (
-              <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <ul className="flex flex-col gap-2">
                 {dayEvents.map((ev) => (
                   <li
                     key={`${ev.id}-${ev.eventDate}`}
-                    className="row"
-                    style={{
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '0.75rem',
-                      borderBottom: '1px solid var(--border)',
-                      paddingBottom: '0.5rem',
-                    }}
+                    className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2"
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="flex items-center gap-2">
                       <span
                         className={`inline-block h-3 w-3 rounded-full ${CALENDAR_EVENT_DOT_CLASS[ev.type]}`}
                         aria-hidden="true"
                       />
                       <div>
                         <div className="font-medium">{ev.name}</div>
-                        <div className="muted text-xs">
+                        <div className="text-xs leading-6 text-muted-foreground">
                           {ev.kindLabel} ·{' '}
                           {formatMoney(Number(ev.amount), ev.currency)}
                           {ev.recurrenceRule ? ' · recurring' : ''}
                         </div>
                       </div>
                     </div>
-                    <div className="row" style={{ gap: '0.25rem' }}>
+                    <div className="flex flex-wrap items-center gap-1">
                       <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                         {ev.recurrenceRule ? (
                           <Repeat
@@ -622,7 +618,7 @@ export function CalendarPage() {
                 idPrefix={`calendar-edit-${editingId}`}
                 showStatus
               />
-              <p className="muted text-xs" style={{ marginTop: '0.75rem' }}>
+              <p className="mt-3 text-xs leading-6 text-muted-foreground">
                 Need to link this event to a transaction?{' '}
                 <Button
                   type="button"
@@ -666,58 +662,41 @@ type UpcomingSummary = {
 }
 
 function UpcomingSummaryCard({ summary }: { summary: UpcomingSummary }) {
+  const netColor = summary.net >= 0 ? 'text-positive' : 'text-negative'
   return (
-    <Card className="accountsFormCard" style={{ marginBottom: '1rem' }}>
-      <div className="accountsCardHeader">
-        <div>
-          <h2 className="flex items-center gap-2">
+    <Card className="mb-4">
+      <SectionHeader
+        title={
+          <span className="flex items-center gap-2">
             <CalendarIcon aria-hidden="true" className="h-5 w-5" />
             Next 14 days
-          </h2>
-          <p className="muted">
-            {summary.count === 0
-              ? 'Nothing planned in the next two weeks.'
-              : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`}
-          </p>
-        </div>
-        <div className="row" style={{ gap: '1.25rem', flexWrap: 'wrap' }}>
-          <Stat label="Expected in" value={summary.inflow} positive />
-          <Stat label="Expected out" value={summary.outflow} negative />
-          <Stat
-            label="Net"
-            value={summary.net}
-            positive={summary.net >= 0}
-            negative={summary.net < 0}
-          />
-        </div>
-      </div>
+          </span>
+        }
+        description={
+          summary.count === 0
+            ? 'Nothing planned in the next two weeks.'
+            : `${summary.count} event${summary.count === 1 ? '' : 's'} ahead.`
+        }
+      />
+      {/* Grid+StatCard: deliberate standardization — replaces custom Stat divs
+          with the shared primitive so all summary stats across the app are
+          uniform. MinItemWidth=120 keeps the 3-up layout on wider viewports
+          while collapsing gracefully on narrow screens. */}
+      <Grid minItemWidth={120} gap="sm">
+        <StatCard
+          label="Expected in"
+          value={<span className="text-positive">{formatMoney(summary.inflow, 'CAD')}</span>}
+        />
+        <StatCard
+          label="Expected out"
+          value={<span className="text-negative">{formatMoney(summary.outflow, 'CAD')}</span>}
+        />
+        <StatCard
+          label="Net"
+          value={<span className={netColor}>{formatMoney(summary.net, 'CAD')}</span>}
+        />
+      </Grid>
     </Card>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  positive,
-  negative,
-}: {
-  label: string
-  value: number
-  positive?: boolean
-  negative?: boolean
-}) {
-  const color = positive
-    ? 'text-positive'
-    : negative
-      ? 'text-negative'
-      : 'text-foreground'
-  return (
-    <div>
-      <div className="muted text-xs">{label}</div>
-      <div className={`text-lg font-semibold ${color}`}>
-        {formatMoney(value, 'CAD')}
-      </div>
-    </div>
   )
 }
 
@@ -734,7 +713,7 @@ type MonthGridViewProps = {
 function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: MonthGridViewProps) {
   const navigate = useNavigate()
   return (
-    <Card className="accountsFormCard">
+    <Card className="mb-4">
       <div
         role="grid"
         aria-label="Month calendar"
@@ -744,8 +723,7 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
           <div
             key={d}
             role="columnheader"
-            className="muted text-xs"
-            style={{ padding: '0.4rem', background: 'var(--card)', textAlign: 'center', fontWeight: 600 }}
+            className="text-xs leading-6 text-muted-foreground bg-card text-center font-semibold p-[0.4rem]"
           >
             {d}
           </div>
@@ -764,17 +742,9 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
               aria-label={`${cell.iso}, ${events.length} event${events.length === 1 ? '' : 's'}`}
               data-in-month={cell.inMonth}
               data-today={cell.isToday}
+              className="bg-card min-h-[5.5rem] p-[0.4rem] text-left border-0 cursor-pointer flex flex-col gap-1"
               style={{
-                background: 'var(--card)',
                 opacity: cell.inMonth ? 1 : 0.45,
-                minHeight: '5.5rem',
-                padding: '0.4rem',
-                textAlign: 'left',
-                border: 0,
-                cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.25rem',
                 outline: cell.isToday ? '2px solid var(--primary, currentColor)' : 'none',
                 outlineOffset: '-2px',
               }}
@@ -799,14 +769,14 @@ function MonthGridView({ grid, eventsByDate, loading, month, onDayClick }: Month
                 </span>
               ))}
               {hidden > 0 ? (
-                <span className="muted text-xs">+{hidden} more</span>
+                <span className="text-xs leading-6 text-muted-foreground">+{hidden} more</span>
               ) : null}
             </Button>
           )
         })}
       </div>
       {loading ? (
-        <p className="muted" style={{ marginTop: '0.5rem' }}>Loading…</p>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">Loading…</p>
       ) : null}
       {/* `month` prop is consumed via grid construction upstream; we accept
           it here so the parent can re-render the grid when it changes. */}
@@ -826,8 +796,8 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
   const grouped = useMemo(() => groupByDate(events), [events])
   const entries = Array.from(grouped.entries())
   return (
-    <Card className="accountsFormCard">
-      {loading ? <p className="muted">Loading…</p> : null}
+    <Card className="mb-4">
+      {loading ? <p className="text-sm leading-6 text-muted-foreground">Loading…</p> : null}
       {entries.length === 0 && !loading ? (
         <EmptyState
           title="No events in this window."
@@ -837,41 +807,32 @@ function ListView({ events, loading, onEditClick, onDeleteClick }: ListViewProps
       {entries.map(([iso, evs]) => (
         <section
           key={iso}
-          style={{
-            borderBottom: '1px solid var(--border)',
-            paddingBottom: '0.75rem',
-            marginBottom: '0.75rem',
-          }}
+          className="border-b border-border pb-3 mb-3"
         >
-          <h3 className="text-sm font-semibold" style={{ marginBottom: '0.4rem' }}>
+          <h3 className="text-sm font-semibold mb-[0.4rem]">
             {formatDateLabel(iso)}
           </h3>
-          <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <ul className="flex flex-col gap-2">
             {evs.map((ev) => (
               <li
                 key={`${ev.id}-${ev.eventDate}`}
-                className="row"
-                style={{
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                }}
+                className="mb-3 flex flex-wrap items-center justify-between gap-3"
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div className="flex items-center gap-2">
                   <span
                     className={`inline-block h-3 w-3 rounded-full ${CALENDAR_EVENT_DOT_CLASS[ev.type]}`}
                     aria-hidden="true"
                   />
                   <div>
                     <div className="font-medium">{ev.name}</div>
-                    <div className="muted text-xs">
+                    <div className="text-xs leading-6 text-muted-foreground">
                       {ev.kindLabel} ·{' '}
                       {formatMoney(Number(ev.amount), ev.currency)}
                       {ev.recurrenceRule ? ' · recurring' : ''}
                     </div>
                   </div>
                 </div>
-                <div className="row" style={{ gap: '0.25rem' }}>
+                <div className="flex flex-wrap items-center gap-1">
                   <Badge className={CALENDAR_EVENT_BG_CLASS[ev.type]}>
                     {ev.recurrenceRule ? (
                       <Repeat
