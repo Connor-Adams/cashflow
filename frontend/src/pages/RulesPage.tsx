@@ -404,15 +404,15 @@ export function RulesPage() {
               }}
             />
             {previewState === 'counting' && (
-              <span className="muted" style={{ fontSize: 12, fontStyle: 'italic' }}>Counting…</span>
+              <span className="muted text-xs italic">Counting…</span>
             )}
             {previewState !== null && previewState !== 'counting' && (
               'error' in previewState ? (
-                <span style={{ fontSize: 12, color: 'var(--color-destructive)' }}>
+                <span className="text-xs text-destructive">
                   Invalid pattern: {previewState.error}
                 </span>
               ) : (
-                <span className="muted" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                <span className="muted text-xs italic">
                   {previewState.matches >= 500
                     ? 'matches 500+ existing transactions'
                     : `matches ${previewState.matches} existing transaction${previewState.matches === 1 ? '' : 's'}`}
@@ -434,11 +434,11 @@ export function RulesPage() {
               <option value="substring">substring</option>
               <option value="regex">regex</option>
             </select>
-            <span className="muted" style={{ fontSize: 12 }}>
+            <span className="muted text-xs">
               substring matches any part of the description; regex is for patterns (advanced).
             </span>
             {patternError && (
-              <span style={{ fontSize: 12, color: 'var(--color-destructive)' }} role="alert">
+              <span className="text-xs text-destructive" role="alert">
                 {patternError}
               </span>
             )}
@@ -515,10 +515,10 @@ export function RulesPage() {
           </>
           )}
           {newSplitType === 'shared' && (
-            <div style={{ gridColumn: '1 / -1' }}>
-              <span className="muted" style={{ fontSize: 12 }}>Must sum to 100%</span>
+            <div className="col-span-full">
+              <span className="muted text-xs">Must sum to 100%</span>
               {shareError && (
-                <span style={{ fontSize: 12, color: 'var(--color-destructive)', marginLeft: 8 }} role="alert">
+                <span className="text-xs text-destructive ml-2" role="alert">
                   {shareError}
                 </span>
               )}
