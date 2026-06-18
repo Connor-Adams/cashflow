@@ -927,7 +927,7 @@
   }
 
   .aiVisibilityItem.is-unread {
-    border-left: 3px solid var(--brand, var(--primary));
+    border-left: 3px solid var(--amber-w-300);
     padding-left: 0.5rem;
   }
   .unreadDot {
@@ -935,7 +935,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--brand, var(--primary));
+    background: var(--amber-w-300);
     margin-right: 0.5rem;
     vertical-align: middle;
   }
