@@ -42,6 +42,7 @@ import { getJson, postJson } from '../lib/api'
 import { formatMoney } from '../lib/formatMoney'
 import { safePct } from '../lib/num'
 import type {
+  BySecurityRow,
   HoldingSnapshot,
   PortfolioAllocation,
   PortfolioBySecurity,
@@ -576,110 +577,148 @@ function BySecurityPanel({
   sparklines: Map<number, PortfolioSparklinePoint[]>
 }) {
   const rows = data?.rows ?? []
+  const columns: TableColumn<BySecurityRow>[] = [
+    {
+      key: 'symbol',
+      header: 'Symbol',
+      sortable: true,
+      accessor: (row) => row.symbol,
+      render: (row) => (
+        <span className="flex items-center gap-2">
+          <SecurityLogo
+            size="sm"
+            symbol={row.symbol}
+            name={row.name}
+            assetType={row.assetType}
+            currency={row.currency}
+          />
+          <Link
+            to={`/portfolio/security/${row.securityId}`}
+            className="text-foreground underline-offset-2 hover:underline"
+          >
+            {row.symbol}
+          </Link>
+        </span>
+      ),
+    },
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: true,
+      accessor: (row) => row.name,
+      render: (row) => row.name ?? '—',
+    },
+    {
+      key: 'assetType',
+      header: 'Asset type',
+      sortable: true,
+      accessor: (row) => row.assetType,
+      render: (row) => row.assetType ?? '—',
+    },
+    {
+      key: 'totalQuantity',
+      header: 'Total qty',
+      sortable: true,
+      accessor: (row) => row.totalQuantity,
+      render: (row) => row.totalQuantity,
+    },
+    {
+      key: 'totalCostBasis',
+      header: 'Total cost basis',
+      sortable: true,
+      accessor: (row) => row.totalCostBasis,
+      render: (row) =>
+        row.totalCostBasis != null
+          ? formatMoney(row.totalCostBasis, row.currency)
+          : '—',
+    },
+    {
+      key: 'totalMarketValue',
+      header: 'Total market value',
+      sortable: true,
+      accessor: (row) => row.totalMarketValue,
+      render: (row) => formatMoney(row.totalMarketValue, row.currency),
+    },
+    {
+      key: 'unrealizedGainLoss',
+      header: 'Unrealized',
+      sortable: true,
+      accessor: (row) => row.unrealizedGainLoss,
+      render: (row) =>
+        row.unrealizedGainLoss != null
+          ? formatMoney(row.unrealizedGainLoss, row.currency)
+          : '—',
+    },
+    {
+      key: 'todayChangePct',
+      header: 'Today',
+      sortable: true,
+      accessor: (row) => row.todayChangePct,
+      render: (row) => <PctDeltaCell value={row.todayChangePct} />,
+    },
+    {
+      key: 'thirtyDayReturnPct',
+      header: '30d Δ',
+      sortable: true,
+      accessor: (row) => row.thirtyDayReturnPct,
+      render: (row) => <PctDeltaCell value={row.thirtyDayReturnPct} />,
+    },
+    {
+      key: 'weightPct',
+      header: 'Weight',
+      sortable: true,
+      accessor: (row) => row.weightPct,
+      render: (row) =>
+        row.weightPct != null ? `${row.weightPct.toFixed(1)}%` : '—',
+    },
+    {
+      key: 'totalReturnPct',
+      header: 'Total Return',
+      sortable: true,
+      accessor: (row) => row.totalReturnPct,
+      render: (row) => <PctDeltaCell value={row.totalReturnPct} />,
+    },
+    {
+      key: 'accounts',
+      header: 'Accounts',
+      sortable: true,
+      accessor: (row) => row.accountBreakdown.length,
+      render: (row) => row.accountBreakdown.length,
+    },
+    {
+      key: 'sparkline',
+      header: '30d',
+      sortable: false,
+      render: (row) => (
+        <Sparkline
+          data={(sparklines.get(row.securityId) ?? []).map((p) => ({
+            date: p.date,
+            value: p.close,
+          }))}
+        />
+      ),
+    },
+    {
+      key: 'latestQuote',
+      header: 'Latest quote',
+      sortable: true,
+      accessor: (row) => row.latestPrice?.pricedAt ?? null,
+      render: (row) =>
+        row.latestPrice
+          ? `${formatMoney(row.latestPrice.price, row.latestPrice.currency)} · ${row.latestPrice.pricedAt.slice(0, 10)}`
+          : '—',
+    },
+  ]
   return (
-    <Card className="transactionsTableCard">
-      <div className="transactionsPanelHeader">
-        <div>
-          <h2>By security</h2>
-          <p className="muted">
-            Cross-account aggregate per ticker — combined quantity, cost basis, and
-            market value across every account.
-          </p>
-        </div>
-      </div>
-      <div className="transactionsTableWrap">
-        <Table className="table transactionsTable">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Asset type</TableHead>
-              <TableHead>Total qty</TableHead>
-              <TableHead>Total cost basis</TableHead>
-              <TableHead>Total market value</TableHead>
-              <TableHead>Unrealized</TableHead>
-              <TableHead>Today</TableHead>
-              <TableHead>30d Δ</TableHead>
-              <TableHead>Weight</TableHead>
-              <TableHead>Total Return</TableHead>
-              <TableHead>Accounts</TableHead>
-              <TableHead>30d</TableHead>
-              <TableHead>Latest quote</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.securityId}>
-                <TableCell>
-                  <span className="flex items-center gap-2">
-                    <SecurityLogo
-                      size="sm"
-                      symbol={row.symbol}
-                      name={row.name}
-                      assetType={row.assetType}
-                      currency={row.currency}
-                    />
-                    <Link
-                      to={`/portfolio/security/${row.securityId}`}
-                      className="text-foreground underline-offset-2 hover:underline"
-                    >
-                      {row.symbol}
-                    </Link>
-                  </span>
-                </TableCell>
-                <TableCell>{row.name ?? '—'}</TableCell>
-                <TableCell>{row.assetType ?? '—'}</TableCell>
-                <TableCell>{row.totalQuantity}</TableCell>
-                <TableCell>
-                  {row.totalCostBasis != null
-                    ? formatMoney(row.totalCostBasis, row.currency)
-                    : '—'}
-                </TableCell>
-                <TableCell>{formatMoney(row.totalMarketValue, row.currency)}</TableCell>
-                <TableCell>
-                  {row.unrealizedGainLoss != null
-                    ? formatMoney(row.unrealizedGainLoss, row.currency)
-                    : '—'}
-                </TableCell>
-                <TableCell>
-                  <PctDeltaCell value={row.todayChangePct} />
-                </TableCell>
-                <TableCell>
-                  <PctDeltaCell value={row.thirtyDayReturnPct} />
-                </TableCell>
-                <TableCell>
-                  {row.weightPct != null ? `${row.weightPct.toFixed(1)}%` : '—'}
-                </TableCell>
-                <TableCell>
-                  <PctDeltaCell value={row.totalReturnPct} />
-                </TableCell>
-                <TableCell>{row.accountBreakdown.length}</TableCell>
-                <TableCell>
-                  <Sparkline
-                    data={(sparklines.get(row.securityId) ?? []).map((p) => ({
-                      date: p.date,
-                      value: p.close,
-                    }))}
-                  />
-                </TableCell>
-                <TableCell>
-                  {row.latestPrice
-                    ? `${formatMoney(row.latestPrice.price, row.latestPrice.currency)} · ${row.latestPrice.pricedAt.slice(0, 10)}`
-                    : '—'}
-                </TableCell>
-              </TableRow>
-            ))}
-            {rows.length === 0 && (
-              <EmptyTableRow
-                colSpan={14}
-                title="No positions yet."
-                description="Aggregated view appears after holdings are imported."
-              />
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </Card>
+    <TableCard
+      title="By security"
+      description="Cross-account aggregate per ticker — combined quantity, cost basis, and market value across every account."
+      columns={columns}
+      rows={rows}
+      defaultSort={{ key: 'totalMarketValue', dir: 'desc' }}
+      getRowKey={(row) => row.securityId}
+      empty="No positions yet."
+    />
   )
 }
 
