@@ -75,12 +75,18 @@ Generalize the existing #376 counterparty backfill
   flows — `txn_type='transfer'` or merchant text matching an e-transfer pattern
   (e.g. `e-?transfer`, `online transfer`). Excludes investment-account rows.
 - For each, match against every contact's terms (Component 1). Single unambiguous
-  match → eligible to link. Ambiguous (matches >1 contact) → skipped, surfaced in
-  preview.
-- **Dry-run preview** endpoint returns candidate counts per contact and a sample,
-  writes nothing.
-- **Commit** sets `counterparty_contact_id` on matches. Idempotent — never relinks
-  an already-linked row. Reuses the existing rate-limit / streaming shape.
+  match → auto-linked on commit. Ambiguous (matches >1 contact) → NOT auto-linked;
+  surfaced as a manual-pick queue (the row + its candidate contacts) so the user
+  resolves each one. Never silently dropped.
+- **Dry-run preview** endpoint returns, per contact, the unambiguous candidate
+  count + a sample, AND the ambiguous rows with their competing contacts. Writes
+  nothing.
+- **Commit** sets `counterparty_contact_id` on unambiguous matches. Idempotent —
+  never relinks an already-linked row. Reuses the existing rate-limit / streaming
+  shape.
+- **Manual resolve:** an endpoint to set `counterparty_contact_id` on a single
+  ambiguous row to the user-chosen contact (reuses the existing per-transaction
+  counterparty-link path). The ledger-page UI presents the ambiguous queue.
 
 ### 3. Ledger derivation
 
@@ -126,6 +132,8 @@ No logic change. As loans are marked, the existing `owedBack` tile populates
   (sent − received per currency, mixed CAD/USD, no FX); reuse of `summarize()` for
   tracked balance.
 - **Link pass:** dry-run returns candidates and writes nothing; commit sets the FK
-  idempotently and skips already-linked and ambiguous-match rows.
+  idempotently, skips already-linked rows, auto-links unambiguous matches, and
+  leaves ambiguous (>1 contact) rows unlinked but reported in the manual-pick
+  queue; manual-resolve sets the chosen contact on one ambiguous row.
 - **Integration:** ledger endpoint returns both numbers for a contact with mixed
   transfers plus one marked loan.
