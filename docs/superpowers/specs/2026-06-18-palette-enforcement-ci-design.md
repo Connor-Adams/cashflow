@@ -65,10 +65,16 @@ without filesystem or process concerns.
    from ever matching as a 3-digit hex in `.tsx`.
 3. **Functional colors:** flag `rgb(`, `rgba(`, `hsl(`, `hsla(` literals.
 4. **Named colors:** flag a curated set of CSS named colors (`red`, `blue`,
-   `white`, `black`, …) **only in color-property position** — a CSS
-   `color:`/`background*:`/`border*:`/`fill:`/`stroke:` value, or a JSX inline
-   `style` object color key. Avoids matching the word "red" in prose/JSX text.
+   `white`, `black`, `gray`, …) **only in color-property position** — a CSS
+   `color:`/`background*:`/`border*:`/`fill:`/`stroke:` value (this includes
+   `color-mix(…)` anchor arguments), or a JSX inline `style` object color key.
+   Avoids matching the word "red" in prose/JSX text. **No carve-out for
+   black/white** — they are violations too (see Token promotion).
 5. Never flag a value that is a `var(--…)` reference.
+
+**Comment stripping must be string-aware.** A naive strip-to-EOL on `//` would
+corrupt lines containing a URL string literal (`"https://…"`, 3 such in tsx).
+Strip only `//` / `/* */` that are not inside a string or template literal.
 
 **Escape hatch:** a `// palette-allow` or `/* palette-allow */` marker on the
 same line suppresses that line. A small `PATH_ALLOWLIST` array in the script
@@ -104,12 +110,19 @@ authoritative + CSS coverage.
   `PALETTE` to `['var(--avatar-1)', …, 'var(--avatar-12)']` (consumed as inline
   `background` values). Palette stays the single source of truth — even
   categorical colors live in the token file.
-- Tokenize the remaining ~3 stragglers (e.g. `NetWorthTile`,
+- Tokenize the remaining ~3 tsx stragglers (e.g. `NetWorthTile`,
   `UtilizationBadge`) against existing semantic tokens, or mark with
   `// palette-allow` only if a value is genuinely dynamic and cannot be a
   token.
+- **App.css raw black/white → greyscale tokens.** ~25 `color-mix(…)` anchors
+  use raw `white`/`black`, plus 3 `color: #fff`. Per the palette rule these are
+  off-palette. Rewrite `white` → `var(--zinc-50)` (`#FAFAFA`) and `black` →
+  `var(--zinc-950)` (`#09090B`). Note: this is a deliberate, slight shift from
+  pure `#fff`/`#000` to the palette extremes — accepted, since the palette
+  defines no pure white/black.
 
-After this, the check passes on a clean tree at launch.
+After this (~46 literals total: ~18 tsx, ~28 css), the check passes on a clean
+tree at launch.
 
 ## Wiring
 
@@ -135,6 +148,10 @@ vitest (frontend convention) exercising `findViolations` directly:
 | `className="bg-[#fff]"` | flagged |
 | `color: #9B2D3A // palette-allow` | suppressed |
 | named color `color: red` (css) | flagged |
+| `color-mix(in srgb, var(--border) 88%, white 4%)` | flagged (raw `white`) |
+| `color-mix(in srgb, var(--border) 88%, var(--zinc-50) 4%)` | not flagged |
+| `color: #fff` (css, 3-digit) | flagged |
+| `"https://x.com//y"` URL in tsx | not flagged (string-aware strip) |
 | the word "red" in JSX text | not flagged |
 
 ## Non-goals / YAGNI
