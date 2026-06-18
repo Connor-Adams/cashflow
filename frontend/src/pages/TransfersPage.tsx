@@ -231,14 +231,7 @@ export function TransfersPage() {
         title="Money movement"
         description="Aggregate of linked transfer pairs. Use the purpose filter to see only owner draws, reimbursements, etc."
       >
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-        >
+        <div className="flex items-center gap-3 mb-3">
           <label htmlFor="transfer-purpose-filter">Purpose</label>
           <NativeSelect
             id="transfer-purpose-filter"
@@ -334,13 +327,12 @@ function Stat({
 }) {
   return (
     <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
-      <div className="muted" style={{ fontSize: 12 }}>
+      <div className="text-xs text-muted-foreground">
         {label}
       </div>
       <div
+        className="text-xl font-semibold"
         style={{
-          fontSize: 20,
-          fontWeight: 600,
           color: tone === 'warn' ? 'var(--accent-warm)' : undefined,
         }}
       >
@@ -487,7 +479,7 @@ function SuggestionPanel({
   const candidates = suggestions?.candidates ?? []
 
   return (
-    <div style={{ padding: 8 }}>
+    <div className="p-2">
       {loading && <p className="muted">Loading suggestions…</p>}
       {err && (
         <p className="error" role="alert">
@@ -496,14 +488,7 @@ function SuggestionPanel({
       )}
       {!loading && !err && (
         <>
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              alignItems: 'center',
-              marginBottom: 12,
-            }}
-          >
+          <div className="flex items-center gap-3 mb-3">
             <label htmlFor={`purpose-${anchor.id}`}>Classify as</label>
             <NativeSelect
               id={`purpose-${anchor.id}`}
@@ -644,7 +629,7 @@ function MoneyMovementTable({
         </TableBody>
       </Table>
       {flows.length > 0 && (
-        <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+        <p className="mt-2 text-xs text-muted-foreground">
           Total source movement:{' '}
           {sourceTotalsByCurrency
             .map(([cur, amount]) => formatMoney(amount, cur))
