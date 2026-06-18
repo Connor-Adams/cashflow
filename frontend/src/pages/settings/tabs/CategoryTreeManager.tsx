@@ -119,7 +119,7 @@ function TreeNode({ node, depth, onChanged, onError, onReparent: _onReparent }: 
           </Button>
         </div>
       )}
-      {node.children.length > 0 && (
+      {(node.children?.length ?? 0) > 0 && (
         <ul>
           {node.children.map((c) => (
             <TreeNode
