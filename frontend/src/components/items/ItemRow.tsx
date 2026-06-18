@@ -1,6 +1,10 @@
 import { useState, useRef } from 'react'
 import { patchJson } from '../../lib/api'
 import { formatMoney } from '../../lib/formatMoney'
+import { cn } from '@/lib/utils'
+import { TableRow, TableCell } from '@/components/ui/table'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Input } from '@/components/ui/input'
 import type { ExternalOrderItemView } from '../../../../shared/api-types'
 
 export type ItemRowProps = {
@@ -56,9 +60,9 @@ export function ItemRow({ item, categoryHints, currency, onSaved }: ItemRowProps
   }
 
   return (
-    <tr>
-      <td>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+    <TableRow>
+      <TableCell className="whitespace-normal">
+        <div className="flex items-center gap-2">
           {item.imageUrl && (
             <a href={item.costcoUrl ?? undefined} target="_blank" rel="noopener noreferrer">
               <img
@@ -67,7 +71,10 @@ export function ItemRow({ item, categoryHints, currency, onSaved }: ItemRowProps
                 title={item.imageVerified === false ? 'Best-effort match (unverified)' : undefined}
                 width={40}
                 height={40}
-                style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid var(--border)', opacity: item.imageVerified === false ? 0.6 : 1 }}
+                className={cn(
+                  'rounded border border-border object-contain',
+                  item.imageVerified === false && 'opacity-60',
+                )}
                 loading="lazy"
               />
             </a>
@@ -75,39 +82,49 @@ export function ItemRow({ item, categoryHints, currency, onSaved }: ItemRowProps
           <div>
             {item.displayName ?? item.title}
             {item.displayName && (
-              <div style={{ fontSize: '0.8em', color: 'var(--muted-foreground)' }}>{item.title}</div>
+              <div className="text-xs text-muted-foreground">{item.title}</div>
             )}
           </div>
         </div>
-      </td>
-      <td>{item.quantity}</td>
-      <td>{item.totalPrice != null ? formatMoney(Number(item.totalPrice), currency) : '—'}</td>
-      <td>
-        <select
+      </TableCell>
+      <TableCell>{item.quantity}</TableCell>
+      <TableCell>{item.totalPrice != null ? formatMoney(Number(item.totalPrice), currency) : '—'}</TableCell>
+      <TableCell>
+        <NativeSelect
+          size="sm"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           onBlur={() => void handleCategoryBlur()}
         >
-          <option value="">(uncategorized)</option>
+          <NativeSelectOption value="">(uncategorized)</NativeSelectOption>
           {categoryHints.map((c) => (
-            <option key={c} value={c}>
+            <NativeSelectOption key={c} value={c}>
               {c}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-        {categoryError && <span role="alert">{categoryError}</span>}
-      </td>
-      <td>
-        <input
+        </NativeSelect>
+        {categoryError && (
+          <span role="alert" className="mt-1 block text-xs text-danger">
+            {categoryError}
+          </span>
+        )}
+      </TableCell>
+      <TableCell>
+        <Input
           type="number"
           min={0}
           max={100}
+          className="h-8 w-20"
           value={business}
           onChange={(e) => setBusiness(e.target.value)}
           onBlur={() => void handleBusinessBlur()}
         />
-        {businessError && <span role="alert">{businessError}</span>}
-      </td>
-    </tr>
+        {businessError && (
+          <span role="alert" className="mt-1 block text-xs text-danger">
+            {businessError}
+          </span>
+        )}
+      </TableCell>
+    </TableRow>
   )
 }
