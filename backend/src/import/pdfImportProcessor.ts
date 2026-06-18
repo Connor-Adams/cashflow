@@ -40,7 +40,7 @@ export async function processItem(item: PdfImportItem): Promise<'done' | 'skippe
   if (!parseOut.header) throw new Error(`Parser ${parser.id} produced no header for account match`);
 
   const { account, overrideBusiness } = await resolvePdfAccountFromHeader(
-    parseOut.header, batch.householdId, batch.userId,
+    parseOut.header, batch.householdId, batch.userId, item.fileName,
   );
   const preview = await parseStatementFile({
     buffer, fileName: item.fileName, accountId: account.id,
