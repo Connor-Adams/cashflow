@@ -52,9 +52,10 @@ router.get('/self-suggestions', apiReadLimiter, async (req, res, next) => {
     const { user, household } = currentAuth(req);
     const householdId = household.id;
 
-    // Load all non-self contacts for this household.
+    // Load non-self contacts for this household — already-flagged self
+    // accounts are filtered at the DB so we never re-suggest them.
     const contactRows = await Contact.findAll({
-      where: { householdId },
+      where: { householdId, isSelf: false },
       order: [['name', 'ASC']],
     });
 
