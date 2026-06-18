@@ -7,10 +7,18 @@ import { Category } from '../models/Category';
 import { normalizeCategoryName } from './normalizeName';
 
 /**
- * Resolve a category NAME to a root Category node id for a household,
- * find-or-creating a flat root node (parentId null). Mirrors the legacy
- * ensureCategory create-a-root behavior, returning the id so write paths can
- * set their *CategoryId FK. Null / empty / whitespace name → null.
+ * Resolve a category NAME (a flat, pathless name from rules / import /
+ * auto-categorization) to a Category node id for a household.
+ *
+ * Resolution order, so a name never silently forks an existing category into a
+ * duplicate root:
+ *   1. an existing ROOT (parentId null) with that name — the canonical target;
+ *   2. else, if exactly ONE category anywhere in the tree bears that name, reuse
+ *      it (e.g. a former root that has since been nested under a parent);
+ *   3. else (none, or ambiguous: multiple same-named nested nodes and no root)
+ *      find-or-create a flat root, the deterministic legacy behaviour.
+ *
+ * Null / empty / whitespace name → null.
  */
 export async function resolveCategoryIdByName(
   householdId: number,
@@ -21,6 +29,16 @@ export async function resolveCategoryIdByName(
   const trimmed = name.trim();
   if (!trimmed) return null;
   const nameKey = normalizeCategoryName(trimmed);
+
+  const matches = await Category.findAll({
+    where: { householdId, nameKey },
+    attributes: ['id', 'parentId'],
+    transaction: opts.transaction,
+  });
+  const root = matches.find((m) => m.parentId == null);
+  if (root) return root.id;
+  if (matches.length === 1) return matches[0].id; // single nested match — reuse, don't fork
+
   const [node] = await Category.findOrCreate({
     where: { householdId, parentId: null, nameKey },
     defaults: { householdId, parentId: null, name: trimmed, icon: null },
