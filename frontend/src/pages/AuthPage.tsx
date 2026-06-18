@@ -87,7 +87,7 @@ export function AuthPage() {
           )}
           <label>
             Email
-            <Input name="email" type="email" autoComplete="email" required />
+            <Input name="email" type="email" autoComplete="username" required />
           </label>
           <label>
             Password
