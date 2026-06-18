@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Grid } from '@/components/ui/grid'
 import { SectionHeader } from '@/components/ui/section-header'
@@ -141,9 +142,9 @@ export function RulesHealthSection({ onAfterCreate }: Props) {
         title="Rules health"
         description={`Coverage and gaps over the last ${health.windowDays} days.`}
         actions={
-          <span className="transactionsPanelBadge">
+          <Badge variant="count">
             {health.totalRules} rules
-          </span>
+          </Badge>
         }
       />
 

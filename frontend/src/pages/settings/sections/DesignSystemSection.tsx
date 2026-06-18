@@ -49,6 +49,7 @@ export function DesignSystemSection() {
         <Badge variant="secondary">Secondary</Badge>
         <Badge variant="outline">Outline</Badge>
         <Badge variant="destructive">Destructive</Badge>
+        <Badge variant="count">Count</Badge>
       </Group>
 
       <Group name="Alerts">

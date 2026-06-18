@@ -11,6 +11,7 @@ const badgeVariants = cva(
         secondary: 'border-transparent bg-muted text-foreground',
         destructive: 'border-transparent bg-destructive text-[var(--destructive-foreground)]',
         outline: 'border-border text-foreground',
+        count: 'border-border bg-muted px-2.5 py-1 text-[0.68rem] font-bold uppercase tracking-normal text-muted-foreground',
       },
     },
     defaultVariants: {

@@ -653,13 +653,6 @@
     @apply mt-0 mb-1;
   }
 
-  .transactionsPanelBadge {
-    @apply rounded-md border px-2.5 py-1 text-[0.68rem] font-bold uppercase tracking-normal;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    background: color-mix(in srgb, var(--bg3) 62%, transparent);
-    color: var(--muted-foreground);
-  }
-
   .transactionsToolbar {
     @apply mb-4;
   }
@@ -1176,19 +1169,6 @@
 
   .txnAmount--credit {
     color: var(--positive);
-  }
-
-  .txnBadge {
-    @apply inline-flex rounded-md border px-2 py-1 text-[0.68rem] font-bold uppercase tracking-normal;
-    border-color: color-mix(in srgb, var(--border) 86%, white 6%);
-    color: var(--muted-foreground);
-    background: color-mix(in srgb, var(--bg3) 52%, transparent);
-  }
-
-  .txnBadge--review {
-    border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border));
-    color: var(--warning-foreground);
-    background: var(--warning-bg);
   }
 
   .txnReceiptCount {
