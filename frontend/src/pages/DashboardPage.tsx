@@ -736,27 +736,6 @@ export function DashboardPage() {
         description="Totals stay in each currency. Filter by currency and date range."
       />
       {err && <Alert variant="error">{err}</Alert>}
-      {loading && (
-        <div
-          className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
-          aria-busy={loading}
-          aria-label="Loading dashboard"
-        >
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={`dash-skeleton-${i}`}
-              className="col-span-1 sm:col-span-2 rounded-xl border border-border bg-card p-4"
-            >
-              <Skeleton className="h-3 w-1/2" />
-              <Skeleton className="mt-3 h-7 w-2/3" />
-            </div>
-          ))}
-          <Skeleton className="col-span-1 sm:col-span-6 lg:col-span-8 row-span-2 h-full min-h-[20rem] rounded-xl" />
-          <div className="col-span-1 sm:col-span-6 lg:col-span-4 row-span-2 rounded-xl border border-border bg-card p-4">
-            <SkeletonText lines={5} />
-          </div>
-        </div>
-      )}
 
       <FilterCard density="compact" className="mt-2">
           <FilterBar
@@ -808,7 +787,41 @@ export function DashboardPage() {
 
       <ActivationCardDeck />
 
-      {!loading && (
+      {loading ? (
+        <div
+          className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
+          aria-busy={loading}
+          aria-label="Loading dashboard"
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={`dash-skeleton-stat-${i}`}
+              className="col-span-1 sm:col-span-3 lg:col-span-2 rounded-xl border border-border bg-card p-4"
+            >
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="mt-3 h-7 w-2/3" />
+              <Skeleton className="mt-2 h-3 w-1/3" />
+            </div>
+          ))}
+          <div className="col-span-1 sm:col-span-6 lg:col-span-8 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="min-h-[14rem] flex-1 rounded-lg" />
+          </div>
+          <div className="col-span-1 sm:col-span-6 lg:col-span-4 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+            <Skeleton className="h-4 w-1/2" />
+            <SkeletonText lines={6} />
+          </div>
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div
+              key={`dash-skeleton-tile-${i}`}
+              className="col-span-1 sm:col-span-3 lg:col-span-6 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
+            >
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="min-h-[10rem] flex-1 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      ) : (
       <div
         className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
