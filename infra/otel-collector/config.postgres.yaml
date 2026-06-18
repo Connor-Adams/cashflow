@@ -1,0 +1,55 @@
+# infra/otel-collector/config.postgres.yaml
+#
+# PROD-ONLY overlay that adds Postgres engine metrics to the collector.
+#
+# This is layered ON TOP of config.yaml via a SECOND --config flag, NOT used on
+# its own. The collector deep-merges multiple --config files: maps merge, but
+# sequences are replaced — so `service.pipelines.metrics.receivers` below
+# restates the full list ([otlp, postgresql]) rather than appending.
+#
+# WHY an overlay instead of folding this into config.yaml: the same collector
+# image runs locally (infra/docker-compose.yml) where the app is on SQLite and
+# there is NO Postgres to scrape. Baking the receiver into the base config would
+# make the local collector log a connection error every collection_interval.
+# Keeping it as a prod-only overlay means local stays silent and the receiver
+# only exists where a Railway Postgres actually lives.
+#
+# Railway: set the otel-collector service's Custom Start Command to load both:
+#   --config=/etc/otel-collector-config.yaml --config=/etc/otel-collector-pg-config.yaml
+# and set the PG_METRICS_* env vars (see docs/observability.md).
+#
+# The postgresql receiver reads pg_stat_* / pg_settings — it needs NO extension
+# (pg_stat_statements is only for query-digest analytics, which we don't do
+# here). A few optional metrics (deadlocks, locks) require the monitoring role to
+# hold pg_monitor; the grant is documented alongside the env vars.
+receivers:
+  postgresql:
+    endpoint: ${env:PG_METRICS_ENDPOINT}        # host:port, e.g. postgres.railway.internal:5432
+    transport: tcp
+    username: ${env:PG_METRICS_USERNAME}
+    password: ${env:PG_METRICS_PASSWORD}
+    databases:
+      - ${env:PG_METRICS_DATABASE}
+    collection_interval: 30s
+    tls:
+      insecure: true                            # Railway private network is plaintext
+    metrics:
+      # Optional metric, disabled by default — needed for the Deadlocks panel.
+      # Requires the monitoring role to hold pg_monitor.
+      postgresql.deadlocks:
+        enabled: true
+    # NOTE: per-table / per-index metrics (postgresql.rows, postgresql.table.*,
+    # postgresql.index.*) carry table/db identity in RESOURCE attributes, which
+    # the prometheus exporter drops unless resource_to_telemetry_conversion is
+    # enabled. Enabling that here would also relabel the app's cashflow_* metrics
+    # and risk existing alerts/dashboards, so we keep it OFF and the dashboard
+    # sticks to per-database / global series. Revisit only if per-table stats are
+    # genuinely needed.
+
+service:
+  pipelines:
+    metrics:
+      # Sequence is REPLACED on merge, so list both receivers explicitly. The
+      # base config's processors ([memory_limiter, batch]) and exporters
+      # ([prometheus]) are map-merged in and need not be repeated.
+      receivers: [otlp, postgresql]

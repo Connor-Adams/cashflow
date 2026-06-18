@@ -576,9 +576,9 @@ describe('Toast primitive', () => {
 })
 
 describe('Skeleton primitive', () => {
-  it('renders with pulse class', () => {
+  it('renders with shimmer class', () => {
     const html = renderToStaticMarkup(<Skeleton className="h-4 w-20" />)
-    expect(html).toContain('animate-pulse')
+    expect(html).toContain('skeleton-shimmer')
     expect(html).toContain('data-slot="skeleton"')
     expect(html).toContain('h-4')
     expect(html).toContain('w-20')
@@ -600,7 +600,7 @@ describe('Skeleton primitive', () => {
     )
     const cellMatches = html.match(/<td/g) ?? []
     expect(cellMatches.length).toBe(3)
-    expect(html).toContain('animate-pulse')
+    expect(html).toContain('skeleton-shimmer')
   })
 })
 

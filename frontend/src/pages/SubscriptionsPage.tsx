@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ExternalLink } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
+import { Grid } from '@/components/ui/grid'
 import { SummaryStat } from '@/components/SummaryStat'
 import {
   Dialog,
@@ -242,8 +245,8 @@ export function SubscriptionsPage() {
 
       <SubscriptionSummary summary={summary} loading={loading} />
 
-      <section className="card">
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+      <Card className="mb-4">
+        <div className="flex items-center gap-3">
           <label htmlFor="subscriptions-status-filter">Status</label>
           <NativeSelect
             id="subscriptions-status-filter"
@@ -257,12 +260,12 @@ export function SubscriptionsPage() {
             ))}
           </NativeSelect>
         </div>
-      </section>
+      </Card>
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
       <CollapsibleCard
@@ -270,45 +273,43 @@ export function SubscriptionsPage() {
         title="Detected subscriptions"
         description="Each row is a recurring charge group detected from the last 180 days of activity. Status and cancellation URL are user-curated and preserved across refreshes."
       >
-        <div className="tableWrap" aria-busy={loading}>
-          <Table className="table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Merchant</TableHead>
-                <TableHead>Cadence</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Annual cost</TableHead>
-                <TableHead>Last charged</TableHead>
-                <TableHead>Next expected</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                Array.from({ length: 6 }).map((_, i) => (
-                  <SkeletonRow key={`subs-skeleton-${i}`} cols={COLUMN_COUNT} />
-                ))
-              ) : visibleItems.length === 0 ? (
-                <EmptyTableRow
-                  colSpan={COLUMN_COUNT}
-                  title="No subscriptions detected yet."
-                  description="Import more transaction history so the recurring detector has enough data, or check back after a few cycles."
+        <Table aria-busy={loading}>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Merchant</TableHead>
+              <TableHead>Cadence</TableHead>
+              <TableHead>Amount</TableHead>
+              <TableHead>Annual cost</TableHead>
+              <TableHead>Last charged</TableHead>
+              <TableHead>Next expected</TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead>Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonRow key={`subs-skeleton-${i}`} cols={COLUMN_COUNT} />
+              ))
+            ) : visibleItems.length === 0 ? (
+              <EmptyTableRow
+                colSpan={COLUMN_COUNT}
+                title="No subscriptions detected yet."
+                description="Import more transaction history so the recurring detector has enough data, or check back after a few cycles."
+              />
+            ) : (
+              visibleItems.map((item) => (
+                <SubscriptionRow
+                  key={item.id}
+                  item={item}
+                  onStatusChange={updateStatus}
+                  onCadenceChange={updateCadence}
+                  rowError={rowErrors.get(item.id)}
                 />
-              ) : (
-                visibleItems.map((item) => (
-                  <SubscriptionRow
-                    key={item.id}
-                    item={item}
-                    onStatusChange={updateStatus}
-                    onCadenceChange={updateCadence}
-                    rowError={rowErrors.get(item.id)}
-                  />
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+              ))
+            )}
+          </TableBody>
+        </Table>
       </CollapsibleCard>
     </div>
   )
@@ -323,23 +324,19 @@ function SubscriptionSummary({
 }) {
   if (loading && !summary) {
     return (
-      <section className="card" aria-busy="true">
-        <p className="muted">Loading subscription totals…</p>
-      </section>
+      <Card className="mb-4" aria-busy="true">
+        <p className="mb-4 text-sm leading-6 text-muted-foreground">
+          Loading subscription totals…
+        </p>
+      </Card>
     )
   }
   if (!summary) return null
 
   const { totals, byCurrency } = summary
   return (
-    <section className="card" aria-label="Subscription totals">
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
-      >
+    <Card className="mb-4" aria-label="Subscription totals">
+      <Grid minItemWidth={180} gap="md">
         <SummaryStat label="Active" value={String(totals.active)} />
         <SummaryStat label="Ignored" value={String(totals.ignored)} />
         <SummaryStat label="Cancelled" value={String(totals.cancelled)} />
@@ -362,8 +359,8 @@ function SubscriptionSummary({
             value={formatMoney(row.annualCost, row.currency)}
           />
         ))}
-      </div>
-    </section>
+      </Grid>
+    </Card>
   )
 }
 
@@ -411,13 +408,13 @@ function SubscriptionRow({
   return (
     <TableRow>
       <TableCell>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="flex items-center gap-1.5">
           {item.merchantName}
           {pendingChange ? (
             <Badge
               variant={pctNum >= 0 ? 'destructive' : 'default'}
               title={`Went from ${formatMoney(pendingChange.prevCents / 100, item.currency)} to ${formatMoney(pendingChange.newCents / 100, item.currency)} on ${pendingChange.detectedOn}`}
-              style={{ cursor: 'pointer' }}
+              className="cursor-pointer"
               onClick={() => setPriceDrawerOpen(true)}
             >
               Price {pctLabel}
@@ -458,12 +455,7 @@ function SubscriptionRow({
             href={item.cancellationUrl}
             target="_blank"
             rel="noopener noreferrer"
-            style={{
-              fontSize: 12,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
+            className="inline-flex items-center gap-1 text-xs"
           >
             cancel <ExternalLink size={10} aria-hidden="true" />
           </a>
@@ -498,14 +490,7 @@ function SubscriptionRow({
       <TableCell>{item.nextExpectedDate ?? '—'}</TableCell>
       <TableCell>{item.category ?? '—'}</TableCell>
       <TableCell>
-        <div
-          style={{
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-            flexWrap: 'wrap',
-          }}
-        >
+        <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant={STATUS_BADGE_VARIANT[item.status]}>
             {item.status}
           </Badge>
@@ -516,9 +501,9 @@ function SubscriptionRow({
             onToggleImpact={() => setShowImpact((v) => !v)}
           />
           {rowError && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} role="alert">
+            <div className="flex items-center gap-1" role="alert">
               <span
-                style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--destructive)', flexShrink: 0 }}
+                className="h-2 w-2 shrink-0 rounded-full bg-destructive"
                 aria-hidden="true"
               />
               <span className="text-xs text-destructive">{rowError.message}</span>

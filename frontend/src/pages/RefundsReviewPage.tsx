@@ -141,10 +141,12 @@ export function RefundsReviewPage() {
         }
       />
       {loading && rows.length === 0 ? (
-        <p className="muted">Loading refund queue…</p>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Loading refund queue…
+        </p>
       ) : rows.length === 0 ? (
         <Card className="p-6">
-          <p className="muted">
+          <p className="text-sm leading-6 text-muted-foreground">
             No refunds need review. New refunds appear here automatically when
             the detector auto-links them, or when a canonical-brand suggestion
             needs human confirmation.
@@ -189,15 +191,15 @@ function RefundReviewItem({
             {row.refundMerchantClean} ·{' '}
             {formatMoney(row.refundAmount, row.refundCurrency)}
           </p>
-          <p className="muted text-sm">{row.refundDate}</p>
+          <p className="text-sm text-muted-foreground">{row.refundDate}</p>
         </div>
-        <div className="text-sm muted">
+        <div className="text-sm text-muted-foreground">
           {row.autoSource ?? 'manual'} · {row.autoConfidence ?? 'n/a'}
         </div>
       </div>
       {row.linkedOriginal && (
         <div className="mt-3 text-sm">
-          <p className="muted">Currently linked to:</p>
+          <p className="text-muted-foreground">Currently linked to:</p>
           <p>
             #{row.linkedOriginal.id} · {row.linkedOriginal.merchantClean} ·{' '}
             {formatMoney(
@@ -210,7 +212,7 @@ function RefundReviewItem({
       )}
       {row.suggestions.length > 0 && (
         <div className="mt-3 text-sm">
-          <p className="muted">Other possible matches:</p>
+          <p className="text-muted-foreground">Other possible matches:</p>
           <ul className="space-y-1">
             {row.suggestions.map((s) => (
               <li

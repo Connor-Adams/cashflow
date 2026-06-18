@@ -22,6 +22,7 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
+import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/formatMoney'
 import {
   fromDateInputValue,
@@ -107,7 +108,54 @@ export function NetWorthPage() {
   }
 
   if (current.loading && !current.data) {
-    return <div className="p-6">Loading net worth…</div>
+    return (
+      <div className="p-6 space-y-6">
+        <header className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-40" />
+            <Skeleton className="h-4 w-28" />
+          </div>
+          <div className="flex gap-1">
+            {['1M', '3M', '1Y', 'All'].map((_, i) => (
+              <Skeleton key={`networth-skeleton-range-${i}`} className="h-8 w-10" />
+            ))}
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[0, 1, 2].map((i) => (
+            <div key={`networth-skeleton-card-${i}`} className="rounded border p-4 space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-8 w-32" />
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded border p-4 space-y-2">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-[280px] w-full" />
+        </div>
+
+        <div className="rounded border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Source</TableHead>
+                <TableHead>Currency</TableHead>
+                <TableHead className="text-right">Native</TableHead>
+                <TableHead className="text-right">CAD value</TableHead>
+                <TableHead>Notes</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonRow key={`networth-skeleton-${i}`} cols={5} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    )
   }
 
   const cur = current.data

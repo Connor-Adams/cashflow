@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import { cn } from '@/lib/utils'
 import { BentoTile, type BentoSpan } from './BentoTile'
 
 export type TableTileColumn<R> = {
@@ -79,31 +80,46 @@ export function TableTile<R>({
         <p className="emptyState">{emptyLabel}</p>
       ) : (
         <>
-          <div className="tableTile">
+          {/* formerly .tableTile */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* formerly .tableTile__header */}
             <div
-              className="tableTile__header"
+              className="grid items-center gap-2 py-1 border-b border-[var(--border)]"
               style={{ gridTemplateColumns: gridTemplate }}
               role="row"
             >
               {columns.map((c) => (
+                // formerly .tableTile__head + [data-align="right"]
                 <span
                   key={c.key}
                   role="columnheader"
-                  className="tableTile__head"
+                  className="truncate text-[0.7rem] font-bold uppercase tracking-wide text-[var(--muted-foreground)]"
+                  style={c.align === 'right' ? { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } : undefined}
                   data-align={c.align ?? 'left'}
                 >
                   {c.label}
                 </span>
               ))}
             </div>
-            <div className="tableTile__body" role="rowgroup">
+            {/* formerly .tableTile__body */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" role="rowgroup">
               {rows.map((row) => {
                 const interactive = Boolean(onRowClick)
                 return (
+                  // formerly .tableTile__row + sibling border + interactive states
                   <div
                     key={rowKey(row)}
                     role="row"
-                    className="tableTile__row"
+                    className={cn(
+                      'grid items-center gap-2 py-1',
+                      '[&+&]:border-t [&+&]:border-[color-mix(in_oklch,var(--border)_60%,transparent)]',
+                      interactive && [
+                        'cursor-pointer rounded-[6px] mx-[-4px] px-[4px]',
+                        'transition-colors duration-[150ms]',
+                        'hover:bg-[color-mix(in_oklch,var(--muted)_50%,transparent)]',
+                        'focus-visible:outline-2 focus-visible:outline-[var(--ring)] focus-visible:outline-offset-2',
+                      ],
+                    )}
                     data-interactive={interactive}
                     style={{ gridTemplateColumns: gridTemplate }}
                     tabIndex={interactive ? 0 : undefined}
@@ -111,10 +127,12 @@ export function TableTile<R>({
                     onKeyDown={interactive ? (e) => handleKey(e, row) : undefined}
                   >
                     {columns.map((c) => (
+                      // formerly .tableTile__cell + [data-align="right"]
                       <span
                         key={c.key}
                         role="cell"
-                        className="tableTile__cell"
+                        className="truncate text-sm text-[var(--foreground)]"
+                        style={c.align === 'right' ? { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } : undefined}
                         data-align={c.align ?? 'left'}
                       >
                         {c.render(row)}
@@ -126,8 +144,10 @@ export function TableTile<R>({
             </div>
           </div>
           {viewAllLabel && viewAllHref && (
-            <div className="tableTile__footer">
-              <Link to={viewAllHref} className="tableTile__viewAll">
+            // formerly .tableTile__footer
+            <div className="mt-2 flex justify-end pt-2 border-t border-[var(--border)]">
+              {/* formerly .tableTile__viewAll + :hover */}
+              <Link to={viewAllHref} className="text-xs font-semibold no-underline text-[var(--primary)] hover:underline">
                 {viewAllLabel} →
               </Link>
             </div>

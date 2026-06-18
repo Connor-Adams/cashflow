@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Grid } from '@/components/ui/grid'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
+import { SkeletonRow } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -221,8 +224,10 @@ export function GoalsPage() {
   const [editForm, setEditForm] = useState<FormState>(emptyForm())
   const [editSaving, setEditSaving] = useState(false)
   const [statusFilter, setStatusFilter] = useState<FinancialGoalStatus | ''>('active')
+  const [loading, setLoading] = useState(true)
 
   const loadGoals = useCallback(async () => {
+    setLoading(true)
     try {
       const path = statusFilter
         ? `/api/goals?status=${encodeURIComponent(statusFilter)}`
@@ -249,6 +254,8 @@ export function GoalsPage() {
       setProjections(map)
     } catch {
       // Surfaced via toast in handlers
+    } finally {
+      setLoading(false)
     }
   }, [statusFilter])
 
@@ -393,20 +400,20 @@ export function GoalsPage() {
         title="Goals"
         description="Savings targets, sinking funds, and recurring expense reserves (emergency fund, vacation, taxes, annual insurance)."
       />
-      <Card className="accountsFormCard">
-        <div className="accountsCardHeader">
-          <div>
-            <h2 className="flex items-center gap-2">
+      <Card className="mb-4">
+        <SectionHeader
+          title={
+            <span className="flex items-center gap-2">
               <Target aria-hidden="true" className="h-5 w-5" />
               Your goals
-            </h2>
-            <p className="muted">
-              {goals.length === 0
-                ? 'Add a goal below to start tracking progress.'
-                : `${goals.length} goal${goals.length === 1 ? '' : 's'} shown.`}
-            </p>
-          </div>
-          <div>
+            </span>
+          }
+          description={
+            goals.length === 0
+              ? 'Add a goal below to start tracking progress.'
+              : `${goals.length} goal${goals.length === 1 ? '' : 's'} shown.`
+          }
+          actions={
             <Label htmlFor="goals-status-filter" className="text-sm">
               Status
               <NativeSelect
@@ -424,16 +431,15 @@ export function GoalsPage() {
                 ))}
               </NativeSelect>
             </Label>
-          </div>
-        </div>
-        {goals.length === 0 ? (
+          }
+        />
+        {!loading && goals.length === 0 ? (
           <EmptyState
             title="No goals yet."
             description="Add a target below — emergency fund, sinking fund, or upcoming expense."
           />
         ) : (
-          <div className="tableWrap">
-            <Table className="table">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
@@ -448,7 +454,11 @@ export function GoalsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {goals.map((row) => {
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <SkeletonRow key={`goals-skeleton-${i}`} cols={9} />
+                    ))
+                  : goals.map((row) => {
                   if (editId === row.id) {
                     return (
                       <TableRow key={row.id}>
@@ -461,7 +471,7 @@ export function GoalsPage() {
                               idPrefix={`goal-edit-${row.id}`}
                               showStatus
                             />
-                            <div className="row">
+                            <div className="mb-3 flex flex-wrap items-center gap-3">
                               <Button
                                 type="submit"
                                 size="sm"
@@ -492,7 +502,7 @@ export function GoalsPage() {
                       <TableCell>
                         <div className="font-medium">{row.name}</div>
                         {row.notes ? (
-                          <div className="muted text-xs">{row.notes}</div>
+                          <div className="text-xs text-muted-foreground">{row.notes}</div>
                         ) : null}
                       </TableCell>
                       <TableCell>
@@ -510,7 +520,7 @@ export function GoalsPage() {
                               style={{ width: `${progress}%` }}
                             />
                           </div>
-                          <div className="muted text-xs">
+                          <div className="text-xs text-muted-foreground">
                             {safeNum(row.currentAmount) !== null
                               ? formatMoney(safeNum(row.currentAmount)!, row.currency)
                               : <em className="text-muted-foreground">(unset)</em>}
@@ -547,17 +557,17 @@ export function GoalsPage() {
                               /mo
                             </div>
                             {projection.projectedCompletionDate ? (
-                              <div className="muted">
+                              <div className="text-sm leading-6 text-muted-foreground">
                                 Finish ~{projection.projectedCompletionDate}
                               </div>
                             ) : null}
                           </div>
                         ) : projection?.projectedCompletionDate ? (
-                          <div className="muted text-xs">
+                          <div className="text-xs text-muted-foreground">
                             Finish ~{projection.projectedCompletionDate}
                           </div>
                         ) : (
-                          <span className="muted text-xs">—</span>
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -579,7 +589,7 @@ export function GoalsPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="row">
+                        <div className="mb-3 flex flex-wrap items-center gap-3">
                           <Button
                             type="button"
                             size="sm"
@@ -613,10 +623,9 @@ export function GoalsPage() {
                       </TableCell>
                     </TableRow>
                   )
-                })}
+                  })}
               </TableBody>
             </Table>
-          </div>
         )}
 
         <form onSubmit={createGoal}>
@@ -655,7 +664,7 @@ function GoalFormFields({
   showStatus,
 }: GoalFormFieldsProps) {
   return (
-    <div className="formGrid">
+    <Grid minItemWidth={180} gap="md" fill className="mb-3">
       <Label htmlFor={`${idPrefix}-name`}>
         Name
         <Input
@@ -805,6 +814,6 @@ function GoalFormFields({
           maxLength={4096}
         />
       </Label>
-    </div>
+    </Grid>
   )
 }

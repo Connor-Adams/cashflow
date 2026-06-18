@@ -460,6 +460,28 @@ export type Contact = {
    * Fairness dashboard's partner_inflows / non_partner_inflows split.
    */
   isPartner: boolean
+  /**
+   * True when this contact has been confirmed as the user's own account
+   * (e.g. "Connor Adams RBC"). Self-accounts are excluded from the
+   * per-person loan ledger and the transfer-link pass.
+   */
+  isSelf: boolean
+}
+
+/**
+ * A contact suggested as a potential self-account (the household user's own
+ * account appearing as a counterparty). Returned by GET /api/contacts/self-suggestions.
+ */
+export type SelfSuggestion = {
+  id: number
+  name: string
+  /** Human-readable explanation of why this contact looks like a self-account. */
+  reason: string
+}
+
+/** Response shape for GET /api/contacts/self-suggestions. */
+export type SelfSuggestionsResponse = {
+  suggestions: SelfSuggestion[]
 }
 
 export const TAX_TREATMENTS = [
@@ -1789,3 +1811,44 @@ export type PeriodInsightCurrency = {
 export type PeriodInsightResp = {
   byCurrency: PeriodInsightCurrency[];
 };
+
+// ── Per-person loan ledger (per-person loan ledger feature) ──────────────────
+
+export interface LedgerTransferRow {
+  id: number;
+  date: string;
+  amount: string;
+  currency: string;
+  merchant: string | null;
+  direction: 'out' | 'in';
+  isLoan: boolean;
+}
+
+export interface TransferNet {
+  currency: string;
+  sent: string;
+  received: string;
+  net: string;
+}
+
+export interface ContactLedgerResponse {
+  contactId: number;
+  name: string;
+  transferNet: TransferNet[];
+  trackedOutstandingByCurrency: Record<string, string>;
+  transfers: LedgerTransferRow[];
+}
+
+export interface TransferLinkAmbiguous {
+  txnId: number;
+  merchantText: string;
+  contactIds: number[];
+}
+
+export interface TransferLinkResult {
+  processed: number;
+  linked: number;
+  ambiguous: TransferLinkAmbiguous[];
+  dryRun: boolean;
+  elapsedMs: number;
+}

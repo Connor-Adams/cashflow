@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
 import { ReportsPage } from './ReportsPage'
+import { getJson } from '../lib/api'
 
 // Minimally-valid mock shapes for each endpoint ReportsPage fetches.
 // getJson branches on the URL substring; postJson/deleteReq are stubs.
@@ -107,5 +108,20 @@ describe('ReportsPage', () => {
     renderPage()
     // The settlement table renders the contactName from the mock data
     expect(await screen.findByText('Alex')).toBeInTheDocument()
+  })
+
+  it('renders skeletons while loading', () => {
+    // Pin loading=true by making getJson never resolve, then restore the
+    // route-aware default so sibling tests keep their resolved fixtures.
+    const original = vi.mocked(getJson).getMockImplementation()
+    vi.mocked(getJson).mockImplementation(() => new Promise(() => {}))
+    try {
+      const { container } = renderPage()
+      expect(
+        container.querySelectorAll('[data-slot="skeleton"]').length,
+      ).toBeGreaterThan(0)
+    } finally {
+      vi.mocked(getJson).mockImplementation(original!)
+    }
   })
 })

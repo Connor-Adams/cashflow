@@ -194,8 +194,12 @@ describe('SankeyPage', () => {
     )
     // Backend returned 5000 CAD income, 425 CAD spend.
     await waitFor(() => {
-      const incomeCard = screen.getByText('Total income').closest('article')
-      const spendCard = screen.getByText('Total spend').closest('article')
+      const incomeCard = screen
+        .getByText('Total income')
+        .closest('[data-slot="stat-card"]')
+      const spendCard = screen
+        .getByText('Total spend')
+        .closest('[data-slot="stat-card"]')
       expect(incomeCard?.textContent).toContain('5,000')
       expect(spendCard?.textContent).toContain('425')
     })

@@ -11,7 +11,8 @@ import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/components/ui/grid'
 import { FilterCard } from '@/components/ui/filter-card'
 import { TableCard } from '@/components/ui/table-card'
-import { TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Skeleton, SkeletonText, SkeletonRow } from '@/components/ui/skeleton'
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
 const ALERT_VARIANTS = ['error', 'warning', 'info', 'success'] as const
@@ -77,6 +78,33 @@ export function DesignSystemSection() {
         />
       </Group>
 
+      <Group name="Skeletons (loading)">
+        <div className="w-full space-y-2 sm:w-56">
+          <Skeleton className="h-3 w-1/2" />
+          <Skeleton className="h-7 w-2/3" />
+          <Skeleton className="h-3 w-1/3" />
+        </div>
+        <div className="w-full sm:w-56">
+          <SkeletonText lines={4} />
+        </div>
+        <div className="w-full">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Account</TableHead>
+                <TableHead>Value</TableHead>
+                <TableHead>Change</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <SkeletonRow key={`ds-skeleton-${i}`} cols={3} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </Group>
+
       <Group name="Filter card">
         <FilterCard className="w-full">
           <div className="text-sm text-muted-foreground">Comfortable filter bar</div>
@@ -130,6 +158,27 @@ export function DesignSystemSection() {
             </TableRow>
           </TableBody>
         </TableCard>
+      </Group>
+
+      <Group name="Sortable table card">
+        <TableCard
+          title="Holdings"
+          description="Click a header to sort: ascending → descending → default."
+          actions={<Badge variant="count">3</Badge>}
+          className="w-full"
+          columns={[
+            { key: 'account', header: 'Account', sortable: true },
+            { key: 'value', header: 'Value', sortable: true, align: 'right', render: (r) => `$${r.value.toLocaleString()}` },
+            { key: 'change', header: 'Change', sortable: true, align: 'right', render: (r) => `${r.change > 0 ? '+' : ''}${r.change}%` },
+          ]}
+          rows={[
+            { account: 'RRSP', value: 42100, change: 2.1 },
+            { account: 'TFSA', value: 18400, change: -0.5 },
+            { account: 'Taxable', value: 9800, change: 1.3 },
+          ]}
+          defaultSort={{ key: 'value', dir: 'desc' }}
+          getRowKey={(r) => r.account}
+        />
       </Group>
     </Card>
   )

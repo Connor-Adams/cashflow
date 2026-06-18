@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getJson } from '@/lib/api'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/formatMoney'
 import {
   summarizeOrders,
@@ -65,7 +66,20 @@ export function ReceiptsList({ group }: { group: ReceiptGroup }) {
     )
   }
   if (orders === null) {
-    return <p className="muted text-sm">Loading receipts…</p>
+    return (
+      <ul className="flex flex-col gap-1" aria-hidden>
+        {Array.from({ length: 6 }, (_, i) => (
+          <li key={`receipts-skeleton-${i}`} className={`${ROW_GRID} rounded-md border border-border px-3 py-2`}>
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="ml-auto h-4 w-12" />
+            <Skeleton className="ml-auto h-4 w-16" />
+            <Skeleton className="mx-auto h-2 w-2 rounded-full" />
+            <Skeleton className="h-4 w-3" />
+          </li>
+        ))}
+      </ul>
+    )
   }
   if (orders.length === 0) {
     return (

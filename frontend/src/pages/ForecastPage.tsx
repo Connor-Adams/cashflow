@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -300,7 +301,7 @@ export function ForecastPage() {
             </ResponsiveContainer>
           ) : (
             <div className="grid h-full place-items-center">
-              <p className="muted">
+              <p className="text-sm leading-6 text-muted-foreground">
                 {loading ? 'Loading forecast…' : 'No projection available.'}
               </p>
             </div>
@@ -350,7 +351,7 @@ export function ForecastPage() {
                       <span>{e.sourceName}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs muted">
+                  <TableCell className="text-xs text-muted-foreground">
                     {buildEventDescription(e)}
                   </TableCell>
                   <TableCell
@@ -380,7 +381,7 @@ export function ForecastPage() {
                         </Button>
                       </div>
                     ) : (
-                      <span className="muted text-xs">—</span>
+                      <span className="text-muted-foreground text-xs">—</span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -427,17 +428,18 @@ type SummaryTileProps = {
 }
 
 function SummaryTile({ label, value, description, tone, loading }: SummaryTileProps) {
+  const display = loading ? '…' : value
   return (
-    <Card className="p-3">
-      <p className="muted mb-1 text-xs uppercase tracking-wide">{label}</p>
-      <p
-        className={`mb-0 text-lg font-semibold tabular-nums ${
-          tone === 'warn' ? 'text-warning' : ''
-        }`}
-      >
-        {loading ? '…' : value}
-      </p>
-      {description ? <p className="muted mb-0 text-xs">{description}</p> : null}
-    </Card>
+    <StatCard
+      label={label}
+      value={
+        tone === 'warn' ? (
+          <span className="text-warning">{display}</span>
+        ) : (
+          display
+        )
+      }
+      hint={description}
+    />
   )
 }

@@ -17,6 +17,9 @@ export class Contact extends Model<
   declare householdId: number;
   declare name: string;
   declare notes: string | null;
+  /** Comma-separated extra match terms for the transfer link pass (per-person
+   *  loan ledger). Null means match on name only. */
+  declare aliases: CreationOptional<string | null>;
   /**
    * #375 — marks this Contact as the household's partner. Drives the Partner
    * Fairness dashboard's partner_inflows / non_partner_inflows split: inflows
@@ -25,6 +28,17 @@ export class Contact extends Model<
    * Default false so legacy rows behave as before.
    */
   declare isPartner: CreationOptional<boolean>;
+  /**
+   * Self-account flag: true when the user has confirmed this Contact is their
+   * own identity (e.g. "Connor Adams RBC" — a transfer to their own account).
+   * Confirmed self-accounts are excluded from the transfer-link pass because
+   * you cannot owe yourself. Suggested automatically via name-token overlap;
+   * the user must confirm via PATCH /api/contacts/:id { isSelf: true }.
+   * Default false so legacy rows behave as before.
+   *
+   * Spine note: a discriminator field on the Contact primitive, NOT a new primitive.
+   */
+  declare isSelf: CreationOptional<boolean>;
   /** Lowercase + whitespace-collapsed key for dedup; auto-set by a hook. */
   declare normalizedName: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
@@ -42,9 +56,16 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       },
       name: { type: DataTypes.STRING(160), allowNull: false },
       notes: { type: DataTypes.TEXT, allowNull: true },
+      aliases: { type: DataTypes.STRING(500), allowNull: true },
       isPartner: {
         type: DataTypes.BOOLEAN,
         field: 'is_partner',
+        allowNull: false,
+        defaultValue: false,
+      },
+      isSelf: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_self',
         allowNull: false,
         defaultValue: false,
       },

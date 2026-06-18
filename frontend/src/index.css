@@ -486,3 +486,38 @@ select,
 textarea {
   font: inherit;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Skeleton shimmer
+ *
+ * Loading-placeholder surface: a muted base with a faint hero-gradient sweep
+ * travelling across it. Subtler than a full gradient — color-mixed down to
+ * ~22% so it reads as a polished loading state, not decoration. Applied by the
+ * <Skeleton> primitive, but `.skeleton-shimmer` can be dropped onto any block.
+ * Falls back to a static muted block under prefers-reduced-motion.
+ * ──────────────────────────────────────────────────────────────────────── */
+@keyframes skeletonShimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.skeleton-shimmer {
+  background-color: var(--muted);
+  background-image: linear-gradient(
+    100deg,
+    transparent 25%,
+    color-mix(in oklch, var(--gradient-hero-from) 22%, transparent) 42%,
+    color-mix(in oklch, var(--gradient-hero-to) 22%, transparent) 58%,
+    transparent 75%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: skeletonShimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    background-image: none;
+    animation: none;
+  }
+}

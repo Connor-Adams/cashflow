@@ -26,6 +26,7 @@ import {
   Upload,
   PiggyBank,
   Sparkles,
+  Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -78,6 +79,7 @@ const navSections: NavSection[] = [
     items: [
       { to: '/budgets', label: 'Budgets', icon: PiggyBank },
       { to: '/planned', label: 'Planned', icon: CalendarClock, visibilityKey: 'planned' },
+      { to: '/planned/people', label: 'People', icon: Users },
       { to: '/goals', label: 'Goals', icon: Target, visibilityKey: 'goals' },
       { to: '/scenarios', label: 'Scenarios', icon: GitCompare, visibilityKey: 'scenarios' },
       { to: '/scenarios/tax', label: 'Tax', icon: Calculator },

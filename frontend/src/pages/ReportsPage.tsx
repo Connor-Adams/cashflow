@@ -26,6 +26,8 @@ import {
   NativeSelectOption,
 } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { Skeleton, SkeletonRow } from '@/components/ui/skeleton'
+import { Card } from '@/components/ui/card'
 import {
   Table,
   TableBody,
@@ -546,8 +548,18 @@ export function ReportsPage() {
         />
       </FilterCard>
       {err && <Alert variant="error" className="mb-4">{err}</Alert>}
-      {loading && <p className="mb-4 text-sm leading-6 text-muted-foreground">Loading…</p>}
 
+      {loading ? (
+        <Grid minItemWidth={180} gap="md" responsiveFloor={false} className="mb-4" aria-busy={loading}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={`reports-skeleton-${i}`} className="mb-0">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="mt-2 h-7 w-28" />
+              <Skeleton className="mt-2 h-3 w-24" />
+            </Card>
+          ))}
+        </Grid>
+      ) : (
       <Grid minItemWidth={180} gap="md" responsiveFloor={false} className="mb-4" aria-busy={loading}>
         <StatCard
           label="My share"
@@ -572,6 +584,7 @@ export function ReportsPage() {
           hint={`${totalPartnerRows} partner row${totalPartnerRows === 1 ? '' : 's'} and ${totalBusinessRows} business row${totalBusinessRows === 1 ? '' : 's'}`}
         />
       </Grid>
+      )}
 
       <Grid minItemWidth={320} gap="lg">
         <CollapsibleCard
@@ -650,6 +663,10 @@ export function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {loading &&
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonRow key={`reports-skeleton-${i}`} cols={5} />
+                  ))}
                 {(partner?.byCurrency.length ?? 0) === 0 && !loading && (
                   <EmptyTableRow
                     colSpan={5}
@@ -741,6 +758,10 @@ export function ReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {loading &&
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonRow key={`reports-skeleton-${i}`} cols={2} />
+                  ))}
                 {(business?.byCurrency.length ?? 0) === 0 && !loading && (
                   <EmptyTableRow
                     colSpan={2}

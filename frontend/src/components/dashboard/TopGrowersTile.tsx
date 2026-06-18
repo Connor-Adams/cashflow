@@ -179,7 +179,8 @@ function GrowersBody({
     return <p className="emptyState">No movement to highlight in this view.</p>
   }
   return (
-    <ul className="growersList">
+    // formerly .growersList
+    <ul className="m-0 flex h-full flex-col gap-1.5 p-0 list-none">
       {growers.map((g) => (
         <GrowerListItem key={g.key} grower={g} />
       ))}
@@ -195,19 +196,36 @@ function GrowerListItem({ grower }: { grower: GrowerRow }) {
   const tone = resolveDeltaTone(parseDeltaSign(deltaLabel), 'spend')
   const pct = computePercent(grower)
   return (
-    <li className="growersList__row">
-      <div className="growersList__main">
-        <span className="growersList__category" title={grower.category}>
+    // formerly .growersList__row + .growersList__row (border-top via CSS sibling selector)
+    // Using group class approach — sibling logic reproduced via [&+&] pseudo-selector
+    <li className="flex items-center gap-2 py-1 [&+&]:border-t [&+&]:border-[var(--border)] [&+&]:pt-2">
+      {/* formerly .growersList__main */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* formerly .growersList__category */}
+        <span className="truncate text-sm font-medium text-[var(--foreground)]" title={grower.category}>
           {grower.category}
         </span>
-        {grower.isNew && <span className="growersList__newBadge">new</span>}
+        {grower.isNew && (
+          // formerly .growersList__newBadge — color-mix values must stay inline
+          <span
+            className="shrink-0 rounded-full border px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-[var(--primary)]"
+            style={{
+              borderColor: 'color-mix(in oklch, var(--primary) 35%, var(--border))',
+              background: 'color-mix(in oklch, var(--primary) 12%, transparent)',
+            }}
+          >
+            new
+          </span>
+        )}
       </div>
-      <span className="growersList__current">
+      {/* formerly .growersList__current */}
+      <span className="shrink-0 text-xs tabular-nums text-[var(--muted-foreground)]">
         {formatMoney(grower.current, grower.currency)}
       </span>
+      {/* formerly .growersList__delta (combined with pre-existing inline Tailwind classes) */}
       <span
         data-tone={tone}
-        className="growersList__delta inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-semibold"
+        className="shrink-0 tabular-nums inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-semibold"
         style={DELTA_SIGN_STYLE[tone]}
       >
         {deltaLabel}

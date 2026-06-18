@@ -39,6 +39,16 @@ describe('ReceiptsList', () => {
     expect(screen.getByText(/linked/i)).toBeInTheDocument()
   })
 
+  it('renders skeletons while loading', () => {
+    // never-resolving getJson keeps orders === null, so the skeleton list
+    // renders. beforeEach mockReset tears this down for the next test.
+    vi.mocked(getJson).mockImplementation(() => new Promise(() => {}))
+    const { container } = render(<ReceiptsList group="all" />)
+    expect(
+      container.querySelectorAll('[data-slot="skeleton"]').length,
+    ).toBeGreaterThan(0)
+  })
+
   it('shows an empty state when there are no receipts', async () => {
     vi.mocked(getJson).mockResolvedValue([])
     render(<ReceiptsList group="all" />)

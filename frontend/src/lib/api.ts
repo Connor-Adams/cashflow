@@ -1,4 +1,5 @@
 import { clientLogger } from './clientLogger'
+import type { ContactLedgerResponse, TransferLinkResult, SelfSuggestionsResponse } from '@cashflow/shared'
 
 const base = import.meta.env.VITE_API_BASE ?? ''
 
@@ -90,6 +91,30 @@ export async function postFormData<T>(path: string, form: FormData): Promise<T> 
   })
   if (!r.ok) throw await apiError(r, path)
   return parseJson<T>(r)
+}
+
+// ── Per-person loan ledger client functions ──────────────────────────────────
+
+export function getContactLedger(id: number): Promise<ContactLedgerResponse> {
+  return getJson<ContactLedgerResponse>(`/api/contacts/${id}/ledger`)
+}
+export function previewTransferLink(): Promise<TransferLinkResult> {
+  return postJson<TransferLinkResult>('/api/transfer-link/preview')
+}
+export function commitTransferLink(): Promise<TransferLinkResult> {
+  return postJson<TransferLinkResult>('/api/transfer-link/commit')
+}
+export function markTransactionAsLoan(txnId: number, contactId: number): Promise<unknown> {
+  return postJson(`/api/transactions/${txnId}/reimbursable`, { contactId })
+}
+export function setTransactionContact(txnId: number, contactId: number): Promise<unknown> {
+  return patchJson(`/api/transactions/${txnId}`, { counterpartyContactId: contactId })
+}
+export function getSelfSuggestions(): Promise<SelfSuggestionsResponse> {
+  return getJson<SelfSuggestionsResponse>('/api/contacts/self-suggestions')
+}
+export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
+  return patchJson(`/api/contacts/${id}`, { isSelf })
 }
 
 async function apiError(res: Response, path: string): Promise<ApiError> {

@@ -37,12 +37,14 @@ import { enqueueNotification } from '../notifications';
 import { logger } from '../observability/logger';
 import {
   aggregateSpendByCategory,
+  categoryAndDescendantNames,
   computeBudgetProgress,
   currentPeriodBounds,
   netRefundsFromSpend,
   resolveRefundNets,
   scopeWhereClause,
 } from '../routes/budgets';
+import { loadCategoryTree } from '../categories/rollup';
 import { loadItemAllocationContext } from '../summary/loadItemAllocations';
 
 /**
@@ -314,6 +316,7 @@ export async function processBudget(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolveRefundNets(rows as any, refundRows),
   );
+  const tree = await loadCategoryTree(budget.householdId);
   const [progress] = computeBudgetProgress(
     [
       {
@@ -321,6 +324,10 @@ export async function processBudget(
         category: budget.category,
         currency: budget.currency,
         amount: String(budget.amount),
+        categoryNames:
+          budget.categoryId != null
+            ? categoryAndDescendantNames(tree, budget.categoryId)
+            : null,
       },
     ],
     spendByCategory,

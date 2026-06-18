@@ -15,10 +15,12 @@ import {
 import { FilterX } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { FilterBar, type QuickRange } from '@/components/ui/filter-bar'
 import { FilterCard } from '@/components/ui/filter-card'
 import { PageHeader } from '@/components/ui/page-header'
+import { Skeleton, SkeletonText } from '@/components/ui/skeleton'
 import { BentoTile, type BentoSpan } from '@/components/dashboard/BentoTile'
 import { PeriodInsightBand } from '@/components/dashboard/PeriodInsightBand'
 import { KpiStack } from '@/components/dashboard/KpiStack'
@@ -733,8 +735,7 @@ export function DashboardPage() {
         title="Dashboard"
         description="Totals stay in each currency. Filter by currency and date range."
       />
-      {err && <span className="error">{err}</span>}
-      {loading && <p className="muted">Loading dashboard…</p>}
+      {err && <Alert variant="error">{err}</Alert>}
 
       <FilterCard density="compact" className="mt-2">
           <FilterBar
@@ -768,37 +769,15 @@ export function DashboardPage() {
               ) : null
             }
             caption={
-              <p
-                className="muted"
-                style={{
-                  marginBottom: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '0.4rem',
-                }}
-              >
+              <p className="mb-0 flex items-center flex-wrap gap-[0.4rem] text-sm leading-6 text-muted-foreground">
                 Showing
                 {/* Pill-style active-filter chip — reads as the currently
                     applied scope rather than a low-contrast footnote. Uses
                     --muted as the surface and --border for the outline to stay
                     on the brand token palette (no hex). */}
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    padding: '0.25rem 0.65rem',
-                    borderRadius: '9999px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--muted)',
-                    color: 'var(--foreground)',
-                    fontSize: '0.8rem',
-                    lineHeight: 1.2,
-                  }}
-                >
+                <span className="inline-flex items-center gap-[0.35rem] px-[0.65rem] py-1 rounded-full border border-border bg-muted text-foreground text-[0.8rem] leading-[1.2]">
                   <strong>{currency || 'all currencies'}</strong>
-                  <span style={{ color: 'var(--muted-foreground)' }}>·</span>
+                  <span className="text-muted-foreground">·</span>
                   <strong>{activeRangeLabel}</strong>
                 </span>
               </p>
@@ -808,6 +787,41 @@ export function DashboardPage() {
 
       <ActivationCardDeck />
 
+      {loading ? (
+        <div
+          className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
+          aria-busy={loading}
+          aria-label="Loading dashboard"
+        >
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={`dash-skeleton-stat-${i}`}
+              className="col-span-1 sm:col-span-3 lg:col-span-2 rounded-xl border border-border bg-card p-4"
+            >
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="mt-3 h-7 w-2/3" />
+              <Skeleton className="mt-2 h-3 w-1/3" />
+            </div>
+          ))}
+          <div className="col-span-1 sm:col-span-6 lg:col-span-8 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="min-h-[14rem] flex-1 rounded-lg" />
+          </div>
+          <div className="col-span-1 sm:col-span-6 lg:col-span-4 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+            <Skeleton className="h-4 w-1/2" />
+            <SkeletonText lines={6} />
+          </div>
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div
+              key={`dash-skeleton-tile-${i}`}
+              className="col-span-1 sm:col-span-3 lg:col-span-6 row-span-2 flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
+            >
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="min-h-[10rem] flex-1 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      ) : (
       <div
         className="mb-4 grid grid-flow-row-dense grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-4 auto-rows-[minmax(160px,auto)]"
         aria-busy={loading}
@@ -847,7 +861,8 @@ export function DashboardPage() {
             label="Budget progress + pacing"
             description="Spend so far against each budget plus how much of the period has elapsed. Tick on the bar = where you'd be if perfectly paced."
           >
-            <div className="budgetPillStrip">
+            {/* formerly .budgetPillStrip */}
+            <div className="flex h-full gap-3 overflow-x-auto pb-1 [scrollbar-width:thin]">
               {budgetProgressSorted.map((item) => {
                 // Tone prefers the backend's pacingState classification
                 // when available — it already accounts for time-elapsed,
@@ -902,20 +917,40 @@ export function DashboardPage() {
                   behind: 'Under pace',
                   over: 'Over budget',
                 }
+                // Lookup table for the fill background color keyed on tone.
+                // Cannot interpolate class names — Tailwind JIT needs literals.
+                const fillBgStyle: Record<'ok' | 'warn' | 'over', string> = {
+                  ok: 'var(--positive)',
+                  warn: 'var(--primary)',
+                  over: 'var(--destructive)',
+                }
                 return (
+                  // formerly .budgetPill + .budgetPill--{tone}
+                  // color-mix background must be inline (no JIT equivalent)
                   <article
                     key={item.budgetId}
-                    className={`budgetPill budgetPill--${tone}`}
+                    className="flex shrink-0 flex-col justify-center gap-1.5 rounded-md border p-2.5"
+                    style={{
+                      borderColor: 'var(--border)',
+                      background: 'color-mix(in oklch, var(--muted) 50%, transparent)',
+                      minWidth: '200px',
+                      maxWidth: '240px',
+                    }}
                   >
-                    <header className="budgetPill__header">
-                      <strong className="budgetPill__label inline-flex items-center gap-1.5 min-w-0" title={label}>
+                    {/* formerly .budgetPill__header */}
+                    <header className="flex items-baseline justify-between gap-2">
+                      {/* formerly .budgetPill__label */}
+                      <strong className="truncate text-sm font-semibold text-[var(--foreground)] inline-flex items-center gap-1.5 min-w-0" title={label}>
                         <CategoryIcon name={item.category} />
                         <span className="truncate">{label}</span>
                       </strong>
-                      <span className="budgetPill__pct">{percentRounded}%</span>
+                      {/* formerly .budgetPill__pct */}
+                      <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--muted-foreground)]">{percentRounded}%</span>
                     </header>
+                    {/* formerly .budgetPill__bar — color-mix bg must stay inline */}
                     <div
-                      className="budgetPill__bar relative"
+                      className="relative h-1.5 w-full overflow-hidden rounded-full border border-[var(--border)]"
+                      style={{ background: 'var(--muted)' }}
                       role="img"
                       aria-label={
                         elapsedRounded !== null
@@ -923,9 +958,14 @@ export function DashboardPage() {
                           : `${label} ${percentRounded} percent of target used`
                       }
                     >
+                      {/* formerly .budgetPill__fill + .budgetPill--{tone} .budgetPill__fill */}
                       <span
-                        className="budgetPill__fill"
-                        style={{ width }}
+                        className="block h-full"
+                        style={{
+                          background: fillBgStyle[tone],
+                          transition: 'width 0.3s ease-out',
+                          width,
+                        }}
                       />
                       {elapsedTick !== null && (
                         // Vertical tick indicating where spend "should" be
@@ -939,13 +979,15 @@ export function DashboardPage() {
                         />
                       )}
                     </div>
-                    <p className="budgetPill__amount">
+                    {/* formerly .budgetPill__amount */}
+                    <p className="m-0 truncate text-xs text-[var(--muted-foreground)]">
                       {formatCurrency(item.spent, item.currency)} /{' '}
                       {formatCurrency(item.target, item.currency)}{' '}
-                      <span className="budgetPill__currency">{item.currency}</span>
+                      {/* formerly .budgetPill__currency */}
+                      <span className="ml-1 opacity-70">{item.currency}</span>
                     </p>
                     {item.pacingState && elapsedRounded !== null && (
-                      <p className="budgetPill__pacing mt-1">
+                      <p className="mt-1">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                             pacingBadgeClass[item.pacingState] ?? ''
@@ -1045,10 +1087,10 @@ export function DashboardPage() {
           </div>
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Business {bizSplit.incomeShare.toFixed(0)}%
               </span>
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Personal {(100 - bizSplit.incomeShare).toFixed(0)}%
               </span>
             </div>
@@ -1067,7 +1109,7 @@ export function DashboardPage() {
               />
             </div>
             {bizSplit.income.business + bizSplit.income.personal <= 0 && (
-              <p className="muted businessShareCaption">No income in current filters.</p>
+              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No income in current filters.</p>
             )}
           </div>
         </BentoTile>
@@ -1092,10 +1134,10 @@ export function DashboardPage() {
           </div>
           <div className="businessSharePanel">
             <div className="businessShareLabels" aria-hidden="true">
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Business {bizSplit.spendShare.toFixed(0)}%
               </span>
-              <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
+              <span className="font-semibold text-foreground">
                 Personal {(100 - bizSplit.spendShare).toFixed(0)}%
               </span>
             </div>
@@ -1114,7 +1156,7 @@ export function DashboardPage() {
               />
             </div>
             {bizSplit.spend.business + bizSplit.spend.personal <= 0 && (
-              <p className="muted businessShareCaption">No net spend in current filters.</p>
+              <p className="businessShareCaption text-sm leading-6 text-muted-foreground">No net spend in current filters.</p>
             )}
           </div>
         </BentoTile>
@@ -1129,11 +1171,11 @@ export function DashboardPage() {
           {chartData.length === 0 ? (
             !loading ? (
               <div>
-                <p className="emptyState">
+                <p className="m-0 text-muted-foreground">
                   No category totals for these filters. Your transactions may be in a
                   different currency or outside this date window.
                 </p>
-                <div className="row" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                <div className="mt-2 mb-0 flex flex-wrap items-center gap-3">
                   {currency ? (
                     <Button type="button" variant="secondary" onClick={() => setCurrency('')}>
                       Show all currencies
@@ -1224,7 +1266,7 @@ export function DashboardPage() {
             </ResponsiveContainer>
           )}
           {chartData.length > 0 ? (
-            <p className="muted" style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.75rem' }}>
+            <p className="mt-2 mb-0 text-xs leading-6 text-muted-foreground">
               Jump to:{' '}
               {chartData.slice(0, 8).map((entry, index) => (
                 <span key={entry.name}>
@@ -1256,7 +1298,7 @@ export function DashboardPage() {
         >
           {monthlyBreakdownData.length === 0 ? (
             !loading ? (
-              <p className="emptyState">No monthly breakdown data for these filters.</p>
+              <p className="m-0 text-muted-foreground">No monthly breakdown data for these filters.</p>
             ) : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
@@ -1314,7 +1356,7 @@ export function DashboardPage() {
           description="One line per currency using signed monthly totals, excluding payments and transfers."
         >
           {monthlyChartData.length === 0 ? (
-            !loading ? <p className="muted">No transactions in this range.</p> : null
+            !loading ? <p className="text-sm leading-6 text-muted-foreground">No transactions in this range.</p> : null
           ) : (
             <ResponsiveContainer width="100%" height={110}>
               <LineChart data={monthlyChartData} margin={narrowChartMargin}>
@@ -1458,6 +1500,7 @@ export function DashboardPage() {
           loading={loading}
         />
       </div>
+      )}
     </div>
   )
 }

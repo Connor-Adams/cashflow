@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, ShieldCheck } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -153,7 +154,7 @@ export function ReturnWarrantyPage() {
       </div>
 
       {tab === 'expiring' && (
-        <section className="card mb-4 flex flex-wrap items-center gap-3">
+        <Card className="mb-4 flex flex-wrap items-center gap-3">
           <label htmlFor="expiring-days" className="text-sm">
             Window (days)
           </label>
@@ -168,13 +169,13 @@ export function ReturnWarrantyPage() {
               </option>
             ))}
           </NativeSelect>
-        </section>
+        </Card>
       )}
 
       {err && (
-        <p className="error" role="alert">
+        <Alert variant="error" className="mb-4">
           {err}
-        </p>
+        </Alert>
       )}
 
       <TabPanel value="active" active={tab} tabsId="return-warranty-tabs">
@@ -258,7 +259,7 @@ function ReturnTable({
 }) {
   return (
     <Card className="overflow-x-auto p-0">
-      <Table className="table">
+      <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Date</TableHead>
@@ -319,7 +320,7 @@ function RowView({
       <TableCell>
         <div>{row.merchant}</div>
         {row.accountName && (
-          <div className="muted text-xs">{row.accountName}</div>
+          <div className="text-xs text-muted-foreground">{row.accountName}</div>
         )}
       </TableCell>
       <TableCell>{formatMoney(amountNum, row.currency)}</TableCell>
@@ -328,7 +329,7 @@ function RowView({
           {receiptStatusLabel(row.receiptStatus)}
         </Badge>
         {row.hasReceipt && row.receiptStatus !== 'have' && (
-          <div className="muted text-xs mt-1">attachment on file</div>
+          <div className="text-xs text-muted-foreground mt-1">attachment on file</div>
         )}
       </TableCell>
       {showReturnDeadline && (
@@ -343,7 +344,7 @@ function RowView({
               expiringSoon={Boolean(highlightExpiringSoon)}
             />
           ) : (
-            <span className="muted">—</span>
+            <span className="text-sm text-muted-foreground">—</span>
           )}
         </TableCell>
       )}
@@ -358,7 +359,7 @@ function RowView({
               }
             />
           ) : (
-            <span className="muted">—</span>
+            <span className="text-sm text-muted-foreground">—</span>
           )}
         </TableCell>
       )}
@@ -489,7 +490,7 @@ function EditDialog({
     >
       <Card className="w-full max-w-md p-5">
         <h2 className="mb-3 text-lg font-semibold">Edit return / warranty</h2>
-        <p className="muted text-sm mb-4">
+        <p className="text-sm text-muted-foreground mb-4">
           {row.merchant} · {row.date}
         </p>
         <form onSubmit={submit} className="flex flex-col gap-3">

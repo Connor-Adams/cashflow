@@ -20,28 +20,28 @@ export function EnrichmentSourceChart({ bySource }: Props) {
   const total = entries.reduce((acc, [, n]) => acc + n, 0)
 
   return (
-    <Card className="enrichChartCard">
-      <div className="enrichChartCard__header">
-        <h3 className="enrichChartCard__title">By source</h3>
+    <Card>
+      <div className="flex justify-between items-baseline mb-3">
+        <h3 className="text-[0.95rem] font-semibold m-0">By source</h3>
       </div>
       {entries.length === 0 ? (
         <p className="muted text-sm m-0">No source data yet. Run the backfill to populate.</p>
       ) : (
-        <div className="enrichSourceList">
+        <div className="grid gap-2 text-[0.78rem]">
           {entries.map(([key, n]) => {
             const pct = total > 0 ? Math.round((n / total) * 100) : 0
             const color = SOURCE_COLOR[key] ?? 'var(--muted-foreground)'
             const label = LABEL[key] ?? key
             return (
-              <div key={key} className="enrichSourceBar">
-                <span className="enrichSourceBar__label">{label}</span>
-                <div className="enrichSourceBar__track">
+              <div key={key} className="flex items-center gap-[0.625rem]">
+                <span className="enrichSourceBar__label w-[3.5rem] text-right text-[var(--muted-foreground)]">{label}</span>
+                <div className="flex-1 bg-[var(--muted)] h-[14px] rounded-[3px] overflow-hidden">
                   <div
-                    className="enrichSourceBar__fill"
+                    className="h-full rounded-[3px]"
                     style={{ width: `${pct}%`, background: color }}
                   />
                 </div>
-                <span className="enrichSourceBar__count">{n.toLocaleString()} · {pct}%</span>
+                <span className="w-[6rem] text-[var(--foreground)] tabular-nums">{n.toLocaleString()} · {pct}%</span>
               </div>
             )
           })}

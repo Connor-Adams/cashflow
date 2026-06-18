@@ -139,6 +139,78 @@
     @apply h-4 w-4 shrink-0;
   }
 
+  /* Tree rows wear the hero gradient — same treatment as the active nav link:
+   * a faded gradient fill + a full-color gradient rail (via ::before, since
+   * box-shadow can't take a gradient). `.treeRow` shows it on hover; a selected
+   * / drop-target row (`.treeRowActive`) shows it persistently and a touch
+   * stronger. */
+  .treeRow,
+  .treeRowActive {
+    position: relative;
+  }
+  .treeRow::before,
+  .treeRowActive::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--gradient-hero);
+    border-top-left-radius: inherit;
+    border-bottom-left-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms;
+  }
+  .treeRow:hover {
+    background-image:
+      linear-gradient(135deg,
+        color-mix(in oklch, var(--gradient-hero-from) 11%, transparent),
+        color-mix(in oklch, var(--gradient-hero-to) 11%, transparent));
+  }
+  .treeRow:hover::before {
+    opacity: 1;
+  }
+  .treeRowActive {
+    background-image:
+      linear-gradient(135deg,
+        color-mix(in oklch, var(--gradient-hero-from) 17%, transparent),
+        color-mix(in oklch, var(--gradient-hero-to) 17%, transparent));
+  }
+  .treeRowActive::before {
+    opacity: 1;
+  }
+  /* Nested-group indent guide: a thin hero-gradient thread instead of a flat
+   * border, so the hierarchy carries a little brand colour at rest. */
+  .treeGuide {
+    background-image: linear-gradient(180deg,
+      color-mix(in oklch, var(--gradient-hero-from) 45%, transparent),
+      color-mix(in oklch, var(--gradient-hero-to) 45%, transparent));
+    background-size: 1.5px 100%;
+    background-repeat: no-repeat;
+    background-position: left top;
+  }
+
+  /* Tree row icons wear the hero gradient. lucide icons are strokes, so we
+   * paint the stroke with an SVG <linearGradient> (id="treeIconGradient",
+   * rendered once by CategoryTreeManager) rather than a CSS background. */
+  .treeIconGradient {
+    stroke: url(#treeIconGradient);
+  }
+  /* Iconless rows show a small gradient dot instead of a flat muted one. */
+  .treeIconDot {
+    background-image: var(--gradient-hero);
+  }
+
+  /* Root "make top-level" drop zone while dragging: gradient fill + a gradient
+   * dashed border (no rail — it is a hint box, not a row). */
+  .treeDropZoneActive {
+    background:
+      linear-gradient(135deg,
+        color-mix(in oklch, var(--gradient-hero-from) 16%, transparent),
+        color-mix(in oklch, var(--gradient-hero-to) 16%, transparent));
+    border-color: color-mix(in oklch, var(--gradient-hero-to) 55%, var(--border));
+  }
+
   .sidebar__footer {
     @apply mt-auto flex flex-col gap-2 pt-3;
     border-top: 1px solid var(--border);
@@ -374,89 +446,6 @@
     @apply w-9 text-center;
   }
 
-  .chartWrap {
-    @apply mt-4;
-  }
-
-  .amazonHeader,
-  .amazonImportPanel,
-  .amazonReviewRow,
-  .amazonSuggestedLink,
-  .amazonManualLink,
-  .amazonActionRow {
-    @apply flex flex-wrap items-center gap-3;
-  }
-
-  .amazonHeader,
-  .amazonReviewRow {
-    @apply justify-between;
-  }
-
-  .amazonHeader .muted,
-  .amazonImportPanel .muted,
-  .amazonSuggestedLink .muted {
-    @apply mb-0;
-  }
-
-  .amazonImportPanel {
-    @apply justify-between;
-  }
-
-  .amazonSummaryGrid {
-    @apply grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .amazonSummaryGrid .card {
-    @apply grid gap-1;
-  }
-
-  .amazonSummaryGrid strong {
-    @apply text-2xl;
-  }
-
-  .amazonSummaryGrid span {
-    @apply text-sm;
-    color: var(--muted-foreground);
-  }
-
-  .amazonReviewList,
-  .amazonLinks,
-  .amazonSuggestedLink,
-  .amazonOrderEditor {
-    @apply grid gap-3;
-  }
-
-  .amazonReviewRow {
-    @apply rounded-lg border p-3;
-    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 4%);
-    background: color-mix(in srgb, var(--bg) 74%, transparent);
-  }
-
-  .amazonLinks {
-    @apply min-w-[min(100%,34rem)] flex-1;
-  }
-
-  .amazonSuggestedLink {
-    @apply rounded-lg border p-3;
-    border-color: color-mix(in srgb, var(--border) 84%, var(--zinc-50) 4%);
-    background: color-mix(in srgb, var(--bg2) 70%, transparent);
-  }
-
-  .amazonSuggestedLink > div:first-child {
-    @apply grid gap-1;
-  }
-
-  .amazonManualLink {
-    @apply justify-end;
-  }
-
-  .dashboardFilters {
-    @apply mt-3 rounded-lg border p-3 sm:p-4;
-    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 4%);
-    background: color-mix(in srgb, var(--bg2) 64%, transparent);
-  }
-
   .quickFilters {
     @apply mb-3 mt-3 flex flex-wrap gap-2;
   }
@@ -474,171 +463,9 @@
     color: var(--accent-foreground);
   }
 
-  .dashboardStats {
-    @apply mb-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-
   .transactionsStats {
     @apply mb-4 grid gap-3;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .reviewInboxStats {
-    @apply mb-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .reviewInboxLayout {
-    @apply grid gap-4;
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  }
-
-  .reviewInboxTableCard {
-    @apply mb-0;
-  }
-
-  /* Flat decision card — emphasis comes from the oxblood border, not a wash. */
-  .reviewInboxDecisionCard {
-    @apply mb-0;
-    background: var(--card);
-  }
-
-  .reviewInboxToolbar {
-    @apply mb-3 flex flex-wrap items-end gap-3;
-  }
-
-  .reviewInboxToolbar label,
-  .reviewInboxDecisionFields label {
-    @apply flex flex-col gap-1 text-[0.82rem] font-semibold;
-    color: var(--muted-foreground);
-  }
-
-  .reviewInboxToolbar label:first-child {
-    @apply min-w-[220px];
-  }
-
-  .reviewInboxToolbar label svg {
-    @apply mr-1 inline size-4;
-  }
-
-  .reviewInboxBatchPills {
-    @apply flex flex-wrap gap-2;
-  }
-
-  /* Inline keyboard shortcut hint. Daily-driver keys only; the full
-   * shortcut list is still one click away via the Shortcuts button. */
-  .reviewInboxShortcutsHint {
-    @apply mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs;
-    color: var(--muted-foreground);
-  }
-  .reviewInboxShortcutsHint kbd {
-    @apply inline-flex min-w-5 items-center justify-center rounded border px-1 py-0.5 font-mono text-[0.7rem];
-    border-color: var(--border);
-    background: var(--muted);
-    color: var(--foreground);
-  }
-
-  .reviewInboxMessage {
-    @apply mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold;
-    border-color: color-mix(in srgb, var(--positive) 45%, var(--border));
-    background: color-mix(in srgb, var(--positive) 10%, transparent);
-    color: var(--positive);
-  }
-
-  .reviewInboxTableWrap {
-    @apply overflow-auto rounded-lg border;
-    max-height: 70vh;
-    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
-  }
-
-  .reviewInboxTable thead th {
-    @apply sticky top-0 z-10;
-    background: color-mix(in srgb, var(--muted) 88%, transparent);
-  }
-
-  /* Cursor row — replaces an inline style block on the row JSX. Uses
-   * --primary (amber) instead of --accent (plum); the cursor is the
-   * user's attention point, so it should match the brand attention
-   * color. Rail 4px (was 3px) + tint 10% (was 8%) for visibility. */
-  .reviewInboxTable tr[data-cursor="true"] {
-    box-shadow: inset 4px 0 0 0 var(--primary);
-    background: color-mix(in oklch, var(--primary) 10%, transparent);
-  }
-
-  .reviewInboxHint {
-    @apply text-xs;
-    color: var(--muted-foreground);
-  }
-
-  /* Inline-link button variant of .reviewInboxHint (e.g. the "Why?"
-   * trigger that opens the enrichment signals dialog). */
-  .reviewInboxHintLink {
-    @apply text-xs;
-    background: none;
-    border: none;
-    padding: 0;
-    text-decoration: underline;
-    color: var(--muted-foreground);
-    cursor: pointer;
-  }
-  .reviewInboxHintLink:hover { color: var(--primary); }
-  .reviewInboxHintLink:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  .reviewInboxDecisionFields {
-    @apply grid gap-3;
-  }
-
-  .reviewInboxDecisionFields select,
-  .reviewInboxToolbar select {
-    @apply min-h-9 rounded-md border px-3 text-sm;
-    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
-    background: color-mix(in srgb, var(--card) 94%, transparent);
-    color: var(--foreground);
-  }
-
-  .reviewInboxPreview {
-    @apply my-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  }
-
-  .reviewInboxPreview div {
-    @apply rounded-lg border p-3;
-    border-color: color-mix(in srgb, var(--border) 86%, var(--zinc-50) 6%);
-    background: color-mix(in srgb, var(--muted) 46%, transparent);
-  }
-
-  .reviewInboxPreview strong,
-  .reviewInboxPreview span {
-    @apply block;
-  }
-
-  .reviewInboxPreview span {
-    @apply mt-1 text-xs;
-    color: var(--muted-foreground);
-  }
-
-  .reviewInboxActions {
-    @apply flex flex-col gap-2;
-  }
-
-  .reviewInboxGuardrail {
-    @apply mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5;
-    border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
-    background: color-mix(in srgb, var(--muted) 42%, transparent);
-    color: var(--muted-foreground);
-  }
-
-  .reviewInboxGuardrail svg {
-    @apply mt-0.5 size-4 shrink-0;
-  }
-
-  .transactionsTopGrid {
-    @apply mb-4 grid gap-4;
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   }
 
   .transactionsPanel {
@@ -653,30 +480,17 @@
     @apply mt-0 mb-1;
   }
 
-  .transactionsToolbar {
-    @apply mb-4;
-  }
-
-  .transactionsToolbarMeta {
-    @apply flex flex-wrap gap-2;
-  }
-
-  .rulesCardHeader,
   .reportsCardHeader,
   .accountsCardHeader {
     @apply mb-4 flex flex-wrap items-start justify-between gap-3;
   }
 
-  .rulesCardHeader h2,
   .reportsCardHeader h2,
   .accountsCardHeader h2 {
     @apply mb-1 mt-0;
   }
 
-  .rulesFormCard,
-  .rulesTableCard,
   .accountsFormCard,
-  .accountsTableCard,
   .settingsDisplayCard {
     @apply mb-4;
   }
@@ -714,10 +528,6 @@
     color: var(--muted-foreground);
   }
 
-  .rulesFormGrid {
-    @apply mb-0;
-  }
-
   .rulesCategoryField {
     grid-column: span 2;
   }
@@ -733,34 +543,6 @@
 
   .rulesCategoryPickerItem {
     @apply text-xs;
-  }
-
-  .reportsFilters {
-    @apply mb-4;
-  }
-
-  .reportsStats,
-  .accountsStats {
-    @apply mb-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-
-  .reportsGrid {
-    @apply grid gap-4;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  }
-
-  .reportsTableCard {
-    @apply mb-0;
-  }
-
-  .accountsActionGroup {
-    @apply flex flex-wrap gap-2;
-  }
-
-  .transactionsFilterGrid {
-    @apply mb-0;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
   .transactionsCategoryField {
@@ -824,10 +606,6 @@
     @apply h-4 w-4;
   }
 
-  .transactionsActionRow {
-    @apply mt-3;
-  }
-
   .transactionsFilterPills {
     @apply mb-3 flex flex-wrap gap-2;
   }
@@ -866,10 +644,6 @@
     color: var(--destructive);
   }
 
-  .transactionsHelperCopy {
-    @apply mb-0 mt-2;
-  }
-
   .transactionsBulkCard {
     @apply items-center;
   }
@@ -902,8 +676,7 @@
     @apply flex flex-wrap items-baseline justify-between gap-2;
   }
 
-  .aiVisibilityHeader .muted,
-  .aiVisibilityMore {
+  .aiVisibilityHeader .muted {
     @apply mb-0 text-xs;
   }
 
@@ -926,118 +699,6 @@
     @apply mb-0 mt-1 leading-5;
   }
 
-  .aiVisibilityItem.is-unread {
-    border-left: 3px solid var(--amber-w-300);
-    padding-left: 0.5rem;
-  }
-  .unreadDot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--amber-w-300);
-    margin-right: 0.5rem;
-    vertical-align: middle;
-  }
-
-  /* ─── AI Inbox page ───────────────────────────────────────────────── */
-
-  .aiInboxPage {
-    padding: 1rem;
-    max-width: 56rem;
-  }
-
-  .aiInboxTabs {
-    @apply flex flex-row flex-wrap gap-2;
-    margin-bottom: 1rem;
-  }
-
-  .aiInboxTabs button {
-    @apply rounded-full px-3 py-1 text-sm font-medium;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted-foreground);
-    cursor: pointer;
-    transition: background 150ms, color 150ms;
-  }
-
-  .aiInboxTabs button:hover {
-    color: var(--foreground);
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
-  }
-
-  .aiInboxTabs button[aria-pressed="true"] {
-    background: var(--muted);
-    color: var(--foreground);
-    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
-  }
-
-  .aiInboxTabs button:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  .aiInboxList {
-    @apply flex flex-col gap-3;
-    list-style: none;
-    padding-left: 0;
-    margin: 0;
-  }
-
-  .aiInboxItem {
-    @apply rounded-md border px-4 py-3 text-sm;
-    border-color: var(--border);
-    background: color-mix(in srgb, var(--bg3) 48%, transparent);
-  }
-
-  .aiInboxItemSummary {
-    @apply w-full font-medium leading-5;
-  }
-
-  .aiInboxItemActions {
-    @apply flex flex-row flex-wrap gap-2;
-    justify-content: flex-end;
-    margin-top: 0.5rem;
-  }
-
-  .aiInboxTabCount {
-    @apply ml-1 tabular-nums text-xs;
-    color: var(--muted-foreground);
-  }
-
-  .aiInboxExpandToggle {
-    @apply ml-2 text-xs font-medium underline-offset-2;
-    background: transparent;
-    color: var(--muted-foreground);
-    border: none;
-    padding: 0;
-    cursor: pointer;
-  }
-
-  .aiInboxExpandToggle:hover {
-    color: var(--foreground);
-    text-decoration: underline;
-  }
-
-  .aiInboxItemDetails {
-    @apply flex flex-col gap-1 mt-2 pl-3;
-    list-style: none;
-    border-left: 2px solid var(--border);
-  }
-
-  .aiInboxItemDetail {
-    @apply text-sm leading-5;
-  }
-
-  .aiInboxItemDetailLink {
-    @apply ml-2 text-xs;
-    color: var(--primary);
-  }
-
-  .aiInboxItemDetailLink:hover {
-    text-decoration: underline;
-  }
-
   /* ─── Sidebar nav badge (count chip at end of NavLink) ────────────── */
 
   .sidebar__navBadge {
@@ -1047,47 +708,6 @@
     min-width: 1.25rem;
     text-align: center;
     line-height: 1.25;
-  }
-
-  /* ─── Button-like anchor (sits inline with <Button> elements) ─────── */
-
-  .buttonLikeLink {
-    @apply inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium no-underline;
-    border: 1px solid var(--border);
-    background: var(--bg2);
-    color: var(--foreground);
-    cursor: pointer;
-    transition: background 150ms;
-  }
-
-  .buttonLikeLink:hover {
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
-    color: var(--foreground);
-  }
-
-  .buttonLikeLink:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  /* ─── Dashboard insight card helpers ─────────────────────────────── */
-
-  .aiVisibilitySupportingIds {
-    display: block;
-  }
-
-  .aiVisibilityAction {
-    @apply text-xs font-medium;
-    display: inline-block;
-    padding-top: 0.375rem;
-    color: var(--primary);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    cursor: pointer;
-  }
-
-  .aiVisibilityAction:hover {
-    color: var(--text-link-hover);
   }
 
   .transactionsTableCard {
@@ -1111,10 +731,6 @@
 
   .transactionsTable tbody .transactionsActionsCol {
     background: color-mix(in srgb, var(--bg) 96%, transparent);
-  }
-
-  .transactionsPager {
-    @apply mb-0 mt-4 justify-center;
   }
 
   .txnMerchantCell {
@@ -1253,10 +869,6 @@
     @apply m-0 text-xs leading-5;
   }
 
-  .dashboardBusinessSpotlight {
-    background: color-mix(in srgb, var(--bg2) 72%, var(--accent-green) 8%);
-  }
-
   .businessSpotlightGrid {
     @apply mt-4 grid gap-4;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1318,18 +930,6 @@
     @apply mt-2 mb-0;
   }
 
-  .dashboardChartCard {
-    @apply mb-4;
-  }
-
-  .dashboardChartCard h2 {
-    @apply mt-0;
-  }
-
-  .dashboardChartCard .muted {
-    @apply mb-1;
-  }
-
   .bulkBar {
     @apply flex flex-wrap items-end gap-x-4 gap-y-3;
   }
@@ -1340,36 +940,6 @@
 
   .bulkBar .checkRow {
     @apply flex-row items-center gap-2;
-  }
-
-  .uploadCard h2 {
-    @apply mb-1 mt-0 text-[1.05rem];
-  }
-
-  .uploadCard .uploadMsg {
-    @apply mt-3 text-sm whitespace-pre-wrap;
-    color: var(--muted-foreground);
-  }
-
-  .uploadCard .uploadMsg.warn {
-    color: var(--warning);
-  }
-
-  .uploadCard .parseErrorList {
-    @apply mt-2 max-h-48 overflow-y-auto pl-5 text-[0.82rem];
-    color: var(--danger);
-  }
-
-  .uploadCard .previewBlock {
-    @apply mt-4;
-  }
-
-  .uploadCard .previewBlock code {
-    @apply text-xs break-all;
-  }
-
-  .filePick input[type='file'] {
-    @apply max-w-full;
   }
 
   .req {
@@ -1410,363 +980,6 @@
     @apply flex-row items-center gap-2;
   }
 
-  /* ─── Bento dashboard tile chrome ─────────────────────────────────────
-   * Grid container + column/row spans live in Tailwind utilities
-   * (DashboardPage container + SPAN_CLASSES/ROW_CLASSES in BentoTile.tsx).
-   * ─────────────────────────────────────────────────────────────────── */
-
-  .bentoTile {
-    @apply flex flex-col gap-3 rounded-lg border p-4 sm:p-5;
-    border-color: color-mix(in srgb, var(--border) 88%, var(--zinc-50) 4%);
-    background: var(--card);
-    box-shadow: var(--shadow);
-    min-width: 0;
-  }
-
-  /* Hero anchor tile: flat surface (chart bands stay readable). */
-  .bentoTile--hero {
-    background: var(--card);
-  }
-
-  /* The one deliberate gradient surface — orange→pink with white text. */
-  .bentoTile--gradient {
-    background: var(--gradient-hero);
-    border-color: transparent;
-    color: var(--zinc-50);
-  }
-  .bentoTile--gradient .bentoTile__label,
-  .bentoTile--gradient .bentoTile__description {
-    color: color-mix(in srgb, var(--zinc-50) 92%, transparent);
-  }
-
-  .bentoTile__header {
-    @apply flex items-start justify-between gap-3;
-  }
-
-  .bentoTile__heading {
-    @apply min-w-0 flex-1;
-  }
-
-  .bentoTile__label {
-    @apply m-0 text-sm font-semibold;
-    color: var(--foreground);
-  }
-
-  .bentoTile__description {
-    @apply mt-1 mb-0 text-xs;
-    color: var(--muted-foreground);
-  }
-
-  .bentoTile__actions {
-    @apply flex shrink-0 items-center gap-2;
-  }
-
-  .bentoTile__body {
-    @apply flex min-h-0 flex-1 flex-col;
-  }
-
-  /* ─── KpiStack ─────────────────────────────────────────────────────── */
-
-  .kpiStack {
-    @apply flex h-full flex-col;
-    gap: 0;
-  }
-
-  .kpiStack__row {
-    @apply flex flex-1 flex-col justify-center gap-1 py-2;
-  }
-
-  .kpiStack__row + .kpiStack__row {
-    border-top: 1px solid var(--border);
-  }
-
-  .kpiStack__label {
-    @apply m-0 text-xs font-semibold uppercase tracking-wide;
-    color: var(--muted-foreground);
-  }
-
-  .kpiStack__value {
-    @apply m-0 truncate text-xl font-semibold tabular-nums;
-    color: var(--foreground);
-  }
-
-  .kpiStack__hint {
-    @apply m-0 text-xs;
-    color: var(--muted-foreground);
-  }
-
-  .kpiStack__delta {
-    @apply m-0 mt-1;
-  }
-
-  /* ─── Top growers tile ─────────────────────────────────────────────── */
-
-  .growersList {
-    @apply m-0 flex h-full flex-col gap-1.5 p-0;
-    list-style: none;
-  }
-
-  .growersList__row {
-    @apply flex items-center gap-2 py-1;
-  }
-  .growersList__row + .growersList__row {
-    border-top: 1px solid var(--border);
-    padding-top: 0.5rem;
-  }
-
-  .growersList__main {
-    @apply flex min-w-0 flex-1 items-center gap-2;
-  }
-
-  .growersList__category {
-    @apply truncate text-sm font-medium;
-    color: var(--foreground);
-  }
-
-  .growersList__newBadge {
-    @apply shrink-0 rounded-full border px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide;
-    border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
-    background: color-mix(in oklch, var(--primary) 12%, transparent);
-    color: var(--primary);
-  }
-
-  .growersList__current {
-    @apply shrink-0 text-xs tabular-nums;
-    color: var(--muted-foreground);
-  }
-
-  .growersList__delta {
-    @apply shrink-0 tabular-nums;
-  }
-
-  /* ─── Recurring this month tile ────────────────────────────────────── */
-
-  .recurringList {
-    @apply m-0 flex flex-col gap-1.5 p-0;
-    list-style: none;
-  }
-
-  .recurringList__row {
-    @apply grid items-baseline gap-2 py-1;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-  }
-  .recurringList__row + .recurringList__row {
-    border-top: 1px solid var(--border);
-    padding-top: 0.5rem;
-  }
-
-  .recurringList__merchant {
-    @apply truncate text-sm font-semibold no-underline;
-    color: var(--foreground);
-  }
-  .recurringList__merchant:hover {
-    color: var(--primary);
-    text-decoration: underline;
-  }
-
-  .recurringList__amount {
-    @apply text-sm tabular-nums;
-    color: var(--foreground);
-  }
-
-  .recurringList__date {
-    @apply text-xs tabular-nums;
-    color: var(--muted-foreground);
-  }
-
-  .recurringList__footer {
-    @apply mt-auto flex items-baseline justify-between gap-2 pt-2 text-xs;
-    border-top: 1px solid var(--border);
-  }
-
-  .recurringList__total {
-    @apply truncate tabular-nums;
-    color: var(--muted-foreground);
-  }
-
-  .recurringList__viewAll {
-    @apply shrink-0 font-semibold no-underline;
-    color: var(--primary);
-  }
-  .recurringList__viewAll:hover { text-decoration: underline; }
-
-  /* ─── Currency mix tile ───────────────────────────────────────────── */
-
-  .currencyMixBar {
-    @apply mt-1 flex h-6 w-full overflow-hidden rounded-md border;
-    border-color: var(--border);
-  }
-
-  .currencyMixBar__segment {
-    @apply block h-full;
-    transition: width 0.3s ease-out;
-  }
-  .currencyMixBar__segment + .currencyMixBar__segment {
-    border-left: 1px solid color-mix(in oklch, var(--card) 65%, transparent);
-  }
-
-  .currencyMixLegend {
-    @apply m-0 mt-3 flex flex-col gap-1.5 p-0;
-    list-style: none;
-  }
-
-  .currencyMixLegend__row {
-    @apply grid items-center gap-2 text-xs;
-    grid-template-columns: 10px auto 1fr auto;
-  }
-
-  .currencyMixLegend__dot {
-    @apply h-2.5 w-2.5 rounded-full;
-  }
-
-  .currencyMixLegend__code {
-    @apply font-semibold;
-    color: var(--foreground);
-  }
-
-  .currencyMixLegend__amount {
-    @apply truncate text-right tabular-nums;
-    color: var(--muted-foreground);
-  }
-
-  .currencyMixLegend__pct {
-    @apply shrink-0 tabular-nums font-semibold;
-    color: var(--foreground);
-  }
-
-  /* ─── TableTile (compact top-N grid living in a bento tile) ───────── */
-
-  .tableTile {
-    @apply flex min-h-0 flex-1 flex-col;
-  }
-
-  .tableTile__header,
-  .tableTile__row {
-    @apply grid items-center gap-2 py-1;
-  }
-
-  .tableTile__header {
-    border-bottom: 1px solid var(--border);
-  }
-
-  .tableTile__head {
-    @apply truncate text-[0.7rem] font-bold uppercase tracking-wide;
-    color: var(--muted-foreground);
-  }
-
-  .tableTile__body {
-    @apply flex min-h-0 flex-1 flex-col;
-    overflow-y: auto;
-  }
-
-  .tableTile__row + .tableTile__row {
-    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-  }
-
-  .tableTile__row[data-interactive="true"] {
-    cursor: pointer;
-    border-radius: 6px;
-    margin: 0 -4px;
-    padding-left: 4px;
-    padding-right: 4px;
-    transition: background-color 0.15s;
-  }
-  .tableTile__row[data-interactive="true"]:hover {
-    background: color-mix(in oklch, var(--muted) 50%, transparent);
-  }
-  .tableTile__row[data-interactive="true"]:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  .tableTile__cell {
-    @apply truncate text-sm;
-    color: var(--foreground);
-  }
-
-  .tableTile__head[data-align="right"],
-  .tableTile__cell[data-align="right"] {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .tableTile__footer {
-    @apply mt-2 flex justify-end pt-2;
-    border-top: 1px solid var(--border);
-  }
-
-  .tableTile__viewAll {
-    @apply text-xs font-semibold no-underline;
-    color: var(--primary);
-  }
-  .tableTile__viewAll:hover { text-decoration: underline; }
-
-  /* ─── Budget pills (compact horizontal strip in a 12×1 bento tile) ── */
-
-  .budgetPillStrip {
-    @apply flex h-full gap-3 overflow-x-auto pb-1;
-    scrollbar-width: thin;
-  }
-
-  .budgetPill {
-    @apply flex shrink-0 flex-col justify-center gap-1.5 rounded-md border p-2.5;
-    border-color: var(--border);
-    background: color-mix(in oklch, var(--muted) 50%, transparent);
-    min-width: 200px;
-    max-width: 240px;
-  }
-
-  .budgetPill__header {
-    @apply flex items-baseline justify-between gap-2;
-  }
-
-  .budgetPill__label {
-    @apply truncate text-sm font-semibold;
-    color: var(--foreground);
-  }
-
-  .budgetPill__pct {
-    @apply shrink-0 text-xs font-semibold tabular-nums;
-    color: var(--muted-foreground);
-  }
-
-  .budgetPill__bar {
-    @apply relative h-1.5 w-full overflow-hidden rounded-full;
-    background: var(--muted);
-    border: 1px solid var(--border);
-  }
-
-  .budgetPill__fill {
-    @apply block h-full;
-    background: var(--positive);
-    transition: width 0.3s ease-out;
-  }
-
-  .budgetPill--warn .budgetPill__fill { background: var(--primary); }
-  .budgetPill--over .budgetPill__fill { background: var(--destructive); }
-
-  .budgetPill__amount {
-    @apply m-0 truncate text-xs;
-    color: var(--muted-foreground);
-  }
-
-  .budgetPill__currency {
-    @apply ml-1 opacity-70;
-  }
-
-  /* ─── Dashboard table card (post-bento, drill-down stack) ──────────── */
-
-  .dashboardTableCard {
-    @apply mb-4;
-  }
-
-  .dashboardTableCard h2 {
-    @apply mt-0;
-  }
-
-  .dashboardTableCard .muted {
-    @apply mb-1;
-  }
 }
 
 @media (max-width: 768px) {
@@ -1807,18 +1020,6 @@
 }
 
 @media (width <= 720px) {
-  .transactionsTopGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .reviewInboxLayout {
-    grid-template-columns: 1fr;
-  }
-
-  .reviewInboxDecisionCard {
-    order: -1;
-  }
-
   .rulesCategoryField {
     grid-column: span 1;
   }
@@ -1839,329 +1040,3 @@
   100% { background-color: color-mix(in srgb, var(--primary) 14%, transparent); }
 }
 
-.enrichAdminPill {
-  background: color-mix(in srgb, var(--accent) 100%, transparent);
-  color: var(--accent-foreground);
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
-.enrichBackfillFeed {
-  margin-top: 0.5rem;
-  max-height: 18rem;
-  overflow-y: auto;
-  border-top: 1px solid var(--border);
-  padding-top: 0.5rem;
-  font-size: 0.78rem;
-  line-height: 1.3;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.enrichBackfillFeed__row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
-}
-
-.enrichBackfillFeed__id {
-  width: 4rem;
-  text-align: right;
-}
-
-.enrichBackfillFeed__raw {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.enrichBackfillFeed__src {
-  min-width: 6rem;
-}
-
-.enrichBackfillFeed__cleared {
-  color: var(--success);
-}
-
-.enrichStatGrid {
-  display: grid;
-  grid-template-columns: 1.6fr repeat(5, 1fr);
-  gap: 0.625rem;
-  margin-bottom: 0.875rem;
-}
-
-@media (max-width: 960px) {
-  .enrichStatGrid { grid-template-columns: repeat(2, 1fr); }
-}
-
-@media (max-width: 520px) {
-  .enrichStatGrid { grid-template-columns: 1fr; }
-}
-
-.enrichWorkflowTile {
-  background: var(--warning-bg);
-  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
-  color: var(--warning-foreground);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.enrichWorkflowTile--empty {
-  background: var(--card);
-  border-color: var(--border);
-  color: var(--foreground);
-}
-
-.enrichWorkflowTile__label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--warning-foreground);
-  opacity: 0.85;
-  margin: 0;
-}
-
-.enrichWorkflowTile__value {
-  font-size: 1.7rem;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--warning-foreground);
-  margin: 0.125rem 0 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichWorkflowTile__pct {
-  font-size: 0.8rem;
-  font-weight: 500;
-  opacity: 0.75;
-}
-
-.enrichWorkflowTile__sub {
-  font-size: 0.78rem;
-  color: var(--warning-foreground);
-  opacity: 0.85;
-  margin: 0.25rem 0 0;
-}
-
-.enrichWorkflowTile__cta {
-  display: inline-block;
-  padding: 7px 14px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border-radius: 6px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border: 1px solid var(--primary-hover);
-  text-decoration: none;
-  align-self: flex-start;
-  margin-top: auto;
-}
-
-.enrichWorkflowTile__cta:hover {
-  background: var(--primary-hover);
-}
-
-.enrichStatCleared .statValue {
-  color: var(--success);
-}
-
-.enrichChartCard__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 0.75rem;
-}
-
-.enrichChartCard__title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  margin: 0;
-}
-
-.enrichAdminPill--amber {
-  background: color-mix(in srgb, var(--primary) 24%, transparent);
-  color: var(--primary-foreground);
-}
-
-.enrichConfidenceBar {
-  display: flex;
-  height: 22px;
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 0.625rem;
-  background: var(--muted);
-}
-
-.enrichConfidenceBar__seg {
-  height: 100%;
-  min-width: 0;
-}
-
-.enrichConfidenceLegend {
-  display: flex;
-  gap: 0.875rem;
-  flex-wrap: wrap;
-  font-size: 0.74rem;
-  color: var(--muted-foreground);
-}
-
-.enrichConfidenceLegend__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.enrichConfidenceLegend__swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-}
-
-.enrichConfidenceLegend__label {
-  color: var(--foreground);
-  font-weight: 500;
-}
-
-.enrichConfidenceLegend__count {
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichSourceList {
-  display: grid;
-  gap: 0.5rem;
-  font-size: 0.78rem;
-}
-
-.enrichSourceBar {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.enrichSourceBar__label {
-  width: 3.5rem;
-  text-align: right;
-  color: var(--muted-foreground);
-}
-
-.enrichSourceBar__track {
-  flex: 1;
-  background: var(--muted);
-  height: 14px;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.enrichSourceBar__fill {
-  height: 100%;
-  border-radius: 3px;
-}
-
-.enrichSourceBar__count {
-  width: 6rem;
-  color: var(--foreground);
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichListsGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.625rem;
-  margin-bottom: 0.875rem;
-}
-
-@media (max-width: 760px) {
-  .enrichListsGrid { grid-template-columns: 1fr; }
-}
-
-.enrichListCard__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 0.625rem;
-}
-
-.enrichListCard__title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  margin: 0;
-}
-
-.enrichListCard__manage {
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--primary);
-  text-decoration: none;
-}
-
-.enrichListCard__manage:hover {
-  text-decoration: underline;
-}
-
-.enrichListCard__rows {
-  font-size: 0.82rem;
-}
-
-.enrichListRow {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 0.625rem;
-  padding: 0.5rem 0;
-  align-items: baseline;
-  border-bottom: 1px solid var(--border);
-}
-
-.enrichListRow:last-child { border-bottom: 0; }
-
-.enrichListRow--twoCol { grid-template-columns: 1fr auto; }
-
-.enrichListRow__primary { color: var(--foreground); min-width: 0; }
-
-.enrichListRow__count {
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichListRow__action {
-  font-size: 0.75rem;
-  color: var(--primary);
-  text-decoration: none;
-}
-
-.enrichListRow__action:hover { text-decoration: underline; }
-
-.enrichInlineCode {
-  background: color-mix(in srgb, var(--primary) 18%, transparent);
-  color: var(--foreground);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 0.78rem;
-}
-
-.enrichTabRoot {
-  display: flex;
-  flex-direction: column;
-  gap: 0.875rem;
-}
-
-.enrichChartsGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.625rem;
-}
-
-@media (max-width: 760px) {
-  .enrichChartsGrid { grid-template-columns: 1fr; }
-}
-
-.enrichRefreshRow {
-  display: flex;
-  justify-content: flex-end;
-}
