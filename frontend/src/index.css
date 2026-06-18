@@ -157,6 +157,23 @@
   --chart-danger-line:      var(--oxblood-500);
   --chart-link-stroke:      var(--zinc-700);
 
+  /* Categorical avatar identity colors (single source of truth for LetterAvatar) */
+  --avatar-1:  #5B8DEF;
+  --avatar-2:  #7C5CFF;
+  --avatar-3:  #10B981;
+  --avatar-4:  #F59E0B;
+  --avatar-5:  #EF4444;
+  --avatar-6:  #06B6D4;
+  --avatar-7:  #EC4899;
+  --avatar-8:  #84CC16;
+  --avatar-9:  #0EA5E9;
+  --avatar-10: #A855F7;
+  --avatar-11: #F97316;
+  --avatar-12: #14B8A6;
+  /* Text colors for avatar backgrounds (precomputed contrast — see LetterAvatar) */
+  --avatar-on-light: var(--zinc-50);   /* light text on dark/saturated bg */
+  --avatar-on-dark:  var(--zinc-900);  /* dark text on light bg */
+
   /* Legacy aliases — one migration cycle, then removed.
    * App.css component classes (.navLink.isActive, .brandMark, .superadminBadge,
    * etc.) still reference these. They'll get sweeped in a follow-up. */
