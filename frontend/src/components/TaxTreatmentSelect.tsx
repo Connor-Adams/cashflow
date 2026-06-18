@@ -1,3 +1,4 @@
+import type React from 'react';
 import { TREATMENT_LABELS, type TaxTreatment } from '../lib/taxTreatment';
 
 interface TaxTreatmentSelectProps {
@@ -9,6 +10,8 @@ interface TaxTreatmentSelectProps {
   /** Disabled placeholder text when emptyLabel is not provided. */
   placeholder?: string;
   'aria-label'?: string;
+  className?: string;
+  style?: React.CSSProperties;
 }
 
 export function TaxTreatmentSelect({
@@ -18,11 +21,14 @@ export function TaxTreatmentSelect({
   emptyLabel,
   placeholder = 'Choose…',
   'aria-label': ariaLabel,
+  className,
+  style,
 }: TaxTreatmentSelectProps) {
   return (
     <select
       aria-label={ariaLabel}
-      className="text-sm"
+      className={className ?? 'text-sm'}
+      style={style}
       value={value ?? ''}
       onChange={(e) => {
         const next = e.target.value;

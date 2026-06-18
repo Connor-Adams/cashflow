@@ -145,6 +145,15 @@ const CONFIDENCE_FLAG_CHIPS: Array<{
   }),
 )
 
+/** Keyboard shortcut key badge — styled kbd element used in the shortcuts hint bar. */
+function KbdKey({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex min-w-5 items-center justify-center rounded border border-[var(--border)] bg-[var(--muted)] px-1 py-0.5 font-mono text-[0.7rem] text-[var(--foreground)]">
+      {children}
+    </kbd>
+  )
+}
+
 /** An item is a straggler (needs review) when no category has been resolved at sufficient confidence.
  * Mirrors the backend ENRICHMENT_ITEM_CLEAR_CONFIDENCE threshold (>=80). */
 function isItemStraggler(item: ExternalOrderItemView): boolean {
@@ -666,11 +675,11 @@ export function ReviewInboxPage() {
         />
       </Grid>
 
-      <section className="reviewInboxLayout">
-        <Card className="reviewInboxTableCard">
-          <div className="reviewInboxToolbar">
-            <Label>
-              <Search aria-hidden="true" />
+      <section className="grid gap-4 [grid-template-columns:minmax(0,_1fr)_minmax(280px,_360px)] max-[720px]:[grid-template-columns:1fr]">
+        <Card className="mb-0">
+          <div className="mb-3 flex flex-wrap items-end gap-3">
+            <Label className="min-w-[220px]">
+              <Search aria-hidden="true" className="mr-1 inline size-4" />
               Merchant
               <Input
                 value={merchantFilter}
@@ -683,6 +692,10 @@ export function ReviewInboxPage() {
               <NativeSelect
                 value={batchFilter}
                 onChange={(e) => setBatchFilter(e.target.value)}
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
+                }}
               >
                 <NativeSelectOption value="">All batches</NativeSelectOption>
                 {uniqueBatches.map((batch) => (
@@ -692,7 +705,7 @@ export function ReviewInboxPage() {
                 ))}
               </NativeSelect>
             </Label>
-            <div className="reviewInboxBatchPills">
+            <div className="flex flex-wrap gap-2">
               {summary.batches.slice(0, 4).map((batch) => (
                 <Badge key={batch.name} variant="outline">
                   {batch.name}: {batch.unreviewed}
@@ -769,19 +782,40 @@ export function ReviewInboxPage() {
             ) : null}
           </div>
 
-          <p className="reviewInboxShortcutsHint" aria-hidden="true">
-            <kbd>j</kbd>/<kbd>k</kbd> navigate · <kbd>space</kbd> select ·{' '}
-            <kbd>c</kbd> category · <kbd>Enter</kbd> apply · <kbd>?</kbd> help
+          <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted-foreground)]" aria-hidden="true">
+            <KbdKey>j</KbdKey>/<KbdKey>k</KbdKey> navigate · <KbdKey>space</KbdKey> select ·{' '}
+            <KbdKey>c</KbdKey> category · <KbdKey>Enter</KbdKey> apply · <KbdKey>?</KbdKey> help
           </p>
 
           {err && <Alert variant="error">{err}</Alert>}
-          {message && <span className="reviewInboxMessage">{message}</span>}
+          {message && (
+            <span
+              className="mb-3 inline-flex rounded-lg border px-3 py-2 text-sm font-semibold"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--positive) 45%, var(--border))',
+                background: 'color-mix(in srgb, var(--positive) 10%, transparent)',
+                color: 'var(--positive)',
+              }}
+            >
+              {message}
+            </span>
+          )}
 
-          <div className="reviewInboxTableWrap" ref={tableWrapRef}>
-            <Table className="reviewInboxTable">
+          <div
+            className="overflow-auto rounded-lg border"
+            style={{
+              maxHeight: '70vh',
+              borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+            }}
+            ref={tableWrapRef}
+          >
+            <Table
+              stickyHeader
+              className="[&_thead_th]:bg-[color-mix(in_srgb,var(--muted)_88%,transparent)] [&_tr[data-cursor='true']]:shadow-[inset_4px_0_0_0_var(--primary)] [&_tr[data-cursor='true']]:bg-[color-mix(in_oklch,var(--primary)_10%,transparent)]"
+            >
               <TableHeader>
                 <TableRow>
-                  <TableHead className="narrowCol">
+                  <TableHead className="w-9 text-center">
                     <input
                       type="checkbox"
                       checked={
@@ -833,15 +867,15 @@ export function ReviewInboxPage() {
                       <span className="txnMerchantCell">
                         <span className="txnMerchantName">{row.merchantClean}</span>
                         {row.appliedRuleId ? (
-                          <span className="reviewInboxHint">Rule #{row.appliedRuleId}</span>
+                          <span className="text-xs text-[var(--muted-foreground)]">Rule #{row.appliedRuleId}</span>
                         ) : (
-                          <span className="reviewInboxHint">No rule</span>
+                          <span className="text-xs text-[var(--muted-foreground)]">No rule</span>
                         )}
                         <Button
                           type="button"
                           variant="link"
                           size="sm"
-                          className="reviewInboxHintLink"
+                          className="p-0 text-xs text-[var(--muted-foreground)] underline hover:text-[var(--primary)] focus-visible:outline-2 focus-visible:outline-[var(--ring)] focus-visible:outline-offset-2"
                           onClick={() => setSignalsDialogTxnId(row.id)}
                         >
                           Why?
@@ -957,7 +991,7 @@ export function ReviewInboxPage() {
           </div>
         </Card>
 
-        <Card className="reviewInboxDecisionCard">
+        <Card className="mb-0 bg-[var(--card)] max-[720px]:order-[-1]">
           <SectionHeader
             title="Decision"
             description={
@@ -973,7 +1007,7 @@ export function ReviewInboxPage() {
             }
           />
 
-          <div className="reviewInboxDecisionFields">
+          <div className="grid gap-3">
             <Label>
               Category
               <div ref={categoryPickerRef}>
@@ -987,7 +1021,14 @@ export function ReviewInboxPage() {
             </Label>
             <Label>
               Split
-              <NativeSelect value={splitType} onChange={(e) => setSplitType(e.target.value)}>
+              <NativeSelect
+                value={splitType}
+                onChange={(e) => setSplitType(e.target.value)}
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
+                }}
+              >
                 <NativeSelectOption value="">Keep current</NativeSelectOption>
                 <NativeSelectOption value="me">Me</NativeSelectOption>
                 <NativeSelectOption value="partner">Partner</NativeSelectOption>
@@ -996,7 +1037,14 @@ export function ReviewInboxPage() {
             </Label>
             <Label>
               Business
-              <NativeSelect value={business} onChange={(e) => setBusiness(e.target.value)}>
+              <NativeSelect
+                value={business}
+                onChange={(e) => setBusiness(e.target.value)}
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
+                }}
+              >
                 <NativeSelectOption value="">Keep current</NativeSelectOption>
                 <NativeSelectOption value="false">Personal</NativeSelectOption>
                 <NativeSelectOption value="true">Business</NativeSelectOption>
@@ -1009,31 +1057,40 @@ export function ReviewInboxPage() {
                 options={TAX_TREATMENTS.filter((tt) => tt !== 'none')}
                 emptyLabel="Keep current"
                 onChange={(t) => setTaxTreatment(t ?? '')}
+                className="min-h-9 rounded-md border px-3 text-sm"
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  background: 'color-mix(in srgb, var(--card) 94%, transparent)',
+                  color: 'var(--foreground)',
+                }}
               />
             </Label>
           </div>
 
-          <div className="reviewInboxPreview">
-            <div>
-              <strong>{selectedSummary.count}</strong>
-              <span>selected</span>
-            </div>
-            <div>
-              <strong>
-                {formatMoney(
-                  selectedSummary.absoluteSpend,
-                  selectedSummary.currency ?? 'CAD'
-                )}
-              </strong>
-              <span>absolute spend</span>
-            </div>
-            <div>
-              <strong>{selectedRows.filter((row) => !row.appliedRuleId).length}</strong>
-              <span>without rules</span>
-            </div>
+          <div
+            className="my-4 grid gap-3"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))' }}
+          >
+            {([
+              { value: selectedSummary.count, label: 'selected' },
+              { value: formatMoney(selectedSummary.absoluteSpend, selectedSummary.currency ?? 'CAD'), label: 'absolute spend' },
+              { value: selectedRows.filter((row) => !row.appliedRuleId).length, label: 'without rules' },
+            ] as { value: React.ReactNode; label: string }[]).map(({ value: val, label }) => (
+              <div
+                key={label}
+                className="rounded-lg border p-3"
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)',
+                  background: 'color-mix(in srgb, var(--muted) 46%, transparent)',
+                }}
+              >
+                <strong className="block">{val}</strong>
+                <span className="mt-1 block text-xs text-[var(--muted-foreground)]">{label}</span>
+              </div>
+            ))}
           </div>
 
-          <div className="reviewInboxActions">
+          <div className="flex flex-col gap-2">
             <Button
               type="button"
               disabled={!canApply || applying}
@@ -1053,8 +1110,14 @@ export function ReviewInboxPage() {
             </Button>
           </div>
 
-          <div className="reviewInboxGuardrail">
-            <ShieldCheck aria-hidden="true" />
+          <div
+            className="mt-4 flex gap-2 rounded-lg border px-3 py-2 text-xs leading-5 text-[var(--muted-foreground)]"
+            style={{
+              borderColor: 'color-mix(in srgb, var(--primary) 18%, var(--border))',
+              background: 'color-mix(in srgb, var(--muted) 42%, transparent)',
+            }}
+          >
+            <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>
               This only updates selected rows. Rule creation is available when all
               selected rows share one merchant.
