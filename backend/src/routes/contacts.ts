@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Contact, Reimbursement, Transaction } from '../models';
+import { Account, Contact, Reimbursement, Transaction } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { resolveHouseholdToday } from '../time/householdToday';
@@ -12,6 +12,7 @@ import {
   type ReimbursementRow,
 } from '../reimbursements/serialize';
 import { computeTransferNet, type TransferRow } from '../contacts/transferLedger';
+import { tokenize, suggestSelfContacts } from '../contacts/selfAccountSuggest';
 
 const router = Router();
 
@@ -21,7 +22,65 @@ router.get('/', async (req, res, next) => {
       where: householdWhere(req),
       order: [['name', 'ASC']],
     });
-    res.json(rows);
+    // Include isSelf so the frontend can section self-accounts separately.
+    res.json(rows.map((r) => ({
+      id: r.id,
+      householdId: r.householdId,
+      name: r.name,
+      notes: r.notes,
+      isPartner: r.isPartner,
+      isSelf: r.isSelf,
+      aliases: r.aliases,
+      normalizedName: r.normalizedName,
+    })));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Self-account auto-suggest. Returns contacts whose name tokens overlap the
+ * current user's name tokens or any household account name tokens. The user
+ * then confirms via PATCH /:id { isSelf: true }, after which the contact is
+ * excluded from the transfer-link pass permanently.
+ *
+ * MOUNT ORDER: this literal path MUST stay above the `/:id` param route so
+ * Express matches "self-suggestions" as a path segment, not as an :id value.
+ */
+router.get('/self-suggestions', apiReadLimiter, async (req, res, next) => {
+  try {
+    const { user, household } = currentAuth(req);
+    const householdId = household.id;
+
+    // Load non-self contacts for this household — already-flagged self
+    // accounts are filtered at the DB so we never re-suggest them.
+    const contactRows = await Contact.findAll({
+      where: { householdId, isSelf: false },
+      order: [['name', 'ASC']],
+    });
+
+    // Tokenize the current user's display name.
+    const userNameTokens = tokenize(user.displayName ?? '');
+
+    // Tokenize all household account names.
+    const accountRows = await Account.findAll({
+      where: { householdId },
+      attributes: ['name'],
+    });
+    const accountNameTokens = accountRows.flatMap((a) => tokenize(a.name));
+
+    const suggestions = suggestSelfContacts(
+      contactRows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        normalizedName: c.normalizedName ?? null,
+        isSelf: c.isSelf ?? false,
+      })),
+      userNameTokens,
+      accountNameTokens,
+    );
+
+    res.json({ suggestions });
   } catch (e) {
     next(e);
   }
@@ -91,6 +150,7 @@ router.get('/:id', apiReadLimiter, async (req, res, next) => {
       name: contact.name,
       notes: contact.notes,
       isPartner: contact.isPartner,
+      isSelf: contact.isSelf,
       aliases: contact.aliases,
       openReimbursements: open,
       today,
@@ -171,6 +231,14 @@ router.patch('/:id', async (req, res, next) => {
         return;
       }
       row.set('isPartner', parsed);
+    }
+    if (b.isSelf !== undefined) {
+      const parsed = coerceBool(b.isSelf);
+      if (parsed === null) {
+        res.status(400).json({ error: 'isSelf must be boolean' });
+        return;
+      }
+      row.set('isSelf', parsed);
     }
     await row.save();
     res.json(row);
