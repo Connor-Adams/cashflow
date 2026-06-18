@@ -84,8 +84,8 @@ function TreeNode({
             onClick={() => onEdit(node.id)}
           >
             {node.icon
-              ? <CategoryIcon name={node.name} size={15} />
-              : <span className="size-1.5 rounded-full bg-muted-foreground/30 transition-colors group-hover:bg-muted-foreground/70" aria-hidden />}
+              ? <CategoryIcon name={node.name} size={15} className="treeIconGradient" />
+              : <span className="treeIconDot size-1.5 rounded-full opacity-50 transition-opacity group-hover:opacity-100" aria-hidden />}
           </button>
         }
         actions={
@@ -280,6 +280,15 @@ export function CategoryTreeManager() {
 
   return (
     <div>
+      {/* One shared gradient def the row icons paint their stroke from. */}
+      <svg width="0" height="0" aria-hidden focusable="false" className="absolute">
+        <defs>
+          <linearGradient id="treeIconGradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="var(--gradient-hero-from)" />
+            <stop offset="1" stopColor="var(--gradient-hero-to)" />
+          </linearGradient>
+        </defs>
+      </svg>
       {(error || actionError) && (
         <span className="error" role="alert">{actionError ?? error}</span>
       )}
