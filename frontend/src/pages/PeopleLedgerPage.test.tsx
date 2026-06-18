@@ -126,8 +126,9 @@ describe('PeopleLedgerPage — drill-in', () => {
         <PeopleLedgerPage />
       </MemoryRouter>,
     );
-    // Raw-net label (unique text, no scoping needed)
-    expect(await screen.findByText(/CAD 480.00 owed to you/)).toBeInTheDocument();
+    // Raw-net label — scoped to the summary card
+    const summaryCard = await screen.findByTestId('ledger-summary-card');
+    expect(within(summaryCard).getByText(/CAD 480.00 owed to you/)).toBeInTheDocument();
     // Tracked outstanding — scoped to its container to avoid collision with transfer row
     const outstandingSection = await screen.findByTestId('tracked-outstanding');
     expect(within(outstandingSection).getByText(/200\.00/)).toBeInTheDocument();

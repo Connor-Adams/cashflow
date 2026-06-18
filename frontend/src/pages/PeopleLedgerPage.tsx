@@ -242,20 +242,20 @@ export function PeopleLedgerPage() {
 
   // ── Load contacts + per-contact ledgers + self-suggestions ──────────────
 
-  const loadAll = useCallback(async () => {
-    setContactsLoading(true)
+  const loadAll = useCallback(async (isActive: () => boolean = () => true) => {
+    if (isActive()) setContactsLoading(true)
     try {
       const [rawContacts, suggestionsResp] = await Promise.all([
         getJson<ContactLite[]>('/api/contacts'),
         getSelfSuggestions().catch(() => ({ suggestions: [] as SelfSuggestion[] })),
       ])
-      setContacts(rawContacts)
-      setSelfSuggestions(suggestionsResp.suggestions)
+      if (isActive()) setContacts(rawContacts)
+      if (isActive()) setSelfSuggestions(suggestionsResp.suggestions)
 
       // Fetch ledgers for all non-self contacts in parallel (small N)
       const realContacts = rawContacts.filter((c) => !c.isSelf)
       if (realContacts.length > 0) {
-        setLedgersLoading(true)
+        if (isActive()) setLedgersLoading(true)
         const entries = await Promise.all(
           realContacts.map((c) =>
             getContactLedger(c.id)
@@ -267,22 +267,24 @@ export function PeopleLedgerPage() {
         for (const e of entries) {
           if (e) m.set(e[0], e[1])
         }
-        setLedgerMap(m)
-        setLedgersLoading(false)
+        if (isActive()) setLedgerMap(m)
+        if (isActive()) setLedgersLoading(false)
       }
     } catch (e) {
-      showToastRef.current({
+      if (isActive()) showToastRef.current({
         title: e instanceof Error ? e.message : 'Failed to load contacts',
         variant: 'destructive',
       })
     } finally {
-      setContactsLoading(false)
+      if (isActive()) setContactsLoading(false)
     }
     // showToastRef is a stable ref — intentionally excluded from dep array
   }, [])
 
   useEffect(() => {
-    void loadAll()
+    let active = true
+    void loadAll(() => active)
+    return () => { active = false }
   }, [loadAll])
 
   // ── Load drill-in ledger ──────────────────────────────────────────────────
@@ -479,7 +481,7 @@ export function PeopleLedgerPage() {
       {selectedId == null && (
         <>
           {/* Metric cards */}
-          {!contactsLoading && (
+          {!contactsLoading && !ledgersLoading && (
             <Card className="mb-4 p-4" data-testid="metrics-card">
               <div className="flex flex-wrap gap-8">
                 <MetricCard
@@ -623,7 +625,7 @@ export function PeopleLedgerPage() {
           ) : ledger ? (
             <>
               {/* Summary card: two numbers + sent/returned visual */}
-              <Card className="mb-4 p-4">
+              <Card className="mb-4 p-4" data-testid="ledger-summary-card">
                 <h2 className="mb-3 text-base font-semibold">{ledger.name}</h2>
                 <div className="flex flex-wrap gap-8">
                   <div>
