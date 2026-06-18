@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -16,6 +17,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
+import { cn } from '@/lib/utils'
 import { formatMoney } from '../lib/formatMoney'
 import {
   useCreditCards,
@@ -266,7 +268,7 @@ function CardRow({
             placeholder="—"
           />
         ) : card.statementBalance == null ? (
-          <span className="muted">—</span>
+          <span className="text-muted-foreground">—</span>
         ) : (
           formatMoney(card.statementBalance, currency)
         )}
@@ -321,7 +323,7 @@ function CardRow({
             {card.autopayType ?? 'on'}
           </Badge>
         ) : (
-          <span className="muted text-xs">Off</span>
+          <span className="text-muted-foreground text-xs">Off</span>
         )}
       </TableCell>
       <TableCell className="text-right whitespace-nowrap">
@@ -382,7 +384,7 @@ function DueBadge({ label, tone }: { label: string; tone: 'warn' | 'soon' | 'ok'
       </Badge>
     )
   }
-  return <span className="muted text-xs">{label}</span>
+  return <span className="text-muted-foreground text-xs">{label}</span>
 }
 
 type SummaryTileProps = {
@@ -395,16 +397,15 @@ type SummaryTileProps = {
 
 function SummaryTile({ label, value, description, tone, loading }: SummaryTileProps) {
   return (
-    <Card className="p-3">
-      <p className="muted mb-1 text-xs uppercase tracking-wide">{label}</p>
-      <p
-        className={`mb-0 text-lg font-semibold tabular-nums ${
-          tone === 'warn' ? 'text-warning' : ''
-        }`}
-      >
-        {loading ? '…' : value}
-      </p>
-      {description ? <p className="muted mb-0 text-xs">{description}</p> : null}
-    </Card>
+    <StatCard
+      className="p-3"
+      label={label}
+      value={
+        <span className={cn('tabular-nums', tone === 'warn' && 'text-warning')}>
+          {loading ? '…' : value}
+        </span>
+      }
+      hint={description}
+    />
   )
 }
