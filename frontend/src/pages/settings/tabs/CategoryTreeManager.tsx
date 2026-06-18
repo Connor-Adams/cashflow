@@ -1,9 +1,10 @@
 // frontend/src/pages/settings/tabs/CategoryTreeManager.tsx
 import { useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tree, TreeGroup, TreeRow } from '@/components/ui/tree';
 import { CategoryIcon } from '../../../components/CategoryIcon';
 import { CategoryIconPicker } from '../../../components/CategoryIconPicker';
 import { TaxTreatmentSelect } from '../../../components/TaxTreatmentSelect';
@@ -48,11 +49,13 @@ function TreeNode({
 
   return (
     <li>
-      <div
-        className={
-          'group flex items-center gap-1.5 rounded-md py-1 pr-1 transition-colors ' +
-          (isDropTarget ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/50')
-        }
+      <TreeRow
+        grip
+        highlighted={isDropTarget}
+        expandable={hasKids}
+        expanded={isOpen}
+        toggleLabel={node.name}
+        onToggle={() => toggle(node.id)}
         draggable={!renaming}
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = 'move';
@@ -72,35 +75,42 @@ function TreeNode({
           if (!draggedId || draggedId === node.id) return;
           onReparent(draggedId, node.id);
         }}
-      >
-        <GripVertical
-          size={14}
-          aria-hidden
-          className="shrink-0 cursor-grab text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100"
-        />
-        {hasKids ? (
+        icon={
           <button
             type="button"
-            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${node.name}`}
-            aria-expanded={isOpen}
-            className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"
-            onClick={() => toggle(node.id)}
+            aria-label={`Edit icon and tax for ${node.name}`}
+            className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-muted"
+            onClick={() => onEdit(node.id)}
           >
-            {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            <CategoryIcon name={node.name} size={15} />
           </button>
-        ) : (
-          <span className="inline-block size-5 shrink-0" />
-        )}
-
-        <button
-          type="button"
-          aria-label={`Edit icon and tax for ${node.name}`}
-          className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"
-          onClick={() => onEdit(node.id)}
-        >
-          <CategoryIcon name={node.name} size={15} />
-        </button>
-
+        }
+        actions={
+          <>
+            <Button
+              type="button" variant="ghost" size="icon" className="size-7"
+              aria-label={`Rename ${node.name}`}
+              onClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
+            >
+              <Pencil size={14} />
+            </Button>
+            <Button
+              type="button" variant="ghost" size="icon" className="size-7"
+              aria-label={`Add subcategory under ${node.name}`}
+              onClick={() => setAdding((v) => !v)}
+            >
+              <Plus size={14} />
+            </Button>
+            <Button
+              type="button" variant="ghost" size="icon" className="size-7 text-destructive hover:text-destructive"
+              aria-label={`Delete ${node.name}`}
+              onClick={() => void run(() => deleteCategory(node.id))}
+            >
+              <Trash2 size={14} />
+            </Button>
+          </>
+        }
+      >
         {renaming ? (
           <Input
             aria-label={`Rename ${node.name}`}
@@ -133,31 +143,7 @@ function TreeNode({
             {node.name}
           </button>
         )}
-
-        <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          <Button
-            type="button" variant="ghost" size="icon" className="size-7"
-            aria-label={`Rename ${node.name}`}
-            onClick={() => { savedRef.current = false; setRenameValue(node.name); setRenaming(true); }}
-          >
-            <Pencil size={14} />
-          </Button>
-          <Button
-            type="button" variant="ghost" size="icon" className="size-7"
-            aria-label={`Add subcategory under ${node.name}`}
-            onClick={() => setAdding((v) => !v)}
-          >
-            <Plus size={14} />
-          </Button>
-          <Button
-            type="button" variant="ghost" size="icon" className="size-7 text-destructive hover:text-destructive"
-            aria-label={`Delete ${node.name}`}
-            onClick={() => void run(() => deleteCategory(node.id))}
-          >
-            <Trash2 size={14} />
-          </Button>
-        </div>
-      </div>
+      </TreeRow>
 
       {adding && (
         <div className="flex items-center gap-2 py-1 pl-7">
@@ -196,7 +182,7 @@ function TreeNode({
       )}
 
       {hasKids && isOpen && (
-        <ul className="ml-[15px] border-l border-border/60 pl-2">
+        <TreeGroup>
           {kids.map((c) => (
             <TreeNode
               key={c.id}
@@ -212,7 +198,7 @@ function TreeNode({
               onError={onError}
             />
           ))}
-        </ul>
+        </TreeGroup>
       )}
     </li>
   );
@@ -296,8 +282,7 @@ export function CategoryTreeManager() {
       {loading ? (
         <p className="muted">Loading…</p>
       ) : (
-        <ul
-          className="flex flex-col gap-0.5"
+        <Tree
           onDragEnter={() => setDraggingRoot(true)}
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
           onDrop={(e) => {
@@ -312,7 +297,7 @@ export function CategoryTreeManager() {
           <li
             className={
               'rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground transition-all ' +
-              (draggingRoot ? 'border-primary/50 bg-primary/5 opacity-100' : 'border-transparent opacity-0 h-0 py-0 overflow-hidden')
+              (draggingRoot ? 'border-ring bg-accent opacity-100' : 'border-transparent opacity-0 h-0 py-0 overflow-hidden')
             }
             aria-label="Move to top level"
           >
@@ -333,7 +318,7 @@ export function CategoryTreeManager() {
               onError={setActionError}
             />
           ))}
-        </ul>
+        </Tree>
       )}
 
       {editing && (
