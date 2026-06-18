@@ -733,20 +733,6 @@
     background: color-mix(in srgb, var(--bg) 96%, transparent);
   }
 
-  .txnMerchantCell {
-    @apply flex min-w-[180px] flex-col gap-1;
-  }
-
-  .txnMerchantName {
-    @apply font-medium;
-    color: var(--fg);
-  }
-
-  .txnMerchantMeta {
-    @apply text-xs;
-    color: var(--muted-foreground);
-  }
-
   .txnCategoryCell {
     @apply min-w-[210px];
   }
