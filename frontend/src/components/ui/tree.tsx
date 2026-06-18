@@ -1,0 +1,92 @@
+import * as React from 'react'
+import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+/**
+ * Design-system tree primitives. Shared row chrome for hierarchical lists —
+ * the editable category manager and the read-only spend rollup both compose
+ * these. Consumers own the data shape and recursion; these own the look:
+ * indent guides, the expand/collapse control, grip affordance, icon + action
+ * slots, and the brand-tinted highlight (oxblood, matching the house
+ * selected-row convention).
+ */
+
+/** Root list for a tree. Drag handlers etc. spread onto the <ul>. */
+function Tree({ className, ...props }: React.ComponentProps<'ul'>) {
+  return <ul className={cn('flex flex-col gap-0.5', className)} {...props} />
+}
+
+/** Nested child list — draws the left indent guide. */
+function TreeGroup({ className, ...props }: React.ComponentProps<'ul'>) {
+  return <ul className={cn('ml-[15px] border-l border-border/60 pl-2', className)} {...props} />
+}
+
+type TreeRowProps = React.ComponentProps<'div'> & {
+  /** Whether this node can expand (has children). */
+  expandable?: boolean
+  expanded?: boolean
+  onToggle?: () => void
+  /** Accessible name for the expand/collapse control, e.g. the node's name. */
+  toggleLabel?: string
+  /** Show the drag-handle affordance (revealed on row hover). */
+  grip?: boolean
+  /** Drop-target / cursor highlight — brand oxblood, the house convention. */
+  highlighted?: boolean
+  /** Leading icon slot (e.g. a category icon, or a button wrapping one). */
+  icon?: React.ReactNode
+  /** Hover-revealed trailing controls (icon buttons). */
+  actions?: React.ReactNode
+  /** Always-visible trailing content (e.g. an amount). */
+  trailing?: React.ReactNode
+  /** The row label — name text, a rename input, etc. */
+  children: React.ReactNode
+}
+
+function TreeRow({
+  expandable, expanded, onToggle, toggleLabel, grip, highlighted,
+  icon, actions, trailing, children, className, ...rowProps
+}: TreeRowProps) {
+  return (
+    <div
+      className={cn(
+        'group flex items-center gap-1.5 rounded-md py-1 pr-1 transition-colors',
+        highlighted
+          ? 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)] shadow-[inset_3px_0_0_0_var(--primary)]'
+          : 'hover:bg-muted/50',
+        className,
+      )}
+      {...rowProps}
+    >
+      {grip && (
+        <GripVertical
+          size={14}
+          aria-hidden
+          className="shrink-0 cursor-grab text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100"
+        />
+      )}
+      {expandable ? (
+        <button
+          type="button"
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${toggleLabel ?? ''}`.trim()}
+          aria-expanded={expanded}
+          className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"
+          onClick={onToggle}
+        >
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+      ) : (
+        <span className="inline-block size-5 shrink-0" aria-hidden />
+      )}
+      {icon != null && <span className="flex shrink-0 items-center">{icon}</span>}
+      <div className="flex min-w-0 flex-1 items-center">{children}</div>
+      {actions != null && (
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          {actions}
+        </div>
+      )}
+      {trailing != null && <div className="shrink-0">{trailing}</div>}
+    </div>
+  )
+}
+
+export { Tree, TreeGroup, TreeRow }

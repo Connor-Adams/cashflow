@@ -1,6 +1,6 @@
 // frontend/src/components/CategoryRollupTree.tsx
 import { useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Tree, TreeGroup, TreeRow } from '@/components/ui/tree';
 import type { RollupRow } from '../types/api';
 
 type Props = { rows: RollupRow[]; currency: string };
@@ -39,27 +39,24 @@ export function CategoryRollupTree({ rows, currency }: Props) {
     const isOpen = expanded.has(r.categoryId);
     return (
       <li key={r.categoryId}>
-        <div className="flex items-center gap-2 py-1" style={{ paddingLeft: r.depth * 16 }}>
-          {kids.length > 0 ? (
-            <Button
-              type="button" variant="ghost" size="sm"
-              aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${r.name}`}
-              aria-expanded={isOpen}
-              onClick={() => setExpanded((prev) => {
-                const next = new Set(prev);
-                if (next.has(r.categoryId)) next.delete(r.categoryId);
-                else next.add(r.categoryId);
-                return next;
-              })}
-            >{isOpen ? '▾' : '▸'}</Button>
-          ) : <span className="inline-block w-6" />}
-          <span className="flex-1">{r.name}</span>
-          <span className="tabular-nums">{format(r.rolledTotal)}</span>
-        </div>
-        {isOpen && kids.length > 0 && <ul>{kids.map(renderRow)}</ul>}
+        <TreeRow
+          expandable={kids.length > 0}
+          expanded={isOpen}
+          toggleLabel={r.name}
+          onToggle={() => setExpanded((prev) => {
+            const next = new Set(prev);
+            if (next.has(r.categoryId)) next.delete(r.categoryId);
+            else next.add(r.categoryId);
+            return next;
+          })}
+          trailing={<span className="tabular-nums text-sm">{format(r.rolledTotal)}</span>}
+        >
+          <span className="truncate text-sm">{r.name}</span>
+        </TreeRow>
+        {isOpen && kids.length > 0 && <TreeGroup>{kids.map(renderRow)}</TreeGroup>}
       </li>
     );
   };
 
-  return <ul className="flex flex-col">{roots.map(renderRow)}</ul>;
+  return <Tree>{roots.map(renderRow)}</Tree>;
 }
