@@ -297,7 +297,7 @@ export function CategoryTreeManager() {
           <li
             className={
               'rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground transition-all ' +
-              (draggingRoot ? 'border-ring bg-accent opacity-100' : 'border-transparent opacity-0 h-0 py-0 overflow-hidden')
+              (draggingRoot ? 'treeDropZoneActive opacity-100' : 'border-transparent opacity-0 h-0 py-0 overflow-hidden')
             }
             aria-label="Move to top level"
           >
