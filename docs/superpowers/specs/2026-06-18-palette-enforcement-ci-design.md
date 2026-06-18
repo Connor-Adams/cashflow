@@ -55,6 +55,12 @@ without filesystem or process concerns.
 **Scope:** scans `frontend/src/**/*.{tsx,ts,css}`. Excludes:
 - `frontend/src/index.css` — the sanctioned token-definition home.
 - `**/*.test.{ts,tsx}` — test fixtures legitimately contain arbitrary strings.
+- `frontend/src/extension/**` and `frontend/src/bookmarklets/**` — these bundles
+  are injected into foreign pages (Amazon/Apple) and the extension service
+  worker, where the app's `index.css` tokens do **not** resolve. Their hex
+  colors (`extension/background.ts`, `bookmarklets/scrape/toast.ts`) are
+  legitimate self-contained literals, not app UI — tokenizing them would break
+  them. They live outside the palette by design.
 
 **Detection (color-aware, false-positive-safe):**
 1. Strip `//` line comments and `/* */` block comments first. This removes
@@ -106,14 +112,24 @@ authoritative + CSS coverage.
 ### 3. Token promotion (one-time cleanup)
 
 - Add `--avatar-1 .. --avatar-12` to `index.css` holding the 12 categorical
-  hexes currently inlined in `letter-avatar.tsx`. Rewrite that file's
-  `PALETTE` to `['var(--avatar-1)', …, 'var(--avatar-12)']` (consumed as inline
-  `background` values). Palette stays the single source of truth — even
-  categorical colors live in the token file.
-- Tokenize the remaining ~3 tsx stragglers (e.g. `NetWorthTile`,
-  `UtilizationBadge`) against existing semantic tokens, or mark with
-  `// palette-allow` only if a value is genuinely dynamic and cannot be a
-  token.
+  hexes currently inlined in `letter-avatar.tsx`. Palette stays the single
+  source of truth — even categorical colors live in the token file.
+  - **Constraint:** `letter-avatar.tsx` parses the hex at runtime
+    (`readableForeground()` does `parseInt(bgHex.slice(1,3),16)`) to pick a
+    readable text color. A `var(--…)` string breaks that parse. So we cannot
+    just swap the strings. Instead, **precompute** the foreground per palette
+    entry (apply the existing `luminance > 0.55` rule once, at authoring time)
+    and store the palette as paired token references:
+    `PALETTE = [{ bg: 'var(--avatar-1)', fg: 'var(--avatar-on-light)' }, …]`.
+    The dark-text entries (luminance > 0.55) are indices 3, 4, 6, 8, 12; the
+    rest take light text. `--avatar-on-dark` → `var(--zinc-900)`,
+    `--avatar-on-light` → `var(--zinc-50)`. This deletes `readableForeground`
+    and the runtime hex parsing entirely.
+- `security-logo.tsx` has one `#FFFFFF` in an SVG `fill`. Tokenize to
+  `var(--zinc-50)` if it should track the palette, or mark `// palette-allow`
+  if it is a fixed brand asset (implementer's call — default to tokenize).
+- `NetWorthTile` / `UtilizationBadge` are **not** violations — their earlier
+  apparent hex hits were 3-digit / PR-ref false positives.
 - **App.css raw black/white → greyscale tokens.** ~25 `color-mix(…)` anchors
   use raw `white`/`black`, plus 3 `color: #fff`. Per the palette rule these are
   off-palette. Rewrite `white` → `var(--zinc-50)` (`#FAFAFA`) and `black` →
@@ -121,17 +137,25 @@ authoritative + CSS coverage.
   pure `#fff`/`#000` to the palette extremes — accepted, since the palette
   defines no pure white/black.
 
-After this (~46 literals total: ~18 tsx, ~28 css), the check passes on a clean
-tree at launch.
+After this (~43 literals total: ~15 tsx in `letter-avatar` + `security-logo`,
+~28 css), the check passes on a clean tree at launch. The `extension/` and
+`bookmarklets/` hexes are out of scope and untouched.
 
 ## Wiring
 
+**Finding:** `.github/workflows/ci.yml` currently has **no lint job** — ESLint
+(`yarn lint`) is not run in CI at all, and the root `yarn ci` aggregate skips
+lint too. So both mechanisms need explicit wiring to actually gate merges.
+
 - `frontend/package.json`: add `"lint:palette": "node scripts/check-palette.mjs"`.
-- CI (`.github/workflows/ci.yml`): add a step running
-  `yarn workspace frontend lint:palette` (exact insertion point determined in
-  the implementation plan after inspecting the current job layout).
-- Fold the same command into the local `yarn ci` aggregate so it runs before
-  push.
+- `.github/workflows/ci.yml`: add a new `frontend-lint` job (mirroring the
+  `frontend-test` job's `needs: install` + download/extract node_modules
+  pattern) that runs **both** `yarn workspace frontend run lint` (the ESLint
+  rule) and `yarn workspace frontend run lint:palette` (the script). This is
+  the first time ESLint is enforced in CI — a deliberate, in-scope addition.
+- Root `package.json` `ci` script: append
+  `&& yarn workspace frontend run lint && yarn workspace frontend run lint:palette`
+  so a local `yarn ci` catches violations before push.
 
 ## Testing
 
