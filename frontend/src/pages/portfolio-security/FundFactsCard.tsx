@@ -175,7 +175,7 @@ export function FundFactsCard({ overview, currency }: FundFactsCardProps) {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
             Top holdings
           </h3>
-          <Table>
+          <Table className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
             <TableHeader>
               <TableRow>
                 <TableHead>Symbol</TableHead>

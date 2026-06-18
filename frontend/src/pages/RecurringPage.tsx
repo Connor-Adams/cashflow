@@ -101,7 +101,7 @@ export function RecurringPage() {
         description={`Detected charges that repeat within the last ${windowDays} days.`}
       >
         <div className="overflow-auto rounded-lg border" aria-busy={loading} style={{ borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)', background: 'color-mix(in srgb, var(--bg) 90%, transparent)' }}>
-          <Table>
+          <Table className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
             <TableHeader>
               <TableRow>
                 <SortableTableHead field="merchant" label="Merchant" currentSort={sort} dir={dir} onSort={toggle} />

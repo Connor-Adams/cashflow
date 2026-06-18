@@ -486,7 +486,7 @@
    * --primary (amber) instead of --accent (plum); the cursor is the
    * user's attention point, so it should match the brand attention
    * color. Rail 4px (was 3px) + tint 10% (was 8%) for visibility. */
-  .reviewInboxTable tr[data-cursor="true"] {
+  [data-slot="table"] tr[data-cursor="true"] {
     box-shadow: inset 4px 0 0 0 var(--primary);
     background: color-mix(in oklch, var(--primary) 10%, transparent);
   }

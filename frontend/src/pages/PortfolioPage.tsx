@@ -519,7 +519,7 @@ function HoldingsPanel({
           </div>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-          <Table stickyHeader>
+          <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -597,7 +597,7 @@ function BySecurityPanel({
         </div>
       </div>
       <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-        <Table stickyHeader>
+        <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
           <TableHeader>
             <TableRow>
               <TableHead>Symbol</TableHead>
@@ -762,7 +762,7 @@ function AllocationPanel({ data, sort, dir, onSort }: AllocationPanelProps) {
           </div>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-          <Table stickyHeader>
+          <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
             <TableHeader>
               <TableRow>
                 <TableHead>Group</TableHead>
@@ -999,7 +999,7 @@ function IncomeBySecurityTable({
         </div>
       </div>
       <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-        <Table stickyHeader>
+        <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
           <TableHeader>
             <TableRow>
               <TableHead>Symbol</TableHead>
@@ -1233,7 +1233,7 @@ function RealizedBySecurityTable({ rows }: { rows: RealizedBySecurityRowData[] }
         </div>
       </div>
       <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-        <Table stickyHeader>
+        <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
           <TableHeader>
             <TableRow>
               <TableHead>Symbol</TableHead>
@@ -1280,7 +1280,7 @@ function RealizedEventsTable({ events }: { events: RealizedEventWithRunning[] })
         </div>
       </div>
       <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-        <Table stickyHeader>
+        <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>

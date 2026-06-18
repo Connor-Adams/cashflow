@@ -213,7 +213,7 @@ export function PortfolioSecurityPage() {
           </div>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-          <Table stickyHeader>
+          <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
@@ -253,7 +253,7 @@ export function PortfolioSecurityPage() {
           </div>
         </div>
         <div className="overflow-auto" style={{ maxHeight: '72vh' }}>
-          <Table stickyHeader>
+          <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
             <TableHeader>
               <TableRow>
                 <TableHead>Statement date</TableHead>

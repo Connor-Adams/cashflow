@@ -1774,7 +1774,7 @@ export function TransactionsPage() {
           }
         />
         <div className="overflow-auto rounded-lg border" style={{ maxHeight: '72vh', borderColor: 'color-mix(in srgb, var(--border) 86%, white 6%)', background: 'color-mix(in srgb, var(--bg) 90%, transparent)' }}>
-          <Table stickyHeader>
+          <Table stickyHeader className="[&_thead_th]:bg-[color-mix(in_srgb,var(--bg3)_72%,transparent)]">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-9 text-center">
