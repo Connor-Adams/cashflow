@@ -61,6 +61,27 @@ async function openOrderRow(user: ReturnType<typeof userEvent.setup>) {
   await user.click(buttons[0])
 }
 
+describe('AmazonPage characterization', () => {
+  it('renders the page h1 heading', async () => {
+    render(<AmazonPage />)
+    expect(await screen.findByRole('heading', { level: 1, name: 'Amazon Enrichment' })).toBeInTheDocument()
+  })
+
+  it('renders the Recent Imported Orders table with Order, Date, and Total column headers', async () => {
+    render(<AmazonPage />)
+    // Wait for orders to load (the order ID cell appears once data arrives).
+    await screen.findByText('ORD-1')
+    expect(screen.getByRole('columnheader', { name: 'Order' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Total' })).toBeInTheDocument()
+  })
+
+  it('renders the order row with the vendor order ID', async () => {
+    render(<AmazonPage />)
+    expect(await screen.findByRole('cell', { name: 'ORD-1' })).toBeInTheDocument()
+  })
+})
+
 describe('AmazonPage totalPrice validation', () => {
   it('totalPrice input has min=0 and step=0.01', async () => {
     const user = userEvent.setup()
