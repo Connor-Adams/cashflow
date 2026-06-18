@@ -42,7 +42,7 @@ export function SecurityLogo({
         height: `${px}px`,
         borderRadius: 6,
         objectFit: 'contain',
-        backgroundColor: '#FFFFFF',
+        backgroundColor: 'var(--zinc-50)',
         border: '1px solid var(--border)',
         flexShrink: 0,
       }}

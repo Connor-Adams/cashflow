@@ -518,7 +518,7 @@ function SubscriptionRow({
           {rowError && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} role="alert">
               <span
-                style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-destructive, red)', flexShrink: 0 }}
+                style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--destructive)', flexShrink: 0 }}
                 aria-hidden="true"
               />
               <span className="text-xs text-destructive">{rowError.message}</span>
