@@ -207,7 +207,7 @@ export function CounterpartyBackfillCard() {
               overwritten.
             </p>
           </div>
-          <span className="enrichAdminPill">Admin action</span>
+          <span className="bg-[var(--accent)] text-[var(--accent-foreground)] px-[10px] py-[2px] rounded-full text-[0.7rem] font-semibold tracking-[0.04em] whitespace-nowrap">Admin action</span>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
           <div className="text-sm muted">
@@ -272,11 +272,15 @@ export function CounterpartyBackfillCard() {
               </details>
             )}
             {feed.length > 0 && (
-              <div className="enrichBackfillFeed" role="log" aria-live="polite">
+              <div
+                className="mt-2 max-h-[18rem] overflow-y-auto border-t border-[var(--border)] pt-2 text-[0.78rem] leading-[1.3] font-mono"
+                role="log"
+                aria-live="polite"
+              >
                 {feed.map((row) => (
-                  <div key={row.txnId} className="enrichBackfillFeed__row">
-                    <span className="muted enrichBackfillFeed__id">#{row.txnId}</span>
-                    <span className="enrichBackfillFeed__raw">{row.merchantRaw}</span>
+                  <div key={row.txnId} className="flex gap-2 items-baseline">
+                    <span className="muted w-[4rem] text-right">#{row.txnId}</span>
+                    <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{row.merchantRaw}</span>
                     {row.counterpartyRaw ? (
                       <span>
                         → <strong>{row.counterpartyRaw}</strong>
