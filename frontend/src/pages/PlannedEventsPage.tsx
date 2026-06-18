@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import {
   Table,
   TableBody,
@@ -229,20 +230,20 @@ export function PlannedEventsPage() {
         title="Planned events"
         description="Future income, expenses, transfers, and goal contributions. Powers forecast, calendar, and safe-to-spend."
       />
-      <Card className="accountsFormCard">
-        <div className="accountsCardHeader">
-          <div>
-            <h2 className="flex items-center gap-2">
+      <Card>
+        <SectionHeader
+          title={
+            <span className="flex items-center gap-2">
               <Calendar aria-hidden="true" className="h-5 w-5" />
               Upcoming
-            </h2>
-            <p className="muted">
-              {events.length === 0
-                ? 'Add a planned event below to start projecting your cashflow.'
-                : `${events.length} event${events.length === 1 ? '' : 's'} on file.`}
-            </p>
-          </div>
-          <div>
+            </span>
+          }
+          description={
+            events.length === 0
+              ? 'Add a planned event below to start projecting your cashflow.'
+              : `${events.length} event${events.length === 1 ? '' : 's'} on file.`
+          }
+          actions={
             <Label htmlFor="planned-events-status-filter" className="text-sm">
               Status
               <NativeSelect
@@ -260,16 +261,15 @@ export function PlannedEventsPage() {
                 ))}
               </NativeSelect>
             </Label>
-          </div>
-        </div>
+          }
+        />
         {events.length === 0 ? (
           <EmptyState
             title="No planned events yet."
             description="Add a future income or expense to start your forecast."
           />
         ) : (
-          <div className="tableWrap">
-            <Table className="table">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
@@ -296,7 +296,7 @@ export function PlannedEventsPage() {
                               idPrefix={`planned-event-edit-${row.id}`}
                               showStatus
                             />
-                            <div className="row">
+                            <div className="mb-3 flex flex-wrap items-center gap-3">
                               <Button
                                 type="submit"
                                 size="sm"
@@ -326,7 +326,9 @@ export function PlannedEventsPage() {
                       <TableCell>
                         <div className="font-medium">{row.name}</div>
                         {row.notes ? (
-                          <div className="muted text-xs">{row.notes}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {row.notes}
+                          </div>
                         ) : null}
                       </TableCell>
                       <TableCell>
@@ -349,7 +351,9 @@ export function PlannedEventsPage() {
                             {row.recurrenceRule}
                           </span>
                         ) : (
-                          <span className="muted text-xs">One-off</span>
+                          <span className="text-xs text-muted-foreground">
+                            One-off
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -358,7 +362,7 @@ export function PlannedEventsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="row">
+                        <div className="mb-3 flex flex-wrap items-center gap-3">
                           <Button
                             type="button"
                             size="sm"
@@ -389,7 +393,6 @@ export function PlannedEventsPage() {
                 })}
               </TableBody>
             </Table>
-          </div>
         )}
 
         <form onSubmit={createEvent}>
