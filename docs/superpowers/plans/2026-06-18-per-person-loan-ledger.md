@@ -214,14 +214,27 @@ In `PATCH /:id` (after the `notes` set, near line 159), add:
 
 - [ ] **Step 4: Write the integration test**
 
+Integration tests MUST follow the canonical pattern (see `backend/test/integration/aiQuery.test.ts`): bootstrap a per-file Postgres DB with `setupPgTestDb()` in `before()`, seed a household with the `seedHousehold` helper, and import models **dynamically after** the DB is set up (`await import('../../src/models')`) so they bind to the right connection.
+
 ```ts
 // backend/test/integration/contactsAliases.test.ts
-import { test } from 'node:test';
+import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Contact } from '../../src/models';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
+import { seedHousehold } from '../helpers/seedHousehold';
+
+let testDb: PgTestDb;
+let householdId: number;
+
+before(async () => {
+  testDb = await setupPgTestDb('contacts-aliases');
+  ({ householdId } = await seedHousehold('aliases', 'Seed'));
+});
+after(async () => { await teardownPgTestDb(testDb); });
 
 test('Contact persists aliases round-trip', async () => {
-  const c = await Contact.create({ householdId: 1, name: 'Caelan', aliases: 'iten-mcgrath' });
+  const { Contact } = await import('../../src/models');
+  const c = await Contact.create({ householdId, name: 'Caelan', aliases: 'iten-mcgrath' });
   const reloaded = await Contact.findByPk(c.id);
   assert.equal(reloaded?.aliases, 'iten-mcgrath');
 });
@@ -229,8 +242,7 @@ test('Contact persists aliases round-trip', async () => {
 
 - [ ] **Step 5: Run the migration + test**
 
-Run: `yarn db:migrate && cd backend && TEST_DATABASE_URL=$TEST_DATABASE_URL yarn tsx --import ./test/setup.ts --test test/integration/contactsAliases.test.ts`
-Expected: migration applies; test PASSES. Also run `yarn workspace cashflow-backend run typecheck` — expect no errors.
+Run: `yarn db:migrate` (applies the new column to the dev DB). Then from `backend/`: `yarn tsx --import ./test/setup.ts --test test/integration/contactsAliases.test.ts` — the integration runner provisions its own Postgres DB via `setupPgTestDb` (admin URL defaults to `postgres://postgres:postgres@localhost:5432/postgres`, which is up locally) and runs the full migration suite against it, so no `TEST_DATABASE_URL` is required. Expected: test PASSES. Also `yarn workspace cashflow-backend run typecheck` — no errors.
 
 - [ ] **Step 6: Commit**
 
@@ -359,39 +371,52 @@ Loads unlinked transfer rows, runs the planner, writes the FK for unambiguous ma
 
 - [ ] **Step 1: Write the failing test**
 
+Follow the canonical integration pattern (`setupPgTestDb` in `before()` + `seedHousehold` + dynamic `await import('../../src/models')`). Consult the `Account` and `Transaction` models for required fields and adjust the `create({...})` calls if the runner reports a not-null violation.
+
 ```ts
 // backend/test/integration/transferContactLink.test.ts
-import { test } from 'node:test';
+import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Account, Contact, Transaction } from '../../src/models';
-import { runTransferContactLink, _resetTransferLinkInFlightForTest } from '../../src/import/transferContactLink';
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
+import { seedHousehold } from '../helpers/seedHousehold';
+
+let testDb: PgTestDb;
+let householdId: number;
+
+before(async () => {
+  testDb = await setupPgTestDb('transfer-link');
+  ({ householdId } = await seedHousehold('xferlink', 'Seed'));
+});
+after(async () => { await teardownPgTestDb(testDb); });
 
 test('links unambiguous transfers and reports ambiguous ones', async () => {
+  const { Account, Contact, Transaction } = await import('../../src/models');
+  const { runTransferContactLink, _resetTransferLinkInFlightForTest } =
+    await import('../../src/import/transferContactLink');
   _resetTransferLinkInFlightForTest();
-  const hh = 1;
-  const acct = await Account.create({ householdId: hh, name: 'Chequing', accountType: 'checking', currency: 'CAD' });
-  const caelan = await Contact.create({ householdId: hh, name: 'Caelan', aliases: 'iten-mcgrath' });
+  const acct = await Account.create({ householdId, name: 'Chequing', accountType: 'checking', currency: 'CAD' });
+  const caelan = await Contact.create({ householdId, name: 'Caelan', aliases: 'iten-mcgrath' });
   const t1 = await Transaction.create({
-    householdId: hh, accountId: acct.id, date: '2019-07-22', amount: '-200.0000', currency: 'CAD',
+    householdId, accountId: acct.id, date: '2019-07-22', amount: '-200.0000', currency: 'CAD',
     txnType: 'transfer', merchantRaw: 'ONLINE TRANSFER SENT - 5552 CAELAN ANTHONY ITEN-MCGRATH', merchantClean: 'Online transfer sent',
   });
 
-  const dry = await runTransferContactLink({ householdId: hh, dryRun: true });
+  const dry = await runTransferContactLink({ householdId, dryRun: true });
   assert.equal(dry.linked, 1);
   assert.equal((await Transaction.findByPk(t1.id))?.counterpartyContactId, null, 'dry run writes nothing');
 
-  const wet = await runTransferContactLink({ householdId: hh });
+  const wet = await runTransferContactLink({ householdId });
   assert.equal(wet.linked, 1);
   assert.equal((await Transaction.findByPk(t1.id))?.counterpartyContactId, caelan.id);
 
-  const again = await runTransferContactLink({ householdId: hh });
+  const again = await runTransferContactLink({ householdId });
   assert.equal(again.linked, 0, 'idempotent — already linked rows skipped');
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend && TEST_DATABASE_URL=$TEST_DATABASE_URL yarn tsx --import ./test/setup.ts --test test/integration/transferContactLink.test.ts`
+Run: `cd backend && yarn tsx --import ./test/setup.ts --test test/integration/transferContactLink.test.ts`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -509,7 +534,7 @@ export async function runTransferContactLink(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend && TEST_DATABASE_URL=$TEST_DATABASE_URL yarn tsx --import ./test/setup.ts --test test/integration/transferContactLink.test.ts`
+Run: `cd backend && yarn tsx --import ./test/setup.ts --test test/integration/transferContactLink.test.ts`
 Expected: PASS. Also `yarn workspace cashflow-backend run typecheck` — no errors.
 
 - [ ] **Step 5: Commit**
@@ -643,31 +668,47 @@ Exposes the two numbers per contact, the linked transfer rows (each flagged whet
 
 - [ ] **Step 1: Write the failing test**
 
+Route integration test — follow the canonical pattern: `setupPgTestDb` in `before()`, register the first user via `request.agent(app).post('/api/auth/register')` to get an authenticated agent + its `householdId`, import models dynamically, then create data under that household. Attach the agent (not a raw `Cookie` header).
+
 ```ts
 // backend/test/integration/contactLedger.test.ts
-import { test } from 'node:test';
+import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
-import { app } from '../../src/app';
-import { Account, Contact, Transaction, Reimbursement } from '../../src/models';
-import { authCookie } from '../helpers/authCookie'; // existing integration helper
+import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
+
+let testDb: PgTestDb;
+let app: import('express').Express;
+let authed: ReturnType<typeof request.agent>;
+let householdId: number;
+
+before(async () => {
+  testDb = await setupPgTestDb('contact-ledger');
+  app = (await import('../../src/app.js')).default;
+  authed = request.agent(app);
+  const reg = await authed.post('/api/auth/register').send({
+    email: 'ledger@example.com', displayName: 'Ledger User', password: 'password123',
+  });
+  assert.equal(reg.status, 201);
+  householdId = (reg.body.user.household?.id ?? reg.body.user.householdId) as number;
+});
+after(async () => { await teardownPgTestDb(testDb); });
 
 test('GET /api/contacts/:id/ledger returns net + tracked + flagged transfers', async () => {
-  const cookie = await authCookie(); // seeds/returns a logged-in household session
-  const hh = 1;
-  const acct = await Account.create({ householdId: hh, name: 'Chequing', accountType: 'checking', currency: 'CAD' });
-  const caelan = await Contact.create({ householdId: hh, name: 'Caelan' });
+  const { Account, Contact, Transaction, Reimbursement } = await import('../../src/models');
+  const acct = await Account.create({ householdId, name: 'Chequing', accountType: 'checking', currency: 'CAD' });
+  const caelan = await Contact.create({ householdId, name: 'Caelan' });
   const out = await Transaction.create({
-    householdId: hh, accountId: acct.id, date: '2020-01-01', amount: '-200.0000', currency: 'CAD',
+    householdId, accountId: acct.id, date: '2020-01-01', amount: '-200.0000', currency: 'CAD',
     txnType: 'transfer', merchantRaw: 'TRANSFER CAELAN', merchantClean: 'Transfer', counterpartyContactId: caelan.id,
   });
   await Transaction.create({
-    householdId: hh, accountId: acct.id, date: '2020-02-01', amount: '50.0000', currency: 'CAD',
+    householdId, accountId: acct.id, date: '2020-02-01', amount: '50.0000', currency: 'CAD',
     txnType: 'transfer', merchantRaw: 'TRANSFER CAELAN', merchantClean: 'Transfer', counterpartyContactId: caelan.id,
   });
-  await Reimbursement.create({ householdId: hh, transactionId: out.id, contactId: caelan.id, amount: '200.0000', currency: 'CAD', status: 'expected' });
+  await Reimbursement.create({ householdId, transactionId: out.id, contactId: caelan.id, amount: '200.0000', currency: 'CAD', status: 'expected' });
 
-  const res = await request(app).get(`/api/contacts/${caelan.id}/ledger`).set('Cookie', cookie);
+  const res = await authed.get(`/api/contacts/${caelan.id}/ledger`);
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.transferNet, [{ currency: 'CAD', sent: '200.0000', received: '50.0000', net: '150.0000' }]);
   assert.equal(res.body.trackedOutstandingByCurrency.CAD, '200.0000');
@@ -679,7 +720,7 @@ test('GET /api/contacts/:id/ledger returns net + tracked + flagged transfers', a
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend && TEST_DATABASE_URL=$TEST_DATABASE_URL yarn tsx --import ./test/setup.ts --test test/integration/contactLedger.test.ts`
+Run: `cd backend && yarn tsx --import ./test/setup.ts --test test/integration/contactLedger.test.ts`
 Expected: FAIL — route 404 / router not mounted. (If `authCookie` helper name differs, match the one used by other files in `backend/test/integration/` — grep `Cookie` there.)
 
 - [ ] **Step 3a: Add the ledger route to `contacts.ts`**
@@ -805,7 +846,7 @@ Add the mount entry next to the contacts entry (near line 244), inside `gatedRou
 
 - [ ] **Step 4: Run the test + route-order lock**
 
-Run: `cd backend && TEST_DATABASE_URL=$TEST_DATABASE_URL yarn tsx --import ./test/setup.ts --test test/integration/contactLedger.test.ts`
+Run: `cd backend && yarn tsx --import ./test/setup.ts --test test/integration/contactLedger.test.ts`
 Expected: PASS.
 Run: `cd backend && yarn tsx --import ./test/setup.ts --test test/appRouteOrder.test.ts`
 Expected: PASS (new mount doesn't violate ordering invariants).
