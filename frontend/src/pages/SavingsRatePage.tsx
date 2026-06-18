@@ -3,7 +3,11 @@ import { PiggyBank, TrendingDown, TrendingUp } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Grid } from '@/components/ui/grid'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
+import { StatCard } from '@/components/ui/stat-card'
 import {
   Table,
   TableBody,
@@ -142,14 +146,11 @@ export function SavingsRatePage() {
           <p className="text-sm leading-6 text-muted-foreground mb-0">Building the report…</p>
         </Card>
       ) : !data ? null : data.byCurrency.length === 0 ? (
-        <Card className="mb-4">
-          <p className="text-sm leading-6 text-muted-foreground mb-0">
-            No income or savings activity for {windowLabel || 'this window'}
-            {scope !== 'all' ? ` in the ${scope} scope` : ''}
-            {currency ? ` (${currency})` : ''}. Import transactions or widen the
-            window.
-          </p>
-        </Card>
+        <EmptyState
+          className="mb-4"
+          title={`No activity for ${windowLabel || 'this window'}`}
+          description={`No income or savings${scope !== 'all' ? ` in the ${scope} scope` : ''}${currency ? ` (${currency})` : ''}. Import transactions or widen the window.`}
+        />
       ) : (
         data.byCurrency.map((summary) => (
           <CurrencySummaryCard key={summary.currency} summary={summary} />
@@ -219,28 +220,18 @@ function CurrencySummaryCard({ summary }: { summary: SavingsRateCurrencySummary 
   const { totals } = summary
   return (
     <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label={`Savings rate — ${summary.currency}`}>
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="m-0">{summary.currency}</h2>
-        <RateBadge pct={totals.savingsRatePct} />
-      </div>
+      <SectionHeader
+        title={summary.currency}
+        actions={<RateBadge pct={totals.savingsRatePct} />}
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-          gap: 12,
-        }}
-      >
-        <Stat label="Income" value={totals.income} currency={summary.currency} />
-        <Stat label="Spending" value={totals.spending} currency={summary.currency} />
-        <Stat label="Savings" value={totals.savings} currency={summary.currency} />
-        <Stat label="Investments" value={totals.investments} currency={summary.currency} />
-        <Stat
-          label="Debt principal"
-          value={totals.debtPrincipal}
-          currency={summary.currency}
-        />
-      </div>
+      <Grid minItemWidth={150} gap="md">
+        <StatCard label="Income" value={formatMoney(totals.income, summary.currency)} />
+        <StatCard label="Spending" value={formatMoney(totals.spending, summary.currency)} />
+        <StatCard label="Savings" value={formatMoney(totals.savings, summary.currency)} />
+        <StatCard label="Investments" value={formatMoney(totals.investments, summary.currency)} />
+        <StatCard label="Debt principal" value={formatMoney(totals.debtPrincipal, summary.currency)} />
+      </Grid>
 
       <MonthlySeriesTable series={summary.series} currency={summary.currency} />
     </section>
@@ -258,33 +249,6 @@ function RateBadge({ pct }: { pct: number | null }) {
       <PiggyBank size={14} aria-hidden="true" /> {formatRate(pct)} saved
       <Icon size={14} aria-hidden="true" />
     </Badge>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  currency,
-}: {
-  label: string
-  value: number
-  currency: string
-}) {
-  return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: 12,
-      }}
-    >
-      <p className="text-sm leading-6 text-muted-foreground m-0">
-        {label}
-      </p>
-      <p className="m-0 mt-1 text-xl font-semibold">
-        {formatMoney(value, currency)}
-      </p>
-    </div>
   )
 }
 
