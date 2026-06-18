@@ -1789,3 +1789,44 @@ export type PeriodInsightCurrency = {
 export type PeriodInsightResp = {
   byCurrency: PeriodInsightCurrency[];
 };
+
+// ── Per-person loan ledger (per-person loan ledger feature) ──────────────────
+
+export interface LedgerTransferRow {
+  id: number;
+  date: string;
+  amount: string;
+  currency: string;
+  merchant: string | null;
+  direction: 'out' | 'in';
+  isLoan: boolean;
+}
+
+export interface TransferNet {
+  currency: string;
+  sent: string;
+  received: string;
+  net: string;
+}
+
+export interface ContactLedgerResponse {
+  contactId: number;
+  name: string;
+  transferNet: TransferNet[];
+  trackedOutstandingByCurrency: Record<string, string>;
+  transfers: LedgerTransferRow[];
+}
+
+export interface TransferLinkAmbiguous {
+  txnId: number;
+  merchantText: string;
+  contactIds: number[];
+}
+
+export interface TransferLinkResult {
+  processed: number;
+  linked: number;
+  ambiguous: TransferLinkAmbiguous[];
+  dryRun: boolean;
+  elapsedMs: number;
+}

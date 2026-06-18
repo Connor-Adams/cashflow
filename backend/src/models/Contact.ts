@@ -17,6 +17,9 @@ export class Contact extends Model<
   declare householdId: number;
   declare name: string;
   declare notes: string | null;
+  /** Comma-separated extra match terms for the transfer link pass (per-person
+   *  loan ledger). Null means match on name only. */
+  declare aliases: CreationOptional<string | null>;
   /**
    * #375 — marks this Contact as the household's partner. Drives the Partner
    * Fairness dashboard's partner_inflows / non_partner_inflows split: inflows
@@ -42,6 +45,7 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       },
       name: { type: DataTypes.STRING(160), allowNull: false },
       notes: { type: DataTypes.TEXT, allowNull: true },
+      aliases: { type: DataTypes.STRING(500), allowNull: true },
       isPartner: {
         type: DataTypes.BOOLEAN,
         field: 'is_partner',

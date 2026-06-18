@@ -63,6 +63,7 @@ import { IncomePage } from './pages/IncomePage'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
 import { ReimbursementsPage } from './pages/ReimbursementsPage'
+import { PeopleLedgerPage } from './pages/PeopleLedgerPage'
 import { LargePurchasesPage } from './pages/LargePurchasesPage'
 import { UnifiedInboxPage } from './pages/UnifiedInboxPage'
 // InsightsPage kept on disk — route redirects to /inbox?view=insights (Phase 1 IA cleanup)
@@ -131,6 +132,7 @@ function AppRoutes() {
             <Route path="recurring" element={<RecurringPage />} />
             <Route path="subscriptions" element={<SubscriptionsPage />} />
             <Route path="reimbursements" element={<ReimbursementsPage />} />
+            <Route path="people" element={<PeopleLedgerPage />} />
           </Route>
           <Route path="calendar" element={<Navigate to="/planned/calendar" replace />} />
           <Route path="goals" element={<GoalsPage />} />
