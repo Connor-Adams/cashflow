@@ -312,6 +312,32 @@ describe('TransactionsPage share override percent units', () => {
   })
 })
 
+describe('TransactionsPage enrichment deep-link filters', () => {
+  it('sends enrichment filter from the URL and shows a clearable chip', async () => {
+    render(
+      <MemoryRouter initialEntries={['/transactions?autoConfidence=low']}>
+        <ToastProvider>
+          <TransactionsPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+    // Wait for the list request that carries autoConfidence=low
+    await waitFor(() => {
+      const calls = vi
+        .mocked(api.getJson)
+        .mock.calls.filter((c) => String(c[0]).startsWith('/api/transactions?'))
+      expect(
+        calls.some((call) => {
+          const url = new URL(String(call[0]), 'http://x')
+          return url.searchParams.get('autoConfidence') === 'low'
+        }),
+      ).toBe(true)
+    })
+    // A chip labelled "low confidence" should be visible and clearable
+    expect(screen.getByText(/low confidence/i)).toBeInTheDocument()
+  })
+})
+
 function makeTransaction(
   overrides: Partial<Transaction> & Pick<Transaction, 'id' | 'merchantClean' | 'status'>,
 ): Transaction {
