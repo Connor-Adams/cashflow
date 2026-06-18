@@ -153,26 +153,18 @@ export function ExplainMonthPage() {
       />
 
       <section className="card">
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'flex-end',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div className="flex gap-3 items-end flex-wrap">
+          <div className="flex flex-col gap-1">
             <label htmlFor="explain-month-month">Month</label>
             <input
               id="explain-month-month"
               type="month"
               value={month}
               onChange={(e) => setMonth(e.target.value)}
-              className="input"
-              style={{ minWidth: 160 }}
+              className="input min-w-40"
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div className="flex flex-col gap-1">
             <label htmlFor="explain-month-currency">Currency</label>
             <NativeSelect
               id="explain-month-currency"
@@ -187,14 +179,7 @@ export function ExplainMonthPage() {
               ))}
             </NativeSelect>
           </div>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              cursor: 'pointer',
-            }}
-          >
+          <label className="flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
               checked={aiOptIn}
@@ -231,15 +216,9 @@ export function ExplainMonthPage() {
         <>
           {data.aiSummary != null && (
             <section className="card" aria-label="AI summary">
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  alignItems: 'flex-start',
-                }}
-              >
+              <div className="flex gap-2 items-start">
                 <Sparkles size={18} aria-hidden="true" />
-                <p style={{ margin: 0 }}>{data.aiSummary}</p>
+                <p className="m-0">{data.aiSummary}</p>
               </div>
             </section>
           )}
@@ -282,7 +261,7 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
   if (data.monthOverMonth.length === 0) return null
   return (
     <section className="card" aria-label="Month over month totals">
-      <h2 style={{ marginTop: 0 }}>
+      <h2 className="mt-0">
         {data.month} vs {data.previousMonth}
       </h2>
       <div
@@ -302,33 +281,15 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
           return (
             <div
               key={mom.currency}
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                padding: 12,
-              }}
+              className="border border-border rounded-md p-3"
             >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
+              <div className="flex justify-between items-center">
                 <strong>{mom.currency}</strong>
                 {trendIcon}
               </div>
-              <dl
-                style={{
-                  margin: '8px 0 0',
-                  display: 'grid',
-                  gridTemplateColumns: 'auto 1fr',
-                  rowGap: 4,
-                  columnGap: 8,
-                }}
-              >
+              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-y-1 gap-x-2">
                 <dt className="muted">Spend</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>
+                <dd className="m-0 text-right">
                   {formatMoney(mom.currentSpend, mom.currency)}{' '}
                   <span className="muted">
                     ({mom.spendDelta >= 0 ? '+' : ''}
@@ -336,7 +297,7 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
                   </span>
                 </dd>
                 <dt className="muted">Income</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>
+                <dd className="m-0 text-right">
                   {formatMoney(mom.currentIncome, mom.currency)}{' '}
                   <span className="muted">
                     ({mom.incomeDelta >= 0 ? '+' : ''}
@@ -344,7 +305,7 @@ function MonthOverMonthSection({ data }: { data: ExplainMonthResponse }) {
                   </span>
                 </dd>
                 <dt className="muted">Net</dt>
-                <dd style={{ margin: 0, textAlign: 'right' }}>
+                <dd className="m-0 text-right">
                   {formatMoney(mom.netCurrent, mom.currency)}{' '}
                   <span className="muted">
                     ({mom.netDelta >= 0 ? '+' : ''}
@@ -371,46 +332,25 @@ function FindingGroup({
   if (items.length === 0) return null
   return (
     <section className="card" aria-label={KIND_LABEL[kind]}>
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
+      <div className="flex gap-2 items-center mb-2">
         <Icon size={18} aria-hidden="true" />
-        <h3 style={{ margin: 0 }}>{KIND_LABEL[kind]}</h3>
+        <h3 className="m-0">{KIND_LABEL[kind]}</h3>
         <Badge variant="outline">{items.length}</Badge>
       </div>
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      <ul className="m-0 p-0 list-none">
         {items.map((item) => (
           <li
             key={item.id}
-            style={{
-              padding: '10px 0',
-              borderBottom: '1px solid var(--border)',
-              display: 'grid',
-              gridTemplateColumns: '1fr auto',
-              gap: 12,
-              alignItems: 'center',
-            }}
+            className="py-[10px] border-b border-border grid grid-cols-[1fr_auto] gap-3 items-center"
           >
             <div>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                }}
-              >
+              <div className="flex gap-2 items-center flex-wrap">
                 <Badge variant={SEVERITY_BADGE[item.severity]}>
                   {item.severity}
                 </Badge>
                 <strong>{item.title}</strong>
               </div>
-              <p style={{ margin: '4px 0 0' }}>{item.summary}</p>
+              <p className="mt-1 m-0">{item.summary}</p>
             </div>
             <Link
               to={buildTransactionsHref(item.transactionFilter)}
