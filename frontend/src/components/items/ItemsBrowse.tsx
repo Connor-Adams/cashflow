@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'
 import { formatMoney } from '../../lib/formatMoney'
@@ -125,20 +126,32 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
               </span>
             </h3>
           )}
-          <ul className="divide-y divide-border">
+          <ul className="space-y-1">
             {g.rows.map((r) => (
-              <li key={r.id} className="flex items-center gap-2 py-1 text-sm">
+              <li
+                key={r.id}
+                className="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/50"
+              >
                 <input
                   type="checkbox"
                   aria-label={`Select item ${r.title}`}
+                  className="size-4 shrink-0"
                   checked={selected.has(r.id)}
                   onChange={() => toggleSelect(r.id)}
                 />
-                <Button variant="ghost" className="flex-1 text-left" onClick={() => onOpenItem(r.id, r)}>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate text-left text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={() => onOpenItem(r.id, r)}
+                >
                   {r.title}
-                </Button>
-                <span className="text-muted-foreground">{r.categoryEffective ?? '—'}</span>
-                <span className="w-16 text-right">
+                </button>
+                {r.categoryEffective ? (
+                  <Badge variant="secondary">{r.categoryEffective}</Badge>
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
+                <span className="w-16 shrink-0 text-right text-sm tabular-nums">
                   {r.totalPrice != null ? formatMoney(r.totalPrice, r.currency) : '—'}
                 </span>
               </li>

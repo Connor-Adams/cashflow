@@ -1,18 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Alert } from '@/components/ui/alert'
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@/components/ui/table'
 import type { ReceiptWithItems } from '../../../shared/api-types'
 import { formatMoney } from '../lib/formatMoney'
-import { ItemRow } from './items/ItemRow'
+import { ItemCard } from './items/ItemCard'
 
 type Props = {
   open: boolean
@@ -26,6 +17,21 @@ type ReceiptPanelProps = {
   receipt: ReceiptWithItems
   categoryHints: string[]
   onExtract: (receiptId: number) => Promise<void>
+}
+
+function vendorLabel(vendor: string): string {
+  if (vendor === 'uber') return 'Uber'
+  if (vendor === 'uber_eats') return 'Uber Eats'
+  return vendor
+}
+
+function TotalLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between text-sm text-muted-foreground">
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  )
 }
 
 function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) {
@@ -46,34 +52,36 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
 
   if (receipt.externalOrderId == null || receipt.order == null) {
     return (
-      <Card className="mb-4 space-y-2 p-3">
-        <strong>{receipt.originalName}</strong>
+      <section className="space-y-2">
+        <div className="text-sm font-medium">{receipt.originalName}</div>
         {extractError && <Alert variant="error">{extractError}</Alert>}
-        <div>
+        <div className="flex items-center justify-between rounded-md border border-dashed border-border px-3 py-3">
+          <span className="text-sm text-muted-foreground">No items extracted yet</span>
           <Button
             type="button"
             variant="secondary"
+            size="sm"
             disabled={extracting}
             onClick={() => void handleExtract()}
           >
             {extracting ? 'Extracting…' : 'Extract items'}
           </Button>
         </div>
-      </Card>
+      </section>
     )
   }
 
   const { order, items } = receipt
 
   return (
-    <div className="mb-6">
-      <div className="mb-2">
-        <strong>{order.vendor === 'uber' ? 'Uber' : order.vendor === 'uber_eats' ? 'Uber Eats' : order.vendor}</strong>{' '}
-        <span className="text-muted-foreground">{receipt.originalName}</span>
+    <section className="space-y-2">
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-medium">{vendorLabel(order.vendor)}</span>
+        <span className="truncate text-xs text-muted-foreground">{receipt.originalName}</span>
       </div>
 
       {order.trip && (
-        <div className="mb-2 text-sm">
+        <div className="text-sm">
           <div>
             {order.trip.pickupAddress ?? '—'} → {order.trip.dropoffAddress ?? '—'}
           </div>
@@ -85,49 +93,32 @@ function ReceiptPanel({ receipt, categoryHints, onExtract }: ReceiptPanelProps) 
         </div>
       )}
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Item</TableHead>
-            <TableHead>Qty</TableHead>
-            <TableHead>Total</TableHead>
-            <TableHead>Category</TableHead>
-            <TableHead>Business %</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+      {items.length > 0 && (
+        <div className="space-y-2">
           {items.map((item) => (
-            <ItemRow key={item.id} item={item} categoryHints={categoryHints} currency={order.currency} />
+            <ItemCard key={item.id} item={item} categoryHints={categoryHints} currency={order.currency} />
           ))}
-        </TableBody>
-        <tfoot>
-          {order.subtotal != null && (
-            <TableRow>
-              <TableCell colSpan={4}>Subtotal</TableCell>
-              <TableCell>{formatMoney(Number(order.subtotal), order.currency)}</TableCell>
-            </TableRow>
-          )}
-          {order.tax != null && (
-            <TableRow>
-              <TableCell colSpan={4}>Tax</TableCell>
-              <TableCell>{formatMoney(Number(order.tax), order.currency)}</TableCell>
-            </TableRow>
-          )}
-          {order.shipping != null && (
-            <TableRow>
-              <TableCell colSpan={4}>Shipping</TableCell>
-              <TableCell>{formatMoney(Number(order.shipping), order.currency)}</TableCell>
-            </TableRow>
-          )}
-          {order.total != null && (
-            <TableRow>
-              <TableCell colSpan={4}>Total</TableCell>
-              <TableCell>{formatMoney(Number(order.total), order.currency)}</TableCell>
-            </TableRow>
-          )}
-        </tfoot>
-      </Table>
-    </div>
+        </div>
+      )}
+
+      <div className="space-y-1 border-t border-border pt-2">
+        {order.subtotal != null && (
+          <TotalLine label="Subtotal" value={formatMoney(Number(order.subtotal), order.currency)} />
+        )}
+        {order.tax != null && (
+          <TotalLine label="Tax" value={formatMoney(Number(order.tax), order.currency)} />
+        )}
+        {order.shipping != null && (
+          <TotalLine label="Shipping" value={formatMoney(Number(order.shipping), order.currency)} />
+        )}
+        {order.total != null && (
+          <div className="flex items-center justify-between text-sm font-medium">
+            <span>Total</span>
+            <span>{formatMoney(Number(order.total), order.currency)}</span>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -138,27 +129,54 @@ export default function ReceiptItemsDrawer({
   categoryHints,
   onExtract,
 }: Props) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   if (!open) return null
 
-  return (
-    <div role="dialog" aria-modal="true" aria-labelledby="receipt-items-drawer-title">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 id="receipt-items-drawer-title" className="m-0 text-lg font-semibold">
-          Receipt Items
-        </h2>
-        <Button type="button" variant="secondary" onClick={onClose}>
-          Close
-        </Button>
-      </div>
+  const itemCount = receipts.reduce((n, r) => n + (r.items?.length ?? 0), 0)
 
-      {receipts.map((receipt) => (
-        <ReceiptPanel
-          key={receipt.id}
-          receipt={receipt}
-          categoryHints={categoryHints}
-          onExtract={onExtract}
-        />
-      ))}
-    </div>
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} aria-hidden="true" />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="receipt-items-drawer-title"
+        className="fixed inset-y-0 right-0 z-50 flex w-[440px] max-w-full flex-col border-l border-border bg-card"
+      >
+        <header className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h2 id="receipt-items-drawer-title" className="m-0 text-base font-semibold">
+              Receipt items
+            </h2>
+            <p className="m-0 text-xs text-muted-foreground">
+              {receipts.length} {receipts.length === 1 ? 'receipt' : 'receipts'} · {itemCount}{' '}
+              {itemCount === 1 ? 'item' : 'items'}
+            </p>
+          </div>
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </header>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+          {receipts.map((receipt) => (
+            <ReceiptPanel
+              key={receipt.id}
+              receipt={receipt}
+              categoryHints={categoryHints}
+              onExtract={onExtract}
+            />
+          ))}
+        </div>
+      </aside>
+    </>
   )
 }
