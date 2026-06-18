@@ -16,6 +16,8 @@ export type {
   BySecurityAccountBreakdown,
   BySecurityRow,
   Category,
+  CategoryTreeNode,
+  ResolvedCategoryPath,
   Label,
   TransactionLabelRef,
   Contact,

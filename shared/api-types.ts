@@ -497,6 +497,22 @@ export type Category = {
   updatedAt: string
 }
 
+export type CategoryTreeNode = {
+  id: number
+  name: string
+  parentId: number | null
+  icon: string | null
+  taxTreatment: TaxTreatment
+  children: CategoryTreeNode[]
+}
+
+export type ResolvedCategoryPath = {
+  id: number
+  name: string | null
+  path: string
+  createdIds: number[]
+}
+
 /**
  * A free-text transaction label (issue #270). Household-scoped, max 32 chars,
  * case-insensitively unique per household. `usageCount` is the number of
