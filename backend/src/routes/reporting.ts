@@ -15,6 +15,7 @@ import { detectRecurring, type RecurringInputTxn } from './recurring';
 import { num } from '../util/numbers';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
 import { summarizeReportingCashflow } from '../reporting/cashflowTotals';
+import { loadCategoryTree, buildRollupRows, rollupByCategoryId } from '../categories/rollup';
 
 // Categories considered essential for runway calculation.
 const ESSENTIAL_CATEGORIES = new Set([
@@ -616,43 +617,91 @@ router.get('/spending/by-category', async (req, res, next) => {
 
     // accountType rides along so isNonSpend can drop unrecognized brokerage
     // debits (txnType defaults to 'purchase') — same rule as the dashboard.
-    type Row = { amount: unknown; finalCategory: string | null; txnType: string | null; 'account.accountType': string | null };
-    const currMap = new Map<string, { amount: number; count: number }>();
-    for (const t of currTxns as unknown as Row[]) {
-      if (isNonSpend(t.txnType, t['account.accountType'] ?? null)) continue;
-      const a = num(t.amount);
-      if (a == null) continue;
-      const cat = t.finalCategory ?? 'Uncategorized';
-      const existing = currMap.get(cat) ?? { amount: 0, count: 0 };
-      existing.amount += Math.abs(a);
-      existing.count += 1;
-      currMap.set(cat, existing);
-    }
+    type Row = {
+      amount: unknown;
+      finalCategory: string | null;
+      finalCategoryId: number | null;
+      txnType: string | null;
+      'account.accountType': string | null;
+    };
 
-    const prevMap = new Map<string, number>();
-    for (const t of prevTxns as unknown as Row[]) {
-      if (isNonSpend(t.txnType, t['account.accountType'] ?? null)) continue;
-      const a = num(t.amount);
-      if (a == null) continue;
-      const cat = t.finalCategory ?? 'Uncategorized';
-      prevMap.set(cat, (prevMap.get(cat) ?? 0) + Math.abs(a));
-    }
+    const tree = await loadCategoryTree(household.id);
 
-    const totalAmount = Array.from(currMap.values()).reduce((s, v) => s + v.amount, 0);
-    const categories = Array.from(currMap.entries()).map(([name, { amount, count }]) => {
-      const percentage = totalAmount > 0 ? round4(amount / totalAmount) : 0;
-      const prevAmount = prevMap.get(name) ?? 0;
-      const trendVsPreviousPeriod = prevAmount > 0 ? round4((amount - prevAmount) / prevAmount) : null;
+    // Direct spend + transaction counts keyed by category id. Rows with no
+    // category id (or a stale id no longer in the tree) collapse into a single
+    // Uncategorized bucket, which has no hierarchy.
+    const directAmountById = new Map<number, number>();
+    const directCountById = new Map<number, number>();
+    let uncatAmount = 0;
+    let uncatCount = 0;
+    const accumulate = (
+      rows: Row[],
+      amountById: Map<number, number>,
+      countById: Map<number, number> | null,
+    ): number => {
+      let uncat = 0;
+      for (const t of rows) {
+        if (isNonSpend(t.txnType, t['account.accountType'] ?? null)) continue;
+        const a = num(t.amount);
+        if (a == null) continue;
+        const spend = Math.abs(a);
+        const id = t.finalCategoryId;
+        if (id == null || !tree.parentById.has(id)) {
+          uncat += spend;
+          if (countById) uncatCount += 1;
+          continue;
+        }
+        amountById.set(id, (amountById.get(id) ?? 0) + spend);
+        if (countById) countById.set(id, (countById.get(id) ?? 0) + 1);
+      }
+      return uncat;
+    };
+
+    uncatAmount = accumulate(currTxns as unknown as Row[], directAmountById, directCountById);
+    const prevAmountById = new Map<number, number>();
+    const prevUncat = accumulate(prevTxns as unknown as Row[], prevAmountById, null);
+
+    // Roll each category up its subtree (direct + descendants); previous period
+    // rolled the same way so the trend compares like for like.
+    const rolledRows = buildRollupRows(directAmountById, tree);
+    const prevRolled = rollupByCategoryId(prevAmountById, tree);
+
+    const totalAmount =
+      Array.from(directAmountById.values()).reduce((s, v) => s + v, 0) + uncatAmount;
+
+    const categories = rolledRows.map((r) => {
+      const prevAmount = prevRolled.get(r.categoryId) ?? 0;
       return {
-        categoryId: name,
-        name,
-        amount: round2(amount),
-        percentage,
-        transactionCount: count,
-        trendVsPreviousPeriod,
+        categoryId: r.categoryId,
+        name: r.name,
+        path: r.path,
+        parentId: r.parentId,
+        depth: r.depth,
+        amount: round2(r.directTotal),
+        rolledAmount: round2(r.rolledTotal),
+        percentage: totalAmount > 0 ? round4(r.directTotal / totalAmount) : 0,
+        transactionCount: directCountById.get(r.categoryId) ?? 0,
+        trendVsPreviousPeriod:
+          prevAmount > 0 ? round4((r.rolledTotal - prevAmount) / prevAmount) : null,
       };
     });
-    categories.sort((a, b) => b.amount - a.amount);
+    if (uncatAmount > 0) {
+      categories.push({
+        categoryId: null as unknown as number,
+        name: 'Uncategorized',
+        path: 'Uncategorized',
+        parentId: null,
+        depth: 0,
+        amount: round2(uncatAmount),
+        rolledAmount: round2(uncatAmount),
+        percentage: totalAmount > 0 ? round4(uncatAmount / totalAmount) : 0,
+        transactionCount: uncatCount,
+        trendVsPreviousPeriod:
+          prevUncat > 0 ? round4((uncatAmount - prevUncat) / prevUncat) : null,
+      });
+    }
+    // Sort by rolled spend so parents (which subsume their children) lead.
+    categories.sort((a, b) => b.rolledAmount - a.rolledAmount);
 
     res.json({ start, end, categories });
   } catch (e) {
