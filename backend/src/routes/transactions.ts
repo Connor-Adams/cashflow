@@ -1955,6 +1955,9 @@ router.get('/enrichment/stats', async (req, res, next) => {
       byTxnType,
       topMerchants,
       topRules,
+      uncategorizedRow,
+      missingCanonicalRow,
+      deadRulesRows,
     ] = await Promise.all([
       sequelize.query<{ n: number }>(
         `SELECT COUNT(*) AS n FROM transactions t ${hhClause}`,
@@ -2003,6 +2006,24 @@ router.get('/enrichment/stats', async (req, res, next) => {
          ORDER BY n DESC LIMIT 15`,
         { replacements: reps, type: QueryTypes.SELECT },
       ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} final_category IS NULL`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM transactions t ${hhClause}${hhClause ? ' AND' : ' WHERE'} merchant_canonical IS NULL`,
+        { replacements: reps, type: QueryTypes.SELECT },
+      ),
+      sequelize.query<{ ruleId: number; pattern: string; category: string | null }>(
+        `SELECT r.id AS "ruleId", r.merchant_pattern AS pattern, r.category AS category
+         FROM rules r
+         ${householdId == null ? '' : 'WHERE r.household_id = ?'}
+         ${householdId == null ? 'WHERE' : 'AND'} r.id NOT IN (
+           SELECT applied_rule_id FROM transactions WHERE applied_rule_id IS NOT NULL
+         )
+         ORDER BY r.id DESC LIMIT 15`,
+        { replacements: householdId == null ? [] : [householdId], type: QueryTypes.SELECT },
+      ),
     ]);
 
     res.json({
@@ -2025,6 +2046,13 @@ router.get('/enrichment/stats', async (req, res, next) => {
         pattern: r.pattern,
         category: r.category,
         count: Number(r.n),
+      })),
+      uncategorizedCount: Number(uncategorizedRow[0]?.n ?? 0),
+      merchantsMissingCanonical: Number(missingCanonicalRow[0]?.n ?? 0),
+      deadRules: deadRulesRows.map((r) => ({
+        ruleId: r.ruleId,
+        pattern: r.pattern,
+        category: r.category,
       })),
     });
   } catch (e) {

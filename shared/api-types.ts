@@ -389,6 +389,9 @@ export type EnrichmentStats = {
   transferLinkedCount: number
   topCanonicalMerchants: Array<{ name: string; count: number }>
   topRules: Array<{ ruleId: number; pattern: string; category: string | null; count: number }>
+  uncategorizedCount: number
+  merchantsMissingCanonical: number
+  deadRules: Array<{ ruleId: number; pattern: string; category: string | null }>
 }
 
 export type EnrichmentBackfillProgress =
