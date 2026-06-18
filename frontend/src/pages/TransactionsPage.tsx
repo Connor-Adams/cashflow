@@ -69,6 +69,8 @@ import { useAttachAndAnalyzeReceipt } from '../lib/useAttachAndAnalyzeReceipt'
 import { TAX_TREATMENTS } from '../lib/taxTreatment'
 import { TaxTreatmentSelect } from '../components/TaxTreatmentSelect'
 import type { TaxTreatment } from '../lib/taxTreatment'
+import { useCategoryPaths } from '../lib/useCategoryPaths'
+import { resolveCategoryPatch } from './transactionsCategory'
 
 type CategoryHint = {
   label: string
@@ -497,10 +499,12 @@ export function TransactionsPage() {
         : dateTo
           ? `Up to ${dateTo}`
           : 'All dates'
-  const categoryLabels = useMemo(
-    () => categoryHints.map((hint) => hint.label),
-    [categoryHints]
-  )
+  const { paths: categoryPaths } = useCategoryPaths()
+  // Use full category paths from the category tree for the row picker.
+  // Fall back to the legacy hint labels while the tree is loading (first render).
+  const categoryLabels = categoryPaths.length > 0
+    ? categoryPaths
+    : categoryHints.map((hint) => hint.label)
   const hasCustomCurrency = currency !== DEFAULT_TRANSACTION_CURRENCY
   const activeFilters = useMemo(
     () =>
@@ -2418,21 +2422,23 @@ function TransactionRow({
                 onError('Pick a contact for contact-owned transactions.')
                 return
               }
-              void onSave(t.id, {
-                categoryOverride: cat || null,
-                businessOverride: biz === '' ? null : biz === 'true',
-                taxTreatmentOverride: taxOverride === '' ? null : taxOverride,
-                splitOverride: split || null,
-                pctMeOverride: parsedPctMe,
-                pctPartnerOverride: parsedPctPartner,
-                visibility,
-                ownershipType,
-                ownershipContactId:
-                  ownershipType === 'contact' ? Number(ownershipContactId) : null,
-                counterpartyContactId,
-                reviewFlag: false,
-                aiSuggestionId,
-              })
+              void resolveCategoryPatch(cat).then((catPatch) =>
+                onSave(t.id, {
+                  ...catPatch,
+                  businessOverride: biz === '' ? null : biz === 'true',
+                  taxTreatmentOverride: taxOverride === '' ? null : taxOverride,
+                  splitOverride: split || null,
+                  pctMeOverride: parsedPctMe,
+                  pctPartnerOverride: parsedPctPartner,
+                  visibility,
+                  ownershipType,
+                  ownershipContactId:
+                    ownershipType === 'contact' ? Number(ownershipContactId) : null,
+                  counterpartyContactId,
+                  reviewFlag: false,
+                  aiSuggestionId,
+                })
+              )
             }}
           >
             {!isDirty && t.reviewFlag ? 'Mark reviewed' : isDirty ? 'Save' : 'Saved'}
