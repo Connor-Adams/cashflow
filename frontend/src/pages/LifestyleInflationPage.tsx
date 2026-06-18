@@ -96,7 +96,7 @@ export function LifestyleInflationPage() {
           onRefresh={reload}
         />
         {windowLabel && (
-          <p className="muted" style={{ margin: '8px 0 0' }}>
+          <p className="muted mt-2">
             Showing {windowLabel}.
           </p>
         )}
@@ -135,50 +135,32 @@ export function LifestyleInflationPage() {
 function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
   return (
     <section className="card" aria-label={`Lifestyle inflation — ${trend.currency}`}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>{trend.currency}</h2>
+      <div className="flex justify-between items-center mb-2">
+        <h2 className="m-0">{trend.currency}</h2>
         <OutpacingBadge outpacing={trend.spendOutpacingIncome} />
       </div>
 
       {trend.insight && (
         <div
           role="alert"
-          style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'flex-start',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            padding: 12,
-            marginBottom: 12,
-          }}
+          className="flex gap-2 items-start border border-border rounded-md p-3 mb-3"
         >
           <AlertTriangle size={18} aria-hidden="true" />
           <div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div className="flex gap-2 items-center">
               <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
                 {trend.insight.severity}
               </Badge>
               <strong>{trend.insight.title}</strong>
             </div>
-            <p style={{ margin: '4px 0 0' }}>{trend.insight.summary}</p>
+            <p className="m-0 mt-1">{trend.insight.summary}</p>
           </div>
         </div>
       )}
 
       <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
+        className="grid gap-3"
+        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}
       >
         <GrowthStat
           label="Avg monthly spend"
@@ -255,20 +237,14 @@ function GrowthStat({
         : 'var(--danger)'
   const TrendIcon = rising ? TrendingUp : TrendingDown
   return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: 12,
-      }}
-    >
-      <p className="muted" style={{ margin: 0 }}>
+    <div className="border border-border rounded-md p-3">
+      <p className="muted m-0">
         {label}
       </p>
-      <p style={{ margin: '4px 0 0', fontSize: '1.25rem', fontWeight: 600 }}>
+      <p className="m-0 mt-1 text-xl font-semibold">
         {formatMoney(secondHalf, currency)}
       </p>
-      <p style={{ margin: '2px 0 0', color }}>
+      <p className="m-0 mt-0.5" style={{ color }}>
         <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}{' '}
         <span className="muted">from {formatMoney(firstHalf, currency)}</span>
       </p>
@@ -286,9 +262,9 @@ function CategoryDrivers({
   const risers = drivers.filter((d) => d.delta > 0)
   if (risers.length === 0) return null
   return (
-    <div style={{ marginTop: 12 }}>
-      <h3 style={{ margin: '0 0 6px' }}>What's driving the growth</h3>
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+    <div className="mt-3">
+      <h3 className="m-0 mb-1.5">What's driving the growth</h3>
+      <ul className="m-0 p-0 list-none">
         {risers.map((d) => (
           <li
             key={d.category}
@@ -327,30 +303,30 @@ function MonthlySeriesTable({
 }) {
   if (series.length === 0) return null
   return (
-    <div style={{ marginTop: 12, overflowX: 'auto' }}>
-      <h3 style={{ margin: '0 0 6px' }}>Monthly detail</h3>
-      <table className="table" style={{ minWidth: 360 }}>
+    <div className="mt-3 overflow-x-auto">
+      <h3 className="m-0 mb-1.5">Monthly detail</h3>
+      <table className="table min-w-[360px]">
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>Month</th>
-            <th style={{ textAlign: 'right' }}>Income</th>
-            <th style={{ textAlign: 'right' }}>Spend</th>
-            <th style={{ textAlign: 'right' }}>Savings</th>
+            <th className="text-left">Month</th>
+            <th className="text-right">Income</th>
+            <th className="text-right">Spend</th>
+            <th className="text-right">Savings</th>
           </tr>
         </thead>
         <tbody>
           {series.map((m) => (
             <tr key={m.month}>
               <td>{m.month}</td>
-              <td style={{ textAlign: 'right' }}>
+              <td className="text-right">
                 {formatMoney(m.income, currency)}
               </td>
-              <td style={{ textAlign: 'right' }}>
+              <td className="text-right">
                 {formatMoney(m.spend, currency)}
               </td>
               <td
+                className="text-right"
                 style={{
-                  textAlign: 'right',
                   color: m.savings < 0 ? 'var(--danger)' : undefined,
                 }}
               >
