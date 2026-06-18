@@ -1,8 +1,22 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Card } from '@/components/ui/card'
+import { Grid } from '@/components/ui/grid'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
+import { StatCard } from '@/components/ui/stat-card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { formatMoney } from '../lib/formatMoney'
 import { ReportFilterBar } from './report/ReportFilterBar'
 import { defaultReportMonth, type ScopeOption } from './report/reportFilters'
@@ -79,7 +93,7 @@ export function LifestyleInflationPage() {
         description="Track whether your spending is creeping up faster than your income. Compares the first half of the window to the most recent half."
       />
 
-      <section className="card">
+      <Card className="mb-4">
         <ReportFilterBar
           idPrefix="lifestyle"
           month={month}
@@ -96,33 +110,28 @@ export function LifestyleInflationPage() {
           onRefresh={reload}
         />
         {windowLabel && (
-          <p className="muted" style={{ margin: '8px 0 0' }}>
+          <p className="text-sm leading-6 text-muted-foreground mt-2 mb-0">
             Showing {windowLabel}.
           </p>
         )}
-      </section>
+      </Card>
 
       {err && (
-        <section className="card">
-          <p className="error" role="alert">
-            {err}
-          </p>
-        </section>
+        <Alert variant="error" className="mb-4">
+          {err}
+        </Alert>
       )}
 
       {loading && !data ? (
-        <section className="card" aria-busy="true">
-          <p className="muted">Building the report…</p>
-        </section>
+        <Card className="mb-4" aria-busy="true">
+          <p className="text-sm leading-6 text-muted-foreground mb-0">Building the report…</p>
+        </Card>
       ) : !data ? null : data.byCurrency.length === 0 ? (
-        <section className="card">
-          <p className="muted">
-            No spending data for {windowLabel || 'this window'}
-            {scope !== 'all' ? ` in the ${scope} scope` : ''}
-            {currency ? ` (${currency})` : ''}. Import transactions or widen the
-            window.
-          </p>
-        </section>
+        <EmptyState
+          className="mb-4"
+          title={`No spending data for ${windowLabel || 'this window'}`}
+          description={`No transactions${scope !== 'all' ? ` in the ${scope} scope` : ''}${currency ? ` (${currency})` : ''}. Import transactions or widen the window.`}
+        />
       ) : (
         data.byCurrency.map((trend) => (
           <CurrencyTrendCard key={trend.currency} trend={trend} />
@@ -134,52 +143,29 @@ export function LifestyleInflationPage() {
 
 function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
   return (
-    <section className="card" aria-label={`Lifestyle inflation — ${trend.currency}`}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>{trend.currency}</h2>
-        <OutpacingBadge outpacing={trend.spendOutpacingIncome} />
-      </div>
+    <section className="rounded-lg border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-5 mb-4" aria-label={`Lifestyle inflation — ${trend.currency}`}>
+      <SectionHeader
+        title={trend.currency}
+        actions={<OutpacingBadge outpacing={trend.spendOutpacingIncome} />}
+      />
 
       {trend.insight && (
-        <div
-          role="alert"
-          style={{
-            display: 'flex',
-            gap: 8,
-            alignItems: 'flex-start',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            padding: 12,
-            marginBottom: 12,
-          }}
+        <Alert
+          variant={trend.spendOutpacingIncome ? 'warning' : 'info'}
+          className="mb-3"
         >
-          <AlertTriangle size={18} aria-hidden="true" />
-          <div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
-                {trend.insight.severity}
-              </Badge>
-              <strong>{trend.insight.title}</strong>
-            </div>
-            <p style={{ margin: '4px 0 0' }}>{trend.insight.summary}</p>
+          <div className="flex gap-2 items-center mb-1">
+            <AlertTriangle size={18} aria-hidden="true" />
+            <Badge variant={SEVERITY_BADGE[trend.insight.severity]}>
+              {trend.insight.severity}
+            </Badge>
+            <strong>{trend.insight.title}</strong>
           </div>
-        </div>
+          <p className="m-0">{trend.insight.summary}</p>
+        </Alert>
       )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-        }}
-      >
+      <Grid minItemWidth={180} gap="md" className="mb-3">
         <GrowthStat
           label="Avg monthly spend"
           firstHalf={trend.spendGrowth.firstHalfAvg}
@@ -203,7 +189,7 @@ function CurrencyTrendCard({ trend }: { trend: LifestyleCurrencyTrend }) {
           pct={trend.savingsGrowthPct}
           currency={trend.currency}
         />
-      </div>
+      </Grid>
 
       <CategoryDrivers drivers={trend.categoryDrivers} currency={trend.currency} />
 
@@ -247,7 +233,12 @@ function GrowthStat({
   const rising = delta > 0
   // For spend, rising is bad (red). For income/savings, rising is good (green).
   const good = invert ? !rising : rising
-  const color =
+  // Computed delta color: --accent-green (==--positive) for good, --danger for bad,
+  // muted when flat. StatCard's metricKind chip uses the same tokens under the hood
+  // (--positive / --destructive), so the color semantics are equivalent. We preserve
+  // the raw inline color here because StatCard's delta chip applies a bordered-badge
+  // style that differs visually from the original plain inline row.
+  const deltaColor =
     delta === 0
       ? 'var(--muted-foreground, inherit)'
       : good
@@ -255,24 +246,16 @@ function GrowthStat({
         : 'var(--danger)'
   const TrendIcon = rising ? TrendingUp : TrendingDown
   return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: 12,
-      }}
-    >
-      <p className="muted" style={{ margin: 0 }}>
-        {label}
-      </p>
-      <p style={{ margin: '4px 0 0', fontSize: '1.25rem', fontWeight: 600 }}>
-        {formatMoney(secondHalf, currency)}
-      </p>
-      <p style={{ margin: '2px 0 0', color }}>
-        <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}{' '}
-        <span className="muted">from {formatMoney(firstHalf, currency)}</span>
-      </p>
-    </div>
+    <StatCard
+      label={label}
+      value={formatMoney(secondHalf, currency)}
+      hint={`from ${formatMoney(firstHalf, currency)}`}
+      delta={
+        <span style={{ color: deltaColor }}>
+          <TrendIcon size={14} aria-hidden="true" /> {formatPct(pct)}
+        </span>
+      }
+    />
   )
 }
 
@@ -286,9 +269,9 @@ function CategoryDrivers({
   const risers = drivers.filter((d) => d.delta > 0)
   if (risers.length === 0) return null
   return (
-    <div style={{ marginTop: 12 }}>
-      <h3 style={{ margin: '0 0 6px' }}>What's driving the growth</h3>
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+    <div className="mt-3">
+      <h3 className="m-0 mb-1.5">What's driving the growth</h3>
+      <ul className="m-0 p-0 list-none">
         {risers.map((d) => (
           <li
             key={d.category}
@@ -303,14 +286,14 @@ function CategoryDrivers({
           >
             <Link
               to={`/transactions?category=${encodeURIComponent(d.category)}&currency=${currency}`}
-              className="muted"
+              className="text-sm leading-6 text-muted-foreground"
             >
               {d.category}
             </Link>
-            <span style={{ color: 'var(--danger)' }}>
+            <span className="text-danger">
               +{formatMoney(d.delta, currency)}/mo
             </span>
-            <span className="muted">{formatPct(d.deltaPct)}</span>
+            <span className="text-sm leading-6 text-muted-foreground">{formatPct(d.deltaPct)}</span>
           </li>
         ))}
       </ul>
@@ -327,39 +310,39 @@ function MonthlySeriesTable({
 }) {
   if (series.length === 0) return null
   return (
-    <div style={{ marginTop: 12, overflowX: 'auto' }}>
-      <h3 style={{ margin: '0 0 6px' }}>Monthly detail</h3>
-      <table className="table" style={{ minWidth: 360 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left' }}>Month</th>
-            <th style={{ textAlign: 'right' }}>Income</th>
-            <th style={{ textAlign: 'right' }}>Spend</th>
-            <th style={{ textAlign: 'right' }}>Savings</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div className="mt-3 overflow-x-auto">
+      <h3 className="m-0 mb-1.5">Monthly detail</h3>
+      <Table className="min-w-[360px]">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Month</TableHead>
+            <TableHead className="text-right">Income</TableHead>
+            <TableHead className="text-right">Spend</TableHead>
+            <TableHead className="text-right">Savings</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {series.map((m) => (
-            <tr key={m.month}>
-              <td>{m.month}</td>
-              <td style={{ textAlign: 'right' }}>
+            <TableRow key={m.month}>
+              <TableCell>{m.month}</TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.income, currency)}
-              </td>
-              <td style={{ textAlign: 'right' }}>
+              </TableCell>
+              <TableCell className="text-right">
                 {formatMoney(m.spend, currency)}
-              </td>
-              <td
+              </TableCell>
+              <TableCell
+                className="text-right"
                 style={{
-                  textAlign: 'right',
                   color: m.savings < 0 ? 'var(--danger)' : undefined,
                 }}
               >
                 {formatMoney(m.savings, currency)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }
