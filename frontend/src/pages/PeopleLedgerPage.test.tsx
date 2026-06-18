@@ -1,7 +1,7 @@
 // frontend/src/pages/PeopleLedgerPage.test.tsx
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { PeopleLedgerPage } from './PeopleLedgerPage';
 import * as api from '../lib/api';
@@ -29,8 +29,15 @@ describe('PeopleLedgerPage', () => {
         <PeopleLedgerPage />
       </MemoryRouter>,
     );
+    // Raw-net label (unique text, no scoping needed)
     expect(await screen.findByText(/CAD 480.00 owed to you/)).toBeInTheDocument();
-    expect(await screen.findByText(/200\.00/)).toBeInTheDocument();
+    // Tracked outstanding — scoped to its container to avoid collision with transfer row
+    const outstandingSection = await screen.findByTestId('tracked-outstanding');
+    expect(within(outstandingSection).getByText(/200\.00/)).toBeInTheDocument();
+    // Transfer row amount — scoped to the transfers table
+    const transfersTable = await screen.findByTestId('transfers-table');
+    expect(within(transfersTable).getByText('CAD -200.00')).toBeInTheDocument();
+    // Mark as loan button
     expect(await screen.findByRole('button', { name: /mark as loan/i })).toBeInTheDocument();
   });
 });

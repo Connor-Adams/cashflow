@@ -57,10 +57,14 @@ export function PeopleLedgerPage() {
     setContactsLoading(true)
     getJson<ContactLite[]>('/api/contacts')
       .then((data) => { if (!cancelled) setContacts(data) })
-      .catch(() => { /* silently ignore */ })
+      .catch((e) => {
+        if (!cancelled) {
+          showToast({ title: e instanceof Error ? e.message : 'Failed to load contacts', variant: 'destructive' })
+        }
+      })
       .finally(() => { if (!cancelled) setContactsLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [showToast])
 
   useEffect(() => {
     if (selectedId == null) { setLedger(null); return }
@@ -75,7 +79,11 @@ export function PeopleLedgerPage() {
 
   const reload = () => {
     if (selectedId == null) return
-    getContactLedger(selectedId).then(setLedger).catch(() => {})
+    setLedgerLoading(true)
+    getContactLedger(selectedId)
+      .then(setLedger)
+      .catch(() => {})
+      .finally(() => setLedgerLoading(false))
   }
 
   async function onMarkLoan(txnId: number) {
@@ -174,7 +182,7 @@ export function PeopleLedgerPage() {
           <div className="flex flex-col gap-2">
             {ambiguous.map((a) => (
               <div key={a.txnId} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="muted">{a.merchantText}</span>
+                <span className="text-muted-foreground">{a.merchantText}</span>
                 {a.contactIds.map((cid) => {
                   const label = contacts.find((c) => c.id === cid)?.name ?? `#${cid}`
                   return (
@@ -198,7 +206,7 @@ export function PeopleLedgerPage() {
       {/* Contact list (no selection) */}
       {selectedId == null && (
         <Card className="overflow-x-auto p-0">
-          <Table className="table">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Contact</TableHead>
@@ -224,7 +232,7 @@ export function PeopleLedgerPage() {
                   >
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Users className="size-4 muted" aria-hidden="true" />
+                        <Users className="size-4 text-muted-foreground" aria-hidden="true" />
                         <span>{c.name}</span>
                       </div>
                     </TableCell>
@@ -241,7 +249,7 @@ export function PeopleLedgerPage() {
         <>
           {ledgerLoading ? (
             <Card className="mb-4 p-4">
-              <div className="muted text-sm">Loading…</div>
+              <div className="text-muted-foreground text-sm">Loading…</div>
             </Card>
           ) : ledger ? (
             <>
@@ -250,7 +258,7 @@ export function PeopleLedgerPage() {
                 <h2 className="mb-3 text-base font-semibold">{ledger.name}</h2>
                 <div className="flex flex-wrap gap-8">
                   <div>
-                    <div className="muted mb-1 text-xs uppercase tracking-wide">Raw net flow</div>
+                    <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">Raw net flow</div>
                     {ledger.transferNet.length === 0 ? (
                       <div className="text-sm">—</div>
                     ) : (
@@ -261,8 +269,8 @@ export function PeopleLedgerPage() {
                       ))
                     )}
                   </div>
-                  <div>
-                    <div className="muted mb-1 text-xs uppercase tracking-wide">Tracked loans outstanding</div>
+                  <div data-testid="tracked-outstanding">
+                    <div className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">Tracked loans outstanding</div>
                     {Object.keys(ledger.trackedOutstandingByCurrency).length === 0 ? (
                       <div className="text-sm">—</div>
                     ) : (
@@ -278,7 +286,7 @@ export function PeopleLedgerPage() {
 
               {/* Transfer table */}
               <Card className="overflow-x-auto p-0">
-                <Table className="table">
+                <Table data-testid="transfers-table">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Date</TableHead>
@@ -301,12 +309,7 @@ export function PeopleLedgerPage() {
                           <TableCell>{t.date}</TableCell>
                           <TableCell>{t.merchant}</TableCell>
                           <TableCell>
-                            {/* Split at decimal so no single text node contains
-                                the exact "NNN.DD" pattern (keeps test regex unambiguous) */}
-                            <span aria-label={`${t.currency} ${Number(t.amount).toFixed(2)}`}>
-                              <span>{t.currency} {Number(t.amount) < 0 ? '-' : ''}{Math.floor(Math.abs(Number(t.amount)))}</span>
-                              <span>.{Math.abs(Number(t.amount)).toFixed(2).split('.')[1]}</span>
-                            </span>
+                            {t.currency} {Number(t.amount).toFixed(2)}
                           </TableCell>
                           <TableCell>
                             <Badge variant={t.direction === 'out' ? 'outline' : 'secondary'}>
@@ -339,7 +342,7 @@ export function PeopleLedgerPage() {
             </>
           ) : (
             <Card className="p-4">
-              <div className="muted text-sm">Could not load ledger for this contact.</div>
+              <div className="text-muted-foreground text-sm">Could not load ledger for this contact.</div>
             </Card>
           )}
         </>
