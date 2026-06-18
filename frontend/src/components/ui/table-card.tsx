@@ -259,4 +259,8 @@ function TableCardData<T>({
 }
 
 export { TableCard }
-export type { TableCardProps, TableColumn, TableSort, SortDir }
+// SortDir is intentionally NOT exported: the canonical SortDir lives in
+// hooks/useUrlSort. Re-exporting it here is a duplicate export (fallow
+// duplicate-exports). TableSort carries the direction; consumers needing the
+// bare union import it from useUrlSort.
+export type { TableCardProps, TableColumn, TableSort }
