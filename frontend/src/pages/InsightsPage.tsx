@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Alert } from '@/components/ui/alert'
 import { getJson, patchJson, postJson } from '@/lib/api'
 
 export type InsightSeverity = 'info' | 'warning' | 'critical'
@@ -145,7 +146,7 @@ export function InsightsPage() {
       <header className="flex items-baseline justify-between mb-4">
         <div>
           <h1 className="text-2xl font-semibold">Insights</h1>
-          <p className="muted text-sm">
+          <p className="text-sm text-muted-foreground">
             {rows.length} total · {counts.open} open
           </p>
         </div>
@@ -176,10 +177,10 @@ export function InsightsPage() {
         ))}
       </nav>
 
-      {err ? <p className="error mb-2">{err}</p> : null}
-      {loading ? <p className="muted">Loading…</p> : null}
+      {err ? <Alert variant="error" className="mb-2">{err}</Alert> : null}
+      {loading ? <p className="text-sm leading-6 text-muted-foreground">Loading…</p> : null}
       {!loading && visible.length === 0 ? (
-        <p className="muted py-6 text-center">
+        <p className="py-6 text-center text-sm leading-6 text-muted-foreground">
           Nothing here yet. Use <strong>Run detectors</strong> to scan recent activity.{' '}
           <Link to="/" className="underline">
             Back to Dashboard
@@ -202,11 +203,11 @@ export function InsightsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <Badge variant={SEVERITY_VARIANT[row.severity]}>{row.severity}</Badge>
-                    <span className="text-xs muted">{row.type.replace(/_/g, ' ')}</span>
+                    <span className="text-xs text-muted-foreground">{row.type.replace(/_/g, ' ')}</span>
                   </div>
                   <p className="font-semibold mb-1">{row.title}</p>
                   {row.description ? (
-                    <p className="text-sm muted">{row.description}</p>
+                    <p className="text-sm text-muted-foreground">{row.description}</p>
                   ) : null}
                 </div>
                 <div className="flex flex-col gap-2 items-end shrink-0">
@@ -248,7 +249,7 @@ export function InsightsPage() {
                   )}
                 </div>
               </div>
-              {itemErr ? <p className="error mt-2">{itemErr}</p> : null}
+              {itemErr ? <Alert variant="error" className="mt-2">{itemErr}</Alert> : null}
             </li>
           )
         })}
