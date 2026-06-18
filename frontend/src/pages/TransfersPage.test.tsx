@@ -6,6 +6,9 @@ import { ToastProvider } from '@/components/ui/toast'
 import { TransfersPage } from './TransfersPage'
 import { formatMoney } from '../lib/formatMoney'
 
+// Characterization test — asserts roles/text only (never classNames) so it
+// survives the upcoming UI sweep to Card/Grid/StatCard/Alert/Table + tokens.
+
 vi.mock('../lib/api', () => ({
   getJson: vi.fn((path: string) => {
     if (path.startsWith('/api/transfers/stats')) {
@@ -61,6 +64,29 @@ function renderPage() {
     </MemoryRouter>,
   )
 }
+
+describe('TransfersPage characterization', () => {
+  it('renders the page heading', async () => {
+    renderPage()
+    expect(
+      await screen.findByRole('heading', { name: 'Transfers', level: 1 }),
+    ).toBeInTheDocument()
+  })
+
+  it('renders TransferStats stat labels after data loads', async () => {
+    renderPage()
+    // TransferStats renders Stat tiles with labels "Matched pairs" and "Unmatched"
+    expect(await screen.findByText('Matched pairs')).toBeInTheDocument()
+    expect(screen.getByText('Unmatched')).toBeInTheDocument()
+  })
+
+  it('renders the unmatched queue table column headers (CollapsibleCard open by default)', async () => {
+    renderPage()
+    expect(await screen.findByRole('columnheader', { name: 'Date' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Account' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Direction' })).toBeInTheDocument()
+  })
+})
 
 describe('TransfersPage money movement footer', () => {
   it('totals source movement per currency instead of summing across currencies', async () => {

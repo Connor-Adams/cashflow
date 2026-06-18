@@ -10,6 +10,8 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@/components/ui/grid'
 import { FilterCard } from '@/components/ui/filter-card'
+import { TableCard } from '@/components/ui/table-card'
+import { TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const
 const ALERT_VARIANTS = ['error', 'warning', 'info', 'success'] as const
@@ -99,6 +101,35 @@ export function DesignSystemSection() {
           <StatCard label="Net" value="$4,170" delta="+8%" metricKind="gain" />
           <StatCard label="Savings rate" value="33%" hint="Of income" />
         </Grid>
+      </Group>
+
+      <Group name="Table card">
+        <TableCard title="Example" actions={<Badge variant="count">3</Badge>} className="w-full">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Account</TableHead>
+              <TableHead>Value</TableHead>
+              <TableHead>Change</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow>
+              <TableCell>RRSP</TableCell>
+              <TableCell>$42,100</TableCell>
+              <TableCell>+2.1%</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>TFSA</TableCell>
+              <TableCell>$18,400</TableCell>
+              <TableCell>-0.5%</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Taxable</TableCell>
+              <TableCell>$9,800</TableCell>
+              <TableCell>+1.3%</TableCell>
+            </TableRow>
+          </TableBody>
+        </TableCard>
       </Group>
     </Card>
   )
