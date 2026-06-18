@@ -1,5 +1,5 @@
 import { clientLogger } from './clientLogger'
-import type { ContactLedgerResponse, TransferLinkResult } from '@cashflow/shared'
+import type { ContactLedgerResponse, TransferLinkResult, SelfSuggestionsResponse } from '@cashflow/shared'
 
 const base = import.meta.env.VITE_API_BASE ?? ''
 
@@ -109,6 +109,12 @@ export function markTransactionAsLoan(txnId: number, contactId: number): Promise
 }
 export function setTransactionContact(txnId: number, contactId: number): Promise<unknown> {
   return patchJson(`/api/transactions/${txnId}`, { counterpartyContactId: contactId })
+}
+export function getSelfSuggestions(): Promise<SelfSuggestionsResponse> {
+  return getJson<SelfSuggestionsResponse>('/api/contacts/self-suggestions')
+}
+export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
+  return patchJson(`/api/contacts/${id}`, { isSelf })
 }
 
 async function apiError(res: Response, path: string): Promise<ApiError> {
