@@ -23,6 +23,7 @@ import type {
   TaxYearFacts,
 } from '../engine/types';
 import { computeAcb, type AcbActivity, type AcbRealizedEvent } from '../../portfolio/acb';
+import { inheritedTaxTreatment } from '../../categories/inheritedTaxTreatment';
 import { toCad } from '../../fx/toCad';
 import { dividendDedupDays } from '../../config/env';
 
@@ -94,6 +95,11 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
 
   const householdCategories = await Category.findAll({ where: { householdId: entity.householdId } });
   const catTreatment = new Map(householdCategories.map((c) => [c.name, c.taxTreatment]));
+  // Id-keyed node map so a nested category inherits its parent's tax treatment
+  // (a 'none' child under a 'medical_expense' parent resolves to medical_expense).
+  const catById = new Map(
+    householdCategories.map((c) => [c.id, { id: c.id, parentId: c.parentId, taxTreatment: c.taxTreatment }]),
+  );
 
   const txns = await Transaction.findAll({
     where: {
@@ -126,7 +132,16 @@ export async function buildPersonalFacts(entityId: number, year: number): Promis
     // finalCategory string itself when it is a tax-treatment keyword. This keeps
     // the pre-category snake_case categories (e.g. 'employment_income') working
     // when no Category.taxTreatment / per-txn override is set.
-    let treatment = t.taxTreatmentOverride ?? catTreatment.get(t.finalCategory ?? '') ?? 'none';
+    // Per-txn override wins; otherwise the category's treatment, inherited from
+    // ancestors when the category itself is 'none' (resolve by id to honour the
+    // hierarchy and dodge same-named-category collisions); finally fall back to
+    // the legacy name map for rows with no finalCategoryId.
+    let treatment =
+      t.taxTreatmentOverride ??
+      (t.finalCategoryId != null
+        ? inheritedTaxTreatment(catById, t.finalCategoryId)
+        : catTreatment.get(t.finalCategory ?? '')) ??
+      'none';
     if (treatment === 'none' && t.finalCategory && isTaxTreatment(t.finalCategory)) {
       treatment = t.finalCategory;
     }
