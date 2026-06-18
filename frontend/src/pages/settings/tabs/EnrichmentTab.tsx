@@ -30,7 +30,7 @@ export function EnrichmentTab() {
   }, [loadStats])
 
   return (
-    <div className="enrichTabRoot">
+    <div className="flex flex-col gap-[0.875rem]">
       {statsError && (
         <p className="error" role="alert">{statsError}</p>
       )}
@@ -38,7 +38,7 @@ export function EnrichmentTab() {
       {stats ? (
         <>
           <EnrichmentStatRow stats={stats} />
-          <div className="enrichChartsGrid">
+          <div className="grid grid-cols-2 gap-[0.625rem] max-[760px]:grid-cols-1">
             <EnrichmentConfidenceChart byConfidence={stats.byConfidence} />
             <EnrichmentSourceChart bySource={stats.bySource} />
           </div>
@@ -48,7 +48,7 @@ export function EnrichmentTab() {
         <p className="muted">Loading enrichment stats…</p>
       ) : null}
 
-      <div className="enrichRefreshRow">
+      <div className="flex justify-end">
         <Button type="button" variant="outline" size="sm" disabled={statsLoading} onClick={() => void loadStats()}>
           Refresh stats
         </Button>

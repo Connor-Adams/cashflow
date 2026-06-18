@@ -403,10 +403,6 @@
     @apply w-9 text-center;
   }
 
-  .chartWrap {
-    @apply mt-4;
-  }
-
   .amazonHeader,
   .amazonImportPanel,
   .amazonReviewRow,
@@ -429,24 +425,6 @@
 
   .amazonImportPanel {
     @apply justify-between;
-  }
-
-  .amazonSummaryGrid {
-    @apply grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .amazonSummaryGrid .card {
-    @apply grid gap-1;
-  }
-
-  .amazonSummaryGrid strong {
-    @apply text-2xl;
-  }
-
-  .amazonSummaryGrid span {
-    @apply text-sm;
-    color: var(--muted-foreground);
   }
 
   .amazonReviewList,
@@ -480,12 +458,6 @@
     @apply justify-end;
   }
 
-  .dashboardFilters {
-    @apply mt-3 rounded-lg border p-3 sm:p-4;
-    border-color: color-mix(in srgb, var(--border) 86%, white 4%);
-    background: color-mix(in srgb, var(--bg2) 64%, transparent);
-  }
-
   .quickFilters {
     @apply mb-3 mt-3 flex flex-wrap gap-2;
   }
@@ -501,11 +473,6 @@
     border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
     background: color-mix(in srgb, var(--accent-soft) 92%, white 2%);
     color: var(--accent-foreground);
-  }
-
-  .dashboardStats {
-    @apply mb-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
   .transactionsStats {
@@ -665,11 +632,6 @@
     @apply mt-0.5 size-4 shrink-0;
   }
 
-  .transactionsTopGrid {
-    @apply mb-4 grid gap-4;
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-  }
-
   .transactionsPanel {
     @apply mb-0;
   }
@@ -682,30 +644,17 @@
     @apply mt-0 mb-1;
   }
 
-  .transactionsToolbar {
-    @apply mb-4;
-  }
-
-  .transactionsToolbarMeta {
-    @apply flex flex-wrap gap-2;
-  }
-
-  .rulesCardHeader,
   .reportsCardHeader,
   .accountsCardHeader {
     @apply mb-4 flex flex-wrap items-start justify-between gap-3;
   }
 
-  .rulesCardHeader h2,
   .reportsCardHeader h2,
   .accountsCardHeader h2 {
     @apply mb-1 mt-0;
   }
 
-  .rulesFormCard,
-  .rulesTableCard,
   .accountsFormCard,
-  .accountsTableCard,
   .settingsDisplayCard {
     @apply mb-4;
   }
@@ -743,10 +692,6 @@
     color: var(--muted-foreground);
   }
 
-  .rulesFormGrid {
-    @apply mb-0;
-  }
-
   .rulesCategoryField {
     grid-column: span 2;
   }
@@ -762,34 +707,6 @@
 
   .rulesCategoryPickerItem {
     @apply text-xs;
-  }
-
-  .reportsFilters {
-    @apply mb-4;
-  }
-
-  .reportsStats,
-  .accountsStats {
-    @apply mb-4 grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-
-  .reportsGrid {
-    @apply grid gap-4;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  }
-
-  .reportsTableCard {
-    @apply mb-0;
-  }
-
-  .accountsActionGroup {
-    @apply flex flex-wrap gap-2;
-  }
-
-  .transactionsFilterGrid {
-    @apply mb-0;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
   .transactionsCategoryField {
@@ -853,10 +770,6 @@
     @apply h-4 w-4;
   }
 
-  .transactionsActionRow {
-    @apply mt-3;
-  }
-
   .transactionsFilterPills {
     @apply mb-3 flex flex-wrap gap-2;
   }
@@ -895,10 +808,6 @@
     color: var(--destructive);
   }
 
-  .transactionsHelperCopy {
-    @apply mb-0 mt-2;
-  }
-
   .transactionsBulkCard {
     @apply items-center;
   }
@@ -931,8 +840,7 @@
     @apply flex flex-wrap items-baseline justify-between gap-2;
   }
 
-  .aiVisibilityHeader .muted,
-  .aiVisibilityMore {
+  .aiVisibilityHeader .muted {
     @apply mb-0 text-xs;
   }
 
@@ -955,118 +863,6 @@
     @apply mb-0 mt-1 leading-5;
   }
 
-  .aiVisibilityItem.is-unread {
-    border-left: 3px solid var(--brand, #f59e0b);
-    padding-left: 0.5rem;
-  }
-  .unreadDot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--brand, #f59e0b);
-    margin-right: 0.5rem;
-    vertical-align: middle;
-  }
-
-  /* ─── AI Inbox page ───────────────────────────────────────────────── */
-
-  .aiInboxPage {
-    padding: 1rem;
-    max-width: 56rem;
-  }
-
-  .aiInboxTabs {
-    @apply flex flex-row flex-wrap gap-2;
-    margin-bottom: 1rem;
-  }
-
-  .aiInboxTabs button {
-    @apply rounded-full px-3 py-1 text-sm font-medium;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted-foreground);
-    cursor: pointer;
-    transition: background 150ms, color 150ms;
-  }
-
-  .aiInboxTabs button:hover {
-    color: var(--foreground);
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
-  }
-
-  .aiInboxTabs button[aria-pressed="true"] {
-    background: var(--muted);
-    color: var(--foreground);
-    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
-  }
-
-  .aiInboxTabs button:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  .aiInboxList {
-    @apply flex flex-col gap-3;
-    list-style: none;
-    padding-left: 0;
-    margin: 0;
-  }
-
-  .aiInboxItem {
-    @apply rounded-md border px-4 py-3 text-sm;
-    border-color: var(--border);
-    background: color-mix(in srgb, var(--bg3) 48%, transparent);
-  }
-
-  .aiInboxItemSummary {
-    @apply w-full font-medium leading-5;
-  }
-
-  .aiInboxItemActions {
-    @apply flex flex-row flex-wrap gap-2;
-    justify-content: flex-end;
-    margin-top: 0.5rem;
-  }
-
-  .aiInboxTabCount {
-    @apply ml-1 tabular-nums text-xs;
-    color: var(--muted-foreground);
-  }
-
-  .aiInboxExpandToggle {
-    @apply ml-2 text-xs font-medium underline-offset-2;
-    background: transparent;
-    color: var(--muted-foreground);
-    border: none;
-    padding: 0;
-    cursor: pointer;
-  }
-
-  .aiInboxExpandToggle:hover {
-    color: var(--foreground);
-    text-decoration: underline;
-  }
-
-  .aiInboxItemDetails {
-    @apply flex flex-col gap-1 mt-2 pl-3;
-    list-style: none;
-    border-left: 2px solid var(--border);
-  }
-
-  .aiInboxItemDetail {
-    @apply text-sm leading-5;
-  }
-
-  .aiInboxItemDetailLink {
-    @apply ml-2 text-xs;
-    color: var(--primary);
-  }
-
-  .aiInboxItemDetailLink:hover {
-    text-decoration: underline;
-  }
-
   /* ─── Sidebar nav badge (count chip at end of NavLink) ────────────── */
 
   .sidebar__navBadge {
@@ -1076,47 +872,6 @@
     min-width: 1.25rem;
     text-align: center;
     line-height: 1.25;
-  }
-
-  /* ─── Button-like anchor (sits inline with <Button> elements) ─────── */
-
-  .buttonLikeLink {
-    @apply inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium no-underline;
-    border: 1px solid var(--border);
-    background: var(--bg2);
-    color: var(--foreground);
-    cursor: pointer;
-    transition: background 150ms;
-  }
-
-  .buttonLikeLink:hover {
-    background: color-mix(in oklch, var(--muted) 60%, transparent);
-    color: var(--foreground);
-  }
-
-  .buttonLikeLink:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  /* ─── Dashboard insight card helpers ─────────────────────────────── */
-
-  .aiVisibilitySupportingIds {
-    display: block;
-  }
-
-  .aiVisibilityAction {
-    @apply text-xs font-medium;
-    display: inline-block;
-    padding-top: 0.375rem;
-    color: var(--primary);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    cursor: pointer;
-  }
-
-  .aiVisibilityAction:hover {
-    color: var(--text-link-hover);
   }
 
   .transactionsTableCard {
@@ -1140,10 +895,6 @@
 
   .transactionsTable tbody .transactionsActionsCol {
     background: color-mix(in srgb, var(--bg) 96%, transparent);
-  }
-
-  .transactionsPager {
-    @apply mb-0 mt-4 justify-center;
   }
 
   .txnMerchantCell {
@@ -1282,10 +1033,6 @@
     @apply m-0 text-xs leading-5;
   }
 
-  .dashboardBusinessSpotlight {
-    background: color-mix(in srgb, var(--bg2) 72%, var(--accent-green) 8%);
-  }
-
   .businessSpotlightGrid {
     @apply mt-4 grid gap-4;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1347,18 +1094,6 @@
     @apply mt-2 mb-0;
   }
 
-  .dashboardChartCard {
-    @apply mb-4;
-  }
-
-  .dashboardChartCard h2 {
-    @apply mt-0;
-  }
-
-  .dashboardChartCard .muted {
-    @apply mb-1;
-  }
-
   .bulkBar {
     @apply flex flex-wrap items-end gap-x-4 gap-y-3;
   }
@@ -1369,36 +1104,6 @@
 
   .bulkBar .checkRow {
     @apply flex-row items-center gap-2;
-  }
-
-  .uploadCard h2 {
-    @apply mb-1 mt-0 text-[1.05rem];
-  }
-
-  .uploadCard .uploadMsg {
-    @apply mt-3 text-sm whitespace-pre-wrap;
-    color: var(--muted-foreground);
-  }
-
-  .uploadCard .uploadMsg.warn {
-    color: var(--warning);
-  }
-
-  .uploadCard .parseErrorList {
-    @apply mt-2 max-h-48 overflow-y-auto pl-5 text-[0.82rem];
-    color: var(--danger);
-  }
-
-  .uploadCard .previewBlock {
-    @apply mt-4;
-  }
-
-  .uploadCard .previewBlock code {
-    @apply text-xs break-all;
-  }
-
-  .filePick input[type='file'] {
-    @apply max-w-full;
   }
 
   .req {
@@ -1783,19 +1488,6 @@
     @apply ml-1 opacity-70;
   }
 
-  /* ─── Dashboard table card (post-bento, drill-down stack) ──────────── */
-
-  .dashboardTableCard {
-    @apply mb-4;
-  }
-
-  .dashboardTableCard h2 {
-    @apply mt-0;
-  }
-
-  .dashboardTableCard .muted {
-    @apply mb-1;
-  }
 }
 
 @media (max-width: 768px) {
@@ -1836,10 +1528,6 @@
 }
 
 @media (width <= 720px) {
-  .transactionsTopGrid {
-    grid-template-columns: 1fr;
-  }
-
   .reviewInboxLayout {
     grid-template-columns: 1fr;
   }
@@ -1868,329 +1556,3 @@
   100% { background-color: color-mix(in srgb, var(--primary) 14%, transparent); }
 }
 
-.enrichAdminPill {
-  background: color-mix(in srgb, var(--accent) 100%, transparent);
-  color: var(--accent-foreground);
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
-.enrichBackfillFeed {
-  margin-top: 0.5rem;
-  max-height: 18rem;
-  overflow-y: auto;
-  border-top: 1px solid var(--border);
-  padding-top: 0.5rem;
-  font-size: 0.78rem;
-  line-height: 1.3;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.enrichBackfillFeed__row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
-}
-
-.enrichBackfillFeed__id {
-  width: 4rem;
-  text-align: right;
-}
-
-.enrichBackfillFeed__raw {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.enrichBackfillFeed__src {
-  min-width: 6rem;
-}
-
-.enrichBackfillFeed__cleared {
-  color: var(--success);
-}
-
-.enrichStatGrid {
-  display: grid;
-  grid-template-columns: 1.6fr repeat(5, 1fr);
-  gap: 0.625rem;
-  margin-bottom: 0.875rem;
-}
-
-@media (max-width: 960px) {
-  .enrichStatGrid { grid-template-columns: repeat(2, 1fr); }
-}
-
-@media (max-width: 520px) {
-  .enrichStatGrid { grid-template-columns: 1fr; }
-}
-
-.enrichWorkflowTile {
-  background: var(--warning-bg);
-  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
-  color: var(--warning-foreground);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.enrichWorkflowTile--empty {
-  background: var(--card);
-  border-color: var(--border);
-  color: var(--foreground);
-}
-
-.enrichWorkflowTile__label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--warning-foreground);
-  opacity: 0.85;
-  margin: 0;
-}
-
-.enrichWorkflowTile__value {
-  font-size: 1.7rem;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--warning-foreground);
-  margin: 0.125rem 0 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichWorkflowTile__pct {
-  font-size: 0.8rem;
-  font-weight: 500;
-  opacity: 0.75;
-}
-
-.enrichWorkflowTile__sub {
-  font-size: 0.78rem;
-  color: var(--warning-foreground);
-  opacity: 0.85;
-  margin: 0.25rem 0 0;
-}
-
-.enrichWorkflowTile__cta {
-  display: inline-block;
-  padding: 7px 14px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border-radius: 6px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border: 1px solid var(--primary-hover);
-  text-decoration: none;
-  align-self: flex-start;
-  margin-top: auto;
-}
-
-.enrichWorkflowTile__cta:hover {
-  background: var(--primary-hover);
-}
-
-.enrichStatCleared .statValue {
-  color: var(--success);
-}
-
-.enrichChartCard__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 0.75rem;
-}
-
-.enrichChartCard__title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  margin: 0;
-}
-
-.enrichAdminPill--amber {
-  background: color-mix(in srgb, var(--primary) 24%, transparent);
-  color: var(--primary-foreground);
-}
-
-.enrichConfidenceBar {
-  display: flex;
-  height: 22px;
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 0.625rem;
-  background: var(--muted);
-}
-
-.enrichConfidenceBar__seg {
-  height: 100%;
-  min-width: 0;
-}
-
-.enrichConfidenceLegend {
-  display: flex;
-  gap: 0.875rem;
-  flex-wrap: wrap;
-  font-size: 0.74rem;
-  color: var(--muted-foreground);
-}
-
-.enrichConfidenceLegend__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.enrichConfidenceLegend__swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-}
-
-.enrichConfidenceLegend__label {
-  color: var(--foreground);
-  font-weight: 500;
-}
-
-.enrichConfidenceLegend__count {
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichSourceList {
-  display: grid;
-  gap: 0.5rem;
-  font-size: 0.78rem;
-}
-
-.enrichSourceBar {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.enrichSourceBar__label {
-  width: 3.5rem;
-  text-align: right;
-  color: var(--muted-foreground);
-}
-
-.enrichSourceBar__track {
-  flex: 1;
-  background: var(--muted);
-  height: 14px;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.enrichSourceBar__fill {
-  height: 100%;
-  border-radius: 3px;
-}
-
-.enrichSourceBar__count {
-  width: 6rem;
-  color: var(--foreground);
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichListsGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.625rem;
-  margin-bottom: 0.875rem;
-}
-
-@media (max-width: 760px) {
-  .enrichListsGrid { grid-template-columns: 1fr; }
-}
-
-.enrichListCard__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 0.625rem;
-}
-
-.enrichListCard__title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  margin: 0;
-}
-
-.enrichListCard__manage {
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--primary);
-  text-decoration: none;
-}
-
-.enrichListCard__manage:hover {
-  text-decoration: underline;
-}
-
-.enrichListCard__rows {
-  font-size: 0.82rem;
-}
-
-.enrichListRow {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 0.625rem;
-  padding: 0.5rem 0;
-  align-items: baseline;
-  border-bottom: 1px solid var(--border);
-}
-
-.enrichListRow:last-child { border-bottom: 0; }
-
-.enrichListRow--twoCol { grid-template-columns: 1fr auto; }
-
-.enrichListRow__primary { color: var(--foreground); min-width: 0; }
-
-.enrichListRow__count {
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-
-.enrichListRow__action {
-  font-size: 0.75rem;
-  color: var(--primary);
-  text-decoration: none;
-}
-
-.enrichListRow__action:hover { text-decoration: underline; }
-
-.enrichInlineCode {
-  background: color-mix(in srgb, var(--primary) 18%, transparent);
-  color: var(--foreground);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 0.78rem;
-}
-
-.enrichTabRoot {
-  display: flex;
-  flex-direction: column;
-  gap: 0.875rem;
-}
-
-.enrichChartsGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.625rem;
-}
-
-@media (max-width: 760px) {
-  .enrichChartsGrid { grid-template-columns: 1fr; }
-}
-
-.enrichRefreshRow {
-  display: flex;
-  justify-content: flex-end;
-}
