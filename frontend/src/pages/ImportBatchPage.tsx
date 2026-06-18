@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { Alert } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/toast'
 import { AICleanupPanel } from '../components/import/AICleanupPanel'
@@ -162,11 +166,11 @@ export function ImportBatchPage() {
   return (
     <div className="page">
       <PageHeader title={`Import ${row.batchLabel}`} description={description} />
-      <section className="card transactionsPanel" aria-label="Batch summary">
-        <div className="transactionsPanelHeader">
-          <div>
-            <h2>Batch summary</h2>
-            <p className="muted">
+      <Card aria-label="Batch summary">
+        <SectionHeader
+          title="Batch summary"
+          description={
+            <>
               File: <strong>{row.fileName}</strong> · Status:{' '}
               <strong>{row.status}</strong>
               {row.account ? (
@@ -179,107 +183,93 @@ export function ImportBatchPage() {
                   {' · '}Profile: <code>{row.profileId}</code>
                 </>
               ) : null}
-              {row.errorMessage ? (
-                <>
-                  {' · '}
-                  <span className="error">{row.errorMessage}</span>
-                </>
-              ) : null}
-            </p>
-            {/* Rollback marker (#233). Rendered when the batch carries
-                rolled_back state — preserves audit trail on the page. */}
-            {isRolledBack && row.rolledBackAt ? (
-              <p className="mt-1 text-xs text-danger">
-                Rolled back at{' '}
-                {row.rolledBackAt.slice(0, 19).replace('T', ' ')}.
-                Transactions were deleted; the row is kept for the audit
-                trail.
-              </p>
-            ) : null}
-            {/* Per-stage import counts (#231). Renders only when the row
-                actually has counts captured — legacy rows show nothing
-                here. */}
-            {hasStageCounts ? (
-              <div
-                className="mt-2 flex flex-wrap items-center gap-2 text-xs"
-                aria-label="Batch stage counts"
-              >
-                {insertedCount != null ? (
-                  <span
-                    className="rounded px-2 py-0.5 font-semibold"
-                    style={{ backgroundColor: 'var(--bg2)', color: 'var(--fg)' }}
-                  >
-                    {insertedCount} imported
-                  </span>
-                ) : null}
-                {skippedDuplicateCount != null && skippedDuplicateCount > 0 ? (
-                  <span
-                    className="rounded px-2 py-0.5 font-semibold"
-                    style={{ backgroundColor: 'var(--bg2)', color: 'var(--fg)' }}
-                  >
-                    {skippedDuplicateCount} duplicate{skippedDuplicateCount === 1 ? '' : 's'} skipped
-                  </span>
-                ) : null}
-                {rowErrorsCount != null && rowErrorsCount > 0 ? (
-                  <span
-                    className="rounded px-2 py-0.5 font-semibold text-danger"
-                    style={{ backgroundColor: 'var(--bg2)' }}
-                  >
-                    {rowErrorsCount} row error{rowErrorsCount === 1 ? '' : 's'}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            {/* Per-batch import-confidence breakdown (#214). Renders a small
-                green/amber summary when the batch was classified; quiet when
-                the batch predates the classifier. */}
-            {classified > 0 || unknownCount > 0 ? (
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded px-2 py-0.5 font-semibold text-positive" style={{ backgroundColor: 'var(--bg2)' }}>
-                  {cleanCount} clean
-                </span>
-                {needsReviewCount > 0 ? (
-                  <Link
-                    to={`/review?confidenceFlag=needs_review`}
-                    className="rounded px-2 py-0.5 font-semibold text-warning underline-offset-2 hover:underline"
-                    style={{ backgroundColor: 'var(--bg2)' }}
-                  >
-                    {needsReviewCount} need review
-                  </Link>
-                ) : null}
-                {unknownCount > 0 ? (
-                  <span className="text-muted-foreground">
-                    {unknownCount} legacy (not classified)
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              to={`/transactions?${transactionsQuery.toString()}`}
-              className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border px-4 font-semibold transition-colors hover:opacity-90"
-              style={{
-                backgroundColor: 'var(--bg2)',
-                color: 'var(--fg)',
-                borderColor: 'var(--border)',
-              }}
-            >
-              View transactions →
-            </Link>
-            {!isRolledBack ? (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setRollbackOpen(true)}
-                aria-label={`Roll back import batch ${row.batchLabel}`}
-              >
-                Roll back batch
+            </>
+          }
+          actions={
+            <>
+              <Button asChild variant="outline">
+                <Link to={`/transactions?${transactionsQuery.toString()}`}>
+                  View transactions →
+                </Link>
               </Button>
-            ) : null}
-          </div>
-        </div>
-      </section>
+              {!isRolledBack ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => setRollbackOpen(true)}
+                  aria-label={`Roll back import batch ${row.batchLabel}`}
+                >
+                  Roll back batch
+                </Button>
+              ) : null}
+            </>
+          }
+        >
+          {row.errorMessage ? (
+            <Alert variant="error" className="mt-2">
+              {row.errorMessage}
+            </Alert>
+          ) : null}
+          {/* Rollback marker (#233). Rendered when the batch carries
+              rolled_back state — preserves audit trail on the page. */}
+          {isRolledBack && row.rolledBackAt ? (
+            <p className="mt-1 text-xs text-danger">
+              Rolled back at{' '}
+              {row.rolledBackAt.slice(0, 19).replace('T', ' ')}.
+              Transactions were deleted; the row is kept for the audit
+              trail.
+            </p>
+          ) : null}
+          {/* Per-stage import counts (#231). Renders only when the row
+              actually has counts captured — legacy rows show nothing
+              here. */}
+          {hasStageCounts ? (
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2"
+              aria-label="Batch stage counts"
+            >
+              {insertedCount != null ? (
+                <Badge variant="count">{insertedCount} imported</Badge>
+              ) : null}
+              {skippedDuplicateCount != null && skippedDuplicateCount > 0 ? (
+                <Badge variant="count">
+                  {skippedDuplicateCount} duplicate{skippedDuplicateCount === 1 ? '' : 's'} skipped
+                </Badge>
+              ) : null}
+              {rowErrorsCount != null && rowErrorsCount > 0 ? (
+                <Badge variant="count" className="text-danger">
+                  {rowErrorsCount} row error{rowErrorsCount === 1 ? '' : 's'}
+                </Badge>
+              ) : null}
+            </div>
+          ) : null}
+          {/* Per-batch import-confidence breakdown (#214). Renders a small
+              green/amber summary when the batch was classified; quiet when
+              the batch predates the classifier. */}
+          {classified > 0 || unknownCount > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge variant="count" className="text-positive">
+                {cleanCount} clean
+              </Badge>
+              {needsReviewCount > 0 ? (
+                <Link
+                  to={`/review?confidenceFlag=needs_review`}
+                  className="underline-offset-2 hover:underline"
+                >
+                  <Badge variant="count" className="text-warning">
+                    {needsReviewCount} need review
+                  </Badge>
+                </Link>
+              ) : null}
+              {unknownCount > 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  {unknownCount} legacy (not classified)
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </SectionHeader>
+      </Card>
       <AICleanupPanel batchId={batchLabel} currency={DEFAULT_IMPORT_BATCH_CURRENCY} />
       <RollbackDialog
         open={rollbackOpen}
