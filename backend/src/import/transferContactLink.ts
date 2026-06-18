@@ -48,7 +48,12 @@ export async function runTransferContactLink(
   let status: 'ok' | 'error' = 'ok';
 
   try {
-    const contactRows = await Contact.findAll({ where: { householdId } });
+    // Exclude self-account contacts (isSelf=true): a contact marked as the
+    // user's own identity (e.g. "Connor Adams RBC") must never accumulate
+    // transfer ledger entries — you cannot owe yourself. Users confirm self-
+    // accounts via PATCH /api/contacts/:id { isSelf: true } after the
+    // auto-suggest pass surfaces candidates.
+    const contactRows = await Contact.findAll({ where: { householdId, isSelf: false } });
     const contacts: MatchableContact[] = contactRows.map((c) => ({
       id: c.id, name: c.name, normalizedName: c.normalizedName ?? null, aliases: c.aliases ?? null,
     }));

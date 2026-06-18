@@ -28,6 +28,17 @@ export class Contact extends Model<
    * Default false so legacy rows behave as before.
    */
   declare isPartner: CreationOptional<boolean>;
+  /**
+   * Self-account flag: true when the user has confirmed this Contact is their
+   * own identity (e.g. "Connor Adams RBC" — a transfer to their own account).
+   * Confirmed self-accounts are excluded from the transfer-link pass because
+   * you cannot owe yourself. Suggested automatically via name-token overlap;
+   * the user must confirm via PATCH /api/contacts/:id { isSelf: true }.
+   * Default false so legacy rows behave as before.
+   *
+   * Spine note: a discriminator field on the Contact primitive, NOT a new primitive.
+   */
+  declare isSelf: CreationOptional<boolean>;
   /** Lowercase + whitespace-collapsed key for dedup; auto-set by a hook. */
   declare normalizedName: CreationOptional<string | null>;
   declare readonly createdAt: CreationOptional<Date>;
@@ -49,6 +60,12 @@ export function initContact(sequelize: Sequelize): typeof Contact {
       isPartner: {
         type: DataTypes.BOOLEAN,
         field: 'is_partner',
+        allowNull: false,
+        defaultValue: false,
+      },
+      isSelf: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_self',
         allowNull: false,
         defaultValue: false,
       },
