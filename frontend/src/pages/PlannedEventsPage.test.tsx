@@ -52,9 +52,9 @@ afterEach(() => {
   plannedEvents = [plannedEvent]
 })
 
-function renderPage() {
+function renderPage(initialEntries: string[] = ['/planned']) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <ToastProvider>
         <PlannedEventsPage />
       </ToastProvider>
@@ -89,5 +89,27 @@ describe('PlannedEventsPage', () => {
     plannedEvents = []
     renderPage()
     expect(await screen.findByText(/no planned events yet/i)).toBeInTheDocument()
+  })
+
+  it('highlights the row matching ?focus=<id>', async () => {
+    renderPage(['/planned?focus=1'])
+    const cell = await screen.findByText('Rent')
+    const row = cell.closest('tr')
+    expect(row).not.toBeNull()
+    expect(row).toHaveClass('ring-2')
+  })
+
+  it('is a no-op for an unknown ?focus id (no error, no highlight)', async () => {
+    renderPage(['/planned?focus=999'])
+    const cell = await screen.findByText('Rent')
+    const row = cell.closest('tr')
+    expect(row).not.toBeNull()
+    expect(row).not.toHaveClass('ring-2')
+  })
+
+  it('renders normally with no focus param', async () => {
+    renderPage(['/planned'])
+    const cell = await screen.findByText('Rent')
+    expect(cell.closest('tr')).not.toHaveClass('ring-2')
   })
 })
