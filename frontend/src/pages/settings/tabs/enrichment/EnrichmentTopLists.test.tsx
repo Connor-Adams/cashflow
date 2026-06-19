@@ -22,13 +22,13 @@ function wrap(ui: React.ReactNode) {
 
 describe('EnrichmentTopLists', () => {
   it('renders both cards with their headings', () => {
-    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} />))
+    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} deadRules={[]} />))
     expect(screen.getByText(/top firing rules/i)).toBeInTheDocument()
     expect(screen.getByText(/top canonical merchants/i)).toBeInTheDocument()
   })
 
   it('renders View links on rule rows that deep-link to /rules?focus=<ruleId>', () => {
-    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} />))
+    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} deadRules={[]} />))
     const amazonView = screen.getByRole('link', { name: /view rule for amazon/i })
     expect(amazonView).toHaveAttribute('href', '/rules?focus=11')
     const uberView = screen.getByRole('link', { name: /view rule for uber/i })
@@ -36,26 +36,26 @@ describe('EnrichmentTopLists', () => {
   })
 
   it('renders a "Manage rules" link in the rules card header', () => {
-    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} />))
+    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} deadRules={[]} />))
     const manage = screen.getByRole('link', { name: /manage rules/i })
     expect(manage).toHaveAttribute('href', '/rules')
   })
 
   it('displays "(no category)" when category is null', () => {
-    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} />))
+    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} deadRules={[]} />))
     expect(screen.getByText(/spotify/i)).toBeInTheDocument()
     expect(screen.getByText(/\(no category\)/i)).toBeInTheDocument()
   })
 
-  it('renders merchants as read-only rows (no View link, no anchor)', () => {
-    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} />))
-    expect(screen.getByText('Amazon')).toBeInTheDocument()
+  it('renders merchant names as links to the filtered transactions page', () => {
+    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} deadRules={[]} />))
+    const amazonLink = screen.getByRole('link', { name: 'Amazon' })
+    expect(amazonLink).toHaveAttribute('href', '/transactions?merchantCanonical=Amazon')
     expect(screen.getByText('1,247')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /view amazon/i })).toBeNull()
   })
 
   it('shows empty-state copy when both lists are empty', () => {
-    render(wrap(<EnrichmentTopLists topRules={[]} topMerchants={[]} />))
+    render(wrap(<EnrichmentTopLists topRules={[]} topMerchants={[]} deadRules={[]} />))
     expect(screen.getByText(/no rule matches recorded yet/i)).toBeInTheDocument()
     expect(screen.getByText(/none yet\. run the backfill/i)).toBeInTheDocument()
   })
@@ -71,9 +71,23 @@ describe('EnrichmentTopLists', () => {
       name: `Merchant ${i}`,
       count: 100 - i,
     }))
-    render(wrap(<EnrichmentTopLists topRules={many} topMerchants={manyMerchants} />))
+    render(wrap(<EnrichmentTopLists topRules={many} topMerchants={manyMerchants} deadRules={[]} />))
     expect(screen.getByText('pattern0')).toBeInTheDocument()
     expect(screen.getByText('pattern5')).toBeInTheDocument()
     expect(screen.queryByText('pattern6')).toBeNull()
+  })
+
+  it('renders dead-rules mini-list when deadRules is non-empty', () => {
+    const dead = [
+      { ruleId: 42, pattern: 'oldmerchant', category: null },
+      { ruleId: 99, pattern: 'gone', category: 'Food' },
+    ]
+    render(wrap(<EnrichmentTopLists topRules={TOP_RULES} topMerchants={TOP_MERCHANTS} deadRules={dead} />))
+    expect(screen.getByText(/dead rules \(2\)/i)).toBeInTheDocument()
+    expect(screen.getByText('oldmerchant')).toBeInTheDocument()
+    const viewLink = screen.getAllByRole('link', { name: /view/i }).find(
+      (el) => el.getAttribute('href') === '/rules?focus=42'
+    )
+    expect(viewLink).toBeDefined()
   })
 })
