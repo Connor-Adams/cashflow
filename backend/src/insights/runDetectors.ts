@@ -13,8 +13,10 @@
  * review pass on top — it reads the same `insights` table.
  */
 import { Op } from 'sequelize';
-import { Insight, Transaction, PartnerSettlement, Contact, Receipt, PlannedEvent, sequelize } from '../models';
+import { Insight, Transaction, PartnerSettlement, Contact, Receipt, PlannedEvent, Account, sequelize } from '../models';
 import { isNonSpend } from '../summary/classifyTransactionFlow';
+import { assembleForecast } from '../forecast/assembleForecast';
+import { buildForecast } from '../forecast/buildForecast';
 import {
   detectDuplicateTransactions,
   detectMerchantSpendSpike,
@@ -22,14 +24,25 @@ import {
   detectMissingReceipt,
   detectUnusualCategorySpend,
   detectSettlementImbalance,
+  detectCashRunwayLow,
+  detectCategoryTrend,
 } from './detectors';
 import type {
   DetectorTransaction,
   DetectorSettlement,
+  DetectorRunwayPoint,
   DetectedInsight,
 } from './detectors';
 
 const TRANSACTION_LOOKBACK_DAYS = 180;
+// Runway detector horizon — how far ahead we project the daily balance series.
+// Matches RUNWAY_HORIZON_DAYS in detectors/index.ts (kept here so the
+// projection window covers the detector's scan window).
+const RUNWAY_HORIZON_DAYS = 30;
+
+// Cash-bearing account types excluded from the forecast (investment value isn't
+// spendable cash); mirrors assembleForecast's own exclusion list.
+const FORECAST_EXCLUDED_TYPES = new Set(['investment']);
 
 export type RunDetectorsResult = {
   created: number;
@@ -107,6 +120,56 @@ async function loadSettlements(householdId: number): Promise<DetectorSettlement[
   }));
 }
 
+function isoFromDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Build the per-currency projected daily-balance series the cash-runway
+ * detector consumes. Enumerates the household's cash currencies (non-investment
+ * accounts), then runs the SAME forecast assembly + daily-series math the
+ * `/api/forecast` route uses, once per currency, over the runway horizon. The
+ * detector stays DB-free; this loader is the DB→rows shaping step, mirroring
+ * `loadTransactions`/`loadSettlements`.
+ */
+async function loadRunwayPoints(
+  householdId: number,
+  now: Date,
+): Promise<DetectorRunwayPoint[]> {
+  const dateFrom = isoFromDate(now);
+  const dateTo = isoFromDate(new Date(now.getTime() + RUNWAY_HORIZON_DAYS * 24 * 60 * 60 * 1000));
+
+  // Distinct cash currencies across eligible (non-investment, open) accounts.
+  const accounts = await Account.findAll({ where: { householdId } });
+  const currencies = new Set<string>();
+  for (const acc of accounts) {
+    if (FORECAST_EXCLUDED_TYPES.has(acc.accountType)) continue;
+    if (acc.closedAt && acc.closedAt <= dateFrom) continue;
+    if (acc.defaultCurrency) currencies.add(acc.defaultCurrency);
+  }
+
+  const points: DetectorRunwayPoint[] = [];
+  for (const currency of currencies) {
+    const assembled = await assembleForecast({
+      householdId,
+      dateFrom,
+      dateTo,
+      currency,
+    });
+    const result = buildForecast({
+      openingBalance: assembled.openingBalance,
+      occurrences: assembled.occurrences,
+      dateFrom,
+      dateTo,
+      currency: assembled.currency,
+    });
+    for (const p of result.dailyPoints) {
+      points.push({ date: p.date, balance: p.balance, currency: assembled.currency });
+    }
+  }
+  return points;
+}
+
 /**
  * Upsert one detected insight, keyed by (householdId, type, fingerprint).
  * Refreshes content fields but NEVER writes `status`, so a user's
@@ -163,6 +226,7 @@ export async function runDetectorsForHousehold(
 
   const transactions = await loadTransactions(householdId, now);
   const settlements = await loadSettlements(householdId);
+  const runwayPoints = await loadRunwayPoints(householdId, now);
 
   // Merchants we already track as subscriptions — `recurring_increase` skips
   // these so `subscription_price_increase` (the dedicated subscription-price
@@ -192,6 +256,8 @@ export async function runDetectorsForHousehold(
     ...detectRecurringIncrease(transactions, { now, subscriptionMerchants }),
     ...detectMissingReceipt(transactions, { now }),
     ...detectUnusualCategorySpend(transactions, { now }),
+    ...detectCategoryTrend(transactions, { now }),
+    ...detectCashRunwayLow(runwayPoints, { now }),
     ...detectSettlementImbalance(settlements),
   ];
 
