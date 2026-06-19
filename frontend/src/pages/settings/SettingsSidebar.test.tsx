@@ -31,12 +31,20 @@ describe('SettingsSidebar', () => {
     expect(screen.getByRole('link', { name: 'API tokens' })).toHaveAttribute('href', '/settings/api-tokens')
   })
 
-  it('does NOT render Budgets, Enrichment, or Notifications (moved/removed)', () => {
+  it('does NOT render Budgets or Enrichment (moved/removed)', () => {
     mockUseAuth.mockReturnValue({ user: { household: { role: 'owner' }, globalRole: null } })
     renderSidebar()
     expect(screen.queryByRole('link', { name: 'Budgets' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Enrichment' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Notifications')).not.toBeInTheDocument()
+  })
+
+  it('renders the Notifications link (issue #796)', () => {
+    mockUseAuth.mockReturnValue({ user: { household: { role: 'member' }, globalRole: null } })
+    renderSidebar()
+    expect(screen.getByRole('link', { name: 'Notifications' })).toHaveAttribute(
+      'href',
+      '/settings/notifications',
+    )
   })
 
   it('renders Feedback as a real link for owners', () => {

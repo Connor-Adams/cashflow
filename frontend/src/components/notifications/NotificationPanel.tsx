@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DigestCard } from './DigestCard'
 import type { Notification, NotificationSeverity } from '@/types/api'
 
 /**
@@ -119,6 +120,16 @@ export function NotificationPanel({
       {listStatus === 'success' && notifications.length > 0 && (
         <ul className="divide-y divide-border">
           {notifications.map((n) => {
+            // Weekly digest renders as an expandable card (issue #796) instead
+            // of a one-line row. Clicking the card body toggles expand; we still
+            // mark it read on first interaction.
+            if (n.type === 'digest.weekly') {
+              return (
+                <li key={n.id} className="p-2" onClick={() => void onMarkRead(n.id)}>
+                  <DigestCard notification={n} />
+                </li>
+              )
+            }
             const { Icon, color } = severityIcon(n.severity)
             const isUnread = n.readAt == null
             return (

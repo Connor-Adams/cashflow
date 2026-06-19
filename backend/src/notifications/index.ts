@@ -60,6 +60,8 @@ export type SerializedNotificationPreference = {
   channelInApp: boolean;
   channelEmail: boolean;
   channelPush: boolean;
+  /** 0=Sun … 6=Sat; only meaningful for `digest.weekly` (#796). */
+  digestDayOfWeek: number;
 };
 
 /** Validated patch shape for a preference upsert. */
@@ -67,6 +69,7 @@ export type NotificationPreferencePatch = {
   channelInApp?: boolean;
   channelEmail?: boolean;
   channelPush?: boolean;
+  digestDayOfWeek?: number;
 };
 
 /**
@@ -215,6 +218,7 @@ function serializeRow(
     channelInApp: row.channelInApp,
     channelEmail: row.channelEmail,
     channelPush: row.channelPush,
+    digestDayOfWeek: row.digestDayOfWeek,
   };
 }
 
@@ -224,6 +228,7 @@ function defaultsFor(type: string): SerializedNotificationPreference {
     channelInApp: NOTIFICATION_PREFERENCE_DEFAULTS.channelInApp,
     channelEmail: NOTIFICATION_PREFERENCE_DEFAULTS.channelEmail,
     channelPush: NOTIFICATION_PREFERENCE_DEFAULTS.channelPush,
+    digestDayOfWeek: NOTIFICATION_PREFERENCE_DEFAULTS.digestDayOfWeek,
   };
 }
 
@@ -258,6 +263,17 @@ export function validateNotificationPreferencePatch(
       return { ok: false, error: 'channelPush must be boolean' };
     }
     patch.channelPush = raw.channelPush;
+  }
+
+  if (raw.digestDayOfWeek !== undefined) {
+    const d = raw.digestDayOfWeek;
+    if (typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d > 6) {
+      return {
+        ok: false,
+        error: 'digestDayOfWeek must be an integer 0..6 (0=Sun … 6=Sat)',
+      };
+    }
+    patch.digestDayOfWeek = d;
   }
 
   return { ok: true, patch };
@@ -336,6 +352,7 @@ export async function upsertNotificationPreference(
       channelInApp: NOTIFICATION_PREFERENCE_DEFAULTS.channelInApp,
       channelEmail: NOTIFICATION_PREFERENCE_DEFAULTS.channelEmail,
       channelPush: NOTIFICATION_PREFERENCE_DEFAULTS.channelPush,
+      digestDayOfWeek: NOTIFICATION_PREFERENCE_DEFAULTS.digestDayOfWeek,
     },
   });
 
@@ -347,6 +364,9 @@ export async function upsertNotificationPreference(
   }
   if (patch.channelPush !== undefined) {
     row.set('channelPush', patch.channelPush);
+  }
+  if (patch.digestDayOfWeek !== undefined) {
+    row.set('digestDayOfWeek', patch.digestDayOfWeek);
   }
   await row.save();
 

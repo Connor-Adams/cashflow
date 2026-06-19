@@ -58,6 +58,9 @@ router.post(
           },
         ],
         new Date(),
+        // Manual operator trigger — deliver regardless of the user's chosen
+        // digest day-of-week (#796), unlike the scheduled cron path.
+        { ignoreDayOfWeek: true },
       );
       res.json({ ok: true, result });
     } catch (e) {

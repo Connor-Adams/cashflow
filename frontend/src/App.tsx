@@ -60,6 +60,7 @@ import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { ApiTokensTab } from './pages/settings/tabs/ApiTokensTab'
+import { NotificationsTab } from './pages/settings/tabs/NotificationsTab'
 import { IncomePage } from './pages/IncomePage'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
@@ -175,6 +176,7 @@ function AppRoutes() {
             <Route index element={<Navigate to="display" replace />} />
             <Route path="display" element={<DisplaySection />} />
             <Route path="appearance" element={<AppearanceSection />} />
+            <Route path="notifications" element={<NotificationsTab />} />
             <Route path="gmail" element={<GmailSection />} />
             <Route path="partner-invite" element={<PartnerInviteSection />} />
             <Route path="members" element={<MembersTab />} />
