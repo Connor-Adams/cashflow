@@ -4,7 +4,7 @@ import { Card } from '../card'
 import { Input } from '../input'
 import { Alert } from '../alert'
 import { Skeleton } from '../skeleton'
-import { EmptyState } from '../empty-state'
+import { EmptyState, EmptyTableRow } from '../empty-state'
 
 describe('leaf primitives render', () => {
   it('Card renders content', () => {
@@ -26,5 +26,15 @@ describe('leaf primitives render', () => {
   it('EmptyState shows its title', () => {
     render(<EmptyState title="Nothing here" />)
     expect(screen.getByText('Nothing here')).toBeInTheDocument()
+  })
+  it('EmptyTableRow cell uses utility classes, not the legacy emptyStateCell', () => {
+    render(
+      <table><tbody>
+        <EmptyTableRow colSpan={3} title="None" />
+      </tbody></table>,
+    )
+    const cell = screen.getByText('None').closest('td')!
+    expect(cell.className).toContain('px-4')
+    expect(cell.className).not.toContain('emptyStateCell')
   })
 })
