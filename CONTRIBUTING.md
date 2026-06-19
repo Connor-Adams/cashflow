@@ -97,6 +97,16 @@ What the ratchet does **not** do:
 
 If a PR trips the ratchet, fix the finding (preferred), add a scoped `// fallow-ignore-*` suppression for a deliberate keep, or — only for an intentional ceiling change — adjust `DUP_CEILING` downward with justification. A complementary gate in `fallow.yml` already blocks *new* dead code / duplication introduced on the PR's changed lines (`fail-on-issues: true`, diff-scoped); the `code-audit` ratchet additionally guards against whole-repo regressions.
 
+### New findings become issues on `main`
+
+The per-PR sticky comment is a leading indicator; it is overwritten on the next push and never becomes work. So a second path makes findings durable (cashflow issue #386): when a commit lands on `main`, [`.github/workflows/audit-issues.yml`](.github/workflows/audit-issues.yml) runs `fallow dead-code` and [`scripts/audit-issues.cjs`](scripts/audit-issues.cjs), which **diffs the current findings against the committed baseline** at [`audit-baseline.json`](audit-baseline.json) and files **one `chore` issue per NEW finding** (labels `chore`, `code-audit`, `audit:dead-code`; body links the exact `file#Lline` via a commit-pinned blob URL).
+
+- Findings already in `audit-baseline.json` are **not** re-filed — no spam on the first run, and no duplicate when the same finding persists across commits.
+- After resolving a finding, drop its key from `audit-baseline.json` (or regenerate the whole file with `node scripts/audit-issues.cjs --baseline` after a clean audit) so the category stays honest.
+- This is `main`-only by design — never on PRs — so reviewers see findings in the sticky comment first, and only merged regressions become tickets. Because cashflow auto-merges `feature`/`chore`-labeled work, a filed finding flows straight into the issue-worker loop.
+
+Grafana **alerts** follow the same "signal → issue" pattern via [`.github/workflows/grafana-alert-to-issue.yml`](.github/workflows/grafana-alert-to-issue.yml); see [docs/observability.md › Alert routing](docs/observability.md#alert-routing-every-fire-becomes-a-github-issue).
+
 ## Project layout
 
 | Path | Role |
