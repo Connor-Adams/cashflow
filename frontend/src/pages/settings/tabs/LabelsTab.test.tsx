@@ -8,8 +8,8 @@ import { _resetLabelsCacheForTest } from '../../../lib/useLabels'
 import type { Label } from '../../../types/api'
 
 const SAMPLE: Label[] = [
-  { id: 1, name: 'tax-deductible', usageCount: 4 },
-  { id: 2, name: 'vacation-2026', usageCount: 2 },
+  { id: 1, name: 'tax-deductible', color: null, usageCount: 4 },
+  { id: 2, name: 'vacation-2026', color: '#3B82F6', usageCount: 2 },
 ]
 
 describe('LabelsTab', () => {
@@ -42,7 +42,7 @@ describe('LabelsTab', () => {
     vi.spyOn(api, 'getJson').mockResolvedValue(SAMPLE)
     const patchSpy = vi
       .spyOn(api, 'patchJson')
-      .mockResolvedValue({ id: 1, name: 'deductible', usageCount: 4 })
+      .mockResolvedValue({ id: 1, name: 'deductible', color: null, usageCount: 4 })
     render(<LabelsTab />)
     await waitFor(() => screen.getByText('tax-deductible'))
 
@@ -50,10 +50,34 @@ describe('LabelsTab', () => {
     const input = await screen.findByLabelText('Label name')
     await userEvent.clear(input)
     await userEvent.type(input, 'deductible')
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save label' }))
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith('/api/labels/1', { name: 'deductible' })
+      expect(patchSpy).toHaveBeenCalledWith('/api/labels/1', {
+        name: 'deductible',
+        color: null,
+      })
+    })
+  })
+
+  it('persists a palette color choice via PATCH (#794 AC 7)', async () => {
+    vi.spyOn(api, 'getJson').mockResolvedValue(SAMPLE)
+    const patchSpy = vi
+      .spyOn(api, 'patchJson')
+      .mockResolvedValue({ id: 1, name: 'tax-deductible', color: '#3B82F6', usageCount: 4 })
+    render(<LabelsTab />)
+    await waitFor(() => screen.getByText('tax-deductible'))
+
+    await userEvent.click(screen.getByRole('button', { name: /rename tax-deductible/i }))
+    // pick a swatch from the palette
+    await userEvent.click(await screen.findByRole('button', { name: 'Color #3B82F6' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save label' }))
+
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith('/api/labels/1', {
+        name: 'tax-deductible',
+        color: '#3B82F6',
+      })
     })
   })
 

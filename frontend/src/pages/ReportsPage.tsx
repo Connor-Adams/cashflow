@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { Download, Plus, Trash2 } from 'lucide-react'
 import { Alert } from '@cashflow/ui'
-import { EmptyTableRow } from '@cashflow/ui'
+import { EmptyState, EmptyTableRow } from '@cashflow/ui'
 import { Badge } from '@cashflow/ui'
 import { Button } from '@cashflow/ui'
 import { FilterCard } from '@/components/ui/filter-card'
@@ -427,6 +428,19 @@ export function ReportsPage() {
   const partnerExportDisabled = visiblePartnerRows.length === 0
   const businessExportDisabled = visibleBusinessRows.length === 0
 
+  // Page-level empty state (#799): every report dataset is empty AND no filter
+  // is narrowing the view, so the account genuinely has no spend to report.
+  // When a filter is active we fall through to the per-table empty rows, which
+  // already say "no activity for these filters".
+  const hasNoSpendData =
+    !loading &&
+    !err &&
+    !hasActiveFilters &&
+    (partner?.byCurrency.length ?? 0) === 0 &&
+    (business?.byCurrency.length ?? 0) === 0 &&
+    merchantSummaries.length === 0 &&
+    accountSummaries.length === 0
+
   // Build a "{from}-to-{to}" stub for the filename. Falls back to "all-dates"
   // and uses today's date as a leg when only one bound is set, so filenames
   // still sort sensibly on disk. Uses todayDateInputValue so the leg reflects
@@ -502,6 +516,26 @@ export function ReportsPage() {
     } catch (e) {
       setSettlementsErr(e instanceof Error ? e.message : 'Could not delete')
     }
+  }
+
+  if (hasNoSpendData) {
+    return (
+      <div className="page">
+        <PageHeader
+          title="Reports"
+          description="Partner balances and business totals stay separated by currency and time window."
+        />
+        <EmptyState
+          title="No spend to report yet"
+          description="Import some transactions and your monthly summary will appear here."
+          actions={
+            <Button asChild size="sm">
+              <Link to="/import">Import a statement</Link>
+            </Button>
+          }
+        />
+      </div>
+    )
   }
 
   return (

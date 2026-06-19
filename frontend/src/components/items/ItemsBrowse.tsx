@@ -10,8 +10,11 @@ import {
   DialogDescription,
 } from '@cashflow/ui'
 import { NativeSelect, NativeSelectOption } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { useItemsQuery, type ItemsFilters } from '@/hooks/useItems'
+import { hasActiveItemsFilters } from '@/hooks/useItems'
 import { patchJson } from '@/lib/api'
+import { Link } from 'react-router-dom'
 import { formatMoney } from '../../lib/formatMoney'
 import type { ItemRow } from '@cashflow/shared'
 
@@ -21,9 +24,11 @@ type Props = {
   filters: ItemsFilters
   onOpenItem: (id: number, row: ItemRow) => void
   onItemsPatched?: () => void
+  /** Resets all item filters — wired to the filtered-empty "Clear filters" CTA. */
+  onClearFilters?: () => void
 }
 
-export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
+export function ItemsBrowse({ filters, onOpenItem, onItemsPatched, onClearFilters }: Props) {
   const { items, nextCursor, loading, error, fetchMore } = useItemsQuery(filters)
   const [groupBy, setGroupBy] = useState<GroupBy>('purchase')
   const [groupMenuOpen, setGroupMenuOpen] = useState(false)
@@ -146,7 +151,29 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
         <p className="text-sm text-destructive">Failed to load items. {error.message}</p>
       )}
       {!loading && !error && items.length === 0 && (
-        <p className="text-sm text-muted-foreground">No items match these filters.</p>
+        hasActiveItemsFilters(filters) ? (
+          <EmptyState
+            title="Nothing matches this filter"
+            description="No items match the current filters. Clear them to see everything."
+            actions={
+              onClearFilters ? (
+                <Button size="sm" variant="outline" onClick={onClearFilters}>
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <EmptyState
+            title="No items yet"
+            description="Items appear once you import receipts or orders with line-item detail."
+            actions={
+              <Button asChild size="sm">
+                <Link to="/import">Import a statement</Link>
+              </Button>
+            }
+          />
+        )
       )}
 
       {groups.map((g) => (

@@ -24,3 +24,27 @@ export function validateLabelName(raw: unknown): LabelNameResult {
   }
   return { ok: true, name };
 }
+
+/** A 6-digit hex color, e.g. `#3B82F6`. `null` means "no color → neutral chip". */
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+export type LabelColorResult =
+  | { ok: true; color: string | null }
+  | { ok: false; code: 'INVALID_COLOR' };
+
+/**
+ * Validates an optional label color (issue #794). The field is optional:
+ * `undefined` (not provided) and explicit `null` both mean "no color" and pass.
+ * A non-null value must be a 6-digit hex string (`^#[0-9a-fA-F]{6}$`); anything
+ * else is `INVALID_COLOR`. The route maps the error to a 400. Empty string is
+ * treated as "clear the color" (→ null) for forgiving form submits.
+ */
+export function validateLabelColor(raw: unknown): LabelColorResult {
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: true, color: null };
+  }
+  if (typeof raw !== 'string' || !HEX_COLOR.test(raw)) {
+    return { ok: false, code: 'INVALID_COLOR' };
+  }
+  return { ok: true, color: raw };
+}

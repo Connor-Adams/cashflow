@@ -37,6 +37,7 @@ import transfersRouter from './routes/transfers';
 import statementsRouter from './routes/statements';
 import rulesRouter from './routes/rules';
 import importRouter from './routes/import';
+import simplefinRouter from './routes/simplefin';
 import summaryRouter from './routes/summary';
 import sankeyRouter from './routes/sankey';
 import merchantsRouter from './routes/merchants';
@@ -284,6 +285,11 @@ export const gatedRoutes: RouteEntry[] = [
   { paths: '/api/preferences', handlers: [preferencesRouter] },
   { paths: '/api/onboarding', handlers: [onboardingRouter] },
   { paths: '/api/import', handlers: [importRouter] },
+  {
+    paths: '/api/simplefin',
+    handlers: [simplefinRouter],
+    why: 'SimpleFIN Bridge bank-connection credential store (issue #790) — an import SOURCE alongside importRouter, session-gated and user-scoped via currentAuth. Not a new primitive; mirrors the email-integration credential store.',
+  },
   {
     paths: '/api/summary/sankey',
     handlers: [sankeyRouter],

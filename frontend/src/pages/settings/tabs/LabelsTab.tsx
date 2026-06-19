@@ -16,6 +16,8 @@ import { Label as FieldLabel } from '@cashflow/ui'
 import { NativeSelect } from '@cashflow/ui'
 import { deleteReq, patchJson, postJson } from '../../../lib/api'
 import { useLabels } from '../../../lib/useLabels'
+import { LabelColorPicker } from '../../../components/LabelColorPicker'
+import { labelChipStyle } from '../../../lib/labelColors'
 import type { Label } from '../../../types/api'
 
 /**
@@ -28,6 +30,7 @@ export function LabelsTab() {
   const [err, setErr] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<Label | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [renameColor, setRenameColor] = useState<string | null>(null)
   const [renameSaving, setRenameSaving] = useState(false)
   const [mergeSource, setMergeSource] = useState<Label | null>(null)
   const [mergeTargetId, setMergeTargetId] = useState<string>('')
@@ -39,11 +42,13 @@ export function LabelsTab() {
     setErr(null)
     setRenameTarget(label)
     setRenameValue(label.name)
+    setRenameColor(label.color ?? null)
   }
 
   function closeRename() {
     setRenameTarget(null)
     setRenameValue('')
+    setRenameColor(null)
     setRenameSaving(false)
   }
 
@@ -55,11 +60,14 @@ export function LabelsTab() {
     setRenameSaving(true)
     setErr(null)
     try {
-      await patchJson<Label>(`/api/labels/${renameTarget.id}`, { name: next })
+      await patchJson<Label>(`/api/labels/${renameTarget.id}`, {
+        name: next,
+        color: renameColor,
+      })
       closeRename()
       await refresh()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't rename label. Try again.")
+      setErr(e instanceof Error ? e.message : "Couldn't save label. Try again.")
       setRenameSaving(false)
     }
   }
@@ -152,7 +160,14 @@ export function LabelsTab() {
           <tbody>
             {labels.map((label) => (
               <tr key={label.id} className="border-t border-border">
-                <td className="py-2">{label.name}</td>
+                <td className="py-2">
+                  <span
+                    className="inline-flex items-center rounded-full border border-transparent bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+                    style={labelChipStyle(label.color)}
+                  >
+                    {label.name}
+                  </span>
+                </td>
                 <td className="py-2">{label.usageCount ?? 0}</td>
                 <td className="py-2">
                   <div className="flex justify-end gap-2">
@@ -198,7 +213,7 @@ export function LabelsTab() {
       {renameTarget && (
         <Dialog open onOpenChange={(open) => { if (!open) closeRename() }}>
           <DialogHeader>
-            <DialogTitle>Rename label</DialogTitle>
+            <DialogTitle>Edit label</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitRename}>
             <DialogBody>
@@ -213,6 +228,16 @@ export function LabelsTab() {
                   autoComplete="off"
                 />
               </FieldLabel>
+              <div className="mt-3">
+                <span className="text-sm font-medium">Color</span>
+                <div className="mt-1.5">
+                  <LabelColorPicker
+                    value={renameColor}
+                    onChange={setRenameColor}
+                    disabled={renameSaving}
+                  />
+                </div>
+              </div>
             </DialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeRename}>
@@ -223,10 +248,11 @@ export function LabelsTab() {
                 disabled={
                   renameSaving ||
                   !renameValue.trim() ||
-                  renameValue.trim() === renameTarget.name
+                  (renameValue.trim() === renameTarget.name &&
+                    (renameColor ?? null) === (renameTarget.color ?? null))
                 }
               >
-                Save
+                Save label
               </Button>
             </DialogFooter>
           </form>

@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
 import { ExplainMonthPage } from './ExplainMonthPage'
+import { getJson } from '../lib/api'
 
 // Mock the data layer at the api module level (same pattern as LifestyleInflationPage.test.tsx).
 // The page calls getJson directly; intercepting here avoids coupling the test to
@@ -103,5 +104,21 @@ describe('ExplainMonthPage', () => {
     expect(
       await screen.findByText('Dining up $200 vs last month'),
     ).toBeInTheDocument()
+  })
+
+  it('renders the empty state with a View transactions CTA when there are no findings (#799)', async () => {
+    vi.mocked(getJson).mockResolvedValueOnce({
+      month: '2026-05',
+      previousMonth: '2026-04',
+      monthOverMonth: [],
+      findings: [],
+      aiSummary: null,
+    })
+    renderPage()
+    expect(
+      await screen.findByText('Nothing notable this month'),
+    ).toBeInTheDocument()
+    const cta = screen.getByRole('link', { name: /view transactions/i })
+    expect(cta).toHaveAttribute('href', '/transactions')
   })
 })

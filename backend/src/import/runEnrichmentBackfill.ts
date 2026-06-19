@@ -18,6 +18,7 @@ import { loadAllRules } from './applyRules';
 import { findMerchantMemory } from '../ai/merchantMemory';
 import { caseInsensitiveLikeOp } from '../ai/chat/_common';
 import { enrichTransaction } from './enrich';
+import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import {
   loadAmazonOrdersCache,
@@ -31,6 +32,7 @@ import {
   enrichmentAmazonLinkThreshold,
   enrichmentRefundWindowDays,
   enrichmentTransferWindowDays,
+  enrichmentEmbeddingEnabled,
 } from '../config/env';
 import { recomputeTransactionAmounts } from './calculateShares';
 import { runBackfillBatchTrace } from './backfillTrace';
@@ -38,6 +40,7 @@ import {
   maybeRunAiBatchOverColdRows,
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
+import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
 import type { ChatMessage } from './enrichment/aiBatchStage';
 
 export interface BackfillFlags {
@@ -106,7 +109,12 @@ export interface BackfillCallbacks {
 export async function runBackfill(
   flags: BackfillFlags,
   callbacks: BackfillCallbacks = {},
-  deps: { aiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>> } = {},
+  deps: {
+    aiCaller?: (msgs: ChatMessage[]) => Promise<Record<string, unknown>>;
+    /** Injectable embedder for the embedding-match stage (#792); tests pass a
+     *  seeded stub so no model download / network is needed. */
+    embedder?: import('../ai/merchantEmbeddings').Embedder;
+  } = {},
 ): Promise<BackfillResult> {
   const rulesByHousehold = new Map<string, Awaited<ReturnType<typeof loadAllRules>>>();
   const amazonByHousehold = new Map<string, Awaited<ReturnType<typeof loadAmazonOrdersCache>>>();
@@ -187,6 +195,12 @@ export async function runBackfill(
   // per-household. The manual route is single-household so this is usually one
   // group.
   const runAi = flags.ai === true && !flags.dryRun;
+  // Embedding-match (#792) is local + offline, so it runs over cold rows
+  // independent of the AI flag — only the OpenAI batch is AI-gated. Cold rows
+  // are accumulated whenever EITHER cold-row stage could fire (and never on a
+  // dry run, which never persists).
+  const runEmbedding = enrichmentEmbeddingEnabled && !flags.dryRun;
+  const accumulateColdRows = runAi || runEmbedding;
   const coldRowsByHousehold = new Map<number | null, ColdRow[]>();
   const pushColdRow = (householdId: number | null, row: ColdRow) => {
     const existing = coldRowsByHousehold.get(householdId);
@@ -406,6 +420,20 @@ export async function runBackfill(
                   transaction: t,
                 });
               }
+
+              // Rule actions side-effects (issue #795): re-apply labels
+              // (idempotent), but do NOT re-fire alerts on a backfill — that
+              // would re-notify the user for already-seen transactions.
+              const ruleActions = findRuleActionsSignal(enriched.signals);
+              if (ruleActions) {
+                await applyRuleSideEffects({
+                  ruleActions,
+                  transactionId: txn.id,
+                  householdId: txn.householdId,
+                  transaction: t,
+                  applyAlerts: false,
+                });
+              }
             });
 
             updated++;
@@ -415,7 +443,7 @@ export async function runBackfill(
             // Accumulate cold rows for the post-loop ai-batch stage. Built the
             // same way the import path builds them (runImport.ts), so the shared
             // module sees an identical ColdRow shape.
-            if (runAi && f.reviewFlag === true) {
+            if (accumulateColdRows && f.reviewFlag === true) {
               const key = (f.merchantCanonical ?? '').trim() || f.merchantClean.trim();
               if (key.length > 0) {
                 pushColdRow(txn.householdId, {
@@ -486,17 +514,26 @@ export async function runBackfill(
     }
   }
 
-  // === Stage 8: ai-batch over cold rows ===
-  // Runs outside every per-row DB transaction (same as the import path) so AI
-  // latency never holds locks. Gated on flags.ai && !dryRun via `runAi`; the
-  // shared module also self-gates on enrichmentAiEnabled + OpenAI config, so
-  // this is a no-op when AI is disabled or no rows stayed cold.
-  if (runAi) {
+  // === Stage 5.5 embedding-match, then Stage 8 ai-batch, over cold rows ===
+  // Run outside every per-row DB transaction (same as the import path) so AI
+  // latency never holds locks. Embedding-match runs first and is local/offline
+  // (self-gates on enrichmentEmbeddingEnabled + presence of priors), so it runs
+  // independent of the AI flag (#792, AC #12); rows it matches are removed from
+  // the set the OpenAI batch then sees. The AI batch only runs when `runAi` and
+  // self-gates on enrichmentAiEnabled + OpenAI config. Same shared modules the
+  // import path uses, so behavior cannot fork.
+  if (accumulateColdRows) {
     for (const [householdId, rows] of coldRowsByHousehold) {
-      const summary = await maybeRunAiBatchOverColdRows(rows, householdId, {
-        openaiCaller: deps.aiCaller,
+      const embeddingMatch = await maybeRunEmbeddingMatchOverColdRows(rows, householdId, {
+        embedder: deps.embedder,
       });
-      aiEnhanced += summary.enhanced;
+      aiEnhanced += embeddingMatch.summary.matched;
+      if (runAi) {
+        const summary = await maybeRunAiBatchOverColdRows(embeddingMatch.remainingColdRows, householdId, {
+          openaiCaller: deps.aiCaller,
+        });
+        aiEnhanced += summary.enhanced;
+      }
     }
   }
 

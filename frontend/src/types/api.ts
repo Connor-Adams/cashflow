@@ -79,6 +79,7 @@ export type {
   RealizedSecurityRow,
   RealizedTotalsRow,
   Rule,
+  RuleAction,
   Paginated,
   RollupRow,
   Security,
@@ -1640,10 +1641,59 @@ export type NotificationPreference = {
   type: string;
   channelInApp: boolean;
   channelEmail: boolean;
+  /** Web-push channel (issue #651). */
+  channelPush: boolean;
+  /** 0=Sun … 6=Sat; only meaningful for `digest.weekly` (issue #796). */
+  digestDayOfWeek: number;
 };
 
 export type NotificationPreferencesListResponse = {
   data: NotificationPreference[];
+};
+
+// ---- Weekly digest payload (issue #796) ---------------------------------
+// Shape of `Notification.dataJson` for `type='digest.weekly'`. Every field is
+// optional on read so a digest persisted before #796 degrades to the headline
+// without throwing.
+
+export type DigestCategoryDelta = {
+  category: string;
+  currency: string;
+  total: number;
+  priorTotal: number;
+  delta: number;
+};
+
+export type DigestInsight = {
+  id: number;
+  type: string;
+  severity: string;
+  title: string;
+};
+
+export type DigestUpcomingExpectation = {
+  id: number;
+  name: string;
+  dueDate: string;
+  amount: number;
+  currency: string;
+};
+
+export type WeeklyDigestPayload = {
+  weekStart?: string;
+  weekEnd?: string;
+  currency?: string;
+  totalSpend?: number;
+  priorTotalSpend?: number;
+  totalIncome?: number;
+  priorTotalIncome?: number;
+  netChange?: number;
+  topCategory?: string | null;
+  categoryDeltas?: DigestCategoryDelta[];
+  openInsightCount?: number;
+  topInsights?: DigestInsight[];
+  upcomingExpectations?: DigestUpcomingExpectation[];
+  link?: string;
 };
 
 /** Local-first encrypted sync foundation (#239). */

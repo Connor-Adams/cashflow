@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { RulesPage } from './RulesPage'
 import { ToastProvider } from '@/components/ui/toast'
+import { resetLabelsCache } from '../lib/useLabels'
 
 const SAMPLE_RULES = [
   { id: 1, merchantPattern: 'amazon', matchKind: 'substring', priority: 0, category: 'Shopping', isBusiness: false, splitType: 'me', pctMe: null, pctPartner: null, usageCount: 1204 },
@@ -48,12 +49,17 @@ function mockFetch(rules: typeof SAMPLE_RULES, overrides: MockOverrides = {}) {
     }) } as Response)
     if (url.endsWith('/api/rules/suggestions')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ suggestions: [] }) } as Response)
     if (url.endsWith('/api/transactions/category-hints')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ categories: [] }) } as Response)
+    if (url.endsWith('/api/labels')) return Promise.resolve({ ok: true, json: () => Promise.resolve([
+      { id: 11, name: 'reimbursable', usageCount: 3 },
+      { id: 12, name: 'tax-deductible', usageCount: 0 },
+    ]) } as Response)
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
   }))
 }
 
 describe('RulesPage', () => {
   beforeEach(() => {
+    resetLabelsCache()
     mockFetch(SAMPLE_RULES)
     Element.prototype.scrollIntoView = vi.fn()
   })
@@ -141,6 +147,52 @@ describe('RulesPage', () => {
         // 60 must arrive as the fraction '0.6' with pctPartner null.
         expect(body.pctMe).toBe('0.6')
         expect(body.pctPartner).toBeNull()
+      })
+    })
+  })
+
+  describe('rule actions: tags + alert (issue #795)', () => {
+    function renderRules() {
+      return render(
+        <MemoryRouter initialEntries={['/rules']}>
+          <ToastProvider>
+            <RulesPage />
+          </ToastProvider>
+        </MemoryRouter>,
+      )
+    }
+
+    it('adds set_label and set_alert action rows and posts them in actions[]', async () => {
+      renderRules()
+      await waitFor(() => expect(screen.getByText('amazon')).toBeInTheDocument())
+      // Tags load from /api/labels.
+      const tagButton = await screen.findByRole('button', { name: 'reimbursable' })
+
+      await userEvent.type(screen.getByLabelText(/^pattern$/i), 'acme')
+      await userEvent.click(tagButton)
+      // Enable the alert and set severity + title.
+      await userEvent.click(screen.getByLabelText(/raise alert/i))
+      await userEvent.selectOptions(screen.getByLabelText(/severity/i), 'warn')
+      await userEvent.type(screen.getByLabelText(/title/i), 'ACME charge')
+
+      await userEvent.click(screen.getByRole('button', { name: /add rule/i }))
+
+      await waitFor(() => {
+        const post = vi
+          .mocked(fetch)
+          .mock.calls.find(
+            (c) =>
+              String(c[0]).endsWith('/api/rules') &&
+              (c[1] as RequestInit | undefined)?.method === 'POST',
+          )
+        expect(post).toBeTruthy()
+        const body = JSON.parse(String((post![1] as RequestInit).body))
+        expect(body.actions).toEqual(
+          expect.arrayContaining([
+            { type: 'set_label', payload: { labelId: 11 } },
+            { type: 'set_alert', payload: { severity: 'warn', title: 'ACME charge' } },
+          ]),
+        )
       })
     })
   })

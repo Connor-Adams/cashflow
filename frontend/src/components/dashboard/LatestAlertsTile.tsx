@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { BentoTile } from './BentoTile'
 import { Button } from '@cashflow/ui'
 import { getJson, postJson } from '@/lib/api'
 import { usePushSubscription } from '@/hooks/usePushSubscription'
 import { deepLinkForNotification } from '@/lib/notificationLinks'
+import { DigestCard } from '@/components/notifications/DigestCard'
 import type {
   Notification,
   NotificationSeverity,
@@ -87,6 +88,9 @@ function EnableAlertsControl() {
 export function LatestAlertsTile() {
   const [status, setStatus] = useState<Status>('loading')
   const [items, setItems] = useState<Notification[]>([])
+  // Deep-link from a push tap: `/?digest=expand` opens the digest card open.
+  const [searchParams] = useSearchParams()
+  const expandDigest = searchParams.get('digest') === 'expand'
 
   const load = useCallback(async () => {
     setStatus('loading')
@@ -162,7 +166,12 @@ export function LatestAlertsTile() {
 
       {status === 'success' && items.length > 0 && (
         <ul className="space-y-3">
-          {items.map((n) => (
+          {items.map((n) =>
+            n.type === 'digest.weekly' ? (
+              <li key={n.id}>
+                <DigestCard notification={n} defaultExpanded={expandDigest} />
+              </li>
+            ) : (
             <li key={n.id}>
               <Link
                 to={deepLinkForNotification(n)}

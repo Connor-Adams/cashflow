@@ -41,6 +41,7 @@ import { findMerchantMemory } from '../ai/merchantMemory';
 import { upsertSuggestedOrderLink } from '../amazon/matcher';
 import * as env from '../config/env';
 import { enrichTransaction } from './enrich';
+import { applyRuleSideEffects, findRuleActionsSignal } from '../rules/applyRuleSideEffects';
 import {
   computeImportConfidence,
   serializeFlags,
@@ -66,6 +67,7 @@ import {
   maybeRunAiBatchOverColdRows,
   type ColdRow,
 } from './enrichment/aiBatchOverColdRows';
+import { maybeRunEmbeddingMatchOverColdRows } from './enrichment/embeddingMatchOverColdRows';
 export { aiSuggestionToSignal, dedupeColdRowsByMerchantKey } from './enrichment/aiBatchOverColdRows';
 import { logger } from '../observability/logger';
 import { findOrCreateAccount } from './accountLookup';
@@ -584,6 +586,17 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
               transaction: sp,
             });
           }
+
+          // Rule actions side-effects (issue #795): set_label / set_alert.
+          const ruleActions = findRuleActionsSignal(enriched.signals);
+          if (ruleActions) {
+            await applyRuleSideEffects({
+              ruleActions,
+              transactionId: txn.id,
+              householdId: opts.householdId ?? account.householdId ?? null,
+              transaction: sp,
+            });
+          }
         });
         inserted += 1;
         if (enriched.fields.reviewFlag) {
@@ -649,11 +662,22 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
     );
   });
 
-  // === Phase 2: stage 8 ai-batch over cold rows ===
+  // === Phase 2a: stage 5.5 embedding-match over cold rows (#792) ===
+  // Local, offline-capable semantic match against the household's reviewed
+  // merchants. Runs BEFORE the OpenAI batch; rows it matches are persisted here
+  // and removed from the AI-batch candidate set, so OpenAI stays the strict
+  // below-threshold fallback. Runs outside the import transaction.
+  const enrichHouseholdId = opts.householdId ?? account.householdId ?? null;
+  const embeddingMatch = await maybeRunEmbeddingMatchOverColdRows(coldRows, enrichHouseholdId);
+
+  // === Phase 2b: stage 8 ai-batch over the rows embedding-match left cold ===
   // Runs OUTSIDE the import transaction so OpenAI latency doesn't hold DB locks.
   // Each enhancement is an independent update; partial enhancement is acceptable
   // (cold rows still have phase-1 fields and review_flag=true).
-  const aiEnhanced = await maybeRunAiBatchOverColdRows(coldRows, opts.householdId ?? account.householdId ?? null);
+  const aiEnhanced = await maybeRunAiBatchOverColdRows(
+    embeddingMatch.remainingColdRows,
+    enrichHouseholdId,
+  );
 
   const out: Record<string, unknown> = {
     file: name,
@@ -674,6 +698,13 @@ export async function importCsvFile(opts: ImportCsvFileOpts) {
   } else if (inserted === 0 && skippedDup > 0 && rowErrors === 0) {
     out.warning =
       'Every row matched an existing transaction (duplicate) — nothing new to add.';
+  }
+  if (embeddingMatch.summary.attempted) {
+    out.embeddingMatch = {
+      coldRows: embeddingMatch.summary.coldRowCount,
+      priorMerchants: embeddingMatch.summary.priorMerchants,
+      matched: embeddingMatch.summary.matched,
+    };
   }
   if (aiEnhanced.attempted) {
     out.aiBatch = {

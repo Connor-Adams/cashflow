@@ -33,6 +33,7 @@ import { MonthlyClosePage } from './pages/MonthlyClosePage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
+import { MerchantCleanupPage } from './pages/MerchantCleanupPage'
 import { AuditLogPage } from './pages/AuditLogPage'
 import { SyncPage } from './pages/SyncPage'
 import { TransactionsPage } from './pages/TransactionsPage'
@@ -60,6 +61,7 @@ import { JobsTab } from './pages/settings/tabs/JobsTab'
 import { WhatsNewTab } from './pages/settings/tabs/WhatsNewTab'
 import { FeedbackInboxTab } from './pages/settings/tabs/FeedbackInboxTab'
 import { ApiTokensTab } from './pages/settings/tabs/ApiTokensTab'
+import { NotificationsTab } from './pages/settings/tabs/NotificationsTab'
 import { IncomePage } from './pages/IncomePage'
 import { TaxPage } from './pages/TaxPage'
 import { ReturnWarrantyPage } from './pages/ReturnWarrantyPage'
@@ -150,6 +152,7 @@ function AppRoutes() {
           <Route path="subscriptions" element={<Navigate to="/planned/subscriptions" replace />} />
           <Route path="money-leaks" element={<Navigate to="/transactions/leaks" replace />} />
           <Route path="rules" element={<RulesPage />} />
+          <Route path="merchants/cleanup" element={<MerchantCleanupPage />} />
           <Route path="partner" element={<Navigate to="/reports/partner" replace />} />
           <Route path="partner-home" element={<PartnerHomePage />} />
           <Route path="reports" element={<ReportsLayout />}>
@@ -175,6 +178,7 @@ function AppRoutes() {
             <Route index element={<Navigate to="display" replace />} />
             <Route path="display" element={<DisplaySection />} />
             <Route path="appearance" element={<AppearanceSection />} />
+            <Route path="notifications" element={<NotificationsTab />} />
             <Route path="gmail" element={<GmailSection />} />
             <Route path="partner-invite" element={<PartnerInviteSection />} />
             <Route path="members" element={<MembersTab />} />

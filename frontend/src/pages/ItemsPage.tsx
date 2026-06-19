@@ -110,7 +110,11 @@ export function ItemsPage() {
       </header>
 
       <TabPanel value="browse" active={tab}>
-        <ItemsBrowse filters={filters} onOpenItem={openItem} />
+        <ItemsBrowse
+          filters={filters}
+          onOpenItem={openItem}
+          onClearFilters={() => setFilters({})}
+        />
       </TabPanel>
       <TabPanel value="analyze" active={tab}>
         <AnalyzeTab />

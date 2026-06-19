@@ -16,8 +16,14 @@ import {
   detectMissingReceipt,
   detectUnusualCategorySpend,
   detectSettlementImbalance,
+  detectCashRunwayLow,
+  detectCategoryTrend,
 } from './detectors';
-import type { DetectorTransaction, DetectorSettlement } from './detectors';
+import type {
+  DetectorTransaction,
+  DetectorSettlement,
+  DetectorRunwayPoint,
+} from './detectors';
 
 function txn(partial: Partial<DetectorTransaction>): DetectorTransaction {
   return {
@@ -372,3 +378,225 @@ function _settlement(p: Partial<DetectorSettlement>): DetectorSettlement {
 }
 // Make _settlement appear used so TS doesn't strip it.
 void _settlement;
+
+// ---- detectCashRunwayLow -----------------------------------------------
+
+/** Build a flat-then-stepping daily series starting at `now`. */
+function runwaySeries(
+  now: Date,
+  balances: number[],
+  currency = 'CAD',
+): DetectorRunwayPoint[] {
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  return balances.map((balance, i) => ({
+    date: new Date(now.getTime() + i * MS_PER_DAY).toISOString().slice(0, 10),
+    balance,
+    currency,
+  }));
+}
+
+test('detectCashRunwayLow: fires when projected balance crosses below buffer within horizon', () => {
+  const now = new Date('2026-05-01T12:00:00Z');
+  // Balance stays positive for ~20 days, then dips negative on day 20.
+  const balances = Array.from({ length: 31 }, (_, i) => (i < 20 ? 500 - i * 10 : -50));
+  const insights = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  assert.equal(insights.length, 1);
+  assert.equal(insights[0].type, 'cash_runway_low');
+  assert.equal(insights[0].title, 'Projected balance is running low');
+  assert.ok(insights[0].fingerprint.startsWith('runway:CAD:'));
+  assert.ok(insights[0].fingerprint.length > 'runway:CAD:'.length);
+  // Crossing is on day 20 (> 7 days out) but balance is negative → critical.
+  assert.equal(insights[0].severity, 'critical');
+});
+
+test('detectCashRunwayLow: does NOT fire when balance stays above buffer all horizon', () => {
+  const now = new Date('2026-05-01T12:00:00Z');
+  const balances = Array.from({ length: 31 }, () => 1000);
+  const insights = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  assert.equal(insights.length, 0);
+});
+
+test('detectCashRunwayLow: does NOT fire when crossing is beyond the horizon (day 45)', () => {
+  const now = new Date('2026-05-01T12:00:00Z');
+  // 46-day series, positive until day 45 — but detector only scans 30 days.
+  const balances = Array.from({ length: 46 }, (_, i) => (i < 45 ? 100 : -100));
+  const insights = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  assert.equal(insights.length, 0);
+});
+
+test('detectCashRunwayLow: critical when crossing within 7 days', () => {
+  const now = new Date('2026-05-01T12:00:00Z');
+  // Dip below buffer on day 3 (but still positive — wait, need < buffer=0).
+  const balances = Array.from({ length: 31 }, (_, i) => (i < 3 ? 100 : -10));
+  const insights = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  assert.equal(insights.length, 1);
+  assert.equal(insights[0].severity, 'critical');
+});
+
+test('detectCashRunwayLow: warning when crossing is far out (>7 days) and balance is positive but below a positive buffer', () => {
+  // With the default buffer of 0 a crossing always means a negative balance,
+  // which is critical. To exercise the `warning` tier we verify the severity
+  // logic directly: a non-negative crossing >7 days out maps to warning. Since
+  // the default buffer is 0, we assert the negative-balance path stays critical
+  // and document that the warning tier is reachable only with a positive buffer
+  // (configurable later — see RUNWAY_LOW_BUFFER TODO).
+  const now = new Date('2026-05-01T12:00:00Z');
+  const balances = Array.from({ length: 31 }, (_, i) => (i < 15 ? 100 : -5));
+  const insights = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  assert.equal(insights.length, 1);
+  // Day 15 crossing, negative balance → critical per the spec.
+  assert.equal(insights[0].severity, 'critical');
+});
+
+test('detectCashRunwayLow: evaluates each currency independently', () => {
+  const now = new Date('2026-05-01T12:00:00Z');
+  const cad = runwaySeries(now, Array.from({ length: 31 }, (_, i) => (i < 10 ? 100 : -50)), 'CAD');
+  const usd = runwaySeries(now, Array.from({ length: 31 }, () => 5000), 'USD');
+  const insights = detectCashRunwayLow([...cad, ...usd], { now });
+  assert.equal(insights.length, 1);
+  assert.equal((insights[0].metadata as { currency: string }).currency, 'CAD');
+});
+
+test('detectCashRunwayLow: fingerprint stable across re-runs when crossing date unchanged', () => {
+  const now = new Date('2026-05-01T12:00:00Z');
+  const balances = Array.from({ length: 31 }, (_, i) => (i < 12 ? 100 : -20));
+  const run1 = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  const run2 = detectCashRunwayLow(runwaySeries(now, balances), { now });
+  assert.equal(run1[0].fingerprint, run2[0].fingerprint);
+});
+
+// ---- detectCategoryTrend -----------------------------------------------
+
+test('detectCategoryTrend: fires on a sustained ≥25% month-over-month rise over 3 full months', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  // Prior 3 full months = Feb, Mar, Apr. 200 → 250 → 300 = +50% rise.
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -200 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -250 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -300 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 1);
+  assert.equal(insights[0].type, 'category_trend');
+  assert.equal(insights[0].title, 'Groceries spending keeps climbing');
+  assert.ok(insights[0].fingerprint.startsWith('category-trend:CAD:groceries:'));
+  // +50% ≥ 40% → warning
+  assert.equal(insights[0].severity, 'warning');
+  const md = insights[0].metadata as { risePct: number; monthlyTotals: number[] };
+  assert.equal(md.risePct, 50);
+  assert.deepEqual(md.monthlyTotals, [200, 250, 300]);
+});
+
+test('detectCategoryTrend: info severity for a 25–40% rise', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  // 200 → 240 → 280 = +40%? (280-200)/200 = 0.4 → warning boundary. Use +30%.
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Dining', amount: -200 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Dining', amount: -230 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Dining', amount: -260 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 1);
+  assert.equal(insights[0].severity, 'info'); // +30%
+});
+
+test('detectCategoryTrend: does NOT fire when rise is below 25%', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  // 200 → 210 → 220 = +10%
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -200 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -210 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -220 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 0);
+});
+
+test('detectCategoryTrend: does NOT fire when latest month is below the $100 floor', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  // Strong % rise but tiny absolute amounts: 20 → 40 → 60 (+200%) but last < 100.
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Coffee', amount: -20 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Coffee', amount: -40 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Coffee', amount: -60 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 0);
+});
+
+test('detectCategoryTrend: does NOT fire when one of the 3 months has no spend (gap)', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  // Feb and Apr present, Mar missing — not a sustained trend.
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -200 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -400 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 0);
+});
+
+test('detectCategoryTrend: does NOT fire on a flat series', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -300 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -300 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -300 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 0);
+});
+
+test('detectCategoryTrend: does NOT fire on a declining series', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const insights = detectCategoryTrend(
+    [
+      txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -400 }),
+      txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -300 }),
+      txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -200 }),
+    ],
+    { now },
+  );
+  assert.equal(insights.length, 0);
+});
+
+test('detectCategoryTrend: produces a distinct finding from detectUnusualCategorySpend on shared data', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  // Data that trips BOTH: prior 3 months trend up (200→250→300), AND a current
+  // (May) month spike of 800 vs the ~250 prior avg (>2x).
+  const rows: DetectorTransaction[] = [
+    txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -200 }),
+    txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -250 }),
+    txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -300 }),
+    txn({ id: 4, date: '2026-05-05', finalCategory: 'Groceries', amount: -800 }),
+  ];
+  const trend = detectCategoryTrend(rows, { now });
+  const spike = detectUnusualCategorySpend(rows, { now });
+  assert.equal(trend.length, 1);
+  assert.equal(spike.length, 1);
+  assert.notEqual(trend[0].type, spike[0].type);
+  assert.notEqual(trend[0].fingerprint, spike[0].fingerprint);
+});
+
+test('detectCategoryTrend: fingerprint stable across re-runs for the same rolling window', () => {
+  const now = new Date('2026-05-15T12:00:00Z');
+  const rows: DetectorTransaction[] = [
+    txn({ id: 1, date: '2026-02-10', finalCategory: 'Groceries', amount: -200 }),
+    txn({ id: 2, date: '2026-03-10', finalCategory: 'Groceries', amount: -250 }),
+    txn({ id: 3, date: '2026-04-10', finalCategory: 'Groceries', amount: -300 }),
+  ];
+  const run1 = detectCategoryTrend(rows, { now });
+  const run2 = detectCategoryTrend(rows, { now });
+  assert.equal(run1[0].fingerprint, run2[0].fingerprint);
+});

@@ -13,6 +13,7 @@ import { Alert } from '@cashflow/ui'
 import { Badge } from '@cashflow/ui'
 import { Button } from '@cashflow/ui'
 import { Card } from '@cashflow/ui'
+import { EmptyState } from '@cashflow/ui'
 import { Grid } from '@cashflow/ui'
 import { NativeSelect } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
@@ -249,13 +250,16 @@ export function ExplainMonthPage() {
           <MonthOverMonthSection data={data} />
 
           {(data.findings ?? []).length === 0 ? (
-            <Card className="mb-4">
-              <p className="text-sm leading-6 text-muted-foreground mb-0">
-                Nothing notable for {data.month}. Spend levels match the
-                previous month, no subscriptions changed, and there are no
-                review-blocked transactions.
-              </p>
-            </Card>
+            <EmptyState
+              className="mb-4"
+              title="Nothing notable this month"
+              description="Spend matched the previous month, no subscriptions changed, and nothing needs review."
+              actions={
+                <Button asChild size="sm">
+                  <Link to="/transactions">View transactions</Link>
+                </Button>
+              }
+            />
           ) : (
             KIND_ORDER.filter((k) => findingsByKind.has(k)).map((kind) => (
               <FindingGroup

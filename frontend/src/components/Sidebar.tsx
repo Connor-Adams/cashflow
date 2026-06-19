@@ -27,6 +27,7 @@ import {
   Upload,
   PiggyBank,
   Sparkles,
+  Tags,
   Users,
 } from 'lucide-react'
 import { Badge } from '@cashflow/ui'
@@ -99,6 +100,7 @@ const navSections: NavSection[] = [
     label: 'Insights & rules',
     items: [
       { to: '/rules', label: 'Rules', icon: BookOpenCheck },
+      { to: '/merchants/cleanup', label: 'Merchant cleanup', icon: Tags },
       { to: '/reports', label: 'Reports', icon: BarChart3 },
       { to: '/vault', label: 'Vault', icon: Lock, visibilityKey: 'vault' },
       { to: '/monthly-close', label: 'Monthly close', icon: CheckSquare },

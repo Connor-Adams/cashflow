@@ -187,4 +187,53 @@ describe('SearchPage', () => {
       expect(screen.getByText(/big-grocery-runs/i)).toBeTruthy()
     })
   })
+
+  it('renders the "Search your transactions" EmptyState with a Try an example CTA before any query (#799)', async () => {
+    makeFetchStub((url) => {
+      if (url.endsWith('/api/search/saved')) {
+        return new Response(JSON.stringify([]), { status: 200 })
+      }
+      return new Response('not stubbed', { status: 500 })
+    })
+    render(
+      <MemoryRouter>
+        <SearchPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('Search your transactions')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /try an example/i })).toBeTruthy()
+  })
+
+  it('renders the "No matches" EmptyState with a Try a different term CTA when a query returns zero results (#799)', async () => {
+    makeFetchStub((url) => {
+      if (url.endsWith('/api/search/saved')) {
+        return new Response(JSON.stringify([]), { status: 200 })
+      }
+      if (url.includes('/api/search?')) {
+        return new Response(
+          JSON.stringify({
+            intent: { category: 'Groceries', errors: [], isEmpty: false },
+            results: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+          }),
+          { status: 200 },
+        )
+      }
+      return new Response('not stubbed', { status: 500 })
+    })
+    render(
+      <MemoryRouter>
+        <SearchPage />
+      </MemoryRouter>,
+    )
+    const input = screen.getByLabelText(/Search transactions/i)
+    fireEvent.change(input, { target: { value: 'category:Groceries' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Search$/i }))
+    await waitFor(() => {
+      expect(screen.getByText('No matches')).toBeTruthy()
+      expect(screen.getByRole('button', { name: /try a different term/i })).toBeTruthy()
+    })
+  })
 })

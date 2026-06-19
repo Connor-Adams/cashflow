@@ -586,13 +586,20 @@ export type ResolvedCategoryPath = {
 export type Label = {
   id: number
   name: string
+  /**
+   * Optional chip color (issue #794), a 6-digit hex string (`#RRGGBB`), or
+   * `null` for the neutral chip. Always present on the GET /api/labels list.
+   */
+  color: string | null
   usageCount?: number
 }
 
-/** The shape a transaction carries for each applied label (id + name only). */
+/** The shape a transaction carries for each applied label (id + name + color). */
 export type TransactionLabelRef = {
   id: number
   name: string
+  /** Chip color (issue #794): a `#RRGGBB` hex string, or `null` for neutral. */
+  color: string | null
 }
 
 export type AuthUser = {
@@ -607,6 +614,18 @@ export type AuthUser = {
   } | null
 }
 
+/**
+ * A rule's composable effect (issue #795). The scalar columns below mirror the
+ * `set_category` / `set_business` / `set_split` actions for backward compat;
+ * `set_label` / `set_alert` live only in the actions list.
+ */
+export type RuleAction =
+  | { type: 'set_category'; payload: { category: string | null } }
+  | { type: 'set_business'; payload: { isBusiness: boolean } }
+  | { type: 'set_split'; payload: { splitType: string; pctMe: string | null; pctPartner: string | null } }
+  | { type: 'set_label'; payload: { labelId: number } }
+  | { type: 'set_alert'; payload: { severity: 'info' | 'warn' | 'critical'; title?: string; body?: string } }
+
 export type Rule = {
   id: number
   merchantPattern: string
@@ -619,6 +638,7 @@ export type Rule = {
   pctPartner: string | null
   effectiveFrom: string | null
   effectiveTo: string | null
+  actions?: RuleAction[]
   usageCount?: number
   updatedAt?: string
 }
@@ -1882,4 +1902,105 @@ export interface TransferLinkResult {
   ambiguous: TransferLinkAmbiguous[];
   dryRun: boolean;
   elapsedMs: number;
+}
+
+// ── Merchant-cleanup review surface (issue #793) ──────────────────────────
+
+export interface MerchantClusterCategorySpread {
+  category: string | null;
+  count: number;
+}
+
+export interface MerchantCluster {
+  merchantClean: string;
+  canonical: string | null;
+  count: number;
+  /** Sum of absolute negative-amount (spend) rows, fixed(2) string. */
+  totalSpend: string;
+  currency: string;
+  dominantCategory: string | null;
+  categorySpread: MerchantClusterCategorySpread[];
+  sampleDescriptions: string[];
+}
+
+export interface MerchantClustersResponse {
+  clusters: MerchantCluster[];
+}
+
+export interface MerchantBulkRecategorizeResponse {
+  recategorized: number;
+  ruleCreated: boolean;
+  ruleId: number | null;
+}
+
+export interface MerchantMergeResponse {
+  reassigned: number;
+  survivor: string;
+}
+
+// ---------------------------------------------------------------------------
+// SimpleFIN Bridge connection (issue #790)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle of a stored SimpleFIN connection. */
+export type SimplefinStatus = 'connected' | 'error' | 'disconnected';
+
+/** Request body for POST /api/simplefin/connect. */
+export interface SimplefinConnectRequest {
+  /** One-time base64 setup token pasted from SimpleFIN Bridge. */
+  setupToken: string;
+}
+
+/** A SimpleFIN account discovered at connect time that matched no Account row. */
+export interface SimplefinUnlinkedAccount {
+  simplefinId: string;
+  name: string;
+}
+
+/** Success body for POST /api/simplefin/connect. */
+export interface SimplefinConnectResponse {
+  status: SimplefinStatus;
+  accountsFound: number;
+  accountsLinked: number;
+  unlinkedAccounts: SimplefinUnlinkedAccount[];
+}
+
+/** Body for GET /api/simplefin/status. Never carries credentials. */
+export interface SimplefinStatusResponse {
+  connected: boolean;
+  status: SimplefinStatus;
+  statusReason: string | null;
+  lastSyncedAt: string | null;
+  /** Masked host of the access URL (never the credentials), or null. */
+  host: string | null;
+  accountsLinked?: number | null;
+}
+
+/** Body for POST /api/simplefin/disconnect. */
+export interface SimplefinDisconnectResponse {
+  status: 'disconnected';
+}
+
+// ---------------------------------------------------------------------------
+// SimpleFIN daily transaction sync (issue #791)
+// ---------------------------------------------------------------------------
+
+/** Request body for POST /api/simplefin/sync (manual "Sync now"). */
+export interface SimplefinSyncRequest {
+  /** Limit the sync to one integration; omitted syncs the caller's connection. */
+  integrationId?: number;
+}
+
+/** Per-account result of a single integration sync. */
+export interface SimplefinSyncRun {
+  integrationId: number;
+  accountId: number;
+  inserted: number;
+  skippedDuplicate: number;
+  status: SimplefinStatus;
+}
+
+/** Success body for POST /api/simplefin/sync. */
+export interface SimplefinSyncResponse {
+  runs: SimplefinSyncRun[];
 }

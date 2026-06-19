@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button } from '@cashflow/ui'
 import { PageHeader } from '@/components/ui/page-header'
@@ -25,6 +26,7 @@ function resolveGroup(params: URLSearchParams): ReceiptGroup {
 export function ReceiptsPage() {
   const [params, setParams] = useSearchParams()
   const group = resolveGroup(params)
+  const sourcesRef = useRef<HTMLDivElement>(null)
 
   function selectGroup(next: ReceiptGroup) {
     const p = new URLSearchParams()
@@ -39,7 +41,9 @@ export function ReceiptsPage() {
         description="Emailed receipts and imported orders, and how they match your card transactions."
       />
 
-      <GmailSection />
+      <div ref={sourcesRef}>
+        <GmailSection />
+      </div>
       <GmailScanHistory />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -66,7 +70,17 @@ export function ReceiptsPage() {
         ))}
       </nav>
 
-      {group === 'amazon' ? <AmazonPage embedded /> : <ReceiptsList group={group} />}
+      {group === 'amazon' ? (
+        <AmazonPage embedded />
+      ) : (
+        <ReceiptsList
+          group={group}
+          onUploadClick={() =>
+            sourcesRef.current?.scrollIntoView({ behavior: 'smooth' })
+          }
+          onClearGroup={() => selectGroup('all')}
+        />
+      )}
     </main>
   )
 }

@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { Button } from '@cashflow/ui'
 import { postJson } from '../../lib/api'
+import { labelChipStyle, isValidLabelColor } from '../../lib/labelColors'
 import type { Label, TransactionLabelRef } from '../../types/api'
 
 const LABEL_NAME_MAX = 32
@@ -78,7 +79,7 @@ export function LabelChipPicker({
     if (appliedIds.has(label.id)) return
     setQuery('')
     setHighlight(0)
-    await persist([...value, { id: label.id, name: label.name }])
+    await persist([...value, { id: label.id, name: label.name, color: label.color ?? null }])
   }
 
   async function applyTypedName(raw: string): Promise<void> {
@@ -104,7 +105,7 @@ export function LabelChipPicker({
       setQuery('')
       setHighlight(0)
       onLabelsMutated?.()
-      await persist([...value, { id: created.id, name: created.name }])
+      await persist([...value, { id: created.id, name: created.name, color: created.color ?? null }])
     } catch {
       setError("Couldn't save label. Try again.")
       setBusy(false)
@@ -149,7 +150,9 @@ export function LabelChipPicker({
         {value.map((label) => (
           <span
             key={label.id}
-            className="group inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+            className="group inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+            style={labelChipStyle(label.color)}
+            data-tinted={isValidLabelColor(label.color) ? 'true' : undefined}
           >
             {label.name}
             <Button

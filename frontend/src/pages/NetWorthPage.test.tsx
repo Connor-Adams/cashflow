@@ -128,6 +128,27 @@ describe('NetWorthPage', () => {
     }
   })
 
+  it('shows the "No accounts yet" EmptyState with an Add an account CTA when there is no data (#799)', () => {
+    vi.mocked(useNetWorthCurrent).mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      refresh: () => {},
+    })
+    try {
+      render(
+        <MemoryRouter>
+          <NetWorthPage />
+        </MemoryRouter>,
+      )
+      expect(screen.getByText('No accounts yet')).toBeInTheDocument()
+      const cta = screen.getByRole('link', { name: /add an account/i })
+      expect(cta).toHaveAttribute('href', '/settings/accounts')
+    } finally {
+      vi.mocked(useNetWorthCurrent).mockImplementation(() => loadedCurrent())
+    }
+  })
+
   it('opening-balance editor PATCHes the new value on save', async () => {
     render(
       <MemoryRouter>

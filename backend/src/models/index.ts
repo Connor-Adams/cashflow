@@ -24,6 +24,7 @@ import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
+import { MerchantEmbedding, initMerchantEmbedding } from './MerchantEmbedding';
 import { TransactionRevision, initTransactionRevision } from './TransactionRevision';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
@@ -37,6 +38,10 @@ import {
 } from './DividendReconciliation';
 import { FxRate, initFxRate } from './FxRate';
 import { UserEmailIntegration, initUserEmailIntegration } from './UserEmailIntegration';
+import {
+  UserSimplefinIntegration,
+  initUserSimplefinIntegration,
+} from './UserSimplefinIntegration';
 import { ReceiptSenderAllowlist, initReceiptSenderAllowlist } from './ReceiptSenderAllowlist';
 import { ProcessedEmailMessage, initProcessedEmailMessage } from './ProcessedEmailMessage';
 import { UserCaptureToken, initUserCaptureToken } from './UserCaptureToken';
@@ -143,6 +148,7 @@ initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
+initMerchantEmbedding(sequelize);
 initTransactionRevision(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
@@ -153,6 +159,7 @@ initSecurityDividend(sequelize);
 initDividendReconciliation(sequelize);
 initFxRate(sequelize);
 initUserEmailIntegration(sequelize);
+initUserSimplefinIntegration(sequelize);
 initReceiptSenderAllowlist(sequelize);
 initProcessedEmailMessage(sequelize);
 initUserCaptureToken(sequelize);
@@ -328,6 +335,12 @@ User.hasMany(UserEmailIntegration, {
   as: 'emailIntegrations',
 });
 UserEmailIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+User.hasOne(UserSimplefinIntegration, {
+  foreignKey: 'user_id',
+  as: 'simplefinIntegration',
+});
+UserSimplefinIntegration.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Account.hasMany(Transaction, { foreignKey: 'account_id', as: 'transactions' });
 Transaction.belongsTo(Account, { foreignKey: 'account_id', as: 'account' });
@@ -1072,6 +1085,7 @@ export {
   ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
+  MerchantEmbedding,
   TransactionRevision,
   Security,
   InvestmentActivity,
@@ -1081,6 +1095,7 @@ export {
   SecurityDividend,
   FxRate,
   UserEmailIntegration,
+  UserSimplefinIntegration,
   ReceiptSenderAllowlist,
   ProcessedEmailMessage,
   UserCaptureToken,
