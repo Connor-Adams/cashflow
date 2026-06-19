@@ -180,6 +180,11 @@ export function ItemsBrowse({ filters, onOpenItem, onItemsPatched }: Props) {
                 >
                   {r.title}
                 </Button>
+                {r.receipt.sourceTxnId == null && (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Unmatched
+                  </Badge>
+                )}
                 {r.categoryEffective ? (
                   <Badge variant="secondary">{r.categoryEffective}</Badge>
                 ) : (
@@ -250,11 +255,18 @@ function groupItems(
   if (by === 'none') return [{ key: 'all', label: 'All', rows }]
   const buckets = new Map<string, { key: string; label: string; rows: ItemRow[] }>()
   for (const r of rows) {
-    const key = by === 'purchase' ? `${r.receipt.id}` : (r.categoryEffective ?? '__none__')
-    const label =
-      by === 'purchase'
-        ? `${r.order.vendor} · ${r.receipt.date ?? '—'}`
-        : (r.categoryEffective ?? 'Uncategorized')
+    const unmatched = r.receipt.sourceTxnId == null
+    let key: string
+    let label: string
+    if (by === 'purchase') {
+      // Items not reconciled to a transaction collapse into one section rather
+      // than scattering under a meaningless "vendor · —" header per order.
+      key = unmatched ? '__unmatched__' : `${r.receipt.id}`
+      label = unmatched ? 'Unmatched purchases' : `${r.order.vendor} · ${r.receipt.date ?? '—'}`
+    } else {
+      key = r.categoryEffective ?? '__none__'
+      label = r.categoryEffective ?? 'Uncategorized'
+    }
     if (!buckets.has(key)) buckets.set(key, { key, label, rows: [] })
     buckets.get(key)!.rows.push(r)
   }

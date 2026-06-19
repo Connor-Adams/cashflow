@@ -4,6 +4,7 @@ import { Account, LiabilityAccount, PlannedEvent, Transaction } from '../models'
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
 import { currentOwed, utilizationPct } from '../cards/utilization';
+import { materializeCreditCardPayment } from '../cards/materializePayment';
 import { computeSafeToSpend, type SafeToSpendResult } from '../cashflow/safeToSpend';
 
 /**
@@ -468,11 +469,6 @@ router.put('/:accountId', async (req, res, next) => {
 // POST /api/credit-cards/:accountId/payment — materialize a forecast payment
 // ---------------------------------------------------------------------------
 
-/** Marker embedded in a planned event's notes to make the feed idempotent. */
-function cardPaymentTag(accountId: number): string {
-  return `[cc-payment:${accountId}]`;
-}
-
 router.post('/:accountId/payment', async (req, res, next) => {
   try {
     const { user, household } = currentAuth(req);
@@ -517,34 +513,15 @@ router.post('/:accountId/payment', async (req, res, next) => {
 
     const currency = account.defaultCurrency ?? 'CAD';
     const expectedDate = dueDay != null ? nextDueDate(dueDay, asOf) : asOf;
-    const tag = cardPaymentTag(accountId);
 
-    // Idempotent per card: replace any prior planned (unposted) cc-payment for
-    // this card so re-planning never accumulates duplicates. Posted (paid)
-    // events are preserved as history.
-    await PlannedEvent.destroy({
-      where: {
-        householdId: household.id,
-        accountId,
-        source: 'credit_card',
-        status: 'planned',
-      },
-    });
-
-    const plannedEvent = await PlannedEvent.create({
+    const plannedEvent = await materializeCreditCardPayment({
+      accountId,
+      accountName: account.name,
       userId: user.id,
       householdId: household.id,
-      accountId,
-      type: 'debt_payment',
-      name: `${account.name} payment`,
-      amount: amount.toFixed(4),
+      amount,
       currency,
       expectedDate,
-      recurrenceRule: null,
-      source: 'credit_card',
-      status: 'planned',
-      linkedTransactionId: null,
-      notes: tag,
     });
 
     // Return the resulting safe-to-spend so the UI can warn when this payment

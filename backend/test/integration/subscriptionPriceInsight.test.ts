@@ -32,6 +32,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -218,7 +219,7 @@ before(async () => {
   app = mod.default;
 
   // First registration becomes the global superadmin and opens the gate.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -230,7 +231,7 @@ before(async () => {
   householdId = primary.householdId;
   ownerUserId = primary.userId;
   accountId = primary.accountId;
-  agent = request.agent(app);
+  agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   // Seed the subscription + 90d of charges with a >=5% median increase:

@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -68,7 +69,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -79,11 +80,11 @@ before(async () => {
   const primary = await seed('Primary');
   primaryHouseholdId = primary.householdId;
   primaryAccountId = primary.accountId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other');
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -92,7 +93,7 @@ after(async () => {
 });
 
 test('GET /api/calendar/events 401s without auth', async () => {
-  const anon = request(app);
+  const anon = testRequest(app);
   const res = await anon.get('/api/calendar/events');
   assert.equal(res.status, 401);
 });

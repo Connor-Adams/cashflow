@@ -53,6 +53,13 @@ const ACCOUNT_TYPE_OPTIONS: Array<{ value: AccountType; label: string }> = [
   { value: 'other', label: 'Other' },
 ]
 
+// Revolving credit (credit cards + `loan` lines of credit) carries a credit
+// limit + utilization; mirrors the backend gate in routes/accounts.ts.
+const REVOLVING_CREDIT_TYPES = new Set<AccountType>(['credit_card', 'loan'])
+function isRevolvingCredit(type: AccountType): boolean {
+  return REVOLVING_CREDIT_TYPES.has(type)
+}
+
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -194,10 +201,10 @@ export function AccountsPage() {
       setErr('Default currency is required')
       return
     }
-    // creditLimit only travels on the wire for credit_card accounts; sending
-    // it for other kinds would 400. Validate > 0 inline for credit cards.
+    // creditLimit only travels on the wire for revolving credit (credit cards +
+    // lines of credit); sending it for other kinds would 400. Validate > 0 inline.
     let creditLimitPayload: number | null | undefined = undefined
-    if (editAccountType === 'credit_card') {
+    if (isRevolvingCredit(editAccountType)) {
       const trimmed = editCreditLimit.trim()
       if (trimmed === '') {
         creditLimitPayload = null
@@ -523,7 +530,7 @@ export function AccountsPage() {
                     </TableCell>
                     <TableCell>
                       {editingId === a.id ? (
-                        editAccountType === 'credit_card' ? (
+                        isRevolvingCredit(editAccountType) ? (
                           <Input
                             type="number"
                             inputMode="decimal"
@@ -537,7 +544,7 @@ export function AccountsPage() {
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )
-                      ) : a.accountType !== 'credit_card' ? (
+                      ) : !isRevolvingCredit(a.accountType) ? (
                         <span className="text-muted-foreground">—</span>
                       ) : a.creditLimit == null ? (
                         <Button

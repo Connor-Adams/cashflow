@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -35,7 +36,7 @@ before(async () => {
   testDb = await setupPgTestDb('changelog');
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const reg = await authed.post('/api/auth/register').send({
     email: 'cl@example.com',
     displayName: 'CL User',
@@ -91,7 +92,7 @@ test('PATCH /api/changelog/seen marks read; /latest then reports unread:false', 
 });
 
 test('latest endpoint requires auth', async () => {
-  const r = await request(app).get('/api/changelog/latest');
+  const r = await testRequest(app).get('/api/changelog/latest');
   assert.equal(r.status, 401);
 });
 

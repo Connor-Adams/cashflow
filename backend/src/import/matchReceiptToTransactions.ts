@@ -261,3 +261,45 @@ export async function matchReceiptOrderToTransactions(args: {
     candidatesScanned: candidates.length,
   };
 }
+
+/**
+ * Lightweight "is there a plausible card transaction for this receipt?" probe
+ * used by the discovery pass to decide auto-ingest confidence BEFORE creating
+ * any ExternalOrder. Mirrors the candidate query in
+ * matchReceiptOrderToTransactions but scores against a synthesized single
+ * payment and persists nothing.
+ */
+export async function hasMatchingTransaction(args: {
+  householdId: number;
+  vendor: string;
+  total: number | null;
+  currency: string;
+  orderDate: string | null;
+  paymentLast4: string | null;
+}): Promise<boolean> {
+  if (args.total == null || args.orderDate == null) return false;
+  const from = shiftDate(args.orderDate, -DATE_WINDOW_DAYS);
+  const to = shiftDate(args.orderDate, DATE_WINDOW_DAYS);
+  const candidates = await Transaction.findAll({
+    where: {
+      householdId: args.householdId,
+      date: { [Op.between]: [from, to] },
+    },
+  });
+  // Score against a synthetic ExternalOrder-shaped object; only the fields the
+  // scorers read are needed.
+  const orderLike = {
+    vendor: args.vendor,
+    orderDate: args.orderDate,
+    currency: args.currency,
+    paymentLast4: args.paymentLast4,
+  } as ExternalOrder;
+  const payment: CandidatePayment = {
+    paymentLast4: args.paymentLast4,
+    amount: args.total,
+    tenderId: null,
+  };
+  return candidates
+    .filter((txn) => txnMatchesVendor(args.vendor, txn))
+    .some((txn) => scoreReceiptMatch(txn, orderLike, payment).confidence >= MATCH_CONFIDENCE_THRESHOLD);
+}

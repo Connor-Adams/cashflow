@@ -58,6 +58,9 @@ export type SharedTxnRow = {
   shared?: boolean;
 };
 
+/** Direct partner transfer amounts per currency (in = partner sent me, out = I sent partner). */
+export type PartnerTransferTotals = { in: number; out: number };
+
 /** Settlement summary keyed by (contactId, currency). Mirrors `partnerMath.SettlementSummary`. */
 export type SettlementTotals = {
   contactId: number;
@@ -137,6 +140,8 @@ export type FairnessByCurrency = {
    * lunch / side-gig / family-gift rows the toggle defaults to excluding.
    */
   nonPartnerInflows: number;
+  /** Direct partner transfers folded into balance (in = partner sent me, out = I sent partner). */
+  partnerTransfers: PartnerTransferTotals;
   /**
    * Cumulative settlement-adjusted balance: sum of per-row viewer-relative
    * balance contributions + (iPaid − partnerPaid). Each shared row contributes
@@ -303,6 +308,7 @@ export type FairnessOptions = {
    * When null/undefined, behaves as owner POV (legacy: me = payer).
    */
   viewerUserId?: number | null;
+  partnerTransfersByCurrency?: Map<string, PartnerTransferTotals>;
 };
 
 /**
@@ -372,6 +378,33 @@ export function projectSettlementContribution(
 }
 
 /**
+ * Per-currency direct partner transfers: money the partner sent me (`in`,
+ * amount>0) vs money I sent the partner (`out`, amount<0), over rows where the
+ * counterparty is a partner Contact AND partnerShare === 0 (pure transfers;
+ * shared-split rows stay in the fairness path to avoid double-counting). Non-loan
+ * categories are intentionally NOT excluded — cash between partners is real
+ * settlement money.
+ */
+export function computePartnerTransferDelta(
+  rows: SharedTxnRow[],
+  partnerContactIds: Set<number>,
+): Map<string, PartnerTransferTotals> {
+  const out = new Map<string, PartnerTransferTotals>();
+  for (const r of rows) {
+    const cid = r.counterpartyContactId;
+    if (cid == null || !partnerContactIds.has(cid)) continue;
+    if (r.partnerShare !== 0) continue;
+    const n = r.amount;
+    if (!Number.isFinite(n) || n === 0) continue;
+    const acc = out.get(r.currency) ?? { in: 0, out: 0 };
+    if (n < 0) acc.out += -n;
+    else acc.in += n;
+    out.set(r.currency, acc);
+  }
+  return out;
+}
+
+/**
  * Build the per-currency fairness summary used by `GET /api/partner/fairness`.
  *
  * @param rows           Raw shared transaction rows (already scoped to household + date filter)
@@ -390,6 +423,7 @@ export function buildFairnessByCurrency(
   const partnerContactIds = options.partnerContactIds ?? new Set<number>();
   const excludeNonPartnerInflows = options.excludeNonPartnerInflows ?? false;
   const viewerUserId = options.viewerUserId;
+  const partnerTransfers = options.partnerTransfersByCurrency ?? new Map<string, PartnerTransferTotals>();
 
   const byCurrency = new Map<string, FairnessByCurrency>();
 
@@ -444,18 +478,20 @@ export function buildFairnessByCurrency(
     settlementByCurrency.set(s.currency, cur);
   }
 
-  // Union currencies across rows, inflows, and settlements so a currency
-  // with only one of those still surfaces.
+  // Union currencies across rows, inflows, settlements, and transfers so a
+  // currency with only one of those still surfaces.
   const allCurrencies = new Set<string>([
     ...rowsByCurrency.keys(),
     ...inflowsByCurrency.keys(),
     ...settlementByCurrency.keys(),
+    ...partnerTransfers.keys(),
   ]);
 
   for (const currency of allCurrencies) {
     const list = rowsByCurrency.get(currency) ?? [];
     const settlement = settlementByCurrency.get(currency) ?? { iPaid: 0, partnerPaid: 0 };
     const inflowSplit = inflowsByCurrency.get(currency) ?? { partner: 0, nonPartner: 0 };
+    const tr = partnerTransfers.get(currency) ?? { in: 0, out: 0 };
     let sharedSpendTotal = 0;
     let myShareTotal = 0;
     let partnerShareTotal = 0;
@@ -473,8 +509,11 @@ export function buildFairnessByCurrency(
         currentMonthSharedSpend += Math.abs(r.amount);
       }
     }
+    // Viewer-relative shared-row contribution (= −partnerShareTotal in owner POV)
+    // + settlements + main's direct partner-transfer delta.
     const rowsContribution = contributionsByCurrency.get(currency) ?? 0;
-    const balance = rowsContribution + (settlement.iPaid - settlement.partnerPaid);
+    const balance =
+      rowsContribution + (settlement.iPaid - settlement.partnerPaid) + (tr.out - tr.in);
     const paidMore: FairnessPaidMore = {
       // What I covered = my-share on shared rows (purchases). Positive number for display.
       youCovered: Math.max(0, -myShareTotal),
@@ -490,6 +529,7 @@ export function buildFairnessByCurrency(
       currentMonthSharedSpend,
       partnerInflows: inflowSplit.partner,
       nonPartnerInflows: inflowSplit.nonPartner,
+      partnerTransfers: tr,
       balance,
       direction: directionFromBalance(balance),
       paidMore,
@@ -561,6 +601,23 @@ export function buildFairnessMonthly(
       byKey.get(key) ??
       ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0, contribution: 0 } satisfies Acc);
     acc.settlementDelta += s.iPaid - s.partnerPaid;
+    byKey.set(key, acc);
+  }
+
+  // Partner direct transfers behave like settlements (same (out − in) fold as
+  // the headline balance): one `+= -n` handles both directions.
+  for (const r of rows) {
+    const cid = r.counterpartyContactId;
+    if (cid == null || !partnerContactIds.has(cid)) continue;
+    if (r.partnerShare !== 0) continue;
+    const n = r.amount;
+    if (!Number.isFinite(n) || n === 0) continue;
+    const month = r.date.slice(0, 7);
+    const key = `${r.currency}\0${month}`;
+    const acc =
+      byKey.get(key) ??
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0, contribution: 0 } satisfies Acc);
+    acc.settlementDelta += -n;
     byKey.set(key, acc);
   }
 

@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -13,7 +14,7 @@ before(async () => {
   testDb = await setupPgTestDb('email-history');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'history@example.com',
     displayName: 'History User',
@@ -60,6 +61,6 @@ test('GET /api/email/history returns the household scan log, newest first', asyn
 });
 
 test('rejects unauthenticated requests', async () => {
-  const res = await request(app).get('/api/email/history');
+  const res = await testRequest(app).get('/api/email/history');
   assert.equal(res.status, 401);
 });

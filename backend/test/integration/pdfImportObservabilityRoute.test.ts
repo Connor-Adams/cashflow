@@ -13,6 +13,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let models: typeof import('../../src/models/index.js');
@@ -36,7 +37,7 @@ before(async () => {
   models = await import('../../src/models/index.js');
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'observability@example.com',
     displayName: 'Observability User',
@@ -291,7 +292,7 @@ test('GET /pdf-batches lists the household batches', async () => {
 
 test('GET /pdf-batches does not return batches from other households', async () => {
   // Create a second user + household
-  const authed2 = request.agent(app);
+  const authed2 = testAgent(app);
   const reg2 = await authed2.post('/api/auth/register').send({
     email: 'observability2@example.com',
     displayName: 'Observability User 2',
@@ -422,7 +423,7 @@ test('GET /pdf-batch/:id 404 for cross-household batch', async () => {
   const { PdfImportBatch } = models;
 
   // Create a second user/household
-  const authed2 = request.agent(app);
+  const authed2 = testAgent(app);
   const reg2 = await authed2.post('/api/auth/register').send({
     email: 'observability-xhh@example.com',
     displayName: 'Observability XHH User',
@@ -449,7 +450,7 @@ test('POST /pdf-batch/:id/retry 404 for cross-household batch', async () => {
   const { PdfImportBatch } = models;
 
   // Create a second user/household
-  const authed2 = request.agent(app);
+  const authed2 = testAgent(app);
   const reg2 = await authed2.post('/api/auth/register').send({
     email: 'observability-xhh2@example.com',
     displayName: 'Observability XHH2 User',

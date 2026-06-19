@@ -14,6 +14,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -33,7 +34,7 @@ before(async () => {
   app = mod.default;
   models = await import('../../src/models');
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin-members@example.com',
     displayName: 'SuperM',
@@ -44,11 +45,11 @@ before(async () => {
   const a = await seedHousehold('MA', 'A Original');
   householdAId = a.householdId;
   ownerAUserId = a.userId;
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${a.token}; Path=/`);
 
   const b = await seedHousehold('MB', 'B Original');
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${b.token}; Path=/`);
 });
 
@@ -83,7 +84,7 @@ test('GET /api/household/members is household-scoped (AC #11)', async () => {
 });
 
 test('GET /api/household/members returns 401 when unauthenticated', async () => {
-  const res = await request(app).get('/api/household/members');
+  const res = await testRequest(app).get('/api/household/members');
   assert.equal(res.status, 401);
 });
 
@@ -198,7 +199,7 @@ test('DELETE /api/invites/:id is household-scoped (404 cross-household)', async 
 });
 
 test('POST /api/invites returns 401 when unauthenticated', async () => {
-  const res = await request(app).post('/api/invites').send({});
+  const res = await testRequest(app).post('/api/invites').send({});
   assert.equal(res.status, 401);
 });
 

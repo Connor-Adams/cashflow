@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { FilterX } from 'lucide-react'
+import { FilterX, Inbox, ShoppingBag, TrendingUp, Wallet } from 'lucide-react'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { Link, useNavigate } from 'react-router-dom'
 import { Alert } from '@/components/ui/alert'
@@ -306,6 +306,18 @@ export function DashboardPage() {
   const [priceChangeCount, setPriceChangeCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  // Banner dismissals persist for the browser session, keyed to the count the
+  // user dismissed at. If the underlying count later changes (new flags, new
+  // price changes), the banner re-surfaces because the stored count no longer
+  // matches — a dismiss silences the *current* situation, not future ones.
+  const [reviewDismissedAt, setReviewDismissedAt] = useSessionState<number | null>(
+    'dashboard.reviewBannerDismissedAt',
+    null
+  )
+  const [priceDismissedAt, setPriceDismissedAt] = useSessionState<number | null>(
+    'dashboard.priceBannerDismissedAt',
+    null
+  )
 
   const summaryQs = useMemo(
     () => summaryQueryString({ currency, dateFrom, dateTo }),
@@ -726,8 +738,13 @@ export function DashboardPage() {
 
   // Review banner pins to 8 cols so it lines up with the period insight band
   // beneath it instead of sprawling full-width across an empty middle.
-  const showReviewBanner = summaryStats.reviewCount > 0
+  // Hidden once dismissed at the current count (see reviewDismissedAt above).
+  const showReviewBanner =
+    summaryStats.reviewCount > 0 &&
+    reviewDismissedAt !== summaryStats.reviewCount
   const reviewBannerSpan: BentoSpan = 12
+  const showPriceBanner =
+    priceChangeCount > 0 && priceDismissedAt !== priceChangeCount
 
   return (
     <div className="page">
@@ -835,22 +852,28 @@ export function DashboardPage() {
             variant="warning"
             role="status"
             aria-live="polite"
+            icon={<Inbox className="size-5" />}
             label={`${summaryStats.reviewCount} transaction${
               summaryStats.reviewCount === 1 ? '' : 's'
             } flagged for review`}
             description="Waiting on category, split, or business decisions before they roll into your totals."
             actions={<Button asChild size="sm"><Link to="/review">Open Review Inbox</Link></Button>}
+            onDismiss={() => setReviewDismissedAt(summaryStats.reviewCount)}
+            dismissLabel="Dismiss review reminder"
           />
         )}
-        {priceChangeCount > 0 && (
+        {showPriceBanner && (
           <BentoTile
             span={12}
             rows={1}
             variant="destructive"
             role="status"
             aria-live="polite"
+            icon={<TrendingUp className="size-5" />}
             label={`${priceChangeCount} subscription price change${priceChangeCount === 1 ? '' : 's'} this month`}
             actions={<Button asChild size="sm" variant="outline"><Link to="/subscriptions?priceChange=unack">Review</Link></Button>}
+            onDismiss={() => setPriceDismissedAt(priceChangeCount)}
+            dismissLabel="Dismiss subscription price alert"
           />
         )}
         {budgetProgressSorted.length > 0 && (
@@ -1071,6 +1094,7 @@ export function DashboardPage() {
           span={6}
           rows={2}
           aria-busy={loading}
+          icon={<Wallet className="size-5" />}
           label="Income · business vs personal"
           description="Earned income split by business vs personal."
         >
@@ -1118,6 +1142,7 @@ export function DashboardPage() {
           span={6}
           rows={2}
           aria-busy={loading}
+          icon={<ShoppingBag className="size-5" />}
           label="Spend · business vs personal"
           description="Spend (gross outflows net of refunds) split by business vs personal."
         >

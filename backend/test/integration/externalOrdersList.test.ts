@@ -2,6 +2,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -15,7 +16,7 @@ before(async () => {
   testDb = await setupPgTestDb('external-orders-list');
   models = await import('../../src/models/index.js');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   const register = await authed.post('/api/auth/register').send({
     email: 'orders@example.com',
     displayName: 'Orders User',
@@ -189,6 +190,6 @@ test('group=other returns non-gmail non-amazon orders only', async () => {
 });
 
 test('rejects unauthenticated requests', async () => {
-  const res = await request(app).get('/api/external-orders');
+  const res = await testRequest(app).get('/api/external-orders');
   assert.equal(res.status, 401);
 });

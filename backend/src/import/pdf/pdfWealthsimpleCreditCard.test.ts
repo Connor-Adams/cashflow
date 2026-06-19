@@ -123,3 +123,29 @@ test('reconciliation tolerates a space artifact in the Purchases total', () => {
   // Total parses despite the embedded space; sums match → no warning.
   assert.equal(r.warnings.filter((w) => /Purchases.*mismatch/i.test(w)).length, 0);
 });
+
+test('header extracts statement balance, payment due date, minimum payment', () => {
+  const h = parseWsCreditCardHeader([
+    mk('Credit card statement'),
+    mk(' Wealthsimple    Apr 15 — May 14, 2026'),
+    mk('4126 50** **** 3338'),
+    mk(' Statement date   May 15, 2026          Minimum payment   $10.00'),
+    mk(' New balance   $1,234.56'),
+    mk(' Payment due date   Jun 11, 2026'),
+  ]);
+  assert.equal(h.statementBalance, 1234.56);
+  assert.equal(h.paymentDueDate, '2026-06-11');
+  assert.equal(h.minimumPayment, 10);
+});
+
+test('header summary fields are null when the summary block is absent', () => {
+  const h = parseWsCreditCardHeader([
+    mk('Credit card statement'),
+    mk(' Wealthsimple    Apr 15 — May 14, 2026'),
+    mk('4126 50** **** 3338'),
+    mk(' Statement date   May 15, 2026'),
+  ]);
+  assert.equal(h.statementBalance, null);
+  assert.equal(h.paymentDueDate, null);
+  assert.equal(h.minimumPayment, null);
+});

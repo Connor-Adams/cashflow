@@ -459,29 +459,35 @@ router.get('/items', async (req, res, next) => {
       (txnWhereWithDate as Record<string, unknown>).date = dateCond;
     }
 
-    // An item is visible only if its order is attributed to a visible transaction,
-    // via either a receipt (explicit upload) or a non-rejected order link (matcher).
-    // Gating on a precomputed order-id set keeps pagination on the item id and
-    // avoids the row duplication a hasMany join through links would cause.
-    const attribution = await loadOrderAttribution(txnWhereWithDate);
-    const orderIds = [...attribution.keys()];
+    // The items page is a purchase-history view: by default it lists every
+    // imported order item for the household, flagging those not reconciled to a
+    // transaction (sourceTxnId null). When a date filter is active it narrows to
+    // items attributed to a visible transaction within that window, since date
+    // filtering is inherently a reconciled-to-the-ledger concept. The attribution
+    // map still decorates matched rows with their transaction in both modes.
+    const dateFilterActive = Boolean(f.from || f.to);
+    const attribution = await loadOrderAttribution(
+      dateFilterActive ? txnWhereWithDate : (txnWhere as WhereOptions),
+    );
 
     const format = typeof req.query.format === 'string' ? req.query.format : 'json';
 
-    if (orderIds.length === 0) {
-      if (format === 'csv') {
-        const filename = `items-${new Date().toISOString().slice(0, 10)}.csv`;
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.send(rowsToCsv([]));
+    if (dateFilterActive) {
+      const orderIds = [...attribution.keys()];
+      if (orderIds.length === 0) {
+        if (format === 'csv') {
+          const filename = `items-${new Date().toISOString().slice(0, 10)}.csv`;
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          res.send(rowsToCsv([]));
+          return;
+        }
+        const empty: ItemsListResponse = { items: [], nextCursor: null };
+        res.json(empty);
         return;
       }
-      const empty: ItemsListResponse = { items: [], nextCursor: null };
-      res.json(empty);
-      return;
+      (itemWhere as Record<string, unknown>).externalOrderId = { [Op.in]: orderIds };
     }
-
-    (itemWhere as Record<string, unknown>).externalOrderId = { [Op.in]: orderIds };
 
     const itemInclude = [
       {

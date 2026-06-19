@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -91,7 +92,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -104,13 +105,13 @@ before(async () => {
   primaryUserId = primary.userId;
   primaryContactId = primary.contactId;
   primaryAccountId = await makeAccount('Primary', primary.householdId, primary.userId);
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seedHousehold('Other', 'Their Friend');
   otherHouseholdId = other.householdId;
   await makeAccount('Other', other.householdId, other.userId);
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 

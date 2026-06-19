@@ -10,6 +10,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent, testRequest } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -52,7 +53,7 @@ before(async () => {
   app = mod.default;
 
   // Bootstrap a superadmin so the very first registration succeeds.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -61,7 +62,7 @@ before(async () => {
   assert.equal(register.status, 201);
 
   const token = await seedUser('Calc');
-  agent = request.agent(app);
+  agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
 });
 
@@ -70,7 +71,7 @@ after(async () => {
 });
 
 test('rejects an unauthenticated request', async () => {
-  const res = await request(app)
+  const res = await testRequest(app)
     .post('/api/opportunity-cost/calculate')
     .send({ mode: 'one-time', amount: 1000, horizonYears: 10, annualReturnRate: 0.07 });
   assert.equal(res.status, 401);
