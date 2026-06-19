@@ -15,6 +15,7 @@ export class Contact extends Model<
 > {
   declare id: CreationOptional<number>;
   declare householdId: number;
+  declare userId: CreationOptional<number | null>;
   declare name: string;
   declare notes: string | null;
   /** Comma-separated extra match terms for the transfer link pass (per-person
@@ -53,6 +54,11 @@ export function initContact(sequelize: Sequelize): typeof Contact {
         type: DataTypes.INTEGER,
         field: 'household_id',
         allowNull: false,
+      },
+      userId: {
+        type: DataTypes.INTEGER,
+        field: 'user_id',
+        allowNull: true,
       },
       name: { type: DataTypes.STRING(160), allowNull: false },
       notes: { type: DataTypes.TEXT, allowNull: true },
