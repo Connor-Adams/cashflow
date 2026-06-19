@@ -139,5 +139,3 @@ export function PartnerHomePage() {
     </div>
   )
 }
-
-export default PartnerHomePage
