@@ -29,6 +29,54 @@ function makeRow(over: Partial<SharedTxnRow> = {}): SharedTxnRow {
   };
 }
 
+// ---------------- viewer-relative projection ----------------
+
+test('buildFairnessByCurrency: viewer projection mirrors balance between partners', () => {
+  // Connor (user 1) paid a shared $100 grocery; partner owes 50 (stored negative).
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -50, partnerShare: -50, payerUserId: 1 }),
+  ];
+  const owner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 1 });
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  // Owner: partner owes me 50.
+  assert.equal(Math.round(owner[0].balance * 100) / 100, 50);
+  assert.equal(owner[0].direction, 'partner_owes_me');
+  // Partner: I owe 50 — exact mirror.
+  assert.equal(Math.round(partner[0].balance * 100) / 100, -50);
+  assert.equal(partner[0].direction, 'i_owe_partner');
+});
+
+test('buildFairnessByCurrency: viewer projection swaps consumption display', () => {
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -70, partnerShare: -30, payerUserId: 1, category: 'Dining' }),
+  ];
+  const owner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 1 });
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  // Owner consumed 70, partner consumed 30.
+  assert.equal(owner[0].myShareTotal, -70);
+  assert.equal(owner[0].partnerShareTotal, -30);
+  // Partner's POV: their own consumption is 30, the other's is 70.
+  assert.equal(partner[0].myShareTotal, -30);
+  assert.equal(partner[0].partnerShareTotal, -70);
+});
+
+test('buildFairnessByCurrency: a me-only row is shared for neither viewer', () => {
+  // partnerShare 0 => not a shared expense; must not surface even for the non-payer.
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -100, partnerShare: 0, payerUserId: 1 }),
+  ];
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  assert.equal(partner.length, 0);
+});
+
+test('buildFairnessByCurrency: no viewerUserId behaves as owner POV (back-compat)', () => {
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -50, partnerShare: -50, payerUserId: 1 }),
+  ];
+  const legacy = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01');
+  assert.equal(Math.round(legacy[0].balance * 100) / 100, 50);
+});
+
 // ---------------- aggregateCategoryBreakdown ----------------
 
 test('aggregateCategoryBreakdown: groups by category and ranks by |sharedSpend|', () => {

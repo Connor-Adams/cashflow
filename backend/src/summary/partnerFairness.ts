@@ -285,7 +285,39 @@ export function topLargestShared(
 export type FairnessOptions = {
   partnerContactIds?: Set<number>;
   excludeNonPartnerInflows?: boolean;
+  /**
+   * When set, project shares relative to this user: a row's consumption
+   * display swaps when viewerUserId !== payerUserId, and balance uses the
+   * per-row contribution `(payer==viewer ? -partnerShare : +partnerShare)`.
+   * When null/undefined, behaves as owner POV (legacy: me = payer).
+   */
+  viewerUserId?: number | null;
 };
+
+/**
+ * Project a stored (owner-POV) row to the viewer's perspective.
+ * - `shared` is computed from the STORED partnerShare (viewer-independent):
+ *   a row is shared iff the non-payer owes a non-zero amount.
+ * - `myShare`/`partnerShare` are consumption portions, swapped when the
+ *   viewer is not the payer.
+ * - `balanceContribution` is the signed receivable for the viewer:
+ *   the payer is owed `partnerShare`; the non-payer owes it. Spend is stored
+ *   negative, so `-partnerShare` yields the positive "owed to me" figure.
+ */
+function projectRow(
+  row: SharedTxnRow,
+  viewerUserId: number | null | undefined,
+): { shared: boolean; myShare: number; partnerShare: number; balanceContribution: number } {
+  const shared = row.partnerShare !== 0;
+  const isPayer =
+    viewerUserId == null || row.payerUserId == null || row.payerUserId === viewerUserId;
+  return {
+    shared,
+    myShare: isPayer ? row.myShare : row.partnerShare,
+    partnerShare: isPayer ? row.partnerShare : row.myShare,
+    balanceContribution: isPayer ? -row.partnerShare : row.partnerShare,
+  };
+}
 
 /**
  * #375 — classify a single shared row as a partner inflow or non-partner
@@ -324,6 +356,7 @@ export function buildFairnessByCurrency(
 ): FairnessByCurrency[] {
   const partnerContactIds = options.partnerContactIds ?? new Set<number>();
   const excludeNonPartnerInflows = options.excludeNonPartnerInflows ?? false;
+  const viewerUserId = options.viewerUserId;
 
   const byCurrency = new Map<string, FairnessByCurrency>();
 
@@ -332,16 +365,28 @@ export function buildFairnessByCurrency(
   // (sharedSpendTotal, balance, categoryBreakdown, largestShared) ignores
   // them. We still tally the inflow splits separately on the unfiltered
   // input below, so the user can always see what they're hiding.
+  //
+  // Rows are pushed PROJECTED to the viewer (myShare/partnerShare swapped when
+  // the viewer is not the payer) so all downstream display reads the viewer's
+  // values. Sharedness uses the STORED partnerShare (viewer-independent), and
+  // the per-row balance contribution is accumulated separately — balance is
+  // NOT derivable from the swapped totals.
   const rowsByCurrency = new Map<string, SharedTxnRow[]>();
+  const contributionsByCurrency = new Map<string, number>();
   for (const r of rows) {
-    if (r.partnerShare === 0) continue;
+    const p = projectRow(r, viewerUserId);
+    if (!p.shared) continue;
     if (excludeNonPartnerInflows) {
       const kind = classifyInflow(r, partnerContactIds);
       if (kind === 'non_partner') continue;
     }
     const list = rowsByCurrency.get(r.currency) ?? [];
-    list.push(r);
+    list.push({ ...r, myShare: p.myShare, partnerShare: p.partnerShare });
     rowsByCurrency.set(r.currency, list);
+    contributionsByCurrency.set(
+      r.currency,
+      (contributionsByCurrency.get(r.currency) ?? 0) + p.balanceContribution,
+    );
   }
 
   // Tally partner/non-partner inflows on the unfiltered input so the UI can
@@ -395,7 +440,8 @@ export function buildFairnessByCurrency(
         currentMonthSharedSpend += Math.abs(r.amount);
       }
     }
-    const balance = -partnerShareTotal + (settlement.iPaid - settlement.partnerPaid);
+    const rowsContribution = contributionsByCurrency.get(currency) ?? 0;
+    const balance = rowsContribution + (settlement.iPaid - settlement.partnerPaid);
     const paidMore: FairnessPaidMore = {
       // What I covered = my-share on shared rows (purchases). Positive number for display.
       youCovered: Math.max(0, -myShareTotal),
