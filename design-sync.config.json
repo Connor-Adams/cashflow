@@ -1,6 +1,7 @@
 {
   "pkg": "@cashflow/ui",
   "globalName": "CashflowUI",
+  "projectId": "2ee5e2a0-95f0-44d4-a428-a93ae5c818f1",
   "shape": "package",
   "buildCmd": "corepack yarn workspace @cashflow/ui run build",
   "cssEntry": "dist/cashflow-ui.css",
