@@ -5,7 +5,12 @@
 > cashflow-product-design) contradicts this file, **this file wins** — it versions
 > with the code; the skills do not.
 
-## Workspaces (yarn-1 monorepo, run everything from repo root)
+## Workspaces (Yarn 4 Berry monorepo, run everything from repo root)
+
+`packageManager: yarn@4.17.0` is pinned in `package.json`; invoke via Corepack
+(`corepack yarn …`). `.yarnrc.yml` sets `nodeLinker: node-modules` (a real
+`node_modules`, **not** PnP) + `nmMode: hardlinks-local`; the lockfile is Berry
+format (`__metadata: version 10`).
 
 | Workspace | yarn name | Notes |
 |---|---|---|
@@ -42,13 +47,33 @@ Partial / faster:
 
 ## Worktree gotchas (.claude/worktrees/<name>)
 
-- A fresh worktree may have **no `node_modules`** (or only a partial one). Consequences:
-  - `yarn install` / `yarn setup` fails under a worktree (vite-link error). Install from
-    the **main checkout** (`/Users/connoradams/Developer/cashflow`).
-  - `git commit` fails at husky→lint-staged (code 127) because the binary isn't on PATH.
-    Fix: `PATH=/Users/connoradams/Developer/cashflow/node_modules/.bin:$PATH git commit …`.
-  - To run eslint/tsc/tsx in a worktree, prefix the same PATH or call the binary from the
-    main checkout's `node_modules/.bin/`.
+Under Yarn 4 each worktree gets its **own** real `node_modules` — the worktree root
+*is* its install root.
+
+- A freshly created worktree has **no `node_modules`** until you install in it. The fix
+  is to **install inside the worktree**: `corepack yarn install` (verified — completes in
+  a few seconds and produces a real `node_modules/` with `.yarn-state.yml` and a local
+  `node_modules/.bin/`). The old Yarn-1 advice — "`yarn install`/`yarn setup` fails under
+  a worktree (vite-link error), install from the main checkout" — is **wrong under
+  Yarn 4**. Do **not** `yarn install` from the main checkout to "fix" a worktree: it
+  rewrites the main checkout's `yarn.lock` and cross-contaminates whatever branch it is
+  sitting on.
+- Once the worktree has its own `node_modules`, `git commit` works normally — eslint /
+  tsc / tsx and the husky pre-commit hook all resolve from the worktree's local
+  `node_modules/.bin/`. The hook script `cd`s to `git rev-parse --show-toplevel` (the
+  worktree root), so it runs against the worktree's staged files.
+- **Husky `.yarn-state.yml` wrinkle (don't reach for `--no-verify`):** the pre-commit
+  hook runs `yarn lint-staged`. If the worktree has **no** own `node_modules` and falls
+  back to a main checkout that is still on an old **Yarn-1** branch, Corepack's Yarn 4
+  runs against a Yarn-1 `node_modules` and fails with
+  `Couldn't find the node_modules state file - findPackageLocation` (the node-modules
+  linker needs `node_modules/.yarn-state.yml`, which a Yarn-1 tree lacks). The real fix
+  is `corepack yarn install` **in the worktree** (gives it the state file). Escape hatch
+  if you genuinely cannot install: front a **classic Yarn** on PATH so the hook still
+  RUNS (never `--no-verify`, never `--amend` after a hook failure) —
+  e.g. a `/tmp/yarn1shim/yarn` that `exec corepack yarn@1.22.22 "$@"`, then
+  `PATH=/tmp/yarn1shim:$PATH git commit …`. `lint-staged.config.cjs` only matches
+  `frontend/**/*.{ts,tsx}`, so doc/infra/backend-only commits are a no-op anyway.
 - An **absolute** `/Users/connoradams/Developer/cashflow/{backend,frontend,shared}/…`
   path used while inside a worktree points at the **main checkout, not your branch**.
 
