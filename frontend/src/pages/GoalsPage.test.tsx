@@ -1,10 +1,11 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
 import { GoalsPage } from './GoalsPage'
-import { getJson } from '../lib/api'
+import { getJson, postJson } from '../lib/api'
 
 // GoalsPage loads goals + accounts through getJson; postJson/deleteReq are
 // stubbed. Default impl resolves empty so the page renders its empty state.
@@ -62,6 +63,25 @@ describe('GoalsPage', () => {
     })
     renderPage()
     expect(await screen.findByText('Emergency fund')).toBeInTheDocument()
+  })
+
+  it('blocks submit and shows an inline error for a negative target amount', async () => {
+    // AC #6: negative amount → inline "Amount can't be negative." + no POST.
+    vi.mocked(postJson).mockClear()
+    const user = userEvent.setup()
+    renderPage()
+    const nameInput = await screen.findByPlaceholderText(
+      /emergency fund, vacation/i,
+    )
+    await user.type(nameInput, 'Vacation')
+    // A native number input still accepts a typed negative in real browsers;
+    // jsdom's userEvent strips the leading '-', so set the raw value directly.
+    const targetInput = screen.getByLabelText(/target amount/i)
+    fireEvent.change(targetInput, { target: { value: '-100' } })
+    fireEvent.submit(targetInput.closest('form')!)
+
+    expect(await screen.findByText("Amount can't be negative.")).toBeInTheDocument()
+    expect(vi.mocked(postJson)).not.toHaveBeenCalled()
   })
 
   // ---- #653 forecast-grounded badges ------------------------------------

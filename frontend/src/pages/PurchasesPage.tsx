@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
-import { formatMoney } from '../lib/formatMoney'
+import { formatMoney, formatMoneyOr } from '../lib/formatMoney'
 import {
   PURCHASE_FILTERS,
   PURCHASE_RECEIPT_STATUSES,
@@ -351,7 +351,10 @@ function LargeInboxCard({
                 <TableCell>{r.merchant}</TableCell>
                 <TableCell>{r.accountName ?? '—'}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {formatMoney(Math.abs(Number(r.amount) || 0), r.currency)}
+                  {formatMoneyOr(
+                    r.amount === '' || r.amount == null ? null : Math.abs(Number(r.amount)),
+                    r.currency,
+                  )}
                 </TableCell>
                 <TableCell>
                   <Button

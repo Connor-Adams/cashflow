@@ -159,6 +159,17 @@ function rowToForm(row: FinancialGoal): FormState {
   }
 }
 
+const NEGATIVE_AMOUNT_ERROR = "Amount can't be negative."
+
+/** Returns the inline error for a money field whose raw input is negative, else
+ *  empty. Empty input and a real `0` are not errors here (the positive-amount
+ *  requirement is enforced separately by buildInput). */
+function negativeAmountError(raw: string): string {
+  if (raw.trim() === '') return ''
+  const n = Number(raw)
+  return Number.isFinite(n) && n < 0 ? NEGATIVE_AMOUNT_ERROR : ''
+}
+
 function buildInput(form: FormState): FinancialGoalInput | null {
   const name = form.name.trim()
   if (!name) return null
@@ -223,9 +234,11 @@ export function GoalsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [form, setForm] = useState<FormState>(emptyForm())
   const [submitting, setSubmitting] = useState(false)
+  const [createAttempted, setCreateAttempted] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<FormState>(emptyForm())
   const [editSaving, setEditSaving] = useState(false)
+  const [editAttempted, setEditAttempted] = useState(false)
   const [statusFilter, setStatusFilter] = useState<FinancialGoalStatus | ''>('active')
   const [loading, setLoading] = useState(true)
 
@@ -286,6 +299,7 @@ export function GoalsPage() {
 
   async function createGoal(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    setCreateAttempted(true)
     const input = buildInput(form)
     if (!input) {
       showToast({
@@ -333,6 +347,7 @@ export function GoalsPage() {
   async function saveEdit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (editId == null) return
+    setEditAttempted(true)
     const patch = buildPatch(editForm)
     if (!patch) {
       showToast({
@@ -473,6 +488,7 @@ export function GoalsPage() {
                               accountOptions={accountOptions}
                               idPrefix={`goal-edit-${row.id}`}
                               showStatus
+                              showErrors={editAttempted}
                             />
                             <div className="mb-3 flex flex-wrap items-center gap-3">
                               <Button
@@ -658,6 +674,7 @@ export function GoalsPage() {
             accountOptions={accountOptions}
             idPrefix="goal-new"
             showStatus={false}
+            showErrors={createAttempted}
           />
           <Button type="submit" disabled={submitting}>
             <Plus aria-hidden="true" />
@@ -676,6 +693,8 @@ type GoalFormFieldsProps = {
   accountOptions: Account[]
   idPrefix: string
   showStatus: boolean
+  /** When true, surface inline validation errors (set after a submit attempt). */
+  showErrors?: boolean
 }
 
 function GoalFormFields({
@@ -684,7 +703,14 @@ function GoalFormFields({
   accountOptions,
   idPrefix,
   showStatus,
+  showErrors = false,
 }: GoalFormFieldsProps) {
+  const targetAmountError = showErrors
+    ? negativeAmountError(form.targetAmount)
+    : ''
+  const contributionError = showErrors
+    ? negativeAmountError(form.monthlyContribution)
+    : ''
   return (
     <Grid minItemWidth={180} gap="md" fill className="mb-3">
       <Label htmlFor={`${idPrefix}-name`}>
@@ -713,7 +739,19 @@ function GoalFormFields({
           }
           required
           placeholder="5000.00"
+          aria-invalid={targetAmountError ? 'true' : undefined}
+          aria-describedby={
+            targetAmountError ? `${idPrefix}-target-amount-error` : undefined
+          }
         />
+        {targetAmountError && (
+          <p
+            id={`${idPrefix}-target-amount-error`}
+            className="text-sm text-destructive mt-1"
+          >
+            {targetAmountError}
+          </p>
+        )}
       </Label>
       <Label htmlFor={`${idPrefix}-current-amount`}>
         Current amount
@@ -771,7 +809,21 @@ function GoalFormFields({
             }))
           }
           placeholder="0"
+          aria-invalid={contributionError ? 'true' : undefined}
+          aria-describedby={
+            contributionError
+              ? `${idPrefix}-monthly-contribution-error`
+              : undefined
+          }
         />
+        {contributionError && (
+          <p
+            id={`${idPrefix}-monthly-contribution-error`}
+            className="text-sm text-destructive mt-1"
+          >
+            {contributionError}
+          </p>
+        )}
       </Label>
       <Label htmlFor={`${idPrefix}-account`}>
         Linked account (optional)

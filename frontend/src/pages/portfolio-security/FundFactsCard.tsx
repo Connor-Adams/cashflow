@@ -55,7 +55,7 @@ function formatCompactNumber(value: number, currencyCode?: string): string {
   const digits = abs >= 100 ? 1 : 2
   if (currencyCode) {
     try {
-      const formatted = new Intl.NumberFormat(undefined, {
+      const formatted = new Intl.NumberFormat('en-CA', {
         style: 'currency',
         currency: currencyCode.toUpperCase(),
         maximumFractionDigits: digits,
