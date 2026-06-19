@@ -31,7 +31,3 @@ reports/
 
 # one-off income backfill audit artifacts (backend/scripts/backfill-income-payer-anchored.ts)
 backend/income-backfill-report-*.json
-.ds-sync/
-ds-bundle/
-.design-sync/.cache/
-.design-sync/learnings/
