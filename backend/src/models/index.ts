@@ -98,6 +98,7 @@ import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
+import { PushSubscription, initPushSubscription } from './PushSubscription';
 import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
@@ -193,6 +194,7 @@ initTransactionLargePurchaseReview(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
+initPushSubscription(sequelize);
 initAuditLog(sequelize);
 initVaultDocument(sequelize);
 initFinanceEvent(sequelize);
@@ -248,6 +250,14 @@ User.hasMany(NotificationPreference, {
   hooks: true,
 });
 NotificationPreference.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+User.hasMany(PushSubscription, {
+  foreignKey: 'user_id',
+  as: 'pushSubscriptions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+PushSubscription.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -1110,6 +1120,7 @@ export {
   CashflowSettings,
   Notification,
   NotificationPreference,
+  PushSubscription,
   AuditLog,
   FinanceEvent,
   BudgetAlertState,

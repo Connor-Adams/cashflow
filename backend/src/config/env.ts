@@ -422,6 +422,19 @@ export const costcoEnrichmentEnabled = parseBoolEnv('COSTCO_ENRICHMENT_ENABLED',
 /** Max distinct item numbers the resolver will attempt per invocation (budget guard). */
 export const costcoEnrichmentMaxItemsPerRun = parseIntEnv('COSTCO_ENRICHMENT_MAX_ITEMS_PER_RUN', 50);
 
+/**
+ * Web-push VAPID keypair (issue #651). When both public+private keys are
+ * configured, the notification dispatch path fans web-push out to a user's
+ * active subscriptions; the public key is also surfaced via GET /api/config
+ * so the browser can `pushManager.subscribe`. When unset, push is disabled
+ * end-to-end (config returns `vapidPublicKey: null`, the client hides the
+ * "Enable browser alerts" control, and the send wrapper no-ops).
+ */
+export const vapidPublicKey = process.env.VAPID_PUBLIC_KEY?.trim() || null;
+export const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY?.trim() || null;
+export const vapidSubject =
+  process.env.VAPID_SUBJECT?.trim() || 'mailto:admin@cashflow.local';
+
 export const googleOauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
 export const googleOauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;
 export const googleOauthRedirectUri =

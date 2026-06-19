@@ -72,6 +72,7 @@ import monthlyCloseRouter from './routes/monthlyClose';
 import calendarRouter from './routes/calendar';
 import goalsRouter from './routes/goals';
 import notificationsRouter from './routes/notifications';
+import pushRouter from './routes/push';
 import notificationPreferencesRouter from './routes/notificationPreferences';
 import usersNotificationsRouter from './routes/usersNotifications';
 import notificationsAdminRouter from './routes/admin/notificationsAdmin';
@@ -255,6 +256,11 @@ export const gatedRoutes: RouteEntry[] = [
   { paths: '/api/calendar', handlers: [calendarRouter] },
   { paths: '/api/goals', handlers: [goalsRouter] },
   { paths: '/api/notifications', handlers: [notificationsRouter] },
+  {
+    paths: '/api/push',
+    handlers: [pushRouter],
+    why: 'Web-push subscription CRUD (issue #651) — delivery transport for the Notification Support concern, sibling to /api/notifications. Session-gated, user-scoped via currentAuth.',
+  },
   {
     paths: '/api/users/me/notifications',
     handlers: [usersNotificationsRouter],
