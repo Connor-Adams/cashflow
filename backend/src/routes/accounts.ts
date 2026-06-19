@@ -6,6 +6,11 @@ import { currentAuth } from '../auth/middleware';
 import { visibleAccountWhere } from '../auth/scope';
 import { pendingTotal } from '../transactions/status';
 import { currentOwed, utilizationPct } from '../cards/utilization';
+import {
+  mergeAccounts,
+  hasMergedSources,
+  AccountMergeError,
+} from '../accounts/accountMerge';
 
 // Revolving-credit kinds carry a creditLimit + utilization (#437). Credit cards
 // and lines of credit (stored as the `loan` type) both draw against a limit, and
@@ -69,8 +74,14 @@ function normalizeAccountType(raw: unknown): string {
 
 router.get('/', async (req, res, next) => {
   try {
+    // Merged-source accounts (#287) are hidden from the default list. Pass
+    // ?includeMerged=true to surface them (the "Hidden / merged" UI section).
+    const includeMerged = req.query.includeMerged === 'true';
+    const where = includeMerged
+      ? visibleAccountWhere(req)
+      : { ...visibleAccountWhere(req), mergedIntoId: null };
     const rows = await Account.findAll({
-      where: visibleAccountWhere(req),
+      where,
       order: [['name', 'ASC']],
     });
     const revolvingIds = rows.filter((a) => isRevolvingCredit(a.accountType)).map((a) => a.id);
@@ -283,12 +294,62 @@ router.delete('/:id', async (req, res, next) => {
       res.status(404).json({ error: 'Not found' });
       return;
     }
+    // Block deleting an account that is the target of a merge (#287): sources
+    // point at it via merged_into_id (ON DELETE RESTRICT). Surface a clean 400
+    // rather than a raw FK error so the client can explain it.
+    const { household } = currentAuth(req);
+    if (await hasMergedSources(id, household.id)) {
+      res.status(400).json({ error: 'ACCOUNT_HAS_MERGED_SOURCES' });
+      return;
+    }
     await sequelize.transaction(async (t) => {
       await Transaction.destroy({ where: { accountId: id }, transaction: t });
       await account.destroy({ transaction: t });
     });
     res.status(204).send();
   } catch (e) {
+    next(e);
+  }
+});
+
+// Merge / consolidate a duplicate account into another (#287). Soft-merge:
+// reassigns the source's child records to the target and flags the source
+// (mergedIntoId/mergedAt), preserving it read-only for audit. The path segment
+// `/merge-into/` keeps this from colliding with the `/:id` PATCH/DELETE routes.
+const MERGE_ERROR_STATUS: Record<string, number> = {
+  SAME_ID: 400,
+  CURRENCY_MISMATCH: 400,
+  TARGET_NOT_MERGEABLE: 400,
+  SOURCE_ALREADY_MERGED: 400,
+  NOT_FOUND: 404,
+};
+
+router.post('/:sourceId/merge-into/:targetId', async (req, res, next) => {
+  try {
+    const { household } = currentAuth(req);
+    const sourceId = parseInt(req.params.sourceId, 10);
+    const targetId = parseInt(req.params.targetId, 10);
+    if (Number.isNaN(sourceId) || Number.isNaN(targetId)) {
+      res.status(400).json({ error: 'Invalid id' });
+      return;
+    }
+    // Ownership is enforced inside mergeAccounts (scoped to householdId).
+    // Superadmins still operate within their own household for this action.
+    const result = await mergeAccounts({ sourceId, targetId, householdId: household.id });
+    res.json({
+      source: result.source.toJSON(),
+      target: result.target.toJSON(),
+      movedTransactions: result.movedTransactions,
+      movedPlannedEvents: result.movedPlannedEvents,
+      movedTotal: result.movedTotal,
+    });
+  } catch (e) {
+    if (e instanceof AccountMergeError) {
+      res
+        .status(MERGE_ERROR_STATUS[e.code] ?? 400)
+        .json({ error: e.code, message: e.message, ...(e.details ? { details: e.details } : {}) });
+      return;
+    }
     next(e);
   }
 });

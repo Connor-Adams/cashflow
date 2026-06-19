@@ -39,6 +39,14 @@ export class Account extends Model<
   declare openingBalanceDate: CreationOptional<string | null>;
   declare closedAt: CreationOptional<string | null>;
   declare notes: string | null;
+  /**
+   * Account merge / consolidation (#287). When set, this account is a merged
+   * source: its transactions + planned events were reassigned to the target
+   * account `mergedIntoId`, and the row is hidden from the default account
+   * list. Null for a normal (un-merged) account.
+   */
+  declare mergedIntoId: CreationOptional<number | null>;
+  declare mergedAt: CreationOptional<Date | null>;
   declare readonly createdAt: CreationOptional<Date>;
   declare readonly updatedAt: CreationOptional<Date>;
 }
@@ -124,6 +132,18 @@ export function initAccount(sequelize: Sequelize): typeof Account {
       },
       notes: {
         type: DataTypes.TEXT,
+        allowNull: true,
+        defaultValue: null,
+      },
+      mergedIntoId: {
+        type: DataTypes.INTEGER,
+        field: 'merged_into_id',
+        allowNull: true,
+        defaultValue: null,
+      },
+      mergedAt: {
+        type: DataTypes.DATE,
+        field: 'merged_at',
         allowNull: true,
         defaultValue: null,
       },

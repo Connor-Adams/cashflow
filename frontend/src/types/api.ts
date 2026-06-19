@@ -6,6 +6,7 @@
 export type {
   Account,
   AccountType,
+  AccountMergeResult,
   AcbRealizedEvent,
   AcbResult,
   AcbTimelineState,
