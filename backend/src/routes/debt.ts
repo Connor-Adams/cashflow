@@ -1,5 +1,4 @@
-import { Router, type Request } from 'express';
-import { Op } from 'sequelize';
+import { Router } from 'express';
 import {
   Account,
   LiabilityAccount,
@@ -8,22 +7,24 @@ import {
 } from '../models';
 import { currentAuth } from '../auth/middleware';
 import { householdWhere } from '../auth/scope';
-import { balanceAtDate } from '../networth/balanceAtDate';
 import {
   computePayoffPlan,
   comparePayoff,
   PAYOFF_STRATEGIES,
   type PayoffStrategy,
-  type PayoffDebtInput,
   type PayoffPlan,
 } from '../debt/payoffPlan';
+import {
+  LIABILITY_TYPES,
+  loadLiabilities,
+  toDebtInputs,
+  type LiabilityRow,
+} from '../debt/loadLiabilities';
 
 const router = Router();
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_NAME_LENGTH = 255;
-// Liability account types — must match networth/accountKind.ts LIABILITY_TYPES.
-const LIABILITY_TYPES = new Set(['credit_card', 'loan', 'mortgage']);
 // How many months of debt payments to materialize into the forecast when
 // feedForecast is requested. Bounded so we never project an unrealistic
 // horizon, and capped further by the plan's own length.
@@ -38,106 +39,14 @@ type ValidationResult<T> =
   | { ok: false; status: number; error: string };
 
 // ---------------------------------------------------------------------------
-// Liability assembly
-// ---------------------------------------------------------------------------
-
-type LiabilityRow = {
-  accountId: number;
-  name: string;
-  accountType: string;
-  currency: string;
-  /** Amount currently owed, as a positive number. */
-  balance: number;
-  interestRate: number;
-  minimumPayment: number;
-  statementBalance: number | null;
-  dueDay: number | null;
-};
-
-/**
- * The owed balance for a liability account. We prefer the explicit
- * `statementBalance` override when set; otherwise we derive it from the
- * transaction-stream balance via balanceAtDate. Liability balances are
- * negative (money owed), so we surface the magnitude as a positive "owed"
- * figure for the planner.
- */
-async function owedBalance(
-  account: InstanceType<typeof Account>,
-  profile: InstanceType<typeof LiabilityAccount> | null,
-  asOf: string,
-): Promise<number> {
-  if (profile && profile.statementBalance != null) {
-    return Math.abs(Number(profile.statementBalance));
-  }
-  const balances = await balanceAtDate(account, asOf);
-  const ccy = account.defaultCurrency ?? 'CAD';
-  const match = balances.find((b) => b.currency === ccy) ?? balances[0];
-  const raw = match ? match.amount : 0;
-  // Owed is the magnitude of a negative balance; a positive balance (overpaid)
-  // means nothing is owed.
-  return raw < 0 ? Math.abs(raw) : 0;
-}
-
-/**
- * Assemble the household's liability accounts joined with their liability
- * profiles and derived owed balances.
- */
-async function loadLiabilities(req: Request, asOf: string): Promise<LiabilityRow[]> {
-  const accounts = await Account.findAll({
-    where: {
-      ...householdWhere(req),
-      accountType: { [Op.in]: Array.from(LIABILITY_TYPES) },
-    },
-    order: [['id', 'ASC']],
-  });
-  if (accounts.length === 0) return [];
-
-  const profiles = await LiabilityAccount.findAll({
-    where: { accountId: { [Op.in]: accounts.map((a) => a.id) } },
-  });
-  const profileByAccount = new Map<number, InstanceType<typeof LiabilityAccount>>();
-  for (const p of profiles) profileByAccount.set(p.accountId, p);
-
-  const rows: LiabilityRow[] = [];
-  for (const account of accounts) {
-    const profile = profileByAccount.get(account.id) ?? null;
-    const balance = await owedBalance(account, profile, asOf);
-    rows.push({
-      accountId: account.id,
-      name: account.name,
-      accountType: account.accountType,
-      currency: account.defaultCurrency ?? 'CAD',
-      balance,
-      interestRate: profile ? Number(profile.interestRate) : 0,
-      minimumPayment: profile ? Number(profile.minimumPayment) : 0,
-      statementBalance: profile && profile.statementBalance != null ? Number(profile.statementBalance) : null,
-      dueDay: profile ? profile.dueDay : null,
-    });
-  }
-  return rows;
-}
-
-/** Map assembled liabilities into the payoff engine's debt inputs (owed > 0). */
-function toDebtInputs(liabilities: LiabilityRow[]): PayoffDebtInput[] {
-  return liabilities
-    .filter((l) => l.balance > 0)
-    .map((l) => ({
-      id: l.accountId,
-      name: l.name,
-      balance: l.balance,
-      apr: l.interestRate,
-      minimumPayment: l.minimumPayment,
-    }));
-}
-
-// ---------------------------------------------------------------------------
 // GET /api/debt — overview + default comparison
 // ---------------------------------------------------------------------------
 
 router.get('/', async (req, res, next) => {
   try {
+    const { household } = currentAuth(req);
     const asOf = todayIso();
-    const liabilities = await loadLiabilities(req, asOf);
+    const liabilities = await loadLiabilities(household.id, asOf);
 
     let extraMonthlyPayment = 0;
     if (req.query.extraMonthlyPayment !== undefined && req.query.extraMonthlyPayment !== '') {
@@ -464,7 +373,7 @@ router.post('/scenarios', async (req, res, next) => {
     }
 
     const asOf = todayIso();
-    const liabilities = await loadLiabilities(req, asOf);
+    const liabilities = await loadLiabilities(household.id, asOf);
 
     const payload = JSON.stringify({
       order: result.value.customOrder ?? null,
@@ -533,6 +442,7 @@ router.get('/scenarios', async (req, res, next) => {
 
 router.get('/scenarios/:id', async (req, res, next) => {
   try {
+    const { household } = currentAuth(req);
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id) || id < 1) {
       res.status(400).json({ error: 'Invalid id' });
@@ -559,7 +469,7 @@ router.get('/scenarios/:id', async (req, res, next) => {
     }
 
     const asOf = todayIso();
-    const liabilities = await loadLiabilities(req, asOf);
+    const liabilities = await loadLiabilities(household.id, asOf);
     const plan = planForScenario(
       liabilities,
       scenario.strategy,

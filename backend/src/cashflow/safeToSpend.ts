@@ -18,6 +18,14 @@
 import { Account, Entity, FinancialGoal, CashflowSettings } from '../models';
 import { CASHFLOW_SETTINGS_DEFAULTS } from '../models/CashflowSettings';
 import { balanceAtDate } from '../networth/balanceAtDate';
+import { loadLiabilities, toDebtInputs } from '../debt/loadLiabilities';
+import {
+  composeSurplus,
+  selectTopGoal,
+  DEFAULT_ASSUMED_ANNUAL_RETURN_RATE,
+  DEFAULT_SURPLUS_HORIZON_YEARS,
+  type Surplus,
+} from './surplus';
 import {
   gatherPlannedOccurrences,
   resolveForecastCurrency,
@@ -412,5 +420,70 @@ export async function computeSafeToSpend(params: {
     expectedCreditCardPayments,
     minimumBuffer: Number(settings.minimumCashBuffer),
     settings,
+  });
+}
+
+/**
+ * Read the user's assumed annual return rate (#654), falling back to the
+ * default when no settings row exists or the value is non-finite/out-of-range.
+ * Returned as a decimal (0.05 == 5%).
+ */
+export async function loadAssumedAnnualReturnRate(
+  userId: number,
+): Promise<number> {
+  const row = await CashflowSettings.findOne({ where: { userId } });
+  const raw =
+    row != null
+      ? Number(row.assumedAnnualReturnRate)
+      : Number(CASHFLOW_SETTINGS_DEFAULTS.assumedAnnualReturnRate);
+  if (!Number.isFinite(raw)) return DEFAULT_ASSUMED_ANNUAL_RETURN_RATE;
+  return raw;
+}
+
+/**
+ * Surplus decision hub (#654). Given an already-computed safe-to-spend result,
+ * derive the investable surplus, the top active goal in the same currency, and
+ * the payoff-vs-invest comparison against the household's in-currency debts.
+ *
+ * DB-aware orchestrator: loads goals + liabilities + the assumed-return setting,
+ * then defers to the pure `composeSurplus`. Records nothing and moves no money.
+ */
+export async function computeSurplus(params: {
+  userId: number;
+  householdId: number;
+  asOfDate: string;
+  result: SafeToSpendResult;
+}): Promise<Surplus> {
+  const currency = params.result.currency;
+
+  const [goals, liabilities, assumedAnnualReturnRate] = await Promise.all([
+    FinancialGoal.findAll({
+      where: { householdId: params.householdId, status: 'active', currency },
+    }),
+    loadLiabilities(params.householdId, params.asOfDate),
+    loadAssumedAnnualReturnRate(params.userId),
+  ]);
+
+  const topGoal = selectTopGoal(
+    goals.map((g) => ({
+      id: g.id,
+      name: g.name,
+      currency: g.currency,
+      priority: g.priority,
+      targetDate: g.targetDate,
+    })),
+  );
+
+  // Scope debts to the surplus currency — other currencies don't contribute.
+  const debts = toDebtInputs(liabilities.filter((l) => l.currency === currency));
+
+  return composeSurplus({
+    safeToSpendValue: params.result.value,
+    buffer: params.result.breakdown.minimumBuffer,
+    currency,
+    topGoal,
+    debts,
+    assumedAnnualReturnRate,
+    horizonYears: DEFAULT_SURPLUS_HORIZON_YEARS,
   });
 }
