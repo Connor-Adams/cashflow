@@ -43,6 +43,8 @@ export type InsightType =
   | 'missing_receipt'
   | 'unusual_category_spend'
   | 'settlement_imbalance'
+  | 'cash_runway_low'
+  | 'category_trend'
   | 'small_subscription'
   | 'recurring_fee'
   | 'duplicate_service'
