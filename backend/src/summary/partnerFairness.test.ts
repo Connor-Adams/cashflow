@@ -77,6 +77,16 @@ test('buildFairnessByCurrency: no viewerUserId behaves as owner POV (back-compat
   assert.equal(Math.round(legacy[0].balance * 100) / 100, 50);
 });
 
+test('buildFairnessMonthly: viewer projection mirrors netDelta', () => {
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, date: '2026-05-10', amount: -100, myShare: -50, partnerShare: -50, payerUserId: 1 }),
+  ];
+  const owner = buildFairnessMonthly(rows, [], { viewerUserId: 1 });
+  const partner = buildFairnessMonthly(rows, [], { viewerUserId: 2 });
+  assert.equal(Math.round(owner[0].netDelta * 100) / 100, 50);
+  assert.equal(Math.round(partner[0].netDelta * 100) / 100, -50);
+});
+
 // ---------------- aggregateCategoryBreakdown ----------------
 
 test('aggregateCategoryBreakdown: groups by category and ranks by |sharedSpend|', () => {

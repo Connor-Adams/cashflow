@@ -491,17 +491,21 @@ export function buildFairnessMonthly(
 ): FairnessMonthlyPoint[] {
   const partnerContactIds = options.partnerContactIds ?? new Set<number>();
   const excludeNonPartnerInflows = options.excludeNonPartnerInflows ?? false;
+  const viewerUserId = options.viewerUserId;
 
   type Acc = {
     sharedSpend: number;
     myShare: number;
     partnerShare: number;
     settlementDelta: number;
+    /** Sum of per-row viewer-relative balance contributions (netDelta base). */
+    contribution: number;
   };
   const byKey = new Map<string, Acc>(); // key: `${currency}\0${month}`
 
   for (const r of rows) {
-    if (r.partnerShare === 0) continue;
+    const p = projectRow(r, viewerUserId);
+    if (!p.shared) continue;
     if (excludeNonPartnerInflows) {
       const kind = classifyInflow(r, partnerContactIds);
       if (kind === 'non_partner') continue;
@@ -510,10 +514,11 @@ export function buildFairnessMonthly(
     const key = `${r.currency}\0${month}`;
     const acc =
       byKey.get(key) ??
-      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0 } satisfies Acc);
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0, contribution: 0 } satisfies Acc);
     acc.sharedSpend += r.amount;
-    acc.myShare += r.myShare;
-    acc.partnerShare += r.partnerShare;
+    acc.myShare += p.myShare;
+    acc.partnerShare += p.partnerShare;
+    acc.contribution += p.balanceContribution;
     byKey.set(key, acc);
   }
 
@@ -521,7 +526,7 @@ export function buildFairnessMonthly(
     const key = `${s.currency}\0${s.month}`;
     const acc =
       byKey.get(key) ??
-      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0 } satisfies Acc);
+      ({ sharedSpend: 0, myShare: 0, partnerShare: 0, settlementDelta: 0, contribution: 0 } satisfies Acc);
     acc.settlementDelta += s.iPaid - s.partnerPaid;
     byKey.set(key, acc);
   }
@@ -541,7 +546,7 @@ export function buildFairnessMonthly(
   const runningByCurrency = new Map<string, number>();
   const points: FairnessMonthlyPoint[] = [];
   for (const { currency, month, acc } of entries) {
-    const netDelta = -acc.partnerShare + acc.settlementDelta;
+    const netDelta = acc.contribution + acc.settlementDelta;
     const running = (runningByCurrency.get(currency) ?? 0) + netDelta;
     runningByCurrency.set(currency, running);
     points.push({
