@@ -150,28 +150,32 @@ import { Link } from 'react-router-dom';
 
 ```ts
 // Components
-export { Button, type ButtonProps } from '@cashflow/ui';
-export { Badge, type BadgeProps } from '@cashflow/ui';
-export { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@cashflow/ui';
-export { Input } from '@cashflow/ui';
-export { Label } from '@cashflow/ui';
-export { Alert, AlertTitle, AlertDescription } from '@cashflow/ui';
-export { Skeleton, SkeletonText, SkeletonRow } from '@cashflow/ui';
-export { EmptyState, EmptyTableRow } from '@cashflow/ui';
-export { Tabs, TabsList, TabsTrigger, TabsContent } from '@cashflow/ui';
-export { LetterAvatar } from '@cashflow/ui';
-export { PageHeader } from '@cashflow/ui';
-export { SectionHeader } from '@cashflow/ui';
-export { StatCard } from '@cashflow/ui';
-export { MetricStat } from '@cashflow/ui';
-export { DeltaBadge } from '@cashflow/ui';
-
-// Utilities
-export { cn } from '@cashflow/ui';
+import { Button, buttonVariants, type ButtonProps } from '@cashflow/ui';
+import { Badge, badgeVariants } from '@cashflow/ui';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@cashflow/ui';
+import { Input } from '@cashflow/ui';
+import { Textarea } from '@cashflow/ui';
+import { Label } from '@cashflow/ui';
+import { Alert, type AlertVariant } from '@cashflow/ui';
+import { Skeleton, SkeletonText, SkeletonRow } from '@cashflow/ui';
+import { EmptyState, EmptyTableRow } from '@cashflow/ui';
+import { Grid, type GridProps } from '@cashflow/ui';
+import { NativeSelect, NativeSelectOption } from '@cashflow/ui';
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@cashflow/ui';
+import { Tabs, TabPanel, type TabItem } from '@cashflow/ui';
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+  DialogFooter,
+  useConfirm,
+} from '@cashflow/ui';
 
 // CSS entry points (import in your app root, not as JS imports)
-// '@cashflow/ui/styles.css' — compiled, self-contained
-// '@cashflow/ui/theme.css'  — raw @theme source for Tailwind v4 consumers
+// import '@cashflow/ui/styles.css'  — compiled, self-contained
+// import '@cashflow/ui/theme.css'   — raw @theme source for Tailwind v4 consumers
 ```
 
 ---

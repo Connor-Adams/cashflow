@@ -8,7 +8,10 @@
   ],
   "files": [
     "dist",
-    "src/styles"
+    "src/styles/preset.css",
+    "src/styles/theme.css",
+    "src/styles/tokens.css",
+    "src/styles/utilities.css"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
