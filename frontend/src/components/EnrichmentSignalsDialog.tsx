@@ -42,6 +42,20 @@ const CONFIDENCE_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | '
   low: 'outline',
 }
 
+// Human-readable chip labels per signal source. `embedding` (#792) is a
+// local semantic match against a previously-categorized merchant, distinct
+// from the exact `memory` match and the `ai` suggestion.
+const SOURCE_LABEL: Record<string, string> = {
+  memory: 'auto (merchant memory)',
+  embedding: 'auto (similar merchant)',
+  ai: 'auto (AI)',
+}
+
+function sourceLabel(source: string | null | undefined): string {
+  if (source == null) return ''
+  return SOURCE_LABEL[source] ?? source
+}
+
 export function EnrichmentSignalsDialog({
   transactionId,
   transactionSummary,
@@ -132,7 +146,7 @@ export function EnrichmentSignalsDialog({
             <div className="row" style={{ gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
               <Badge variant="secondary">type: {transactionSummary.txnType}</Badge>
               {transactionSummary.autoSource && (
-                <Badge variant="secondary">source: {transactionSummary.autoSource}</Badge>
+                <Badge variant="secondary">source: {sourceLabel(transactionSummary.autoSource)}</Badge>
               )}
               {transactionSummary.autoConfidence && (
                 <Badge variant={CONFIDENCE_VARIANT[transactionSummary.autoConfidence] ?? 'muted'}>
@@ -166,7 +180,7 @@ export function EnrichmentSignalsDialog({
               {signals.map((s) => (
                 <li key={s.id} style={{ marginBottom: '0.5rem' }}>
                   <div className="row" style={{ gap: '0.35rem', flexWrap: 'wrap' }}>
-                    <Badge variant="secondary">{s.source}</Badge>
+                    <Badge variant="secondary">{sourceLabel(s.source)}</Badge>
                     <Badge variant={CONFIDENCE_VARIANT[s.confidence] ?? 'muted'}>
                       {s.confidence}
                     </Badge>

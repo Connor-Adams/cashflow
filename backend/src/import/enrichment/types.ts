@@ -12,6 +12,7 @@ export type SignalSource =
   | 'refund-link'
   | 'refund-link-suggested'
   | 'transfer-link'
+  | 'embedding'
   | 'ai';
 
 export type TxnType =

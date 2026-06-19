@@ -371,6 +371,20 @@ function parseIntEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+export function parseFloatEnv(
+  name: string,
+  fallback: number,
+  bounds?: { min?: number; max?: number },
+): number {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  if (bounds?.min != null && n < bounds.min) return fallback;
+  if (bounds?.max != null && n > bounds.max) return fallback;
+  return n;
+}
+
 export const enrichmentRecurringMinSupport = parseIntEnv(
   'ENRICHMENT_RECURRING_MIN_SUPPORT',
   3,
@@ -417,6 +431,27 @@ export const enrichmentItemClearConfidence = parseIntEnv(
   'ENRICHMENT_ITEM_CLEAR_CONFIDENCE',
   80,
 );
+/**
+ * Stage 5.5 embedding-match (#792): local, offline-capable semantic match of a
+ * cold row's merchant against the household's previously-categorized merchants,
+ * run BEFORE the OpenAI batch. Enabled by default (no network/key needed); it
+ * self-skips when a household has no reviewed priors.
+ */
+export const enrichmentEmbeddingEnabled = parseBoolEnv(
+  'ENRICHMENT_EMBEDDING_ENABLED',
+  true,
+);
+/**
+ * Cosine-similarity threshold (inclusive, `>=`) above which an embedding match
+ * is trusted enough to auto-categorize a cold row. Default ~0.85. Clamped to
+ * [0, 1]; out-of-range / unparseable values fall back to the default.
+ */
+export const enrichmentEmbeddingThreshold = parseFloatEnv(
+  'ENRICHMENT_EMBEDDING_THRESHOLD',
+  0.85,
+  { min: 0, max: 1 },
+);
+
 /** Costco product-image enrichment: enabled only when true AND a scraper key is set. */
 export const costcoEnrichmentEnabled = parseBoolEnv('COSTCO_ENRICHMENT_ENABLED', false);
 /** Max distinct item numbers the resolver will attempt per invocation (budget guard). */
