@@ -23,6 +23,22 @@ vi.mock('../lib/api', () => ({
         utilizationPct: null,
         notes: null,
       },
+      {
+        id: 2,
+        name: 'RBC Royal Credit Line',
+        owner: 'me',
+        householdId: null,
+        ownerUserId: null,
+        accountType: 'loan',
+        shortCode: 'LOC',
+        defaultCurrency: 'CAD',
+        visibility: 'shared',
+        closedAt: null,
+        creditLimit: 4000,
+        currentBalance: 800,
+        utilizationPct: 20,
+        notes: null,
+      },
     ]),
   ),
   postJson: vi.fn(() => Promise.resolve({})),
@@ -55,5 +71,15 @@ describe('AccountsPage', () => {
     renderPage()
     expect(await screen.findByRole('columnheader', { name: /name/i })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /default currency/i })).toBeInTheDocument()
+  })
+
+  it('shows the credit limit + utilization for a line of credit (loan)', async () => {
+    renderPage()
+    // Revolving credit (loan line of credit) renders balance / limit + badge.
+    expect(await screen.findByText('RBC Royal Credit Line')).toBeInTheDocument()
+    // balance / limit render as separate text nodes inside one span.
+    expect(screen.getByText(/\$800/)).toBeInTheDocument()
+    expect(screen.getByText(/\$4,000/)).toBeInTheDocument()
+    expect(screen.getByText('20% used')).toBeInTheDocument()
   })
 })
