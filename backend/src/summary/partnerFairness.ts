@@ -48,6 +48,14 @@ export type SharedTxnRow = {
   counterpartyContactId: number | null;
   /** transactions.created_by_user_id — the payer in the single-payer model. Drives viewer-relative projection. NULL on legacy rows. */
   payerUserId: number | null;
+  /**
+   * Controller-set sharedness flag. `buildFairnessByCurrency`/`buildFairnessMonthly`
+   * project rows for the viewer, which can drive the displayed `partnerShare` to 0
+   * on a still-shared row (stored myShare=0 → non-payer view). The aggregation
+   * helpers honour this flag so a shared row is never dropped on its projected
+   * value. Direct callers that omit it fall back to `partnerShare !== 0`.
+   */
+  shared?: boolean;
 };
 
 /** Settlement summary keyed by (contactId, currency). Mirrors `partnerMath.SettlementSummary`. */
@@ -214,7 +222,7 @@ export function aggregateCategoryBreakdown(
 ): FairnessCategoryBreakdown[] {
   const byCategory = new Map<string, FairnessCategoryBreakdown>();
   for (const r of rows) {
-    if (r.partnerShare === 0) continue;
+    if (!(r.shared ?? r.partnerShare !== 0)) continue;
     const key = r.category ?? 'Uncategorized';
     const bucket =
       byCategory.get(key) ??
@@ -247,7 +255,7 @@ export function topLargestShared(
   rows: SharedTxnRow[],
 ): FairnessLargestTransaction[] {
   return rows
-    .filter((r) => r.partnerShare !== 0)
+    .filter((r) => r.shared ?? r.partnerShare !== 0)
     .slice()
     .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
     .slice(0, TOP_LARGEST_LIMIT)
@@ -403,7 +411,7 @@ export function buildFairnessByCurrency(
       if (kind === 'non_partner') continue;
     }
     const list = rowsByCurrency.get(r.currency) ?? [];
-    list.push({ ...r, myShare: p.myShare, partnerShare: p.partnerShare });
+    list.push({ ...r, myShare: p.myShare, partnerShare: p.partnerShare, shared: p.shared });
     rowsByCurrency.set(r.currency, list);
     contributionsByCurrency.set(
       r.currency,

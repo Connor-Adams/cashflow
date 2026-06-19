@@ -87,6 +87,24 @@ test('buildFairnessByCurrency: a me-only row is shared for neither viewer', () =
   assert.equal(partner.length, 0);
 });
 
+test('buildFairnessByCurrency: shared row with stored myShare=0 still appears in breakdown for the non-payer', () => {
+  // Payer (user 1) fronted a $100 cost that is 100% the partner's (myShare 0,
+  // partnerShare -100). The non-payer (user 2) consumed all of it. From the
+  // non-payer view the projected partnerShare (the OTHER's consumption) is 0,
+  // but the row is still shared — it must not vanish from the breakdown/balance.
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: 0, partnerShare: -100, payerUserId: 1, category: 'Gifts' }),
+  ];
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  assert.equal(partner.length, 1);
+  assert.equal(partner[0].sharedTransactionCount, 1);
+  assert.equal(partner[0].categoryBreakdown.length, 1);
+  assert.equal(partner[0].categoryBreakdown[0].category, 'Gifts');
+  assert.equal(partner[0].largestShared.length, 1);
+  // Non-payer owes the full 100.
+  assert.equal(Math.round(partner[0].balance * 100) / 100, -100);
+});
+
 test('buildFairnessByCurrency: no viewerUserId behaves as owner POV (back-compat)', () => {
   const rows: SharedTxnRow[] = [
     makeRow({ txnId: 1, amount: -100, myShare: -50, partnerShare: -50, payerUserId: 1 }),
