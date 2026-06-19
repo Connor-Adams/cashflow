@@ -10,6 +10,10 @@ import type { FxLookup } from './unifyToCad';
 // The contract: buildSeries must return byte-for-byte the same points as
 // looping buildNetWorthAt over the same buckets, but with a handful of
 // prefetch queries instead of thousands of per-bucket round-trips.
+//
+// The DB lifecycle + seed helpers mirror the sibling networth suites
+// (networthAggregate.test.ts, balanceAtDate.test.ts, …) by design — each
+// colocated suite is self-contained so it can run standalone.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
@@ -321,7 +325,7 @@ test('buildSeries: query count is bounded and independent of bucket count', asyn
   assert.ok(q12 <= 12, `expected low-double-digit query count, got ${q12}`);
 });
 
-test('parity: full breakdown values per bucket (buildSeriesAt helper if exposed)', async () => {
+test('parity: full breakdown values per bucket — all dimensions at once', async () => {
   // Larger fixture exercising every dimension at once over 6 monthly buckets.
   const chq = await seedAcc({ accountType: 'checking', defaultCurrency: 'CAD', opening: 1000 });
   const cc = await seedAcc({ accountType: 'credit_card', opening: 0 });
