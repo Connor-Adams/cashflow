@@ -22,10 +22,18 @@ format (`__metadata: version 10`).
 
 - Backend: **`node:test` via `tsx`** (no vitest, no `--run` flag). Tests are
   **auto-discovered**: `backend/scripts/run-unit-tests.sh` → `backend/test/list-unit-tests.mjs`
-  finds every `backend/test/**/*.test.ts` **except** `test/integration/**`.
-  - Backend tests live in **`backend/test/`** (flat tree), NOT `backend/src/**/__tests__/`.
+  recursively walks `backend/src/` and finds every `backend/src/**/*.test.ts`.
+  - Backend unit tests are **colocated** — `foo.test.ts` beside `foo.ts` under
+    `backend/src/`. NOT a flat `backend/test/` tree. A new colocated test runs
+    automatically (no glob to maintain); the lister exits nonzero if it finds zero
+    files (guards a silent empty run).
+  - Two carve-outs live outside the `src/` walk: **integration** tests in
+    `backend/test/integration/` (cross-cutting, Postgres; own `test:integration`
+    script), and **migration** tests in `backend/src/migrations/__tests__/` — NOT
+    directly in `src/migrations/`, which `sequelize-cli` scans for migrations and
+    would try to load a `.test.ts` as one.
   - All backend unit: `yarn workspace cashflow-backend run test`
-  - One file: `cd backend && yarn tsx --import ./test/setup.ts --test test/<file>.test.ts`
+  - One file: `cd backend && yarn tsx --import ./test/setup.ts --test src/<path>.test.ts`
   - Filter by name: append `--test-name-pattern '<regex>'`
   - Integration (needs Postgres, `TEST_DATABASE_URL`): `yarn workspace cashflow-backend run test:integration`
 - Frontend: **vitest**. One file: `yarn workspace frontend run test <Name>`.
