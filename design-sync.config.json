@@ -1,0 +1,51 @@
+{
+  "pkg": "@cashflow/ui",
+  "globalName": "CashflowUI",
+  "shape": "package",
+  "buildCmd": "corepack yarn workspace @cashflow/ui run build",
+  "cssEntry": "dist/cashflow-ui.css",
+  "componentSrcMap": {
+    "CardHeader": null,
+    "CardTitle": null,
+    "CardDescription": null,
+    "CardContent": null,
+    "DialogHeader": null,
+    "DialogTitle": null,
+    "DialogDescription": null,
+    "DialogBody": null,
+    "DialogFooter": null,
+    "SkeletonText": null,
+    "SkeletonRow": null,
+    "EmptyTableRow": null,
+    "NativeSelectOption": null,
+    "TableHeader": null,
+    "TableBody": null,
+    "TableHead": null,
+    "TableRow": null,
+    "TableCell": null,
+    "TabPanel": null
+  },
+  "docsMap": {
+    "Button": "../../.design-sync/groups/Button.md",
+    "Input": "../../.design-sync/groups/Input.md",
+    "Textarea": "../../.design-sync/groups/Textarea.md",
+    "Label": "../../.design-sync/groups/Label.md",
+    "NativeSelect": "../../.design-sync/groups/NativeSelect.md",
+    "Alert": "../../.design-sync/groups/Alert.md",
+    "Badge": "../../.design-sync/groups/Badge.md",
+    "Skeleton": "../../.design-sync/groups/Skeleton.md",
+    "EmptyState": "../../.design-sync/groups/EmptyState.md",
+    "Card": "../../.design-sync/groups/Card.md",
+    "Grid": "../../.design-sync/groups/Grid.md",
+    "Table": "../../.design-sync/groups/Table.md",
+    "Tabs": "../../.design-sync/groups/Tabs.md",
+    "Dialog": "../../.design-sync/groups/Dialog.md"
+  },
+  "overrides": {
+    "Dialog": {
+      "cardMode": "single",
+      "viewport": "560x440",
+      "primaryStory": "ConfirmDelete"
+    }
+  }
+}
