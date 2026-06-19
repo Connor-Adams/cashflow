@@ -84,10 +84,11 @@ account is resolved/created and `header.accountType === 'credit_card'`:
 - Only overwrite a field when the parsed value is non-null (a parser that didn't
   extract minimum payment must not wipe an existing value).
 - **Staleness guard (newer-wins).** Skip the upsert + auto-place entirely when the
-  imported statement is older than what's stored: if `LiabilityAccount.statementDate`
-  is set and the incoming statement date ≤ it, do nothing (a back-fill of an old
-  statement must not clobber the current bill). Equal dates → treat as a re-import
-  (idempotent replace). This makes re-importing an older statement safe.
+  imported statement is **strictly older** than what's stored: if
+  `LiabilityAccount.statementDate` is set and the incoming statement date (its
+  `periodEnd`) `<` the stored value, do nothing (a back-fill of an old statement
+  must not clobber the current bill). Equal date → proceed (re-import of the same
+  statement, idempotent replace). This makes re-importing an older statement safe.
 - This is gated to `credit_card` accounts so non-card imports are untouched.
 
 ### Link 3 — Auto-place (shared materialize service)
