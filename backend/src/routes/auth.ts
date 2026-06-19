@@ -15,6 +15,7 @@ import {
 import { hashPassword, hashToken, randomToken, verifyPassword } from '../auth/password';
 import { clearSessionCookie, currentAuth, setSessionCookie } from '../auth/middleware';
 import { DEMO_EMAIL, demoSeedEnabled, seedDemoData } from '../demo/seedDemoData';
+import { resolveOrCreatePartnerContact } from '../household/linkPartnerContact';
 
 const router = Router();
 const SESSION_DAYS = 30;
@@ -133,6 +134,12 @@ router.post('/register', async (req, res, next) => {
           { acceptedAt: new Date(), acceptedByUserId: createdUser.id },
           { transaction: t }
         );
+        await resolveOrCreatePartnerContact({
+          householdId: household.id,
+          userId: createdUser.id,
+          displayName,
+          transaction: t,
+        });
       } else {
         household = await Household.create(
           { name: `${displayName}'s household` },

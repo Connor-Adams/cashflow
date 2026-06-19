@@ -6,10 +6,28 @@ import {
   buildFairnessMonthly,
   buildSettlementRecommendation,
   computePartnerTransferDelta,
+  projectSettlementContribution,
   topLargestShared,
   type SettlementTotals,
   type SharedTxnRow,
 } from './partnerFairness';
+
+// ---------------- projectSettlementContribution ----------------
+
+test('projectSettlementContribution: owner (recorder) sees direction unchanged', () => {
+  const r = projectSettlementContribution('i_paid_partner', 40, 1, 1);
+  assert.deepEqual(r, { iPaid: 40, partnerPaid: 0 });
+});
+
+test('projectSettlementContribution: other viewer sees direction flipped', () => {
+  const r = projectSettlementContribution('i_paid_partner', 40, 1, 2);
+  assert.deepEqual(r, { iPaid: 0, partnerPaid: 40 });
+});
+
+test('projectSettlementContribution: no viewer or no recorder => owner POV (no flip)', () => {
+  assert.deepEqual(projectSettlementContribution('partner_paid_me', 10, 1, null), { iPaid: 0, partnerPaid: 10 });
+  assert.deepEqual(projectSettlementContribution('partner_paid_me', 10, null, 2), { iPaid: 0, partnerPaid: 10 });
+});
 
 function makeRow(over: Partial<SharedTxnRow> = {}): SharedTxnRow {
   return {
@@ -25,9 +43,86 @@ function makeRow(over: Partial<SharedTxnRow> = {}): SharedTxnRow {
     ownershipContactId: null,
     counterpartyContactId: null,
     contactName: null,
+    payerUserId: null,
     ...over,
   };
 }
+
+// ---------------- viewer-relative projection ----------------
+
+test('buildFairnessByCurrency: viewer projection mirrors balance between partners', () => {
+  // Connor (user 1) paid a shared $100 grocery; partner owes 50 (stored negative).
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -50, partnerShare: -50, payerUserId: 1 }),
+  ];
+  const owner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 1 });
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  // Owner: partner owes me 50.
+  assert.equal(Math.round(owner[0].balance * 100) / 100, 50);
+  assert.equal(owner[0].direction, 'partner_owes_me');
+  // Partner: I owe 50 — exact mirror.
+  assert.equal(Math.round(partner[0].balance * 100) / 100, -50);
+  assert.equal(partner[0].direction, 'i_owe_partner');
+});
+
+test('buildFairnessByCurrency: viewer projection swaps consumption display', () => {
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -70, partnerShare: -30, payerUserId: 1, category: 'Dining' }),
+  ];
+  const owner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 1 });
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  // Owner consumed 70, partner consumed 30.
+  assert.equal(owner[0].myShareTotal, -70);
+  assert.equal(owner[0].partnerShareTotal, -30);
+  // Partner's POV: their own consumption is 30, the other's is 70.
+  assert.equal(partner[0].myShareTotal, -30);
+  assert.equal(partner[0].partnerShareTotal, -70);
+});
+
+test('buildFairnessByCurrency: a me-only row is shared for neither viewer', () => {
+  // partnerShare 0 => not a shared expense; must not surface even for the non-payer.
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -100, partnerShare: 0, payerUserId: 1 }),
+  ];
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  assert.equal(partner.length, 0);
+});
+
+test('buildFairnessByCurrency: shared row with stored myShare=0 still appears in breakdown for the non-payer', () => {
+  // Payer (user 1) fronted a $100 cost that is 100% the partner's (myShare 0,
+  // partnerShare -100). The non-payer (user 2) consumed all of it. From the
+  // non-payer view the projected partnerShare (the OTHER's consumption) is 0,
+  // but the row is still shared — it must not vanish from the breakdown/balance.
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: 0, partnerShare: -100, payerUserId: 1, category: 'Gifts' }),
+  ];
+  const partner = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01', { viewerUserId: 2 });
+  assert.equal(partner.length, 1);
+  assert.equal(partner[0].sharedTransactionCount, 1);
+  assert.equal(partner[0].categoryBreakdown.length, 1);
+  assert.equal(partner[0].categoryBreakdown[0].category, 'Gifts');
+  assert.equal(partner[0].largestShared.length, 1);
+  // Non-payer owes the full 100.
+  assert.equal(Math.round(partner[0].balance * 100) / 100, -100);
+});
+
+test('buildFairnessByCurrency: no viewerUserId behaves as owner POV (back-compat)', () => {
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, amount: -100, myShare: -50, partnerShare: -50, payerUserId: 1 }),
+  ];
+  const legacy = buildFairnessByCurrency(rows, [], '2026-05-01', '2026-06-01');
+  assert.equal(Math.round(legacy[0].balance * 100) / 100, 50);
+});
+
+test('buildFairnessMonthly: viewer projection mirrors netDelta', () => {
+  const rows: SharedTxnRow[] = [
+    makeRow({ txnId: 1, date: '2026-05-10', amount: -100, myShare: -50, partnerShare: -50, payerUserId: 1 }),
+  ];
+  const owner = buildFairnessMonthly(rows, [], { viewerUserId: 1 });
+  const partner = buildFairnessMonthly(rows, [], { viewerUserId: 2 });
+  assert.equal(Math.round(owner[0].netDelta * 100) / 100, 50);
+  assert.equal(Math.round(partner[0].netDelta * 100) / 100, -50);
+});
 
 // ---------------- aggregateCategoryBreakdown ----------------
 

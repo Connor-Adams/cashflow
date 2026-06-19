@@ -386,6 +386,8 @@ HouseholdMember.belongsTo(Household, { foreignKey: 'household_id', as: 'househol
 HouseholdMember.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Contact, { foreignKey: 'household_id', as: 'contacts' });
 Contact.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+User.hasMany(Contact, { foreignKey: 'user_id', as: 'linkedContacts' });
+Contact.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Category, { foreignKey: 'household_id', as: 'categories' });
 Category.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 // Category tree (subcategories): self-referential parent/children.
@@ -405,6 +407,8 @@ Contact.hasMany(PartnerSettlement, {
   as: 'partnerSettlements',
 });
 PartnerSettlement.belongsTo(Contact, { foreignKey: 'contact_id', as: 'contact' });
+User.hasMany(PartnerSettlement, { foreignKey: 'recorded_by_user_id', as: 'recordedSettlements' });
+PartnerSettlement.belongsTo(User, { foreignKey: 'recorded_by_user_id', as: 'recordedByUser' });
 Household.hasMany(BudgetTarget, {
   foreignKey: 'household_id',
   as: 'budgetTargets',

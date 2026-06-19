@@ -21,6 +21,7 @@ export class PartnerSettlement extends Model<
 > {
   declare id: CreationOptional<number>;
   declare householdId: number;
+  declare recordedByUserId: CreationOptional<number | null>;
   declare contactId: number;
   declare direction: PartnerSettlementDirection;
   declare currency: string;
@@ -39,6 +40,11 @@ export function initPartnerSettlement(sequelize: Sequelize): typeof PartnerSettl
         type: DataTypes.INTEGER,
         field: 'household_id',
         allowNull: false,
+      },
+      recordedByUserId: {
+        type: DataTypes.INTEGER,
+        field: 'recorded_by_user_id',
+        allowNull: true,
       },
       contactId: {
         type: DataTypes.INTEGER,
