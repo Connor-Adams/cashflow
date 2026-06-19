@@ -8,7 +8,7 @@
  */
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Sequelize, DataTypes } from 'sequelize';
+import { Sequelize } from 'sequelize';
 
 let sequelize: Sequelize;
 let migration: {
@@ -22,30 +22,27 @@ before(async () => {
   sequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
   const qi = sequelize.getQueryInterface();
 
-  await qi.createTable('notification_preferences', {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    user_id: { type: DataTypes.INTEGER, allowNull: false },
-    type: { type: DataTypes.STRING(64), allowNull: false },
-    channel_in_app: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-    channel_email: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-    channel_push: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-    created_at: { type: DataTypes.DATE, allowNull: false },
-    updated_at: { type: DataTypes.DATE, allowNull: false },
-  });
-
-  // A pre-existing preference row, to prove the default lands.
-  const now = new Date().toISOString();
-  await qi.bulkInsert('notification_preferences', [
-    {
-      user_id: 1,
-      type: 'digest.weekly',
-      channel_in_app: true,
-      channel_email: false,
-      channel_push: false,
-      created_at: now,
-      updated_at: now,
-    },
-  ]);
+  // Minimal prerequisite table: the migration only touches
+  // notification_preferences, so we stand up just enough of it via raw SQL
+  // (a pre-existing row included) to prove the new column's default backfills.
+  await sequelize.query(
+    `CREATE TABLE notification_preferences (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       user_id INTEGER NOT NULL,
+       type TEXT NOT NULL,
+       channel_in_app BOOLEAN NOT NULL DEFAULT 1,
+       channel_email BOOLEAN NOT NULL DEFAULT 0,
+       channel_push BOOLEAN NOT NULL DEFAULT 0,
+       created_at TEXT NOT NULL,
+       updated_at TEXT NOT NULL
+     )`,
+  );
+  await sequelize.query(
+    `INSERT INTO notification_preferences
+       (user_id, type, channel_in_app, channel_email, channel_push, created_at, updated_at)
+     VALUES (1, 'digest.weekly', 1, 0, 0, datetime('now'), datetime('now'))`,
+  );
+  void qi;
 
   migration = require('../20260627000001-add-digest-day-of-week.js');
 });

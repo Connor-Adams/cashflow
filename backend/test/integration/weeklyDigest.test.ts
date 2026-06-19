@@ -432,7 +432,7 @@ test('#796 AC6/AC7: push fired when channelPush=true + subscription; not when fa
   };
 
   setMailerDriverForTest(new NoopMailerDriver());
-  const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), sender);
+  const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), { pushSender: sender });
 
   assert.equal(result.sentPush, 1, 'exactly one user got push');
   assert.deepEqual(calls, ['https://push.example/pushon'], 'only push-on endpoint hit');
@@ -517,7 +517,7 @@ test('#796 AC10: a push-send failure is isolated and never blocks other users', 
   };
 
   setMailerDriverForTest(new NoopMailerDriver());
-  const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), sender);
+  const result = await runWeeklyDigest([a.user, b.user], thisMondayUTC(), { pushSender: sender });
 
   // A's in-app still written (push failure is independent); B processed too.
   assert.equal(result.wroteInApp, 2);

@@ -218,30 +218,29 @@ test('aggregateDigest: uncategorized rows surface as "Uncategorized"', () => {
   assert.equal(d.topCategories[0].category, 'Uncategorized');
 });
 
+// Shared opts for the #796 enrichment tests — the week window + flags are
+// identical across them; only the rows / enriched fields vary. Factoring this
+// keeps each test focused on the field under assertion (and avoids a clone).
+const W796 = {
+  weekStart: '2026-05-18',
+  weekEnd: '2026-05-24',
+  hasAnyHistory: true,
+  pendingCount: 0,
+} as const;
+
 test('aggregateDigest: netChange = income minus spend in chosen currency (#796 AC1)', () => {
   const current = [
     row({ id: 1, amount: '-100.00', finalCategory: 'Groceries' }),
     row({ id: 2, amount: '-50.00', finalCategory: 'Dining' }),
     row({ id: 3, amount: '500.00', txnType: 'income', finalCategory: null }),
   ];
-  const d = aggregateDigest(current, [], {
-    weekStart: '2026-05-18',
-    weekEnd: '2026-05-24',
-    hasAnyHistory: true,
-    pendingCount: 0,
-  });
+  const d = aggregateDigest(current, [], { ...W796 });
   // income 500 - spend 150 = +350
   assert.equal(d.netChange, 350);
 });
 
 test('aggregateDigest: netChange is zero for an empty week (#796 AC9)', () => {
-  const d = aggregateDigest([], [], {
-    weekStart: '2026-05-18',
-    weekEnd: '2026-05-24',
-    hasAnyHistory: true,
-    pendingCount: 0,
-    fallbackCurrency: 'CAD',
-  });
+  const d = aggregateDigest([], [], { ...W796, fallbackCurrency: 'CAD' });
   assert.equal(d.netChange, 0);
   assert.deepEqual(d.categoryDeltas, []);
 });
@@ -253,15 +252,8 @@ test('aggregateDigest: categoryDeltas is the FULL array with delta=total-priorTo
     row({ id: 3, amount: '-300.00', finalCategory: 'Rent' }),
     row({ id: 4, amount: '-50.00', finalCategory: 'Misc' }),
   ];
-  const prior = [
-    row({ id: 10, amount: '-150.00', finalCategory: 'Groceries' }),
-  ];
-  const d = aggregateDigest(current, prior, {
-    weekStart: '2026-05-18',
-    weekEnd: '2026-05-24',
-    hasAnyHistory: true,
-    pendingCount: 0,
-  });
+  const prior = [row({ id: 10, amount: '-150.00', finalCategory: 'Groceries' })];
+  const d = aggregateDigest(current, prior, { ...W796 });
   // Not sliced to 3 — all four categories present.
   assert.equal(d.categoryDeltas.length, 4);
   for (const c of d.categoryDeltas) {
@@ -275,10 +267,7 @@ test('aggregateDigest: categoryDeltas is the FULL array with delta=total-priorTo
 
 test('aggregateDigest: insight rollup + upcoming expectations passed through (#796 AC3/AC4)', () => {
   const d = aggregateDigest([], [], {
-    weekStart: '2026-05-18',
-    weekEnd: '2026-05-24',
-    hasAnyHistory: true,
-    pendingCount: 0,
+    ...W796,
     openInsightCount: 4,
     topInsights: [
       { id: 91, type: 'subscription_price_increase', severity: 'warning', title: 'Netflix up' },

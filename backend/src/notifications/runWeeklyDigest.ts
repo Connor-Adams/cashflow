@@ -201,19 +201,35 @@ async function maybeSendEmail(
   return { sent: true, failed: false };
 }
 
+export interface RunWeeklyDigestOptions {
+  /**
+   * Injectable web-push transport so tests can drive (or fail) the fan-out
+   * deterministically without VAPID/real endpoints. Production omits it and
+   * the default sender is used.
+   */
+  pushSender?: WebPushSender;
+  /**
+   * Bypass the per-user `digestDayOfWeek` gate (#796). The scheduled cron
+   * leaves this false so each user only fires on their chosen weekday; the
+   * admin "run-now" / generate-now path sets it true because it's an explicit
+   * manual trigger that should deliver regardless of the current weekday.
+   */
+  ignoreDayOfWeek?: boolean;
+}
+
 /**
  * Iterate the supplied list of users (already filtered for "due") and
  * deliver each one's digest. Updates `last_digest_sent_at` on success.
  *
  * `asOf` is exposed so tests can pin time-of-day; production passes
- * `new Date()`. `pushSender` is injectable so tests can drive (or fail) the
- * web-push transport deterministically without VAPID/real endpoints.
+ * `new Date()`.
  */
 export async function runWeeklyDigest(
   users: ProcessableUser[],
   asOf: Date,
-  pushSender?: WebPushSender,
+  options: RunWeeklyDigestOptions = {},
 ): Promise<WeeklyDigestRunResult> {
+  const { pushSender, ignoreDayOfWeek = false } = options;
   const result: WeeklyDigestRunResult = {
     processed: 0,
     sentEmail: 0,
@@ -241,7 +257,8 @@ export async function runWeeklyDigest(
 
       // Day-of-week gate (#796 AC8): a user whose chosen day ≠ today's weekday
       // is skipped this tick and left eligible (last_digest_sent_at untouched).
-      if (pref.digestDayOfWeek !== tickDayOfWeek) {
+      // The manual run-now path bypasses this (ignoreDayOfWeek).
+      if (!ignoreDayOfWeek && pref.digestDayOfWeek !== tickDayOfWeek) {
         result.skippedWrongDay += 1;
         continue;
       }
