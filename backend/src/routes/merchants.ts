@@ -29,14 +29,27 @@
  */
 import { Router, type Request } from 'express';
 import { Op, fn, col, where as sqlWhere, QueryTypes } from 'sequelize';
-import { Account, Receipt, Rule, Transaction, sequelize } from '../models';
+import { Account, Category, Receipt, Rule, Transaction, sequelize } from '../models';
 import { serializeTransaction } from '../util/serializeTransaction';
 import {
   aggregateMerchantTimeline,
   resolveMerchantKey,
   type MerchantTimelineTxnRow,
 } from '../summary/merchantTimeline';
-import { visibleTransactionWhere, visibleAccountWhere, householdWhere } from '../auth/scope';
+import {
+  visibleTransactionWhere,
+  visibleAccountWhere,
+  householdWhere,
+  isSuperadmin,
+} from '../auth/scope';
+import { currentAuth } from '../auth/middleware';
+import { defaultCurrency } from '../config/env';
+import { FxRate } from '../models/FxRate';
+import {
+  listMerchantClusters,
+  bulkRecategorize,
+  mergeMerchants,
+} from '../merchants/clusters';
 import { aiSuggestLimiter } from './aiRateLimit';
 
 const router = Router();
@@ -161,6 +174,192 @@ router.get('/', aiSuggestLimiter, async (req, res, next) => {
     });
 
     res.json({ data: summaries.slice(0, limit) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Merchant-cleanup review surface (issue #793).
+//
+// These literal-path routes MUST be registered BEFORE the `/:name` route
+// below, otherwise Express matches `GET /clusters` against `/:name` with
+// name="clusters". They power the bulk merchant-cleanup UI: a derived
+// cluster view plus bulk mutations on the Transaction primitive (and the
+// existing Rule primitive for create-rule).
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve and validate the request currency. Defaults to DEFAULT_CURRENCY.
+ * A supplied currency must be a known FX currency: either the default, or a
+ * pair endpoint in the FxRate table (base or quote).
+ */
+async function resolveClusterCurrency(
+  raw: unknown,
+): Promise<{ ok: true; currency: string } | { ok: false }> {
+  if (raw == null || raw === '') return { ok: true, currency: defaultCurrency };
+  const currency = String(raw).toUpperCase().slice(0, 3);
+  if (currency === defaultCurrency.toUpperCase()) return { ok: true, currency };
+  const known = await FxRate.findOne({
+    where: {
+      [Op.or]: [{ fromCurrency: currency }, { toCurrency: currency }],
+    },
+    attributes: ['id'],
+  });
+  if (!known) return { ok: false };
+  return { ok: true, currency };
+}
+
+/**
+ * GET /api/merchants/clusters?currency=CAD
+ *
+ * One entry per distinct non-blank merchant_clean for the caller's
+ * household, scoped to a single currency, sorted by total spend descending.
+ */
+router.get('/clusters', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const resolved = await resolveClusterCurrency(req.query.currency);
+    if (!resolved.ok) {
+      res.status(400).json({ error: 'unknown currency' });
+      return;
+    }
+    const householdId = isSuperadmin(req) ? null : currentAuth(req).household.id;
+    const clusters = await listMerchantClusters(householdId, resolved.currency);
+    res.json({ clusters });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Confirm a category name exists for the household. Categories are
+ * household-scoped rows (not an enum), so a valid category is one whose
+ * `name` matches an existing Category for the household.
+ */
+async function categoryExists(req: Request, name: string): Promise<boolean> {
+  const count = await Category.count({
+    where: { ...householdWhere(req), name },
+  });
+  return count > 0;
+}
+
+/**
+ * Read a trimmed string body field, or '' when absent/non-string.
+ */
+function bodyString(b: Record<string, unknown>, key: string): string {
+  const v = b[key];
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/**
+ * POST /api/merchants/bulk-recategorize
+ *
+ * Body: { merchantClean, category, createRule? }
+ * Sets final_category on every transaction in the named cluster for the
+ * household and returns the exact count changed. When createRule is true,
+ * also creates a Rule whose merchantPattern derives from the cluster's
+ * merchant_clean — idempotent (a second identical call returns 409). The
+ * privileged mutation lives in the `bulkRecategorize` service; this handler
+ * only validates input and maps the service result to an HTTP status.
+ */
+router.post('/bulk-recategorize', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const merchantClean = bodyString(b, 'merchantClean');
+    const category = bodyString(b, 'category');
+    if (!merchantClean) {
+      res.status(400).json({ error: 'merchantClean is required' });
+      return;
+    }
+    if (!category) {
+      res.status(400).json({ error: 'category is required' });
+      return;
+    }
+    if (!(await categoryExists(req, category))) {
+      res.status(400).json({ error: 'unknown category' });
+      return;
+    }
+
+    const { household, user } = currentAuth(req);
+    const result = await bulkRecategorize({
+      householdId: household.id,
+      createdByUserId: user.id,
+      merchantClean,
+      category,
+      createRule: Boolean(b.createRule),
+    });
+
+    if (!result.ok) {
+      if (result.reason === 'no_match') {
+        res.status(404).json({ error: 'no transactions match the cluster' });
+        return;
+      }
+      res.status(409).json({ error: 'rule already exists', ruleId: result.ruleId });
+      return;
+    }
+    res.json({
+      recategorized: result.recategorized,
+      ruleCreated: result.ruleCreated,
+      ruleId: result.ruleId,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/merchants/merge
+ *
+ * Body: {
+ *   survivorMerchantClean, mergeMerchantCleans?: string[], canonicalName?
+ * }
+ * Reassigns the canonical (merchant_canonical) of every transaction in each
+ * mergeMerchantCleans cluster to the survivor's canonical, and optionally
+ * sets/overrides the survivor cluster's canonical name. A rename-only call
+ * (empty merge list, canonicalName set) updates only the survivor cluster.
+ * The privileged mutation lives in the `mergeMerchants` service.
+ */
+router.post('/merge', aiSuggestLimiter, async (req, res, next) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const survivor = bodyString(b, 'survivorMerchantClean');
+    const canonicalName = bodyString(b, 'canonicalName');
+    const mergeList = Array.isArray(b.mergeMerchantCleans)
+      ? (b.mergeMerchantCleans as unknown[])
+          .map((v) => (typeof v === 'string' ? v.trim() : ''))
+          .filter((v) => v.length > 0)
+      : [];
+
+    if (!survivor) {
+      res.status(400).json({ error: 'survivorMerchantClean is required' });
+      return;
+    }
+    if (mergeList.includes(survivor)) {
+      res.status(400).json({ error: 'survivor must not appear in mergeMerchantCleans' });
+      return;
+    }
+    if (canonicalName.length > 160) {
+      res.status(400).json({ error: 'canonicalName must be <= 160 chars' });
+      return;
+    }
+
+    const { household } = currentAuth(req);
+    const result = await mergeMerchants({
+      householdId: household.id,
+      survivorMerchantClean: survivor,
+      mergeMerchantCleans: mergeList,
+      canonicalName,
+    });
+
+    if (!result.ok) {
+      const msg =
+        result.reason === 'survivor_missing'
+          ? 'survivor cluster has no matching transactions'
+          : `cluster has no matching transactions: ${result.cluster}`;
+      res.status(404).json({ error: msg });
+      return;
+    }
+    res.json({ reassigned: result.reassigned, survivor: result.survivor });
   } catch (e) {
     next(e);
   }

@@ -33,6 +33,7 @@ import { MonthlyClosePage } from './pages/MonthlyClosePage'
 import { ReviewInboxPage } from './pages/ReviewInboxPage'
 import { RefundsReviewPage } from './pages/RefundsReviewPage'
 import { RulesPage } from './pages/RulesPage'
+import { MerchantCleanupPage } from './pages/MerchantCleanupPage'
 import { AuditLogPage } from './pages/AuditLogPage'
 import { SyncPage } from './pages/SyncPage'
 import { TransactionsPage } from './pages/TransactionsPage'
@@ -151,6 +152,7 @@ function AppRoutes() {
           <Route path="subscriptions" element={<Navigate to="/planned/subscriptions" replace />} />
           <Route path="money-leaks" element={<Navigate to="/transactions/leaks" replace />} />
           <Route path="rules" element={<RulesPage />} />
+          <Route path="merchants/cleanup" element={<MerchantCleanupPage />} />
           <Route path="partner" element={<Navigate to="/reports/partner" replace />} />
           <Route path="partner-home" element={<PartnerHomePage />} />
           <Route path="reports" element={<ReportsLayout />}>
