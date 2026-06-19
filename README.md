@@ -6,7 +6,7 @@
 [![release-drafter](https://img.shields.io/github/actions/workflow/status/Connor-Adams/cashflow/release-drafter.yml?branch=main&label=release)](https://github.com/Connor-Adams/cashflow/actions/workflows/release-drafter.yml)
 [![frontend release](https://img.shields.io/github/v/release/Connor-Adams/cashflow?label=frontend)](https://github.com/Connor-Adams/cashflow/releases)
 [![backend release](https://img.shields.io/github/v/release/Connor-Adams/cashflow?label=backend)](https://github.com/Connor-Adams/cashflow/releases)
-[![package manager: yarn](https://img.shields.io/badge/package_manager-yarn_1.22-blue)](https://classic.yarnpkg.com/)
+[![package manager: yarn](https://img.shields.io/badge/package_manager-yarn_4.17-blue)](https://yarnpkg.com/)
 [![node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![typescript](https://img.shields.io/badge/typescript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 <!-- END BADGIE TIME -->
@@ -33,10 +33,13 @@ Open `http://localhost:5173` and click **Continue with demo account** — the
 backend seeds a demo household with sample data on startup, so there is
 something to look at immediately.
 
-Requires **Node 20+** and **Yarn Classic v1**. This is a yarn-1 workspace
-monorepo — always install and run from the **repo root**, never a sub-directory.
-If stray `node_modules` exist inside `backend/` or `frontend/`, delete them and
-reinstall at root.
+Requires **Node 20+** and **Yarn 4 (Berry)**, pinned via the `packageManager`
+field and invoked through [Corepack](https://nodejs.org/api/corepack.html) —
+run `corepack enable` once, then the `yarn …` shim resolves to 4.17 (or call
+`corepack yarn …` explicitly). This is a Yarn workspace monorepo — always
+install and run from the **repo root**, never a sub-directory. If stray
+`node_modules` exist inside `backend/` or `frontend/`, delete them and reinstall
+at root.
 
 Optional config lives in `backend/.env` (copy from
 [`backend/.env.example`](backend/.env.example)). Everything has a working
