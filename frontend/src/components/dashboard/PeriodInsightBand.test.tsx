@@ -10,6 +10,7 @@ const base: PeriodInsightCurrency = {
   realCost: 6000,
   owedBack: 4000,
   owedBackBreakdown: { reimbursable: 4000, partnerShare: 0 },
+  peerLending: { lent: 0, received: 0 },
   totalSpend: 12000,
   totalCredits: 2000,
   totalIncome: 3500,
@@ -64,5 +65,24 @@ describe('PeriodInsightBand', () => {
     )
     expect(getByText('this period')).toBeTruthy()
     expect(queryByText(/this period · /)).toBeNull()
+  })
+
+  it('shows lent-out and received-back figures when peerLending > 0', () => {
+    const { getByText } = render(
+      <PeriodInsightBand
+        data={{ ...base, peerLending: { lent: 2500, received: 800 } }}
+        currency="CAD"
+      />,
+    )
+    expect(getByText('Lent out')).toBeTruthy()
+    expect(getByText('$2,500.00')).toBeTruthy()
+    expect(getByText('Received back')).toBeTruthy()
+    expect(getByText('$800.00')).toBeTruthy()
+  })
+
+  it('hides lent/received figures when peerLending is zero', () => {
+    const { queryByText } = render(<PeriodInsightBand data={base} currency="CAD" />)
+    expect(queryByText('Lent out')).toBeNull()
+    expect(queryByText('Received back')).toBeNull()
   })
 })
