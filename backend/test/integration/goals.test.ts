@@ -334,6 +334,139 @@ test('GET /api/goals/:id/projection 404s for another household', async () => {
   assert.equal(sneak.status, 404);
 });
 
+// ---- #653: forecast-grounded validation -------------------------------------
+
+test('GET /api/goals/:id/projection includes a forecast block (AC1)', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Forecast block test',
+    targetAmount: 1200,
+    currentAmount: 0,
+    currency: 'CAD',
+    targetDate: '2027-06-01',
+    monthlyContribution: 100,
+  });
+  const id = created.body.id as number;
+  const res = await primaryAgent
+    .get(`/api/goals/${id}/projection`)
+    .query({ today: '2026-06-01' });
+  assert.equal(res.status, 200);
+  assert.ok(res.body.forecast, 'forecast block present');
+  const f = res.body.forecast;
+  assert.equal(typeof f.monthlyFreeCash, 'string');
+  assert.ok('status' in f);
+  assert.ok('requiredMonthlyContribution' in f);
+  assert.ok('projectedCompletionDate' in f);
+  assert.equal(typeof f.currencyMismatch, 'boolean');
+  assert.equal(typeof f.currency, 'string');
+});
+
+test('GET /api/goals/:id/projection forecast off_track with no free cash (AC4, AC8)', async () => {
+  // Clean household: no income → monthly free cash <= 0 → off_track. The
+  // required-monthly number is still surfaced for the UI.
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'No-cash goal',
+    targetAmount: 1200,
+    currentAmount: 0,
+    currency: 'CAD',
+    targetDate: '2027-06-01',
+  });
+  const id = created.body.id as number;
+  const res = await primaryAgent
+    .get(`/api/goals/${id}/projection`)
+    .query({ today: '2026-06-01' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.forecast.status, 'off_track');
+  assert.equal(Number(res.body.forecast.requiredMonthlyContribution), 100);
+  assert.equal(res.body.forecast.projectedCompletionDate, null);
+});
+
+test('GET /api/goals/:id/projection forecast no_deadline when no target date (AC6)', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'No-deadline goal',
+    targetAmount: 1200,
+    currency: 'CAD',
+  });
+  const id = created.body.id as number;
+  const res = await primaryAgent
+    .get(`/api/goals/${id}/projection`)
+    .query({ today: '2026-06-01' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.forecast.status, 'no_deadline');
+  assert.equal(res.body.forecast.requiredMonthlyContribution, null);
+});
+
+test('GET /api/goals/:id/projection forecast completed regardless of free cash (AC5)', async () => {
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Met goal',
+    targetAmount: 1000,
+    currentAmount: 1000,
+    currency: 'CAD',
+    targetDate: '2027-06-01',
+  });
+  const id = created.body.id as number;
+  const res = await primaryAgent
+    .get(`/api/goals/${id}/projection`)
+    .query({ today: '2026-06-01' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.forecast.status, 'completed');
+});
+
+test('GET /api/goals/:id/projection forecast cant_validate on currency mismatch (AC7)', async () => {
+  // Household cash is CAD (the only currency with a balance), so a EUR goal
+  // can't be validated — no faked FX conversion.
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Euro goal',
+    targetAmount: 1200,
+    currentAmount: 0,
+    currency: 'EUR',
+    targetDate: '2027-06-01',
+  });
+  const id = created.body.id as number;
+  const res = await primaryAgent
+    .get(`/api/goals/${id}/projection`)
+    .query({ today: '2026-06-01' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.forecast.currencyMismatch, true);
+  assert.equal(res.body.forecast.status, 'cant_validate');
+  assert.equal(res.body.forecast.requiredMonthlyContribution, null);
+});
+
+test('GET /api/goals/:id/projection forecast on_track when forecasted income covers the goal (AC2)', async () => {
+  // Seed a recurring monthly income that gives plenty of free cash, then a
+  // modest goal. Over the 90-day goal window the income nets positive and
+  // exceeds the required monthly → on_track, driven by the forecast (NOT a
+  // typed monthlyContribution, which we deliberately omit).
+  await primaryAgent.post('/api/planned-events').send({
+    type: 'income',
+    name: 'Forecast salary 653',
+    amount: 4000,
+    currency: 'CAD',
+    expectedDate: '2026-06-15',
+    recurrenceRule: 'FREQ=MONTHLY;BYMONTHDAY=15',
+    accountId: primaryAccountId,
+  });
+
+  const created = await primaryAgent.post('/api/goals').send({
+    name: 'Fundable goal',
+    targetAmount: 1200,
+    currentAmount: 0,
+    currency: 'CAD',
+    targetDate: '2027-06-01', // required ~100/mo
+  });
+  const id = created.body.id as number;
+  const res = await primaryAgent
+    .get(`/api/goals/${id}/projection`)
+    .query({ today: '2026-06-01' });
+  assert.equal(res.status, 200);
+  assert.ok(
+    Number(res.body.forecast.monthlyFreeCash) > 0,
+    `expected positive free cash, got ${res.body.forecast.monthlyFreeCash}`,
+  );
+  assert.equal(res.body.forecast.status, 'on_track');
+  // Completion date derives from free cash, present and non-null (AC9).
+  assert.ok(res.body.forecast.projectedCompletionDate);
+});
+
 test('PUT /api/goals/:id patches partial fields', async () => {
   const created = await primaryAgent.post('/api/goals').send({
     name: 'Patch initial',

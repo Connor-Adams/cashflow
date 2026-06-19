@@ -1103,6 +1103,38 @@ export type GoalProjectionStatus =
   | 'unfunded'
   | 'active'
 
+/**
+ * Forecast-grounded goal status (#653). Classifies a dated goal against the
+ * household's *real forecasted free cash*, not the self-reported
+ * monthlyContribution. See {@link GoalForecastProjection}.
+ */
+export type GoalForecastStatus =
+  | 'completed'
+  | 'on_track'
+  | 'at_risk'
+  | 'off_track'
+  | 'no_deadline'
+  | 'cant_validate'
+
+/**
+ * Forecast block on GET /api/goals/:id/projection (#653). Grounds the on-track
+ * classification in forecasted free cash. `requiredMonthlyContribution` and
+ * `projectedCompletionDate` are null when there's no classification to drive
+ * (no deadline, completed, or currency mismatch).
+ */
+export type GoalForecastProjection = {
+  /** Forecast currency the classification was computed in. */
+  currency: string
+  /** Forecasted free cash per month, 4-decimal string. */
+  monthlyFreeCash: string
+  status: GoalForecastStatus
+  requiredMonthlyContribution: string | null
+  /** Derived from forecasted free cash, NOT the typed contribution. */
+  projectedCompletionDate: string | null
+  /** True when the goal currency differs from the forecast currency. */
+  currencyMismatch: boolean
+}
+
 export type GoalProjectionResponse = {
   goalId: number
   /** YYYY-MM-DD — the date the projection was computed against. */
@@ -1113,6 +1145,8 @@ export type GoalProjectionResponse = {
   requiredMonthlyContribution: string | null
   projectedCompletionDate: string | null
   status: GoalProjectionStatus
+  /** Forecast-grounded validation (#653). */
+  forecast: GoalForecastProjection
 }
 
 /**
