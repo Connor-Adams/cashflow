@@ -61,6 +61,27 @@ export function PeriodInsightBand({ data, currency, rangeLabel }: Props) {
         )}
       </div>
 
+      {(data.peerLending.lent > 0 || data.peerLending.received > 0) && (
+        <div className="flex flex-wrap gap-3">
+          {data.peerLending.lent > 0 && (
+            <div className="flex flex-col gap-1 rounded-md bg-negative-bg p-3">
+              <span className="text-xs text-muted-foreground">Lent out</span>
+              <span className="text-xl font-semibold tabular-nums text-negative">
+                {money(data.peerLending.lent)}
+              </span>
+            </div>
+          )}
+          {data.peerLending.received > 0 && (
+            <div className="flex flex-col gap-1 rounded-md bg-success-bg p-3">
+              <span className="text-xs text-muted-foreground">Received back</span>
+              <span className="text-xl font-semibold tabular-nums text-positive">
+                {money(data.peerLending.received)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       <hr className="border-border" />
 
       {/* Where the money moved this period */}

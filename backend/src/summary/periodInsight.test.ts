@@ -52,3 +52,38 @@ test('realCostOf satisfies the identity netSpend = realCost + owedBack', () => {
   assert.equal(realCostOf(10_000, 4_000), 6_000);
   assert.equal(realCostOf(10_000, 4_000) + 4_000, 10_000);
 });
+
+import { computePeerLending } from './periodInsight';
+
+test('computePeerLending splits non-partner transfers into lent/received per currency', () => {
+  const out = computePeerLending(
+    [
+      { currency: 'CAD', amount: '-500.0000', counterpartyContactId: 1, finalCategory: null },
+      { currency: 'CAD', amount: '200.0000', counterpartyContactId: 1, finalCategory: null },
+      { currency: 'USD', amount: '-50.0000', counterpartyContactId: 2, finalCategory: null },
+    ],
+    new Set<number>(),
+  );
+  assert.deepEqual(out.get('CAD'), { lent: 500, received: 200 });
+  assert.deepEqual(out.get('USD'), { lent: 50, received: 0 });
+});
+
+test('computePeerLending excludes partner contacts', () => {
+  const out = computePeerLending(
+    [{ currency: 'CAD', amount: '-1000.0000', counterpartyContactId: 7, finalCategory: null }],
+    new Set<number>([7]),
+  );
+  assert.equal(out.has('CAD'), false);
+});
+
+test('computePeerLending excludes non-loan categories and null counterparties', () => {
+  const out = computePeerLending(
+    [
+      { currency: 'CAD', amount: '-300.0000', counterpartyContactId: 1, finalCategory: 'Rent' },
+      { currency: 'CAD', amount: '-40.0000', counterpartyContactId: null, finalCategory: null },
+      { currency: 'CAD', amount: '0', counterpartyContactId: 1, finalCategory: null },
+    ],
+    new Set<number>(),
+  );
+  assert.equal(out.has('CAD'), false);
+});

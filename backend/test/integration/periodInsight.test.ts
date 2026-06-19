@@ -38,6 +38,7 @@ type TxnSeed = {
   partnerShareAmount?: number;
   myShareAmount?: number;
   txnType?: string;
+  counterpartyContactId?: number | null;
 };
 
 async function createTxn(seed: TxnSeed): Promise<number> {
@@ -82,6 +83,7 @@ async function createTxn(seed: TxnSeed): Promise<number> {
     autoSource: null,
     autoConfidence: null,
     linkedTransactionId: null,
+    counterpartyContactId: seed.counterpartyContactId ?? null,
     isRecurring: false,
     reviewFlag: false,
     reviewedAt: null,
@@ -250,4 +252,50 @@ test('malformed dates return 400, not 500', async () => {
     .query({ currency: 'CAD', dateFrom: '2026-13-99', dateTo: '2026-13-31' });
   assert.equal(res.status, 400, `expected 400 for malformed dates, got ${res.status}`);
   assert.deepEqual(res.body, { error: 'invalid date' });
+});
+
+test('peerLending splits non-partner transfers, excludes partners + non-loan categories', async () => {
+  const models = await import('../../src/models');
+  const friend = await models.Contact.create({ householdId: householdAId, name: 'Lend Friend' });
+  const partner = await models.Contact.create({
+    householdId: householdAId,
+    name: 'Lend Partner',
+    isPartner: true,
+  });
+
+  // Non-partner: lent 500, received 200 back (both inside the window).
+  await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-08-05',
+    amount: -500, currency: 'CAD', merchantRaw: 'Cash sent', txnType: 'transfer',
+    counterpartyContactId: friend.id,
+  });
+  await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-08-12',
+    amount: 200, currency: 'CAD', merchantRaw: 'Cash received', txnType: 'transfer',
+    counterpartyContactId: friend.id,
+  });
+  // Partner transfer — excluded.
+  await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-08-08',
+    amount: -1000, currency: 'CAD', merchantRaw: 'Cash sent', txnType: 'transfer',
+    counterpartyContactId: partner.id,
+  });
+  // Non-loan category (rent) to the friend — excluded.
+  await createTxn({
+    householdId: householdAId, accountId: accountAId, date: '2026-08-09',
+    amount: -300, currency: 'CAD', merchantRaw: 'Rent', finalCategory: 'rent',
+    txnType: 'transfer', counterpartyContactId: friend.id,
+  });
+
+  const res = await agentA
+    .get('/api/summary/period-insight')
+    .query({ currency: 'CAD', dateFrom: '2026-08-01', dateTo: '2026-08-31' });
+  assert.equal(res.status, 200);
+  const cad = (res.body.byCurrency as Array<{
+    currency: string;
+    peerLending: { lent: number; received: number };
+  }>).find((c) => c.currency === 'CAD');
+  assert.ok(cad, `expected CAD entry: ${JSON.stringify(res.body.byCurrency)}`);
+  assert.equal(cad.peerLending.lent, 500, 'only the non-partner, non-rent send counts');
+  assert.equal(cad.peerLending.received, 200);
 });

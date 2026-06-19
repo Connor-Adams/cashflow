@@ -1815,6 +1815,7 @@ export type PeriodInsightCurrency = {
   realCost: number; // netSpend - owedBack
   owedBack: number;
   owedBackBreakdown: { reimbursable: number; partnerShare: number };
+  peerLending: { lent: number; received: number };
   totalSpend: number;
   totalCredits: number;
   totalIncome: number;
