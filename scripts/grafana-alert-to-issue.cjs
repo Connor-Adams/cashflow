@@ -29,7 +29,7 @@
 
 'use strict';
 
-const https = require('https');
+const { githubRequest: rawGithubRequest, ensureLabel: rawEnsureLabel } = require('./github-rest.cjs');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
@@ -150,57 +150,14 @@ function planActions(alerts, openByLabel) {
 }
 
 // ---------------------------------------------------------------------------
-// GitHub API
+// GitHub API (thin wrappers over the shared scripts/github-rest.cjs client)
 // ---------------------------------------------------------------------------
 
-function githubRequest(method, urlPath, body) {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new Error('GITHUB_TOKEN not set');
+const githubRequest = (method, urlPath, body) =>
+  rawGithubRequest(method, urlPath, body, 'cashflow-grafana-alert-to-issue');
 
-  return new Promise((resolve, reject) => {
-    const payload = body ? JSON.stringify(body) : null;
-    const req = https.request(
-      {
-        hostname: 'api.github.com',
-        path: urlPath,
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'cashflow-grafana-alert-to-issue',
-          ...(payload
-            ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-            : {}),
-        },
-      },
-      (res) => {
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        res.on('end', () => {
-          if (res.statusCode >= 400) {
-            reject(new Error(`GitHub API ${res.statusCode}: ${data}`));
-          } else {
-            resolve(data ? JSON.parse(data) : {});
-          }
-        });
-      },
-    );
-    req.on('error', reject);
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-
-async function ensureLabel(repo, name, color, description) {
-  try {
-    await githubRequest('POST', `/repos/${repo}/labels`, { name, color, description });
-  } catch (e) {
-    if (!String(e.message).includes('422')) throw e;
-  }
-}
+const ensureLabel = (repo, name, color, description) =>
+  rawEnsureLabel(githubRequest, repo, name, color, description);
 
 /** Map every open issue's `alert:*` label → issue number. */
 async function fetchOpenAlertIssues(repo) {
@@ -226,47 +183,60 @@ async function fetchOpenAlertIssues(repo) {
   return map;
 }
 
+const LABEL_COLOR = (label) =>
+  label.startsWith('severity:') ? 'E99695' : label.startsWith('component:') ? 'BFD4F2' : 'C2E0C6';
+
+/** Idempotently create every label this alert's issue will carry. */
+async function ensureAlertLabels(repo, alert) {
+  for (const label of buildAlertLabels(alert)) {
+    if (label === 'bug') await ensureLabel(repo, 'bug', 'D73A4A', "Something isn't working");
+    else if (label === 'incident')
+      await ensureLabel(repo, 'incident', 'B60205', 'Production alert fired by Grafana');
+    else await ensureLabel(repo, label, LABEL_COLOR(label), 'Grafana alert metadata');
+  }
+}
+
+async function createAlertIssue(repo, alert) {
+  const title = buildAlertIssueTitle(alert);
+  const issue = await githubRequest('POST', `/repos/${repo}/issues`, {
+    title,
+    body: buildAlertIssueBody(alert),
+    labels: buildAlertLabels(alert),
+  });
+  console.log(`Created #${issue.number}: ${title}`);
+}
+
+async function commentOnAlertIssue(repo, item) {
+  const body =
+    `🔁 **Alert fired again** at ${item.alert.startsAt || new Date().toISOString()}.\n\n` +
+    buildAlertIssueBody(item.alert);
+  await githubRequest('POST', `/repos/${repo}/issues/${item.issueNumber}/comments`, { body });
+  console.log(`Commented on #${item.issueNumber} (re-fire of ${item.dedupLabel}).`);
+}
+
+async function closeAlertIssue(repo, item) {
+  await githubRequest('POST', `/repos/${repo}/issues/${item.issueNumber}/comments`, {
+    body: `✅ **Alert resolved** at ${item.alert.endsAt || new Date().toISOString()}. Closing.`,
+  });
+  await githubRequest('PATCH', `/repos/${repo}/issues/${item.issueNumber}`, {
+    state: 'closed',
+    state_reason: 'completed',
+  });
+  console.log(`Closed #${item.issueNumber} (resolved ${item.dedupLabel}).`);
+}
+
+const ACTION_HANDLERS = {
+  create: (repo, item) => createAlertIssue(repo, item.alert),
+  comment: (repo, item) => commentOnAlertIssue(repo, item),
+  close: (repo, item) => closeAlertIssue(repo, item),
+  noop: (_repo, item) =>
+    Promise.resolve(console.log(`Noop for ${item.dedupLabel} (resolved, no open issue).`)),
+};
+
 async function applyPlan(repo, plan) {
-  // Ensure base labels exist (severity:* / component:* / alert:* are dynamic —
-  // GitHub auto-creates labels on issue creation if they don't exist? No: it
-  // errors on unknown labels. So pre-create the static ones and each dynamic
-  // one we are about to use.)
-  await ensureLabel(repo, 'bug', 'D73A4A', "Something isn't working");
-  await ensureLabel(repo, 'incident', 'B60205', 'Production alert fired by Grafana');
-
   for (const item of plan) {
-    const dynamicLabels = buildAlertLabels(item.alert).filter(
-      (l) => l !== 'bug' && l !== 'incident',
-    );
-    for (const l of dynamicLabels) {
-      const color = l.startsWith('severity:') ? 'E99695' : l.startsWith('component:') ? 'BFD4F2' : 'C2E0C6';
-      await ensureLabel(repo, l, color, 'Grafana alert metadata');
-    }
-
-    if (item.action === 'create') {
-      const title = buildAlertIssueTitle(item.alert);
-      const body = buildAlertIssueBody(item.alert);
-      const labels = buildAlertLabels(item.alert);
-      const issue = await githubRequest('POST', `/repos/${repo}/issues`, { title, body, labels });
-      console.log(`Created #${issue.number}: ${title}`);
-    } else if (item.action === 'comment') {
-      const body =
-        `🔁 **Alert fired again** at ${item.alert.startsAt || new Date().toISOString()}.\n\n` +
-        buildAlertIssueBody(item.alert);
-      await githubRequest('POST', `/repos/${repo}/issues/${item.issueNumber}/comments`, { body });
-      console.log(`Commented on #${item.issueNumber} (re-fire of ${item.dedupLabel}).`);
-    } else if (item.action === 'close') {
-      await githubRequest('POST', `/repos/${repo}/issues/${item.issueNumber}/comments`, {
-        body: `✅ **Alert resolved** at ${item.alert.endsAt || new Date().toISOString()}. Closing.`,
-      });
-      await githubRequest('PATCH', `/repos/${repo}/issues/${item.issueNumber}`, {
-        state: 'closed',
-        state_reason: 'completed',
-      });
-      console.log(`Closed #${item.issueNumber} (resolved ${item.dedupLabel}).`);
-    } else {
-      console.log(`Noop for ${item.dedupLabel} (resolved, no open issue).`);
-    }
+    await ensureAlertLabels(repo, item.alert);
+    await ACTION_HANDLERS[item.action](repo, item);
   }
 }
 

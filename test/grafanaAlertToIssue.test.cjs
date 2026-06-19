@@ -115,22 +115,25 @@ test('planActions: a firing alert with an existing open issue → comment, not d
   assert.equal(plan[0].issueNumber, 1234);
 });
 
-test('planActions: a resolved alert with an open issue → close', () => {
+// A resolved alert (both the group status and the alert's own status flipped).
+function resolvedAlert() {
   const payload = firingPayload({ status: 'resolved' });
   payload.status = 'resolved';
-  const [alert] = normalizeAlerts(payload);
-  const existing = new Map([['alert:cashflow-tempo-export-failing', 1234]]);
-  const plan = planActions([alert], existing);
+  return normalizeAlerts(payload)[0];
+}
+
+const openIssue = (number = 1234) =>
+  new Map([['alert:cashflow-tempo-export-failing', number]]);
+
+test('planActions: a resolved alert with an open issue → close', () => {
+  const plan = planActions([resolvedAlert()], openIssue());
   assert.equal(plan.length, 1);
   assert.equal(plan[0].action, 'close');
   assert.equal(plan[0].issueNumber, 1234);
 });
 
 test('planActions: a resolved alert with no open issue → noop', () => {
-  const payload = firingPayload({ status: 'resolved' });
-  payload.status = 'resolved';
-  const [alert] = normalizeAlerts(payload);
-  const plan = planActions([alert], new Map());
+  const plan = planActions([resolvedAlert()], new Map());
   assert.equal(plan.length, 1);
   assert.equal(plan[0].action, 'noop');
 });

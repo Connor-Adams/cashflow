@@ -21,7 +21,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
+const { githubRequest: rawGithubRequest, ensureLabel: rawEnsureLabel } = require('./github-rest.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const DEADCODE_JSON = path.join(ROOT, 'reports', 'fallow-deadcode.json');
@@ -123,54 +123,14 @@ function diffFindings(findings, baseline) {
 }
 
 // ---------------------------------------------------------------------------
-// GitHub API
+// GitHub API (thin wrappers over the shared scripts/github-rest.cjs client)
 // ---------------------------------------------------------------------------
 
-function githubRequest(method, urlPath, body) {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new Error('GITHUB_TOKEN not set');
+const githubRequest = (method, urlPath, body) =>
+  rawGithubRequest(method, urlPath, body, 'cashflow-audit-issues');
 
-  return new Promise((resolve, reject) => {
-    const payload = body ? JSON.stringify(body) : null;
-    const req = https.request(
-      {
-        hostname: 'api.github.com',
-        path: urlPath,
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'cashflow-audit-issues',
-          ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
-        },
-      },
-      (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          if (res.statusCode >= 400) {
-            reject(new Error(`GitHub API ${res.statusCode}: ${data}`));
-          } else {
-            resolve(data ? JSON.parse(data) : {});
-          }
-        });
-      }
-    );
-    req.on('error', reject);
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-
-async function ensureLabel(repo, name, color, description) {
-  try {
-    await githubRequest('POST', `/repos/${repo}/labels`, { name, color, description });
-  } catch (e) {
-    // 422 = label already exists — ignore
-    if (!String(e.message).includes('422')) throw e;
-  }
-}
+const ensureLabel = (repo, name, color, description) =>
+  rawEnsureLabel(githubRequest, repo, name, color, description);
 
 async function createIssue(repo, title, body, labels) {
   return githubRequest('POST', `/repos/${repo}/issues`, { title, body, labels });
