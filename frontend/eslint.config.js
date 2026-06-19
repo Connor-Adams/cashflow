@@ -43,13 +43,17 @@ export default defineConfig([
   },
   {
     // The palette/hex rule does not apply where literals are legitimate:
-    // test fixtures, the detector script itself, and the foreign-page bundles
-    // (extension/bookmarklets) which cannot use app CSS tokens.
+    // test fixtures, the detector script itself, the foreign-page bundles
+    // (extension/bookmarklets) which cannot use app CSS tokens, and the label
+    // color palette (issue #794) — its swatches ARE the canonical hex values,
+    // persisted per-label to the DB and applied as inline chip tints, so they
+    // cannot be expressed as CSS tokens.
     files: [
       '**/*.test.{ts,tsx}',
       'scripts/**',
       'src/extension/**',
       'src/bookmarklets/**',
+      'src/lib/labelColors.ts',
     ],
     rules: { 'no-restricted-syntax': 'off' },
   },

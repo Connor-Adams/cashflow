@@ -256,6 +256,29 @@ test('GET /api/insights with an unknown type returns an empty list (type is open
   assert.deepEqual(res.body.data, []);
 });
 
+test('POST /api/insights/run surfaces a category_trend, retrievable via ?type=category_trend (issue #797)', async () => {
+  // Seed a sustained 3-month rise on a fresh category so detectCategoryTrend
+  // fires: Mar 200 → Apr 250 → May 300 relative to a June "now".
+  const now = new Date();
+  const monthIso = (offset: number, day = 10): string => {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, day));
+    return d.toISOString().slice(0, 10);
+  };
+  await createTransaction(primaryHouseholdId, primaryAccountId, monthIso(3), 'TrendShop', -200, 'TrendCat-797');
+  await createTransaction(primaryHouseholdId, primaryAccountId, monthIso(2), 'TrendShop', -250, 'TrendCat-797');
+  await createTransaction(primaryHouseholdId, primaryAccountId, monthIso(1), 'TrendShop', -300, 'TrendCat-797');
+
+  const run = await primaryAgent.post('/api/insights/run');
+  assert.equal(run.status, 200);
+
+  const filtered = await primaryAgent.get('/api/insights?type=category_trend');
+  assert.equal(filtered.status, 200);
+  const items = filtered.body.data as Array<{ type: string; title: string }>;
+  assert.ok(items.length >= 1, 'expected at least one category_trend row');
+  for (const i of items) assert.equal(i.type, 'category_trend');
+  assert.ok(items.some((i) => i.title.includes('TrendCat-797')));
+});
+
 // ---- Household scope isolation -----------------------------------------
 
 test('GET /api/insights does not leak rows from other households', async () => {

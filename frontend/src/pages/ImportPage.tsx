@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
+import { EmptyState } from '@/components/ui/empty-state'
 import { ImportModal } from '../components/import/ImportModal'
 import { ImportHistoryTable } from '../components/import/ImportHistoryTable'
 import { getJson } from '../lib/api'
@@ -23,6 +24,9 @@ export function ImportPage() {
   const [accountsError, setAccountsError] = useState(false)
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [modalOpen, setModalOpen] = useState(false)
+  // null while the first /api/import/history fetch is in flight; 0 once we
+  // know the history is genuinely empty (drives the page-level empty state).
+  const [historyCount, setHistoryCount] = useState<number | null>(null)
 
   const loadAccounts = useCallback(() => {
     setAccountsError(false)
@@ -60,19 +64,30 @@ export function ImportPage() {
           setHistoryRefreshKey((k) => k + 1)
         }}
       />
-      <ImportHistoryTable
-        refreshKey={historyRefreshKey}
-        onRowClick={(row) =>
+      {historyCount === 0 && (
+        <EmptyState
+          className="mb-4"
+          title="No imports yet"
+          description="Bring in your spending by importing a card CSV, OFX export, or PDF statement."
+          actions={<Button size="sm" onClick={() => setModalOpen(true)}>Import a statement</Button>}
+        />
+      )}
+      <div hidden={historyCount === 0}>
+        <ImportHistoryTable
+          refreshKey={historyRefreshKey}
+          onLoaded={setHistoryCount}
+          onRowClick={(row) =>
           // #231: navigate by id when present (preferred — drives the /api/import/batches/:id
           // detail endpoint). Fall back to the legacy label-shaped URL for rows that
           // somehow lack an id (shouldn't happen in practice; defensive).
-          navigate(
-            row.id != null
-              ? `/import/${row.id}`
-              : `/import/${encodeURIComponent(row.batchLabel)}`,
-          )
-        }
-      />
+            navigate(
+              row.id != null
+                ? `/import/${row.id}`
+                : `/import/${encodeURIComponent(row.batchLabel)}`,
+            )
+          }
+        />
+      </div>
     </div>
   )
 }

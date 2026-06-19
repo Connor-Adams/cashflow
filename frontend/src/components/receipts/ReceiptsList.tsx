@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getJson } from '@/lib/api'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/formatMoney'
@@ -37,7 +38,19 @@ const CAT_COLORS = [
 // Single source of truth for the column template so header + every row align.
 const ROW_GRID = 'grid grid-cols-[1.6fr_0.7fr_1fr_1fr_auto_1rem] items-center gap-3'
 
-export function ReceiptsList({ group }: { group: ReceiptGroup }) {
+export function ReceiptsList({
+  group,
+  onUploadClick,
+  onClearGroup,
+}: {
+  group: ReceiptGroup
+  /** Invoked by the empty-state CTA when there are no receipts at all — the
+   *  parent surfaces the upload/forward UI (e.g. scroll to the Gmail card). */
+  onUploadClick?: () => void
+  /** Invoked when the active group filter excludes everything — resets to the
+   *  "all" group so the user can see whatever receipts exist. */
+  onClearGroup?: () => void
+}) {
   const [orders, setOrders] = useState<ReceiptOrder[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -82,10 +95,34 @@ export function ReceiptsList({ group }: { group: ReceiptGroup }) {
     )
   }
   if (orders.length === 0) {
+    // A non-"all" group with zero rows means the filter excludes everything,
+    // not that the user has no receipts — disambiguate the CTA (#799).
+    if (group !== 'all') {
+      return (
+        <EmptyState
+          title="Nothing matches this filter"
+          description="No receipts in this group. Clear the filter to see everything."
+          actions={
+            onClearGroup ? (
+              <Button size="sm" variant="outline" onClick={onClearGroup}>
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        />
+      )
+    }
     return (
       <EmptyState
         title="No receipts yet"
-        description="Connect Gmail and run a scan, or import an order report, to see receipts here."
+        description="Forward emailed receipts or upload them, and we'll match them to your card transactions."
+        actions={
+          onUploadClick ? (
+            <Button size="sm" onClick={onUploadClick}>
+              Upload a receipt
+            </Button>
+          ) : undefined
+        }
       />
     )
   }

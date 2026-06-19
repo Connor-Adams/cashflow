@@ -13,6 +13,15 @@ export type ItemsFilters = {
   q?: string
 }
 
+/**
+ * True when any item filter is set. Used to disambiguate an empty result that
+ * is "no items at all" (show the import CTA) from "filtered to nothing" (show
+ * a clear-filters CTA) — see issue #799.
+ */
+export function hasActiveItemsFilters(filters: ItemsFilters): boolean {
+  return Object.values(filters).some((v) => v != null && v !== '')
+}
+
 function buildQuery(filters: ItemsFilters, cursor: string | null): string {
   const p = new URLSearchParams()
   for (const [k, v] of Object.entries(filters)) {

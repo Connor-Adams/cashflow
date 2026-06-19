@@ -50,6 +50,10 @@ type ImportHistoryTableProps = {
   /** Optional label override for the row action button. Defaults to
    *  "Open batch". */
   actionLabel?: string
+  /** Fires after each successful fetch with the number of history rows, so
+   *  a parent (e.g. ImportPage) can show a page-level empty state. Receives
+   *  the count; not called on fetch error. */
+  onLoaded?: (count: number) => void
 }
 
 /**
@@ -62,14 +66,18 @@ export function ImportHistoryTable({
   onRowClick,
   refreshKey = 0,
   actionLabel = 'Open batch',
+  onLoaded,
 }: ImportHistoryTableProps) {
   const [importHistory, setImportHistory] = useState<ImportHistoryRow[]>([])
 
   const refreshImportHistory = useCallback(() => {
     void getJson<ImportHistoryRow[]>('/api/import/history')
-      .then(setImportHistory)
+      .then((rows) => {
+        setImportHistory(rows)
+        onLoaded?.(rows.length)
+      })
       .catch(() => {})
-  }, [])
+  }, [onLoaded])
 
   useEffect(() => {
     refreshImportHistory()

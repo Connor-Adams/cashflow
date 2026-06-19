@@ -124,4 +124,25 @@ describe('ReportsPage', () => {
       vi.mocked(getJson).mockImplementation(original!)
     }
   })
+
+  it('shows the "No spend to report yet" EmptyState with an Import CTA when every dataset is empty (#799)', async () => {
+    const original = vi.mocked(getJson).getMockImplementation()
+    vi.mocked(getJson).mockImplementation((url: string) => {
+      if (url.includes('/api/summary/partner')) return Promise.resolve({ byCurrency: [] })
+      if (url.includes('/api/summary/business')) return Promise.resolve({ byCurrency: [] })
+      if (url.includes('/api/summary/dashboard'))
+        return Promise.resolve({ merchantSummaries: [], accountSummaries: [] })
+      if (url.includes('/api/contacts')) return Promise.resolve([])
+      if (url.includes('/api/settlements')) return Promise.resolve({ data: [] })
+      return Promise.resolve({})
+    })
+    try {
+      renderPage()
+      expect(await screen.findByText('No spend to report yet')).toBeInTheDocument()
+      const cta = screen.getByRole('link', { name: /import a statement/i })
+      expect(cta).toHaveAttribute('href', '/import')
+    } finally {
+      vi.mocked(getJson).mockImplementation(original!)
+    }
+  })
 })

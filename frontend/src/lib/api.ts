@@ -1,5 +1,12 @@
 import { clientLogger } from './clientLogger'
-import type { ContactLedgerResponse, TransferLinkResult, SelfSuggestionsResponse } from '@cashflow/shared'
+import type {
+  ContactLedgerResponse,
+  TransferLinkResult,
+  SelfSuggestionsResponse,
+  SimplefinConnectResponse,
+  SimplefinDisconnectResponse,
+  SimplefinStatusResponse,
+} from '@cashflow/shared'
 
 const base = import.meta.env.VITE_API_BASE ?? ''
 
@@ -115,6 +122,17 @@ export function getSelfSuggestions(): Promise<SelfSuggestionsResponse> {
 }
 export function setContactSelf(id: number, isSelf: boolean): Promise<unknown> {
   return patchJson(`/api/contacts/${id}`, { isSelf })
+}
+
+// SimpleFIN Bridge bank connection (issue #790)
+export function getSimplefinStatus(): Promise<SimplefinStatusResponse> {
+  return getJson<SimplefinStatusResponse>('/api/simplefin/status')
+}
+export function connectSimplefin(setupToken: string): Promise<SimplefinConnectResponse> {
+  return postJson<SimplefinConnectResponse>('/api/simplefin/connect', { setupToken })
+}
+export function disconnectSimplefin(): Promise<SimplefinDisconnectResponse> {
+  return postJson<SimplefinDisconnectResponse>('/api/simplefin/disconnect')
 }
 
 async function apiError(res: Response, path: string): Promise<ApiError> {
