@@ -6,6 +6,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -20,7 +21,7 @@ before(async () => {
 
   const mod = await import('../../src/app.js');
   app = mod.default;
-  authed = request.agent(app);
+  authed = testAgent(app);
   // First registered user becomes superadmin.
   const register = await authed.post('/api/auth/register').send({
     email: 'inbox@example.com',
@@ -53,7 +54,7 @@ before(async () => {
     tokenHash: hashToken(rawToken),
     expiresAt: new Date(Date.now() + 86400 * 1000),
   });
-  regularAgent = request.agent(app);
+  regularAgent = testAgent(app);
   regularAgent.jar.setCookie(`cashflow_session=${rawToken}; Path=/`);
 });
 

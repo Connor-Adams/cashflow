@@ -11,6 +11,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -60,7 +61,7 @@ async function seed(emailPrefix: string, accountType = 'chequing'): Promise<Seed
     tokenHash: hashToken(token),
     expiresAt,
   });
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
   return {
     token,
@@ -102,7 +103,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -401,7 +402,7 @@ test('rejects bad asOfDate', async () => {
 });
 
 test('unauthenticated request returns 401', async () => {
-  const fresh = request.agent(app);
+  const fresh = testAgent(app);
   const res = await fresh.get('/api/forecast/safe-to-spend');
   assert.equal(res.status, 401);
 });

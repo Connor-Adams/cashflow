@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -16,7 +17,7 @@ let testDb: PgTestDb;
 before(async () => {
   testDb = await setupPgTestDb('category-rollup');
   app = (await import('../../src/app.js')).default;
-  authed = request.agent(app);
+  authed = testAgent(app);
 
   const register = await authed
     .post('/api/auth/register')

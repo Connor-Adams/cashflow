@@ -10,6 +10,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -182,7 +183,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -195,13 +196,13 @@ before(async () => {
   primaryUserId = primary.userId;
   primaryAccountId = primary.accountId;
   primaryInvestmentAccountId = await seedInvestmentAccount(primaryHouseholdId, primaryUserId);
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other');
   otherHouseholdId = other.householdId;
   otherAccountId = other.accountId;
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 
   // Primary household: a clear inflation series in CAD over the 6-month window.

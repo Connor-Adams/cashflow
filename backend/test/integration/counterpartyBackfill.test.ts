@@ -17,6 +17,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { seedHousehold } from '../helpers/seedHousehold.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
@@ -84,7 +85,7 @@ before(async () => {
   // Register bootstrap superadmin (first registered user) — we won't
   // actually use this agent for any assertions but the app expects at
   // least one superadmin to exist before /auth/register requires invites.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const reg = await bootstrap.post('/api/auth/register').send({
     email: 'boot@example.com',
     displayName: 'Boot',
@@ -99,9 +100,9 @@ before(async () => {
   userAId = seedA.userId;
   userBId = seedB.userId;
 
-  agentA = request.agent(app);
+  agentA = testAgent(app);
   agentA.jar.setCookie(`cashflow_session=${seedA.token}; Path=/`);
-  agentB = request.agent(app);
+  agentB = testAgent(app);
   agentB.jar.setCookie(`cashflow_session=${seedB.token}; Path=/`);
 });
 

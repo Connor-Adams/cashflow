@@ -22,6 +22,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -155,7 +156,7 @@ before(async () => {
   const mod = await import('../../src/app.js');
   app = mod.default;
 
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -167,13 +168,13 @@ before(async () => {
   primaryHouseholdId = primary.householdId;
   primaryAccountId = primary.accountId;
   primaryUserId = primary.userId;
-  primaryAgent = request.agent(app);
+  primaryAgent = testAgent(app);
   primaryAgent.jar.setCookie(`cashflow_session=${primary.token}; Path=/`);
 
   const other = await seed('Other');
   otherHouseholdId = other.householdId;
   otherAccountId = other.accountId;
-  otherAgent = request.agent(app);
+  otherAgent = testAgent(app);
   otherAgent.jar.setCookie(`cashflow_session=${other.token}; Path=/`);
 });
 
@@ -327,7 +328,7 @@ test('AC#2: promote-counterparty 404 across households', async () => {
 test('AC#3: GET /contacts/:id returns openReimbursements aggregate + items', async () => {
   // Fresh seed so we can count exactly.
   const fresh = await seed('AggContact');
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
 
   // Two outstanding claims (one CAD, one USD) and one received claim — only
@@ -374,7 +375,7 @@ test('AC#3: GET /contacts/:id returns openReimbursements aggregate + items', asy
 
 test('AC#3: GET /contacts/:id 404 across households', async () => {
   const fresh = await seed('AggAcrossHH');
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
   // primaryAgent should not be able to read this contact.
   const res = await primaryAgent.get(`/api/contacts/${fresh.contactId}`);
@@ -383,7 +384,7 @@ test('AC#3: GET /contacts/:id 404 across households', async () => {
 
 test('AC#3: GET /contacts/:id returns empty aggregate when no claims', async () => {
   const fresh = await seed('AggEmpty');
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${fresh.token}; Path=/`);
   const res = await agent.get(`/api/contacts/${fresh.contactId}`);
   assert.equal(res.status, 200);

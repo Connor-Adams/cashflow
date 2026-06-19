@@ -10,6 +10,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -26,7 +27,7 @@ before(async () => {
 
   // First-registered user becomes superadmin. We don't need to drive the
   // superadmin agent — we just want a regular household session next.
-  const bootstrap = request.agent(app);
+  const bootstrap = testAgent(app);
   const register = await bootstrap.post('/api/auth/register').send({
     email: 'superadmin@example.com',
     displayName: 'Super Admin',
@@ -58,7 +59,7 @@ before(async () => {
     tokenHash: hashToken(token),
     expiresAt,
   });
-  agent = request.agent(app);
+  agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
 });
 

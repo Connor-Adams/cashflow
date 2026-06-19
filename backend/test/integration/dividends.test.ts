@@ -17,8 +17,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import request from 'supertest';
-
+import { testAgent } from './_setup/testServer.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, '..', '..');
 const dbPath = path.join(backendRoot, 'data', 'test-dividends.sqlite');
@@ -56,7 +55,7 @@ after(() => {
 async function makeHousehold(tag: string) {
   const { seedHousehold } = await import('./portfolioFixtures.js');
   const seeded = await seedHousehold(models, `div-${tag}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`);
-  const agent = request.agent(app);
+  const agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${seeded.token}; Path=/`);
   return { ...seeded, agent };
 }

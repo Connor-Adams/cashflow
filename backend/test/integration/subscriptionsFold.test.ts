@@ -13,6 +13,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import request from 'supertest';
+import { testAgent } from './_setup/testServer.js';
 import { setupPgTestDb, teardownPgTestDb, type PgTestDb } from './_setup/pgTestDb.js';
 
 let app: import('express').Express;
@@ -51,7 +52,7 @@ before(async () => {
     tokenHash: hashToken(token),
     expiresAt: new Date(Date.now() + 86400000),
   });
-  agent = request.agent(app);
+  agent = testAgent(app);
   agent.jar.setCookie(`cashflow_session=${token}; Path=/`);
 
   // Seed a subscription directly as a merged Expectation row. Merged status
