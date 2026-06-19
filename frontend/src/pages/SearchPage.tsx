@@ -6,7 +6,7 @@
  * into a SearchIntent on the backend, then renders chips for each active
  * filter, a result table, and a saved-search dropdown.
  */
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Search as SearchIcon, Bookmark, Save, X, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -117,8 +117,18 @@ export function SearchPage() {
   const [saved, setSaved] = useState<SavedSearch[]>([])
   const [savingName, setSavingName] = useState('')
   const [savingBusy, setSavingBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const chips = useMemo(() => buildChips(response?.intent ?? null), [response])
+
+  /** Reset to the empty search box and focus it — wired to the "no matches"
+   *  CTA so the user can try a different term (#799). */
+  function clearAndFocus() {
+    setQuery('')
+    setResponse(null)
+    setErr(null)
+    inputRef.current?.focus()
+  }
 
   useEffect(() => {
     void refreshSaved()
@@ -224,6 +234,7 @@ export function SearchPage() {
         <div className="relative flex-1">
           <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            ref={inputRef}
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -286,7 +297,20 @@ export function SearchPage() {
       )}
 
       {!response && !err && (
-        <section className="space-y-2">
+        <section className="space-y-3">
+          <EmptyState
+            title="Search your transactions"
+            description="Combine filters like category:Groceries amount:>100 has:receipt, or pick an example below."
+            actions={
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => applyExample(EXAMPLES[0])}
+              >
+                Try an example
+              </Button>
+            }
+          />
           <h2 className="text-sm font-medium text-muted-foreground">Try one of these</h2>
           <ul className="flex flex-wrap gap-2">
             {EXAMPLES.map((ex) => (
@@ -348,17 +372,31 @@ export function SearchPage() {
             </ul>
           )}
 
-          {response.intent.isEmpty && response.message && (
+          {response.intent.isEmpty && (
             <EmptyState
-              title="Type a search to get started"
-              description={response.message}
+              title="Search your transactions"
+              description="Combine filters like category:Groceries amount:>100 has:receipt, or pick an example below."
+              actions={
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => applyExample(EXAMPLES[0])}
+                >
+                  Try an example
+                </Button>
+              }
             />
           )}
 
           {!response.intent.isEmpty && response.results.length === 0 && (
             <EmptyState
               title="No matches"
-              description="Try widening your filters or removing the most specific ones."
+              description="Nothing matched those filters. Try a different term or widen the most specific ones."
+              actions={
+                <Button type="button" size="sm" variant="outline" onClick={clearAndFocus}>
+                  Try a different term
+                </Button>
+              }
             />
           )}
 

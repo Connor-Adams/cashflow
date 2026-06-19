@@ -14,6 +14,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
+import { EmptyState } from '@/components/ui/empty-state'
 import { getJson, patchJson, postJson } from '@/lib/api'
 
 export type InsightSeverity = 'info' | 'warning' | 'critical'
@@ -182,12 +183,32 @@ export function InsightsPage() {
       {err ? <Alert variant="error" className="mb-2">{err}</Alert> : null}
       {loading ? <p className="text-sm leading-6 text-muted-foreground">Loading…</p> : null}
       {!loading && visible.length === 0 ? (
-        <p className="py-6 text-center text-sm leading-6 text-muted-foreground">
-          Nothing here yet. Use <strong>Run detectors</strong> to scan recent activity.{' '}
-          <Link to="/" className="underline">
-            Back to Dashboard
-          </Link>
-        </p>
+        rows.length === 0 ? (
+          <EmptyState
+            title="No insights yet"
+            description="Run the detectors to scan your recent activity for anything worth a look."
+            actions={
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void runDetectors()}
+                disabled={running}
+              >
+                {running ? 'Running…' : 'Run detectors'}
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            title="Nothing matches this filter"
+            description={`No ${TAB_LABEL[tab].toLowerCase()} insights right now. Clear the filter to see everything.`}
+            actions={
+              <Button type="button" size="sm" variant="outline" onClick={() => setTab('open')}>
+                Clear filters
+              </Button>
+            }
+          />
+        )
       ) : null}
 
       <ul className="flex flex-col gap-3">

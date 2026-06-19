@@ -8,6 +8,7 @@ import {
 import type { ChangeEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/alert'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -1855,27 +1856,30 @@ export function TransactionsPage() {
                 <TableRow>
                   <TableCell colSpan={9} className="emptyStateCell">
                     {activeFilters.length > 0 ? (
-                      <>
-                        <p>No transactions match this filter.</p>
-                        <p>
+                      <EmptyState
+                        title="No transactions match this filter"
+                        description="Try widening your filters or removing the most specific ones."
+                        actions={
                           <Button type="button" variant="outline" size="sm" onClick={clearAllFilters}>
                             Clear filters
                           </Button>
-                        </p>
-                      </>
+                        }
+                      />
+                    ) : statusFilter === 'pending' ? (
+                      <EmptyState
+                        title="No pending transactions"
+                        description="Everything in this view has been reviewed."
+                      />
                     ) : (
-                      <>
-                        <p>
-                          {statusFilter === 'pending'
-                            ? 'No pending transactions.'
-                            : 'No transactions yet.'}
-                        </p>
-                        <p className="mb-4 text-sm leading-6 text-muted-foreground">
-                          Upload a CSV above (pick an account first), or use <strong>Run import</strong> if you
-                          placed files in the configured upload folder. Create accounts under{' '}
-                          <Link to="/accounts">Accounts</Link> if needed.
-                        </p>
-                      </>
+                      <EmptyState
+                        title="No transactions yet"
+                        description="Import a card CSV, OFX export, or PDF statement to start tracking your spending."
+                        actions={
+                          <Button asChild size="sm">
+                            <Link to="/import">Import a statement</Link>
+                          </Button>
+                        }
+                      />
                     )}
                   </TableCell>
                 </TableRow>

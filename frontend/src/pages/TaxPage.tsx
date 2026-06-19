@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Tabs } from '../components/ui/tabs'
+import { Button } from '../components/ui/button'
+import { EmptyState } from '../components/ui/empty-state'
 import { YearJump } from '../components/tax/YearJump'
 import { OverviewTab } from './tax/OverviewTab'
 import { PersonalT1Tab } from './tax/PersonalT1Tab'
@@ -82,6 +85,18 @@ export function TaxPage() {
         )}
         {yearsError && <span className="error">Failed to load years: {yearsError}</span>}
       </header>
+      {years && years.length === 0 ? (
+        <EmptyState
+          title="No tax years yet"
+          description="Import transactions for a tax year and your slips, returns, and reconciliation will populate here."
+          actions={
+            <Button asChild size="sm">
+              <Link to="/import">Import a statement</Link>
+            </Button>
+          }
+        />
+      ) : (
+        <>
       <Tabs items={TABS} value={tab} onValueChange={setTab} />
       {year === null ? (
         <p className="muted">Loading…</p>
@@ -104,6 +119,8 @@ export function TaxPage() {
           {tab === 'planner' && <OwnerCompPlannerTab activePlanId={activePlanId} />}
           {tab === 'hygiene' && <TaxHygieneTab year={year} />}
           {tab === 'reserve' && <TaxReserveTab year={year} />}
+        </>
+      )}
         </>
       )}
     </section>
