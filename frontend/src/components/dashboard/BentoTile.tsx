@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export type BentoSpan = 3 | 4 | 6 | 8 | 12
@@ -68,6 +69,42 @@ type BentoTileProps = React.ComponentProps<'section'> & {
   description?: React.ReactNode
   /** Optional right-aligned actions in the header row. */
   actions?: React.ReactNode
+  /** Optional leading icon, rendered in a tinted circular badge before the
+   *  label. Use it to give a tile a splash of color (e.g. a bell on the
+   *  review banner). The badge tint follows the variant. */
+  icon?: React.ReactNode
+  /** When provided, renders a dismiss (✕) button at the top-right of the
+   *  header. The caller owns the dismissed state. */
+  onDismiss?: () => void
+  /** Accessible label for the dismiss button. Defaults to "Dismiss". */
+  dismissLabel?: string
+}
+
+/**
+ * Badge tint per variant — a saturated circle behind the leading icon so the
+ * tile reads with a pop of color without flooding the whole surface.
+ */
+const VARIANT_ICON_STYLE: Record<BentoVariant, React.CSSProperties> = {
+  default: {
+    background: 'color-mix(in srgb, var(--primary) 16%, var(--card))',
+    color: 'var(--primary)',
+  },
+  hero: {
+    background: 'color-mix(in srgb, var(--primary) 16%, var(--card))',
+    color: 'var(--primary)',
+  },
+  gradient: {
+    background: 'color-mix(in srgb, var(--zinc-50) 22%, transparent)',
+    color: '#fff',
+  },
+  warning: {
+    background: 'color-mix(in srgb, var(--accent-warm) 22%, var(--card))',
+    color: 'var(--accent-warm)',
+  },
+  destructive: {
+    background: 'color-mix(in srgb, var(--danger) 20%, var(--card))',
+    color: 'var(--danger)',
+  },
 }
 
 /**
@@ -93,12 +130,20 @@ export function BentoTile({
   label,
   description,
   actions,
+  icon,
+  onDismiss,
+  dismissLabel = 'Dismiss',
   className,
   style,
   children,
   ...props
 }: BentoTileProps) {
-  const hasHeader = label != null || description != null || actions != null
+  const hasHeader =
+    label != null ||
+    description != null ||
+    actions != null ||
+    icon != null ||
+    onDismiss != null
   const variantStyle = VARIANT_STYLE[variant]
 
   // Base tile styles reproduced from the former .bentoTile App.css rule.
@@ -140,6 +185,16 @@ export function BentoTile({
       {hasHeader && (
         // formerly .bentoTile__header
         <header className="flex items-start justify-between gap-3">
+          {icon != null && (
+            // Tinted circular badge — the tile's splash of color.
+            <span
+              className="flex size-9 shrink-0 items-center justify-center rounded-full"
+              style={VARIANT_ICON_STYLE[variant]}
+              aria-hidden="true"
+            >
+              {icon}
+            </span>
+          )}
           {/* formerly .bentoTile__heading */}
           <div className="min-w-0 flex-1">
             {label && (
@@ -170,7 +225,22 @@ export function BentoTile({
             )}
           </div>
           {/* formerly .bentoTile__actions */}
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          {(actions || onDismiss) && (
+            <div className="flex shrink-0 items-center gap-2">
+              {actions}
+              {onDismiss && (
+                <button
+                  type="button"
+                  onClick={onDismiss}
+                  aria-label={dismissLabel}
+                  className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  style={variant === 'gradient' ? { color: '#fff' } : undefined}
+                >
+                  <X className="size-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          )}
         </header>
       )}
       {/* formerly .bentoTile__body */}
