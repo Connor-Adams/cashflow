@@ -6,6 +6,8 @@ const required = [
   '#9b2d3a',          // oxblood-500 token value (minifier lowercases hex)
   '--primary',        // semantic token present
   'skeleton-shimmer', // keyframe class shipped
+  '.rounded-lg',      // used by Button/Card
+  '.bg-button-primary', // custom @utility emitted for Button
 ]
 const missing = required.filter((needle) => !css.toLowerCase().includes(needle.toLowerCase()))
 if (missing.length > 0) {
