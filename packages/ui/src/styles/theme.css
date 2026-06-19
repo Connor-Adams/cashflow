@@ -1,0 +1,129 @@
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Custom screen for dense-bento 4-wide tier. Slots above default xl (1280)
+   * and below 2xl (1536). Use the `3xl:` prefix. */
+  --breakpoint-3xl: 90rem;
+
+  --color-background:        var(--background);
+  --color-foreground:        var(--foreground);
+  --color-card:              var(--card);
+  --color-card-foreground:   var(--card-foreground);
+  --color-popover:           var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  /* Semantic text colors (Wander naming) */
+  --color-primary:           var(--foreground);
+  --color-secondary:         var(--muted-foreground);
+  --color-destructive:       var(--destructive);
+  --color-muted:             var(--muted);
+  --color-muted-foreground:  var(--muted-foreground);
+  --color-accent:            var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  /* Brand alias — cashflow amber; use for accent UI, badges, etc. */
+  --color-brand:             var(--primary);
+  --color-brand-foreground:  var(--primary-foreground);
+
+  /* Kept for backward compat with remaining shadcn components */
+  --color-primary-foreground:   var(--primary-foreground);
+  --color-secondary-foreground: var(--foreground);
+  --color-border:               var(--border);
+  --color-input:                var(--input);
+  --color-ring:                 var(--ring);
+
+  /* Border semantic tokens — must cover all border-* classes in use */
+  --color-border-primary:      var(--border);
+  --color-border-secondary:    var(--input);
+  --color-border-ring:         var(--ring);
+  --color-border-destructive:  var(--destructive);
+  --color-border-warning:      var(--warning);
+  --color-border-danger:       var(--danger);
+  --color-border-success:      var(--success);
+  --color-border-positive:     var(--positive);
+  --color-border-info:         var(--info);
+  --color-border-transparent:  transparent;
+  --color-border-border:       var(--border);
+  --color-border-input:        var(--input);
+
+  /* Button semantic tokens (Wander naming, cashflow palette) */
+  --color-button-primary:        var(--primary);
+  --color-text-button-primary:   var(--primary-foreground);
+  --color-button-hover-primary:  color-mix(in oklch, var(--primary) 88%, black);
+  --color-button-focus-primary:  color-mix(in oklch, var(--primary) 88%, black);
+
+  --color-button-secondary:        var(--secondary);
+  --color-button-hover-secondary:  color-mix(in oklch, var(--secondary) 88%, black);
+  --color-button-focus-secondary:  color-mix(in oklch, var(--secondary) 88%, black);
+
+  --color-button-outline:        oklch(0 0 0 / 0);
+  --color-button-hover-outline:  var(--secondary);
+  --color-button-focus-outline:  var(--secondary);
+
+  --color-button-ghost:        oklch(0 0 0 / 0);
+  --color-button-hover-ghost:  var(--secondary);
+  --color-button-focus-ghost:  var(--secondary);
+
+  --color-button-destructive:        color-mix(in oklch, var(--destructive) 12%, transparent);
+  --color-button-hover-destructive:  color-mix(in oklch, var(--destructive) 20%, transparent);
+  --color-button-focus-destructive:  color-mix(in oklch, var(--destructive) 20%, transparent);
+
+  --color-button-checkout:        var(--primary);
+  --color-button-hover-checkout:  color-mix(in oklch, var(--primary) 88%, black);
+  --color-button-focus-checkout:  color-mix(in oklch, var(--primary) 88%, black);
+
+  /* Typography scale (Wander DS) */
+  --text-display-lg: 3.25rem;
+  --text-display-lg--line-height: 3.5rem;
+  --text-display-lg--letter-spacing: -0.02em;
+  --text-display: 2.25rem;
+  --text-display--line-height: 2.5rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-display-sm: 2rem;
+  --text-display-sm--line-height: 2rem;
+  --text-display-sm--letter-spacing: -0.02em;
+  --text-headline-lg: 1.875rem;
+  --text-headline-lg--line-height: 2.25rem;
+  --text-headline-lg--letter-spacing: -0.01em;
+  --text-headline: 1.5rem;
+  --text-headline--line-height: 1.75rem;
+  --text-headline--letter-spacing: -0.01em;
+  --text-headline-sm: 1rem;
+  --text-headline-sm--line-height: 1.25rem;
+  --text-headline-sm--letter-spacing: 0em;
+  --text-body-lg: 1rem;
+  --text-body-lg--line-height: 1.25rem;
+  --text-body-lg--letter-spacing: 0em;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.0625rem;
+  --text-body--letter-spacing: 0em;
+  --text-body-sm: 0.75rem;
+  --text-body-sm--line-height: 0.9375rem;
+  --text-body-sm--letter-spacing: 0em;
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Semantic color utilities (so components stop reaching for raw Tailwind hues) */
+  --color-warning:            var(--warning);
+  --color-warning-bg:         var(--warning-bg);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success:            var(--success);
+  --color-success-bg:         var(--success-bg);
+  --color-success-foreground: var(--success-foreground);
+  --color-positive:           var(--positive);
+  --color-negative:           var(--negative);
+  --color-negative-bg:        var(--negative-bg);
+  --color-danger:             var(--danger);
+  --color-danger-bg:          var(--danger-bg);
+  --color-text-link:          var(--text-link);
+  --color-info:            var(--info);
+  --color-info-bg:         var(--info-bg);
+  --color-info-foreground: var(--info-foreground);
+}
