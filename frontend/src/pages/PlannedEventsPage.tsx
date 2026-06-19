@@ -348,7 +348,7 @@ export function PlannedEventsPage() {
                       ref={isFocused ? focusRowRef : undefined}
                       className={
                         isFocused
-                          ? 'ring-2 ring-amber-400 transition-shadow'
+                          ? 'ring-2 ring-warning transition-shadow'
                           : 'transition-shadow'
                       }
                     >
