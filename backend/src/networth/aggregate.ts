@@ -1,7 +1,7 @@
 import { Op } from 'sequelize';
 import { accountKind } from './accountKind';
 import { balanceAtDate } from './balanceAtDate';
-import { portfolioMarketValueAt } from './portfolioMarketValueAt';
+import { portfolioMarketValueAt, valuePositionsAsOf } from './portfolioMarketValueAt';
 import {
   unifyToCad,
   type PerCurrencyByKind,
@@ -11,15 +11,6 @@ import {
 import { ensureFxRate } from '../fx/bankOfCanada';
 import { toUnits, fromUnits } from '../util/numbers';
 import { latestActivePositions } from '../portfolio/latestHoldings';
-import { resolveHoldingMarketValue } from '../portfolio/valuation';
-
-/** Parse a possibly-string DECIMAL into a finite number, or null. Mirrors the
- *  `n()` helper in portfolioMarketValueAt.ts so valuation parity holds. */
-function pnum(raw: unknown): number | null {
-  if (raw == null || raw === '') return null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 // Investment accounts derive their net-worth contribution from holdings
 // market value, NOT from the cash-flow transaction stream — txns on these
@@ -112,6 +103,16 @@ function isImplicitZeroOpening(acc: {
   openingBalanceDate: string | null;
 }): boolean {
   return Number(acc.openingBalance) === 0 && acc.openingBalanceDate == null;
+}
+
+/** Convert an integer-unit per-currency accumulator back to dollars at the
+ *  unify boundary. Shared by buildNetWorthAt and buildSeries. */
+function unitsToDollars(perCurrency: PerCurrencyByKind): PerCurrencyByKind {
+  const out: PerCurrencyByKind = {};
+  for (const [currency, { asset, liability }] of Object.entries(perCurrency)) {
+    out[currency] = { asset: fromUnits(asset), liability: fromUnits(liability) };
+  }
+  return out;
 }
 
 export async function buildNetWorthAt(
@@ -234,11 +235,7 @@ export async function buildNetWorthAt(
   }
   gaps.push(...portfolio.gaps);
 
-  const perCurrencyDollars: PerCurrencyByKind = {};
-  for (const [currency, { asset, liability }] of Object.entries(perCurrency)) {
-    perCurrencyDollars[currency] = { asset: fromUnits(asset), liability: fromUnits(liability) };
-  }
-  const unified = await unifyToCad(perCurrencyDollars, asOf, fxLookup);
+  const unified = await unifyToCad(unitsToDollars(perCurrency), asOf, fxLookup);
   gaps.push(...unified.gaps);
 
   return {
@@ -300,7 +297,7 @@ export function daysInRange(from: string, to: string): string[] {
  * per distinct (pair, date). Null results are cached too, so an absent rate
  * short-circuits the 3-query fallback on subsequent buckets. (Fix #2 of #661.)
  */
-export function memoizeFxLookup(fxLookup: FxLookup): FxLookup {
+function memoizeFxLookup(fxLookup: FxLookup): FxLookup {
   const cache = new Map<string, Awaited<ReturnType<FxLookup>>>();
   const pending = new Map<string, Promise<Awaited<ReturnType<FxLookup>>>>();
   return async (from, to, asOf) => {
@@ -495,44 +492,27 @@ export async function buildSeries(
         (h) => activePortfolioIds.has(h.accountId) && h.statementDate <= asOf
       );
       const latest = latestActivePositions(holdingsInScope);
+      // Resolve the newest price ≤ asOf per security from the prefetched,
+      // pricedAt-DESC list (first match per security wins). Then value the
+      // positions with the shared helper so the series and the single-date
+      // portfolioMarketValueAt path never diverge.
       const asOfEod = `${asOf}T23:59:59.999Z`;
-      for (const h of latest) {
-        // newest price ≤ asOf for this security
-        let price: (typeof pricesAll)[number] | undefined;
-        for (const p of pricesAll) {
-          if (p.securityId === h.securityId && p.pricedAt.toISOString() <= asOfEod) {
-            price = p; // pricesAll is sorted pricedAt DESC, first match wins
-            break;
-          }
+      const priceBySecurity = new Map<number, (typeof pricesAll)[number] | undefined>();
+      for (const p of pricesAll) {
+        if (p.pricedAt.toISOString() <= asOfEod && !priceBySecurity.has(p.securityId)) {
+          priceBySecurity.set(p.securityId, p);
         }
-        const quantity = pnum(h.quantity) ?? 0;
-        const quotePrice = pnum(price?.price);
-        const importedValue = pnum(h.marketValue);
-        const currency = price?.currency || h.currency;
-        let marketValue: number | null = null;
-        if (quotePrice != null || importedValue != null) {
-          marketValue = resolveHoldingMarketValue({
-            quantity,
-            importedValue,
-            importedPrice: pnum(h.price),
-            quotePrice,
-          }).marketValue;
-        }
-        if (marketValue == null) {
-          gaps.push({ date: asOf, currency, reason: 'price_unavailable', securityId: h.securityId });
-          continue;
-        }
-        perCurrency[currency] ??= { asset: 0, liability: 0 };
-        perCurrency[currency].asset += toUnits(marketValue);
+      }
+      const valued = valuePositionsAsOf(latest, priceBySecurity, asOf);
+      gaps.push(...valued.gaps);
+      for (const row of valued.rows) {
+        perCurrency[row.currency] ??= { asset: 0, liability: 0 };
+        perCurrency[row.currency].asset += toUnits(row.marketValue);
       }
     }
 
     // Unify to CAD via the memoized FX lookup.
-    const perCurrencyDollars: PerCurrencyByKind = {};
-    for (const [currency, { asset, liability }] of Object.entries(perCurrency)) {
-      perCurrencyDollars[currency] = { asset: fromUnits(asset), liability: fromUnits(liability) };
-    }
-    const unified = await unifyToCad(perCurrencyDollars, asOf, memoFx);
+    const unified = await unifyToCad(unitsToDollars(perCurrency), asOf, memoFx);
     gaps.push(...unified.gaps);
 
     points.push({
