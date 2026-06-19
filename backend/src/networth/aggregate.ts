@@ -10,6 +10,16 @@ import {
 } from './unifyToCad';
 import { ensureFxRate } from '../fx/bankOfCanada';
 import { toUnits, fromUnits } from '../util/numbers';
+import { latestActivePositions } from '../portfolio/latestHoldings';
+import { resolveHoldingMarketValue } from '../portfolio/valuation';
+
+/** Parse a possibly-string DECIMAL into a finite number, or null. Mirrors the
+ *  `n()` helper in portfolioMarketValueAt.ts so valuation parity holds. */
+function pnum(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 // Investment accounts derive their net-worth contribution from holdings
 // market value, NOT from the cash-flow transaction stream — txns on these
@@ -282,6 +292,61 @@ export function daysInRange(from: string, to: string): string[] {
   return out;
 }
 
+/**
+ * Wrap an FxLookup in a request-scoped memo keyed by (from,to,asOf). A net
+ * worth series re-asks the same currency pairs across every bucket — and the
+ * looseHistoricalFxLookup fallback can fire up to three DB queries per miss —
+ * so deduping within one request collapses thousands of repeat lookups to one
+ * per distinct (pair, date). Null results are cached too, so an absent rate
+ * short-circuits the 3-query fallback on subsequent buckets. (Fix #2 of #661.)
+ */
+export function memoizeFxLookup(fxLookup: FxLookup): FxLookup {
+  const cache = new Map<string, Awaited<ReturnType<FxLookup>>>();
+  const pending = new Map<string, Promise<Awaited<ReturnType<FxLookup>>>>();
+  return async (from, to, asOf) => {
+    const key = `${from}|${to}|${asOf}`;
+    if (cache.has(key)) return cache.get(key)!;
+    const inflight = pending.get(key);
+    if (inflight) return inflight;
+    const p = fxLookup(from, to, asOf).then((res) => {
+      cache.set(key, res);
+      pending.delete(key);
+      return res;
+    });
+    pending.set(key, p);
+    return p;
+  };
+}
+
+type CumByCurrency = Map<string, number>; // currency -> integer units (toUnits)
+
+/**
+ * Per-account txn-stream state, prefetched once for the whole series. We sweep
+ * buckets in ascending date order, advancing a cumulative `cumUpTo` over the
+ * sorted txns. The balance at any asOf reduces to
+ *   cumUpTo(asOf) − cumUpTo(anchor)   (+ opening on defaultCurrency)
+ * which collapses all three branches of `balanceAtDate` (forward, backward,
+ * and no-anchor) into one expression — see the proof in the issue/kindex.
+ */
+// buildSeries emits only date/total/assetsTotal/liabilitiesTotal per point —
+// not the breakdown rows — so the `hasTxns`/`openingBalanceSet` flag that
+// buildNetWorthAt computes is irrelevant here and we don't track txn counts.
+// The negative-asset *exclusion* DOES affect totals and is handled per bucket.
+type AccountTxnState = {
+  txns: { date: string; currency: string; units: number }[];
+  cursor: number; // index into txns of the next txn not yet folded into cum
+  cum: CumByCurrency; // running cumUpTo(currentBucket), in integer units
+  anchorCum: CumByCurrency; // constant cumUpTo(openingBalanceDate), units
+};
+
+function advanceCursor(state: AccountTxnState, asOf: string): void {
+  while (state.cursor < state.txns.length && state.txns[state.cursor].date <= asOf) {
+    const t = state.txns[state.cursor];
+    state.cum.set(t.currency, (state.cum.get(t.currency) ?? 0) + t.units);
+    state.cursor += 1;
+  }
+}
+
 export async function buildSeries(
   from: string,
   to: string,
@@ -293,18 +358,191 @@ export async function buildSeries(
     granularity === 'monthly'
       ? monthEndDatesInRange(from, to)
       : daysInRange(from, to);
+
+  if (buckets.length === 0) {
+    return { baseCurrency: 'CAD', granularity, points: [], partial: false, gaps: [] };
+  }
+
+  // Empty account scope: one zero point per bucket (matches the per-bucket
+  // buildNetWorthAt, which returns a zero snapshot — not an empty series).
+  if (accountIds.length === 0) {
+    return {
+      baseCurrency: 'CAD',
+      granularity,
+      points: buckets.map((date) => ({ date, total: 0, assetsTotal: 0, liabilitiesTotal: 0 })),
+      partial: false,
+      gaps: [],
+    };
+  }
+
+  const memoFx = memoizeFxLookup(fxLookup);
+  const maxBucket = buckets[buckets.length - 1];
+
+  const { Account, Transaction, HoldingSnapshot, SecurityPrice } = await import('../models');
+
+  // ---- Prefetch (1): accounts once -------------------------------------
+  const allAccounts = await Account.findAll({ where: { id: accountIds } });
+  const cashAccounts = allAccounts.filter(
+    (a) => !PORTFOLIO_DRIVEN_TYPES.has(a.accountType)
+  );
+  const portfolioAccounts = allAccounts.filter((a) =>
+    PORTFOLIO_DRIVEN_TYPES.has(a.accountType)
+  );
+  const portfolioAccountIds = portfolioAccounts.map((a) => a.id);
+
+  // ---- Prefetch (2): all in-scope cash txns once -----------------------
+  // We need txns up to the LATEST bucket, plus (for accounts whose anchor is
+  // beyond the last bucket) txns up to the anchor — both are bounded by the
+  // overall max(maxBucket, max(openingBalanceDate)). Fetch the whole stream
+  // ≤ that bound, sorted ascending, then sweep per account.
+  const maxAnchor = cashAccounts.reduce<string>(
+    (m, a) => (a.openingBalanceDate && a.openingBalanceDate > m ? a.openingBalanceDate : m),
+    maxBucket
+  );
+  const cashAccountIds = cashAccounts.map((a) => a.id);
+  const txnRows = cashAccountIds.length
+    ? await Transaction.findAll({
+        where: { accountId: cashAccountIds, date: { [Op.lte]: maxAnchor } },
+        attributes: ['accountId', 'date', 'currency', 'amount'],
+        order: [['date', 'ASC'], ['id', 'ASC']],
+      })
+    : [];
+
+  const txnState = new Map<number, AccountTxnState>();
+  for (const acc of cashAccounts) {
+    txnState.set(acc.id, {
+      txns: [],
+      cursor: 0,
+      cum: new Map(),
+      anchorCum: new Map(),
+    });
+  }
+  for (const t of txnRows) {
+    const st = txnState.get(t.accountId);
+    if (!st) continue;
+    st.txns.push({ date: t.date, currency: t.currency, units: toUnits(Number(t.amount)) });
+  }
+  // Precompute each account's constant cumUpTo(anchor) once.
+  for (const acc of cashAccounts) {
+    const st = txnState.get(acc.id)!;
+    if (!acc.openingBalanceDate) continue;
+    for (const t of st.txns) {
+      if (t.date <= acc.openingBalanceDate) {
+        st.anchorCum.set(t.currency, (st.anchorCum.get(t.currency) ?? 0) + t.units);
+      }
+    }
+  }
+
+  // ---- Prefetch (3): all portfolio holdings + prices once --------------
+  // Snapshots ≤ maxBucket and prices ≤ end-of-maxBucket cover every earlier
+  // bucket too; closedAt is handled per-bucket below. We re-derive
+  // latest-position + price-as-of in memory per bucket.
+  const holdingsAll = portfolioAccountIds.length
+    ? await HoldingSnapshot.findAll({
+        where: { accountId: portfolioAccountIds, statementDate: { [Op.lte]: maxBucket } },
+        order: [['statementDate', 'DESC'], ['id', 'DESC']],
+      })
+    : [];
+  const securityIds = Array.from(new Set(holdingsAll.map((h) => h.securityId)));
+  const pricesAll = securityIds.length
+    ? await SecurityPrice.findAll({
+        where: {
+          securityId: securityIds,
+          pricedAt: { [Op.lte]: `${maxBucket}T23:59:59.999Z` },
+        },
+        order: [['pricedAt', 'DESC']],
+      })
+    : [];
+
+  // ---- Sweep buckets, computing each point from prefetched data --------
   const points: SeriesPoint[] = [];
   const gaps: NetWorthGap[] = [];
-  for (const date of buckets) {
-    const snap = await buildNetWorthAt(date, accountIds, fxLookup);
+
+  for (const asOf of buckets) {
+    const perCurrency: PerCurrencyByKind = {};
+
+    // Cash accounts
+    for (const acc of cashAccounts) {
+      // Closed accounts contribute zero from closed_at onward.
+      if (acc.closedAt && acc.closedAt <= asOf) continue;
+      const st = txnState.get(acc.id)!;
+      advanceCursor(st, asOf);
+      const kind = accountKind(acc.accountType);
+      const defCcy = acc.defaultCurrency ?? 'CAD';
+      const opening = Number(acc.openingBalance) || 0;
+
+      // balance(asOf) per currency = cumUpTo(asOf) − cumUpTo(anchor); opening
+      // is folded onto the default currency. Build the per-currency set as the
+      // union of currencies seen up to asOf and the anchor window.
+      const currencies = new Set<string>([defCcy, ...st.cum.keys(), ...st.anchorCum.keys()]);
+      for (const currency of currencies) {
+        let units = (st.cum.get(currency) ?? 0) - (st.anchorCum.get(currency) ?? 0);
+        if (currency === defCcy) units += toUnits(opening);
+        const amount = fromUnits(units);
+        const flagNegativeAsset = kind === 'asset' && amount < 0;
+        if (flagNegativeAsset) continue; // excluded from totals (still surfaced in /current)
+        perCurrency[currency] ??= { asset: 0, liability: 0 };
+        perCurrency[currency][kind] += units;
+      }
+    }
+
+    // Portfolio accounts
+    const activePortfolioIds = new Set(
+      portfolioAccounts.filter((a) => !a.closedAt || a.closedAt > asOf).map((a) => a.id)
+    );
+    if (activePortfolioIds.size > 0) {
+      const holdingsInScope = holdingsAll.filter(
+        (h) => activePortfolioIds.has(h.accountId) && h.statementDate <= asOf
+      );
+      const latest = latestActivePositions(holdingsInScope);
+      const asOfEod = `${asOf}T23:59:59.999Z`;
+      for (const h of latest) {
+        // newest price ≤ asOf for this security
+        let price: (typeof pricesAll)[number] | undefined;
+        for (const p of pricesAll) {
+          if (p.securityId === h.securityId && p.pricedAt.toISOString() <= asOfEod) {
+            price = p; // pricesAll is sorted pricedAt DESC, first match wins
+            break;
+          }
+        }
+        const quantity = pnum(h.quantity) ?? 0;
+        const quotePrice = pnum(price?.price);
+        const importedValue = pnum(h.marketValue);
+        const currency = price?.currency || h.currency;
+        let marketValue: number | null = null;
+        if (quotePrice != null || importedValue != null) {
+          marketValue = resolveHoldingMarketValue({
+            quantity,
+            importedValue,
+            importedPrice: pnum(h.price),
+            quotePrice,
+          }).marketValue;
+        }
+        if (marketValue == null) {
+          gaps.push({ date: asOf, currency, reason: 'price_unavailable', securityId: h.securityId });
+          continue;
+        }
+        perCurrency[currency] ??= { asset: 0, liability: 0 };
+        perCurrency[currency].asset += toUnits(marketValue);
+      }
+    }
+
+    // Unify to CAD via the memoized FX lookup.
+    const perCurrencyDollars: PerCurrencyByKind = {};
+    for (const [currency, { asset, liability }] of Object.entries(perCurrency)) {
+      perCurrencyDollars[currency] = { asset: fromUnits(asset), liability: fromUnits(liability) };
+    }
+    const unified = await unifyToCad(perCurrencyDollars, asOf, memoFx);
+    gaps.push(...unified.gaps);
+
     points.push({
-      date,
-      total: snap.total,
-      assetsTotal: snap.assetsTotal,
-      liabilitiesTotal: snap.liabilitiesTotal,
+      date: asOf,
+      total: unified.totalAssets + unified.totalLiabilities,
+      assetsTotal: unified.totalAssets,
+      liabilitiesTotal: unified.totalLiabilities,
     });
-    gaps.push(...snap.gaps);
   }
+
   return {
     baseCurrency: 'CAD',
     granularity,
