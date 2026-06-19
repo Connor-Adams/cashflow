@@ -13,8 +13,8 @@ import {
   type LeakSubscription,
   type LeakRecurringGroup,
   type LeakDeliverySpend,
+  type MoneyLeakType,
 } from './detect';
-import type { MoneyLeakType } from '../models/MoneyLeakDismissal';
 
 function sub(overrides: Partial<LeakSubscription> = {}): LeakSubscription {
   return {
