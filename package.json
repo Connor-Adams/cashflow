@@ -28,7 +28,7 @@
     "railway:frontend:start": "RAILWAY_DEPLOY_TARGET=frontend node scripts/railway-run.cjs start",
     "test": "yarn workspace @cashflow/shared run test && yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace frontend run test",
     "coverage": "yarn workspace cashflow-backend run test:coverage && yarn workspace frontend run test:coverage",
-    "ci": "yarn test:workflows && yarn workspace @cashflow/shared run test && yarn workspace cashflow-backend run typecheck && yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace cashflow-backend run build && yarn workspace frontend run test && yarn workspace frontend run build && yarn workspace frontend run lint && yarn workspace frontend run lint:palette",
+    "ci": "yarn test:workflows && yarn workspace @cashflow/shared run test && yarn workspace @cashflow/ui run typecheck && yarn workspace @cashflow/ui run test && yarn workspace @cashflow/ui run build && yarn workspace cashflow-backend run typecheck && yarn workspace cashflow-backend run test && yarn workspace cashflow-backend run test:integration && yarn workspace cashflow-backend run build && yarn workspace frontend run test && yarn workspace frontend run build && yarn workspace frontend run lint && yarn workspace frontend run lint:palette",
     "test:workflows": "node --test test/*.test.cjs",
     "deadcode": "fallow dead-code",
     "health": "fallow health",
