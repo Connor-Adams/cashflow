@@ -1933,3 +1933,27 @@ export interface SimplefinStatusResponse {
 export interface SimplefinDisconnectResponse {
   status: 'disconnected';
 }
+
+// ---------------------------------------------------------------------------
+// SimpleFIN daily transaction sync (issue #791)
+// ---------------------------------------------------------------------------
+
+/** Request body for POST /api/simplefin/sync (manual "Sync now"). */
+export interface SimplefinSyncRequest {
+  /** Limit the sync to one integration; omitted syncs the caller's connection. */
+  integrationId?: number;
+}
+
+/** Per-account result of a single integration sync. */
+export interface SimplefinSyncRun {
+  integrationId: number;
+  accountId: number;
+  inserted: number;
+  skippedDuplicate: number;
+  status: SimplefinStatus;
+}
+
+/** Success body for POST /api/simplefin/sync. */
+export interface SimplefinSyncResponse {
+  runs: SimplefinSyncRun[];
+}

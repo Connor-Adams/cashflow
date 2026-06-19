@@ -20,14 +20,28 @@ export class SimplefinError extends Error {
   readonly code:
     | 'invalid_setup_token'
     | 'claim_exchange_failed'
-    | 'discovery_failed';
+    | 'discovery_failed'
+    | 'sync_failed';
+  /**
+   * True when the access URL was rejected as unauthenticated (HTTP 401/403),
+   * i.e. the SimpleFIN token was revoked/expired. The sync engine uses this to
+   * set the integration `status=error` and surface a reconnect prompt (issue
+   * #791), as distinct from a transient transport failure.
+   */
+  readonly unauthorized: boolean;
   constructor(
-    code: 'invalid_setup_token' | 'claim_exchange_failed' | 'discovery_failed',
+    code:
+      | 'invalid_setup_token'
+      | 'claim_exchange_failed'
+      | 'discovery_failed'
+      | 'sync_failed',
     message: string,
+    opts: { unauthorized?: boolean } = {},
   ) {
     super(message);
     this.name = 'SimplefinError';
     this.code = code;
+    this.unauthorized = opts.unauthorized ?? false;
   }
 }
 
@@ -110,7 +124,7 @@ export function maskAccessUrlHost(accessUrl: string): string | null {
 }
 
 /** Build the Authorization header + base origin path for an access URL. */
-function accessUrlAuth(url: URL): { base: string; authHeader: string } {
+export function accessUrlAuth(url: URL): { base: string; authHeader: string } {
   const user = decodeURIComponent(url.username);
   const pass = decodeURIComponent(url.password);
   const authHeader = `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
@@ -198,5 +212,99 @@ export async function discoverAccounts(
       name: typeof a.name === 'string' && a.name ? a.name : String(a.id),
       accountNumber: a['account-number'] ?? a.accountNumber ?? null,
       currency: typeof a.currency === 'string' ? a.currency : null,
+    }));
+}
+
+/** A single SimpleFIN transaction as returned by `/accounts`. */
+export interface SimplefinTransaction {
+  /** SimpleFIN's stable per-transaction id — lands in `sourceReference`. */
+  id: string;
+  /** Posted epoch seconds (SimpleFIN uses unix seconds). */
+  posted: number;
+  /** Signed decimal amount as a string (e.g. "-12.34"). */
+  amount: string;
+  description: string;
+  payee?: string | null;
+}
+
+/** A SimpleFIN account plus the transactions returned in a sync window. */
+export interface SimplefinAccountWithTransactions {
+  id: string;
+  name: string;
+  currency: string | null;
+  transactions: SimplefinTransaction[];
+}
+
+interface SimplefinTransactionsPayload {
+  accounts?: Array<{
+    id?: string;
+    name?: string;
+    currency?: string;
+    transactions?: Array<{
+      id?: string;
+      posted?: number;
+      amount?: string | number;
+      description?: string;
+      payee?: string;
+    }>;
+  }>;
+}
+
+/**
+ * Fetch accounts with their transactions posted on/after `startDateEpoch`
+ * (unix seconds) via `<access>/accounts?start-date=<epoch>` (issue #791).
+ *
+ * Throws SimplefinError('sync_failed') on transport/HTTP/parse failure. When
+ * the access URL returns 401/403 (token revoked/expired) the error carries
+ * `unauthorized: true` so the sync engine can mark the integration in error and
+ * surface a reconnect prompt without advancing `lastSyncedAt`.
+ */
+export async function fetchTransactions(
+  accessUrl: string,
+  startDateEpoch: number,
+): Promise<SimplefinAccountWithTransactions[]> {
+  const { base, authHeader } = accessUrlAuth(parseAccessUrl(accessUrl));
+  const url = `${base}/accounts?start-date=${Math.floor(startDateEpoch)}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { Authorization: authHeader } });
+  } catch (e) {
+    throw new SimplefinError(
+      'sync_failed',
+      `Transaction fetch failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new SimplefinError(
+      'sync_failed',
+      `Access URL returned ${res.status} (token revoked/expired)`,
+      { unauthorized: true },
+    );
+  }
+  if (!res.ok) {
+    throw new SimplefinError('sync_failed', `Transaction fetch returned ${res.status}`);
+  }
+  let payload: SimplefinTransactionsPayload;
+  try {
+    payload = (await res.json()) as SimplefinTransactionsPayload;
+  } catch {
+    throw new SimplefinError('sync_failed', 'Transaction response was not JSON');
+  }
+  const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+  return accounts
+    .filter((a) => typeof a?.id === 'string' && a.id)
+    .map((a) => ({
+      id: String(a.id),
+      name: typeof a.name === 'string' && a.name ? a.name : String(a.id),
+      currency: typeof a.currency === 'string' ? a.currency : null,
+      transactions: (Array.isArray(a.transactions) ? a.transactions : [])
+        .filter((tx) => typeof tx?.id === 'string' && tx.id)
+        .map((tx) => ({
+          id: String(tx.id),
+          posted: typeof tx.posted === 'number' ? tx.posted : 0,
+          amount: tx.amount == null ? '0' : String(tx.amount),
+          description: typeof tx.description === 'string' ? tx.description : '',
+          payee: typeof tx.payee === 'string' ? tx.payee : null,
+        })),
     }));
 }
