@@ -27,6 +27,10 @@ Repo-specific gotchas for future syncs of `@cashflow/ui` (packages/ui) → claud
 - Dark mode via `data-theme="dark"` on root.
 - Use realistic money/finance content in previews (transactions, balances), never foo/bar.
 
+## Target project (IMPORTANT)
+- Synced to a **dedicated** project **"Cashflow UI — @cashflow/ui"** (`projectId 2ee5e2a0-95f0-44d4-a428-a93ae5c818f1`), pinned in config. Re-syncs go here automatically.
+- Do **NOT** sync to the pre-existing **"Cashflow Design System"** (`2cf89db3-0935-4512-b99a-1ea651de503d`) — that's a separate, hand-built DS (foundations pages, brand assets, full app ui_kit screens, custom component grouping) with a different layout. The converter output would overwrite/duplicate it. Connor chose a new project to keep that one untouched (2026-06-19).
+
 ## Re-sync risks
 - Previews compose sub-parts (CardHeader etc.) that are excluded as standalone cards; if a sub-part is renamed/removed upstream, the parent preview breaks silently — rebuild + eyeball after any DS API change.
 - Group stubs are tied to the current 14-component set; a new primitive needs a new `.design-sync/groups/<Name>.md` + docsMap entry or it lands in `general`.
