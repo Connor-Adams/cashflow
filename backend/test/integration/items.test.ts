@@ -245,7 +245,7 @@ test('GET /api/items shows items linked to a transaction via order link (no rece
   assert.equal(row.receipt.date, '2026-04-01');
 });
 
-test('GET /api/items excludes items whose only order link is rejected', async () => {
+test('GET /api/items shows an order item with a rejected-only link as unmatched', async () => {
   const { Account, ExternalOrder, ExternalOrderItem, Transaction, TransactionOrderLink } =
     await import('../../src/models/index.js');
   const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
@@ -298,7 +298,47 @@ test('GET /api/items excludes items whose only order link is rejected', async ()
 
   const res = await agentA.get('/api/items?vendor=rejectedonly');
   assert.equal(res.status, 200);
-  assert.equal(res.body.items.length, 0, 'rejected-only links must not surface items');
+  assert.equal(res.body.items.length, 1, 'imported item still surfaces as purchase history');
+  assert.equal(
+    res.body.items[0].receipt.sourceTxnId,
+    null,
+    'a rejected-only link leaves the item unmatched (no transaction)',
+  );
+});
+
+test('GET /api/items shows an order item with no link or receipt as unmatched', async () => {
+  const { ExternalOrder, ExternalOrderItem } = await import('../../src/models/index.js');
+  const householdAId = (await agentA.get('/api/auth/me')).body.user.household.id;
+  const order = await ExternalOrder.create({
+    householdId: householdAId,
+    vendor: 'orphanvendor',
+    dedupeKey: 'orphan-1',
+    total: '12',
+    currency: 'USD',
+    source: 'amazon_report',
+  } as never);
+  const item = await ExternalOrderItem.create({
+    externalOrderId: order.id,
+    title: 'orphan widget',
+    quantity: 1,
+    totalPrice: '12',
+    inferredCategory: 'Gadgets',
+  } as never);
+
+  const res = await agentA.get('/api/items?vendor=orphanvendor');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.items.length, 1, 'an unreconciled imported item is visible by default');
+  assert.equal(res.body.items[0].id, item.id);
+  assert.equal(res.body.items[0].receipt.sourceTxnId, null);
+  assert.equal(res.body.items[0].receipt.date, null);
+});
+
+test('GET /api/items with a date filter excludes unmatched items', async () => {
+  // The unmatched orphanvendor item (above) has no transaction, so a date filter
+  // — which narrows to ledger-reconciled items — must not return it.
+  const res = await agentA.get('/api/items?vendor=orphanvendor&from=2000-01-01&to=2100-01-01');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.items.length, 0, 'date filter is reconciled-only');
 });
 
 test('GET /api/items does not duplicate an item with multiple non-rejected links', async () => {
