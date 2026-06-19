@@ -24,6 +24,7 @@ import { ExternalOrderItem, initExternalOrderItem } from './ExternalOrderItem';
 import { ExternalOrderTender, initExternalOrderTender } from './ExternalOrderTender';
 import { TransactionOrderLink, initTransactionOrderLink } from './TransactionOrderLink';
 import { TransactionSignal, initTransactionSignal } from './TransactionSignal';
+import { MerchantEmbedding, initMerchantEmbedding } from './MerchantEmbedding';
 import { TransactionRevision, initTransactionRevision } from './TransactionRevision';
 import { Security, initSecurity } from './Security';
 import { InvestmentActivity, initInvestmentActivity } from './InvestmentActivity';
@@ -147,6 +148,7 @@ initExternalOrderItem(sequelize);
 initExternalOrderTender(sequelize);
 initTransactionOrderLink(sequelize);
 initTransactionSignal(sequelize);
+initMerchantEmbedding(sequelize);
 initTransactionRevision(sequelize);
 initSecurity(sequelize);
 initInvestmentActivity(sequelize);
@@ -1083,6 +1085,7 @@ export {
   ExternalOrderTender,
   TransactionOrderLink,
   TransactionSignal,
+  MerchantEmbedding,
   TransactionRevision,
   Security,
   InvestmentActivity,
