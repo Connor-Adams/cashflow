@@ -31,7 +31,7 @@ import { Tabs, TabPanel } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { getJson, postJson, patchJson } from '../lib/api'
 import { todayDateInputValue } from '../lib/dateInput'
-import { formatMoney } from '../lib/formatMoney'
+import { formatMoneyOr } from '../lib/formatMoney'
 import type { Contact } from '@cashflow/shared'
 import type {
   ReimbursementStatus,
@@ -42,6 +42,16 @@ import type {
   RepaymentCandidate,
   RepaymentCandidatesResponse,
 } from '../types/reimbursement'
+
+/** Coerce a backend money value (sent as a decimal string) to a number for
+ *  display, returning `null` for nullish/empty/NaN inputs so a missing amount
+ *  renders the `—` placeholder instead of a misleading `$0.00`. A real `0`
+ *  (or `"0"`) is preserved. */
+function toAmount(value: string | number | null | undefined): number | null {
+  if (value == null || value === '') return null
+  const n = Number(value)
+  return Number.isNaN(n) ? null : n
+}
 
 /** Tailwind variant lookup for status badges — literal class names so the JIT
  *  compiler keeps them. */
@@ -242,7 +252,7 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
             <div className="flex flex-wrap gap-3">
               {currencies.map((cur) => (
                 <span key={cur} className="text-lg font-semibold">
-                  {formatMoney(Number(summary.outstandingByCurrency[cur]) || 0, cur)}
+                  {formatMoneyOr(toAmount(summary.outstandingByCurrency[cur]), cur)}
                 </span>
               ))}
             </div>
@@ -288,7 +298,7 @@ function SummaryCard({ summary }: { summary: ReimbursementSummaryResponse | null
                     )}
                   </span>
                   <span className="font-medium">
-                    {formatMoney(Number(g.outstanding) || 0, g.currency)}
+                    {formatMoneyOr(toAmount(g.outstanding), g.currency)}
                   </span>
                 </div>
               ))}
@@ -366,7 +376,7 @@ function ReimbursementRow({
   onMatch: (row: ReimbursementView) => void
   onUnlink: (row: ReimbursementView) => void
 }) {
-  const amountNum = Number(row.amount) || 0
+  const amountNum = toAmount(row.amount)
   const overdue = row.effectiveStatus === 'overdue'
   return (
     <TableRow>
@@ -374,7 +384,7 @@ function ReimbursementRow({
         <div>{row.partyLabel}</div>
         {row.contactId != null && <div className="text-xs text-muted-foreground">contact</div>}
       </TableCell>
-      <TableCell>{formatMoney(amountNum, row.currency)}</TableCell>
+      <TableCell>{formatMoneyOr(amountNum, row.currency)}</TableCell>
       <TableCell>
         {row.dueDate ? (
           <div className={overdue ? 'text-destructive' : ''}>
@@ -579,7 +589,7 @@ function MatchDialog({
       <Card className="w-full max-w-lg p-5">
         <h2 className="mb-1 text-lg font-semibold">Match a repayment</h2>
         <p className="text-sm mb-4 text-muted-foreground">
-          {row.partyLabel} · {formatMoney(Number(row.amount) || 0, row.currency)}
+          {row.partyLabel} · {formatMoneyOr(toAmount(row.amount), row.currency)}
           {row.dueDate ? ` · due ${row.dueDate}` : ''}
         </p>
 
@@ -683,7 +693,7 @@ function MatchDialog({
                 <div className="text-sm">
                   <div>
                     {c.merchant ?? 'Transaction'} ·{' '}
-                    {formatMoney(Number(c.amount) || 0, c.currency)}
+                    {formatMoneyOr(toAmount(c.amount), c.currency)}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {c.date} · match {Math.round(c.score * 100)}%

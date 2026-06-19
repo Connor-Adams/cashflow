@@ -34,8 +34,8 @@ import type {
   FinancialGoalPatch,
   FinancialGoalsResponse,
   FinancialGoalStatus,
+  GoalForecastStatus,
   GoalProjectionResponse,
-  GoalProjectionStatus,
 } from '../types/api'
 
 const DEFAULT_CURRENCY = 'CAD'
@@ -88,22 +88,25 @@ const STATUS_BADGE: Record<FinancialGoalStatus, string> = {
   completed: 'bg-success-bg text-success-foreground',
 }
 
-const PROJECTION_BADGE: Record<GoalProjectionStatus, string> = {
+// Forecast-grounded badge (#653). Literal class strings per status — Tailwind
+// v4 JIT needs literals, no dynamic string building. Mirrors the semantic
+// design-system tokens the rest of the page uses.
+const FORECAST_BADGE: Record<GoalForecastStatus, string> = {
   completed: 'bg-success-bg text-success-foreground',
   on_track: 'bg-success-bg text-success-foreground',
-  ahead: 'bg-info-bg text-info-foreground',
-  behind: 'bg-danger-bg text-danger',
-  unfunded: 'bg-warning-bg text-warning-foreground',
-  active: 'bg-muted text-muted-foreground',
+  at_risk: 'bg-warning-bg text-warning-foreground',
+  off_track: 'bg-danger-bg text-danger',
+  no_deadline: 'bg-muted text-muted-foreground',
+  cant_validate: 'bg-muted text-muted-foreground',
 }
 
-const PROJECTION_LABEL: Record<GoalProjectionStatus, string> = {
+const FORECAST_LABEL: Record<GoalForecastStatus, string> = {
   completed: 'Completed',
   on_track: 'On track',
-  ahead: 'Ahead',
-  behind: 'Behind',
-  unfunded: 'No contribution',
-  active: 'Active',
+  at_risk: 'At risk',
+  off_track: 'Off track',
+  no_deadline: 'No deadline',
+  cant_validate: "Can't validate",
 }
 
 function statusLabel(status: FinancialGoalStatus): string {
@@ -154,6 +157,17 @@ function rowToForm(row: FinancialGoal): FormState {
     status: row.status,
     notes: row.notes ?? '',
   }
+}
+
+const NEGATIVE_AMOUNT_ERROR = "Amount can't be negative."
+
+/** Returns the inline error for a money field whose raw input is negative, else
+ *  empty. Empty input and a real `0` are not errors here (the positive-amount
+ *  requirement is enforced separately by buildInput). */
+function negativeAmountError(raw: string): string {
+  if (raw.trim() === '') return ''
+  const n = Number(raw)
+  return Number.isFinite(n) && n < 0 ? NEGATIVE_AMOUNT_ERROR : ''
 }
 
 function buildInput(form: FormState): FinancialGoalInput | null {
@@ -220,9 +234,11 @@ export function GoalsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [form, setForm] = useState<FormState>(emptyForm())
   const [submitting, setSubmitting] = useState(false)
+  const [createAttempted, setCreateAttempted] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<FormState>(emptyForm())
   const [editSaving, setEditSaving] = useState(false)
+  const [editAttempted, setEditAttempted] = useState(false)
   const [statusFilter, setStatusFilter] = useState<FinancialGoalStatus | ''>('active')
   const [loading, setLoading] = useState(true)
 
@@ -283,6 +299,7 @@ export function GoalsPage() {
 
   async function createGoal(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    setCreateAttempted(true)
     const input = buildInput(form)
     if (!input) {
       showToast({
@@ -330,6 +347,7 @@ export function GoalsPage() {
   async function saveEdit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (editId == null) return
+    setEditAttempted(true)
     const patch = buildPatch(editForm)
     if (!patch) {
       showToast({
@@ -470,6 +488,7 @@ export function GoalsPage() {
                               accountOptions={accountOptions}
                               idPrefix={`goal-edit-${row.id}`}
                               showStatus
+                              showErrors={editAttempted}
                             />
                             <div className="mb-3 flex flex-wrap items-center gap-3">
                               <Button
@@ -496,7 +515,8 @@ export function GoalsPage() {
                   }
                   const projection = projections[row.id]
                   const progress = projection?.progressPercent ?? 0
-                  const projStatus = projection?.status ?? 'active'
+                  const forecast = projection?.forecast
+                  const forecastStatus = forecast?.status
                   return (
                     <TableRow key={row.id}>
                       <TableCell>
@@ -547,24 +567,38 @@ export function GoalsPage() {
                             : <em className="text-muted-foreground">(unset)</em>}
                       </TableCell>
                       <TableCell>
-                        {projection?.requiredMonthlyContribution ? (
+                        {/* Forecast-grounded (#653): "Need $X/mo to stay on
+                            track" derives from the real forecast, not the typed
+                            contribution. Falls back to "—" when the projection
+                            fetch failed (no projection on this row). */}
+                        {forecast?.currencyMismatch ? (
+                          <div className="text-xs text-muted-foreground">
+                            Goal currency ({row.currency}) differs from forecast (
+                            {forecast.currency}).
+                          </div>
+                        ) : forecast?.requiredMonthlyContribution ? (
                           <div className="text-xs">
                             <div>
                               Need{' '}
-                              {safeNum(projection.requiredMonthlyContribution) !== null
-                                ? formatMoney(safeNum(projection.requiredMonthlyContribution)!, row.currency)
+                              {safeNum(forecast.requiredMonthlyContribution) !== null
+                                ? formatMoney(safeNum(forecast.requiredMonthlyContribution)!, row.currency)
                                 : <em className="text-muted-foreground">(unset)</em>}
                               /mo
+                              {forecastStatus === 'off_track'
+                                ? safeNum(forecast.monthlyFreeCash) !== null
+                                  ? ` — forecast covers ${formatMoney(safeNum(forecast.monthlyFreeCash)!, forecast.currency)}/mo`
+                                  : null
+                                : ' to stay on track'}
                             </div>
-                            {projection.projectedCompletionDate ? (
+                            {forecast.projectedCompletionDate ? (
                               <div className="text-sm leading-6 text-muted-foreground">
-                                Finish ~{projection.projectedCompletionDate}
+                                Finish ~{forecast.projectedCompletionDate}
                               </div>
                             ) : null}
                           </div>
-                        ) : projection?.projectedCompletionDate ? (
+                        ) : forecast?.projectedCompletionDate ? (
                           <div className="text-xs text-muted-foreground">
-                            Finish ~{projection.projectedCompletionDate}
+                            Finish ~{forecast.projectedCompletionDate}
                           </div>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
@@ -581,9 +615,13 @@ export function GoalsPage() {
                           <Badge className={STATUS_BADGE[row.status]}>
                             {statusLabel(row.status)}
                           </Badge>
-                          {row.status === 'active' && projection ? (
-                            <Badge className={PROJECTION_BADGE[projStatus]}>
-                              {PROJECTION_LABEL[projStatus]}
+                          {/* Forecast-grounded badge (#653): exactly one badge
+                              from the literal-class FORECAST_BADGE table. When
+                              the projection fetch failed (no `forecast`), only
+                              the status badge above renders. */}
+                          {row.status === 'active' && forecastStatus ? (
+                            <Badge className={FORECAST_BADGE[forecastStatus]}>
+                              {FORECAST_LABEL[forecastStatus]}
                             </Badge>
                           ) : null}
                         </div>
@@ -636,6 +674,7 @@ export function GoalsPage() {
             accountOptions={accountOptions}
             idPrefix="goal-new"
             showStatus={false}
+            showErrors={createAttempted}
           />
           <Button type="submit" disabled={submitting}>
             <Plus aria-hidden="true" />
@@ -654,6 +693,8 @@ type GoalFormFieldsProps = {
   accountOptions: Account[]
   idPrefix: string
   showStatus: boolean
+  /** When true, surface inline validation errors (set after a submit attempt). */
+  showErrors?: boolean
 }
 
 function GoalFormFields({
@@ -662,7 +703,14 @@ function GoalFormFields({
   accountOptions,
   idPrefix,
   showStatus,
+  showErrors = false,
 }: GoalFormFieldsProps) {
+  const targetAmountError = showErrors
+    ? negativeAmountError(form.targetAmount)
+    : ''
+  const contributionError = showErrors
+    ? negativeAmountError(form.monthlyContribution)
+    : ''
   return (
     <Grid minItemWidth={180} gap="md" fill className="mb-3">
       <Label htmlFor={`${idPrefix}-name`}>
@@ -691,7 +739,19 @@ function GoalFormFields({
           }
           required
           placeholder="5000.00"
+          aria-invalid={targetAmountError ? 'true' : undefined}
+          aria-describedby={
+            targetAmountError ? `${idPrefix}-target-amount-error` : undefined
+          }
         />
+        {targetAmountError && (
+          <p
+            id={`${idPrefix}-target-amount-error`}
+            className="text-sm text-destructive mt-1"
+          >
+            {targetAmountError}
+          </p>
+        )}
       </Label>
       <Label htmlFor={`${idPrefix}-current-amount`}>
         Current amount
@@ -749,7 +809,21 @@ function GoalFormFields({
             }))
           }
           placeholder="0"
+          aria-invalid={contributionError ? 'true' : undefined}
+          aria-describedby={
+            contributionError
+              ? `${idPrefix}-monthly-contribution-error`
+              : undefined
+          }
         />
+        {contributionError && (
+          <p
+            id={`${idPrefix}-monthly-contribution-error`}
+            className="text-sm text-destructive mt-1"
+          >
+            {contributionError}
+          </p>
+        )}
       </Label>
       <Label htmlFor={`${idPrefix}-account`}>
         Linked account (optional)

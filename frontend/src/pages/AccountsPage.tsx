@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Edit3, Plus, Save, Trash2, X } from 'lucide-react'
+import { Edit3, GitMerge, Plus, Save, Trash2, X } from 'lucide-react'
 import { Badge } from '@cashflow/ui'
 import { Button } from '@cashflow/ui'
 import { Card } from '@cashflow/ui'
@@ -25,14 +25,15 @@ import { SectionHeader } from '@/components/ui/section-header'
 import { Grid } from '@cashflow/ui'
 import { StatCard } from '@/components/ui/stat-card'
 import { UtilizationBadge } from '@/components/accounts/UtilizationBadge'
+import { MergeAccountModal } from '@/components/accounts/MergeAccountModal'
 import { deleteReq, getJson, patchJson, postJson } from '../lib/api'
-import type { Account, AccountType } from '../types/api'
+import type { Account, AccountMergeResult, AccountType } from '../types/api'
 
 function formatMoney(value: number | null | undefined, currency: string | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—'
   const code = (currency ?? 'CAD').toUpperCase()
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat('en-CA', {
       style: 'currency',
       currency: code,
       maximumFractionDigits: 0,
@@ -75,6 +76,7 @@ export function AccountsPage() {
   const [editClosedAt, setEditClosedAt] = useState<string>('')
   const [editCreditLimit, setEditCreditLimit] = useState<string>('')
   const [editNotes, setEditNotes] = useState<string>('')
+  const [mergeSource, setMergeSource] = useState<Account | null>(null)
   const loadRequestRef = useRef(0)
   const confirm = useConfirm()
   const { showToast } = useToast()
@@ -86,7 +88,9 @@ export function AccountsPage() {
     setLoading(true)
     setErr(null)
     try {
-      const nextAccounts = await getJson<Account[]>('/api/accounts')
+      // Fetch the full list (including merged sources) so we can render the
+      // active rows AND the "Hidden / merged" section without a second request.
+      const nextAccounts = await getJson<Account[]>('/api/accounts?includeMerged=true')
       if (loadRequestRef.current === requestId) {
         setAccounts(nextAccounts)
       }
@@ -274,11 +278,38 @@ export function AccountsPage() {
     setEditNotes(account.notes ?? '')
   }
 
-  const accountCount = accounts.length
-  const shortCodeCount = accounts.filter((account) => account.shortCode).length
-  const jointCount = accounts.filter((account) => account.owner === 'joint').length
+  function onMerged(result: AccountMergeResult) {
+    setMergeSource(null)
+    showToast({
+      title: `Merged ${result.source.name} into ${result.target.name}`,
+      description: `Moved ${result.movedTransactions} transaction${result.movedTransactions === 1 ? '' : 's'}.`,
+      variant: 'success',
+      durationMs: 4000,
+    })
+    void load()
+  }
+
+  // Active accounts drive the main table + stat tiles; merged sources are
+  // pulled out into the collapsible "Hidden / merged" section (#287).
+  const activeAccounts = useMemo(
+    () => accounts.filter((a) => a.mergedIntoId == null),
+    [accounts],
+  )
+  const mergedAccounts = useMemo(
+    () => accounts.filter((a) => a.mergedIntoId != null),
+    [accounts],
+  )
+  const accountNameById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const a of accounts) map.set(a.id, a.name)
+    return map
+  }, [accounts])
+
+  const accountCount = activeAccounts.length
+  const shortCodeCount = activeAccounts.filter((account) => account.shortCode).length
+  const jointCount = activeAccounts.filter((account) => account.owner === 'joint').length
   const currencyCount = new Set(
-    accounts.map((account) => (account.defaultCurrency ?? 'CAD').toUpperCase())
+    activeAccounts.map((account) => (account.defaultCurrency ?? 'CAD').toUpperCase())
   ).size
 
   return (
@@ -413,10 +444,10 @@ export function AccountsPage() {
                 Array.from({ length: 6 }).map((_, i) => (
                   <SkeletonRow key={`accounts-skeleton-${i}`} cols={9} />
                 ))
-              ) : accounts.length === 0 ? (
+              ) : activeAccounts.length === 0 ? (
                 <EmptyTableRow colSpan={9} title="No accounts yet" description="Create one using the form above, then import CSVs under Transactions." />
               ) : (
-                accounts.map((a) => (
+                activeAccounts.map((a) => (
                   <Fragment key={a.id}>
                   <TableRow className={a.closedAt ? 'opacity-60' : undefined}>
                     <TableCell>
@@ -584,6 +615,31 @@ export function AccountsPage() {
                             Edit
                           </Button>
                         )}
+                        {(() => {
+                          const currency = (a.defaultCurrency ?? 'CAD').toUpperCase()
+                          const hasTarget = activeAccounts.some(
+                            (other) =>
+                              other.id !== a.id &&
+                              (other.defaultCurrency ?? 'CAD').toUpperCase() === currency,
+                          )
+                          return (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setMergeSource(a)}
+                              disabled={!hasTarget}
+                              title={
+                                hasTarget
+                                  ? undefined
+                                  : 'Need at least two same-currency accounts to merge.'
+                              }
+                            >
+                              <GitMerge aria-hidden="true" />
+                              Merge into…
+                            </Button>
+                          )
+                        })()}
                         <Button
                           type="button"
                           size="sm"
@@ -628,7 +684,56 @@ export function AccountsPage() {
             </TableBody>
           </Table>
       </CollapsibleCard>
+
+      {mergedAccounts.length > 0 ? (
+        <CollapsibleCard
+          id="merged-accounts"
+          className="mb-4"
+          title="Hidden / merged accounts"
+          description="These accounts were merged into another account. They are kept read-only for audit."
+          actions={<Badge variant="secondary">{mergedAccounts.length} merged</Badge>}
+          defaultOpen={false}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Default currency</TableHead>
+                <TableHead>Merged into</TableHead>
+                <TableHead>Merged at</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {mergedAccounts.map((a) => (
+                <TableRow key={a.id} className="opacity-60">
+                  <TableCell>{a.name}</TableCell>
+                  <TableCell>
+                    {ACCOUNT_TYPE_OPTIONS.find((o) => o.value === a.accountType)?.label ??
+                      a.accountType}
+                  </TableCell>
+                  <TableCell>{a.defaultCurrency ?? 'CAD'}</TableCell>
+                  <TableCell>
+                    {a.mergedIntoId != null
+                      ? accountNameById.get(a.mergedIntoId) ?? `#${a.mergedIntoId}`
+                      : '—'}
+                  </TableCell>
+                  <TableCell>{a.mergedAt ? a.mergedAt.slice(0, 10) : '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CollapsibleCard>
+      ) : null}
     </div>
+    {mergeSource ? (
+      <MergeAccountModal
+        source={mergeSource}
+        accounts={activeAccounts}
+        onClose={() => setMergeSource(null)}
+        onMerged={onMerged}
+      />
+    ) : null}
     {confirm.dialog}
     </>
   )

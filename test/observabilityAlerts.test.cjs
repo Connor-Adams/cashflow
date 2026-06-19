@@ -208,6 +208,39 @@ test('each alert has a unique, anchored runbook_url so the on-call lands on the 
   }
 });
 
+test('BackendDown runbook documents the rejected alternatives and traffic-independence rationale', () => {
+  // Issue #418 requires recording WHY a heartbeat gauge was chosen over the two
+  // alternatives, so a future maintainer does not "simplify" it back into a
+  // traffic-coupled check that false-fires at idle.
+  const docs = readFileSync('docs/observability.md', 'utf8');
+
+  // Alternative (A): request-rate absent() — rejected for idle false-positives.
+  assert.match(
+    docs,
+    /absent\(cashflow_http_server_requests_total\)/,
+    'must document alternative (A) absent(cashflow_http_server_requests_total)',
+  );
+  assert.match(
+    docs,
+    /idle/i,
+    'must explain (A) false-positives at idle / low traffic',
+  );
+
+  // Alternative (C): blackbox_exporter — noted as a future upgrade.
+  assert.match(
+    docs,
+    /blackbox_exporter/,
+    'must document alternative (C) blackbox_exporter probing /api/health',
+  );
+
+  // The chosen design must be stated as traffic-independent.
+  assert.match(
+    docs,
+    /traffic-independent|independent of (?:inbound )?traffic|regardless of traffic/i,
+    'must state the heartbeat is traffic-independent (the whole point of #418)',
+  );
+});
+
 test('observability docs and comments do not link to tool homepages instead of specific findings', () => {
   // The pattern this guards against: comments that "explain" an alert by
   // linking to grafana.com or prometheus.io instead of the specific alert

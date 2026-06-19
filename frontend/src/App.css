@@ -1026,3 +1026,15 @@
   100% { background-color: color-mix(in srgb, var(--primary) 14%, transparent); }
 }
 
+/* Deep-link focus highlight for a planned-event row (/planned?focus=<id>).
+   The ring-2 ring-warning utility keeps a steady highlight; this one-shot
+   background flash fades over ~2s to draw the eye on arrival. */
+.plannedRow.isFocused td {
+  animation: plannedRowFocusFlash 2s ease-out 1;
+}
+
+@keyframes plannedRowFocusFlash {
+  0%   { background-color: color-mix(in srgb, var(--warning) 24%, transparent); }
+  100% { background-color: transparent; }
+}
+

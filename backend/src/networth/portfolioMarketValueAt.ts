@@ -27,6 +27,65 @@ function n(raw: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Minimal shape of a HoldingSnapshot row needed to value a position. */
+type ValuableHolding = {
+  accountId: number;
+  securityId: number;
+  quantity: string;
+  price: string | null;
+  marketValue: string | null;
+  currency: string;
+};
+
+/** Minimal shape of a SecurityPrice row needed to value a position. */
+type ValuablePrice = { price: string | null; currency: string };
+
+/**
+ * Pure valuation of a set of current positions at `asOf`, given the resolved
+ * latest price per security. Shared by `portfolioMarketValueAt` (single date)
+ * and the vectorized net-worth series (one call per bucket over prefetched
+ * data) so both paths value holdings identically — the quote-vs-broker guard,
+ * the imported-value fallback, the currency fallback, and the
+ * `price_unavailable` gap all live here once.
+ */
+export function valuePositionsAsOf(
+  latest: ValuableHolding[],
+  priceBySecurity: Map<number, ValuablePrice | undefined>,
+  asOf: string,
+): PortfolioMarketValueResult {
+  const rows: PortfolioRow[] = [];
+  const gaps: PortfolioGap[] = [];
+  for (const h of latest) {
+    const price = priceBySecurity.get(h.securityId);
+    const quantity = n(h.quantity) ?? 0;
+    const quotePrice = n(price?.price);
+    const importedValue = n(h.marketValue);
+    const currency = price?.currency || h.currency;
+
+    // Quote-vs-broker sanity guard (issue #549): a live quote that diverges
+    // implausibly from the broker per-unit price is a symbol→ticker collision
+    // and must not override the broker-imported value. When neither a usable
+    // quote nor an imported value exists, emit a price_unavailable gap.
+    let marketValue: number | null = null;
+    if (quotePrice != null || importedValue != null) {
+      marketValue = resolveHoldingMarketValue({
+        quantity,
+        importedValue,
+        importedPrice: n(h.price),
+        quotePrice,
+      }).marketValue;
+    }
+
+    if (marketValue == null) {
+      gaps.push({ date: asOf, currency, reason: 'price_unavailable', securityId: h.securityId });
+      continue;
+    }
+
+    rows.push({ accountId: h.accountId, securityId: h.securityId, marketValue, currency });
+  }
+  return { rows, gaps };
+}
+
 /**
  * For each (accountId, securityId) pair within the given account scope, compute
  * market value at `asOf`. Value resolution order, matching the existing
@@ -104,53 +163,10 @@ export async function portfolioMarketValueAt(
     },
     order: [['pricedAt', 'DESC']],
   });
-  const priceBySecurity = new Map<number, (typeof allPrices)[number]>();
+  const priceBySecurity = new Map<number, (typeof allPrices)[number] | undefined>();
   for (const p of allPrices) {
     if (!priceBySecurity.has(p.securityId)) priceBySecurity.set(p.securityId, p);
   }
 
-  const rows: PortfolioRow[] = [];
-  const gaps: PortfolioGap[] = [];
-
-  for (const h of latest) {
-    const price = priceBySecurity.get(h.securityId);
-    const quantity = n(h.quantity) ?? 0;
-    const quotePrice = n(price?.price);
-    const importedValue = n(h.marketValue);
-    const currency = price?.currency || h.currency;
-
-    // Quote-vs-broker sanity guard (issue #549): a live quote that diverges
-    // implausibly from the broker per-unit price is a symbol→ticker collision
-    // and must not override the broker-imported value. When neither a usable
-    // quote nor an imported value exists, emit a price_unavailable gap.
-    let marketValue: number | null = null;
-    if (quotePrice != null || importedValue != null) {
-      const resolved = resolveHoldingMarketValue({
-        quantity,
-        importedValue,
-        importedPrice: n(h.price),
-        quotePrice,
-      });
-      marketValue = resolved.marketValue;
-    }
-
-    if (marketValue == null) {
-      gaps.push({
-        date: asOf,
-        currency,
-        reason: 'price_unavailable',
-        securityId: h.securityId,
-      });
-      continue;
-    }
-
-    rows.push({
-      accountId: h.accountId,
-      securityId: h.securityId,
-      marketValue,
-      currency,
-    });
-  }
-
-  return { rows, gaps };
+  return valuePositionsAsOf(latest, priceBySecurity, asOf);
 }

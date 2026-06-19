@@ -15,6 +15,7 @@ import {
   buildFairnessMonthly,
   buildSettlementRecommendation,
   computePartnerTransferDelta,
+  projectSettlementContribution,
   type SettlementTotals,
   type SharedTxnRow,
 } from '../summary/partnerFairness';
@@ -77,6 +78,7 @@ type RawTxnRow = {
   ownershipType: string;
   ownershipContactId: number | null;
   counterpartyContactId: number | null;
+  createdByUserId: number | null;
 };
 
 type RawSettlementRow = {
@@ -85,6 +87,7 @@ type RawSettlementRow = {
   direction: 'i_paid_partner' | 'partner_paid_me';
   amount: unknown;
   settledDate: string;
+  recordedByUserId: number | null;
 };
 
 async function loadSharedTxns(req: Request): Promise<{
@@ -92,7 +95,16 @@ async function loadSharedTxns(req: Request): Promise<{
   settlementTotals: SettlementTotals[];
   monthlySettlements: Array<SettlementTotals & { month: string }>;
   partnerContactIds: Set<number>;
+  viewerUserId: number | null;
 }> {
+  // Resolve the viewing user so fairness/settlement projection is relative to
+  // them. Tests may bypass auth — fall back to owner POV (null).
+  let viewerUserId: number | null = null;
+  try {
+    viewerUserId = currentAuth(req).user.id;
+  } catch {
+    viewerUserId = null;
+  }
   const [txns, settlements, contacts] = await Promise.all([
     Transaction.findAll({
       where: dateWhere(req),
@@ -109,12 +121,13 @@ async function loadSharedTxns(req: Request): Promise<{
         'ownershipType',
         'ownershipContactId',
         'counterpartyContactId',
+        'createdByUserId',
       ],
       raw: true,
     }),
     PartnerSettlement.findAll({
       where: settlementWhere(req),
-      attributes: ['contactId', 'currency', 'direction', 'amount', 'settledDate'],
+      attributes: ['contactId', 'currency', 'direction', 'amount', 'settledDate', 'recordedByUserId'],
       raw: true,
     }),
     Contact.findAll({
@@ -147,6 +160,7 @@ async function loadSharedTxns(req: Request): Promise<{
     ownershipType: r.ownershipType,
     ownershipContactId: r.ownershipContactId,
     counterpartyContactId: r.counterpartyContactId,
+    payerUserId: r.createdByUserId,
     contactName:
       r.ownershipContactId != null ? contactsById.get(r.ownershipContactId) ?? null : null,
   }));
@@ -157,6 +171,13 @@ async function loadSharedTxns(req: Request): Promise<{
   const monthlyByKey = new Map<string, SettlementTotals & { month: string }>();
   for (const s of settlements as unknown as RawSettlementRow[]) {
     const amount = num(s.amount) ?? 0;
+    // Project the direction relative to the viewer before rolling up.
+    const { iPaid, partnerPaid } = projectSettlementContribution(
+      s.direction,
+      amount,
+      s.recordedByUserId,
+      viewerUserId,
+    );
     const totalsKey = `${s.contactId}\0${s.currency}`;
     const existing =
       totalsByKey.get(totalsKey) ??
@@ -166,8 +187,8 @@ async function loadSharedTxns(req: Request): Promise<{
         iPaid: 0,
         partnerPaid: 0,
       } satisfies SettlementTotals);
-    if (s.direction === 'i_paid_partner') existing.iPaid += amount;
-    else existing.partnerPaid += amount;
+    existing.iPaid += iPaid;
+    existing.partnerPaid += partnerPaid;
     totalsByKey.set(totalsKey, existing);
 
     const month = s.settledDate.slice(0, 7);
@@ -181,8 +202,8 @@ async function loadSharedTxns(req: Request): Promise<{
         partnerPaid: 0,
         month,
       });
-    if (s.direction === 'i_paid_partner') monthly.iPaid += amount;
-    else monthly.partnerPaid += amount;
+    monthly.iPaid += iPaid;
+    monthly.partnerPaid += partnerPaid;
     monthlyByKey.set(monthKey, monthly);
   }
 
@@ -191,6 +212,7 @@ async function loadSharedTxns(req: Request): Promise<{
     settlementTotals: Array.from(totalsByKey.values()),
     monthlySettlements: Array.from(monthlyByKey.values()),
     partnerContactIds,
+    viewerUserId,
   };
 }
 
@@ -238,7 +260,7 @@ function currentMonthBoundaries(now: Date): { start: string; nextStart: string }
  */
 router.get('/fairness', async (req, res, next) => {
   try {
-    const { sharedRows, settlementTotals, partnerContactIds } =
+    const { sharedRows, settlementTotals, partnerContactIds, viewerUserId } =
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
@@ -248,7 +270,7 @@ router.get('/fairness', async (req, res, next) => {
       settlementTotals,
       start,
       nextStart,
-      { partnerContactIds, excludeNonPartnerInflows, partnerTransfersByCurrency },
+      { partnerContactIds, excludeNonPartnerInflows, viewerUserId, partnerTransfersByCurrency },
     );
     res.json({ byCurrency, excludeNonPartnerInflows });
   } catch (e) {
@@ -267,12 +289,13 @@ router.get('/fairness', async (req, res, next) => {
  */
 router.get('/monthly', async (req, res, next) => {
   try {
-    const { sharedRows, monthlySettlements, partnerContactIds } =
+    const { sharedRows, monthlySettlements, partnerContactIds, viewerUserId } =
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const points = buildFairnessMonthly(sharedRows, monthlySettlements, {
       partnerContactIds,
       excludeNonPartnerInflows,
+      viewerUserId,
     });
     res.json({ points, excludeNonPartnerInflows });
   } catch (e) {
@@ -289,7 +312,7 @@ router.get('/monthly', async (req, res, next) => {
  */
 router.get('/settlement-recommendation', async (req, res, next) => {
   try {
-    const { sharedRows, settlementTotals, partnerContactIds } =
+    const { sharedRows, settlementTotals, partnerContactIds, viewerUserId } =
       await loadSharedTxns(req);
     const excludeNonPartnerInflows = await resolveExcludeNonPartnerInflows(req);
     const { start, nextStart } = currentMonthBoundaries(new Date());
@@ -299,7 +322,7 @@ router.get('/settlement-recommendation', async (req, res, next) => {
       settlementTotals,
       start,
       nextStart,
-      { partnerContactIds, excludeNonPartnerInflows, partnerTransfersByCurrency },
+      { partnerContactIds, excludeNonPartnerInflows, viewerUserId, partnerTransfersByCurrency },
     );
     const recommendations = buildSettlementRecommendation(fairness);
     res.json({ recommendations, excludeNonPartnerInflows });

@@ -31,6 +31,7 @@ import { RecurringThisMonthTile } from '@/components/dashboard/RecurringThisMont
 import { CurrencyMixTile } from '@/components/dashboard/CurrencyMixTile'
 import { ReceiptCoverageTile } from '@/components/dashboard/ReceiptCoverageTile'
 import { EmailedReceiptsTile } from '@/components/dashboard/EmailedReceiptsTile'
+import { LatestAlertsTile } from '@/components/dashboard/LatestAlertsTile'
 import { ImportHealthTile } from '@/components/dashboard/ImportHealthTile'
 import { InboxSummaryTile } from '@/components/dashboard/InboxSummaryTile'
 import { BudgetStatusCard } from '@/components/dashboard/BudgetStatusCard'
@@ -1506,6 +1507,8 @@ export function DashboardPage() {
         />
 
         <ReceiptCoverageTile currency={currency || null} />
+
+        <LatestAlertsTile />
 
         <EmailedReceiptsTile />
 

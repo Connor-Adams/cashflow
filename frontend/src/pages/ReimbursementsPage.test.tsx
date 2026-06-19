@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ToastProvider } from '@/components/ui/toast'
 import { ReimbursementsPage } from './ReimbursementsPage'
@@ -49,8 +49,20 @@ const SUMMARY_EMPTY: ReimbursementSummaryResponse = {
   today: '2026-06-18',
 }
 
+// A row whose amount is missing (null) — exercises the — placeholder.
+const NULL_AMOUNT_ROW: ReimbursementView = {
+  ...ROW,
+  id: 2,
+  transactionId: 200,
+  partyLabel: 'Missing Amount Co',
+  partyName: 'Missing Amount Co',
+  amount: null as unknown as string,
+}
+
 // Toggle whether the list endpoints return ROW or are empty.
 let listEmpty = false
+// When set, the list endpoints additionally return the null-amount row.
+let includeNullRow = false
 
 vi.mock('../lib/api', () => ({
   getJson: vi.fn((url: string) => {
@@ -58,9 +70,14 @@ vi.mock('../lib/api', () => ({
       return Promise.resolve(SUMMARY_EMPTY)
     }
     if (url.includes('/api/reimbursements/overdue')) {
+      const data = listEmpty
+        ? []
+        : includeNullRow
+          ? [ROW, NULL_AMOUNT_ROW]
+          : [ROW]
       return Promise.resolve({
-        data: listEmpty ? [] : [ROW],
-        count: listEmpty ? 0 : 1,
+        data,
+        count: data.length,
         today: '2026-06-18',
       } satisfies ReimbursementListResponse)
     }
@@ -71,9 +88,14 @@ vi.mock('../lib/api', () => ({
       return Promise.resolve([])
     }
     if (url.includes('/api/reimbursements')) {
+      const data = listEmpty
+        ? []
+        : includeNullRow
+          ? [ROW, NULL_AMOUNT_ROW]
+          : [ROW]
       return Promise.resolve({
-        data: listEmpty ? [] : [ROW],
-        count: listEmpty ? 0 : 1,
+        data,
+        count: data.length,
         today: '2026-06-18',
       } satisfies ReimbursementListResponse)
     }
@@ -97,6 +119,7 @@ function renderPage() {
 describe('ReimbursementsPage', () => {
   beforeEach(() => {
     listEmpty = false
+    includeNullRow = false
   })
 
   it('renders the page heading', async () => {
@@ -124,6 +147,18 @@ describe('ReimbursementsPage', () => {
   it('renders a data row when the list is non-empty', async () => {
     renderPage()
     expect(await screen.findByText('Acme Insurer')).toBeInTheDocument()
+  })
+
+  it('renders a real amount in en-CA and a missing amount as —', async () => {
+    // AC #4 + #5: a value row renders $125.00 (en-CA); a null-amount row
+    // renders the em-dash placeholder, never a misleading $0.00.
+    includeNullRow = true
+    renderPage()
+    const valueRow = (await screen.findByText('Acme Insurer')).closest('tr')!
+    expect(within(valueRow).getByText('$125.00')).toBeInTheDocument()
+    const missingRow = screen.getByText('Missing Amount Co').closest('tr')!
+    expect(within(missingRow).getByText('—')).toBeInTheDocument()
+    expect(within(missingRow).queryByText('$0.00')).not.toBeInTheDocument()
   })
 
   it('renders the empty-state row when all lists are empty', async () => {

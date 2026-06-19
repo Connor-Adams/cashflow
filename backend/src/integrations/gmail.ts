@@ -249,9 +249,37 @@ export async function fetchMessage(opts: {
   return (await res.json()) as GmailMessageFull;
 }
 
+/**
+ * Download a single message attachment by its attachmentId. Gmail returns
+ * `{ size, data }` where `data` is base64url; we return the decoded bytes.
+ * Mirrors fetchMessage's auth + error handling.
+ */
+export async function fetchAttachment(opts: {
+  accessToken: string;
+  messageId: string;
+  attachmentId: string;
+}): Promise<Buffer> {
+  const url = `${GMAIL_API}/messages/${encodeURIComponent(opts.messageId)}/attachments/${encodeURIComponent(opts.attachmentId)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${opts.accessToken}` },
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Gmail attachment get failed (${res.status}): ${t.slice(0, 400)}`);
+  }
+  const j = (await res.json()) as { size?: number; data?: string };
+  return base64UrlToBuffer(j.data ?? '');
+}
+
 function base64UrlDecodeToUtf8(b64url: string): string {
   const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
   return Buffer.from(b64, 'base64').toString('utf8');
+}
+
+/** Decode a base64url string to raw bytes (binary-safe, unlike the utf8 variant). */
+export function base64UrlToBuffer(b64url: string): Buffer {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(b64, 'base64');
 }
 
 /**

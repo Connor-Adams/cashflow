@@ -62,8 +62,9 @@ describe('ReceiptsList', () => {
     // (they also label the collapsed-row columns), so assert via unique strings.
     await waitFor(() => expect(screen.getByText('Breakdown')).toBeInTheDocument())
     expect(screen.getByText('Subtotal')).toBeInTheDocument()
-    expect(screen.getByText('CA$555.64')).toBeInTheDocument()
-    expect(screen.getAllByText('CA$582.64').length).toBeGreaterThan(0)
+    // formatMoney now renders CAD via the shared en-CA formatter ($, not CA$).
+    expect(screen.getByText('$555.64')).toBeInTheDocument()
+    expect(screen.getAllByText('$582.64').length).toBeGreaterThan(0)
     expect(screen.getByText(/4021/)).toBeInTheDocument()
   })
 
@@ -77,7 +78,7 @@ describe('ReceiptsList', () => {
     // prove tax is hidden via its (now absent) value instead of the word.
     expect(screen.queryByText('Subtotal')).not.toBeInTheDocument()
     expect(screen.queryByText('Shipping')).not.toBeInTheDocument()
-    expect(screen.queryByText('CA$27.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('$27.00')).not.toBeInTheDocument()
     expect(screen.queryByText(/paid with/i)).not.toBeInTheDocument()
   })
 

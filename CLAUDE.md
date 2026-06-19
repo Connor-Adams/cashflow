@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cashflow is a local-first personal & partner expense tracker: import card CSVs and
 PDF statements, categorize and split transactions, attach receipts, track
-investments, and roll spend into per-currency summaries. Yarn-1 workspace monorepo
-(`backend`, `frontend`, `shared`).
+investments, and roll spend into per-currency summaries. Yarn 4 (Berry) workspace
+monorepo (`backend`, `frontend`, `shared`); `packageManager: yarn@4.17.0` is pinned
+in `package.json` and run via Corepack.
 
 ## Primitives spine (READ BEFORE ADDING ANY MODEL, ROUTE, OR PAGE)
 
@@ -45,9 +46,17 @@ Do not fork same-machine objects; do not merge different-machine objects.
 
 ## Commands
 
-Run everything from the **repo root** — yarn-1 workspaces hoist to the root.
+Run everything from the **repo root** — workspaces hoist to the root.
 Never install or run from a sub-directory; if stray `backend/node_modules` or
 `frontend/node_modules` exist, delete them and reinstall at root.
+
+> **Worktrees (`.claude/worktrees/<name>`):** under Yarn 4 each worktree gets its
+> **own** real `node_modules` — run `corepack yarn install` **inside the worktree**
+> (the worktree root *is* its install root). Do **not** install from the main
+> checkout to "fix" a worktree: that rewrites the main checkout's `yarn.lock` and
+> cross-contaminates whatever branch it's sitting on. A freshly created worktree
+> simply has no `node_modules` until you install in it. See the worktree gotchas in
+> `.claude/conventions.md` for the husky/`.yarn-state.yml` commit wrinkle.
 
 | Task | Command |
 |---|---|

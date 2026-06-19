@@ -29,7 +29,7 @@ import {
 import { Tabs, TabPanel } from '@cashflow/ui'
 import { useToast } from '@/components/ui/toast'
 import { getJson, patchJson } from '../lib/api'
-import { formatMoney } from '../lib/formatMoney'
+import { formatMoneyOr } from '../lib/formatMoney'
 import type {
   ReceiptStatus,
   ReturnWarrantyRowView,
@@ -313,7 +313,8 @@ function RowView({
   showWarranty: boolean
   highlightExpiringSoon?: boolean
 }) {
-  const amountNum = Number(row.amount) || 0
+  const amountNum =
+    row.amount === '' || row.amount == null ? null : Number(row.amount)
   return (
     <TableRow>
       <TableCell>{row.date}</TableCell>
@@ -323,7 +324,7 @@ function RowView({
           <div className="text-xs text-muted-foreground">{row.accountName}</div>
         )}
       </TableCell>
-      <TableCell>{formatMoney(amountNum, row.currency)}</TableCell>
+      <TableCell>{formatMoneyOr(amountNum, row.currency)}</TableCell>
       <TableCell>
         <Badge variant={RECEIPT_STATUS_VARIANT[row.receiptStatus]}>
           {receiptStatusLabel(row.receiptStatus)}

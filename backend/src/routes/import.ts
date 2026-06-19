@@ -127,6 +127,26 @@ function logImportEvent(
   logger.info(details, `import_${event}`);
 }
 
+/**
+ * Fire-and-forget kick of the PDF import processor.
+ *
+ * The batch row is durably created before this runs, so the HTTP response can
+ * stay `201` and the processor is retried elsewhere. But a failure to *start*
+ * the job must be observable: previously this was `.catch(() => {})`, so a
+ * stuck "pending" batch left no trace. We now log `pdf_import_kick_failed` with
+ * the `batchId` so the failure is traceable. Returns the promise so callers /
+ * tests can await the settled kick. The runner is injectable so unit tests can
+ * exercise the failure path without standing up the job registry.
+ */
+export function kickPdfImportProcessor(
+  batchId: string,
+  runner: (name: string) => Promise<unknown> = runJobByName
+): Promise<unknown> {
+  return runner('pdf_import_process').catch((err) => {
+    logger.error({ err, batchId }, 'pdf_import_kick_failed');
+  });
+}
+
 router.get('/profiles', (_req, res) => {
   res.json([
     {
@@ -600,7 +620,7 @@ const pdfBundleHandler = async (req: Request, res: Response, next: NextFunction)
     });
 
     // Phase 3: kick the processor and respond.
-    void runJobByName('pdf_import_process').catch(() => {});
+    void kickPdfImportProcessor(batch.id);
     logImportEvent('pdf_bundle_queued', { batchId: batch.id, total: files.length });
     res.status(201).json({ batchId: batch.id, total: files.length });
   } catch (e) {

@@ -169,6 +169,11 @@ function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
     grossAmountCents: number
     taxWithheldCents: number | null
   } | null {
+    const grossRaw = parseFloat(form.grossAmountDollars)
+    if (Number.isFinite(grossRaw) && grossRaw < 0) {
+      setGrossError("Amount can't be negative.")
+      return null
+    }
     const gross = centsFromDollars(form.grossAmountDollars)
     if (gross === null || gross <= 0) {
       setGrossError('Enter a positive amount.')
@@ -269,9 +274,13 @@ function LogDialog({ open, onOpenChange, onSaved, editing }: LogDialogProps) {
                 value={form.grossAmountDollars}
                 onChange={(e) => set('grossAmountDollars', e.target.value)}
                 required
+                aria-invalid={grossError ? 'true' : undefined}
+                aria-describedby={grossError ? 'income-gross-error' : undefined}
               />
               {grossError && (
-                <p className="text-xs text-destructive">{grossError}</p>
+                <p id="income-gross-error" className="text-sm text-destructive mt-1">
+                  {grossError}
+                </p>
               )}
             </div>
             <div className="grid gap-1.5">

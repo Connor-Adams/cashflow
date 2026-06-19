@@ -14,6 +14,8 @@ import {
   MAX_COUNTERPARTY_PROMOTION_THRESHOLD,
   MIN_LARGE_PURCHASE_THRESHOLD,
   MAX_LARGE_PURCHASE_THRESHOLD,
+  MIN_ASSUMED_ANNUAL_RETURN_RATE,
+  MAX_ASSUMED_ANNUAL_RETURN_RATE,
 } from '../models/CashflowSettings';
 
 const router = Router();
@@ -26,6 +28,8 @@ type Serialized = {
   counterpartyPromotionThreshold: number;
   excludeNonPartnerInflows: boolean;
   largePurchaseThreshold: string;
+  /** #654 — assumed annual return (decimal string) for the surplus calc. */
+  assumedAnnualReturnRate: string;
   /**
    * #259 — ISO8601 timestamp the user dismissed/completed first-run
    * onboarding, or null if they never did. The frontend onboarding gate
@@ -45,6 +49,7 @@ function serialize(row: InstanceType<typeof CashflowSettings>): Serialized {
     counterpartyPromotionThreshold: row.counterpartyPromotionThreshold,
     excludeNonPartnerInflows: row.excludeNonPartnerInflows,
     largePurchaseThreshold: String(row.largePurchaseThreshold),
+    assumedAnnualReturnRate: String(row.assumedAnnualReturnRate),
     onboardingDismissedAt: row.onboardingDismissedAt
       ? new Date(row.onboardingDismissedAt).toISOString()
       : null,
@@ -61,6 +66,7 @@ function defaults(): Serialized {
       CASHFLOW_SETTINGS_DEFAULTS.counterpartyPromotionThreshold,
     excludeNonPartnerInflows: CASHFLOW_SETTINGS_DEFAULTS.excludeNonPartnerInflows,
     largePurchaseThreshold: CASHFLOW_SETTINGS_DEFAULTS.largePurchaseThreshold,
+    assumedAnnualReturnRate: CASHFLOW_SETTINGS_DEFAULTS.assumedAnnualReturnRate,
     onboardingDismissedAt: null,
   };
 }
@@ -156,6 +162,21 @@ export function validateCashflowSettingsPatch(raw: Record<string, unknown>):
     out.largePurchaseThreshold = n.toFixed(4);
   }
 
+  if (raw.assumedAnnualReturnRate !== undefined) {
+    const n = Number(raw.assumedAnnualReturnRate);
+    if (
+      !Number.isFinite(n) ||
+      n < MIN_ASSUMED_ANNUAL_RETURN_RATE ||
+      n > MAX_ASSUMED_ANNUAL_RETURN_RATE
+    ) {
+      return {
+        ok: false,
+        error: `assumedAnnualReturnRate must be a decimal between ${MIN_ASSUMED_ANNUAL_RETURN_RATE} and ${MAX_ASSUMED_ANNUAL_RETURN_RATE} (e.g. 0.05 for 5%)`,
+      };
+    }
+    out.assumedAnnualReturnRate = n.toFixed(4);
+  }
+
   return { ok: true, patch: out };
 }
 
@@ -212,6 +233,9 @@ router.patch('/', async (req, res, next) => {
     }
     if (result.patch.largePurchaseThreshold !== undefined) {
       row.set('largePurchaseThreshold', result.patch.largePurchaseThreshold);
+    }
+    if (result.patch.assumedAnnualReturnRate !== undefined) {
+      row.set('assumedAnnualReturnRate', result.patch.assumedAnnualReturnRate);
     }
     await row.save();
     res.json(serialize(row));

@@ -23,6 +23,21 @@ export type Account = {
   utilizationPct?: number | null
   /** Free-form notes (max 4000 chars). Markdown rendered on the detail view. */
   notes?: string | null
+  /** Account merge / consolidation (#287). When set, this account is a merged
+   *  source: its transactions + planned events were reassigned to the account
+   *  with this id, and it is hidden from the default account list. */
+  mergedIntoId?: number | null
+  /** ISO timestamp the merge happened, or null for an un-merged account. */
+  mergedAt?: string | null
+}
+
+/** Result of POST /api/accounts/:sourceId/merge-into/:targetId (#287). */
+export type AccountMergeResult = {
+  source: Account
+  target: Account
+  movedTransactions: number
+  movedPlannedEvents: number
+  movedTotal: number
 }
 
 /**

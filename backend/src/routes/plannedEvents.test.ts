@@ -80,6 +80,8 @@ test('validatePlannedEventInput: requires name', () => {
 });
 
 test('validatePlannedEventInput: rejects negative amount', () => {
+  // Regression lock (issue #655 AC #8): the money-amount schema the forms must
+  // match still rejects a negative amount with 400 + the exact error message.
   const result = validatePlannedEventInput({
     type: 'expense',
     name: 'Rent',
@@ -88,6 +90,10 @@ test('validatePlannedEventInput: rejects negative amount', () => {
     expectedDate: '2026-06-01',
   });
   assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.status, 400);
+    assert.equal(result.error, 'amount must be a non-negative number');
+  }
 });
 
 test('validatePlannedEventInput: accepts zero amount (placeholder events)', () => {

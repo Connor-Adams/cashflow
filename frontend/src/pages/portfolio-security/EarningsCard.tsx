@@ -17,7 +17,7 @@ function formatEps(value: number | null, currencyCode?: string): string {
   if (value == null) return '—'
   if (currencyCode) {
     try {
-      return new Intl.NumberFormat(undefined, {
+      return new Intl.NumberFormat('en-CA', {
         style: 'currency',
         currency: currencyCode.toUpperCase(),
         maximumFractionDigits: 2,
@@ -51,7 +51,7 @@ function formatRevenue(value: number | null, currencyCode?: string): string {
   const digits = abs >= 100 ? 1 : 2
   if (currencyCode) {
     try {
-      const formatted = new Intl.NumberFormat(undefined, {
+      const formatted = new Intl.NumberFormat('en-CA', {
         style: 'currency',
         currency: currencyCode.toUpperCase(),
         maximumFractionDigits: digits,

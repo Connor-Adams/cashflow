@@ -25,7 +25,9 @@ import {
   getDiscoveryExclusions,
   receiptCurrencyOrDefault,
   ensureFreshAccessToken,
+  parseReceiptText,
 } from './scanReceipts';
+import { collectPdfParts, extractPdfReceiptText as realExtractPdfReceiptText } from './pdfAttachments';
 import {
   fetchMessage as realFetchMessage,
   listMessageIds as realListMessageIds,
@@ -33,7 +35,6 @@ import {
   getHeader,
 } from './gmail';
 import { classifySubject } from './subjectFilter';
-import { tryDeterministicParse } from './parsers';
 import { extractReceiptFromText } from '../ai/extractReceiptItems';
 import type { ExtractedReceiptOrder } from '../ai/extractReceiptItems';
 import { isPurchasesLabel, classifyDiscoveryConfidence } from './discoveryConfidence';
@@ -46,6 +47,7 @@ export interface DiscoveryDeps {
   listMessageIds: typeof realListMessageIds;
   fetchMessage: typeof realFetchMessage;
   extractFromText: (body: string) => Promise<ExtractedReceiptOrder>;
+  extractPdfReceiptText: typeof realExtractPdfReceiptText;
 }
 
 export interface DiscoveryResultMessage {
@@ -98,6 +100,7 @@ export async function discoverReceiptSources(
   const listMessageIds = deps.listMessageIds ?? realListMessageIds;
   const fetchMessage = deps.fetchMessage ?? realFetchMessage;
   const extractFromText = deps.extractFromText ?? extractReceiptFromText;
+  const extractPdfReceiptText = deps.extractPdfReceiptText ?? realExtractPdfReceiptText;
 
   const integ = await UserEmailIntegration.findOne({
     where: { userId: opts.userId, provider: 'google' },
@@ -114,7 +117,7 @@ export async function discoverReceiptSources(
       ? opts.sinceDateOverride
       : new Date(Date.now() - 30 * 86_400_000);
   const excludeSenders = await getDiscoveryExclusions(opts.householdId);
-  const query = buildDiscoveryQuery({ sinceDate, excludeSenders });
+  const query = buildDiscoveryQuery({ sinceDate, excludeSenders, includePdfAttachments: true });
 
   const summaries = await listMessageIds({
     accessToken,
@@ -175,8 +178,9 @@ export async function discoverReceiptSources(
     extracted: ExtractedReceiptOrder;
     parser: string;
     gmailMessageId: string;
+    fromPdf: boolean;
   }): Promise<number> {
-    const { extracted, parser, gmailMessageId } = args;
+    const { extracted, parser, gmailMessageId, fromPdf } = args;
     const dedupeKey = [
       extracted.vendor,
       extracted.orderId || '',
@@ -203,7 +207,7 @@ export async function discoverReceiptSources(
           total: extracted.total != null ? String(extracted.total) : null,
           currency: receiptCurrencyOrDefault(extracted.currency),
           paymentLast4: extracted.paymentLast4,
-          source: `gmail-discovery:${parser}`,
+          source: `gmail-discovery:${parser}${fromPdf ? '-pdf' : ''}`,
           rawPayload: { extracted, gmailMessageId, parser } as unknown,
         } as never,
         transaction: t,
@@ -253,7 +257,34 @@ export async function discoverReceiptSources(
       }
 
       const body = extractMessageBody(full.payload);
-      if (!body.trim()) {
+
+      let extracted: ExtractedReceiptOrder | null = null;
+      let parser = 'ai';
+      let fromPdf = false;
+      if (body.trim()) {
+        const parsed = await parseReceiptText({ fromAddress: r.from, subject: r.subject, text: body, extractFromText });
+        extracted = parsed.extracted;
+        parser = parsed.parser;
+      }
+
+      let hasCleanExtract = extracted != null && extracted.total != null && extracted.items.length > 0;
+
+      // PDF fallback: when the body yielded no clean receipt, try PDF attachments.
+      if (!hasCleanExtract && collectPdfParts(full.payload).length > 0) {
+        const pdfText = await extractPdfReceiptText({ accessToken, messageId: summary.id, payload: full.payload });
+        if (pdfText.trim()) {
+          const parsed = await parseReceiptText({ fromAddress: r.from, subject: r.subject, text: pdfText, extractFromText });
+          if (parsed.extracted.total != null && parsed.extracted.items.length > 0) {
+            extracted = parsed.extracted;
+            parser = parsed.parser;
+            fromPdf = true;
+            hasCleanExtract = true;
+          }
+        }
+      }
+
+      if (extracted == null) {
+        // No body text and no usable PDF text.
         r.status = 'extraction_failed';
         r.error = 'empty body';
         failed++;
@@ -261,21 +292,10 @@ export async function discoverReceiptSources(
         return r;
       }
 
-      let extracted: ExtractedReceiptOrder | null = null;
-      let parser = 'ai';
-      const det = tryDeterministicParse({ fromAddress: r.from, subject: r.subject, body });
-      if (det.ok) {
-        extracted = det.order;
-        parser = det.parser;
-      } else {
-        extracted = await extractFromText(body);
-        parser = 'ai';
-      }
       r.parser = parser;
       r.vendor = extracted.vendor;
       r.total = extracted.total;
 
-      const hasCleanExtract = extracted.total != null && extracted.items.length > 0;
       if (!hasCleanExtract && parser === 'ai') {
         // Nothing usable and no deterministic signal — surface the sender as a
         // suggestion so the user can decide, but write no order. Count it toward
@@ -311,7 +331,7 @@ export async function discoverReceiptSources(
       r.confidence = confidence;
 
       if (confidence === 'high') {
-        const orderId = await persistHighConfidenceOrder({ extracted, parser, gmailMessageId: summary.id });
+        const orderId = await persistHighConfidenceOrder({ extracted, parser, gmailMessageId: summary.id, fromPdf });
         r.orderId = orderId;
         r.status = 'auto_learned';
         autoIngested++;

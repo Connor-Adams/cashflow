@@ -201,3 +201,39 @@ test('excludeNonPartnerInflows rejects garbage values', () => {
   assert.equal(r.ok, false);
   if (!r.ok) assert.match(r.error, /excludeNonPartnerInflows must be boolean/);
 });
+
+// ---------------- #654 assumedAnnualReturnRate -------------------------
+
+test('assumedAnnualReturnRate accepts an in-range decimal, normalises to 4dp', () => {
+  const r = validateCashflowSettingsPatch({ assumedAnnualReturnRate: 0.07 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.assumedAnnualReturnRate, '0.0700');
+});
+
+test('assumedAnnualReturnRate accepts the lower boundary 0', () => {
+  const r = validateCashflowSettingsPatch({ assumedAnnualReturnRate: 0 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.assumedAnnualReturnRate, '0.0000');
+});
+
+test('assumedAnnualReturnRate accepts the upper boundary 1', () => {
+  const r = validateCashflowSettingsPatch({ assumedAnnualReturnRate: 1 });
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.patch.assumedAnnualReturnRate, '1.0000');
+});
+
+test('assumedAnnualReturnRate rejects a value above 1', () => {
+  const r = validateCashflowSettingsPatch({ assumedAnnualReturnRate: 1.5 });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /assumedAnnualReturnRate/);
+});
+
+test('assumedAnnualReturnRate rejects a negative value', () => {
+  const r = validateCashflowSettingsPatch({ assumedAnnualReturnRate: -0.01 });
+  assert.equal(r.ok, false);
+});
+
+test('assumedAnnualReturnRate rejects non-numeric', () => {
+  const r = validateCashflowSettingsPatch({ assumedAnnualReturnRate: 'high' });
+  assert.equal(r.ok, false);
+});

@@ -1,0 +1,64 @@
+name: Audit findings to issues
+
+# Issue #386 — turn NEW code-audit (fallow dead-code) findings into `chore`
+# issues, but only when they land on `main`. The per-PR sticky comment from the
+# `code-audit` job in ci.yml stays the leading indicator; this workflow makes the
+# findings durable, owner-assignable work items so they don't rot in a comment.
+#
+# Dedup against spam: scripts/audit-issues.cjs diffs the current findings against
+# the committed baseline at audit-baseline.json and only files issues for keys
+# that are NOT in the baseline. The first run after the baseline is committed
+# therefore files nothing. After resolving a finding, drop its key from the
+# baseline (or regenerate it) so the category stays honest.
+
+on:
+  push:
+    branches: [main]
+
+# Don't pile up parallel runs on rapid merges — the latest main is the truth.
+concurrency:
+  group: audit-issues-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit-to-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # fallow health derives churn from git history; dead-code does not, but
+          # keep parity with the ci.yml code-audit job so results match.
+          fetch-depth: 0
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'yarn'
+
+      - name: Install
+        run: yarn install --immutable
+
+      - name: Dead code (fallow)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          # Invoke the binary directly (not `yarn fallow`) so nothing from the
+          # package manager leaks into the JSON on stdout. `|| true` keeps
+          # fallow's non-zero "found issues" exit from aborting the step.
+          ./node_modules/.bin/fallow dead-code --format json > reports/fallow-deadcode.json || true
+
+      - name: File issues for new findings
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: node scripts/audit-issues.cjs

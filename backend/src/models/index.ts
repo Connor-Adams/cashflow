@@ -79,10 +79,6 @@ import { FinancialGoal, initFinancialGoal } from './FinancialGoal';
 import { AiReviewRun, initAiReviewRun } from './AiReviewRun';
 import { CashflowSettings, initCashflowSettings } from './CashflowSettings';
 import { CfoBriefing, initCfoBriefing } from './CfoBriefing';
-import {
-  MoneyLeakDismissal,
-  initMoneyLeakDismissal,
-} from './MoneyLeakDismissal';
 import { TaxReserveSetting, initTaxReserveSetting } from './TaxReserveSetting';
 import {
   MonthlyClosePeriod,
@@ -102,6 +98,7 @@ import {
   NotificationPreference,
   initNotificationPreference,
 } from './NotificationPreference';
+import { PushSubscription, initPushSubscription } from './PushSubscription';
 import { VaultDocument, initVaultDocument } from './VaultDocument';
 import { BudgetAlertState, initBudgetAlertState } from './BudgetAlertState';
 import { SavedSearch, initSavedSearch } from './SavedSearch';
@@ -188,7 +185,6 @@ initPlannedEvent(sequelize);
 initFinancialGoal(sequelize);
 initAiReviewRun(sequelize);
 initCfoBriefing(sequelize);
-initMoneyLeakDismissal(sequelize);
 initTaxReserveSetting(sequelize);
 initMonthlyClosePeriod(sequelize);
 initMonthlyCloseTask(sequelize);
@@ -198,6 +194,7 @@ initTransactionLargePurchaseReview(sequelize);
 initCashflowSettings(sequelize);
 initNotification(sequelize);
 initNotificationPreference(sequelize);
+initPushSubscription(sequelize);
 initAuditLog(sequelize);
 initVaultDocument(sequelize);
 initFinanceEvent(sequelize);
@@ -253,6 +250,14 @@ User.hasMany(NotificationPreference, {
   hooks: true,
 });
 NotificationPreference.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+User.hasMany(PushSubscription, {
+  foreignKey: 'user_id',
+  as: 'pushSubscriptions',
+  onDelete: 'CASCADE',
+  hooks: true,
+});
+PushSubscription.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Household.hasMany(Entity, { foreignKey: 'household_id', as: 'taxEntities' });
 Entity.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
@@ -381,6 +386,8 @@ HouseholdMember.belongsTo(Household, { foreignKey: 'household_id', as: 'househol
 HouseholdMember.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Contact, { foreignKey: 'household_id', as: 'contacts' });
 Contact.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
+User.hasMany(Contact, { foreignKey: 'user_id', as: 'linkedContacts' });
+Contact.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Household.hasMany(Category, { foreignKey: 'household_id', as: 'categories' });
 Category.belongsTo(Household, { foreignKey: 'household_id', as: 'household' });
 // Category tree (subcategories): self-referential parent/children.
@@ -400,6 +407,8 @@ Contact.hasMany(PartnerSettlement, {
   as: 'partnerSettlements',
 });
 PartnerSettlement.belongsTo(Contact, { foreignKey: 'contact_id', as: 'contact' });
+User.hasMany(PartnerSettlement, { foreignKey: 'recorded_by_user_id', as: 'recordedSettlements' });
+PartnerSettlement.belongsTo(User, { foreignKey: 'recorded_by_user_id', as: 'recordedByUser' });
 Household.hasMany(BudgetTarget, {
   foreignKey: 'household_id',
   as: 'budgetTargets',
@@ -612,25 +621,6 @@ Account.hasMany(FinancialGoal, {
 FinancialGoal.belongsTo(Account, {
   foreignKey: 'linked_account_id',
   as: 'linkedAccount',
-});
-
-Household.hasMany(MoneyLeakDismissal, {
-  foreignKey: 'household_id',
-  as: 'moneyLeakDismissals',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-MoneyLeakDismissal.belongsTo(Household, {
-  foreignKey: 'household_id',
-  as: 'household',
-});
-User.hasMany(MoneyLeakDismissal, {
-  foreignKey: 'dismissed_by_user_id',
-  as: 'moneyLeakDismissals',
-});
-MoneyLeakDismissal.belongsTo(User, {
-  foreignKey: 'dismissed_by_user_id',
-  as: 'dismissedByUser',
 });
 
 Household.hasMany(AiReviewRun, {
@@ -1125,9 +1115,6 @@ export {
   FinancialGoal,
   AiReviewRun,
   CfoBriefing,
-  // Model registry barrel: re-exported for API symmetry though current consumers import from the model file directly.
-  // fallow-ignore-next-line unused-export
-  MoneyLeakDismissal,
   TaxReserveSetting,
   MonthlyClosePeriod,
   MonthlyCloseTask,
@@ -1137,6 +1124,7 @@ export {
   CashflowSettings,
   Notification,
   NotificationPreference,
+  PushSubscription,
   AuditLog,
   FinanceEvent,
   BudgetAlertState,
