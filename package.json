@@ -6,7 +6,8 @@
   "workspaces": [
     "backend",
     "frontend",
-    "shared"
+    "shared",
+    "packages/*"
   ],
   "scripts": {
     "prepare": "husky || true",
